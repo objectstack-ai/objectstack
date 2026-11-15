@@ -10854,6 +10854,15 @@ export class ObjectStackProtocolImplementation implements
      * fault the registry helper only logs (every type but `object`) is not
      * seen here.
      *
+     * [#33564, ADR-0067 D3] The revert's own commit records, per row it
+     * changed, the version that row held before the revert (`prevVersion`),
+     * and `existedBefore` true exactly when the row was there, so reverting
+     * the revert restores what it replaced: the restored body's predecessor,
+     * or the removed row, written again. An item recorded as existing before
+     * the commit but with no version to restore (the shape revert commits
+     * recorded before this) is named in `failed[]`, with nothing written,
+     * never skipped.
+     *
      * [#9174] An item whose STORED `type` is non-canonical
      * ({@link isNonCanonicalStoredType}) is REFUSED on the restore limb, into
      * `failed[]` with `code: 'STORED_TYPE_NOT_CANONICAL'` — the same wire-visible

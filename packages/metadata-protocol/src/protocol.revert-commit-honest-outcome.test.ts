@@ -381,3 +381,65 @@ describe('[#33563] revertCommit reports a fault after an item\'s row write in fa
         expect(res.failed[0].error).toContain('its row was restored to the body of version 1');
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §2 [#33564, ADR-0067 D3] A revert is itself revertible
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Measured before the fix, on this harness: the revert commit recorded every
+// item as `prevVersion: null` (`existedBefore` true only for a restored item),
+// so reverting it took neither limb for a restored item (in neither
+// `reverted[]` nor `failed[]`, `success: false` with nothing said) and sent a
+// removed item down the soft-remove limb again, recreating nothing.
+
+describe('[#33564] reverting a revert commit restores what the revert replaced', () => {
+    it('restore limb: the revert records the version it replaced, and reverting it brings that body back', async () => {
+        const { protocol, rows, commits } = await editedTwice();
+
+        const first = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+        expect(first.success).toBe(true);
+        expect(storedLabel(rows)).toBe('Ticket');
+        const [revert] = revertsOf(commits, 'c1');
+        expect(JSON.parse(revert.items)).toEqual([
+            { type: 'object', name: 'ticket', existedBefore: true, prevVersion: 2 },
+        ]);
+
+        const second = await protocol.revertCommit({ commitId: revert.id, packageId: PKG });
+
+        expect(second).toMatchObject({ success: true, revertedCount: 1, failed: [] });
+        expect(second.reverted).toEqual([{ type: 'object', name: 'ticket', action: 'restored' }]);
+        expect(storedLabel(rows)).toBe('Renamed');
+    });
+
+    it('soft-remove limb: the revert records the removed row\'s version, and reverting it writes the row again', async () => {
+        const { protocol, rows, commits } = await createdByTheCommit();
+
+        const first = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+        expect(first.reverted).toEqual([{ type: 'object', name: 'ticket', action: 'removed' }]);
+        expect(storedLabel(rows)).toBeUndefined();
+        const [revert] = revertsOf(commits, 'c1');
+        expect(JSON.parse(revert.items)).toEqual([
+            { type: 'object', name: 'ticket', existedBefore: true, prevVersion: 1 },
+        ]);
+
+        const second = await protocol.revertCommit({ commitId: revert.id, packageId: PKG });
+
+        expect(second).toMatchObject({ success: true, revertedCount: 1, failed: [] });
+        expect(second.reverted).toEqual([{ type: 'object', name: 'ticket', action: 'restored' }]);
+        expect(storedLabel(rows)).toBe('Ticket');
+    });
+
+    it('an item recorded as existing with no version is named in failed[], never skipped, and nothing is written', async () => {
+        // The shape every revert commit an earlier release recorded carries.
+        const { protocol, rows, commits } = await editedTwice();
+        recordApply(commits, 'legacy_revert', [{ type: 'object', name: 'ticket', existedBefore: true, prevVersion: null }]);
+
+        const res = await protocol.revertCommit({ commitId: 'legacy_revert', packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, revertedCount: 0, failedCount: 1, reverted: [] });
+        expect(res.failed[0]).toMatchObject({ type: 'object', name: 'ticket' });
+        expect(res.failed[0].error).toContain('records no version to restore it to, so nothing was written');
+        expect(res.failed[0].error).toContain('/api/v1/meta/object/ticket/rollback');
+        expect(storedLabel(rows)).toBe('Renamed');
+    });
+});

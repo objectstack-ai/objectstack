@@ -31,6 +31,7 @@ import type {
     InstallPackageRequest,
 } from '@objectstack/spec/api';
 import { packageScopedRowWhere } from './sys-metadata-repository.js';
+import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
 import {
@@ -1188,7 +1189,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#revertCommit`; the method's docblock there is its contract. */
-    static async revertCommit(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'getOverlayRepo' | 'isArtifactBacked' | 'namedBaseOverlayWriteRefusal' | 'parseCommitItems' | 'readRevertableCommit' | 'recordPackageCommit' | 'refuseOrganizationScopedWrite' | 'restoreArtifactRegistryView' | 'restoreWriteFor' | 'runMutationProjector'>, request: {
+    static async revertCommit(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'namedBaseOverlayWriteRefusal' | 'parseCommitItems' | 'readRevertableCommit' | 'recordPackageCommit' | 'refuseOrganizationScopedWrite' | 'restoreArtifactRegistryView' | 'restoreWriteFor' | 'runMutationProjector'>, request: {
             commitId: string;
             /**
              * The package the commit must belong to (ADR-0067): a commit of any
@@ -1365,6 +1366,26 @@ export class ProtocolPackageCommitsFacet {
                 continue;
             }
 
+            // [#33564, ADR-0067 D3] An item recorded as existing before the
+            // commit but with no version to restore takes neither limb below.
+            // It used to land in neither `reverted[]` nor `failed[]`, so the
+            // revert of a revert commit recorded before every revert carried
+            // its versions restored nothing and said nothing. It is named here,
+            // with nothing written.
+            if (it.existedBefore && restoreToVersion === null) {
+                const singular = PLURAL_TO_SINGULAR[it.type] ?? it.type;
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: `Commit item '${it.type}/${it.name}' is recorded as existing before the commit, but the `
+                        + 'commit records no version to restore it to, so nothing was written for it. A revert '
+                        + 'commit recorded by an earlier release records every item it restored this way. Restore '
+                        + `the item from its own version history instead: GET /api/v1/meta/${singular}/${it.name}/history `
+                        + `lists its versions, and POST /api/v1/meta/${singular}/${it.name}/rollback restores one.`,
+                });
+                continue;
+            }
+
             // [ADR-0131 D6] Every item reverts environment-wide: the commit row
             // is environment-wide (a legacy organization's was refused above).
             const repo = host.getOverlayRepo();
@@ -1374,6 +1395,23 @@ export class ProtocolPackageCommitsFacet {
             // one locale of a template leaves the other locale's row alone.
             // Absent (the canonical member) on every other item, as before.
             const member = it.member;
+            // [#33564, ADR-0067 D3] The history version of the committing
+            // package's active row as it stands BEFORE this item's write: what
+            // the revert's own commit records as the item's `prevVersion`, so
+            // that reverting the revert restores it. The read the publish door
+            // makes for its own plan (`publishPackageDrafts`), on the same
+            // address. Asked before the write, so a read failure fails this
+            // item cleanly into `failed[]` with nothing written.
+            const replacedVersion = async (): Promise<number | null> => {
+                const activeRow = (await host.findEnvironmentRow('sys_metadata', {
+                    where: {
+                        type: it.type, name: it.name, state: 'active', package_id: commitPackageId,
+                        ...overlayMemberWhere(it.type, member),
+                    },
+                    context: { isSystem: true },
+                })) as { version?: unknown } | null;
+                return activeRow && typeof activeRow.version === 'number' ? activeRow.version : null;
+            };
             // [#33563] What this item's row write did, once it has done it:
             // every step after it (the registry write-through or heal, the
             // storage sync, the projector) acts on a row that is already
@@ -1445,6 +1483,10 @@ export class ProtocolPackageCommitsFacet {
                     // here and below.
                     const intent: 'override-artifact' | 'runtime-only' =
                         host.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
+                    // [#33564] The version this removal replaces: reverting the
+                    // revert restores it (the restore limb, which writes the
+                    // row again when it is deleted).
+                    const removedVersion = current ? await replacedVersion() : null;
                     if (current) {
                         await repo.delete(ref, {
                             parentVersion: current.hash,
@@ -1458,7 +1500,7 @@ export class ProtocolPackageCommitsFacet {
                         rowWritten = 'its row was removed from sys_metadata';
                     }
                     revertPlan.push({
-                        type: it.type, name: it.name, existedBefore: false, prevVersion: null,
+                        type: it.type, name: it.name, existedBefore: current !== null, prevVersion: removedVersion,
                         ...(member !== undefined ? { member } : {}),
                     });
                     // [#6621] The registry must stop serving what the revert
@@ -1647,6 +1689,10 @@ export class ProtocolPackageCommitsFacet {
                         'rollback',
                     );
                     if (namedBase) throw namedBase;
+                    // [#33564] The version this restore replaces, or none when
+                    // the row was deleted since and the restore writes it
+                    // again: reverting the revert then removes it.
+                    const restoreReplaces = current ? await replacedVersion() : null;
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
@@ -1668,7 +1714,7 @@ export class ProtocolPackageCommitsFacet {
                     });
                     rowWritten = `its row was restored to the body of version ${restoreToVersion}`;
                     revertPlan.push({
-                        type: it.type, name: it.name, existedBefore: true, prevVersion: null,
+                        type: it.type, name: it.name, existedBefore: current !== null, prevVersion: restoreReplaces,
                         ...(member !== undefined ? { member } : {}),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
