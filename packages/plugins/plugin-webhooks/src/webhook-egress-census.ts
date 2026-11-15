@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { EgressGuard } from '@objectstack/core/egress';
-import type { EngineQueryOptions, IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 /**
  * The boot census of stored webhook targets against the outbound-request

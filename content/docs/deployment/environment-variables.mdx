@@ -139,6 +139,23 @@ Auth settings precedence:
 
 ---
 
+## Outbound requests
+
+Webhook deliveries and the flow `http` node (inline and `durable: true`) reach only
+public addresses. Loopback, private (RFC 1918), carrier-grade NAT, link-local,
+unique-local, multicast, broadcast and unspecified addresses are refused, after DNS
+resolution and on every redirect, unless the target is listed below. A refused
+webhook delivery dead-letters at once as `EGRESS_REFUSED`; a refused `http` call
+fails its node with `EGRESS_REFUSED`. The boot logs one line saying the guard is
+active and how many targets are allowlisted, and the webhook plugin logs once how
+many stored `sys_webhook` rows target an address the guard refuses.
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_EGRESS_ALLOWED_TARGETS` | csv | — | Internal targets these requests may reach: exact host names (`hooks.internal`), IP addresses (`10.0.0.5`, `::1`) or CIDR blocks with host bits zero and a prefix of at least `/8` (`10.0.0.0/8`, `fd00::/8`), comma-separated. No scheme, port, path or wildcard. A malformed or over-broad entry (such as `0.0.0.0/0`) fails the boot. Link-local addresses (`169.254.0.0/16`, `fe80::/10`) and cloud metadata addresses can never be listed, and are refused even when a listed host name or block covers them. |
+
+---
+
 ## Branding
 
 The console's product name, logo, favicon and colours are served by `RuntimeConfigPlugin` (`@objectstack/cloud-connection`) as the `branding` block of `GET /api/v1/runtime/config`, which the console reads on every page load. A host that constructs its own `RuntimeConfigPlugin` with an option of the same name (`productName`, `logoUrl`, …) outranks the variable. The first eight variables below are read **once, when that plugin is constructed at boot**: changing one takes a restart. A value saved in **Setup → Branding** is read per request instead (see the precedence below). Mail and auth are named separately, by `OS_APP_NAME`.
