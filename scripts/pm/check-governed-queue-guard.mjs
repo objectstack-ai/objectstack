@@ -700,7 +700,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruling B2, 2026-10-13)': 14,
   '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
   'the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so': 12,
-  '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
+  // Raised 28 → 30 with the timeline reader's `Link` header: a short page that names a next page is followed, and
+  // a next page named on every answer throws at the page limit.
+  '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 30,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
   // Raised 54 → 72 with the arm's record stage: the record's `Security-touching:` line (control, absent line, `yes`,
@@ -3397,6 +3399,12 @@ export function makeCommentReader({ apiUrl, slug, token, fetchImpl = fetch, perP
  * timeline is oldest-first, so the event this leg reads is on the LAST page. A
  * list cut at `maxPages` would answer an older enqueue as the newest, so it
  * throws instead — the caller turns that into UNDETERMINED, never a pass.
+ *
+ * ⚠️ A SHORT page ends the walk only when the answer names no next page. The arm reads a REMOVED
+ * label off a card's timeline with this reader, and a walk that stopped at a short page that was not
+ * the last would read "never removed". Whether this route ever answers such a page is NOT MEASURED;
+ * the `Link` header's `rel="next"` settles it either way, and an answer with no such header reads as
+ * it always did.
  */
 export function makeTimelineReader({ apiUrl, slug, token, fetchImpl = fetch, perPage = 100, maxPages = 10 }) {
   return async function fetchTimeline(pull) {
@@ -3408,7 +3416,8 @@ export function makeTimelineReader({ apiUrl, slug, token, fetchImpl = fetch, per
       const batch = await res.json();
       if (!Array.isArray(batch)) throw new Error(`the timeline endpoint answered a non-array body for #${pull}`);
       all.push(...batch);
-      if (batch.length < perPage) return all;
+      const namesNextPage = /<[^>]*>[ \t]*;[ \t]*rel="?next"?/i.test(String(res.headers?.get?.('link') ?? ''));
+      if (batch.length < perPage && !namesNextPage) return all;
     }
     throw new Error(`#${pull} has more than ${perPage * maxPages} timeline events — the newest is on a page this read never reached`);
   };
@@ -6204,6 +6213,13 @@ export async function selfTest() {
   const fakeFetch = (pages) => async (url) => { urls.push(url); const page = Number(new URL(url).searchParams.get('page')); return { ok: true, status: 200, json: async () => pages[page - 1] ?? [] }; };
   const twoPages = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: fakeFetch([[added(SEAT), removed()], [added(GOVERNED_APPROVERS[0])]]), perPage: 2 })(9);
   assert('the-timeline-reader-walks-to-the-short-page-on-the-issues-timeline-route', twoPages.length === 3 && urls[0] === 'https://api.example/repos/o/r/issues/9/timeline?per_page=2&page=1' && enqueuerFromTimeline(twoPages).login === GOVERNED_APPROVERS[0], JSON.stringify(urls));
+  // ⛔ A short page that is not the last: the answer's `Link` header names the next page, and the walk follows it.
+  const linked = (pages, next) => async (url) => { const page = Number(new URL(url).searchParams.get('page')); return { ok: true, status: 200, headers: { get: (name) => (name.toLowerCase() === 'link' && next(page) ? `<${url.replace(/page=\d+$/, `page=${page + 1}`)}>; rel="next", <${url}>; rel="last"` : null) }, json: async () => pages[page - 1] ?? [] }; };
+  const shortThenMore = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: linked([[added(SEAT)], [added(GOVERNED_APPROVERS[0])]], (page) => page === 1), perPage: 2 })(9);
+  const shortAndLast = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: linked([[added(SEAT)], [added(GOVERNED_APPROVERS[0])]], () => false), perPage: 2 })(9);
+  assert('⛔ a-SHORT-page-whose-answer-names-a-next-page-is-NOT-the-last-the-walk-follows-the-Link-header', shortThenMore.length === 2 && enqueuerFromTimeline(shortThenMore).login === GOVERNED_APPROVERS[0] && shortAndLast.length === 1 && enqueuerFromTimeline(shortAndLast).login === SEAT, `${shortThenMore.length} then ${shortAndLast.length}`);
+  const neverEnds = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: linked([[added(SEAT)]], () => true), perPage: 2, maxPages: 3 })(9).then(() => null, (error) => error);
+  assert('⛔ a-next-page-named-on-every-answer-THROWS-at-the-page-limit-never-an-early-answer', neverEnds instanceof Error && /never reached/.test(neverEnds.message), String(neverEnds?.message));
   const truncated = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: fakeFetch([[removed()], [added(GOVERNED_APPROVERS[0])]]), perPage: 1, maxPages: 1 })(9).then(() => null, (error) => error);
   assert('⛔ a-TRUNCATED-timeline-THROWS-rather-than-answering-an-older-add-as-the-newest', truncated instanceof Error && /never reached/.test(truncated.message), String(truncated?.message));
   const denied = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }) })(9).then(() => null, (error) => error);

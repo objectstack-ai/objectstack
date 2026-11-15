@@ -13102,8 +13102,9 @@ const CONTRACT_REVIEW_SECURITY_TOUCHING_LINE = new RegExp(CONTRACT_REVIEW_LINE_L
  * holding the KEY (the spelling that mentions the line) are each `unreadable` — the same
  * strictness `readBareDeclaration` holds a PR body's `Clause-②:` line to.
  * ⚠️ Not read: whether GitHub RENDERS the line. A bare line inside an HTML comment, a `pre` element
- * or a code span opened on an earlier line is hidden or shown as code there and still reads here;
- * only an author the guard trusts can write a record, so the reader is not widened into a renderer.
+ * or a code span opened on an earlier line is hidden or shown as code there, and a bare line directly
+ * under a quoted line, with no blank line between, is rendered inside that quote; each still reads
+ * here. Only an author the guard trusts can write a record, so the reader is not widened into a renderer.
  *
  * ⛔ Fail closed, in the one direction that matters: `missing`, `unreadable` and `yes` each
  * keep the pull request at Tier H, and no reading here ever DEFAULTS to `no`. Pure.
@@ -25708,7 +25709,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // 88 → 93: the record's `Security-touching:` line, the low-risk skills arm's machine line — the bare
   // readings, the MISSING record, the unreadable shapes, the fence and reason pins, and the constants.
   // 93 → 94: a code span holding the KEY mentions the line and is unreadable; only the value may sit in one.
-  'H43 hand-off timing': 94,
+  // 94 → 103: the nine verdict-reader rows that landed with no pin of their own — the closed finding that
+  // must END, the FAIL spellings, the fail-safe idiom. The battery registers 126 cases beside these rows.
+  'H43 hand-off timing': 103,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
   'H70/H71 seat patrol': 30,
