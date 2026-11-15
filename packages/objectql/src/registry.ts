@@ -131,11 +131,11 @@ import {
   EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE, EXTENSION_MEMBERSHIP_KEYS_REFUSED_CODE, FIND_BOUND_ACTION_COLLISIONS,
   MISPLACED_DEFAULT_PAGE_CODE, NAMESPACE_CONFLICT_CODE, NO_PACKAGE_REFERRER, OBJECT_FIELD_TYPE_REFUSED_CODE,
   OBJECT_OWNERSHIP_CONFLICT_CODE, OBJECT_QUEUE_COLUMN_REFUSED_CODE, OWNING_BUSINESS_UNIT_FIELD, QUEUE_FIELD,
-  REGISTRY_LOG_LEVELS, RESERVED_NAMESPACES, SECURITY_CATALOG_NAME_RULE, VALIDATION_RULE_COPY_REFUSED_CODE,
-  applyFieldPatches, bareNameColdBootWarning, bareNameConflictLine, bareNameReasonFor, bundleBaseKey,
-  carriesTenantScopeColumn, coldBootConflictMessage, collectBundle, declaresTenantIndex, mergeValidationsByName,
-  overlaySlotEntriesOf, overlaySlotKey, packageBodySlot, parseOverlaySlotKey, parsePackageAction, picklistReferrerOf,
-  sameActionDeclaration, sameHolder, storesObjectLessPackagelessRow, withArrivingMembers, withDiscriminator,
+  RESERVED_NAMESPACES, SECURITY_CATALOG_NAME_RULE, VALIDATION_RULE_COPY_REFUSED_CODE, applyFieldPatches,
+  bareNameColdBootWarning, bareNameConflictLine, bareNameReasonFor, bundleBaseKey, carriesTenantScopeColumn,
+  coldBootConflictMessage, collectBundle, declaresTenantIndex, mergeValidationsByName, overlaySlotEntriesOf,
+  overlaySlotKey, packageBodySlot, parseOverlaySlotKey, parsePackageAction, picklistReferrerOf, sameActionDeclaration,
+  sameHolder, storesObjectLessPackagelessRow, withArrivingMembers, withDiscriminator,
 } from './registry-top-level.js';
 import type {
   ArtifactInstallScope, BareNameConflict, BoundActionCollision, BundleArrival, BundleEntry, CoOwnershipSource,
@@ -151,9 +151,9 @@ export {
   DUPLICATE_ARTIFACT_OBJECT_NAME_CODE, type DefaultRecordPageConflict, EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE,
   EXTENSION_MEMBERSHIP_KEYS_REFUSED_CODE, FIND_BOUND_ACTION_COLLISIONS, MISPLACED_DEFAULT_PAGE_CODE,
   NAMESPACE_CONFLICT_CODE, OBJECT_FIELD_TYPE_REFUSED_CODE, OBJECT_OWNERSHIP_CONFLICT_CODE,
-  OBJECT_QUEUE_COLUMN_REFUSED_CODE, type ObjectContributor, type ObjectExtensionFoldOptions, REGISTRY_LOG_LEVELS,
-  RESERVED_NAMESPACES, type RegistryLogLevel, type SchemaRegistryOptions, type SecurityCatalogNameConflict,
-  type UnboundActionTarget, type UnboundActionTargetError, VALIDATION_RULE_COPY_REFUSED_CODE, bareNameColdBootWarning,
+  OBJECT_QUEUE_COLUMN_REFUSED_CODE, type ObjectContributor, type ObjectExtensionFoldOptions, RESERVED_NAMESPACES,
+  type RegistryLogLevel, type SchemaRegistryOptions, type SecurityCatalogNameConflict, type UnboundActionTarget,
+  type UnboundActionTargetError, VALIDATION_RULE_COPY_REFUSED_CODE, bareNameColdBootWarning,
   collectManifestBoundActions, collectManifestObjectNames, computeFQN, describeBoundActionCollision,
   describeUnboundActionTargets, parseFQN, reconcileManagedApiMethods, warnFunctionalCompleteness,
   warnStrippedLegacyApiMethods,
@@ -318,6 +318,11 @@ function mergeObjectDefinitions(
 
   return merged;
 }
+
+/** All valid {@link RegistryLogLevel} values — used to validate `OS_REGISTRY_LOG`. */
+export const REGISTRY_LOG_LEVELS: readonly RegistryLogLevel[] = [
+  'debug', 'info', 'warn', 'error', 'silent',
+];
 
 /**
  * Augment a registered object with implicit system fields.

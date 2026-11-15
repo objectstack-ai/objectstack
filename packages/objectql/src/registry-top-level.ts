@@ -945,11 +945,6 @@ function changedPackagedRuleKeys(copy: unknown, packaged: unknown): string[] {
  */
 export type RegistryLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 
-/** All valid {@link RegistryLogLevel} values — used to validate `OS_REGISTRY_LOG`. */
-export const REGISTRY_LOG_LEVELS: readonly RegistryLogLevel[] = [
-  'debug', 'info', 'warn', 'error', 'silent',
-];
-
 /**
  * Construction options for {@link SchemaRegistry}.
  */

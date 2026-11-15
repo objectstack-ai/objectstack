@@ -163,6 +163,9 @@ const PATH_READER_PINS = Object.freeze({
   // split PR does not edit, so the anchored declarations stay here.
   mergeObjectDefinitions: 'ADR-0029 and ADR-0146 anchor `registry.ts#mergeObjectDefinitions` (check:adr-symbol-anchors)',
   isShareableNamespace: 'ADR-0130 and ADR-0141 anchor `registry.ts#isShareableNamespace` (check:adr-symbol-anchors)',
+  // `scripts/check-registry-log-declared.mjs` and `scripts/check-rest-log-declared.mjs`
+  // read the level vocabulary out of `registry.ts` by path (`LEVELS_SOURCE`).
+  REGISTRY_LOG_LEVELS: 'check:registry-log-declared and check:rest-log-declared read it from registry.ts by path (LEVELS_SOURCE)',
   TENANT_SCOPE_INDEX: "ADR-0117 anchors `registry.ts#organization_id`, which resolves as the `'organization_id'` token this declaration carries (check:adr-symbol-anchors)",
 });
 
