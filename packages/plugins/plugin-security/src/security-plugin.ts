@@ -6263,8 +6263,8 @@ export class SecurityPlugin implements Plugin {
    * The computed fields of an object a caller may not read for what they
    * read THROUGH a reference: field-level security covers what a value is
    * computed from, on the referenced record too. A computed field reading
-   * `record.ref.leaf` is withheld when the caller may not read `leaf` on the
-   * object `ref` points at — judged by that object's own read projection
+   * `record.ref.leaf` is withheld when `leaf` is a field the object `ref`
+   * points at declares and the caller may not read there — judged by that object's own read projection
    * ({@link computeReadableFields}, which folds that object's computed fields
    * in turn), or not determinable there (fail closed). The engine serves one
    * hop, so the target's projection is asked without hops of its own.
@@ -6281,7 +6281,10 @@ export class SecurityPlugin implements Plugin {
   ): Promise<Set<string>> {
     if (!postureHasComputedHops(secMeta)) return Promise.resolve(new Set());
     return resolveHopWithheldFields.call(
-      { readLocalReadableFields: (object: string, ctx: unknown) => this.computeReadableFields(object, ctx, { ...options, hops: false }) },
+      {
+        readLocalReadableFields: (object: string, ctx: unknown) => this.computeReadableFields(object, ctx, { ...options, hops: false }),
+        readFieldNames: (object: string) => this.getObjectFieldNames(this.metadata, object, this.ql),
+      },
       secMeta,
       context,
     );

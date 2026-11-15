@@ -641,22 +641,30 @@ export function extractTargetField(
  * The body of `SecurityPlugin#resolveHopWithheldFields`; the method's docblock there is its contract.
  */
 export async function resolveHopWithheldFields(
-  this: { readLocalReadableFields: (object: string, context: unknown) => Promise<string[] | undefined> },
+  this: {
+    readLocalReadableFields: (object: string, context: unknown) => Promise<string[] | undefined>;
+    readFieldNames: (object: string) => Promise<ReadonlySet<string> | null>;
+  },
   secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
   context: unknown,
 ): Promise<Set<string>> {
   const out = new Set<string>();
   const inputs = secMeta.computedFieldInputs ?? {};
   const targets = secMeta.computedHopTargets ?? {};
-  const readable = new Map<string, Promise<ReadonlySet<string> | null>>();
-  const readableOn = (object: string): Promise<ReadonlySet<string> | null> => {
-    let hit = readable.get(object);
+  // Per target: the fields it declares, and the ones this caller may read
+  // there. A leaf the target does not declare is no field to withhold — the
+  // engine answers it `null` with its own fault — so only a DECLARED leaf the
+  // caller may not read withholds; a target whose answer cannot be had
+  // withholds every computed field reading through it (fail closed).
+  const verdicts = new Map<string, Promise<{ declared: ReadonlySet<string>; readable: ReadonlySet<string> } | null>>();
+  const verdictOn = (object: string) => {
+    let hit = verdicts.get(object);
     if (!hit) {
-      hit = this.readLocalReadableFields(object, context).then(
-        (fields) => (Array.isArray(fields) ? new Set(fields) : null),
+      hit = Promise.all([this.readFieldNames(object), this.readLocalReadableFields(object, context)]).then(
+        ([declared, fields]) => (declared && Array.isArray(fields) ? { declared, readable: new Set(fields) } : null),
         () => null,
       );
-      readable.set(object, hit);
+      verdicts.set(object, hit);
     }
     return hit;
   };
@@ -664,8 +672,8 @@ export async function resolveHopWithheldFields(
     for (const [ref, leaves] of input.hops ?? []) {
       const target = targets[ref];
       if (!target) continue;
-      const fields = await readableOn(target);
-      if (fields === null || [...leaves].some((leaf) => !fields.has(leaf))) {
+      const verdict = await verdictOn(target);
+      if (verdict === null || [...leaves].some((leaf) => verdict.declared.has(leaf) && !verdict.readable.has(leaf))) {
         out.add(field);
         break;
       }
