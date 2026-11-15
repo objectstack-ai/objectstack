@@ -14,6 +14,11 @@ function comparable(value: unknown): unknown {
   return value;
 }
 
+/**
+ * A `where` judged the way a SQL driver judges it: a comparison with a NULL
+ * column is never true (`NULL >= 0` is unknown, where JavaScript's
+ * `null >= 0` is `true`), and `{ $null: true }` is `IS NULL`.
+ */
 function matches(row: Row, where: Record<string, unknown> = {}): boolean {
   return Object.entries(where).every(([field, cond]) => {
     if (field === '$and') return (cond as Row[]).every((w) => matches(row, w));
@@ -21,6 +26,9 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
     const value = comparable(row[field]);
     if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       const ops = cond as Record<string, unknown>;
+      const isNull = value === null || value === undefined;
+      if ('$null' in ops && ops.$null !== isNull) return false;
+      if (isNull && ['$gte', '$gt', '$lt', '$in'].some((op) => op in ops)) return false;
       if ('$gte' in ops && !((value as number) >= (comparable(ops.$gte) as number))) return false;
       if ('$gt' in ops && !((value as number) > (comparable(ops.$gt) as number))) return false;
       if ('$lt' in ops && !((value as number) < (comparable(ops.$lt) as number))) return false;
