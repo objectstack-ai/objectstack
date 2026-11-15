@@ -216,7 +216,7 @@
 - 跨包常等于跨车道,PM 事后补跨座位声明。
 - 例:`screen-input-contract.ts` 的 grep 命中「ruling A′」,裁决区写 `A′ · 5651909056` 与原句:
   「a non-number for a numeric field is refused, never silently passed」;路线随之为拒收(A′)。
-- 原令「有限数字串转数字」与之相左,应先送 L1 线程;栅栏点名 A′ 的 spec 散文在范围。
+- 原令「有限数字串转数字」与之相左,应派发前送 L1 线程;栅栏点名 A′ spec 散文在范围。
 - 派发令带 L2 路由:dev 交回点名欠 L2 不自敲;席照 contract-review.md 自审或送 L2 席,⛔ 非分诊
 - 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
 - same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
