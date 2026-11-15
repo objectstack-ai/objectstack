@@ -168,9 +168,8 @@ gh() {
 # objectos joined the triage sweep under Option B (maintainer ruling 2026-08-18,
 # 「就按 B,带你补的两条,落地吧」): it gets the full pm state-machine vocabulary
 # below, but stays OUT of the domain-lane loop (lanes are main-repo-only — its
-# execution folds into domain:devx) and OUT of the target:<major> loop (docs/site
-# repo, no changeset/release flow, no release board). Those absences are
-# deliberate, not oversights. Actually RUNNING this against objectos is a PM
+# execution folds into domain:devx). That absence is deliberate, not an
+# oversight. Actually RUNNING this against objectos is a PM
 # landing step (needs label-write credentials on that repo).
 #
 # hotcrm enrolled on the SAME Option B terms when its execution seat was opened
@@ -179,16 +178,15 @@ gh() {
 # 使用元数据开发crm应用…」). It is the EXEMPLAR APP repo, so like objectos it sits
 # outside the spec dependency chain: it gets the full pm state-machine vocabulary
 # below, and stays OUT of the domain-lane loop (lanes are main-repo-only — hotcrm
-# is a REPO lane, seated through the repo:hotcrm seam label further down) and OUT
-# of the target:<major> loop (no changeset/release flow of its own, so no release
-# board unless one is later ruled). Those absences are deliberate, not oversights.
+# is a REPO lane, seated through the repo:hotcrm seam label further down). That
+# absence is deliberate, not an oversight.
 # Actually RUNNING this against hotcrm is a PM landing step, same as objectos
 # (needs label-write credentials on that repo).
 #
 # mobile enrolled on the same terms when its on-demand repo lane was registered
 # (maintainer choice 2026-11-02, verbatim: "Register, seat on demand
 # (Recommended)"): the native shell that hosts the Console. Full pm vocabulary,
-# OUT of the domain-lane loop and OUT of the target:<major> loop, and no
+# OUT of the domain-lane loop, and no
 # repo:mobile seam row until a seam card gives one a reader. Running this
 # against mobile is a PM landing step, same as hotcrm.
 for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm objectstack-ai/mobile; do
@@ -247,9 +245,11 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # only: a p0 card still obeys the same-file serial queue and the claim
   # protocol (SKILL.md state model, 「优先是排序,不是豁免」). Set by the triage
   # seat when it grades a card; removed by triage when the grade changes. Named
-  # consumers: the lane pull order below (p0 > pm:blocking > target board > Bug
-  # > the rest) and the half-state sweep's H10 (stale unclaimed p0) and H11
-  # (important card parked) in scripts/pm/check-half-states.mjs. It is in this
+  # consumers: the lane pull order (p0 > pm:blocking > 功能点位次 > p1 > p2 > p3;
+  # references/execution-duties.md 取卡全序) — which is also where a release
+  # blocker sits, as p0 inside the release window — and the half-state sweep's
+  # H10 (stale unclaimed p0) and H11 (important card parked) in
+  # scripts/pm/check-half-states.mjs. It is in this
   # per-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO) and
   # grading is a per-repo triage duty — the same reasoning as pm:retriage
   # below. Measured 2026-08-20: objectui carries a live priority:p0 card whose
@@ -285,7 +285,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
   # the triage sweep writes/removes it from the Blocked-by: reverse index, and
   # it comes off when every dependent closes. Named consumers: the lane queue
-  # pull order (p0 > blocking > target board > Bug > age; SKILL.md 选择优先级)
+  # pull order (p0 > blocking > 功能点位次 > p1 > p2 > p3; execution-duties.md 取卡全序)
   # and list-page scans. A hand-set instance is mislabeling — the sweep
   # corrects it against the index.
   gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
@@ -683,28 +683,16 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui; do
   gh label create area:devpath  -R "$R" -c d2dae2 -d "The road — create, dev, verify, publish/install, connect an agent, iterate" 2>/dev/null || true
 done
 
-# Release board — `target:<major>` marks a release BLOCKER for that major
-# (SKILL.md "发版板"). Its consumer is a named query, one per backlog:
-# `label:target:<major> is:open`, and all three boards reading empty IS the
-# release condition — so the family belongs in all three repos, not just the
-# main one.
-#
-# Seed the CURRENT release window only. A major seeded ahead of its window puts
-# an empty board into every autocomplete with no producer behind it — the same
-# harm as recreating a retired lane above. At the start of a new window MOVE the
-# value here rather than accumulating them; a closed window's label object stays
-# in the repos as history and needs no entry.
-#
-# Creation is create-if-missing, so where these already exist this is a no-op
-# and their current colour and description are left exactly as they are;
-# `--reconcile` aligns them. Note the window is part of the description, so a
-# stale object describes the WRONG major: measured 2026-08-20, objectui's
-# target:v17 still carried a 2026-08-04 hand-written description.
-for V in v17; do
-  for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud; do
-    gh label create "target:$V" -R "$R" -c ededed -d "Release blocker for $V — on the board until fixed, dropped as no longer valid, or accepted for GA" 2>/dev/null || true
-  done
-done
+# No `target:<major>` family. A release blocker is `priority:p0` inside the
+# release window and nothing else (pm-dispatch references/filing-gate.md
+# 定级判据, 「⛔ 不打 `target:`」), and the maintainer's release list reads
+# `label:priority:p0 is:open` in each repo (references/seat-post-protocol.md
+# 〈发版板运维〉), so no reference reads a `target:` label as a blocker. This file
+# therefore seeds none — and `--reconcile` no longer rewrites an existing
+# object's description to call it a release blocker. The `target:*` objects
+# already in the repos are left exactly as they are, like a retired lane's (see
+# the header); deleting them is the maintainer's call, never a side effect of
+# this file.
 
 if [ "$RECONCILE" = 1 ]; then
   if [ "$RECONCILE_FAILURES" -gt 0 ]; then
