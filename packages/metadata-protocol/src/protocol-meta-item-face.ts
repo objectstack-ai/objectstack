@@ -46,12 +46,16 @@ import { installedManifestsOfEngine } from './installed-manifests.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import type { PrereadActiveRows } from './protocol-meta-item-reads.js';
+import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { overlayMemberWhere } from './migrations/overlay-index.js';
+import { isServedOverrideRowOf } from './served-override.js';
 import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
     isObjectOfDisabledPackage,
     noPendingDraftError,
     objectPackageDisabledError,
+    rowMatchesOverlayWhere,
 } from './protocol.js';
 
 /**
@@ -395,6 +399,61 @@ export function isAnotherHoldersCopy(registry: any, type: string, name: string, 
     return every.includes(stamp);
 }
 
+/**
+ * [#32849, ADR-0150 D4, ADR-0146 D8 item 2] The address a read naming no
+ * package takes for a bundle member whose one shipper's declared override is
+ * stored: that shipper, so the read serves the override as the shipper's own
+ * address does. `undefined` leaves the read as it was.
+ *
+ * The arrangement: two or more packages ship the name, one of them (a bundle
+ * addition Z) is the one enabled package that ships the member named
+ * (`fr-FR`), and an active row of that member is the served override of Z's
+ * item ({@link isServedOverrideRowOf}: bound to Z's pair, declaring
+ * `overrides.package` Z). The read naming no package takes its content from
+ * `packagelessContentPackage`, which weighs the name's shippers and the
+ * rows' bindings at the name's grain: with several shippers and the row bound
+ * to the pair (no shipper) it answers the package-unbound row alone, so the
+ * read served Z's shipped member and dropped the override that `?package=Z`,
+ * Z's list and the registry's slot at Z all serve. A name one package ships
+ * is that package's content already, and is left as it was.
+ *
+ * Only that arrangement moves: a member two packages ship stays the read's
+ * own judgment (red line 2, ambiguity never guessed), as does a row declaring
+ * another package (the #32606 shape), an undeclared pair row, the
+ * environment's own item, a disabled shipper, and the strict draft read.
+ * The rows are read through `host.readItemActiveRows`, so the read below takes
+ * them instead of reading them again (#24371).
+ */
+async function declaredMemberOverrideAddressOf(
+    host: ServedRowHost,
+    type: string, name: string, member: string | undefined,
+): Promise<string | undefined> {
+    if (member === undefined) return undefined;
+    const registry: any = host.engine?.registry;
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
+    if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size < 2) return undefined;
+    const memberShippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))];
+    if (memberShippers.length !== 1) return undefined;
+    const [shipper] = memberShippers;
+    if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(shipper) === true) return undefined;
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
+        return undefined;
+    }
+    let activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>;
+    try {
+        activeRows = await host.readItemActiveRows(type, name);
+    } catch (error) {
+        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        activeRows = [];
+    }
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    const where = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, member) };
+    const installed = installedManifestsOfEngine(host.engine);
+    return activeRows.some((row) => rowMatchesOverlayWhere(row, where) && isServedOverrideRowOf(row, shipper, installed))
+        ? shipper
+        : undefined;
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'readMetaItem'> & ServedRowHost,
@@ -432,9 +491,13 @@ export async function readMetaItemFace(
             return rows;
         },
     };
+    // [#32849] …and a member whose one shipper's declared override is stored
+    // is read at that shipper ({@link declaredMemberOverrideAddressOf}).
+    const member = request.packageId ? undefined : resolveBundleMemberSelector(request.type, request.member);
     const servedAddress = request.packageId
         ? undefined
-        : await servedAddressOf(judgeHost, request.type, request.name, resolveBundleMemberSelector(request.type, request.member), { refuseWithoutDisabled: true });
+        : await servedAddressOf(judgeHost, request.type, request.name, member, { refuseWithoutDisabled: true })
+            ?? (request.state === 'draft' ? undefined : await declaredMemberOverrideAddressOf(judgeHost, request.type, request.name, member));
     const answer = await this.readMetaItem(servedAddress === undefined ? request : { ...request, packageId: servedAddress }, { face, ...(activeRows !== undefined ? { activeRows } : {}) });
     // [#28877] The served read of an `action` also withholds one that launches
     // into a disabled package, as the served list does.

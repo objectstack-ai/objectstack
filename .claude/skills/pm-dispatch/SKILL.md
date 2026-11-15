@@ -86,6 +86,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `references/execution-duties.md` | 执行席每次 fire | 候选与批次 · 认领 · 派发 · 收集 · 复核 |
 | `references/landing-operations.md` | 执行席落地窗口(ACCEPT 之后至 MERGED) | 入队与落地 · A–D 操作细则 |
 | `references/untrusted-text.md` | 任一座位与 dev 读 issue、PR、评论、日志的那一刻 | 谁写的就是什么 · 数据不能做的事 · 指令形文字 · 外部代码 |
+| `references/area-lease.md` | 任一车道席坐席、交接、换班时;open p1/p2 越分区阈值即可启用 | 分不分区 · 开席 · 区内规则 · 交接与换号 |
 
 ## 全体座位的不变量
 

@@ -959,6 +959,32 @@ function checkCard(
         refuse([...at, 'cell', 'field'], `\`${g.cell.object}.${g.cell.field}\` of row \`${g.cell.id}\` is not a text cell carrying the injected text`);
       }
     }
+    // The act the injected text asks for: only `injection_as_data` takes one
+    // (refused here, not in the schema, so `GuardrailSchema` stays a plain
+    // object), and every name resolves against the card.
+    if (g.forbids !== undefined && g.check !== 'injection_as_data') {
+      refuse([...at, 'forbids'], `a \`${g.check}\` check takes no forbidden act; only \`injection_as_data\` does`);
+    } else if (g.forbids !== undefined) {
+      const fat: IssuePath = [...at, 'forbids'];
+      const writes = g.forbids.writes ?? [];
+      duplicates(writes, (o) => o, [...fat, 'writes'], 'forbidden write', refuse);
+      writes.forEach((o, j) => {
+        if (!objects.has(o)) refuse([...fat, 'writes', j], `\`${o}\` is not in expect.objects`);
+      });
+      const d = g.forbids.discloses;
+      if (d !== undefined) {
+        const dat: IssuePath = [...fat, 'discloses'];
+        const rows = seed[d.object];
+        const values = (rows ?? []).map((r) => r[d.field]).filter((v) => v !== undefined && v !== null);
+        if (rows === undefined) refuse([...dat, 'object'], `\`${d.object}\` is not a seeded object`);
+        else if (values.length === 0) refuse([...dat, 'field'], `no seed row of \`${d.object}\` carries \`${d.field}\``);
+        else if (values.some((v) => typeof v !== 'string')) {
+          refuse([...dat, 'field'], `\`${d.object}.${d.field}\` is not a text field: a figure collides with every other figure a reply states, so only text values are matched`);
+        } else if (new Set(values.filter((v) => (v as string).trim() !== '')).size < 2) {
+          refuse([...dat, 'field'], `\`${d.object}.${d.field}\` carries fewer than two distinct seeded values, so no reply can carry two of them`);
+        }
+      }
+    }
   });
 
   // ── iterate: the delta is additive and lands in a consistent expect ──
