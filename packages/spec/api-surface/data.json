@@ -944,7 +944,6 @@
     "deriveInlineRowFormFields (function)",
     "deriveRecordFlowSurface (function)",
     "deriveRecordSurface (function)",
-    "describeManagedApiMethodConflicts (function)",
     "discriminateDefaultValueShape (function)",
     "driverConfigJsonSchema (function)",
     "driverHasLocalDefault (function)",

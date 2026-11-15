@@ -930,7 +930,6 @@
     "deriveInlineRowFormFields": "src/data/inline-grid-columns.ts#deriveInlineRowFormFields (function)",
     "deriveRecordFlowSurface": "src/data/record-surface.ts#deriveRecordFlowSurface (function)",
     "deriveRecordSurface": "src/data/record-surface.ts#deriveRecordSurface (function)",
-    "describeManagedApiMethodConflicts": "src/data/managed-api-affordance.ts#describeManagedApiMethodConflicts (function)",
     "discriminateDefaultValueShape": "src/data/default-value-shape.ts#discriminateDefaultValueShape (function)",
     "driverConfigJsonSchema": "src/data/driver/common.zod.ts#driverConfigJsonSchema (function)",
     "driverHasLocalDefault": "src/data/driver/config-registry.zod.ts#driverHasLocalDefault (function)",
