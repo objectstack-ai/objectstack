@@ -1078,8 +1078,8 @@ describe('[#33386] a run of a name two slots hold judges the served holders', ()
  * dispatches it again with no re-arm. A boot disable arms nothing of the
  * disabled package; the re-sync that arms it on enable makes it dispatch.
  * The slot keys, the bindings and the dispatch holder do not move
- * (amendment 7). A name one package holds is outside the ruling: its trigger
- * answers as on `main` (CONTROL).
+ * (amendment 7). A name one package holds: its trigger answers as on `main`
+ * today (CONTROL).
  */
 describe('[#33748] a trigger binding does not dispatch a slot whose package is disabled', () => {
     const tagOf = (packageId: string) => packageId.split('.').pop()!;
@@ -1186,7 +1186,7 @@ describe('[#33748] a trigger binding does not dispatch a slot whose package is d
         expect(skipSaid()).toEqual([]);
     });
 
-    it('CONTROL — a name one package holds: its trigger answers as on `main`, disabled or not (outside the ruling)', async () => {
+    it('CONTROL — a name one package holds: its trigger answers as on `main` today, disabled or not', async () => {
         ship(P1, triggered('solo', 'alpha'));
         expect([...armed.keys()]).toEqual(['solo']);
         expect(await fireAll()).toEqual(['alpha']);
