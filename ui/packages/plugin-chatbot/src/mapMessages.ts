@@ -14,8 +14,8 @@
  * apps that drive `useChat` themselves (e.g. Studio, which needs a custom
  * `prepareSendMessagesRequest` transport).
  */
-import type { BUILD_PROGRESS_FRAME_TYPE, BuildProgressPhase, ObjectQuerySource } from '@objectstack/spec/ai';
-import { ObjectQuerySourceSchema } from '@objectstack/spec/ai';
+import type { BUILD_PROGRESS_FRAME_TYPE, BuildProgressPhase, DatasetProvenance, ObjectQuerySource } from '@objectstack/spec/ai';
+import { DatasetProvenanceSchema, ObjectQuerySourceSchema } from '@objectstack/spec/ai';
 import type { ChatbotEnhancedMessage as ChatMessage, ChatbotEnhancedToolInvocation as ChatToolInvocation, ChatSource, ChatBuildProgress, ChatBlueprintProgress } from './ChatbotEnhanced';
 import { detectPendingApproval, extractCharts, parseResultEnvelope, type AnyPart } from './toolResultParsers';
 
@@ -763,10 +763,19 @@ export function detectRecordWrite(result: unknown): RecordWrite | undefined {
 }
 
 /**
- * The `source` block a data tool answers beside its result (the tools
- * `OBJECT_QUERY_SOURCE_TOOL_NAMES` names), read through the published
- * contract, `ObjectQuerySourceSchema` (`@objectstack/spec/ai`). The chat draws
- * it as the turn's "How this was computed" block.
+ * What a turn's "How this was computed" block draws for one tool call: an
+ * object query's `source` block (`ObjectQuerySourceSchema`), or the
+ * `provenance` block `query_dataset` answers (`DatasetProvenanceSchema`,
+ * ADR-0149 D3), told apart by the latter's `kind: 'dataset'`.
+ */
+export type AnswerSource = ObjectQuerySource | DatasetProvenance;
+
+/**
+ * The block a data tool answers beside its result, read through the published
+ * contract (`@objectstack/spec/ai`): `query_dataset`'s top-level `provenance`
+ * (`DatasetProvenanceSchema`), else the `source` block the object-query tools
+ * answer (`OBJECT_QUERY_SOURCE_TOOL_NAMES`, `ObjectQuerySourceSchema`). The
+ * chat draws it as the turn's "How this was computed" block.
  *
  * The lift is the schema's parse of the block: a key the schema does not
  * declare is stripped, so nothing else of the tool payload rides along, and a
@@ -775,8 +784,13 @@ export function detectRecordWrite(result: unknown): RecordWrite | undefined {
  * whole parsed block is kept, the members the block does not draw included,
  * because the message cache stores this copy and lifts it again on reload.
  */
-export function detectAnswerSource(result: unknown): ObjectQuerySource | undefined {
-  const raw = parseResultEnvelope(result)?.source;
+export function detectAnswerSource(result: unknown): AnswerSource | undefined {
+  const envelope = parseResultEnvelope(result);
+  if (envelope?.provenance !== undefined) {
+    const provenance = DatasetProvenanceSchema.safeParse(envelope.provenance);
+    if (provenance.success) return provenance.data;
+  }
+  const raw = envelope?.source;
   if (raw === undefined) return undefined;
   const parsed = ObjectQuerySourceSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;

@@ -971,11 +971,23 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "refusals.message": {
         label: "提示语",
-        helpText: "正文抛出此错误码时用户读到的句子——纯文本，不含占位符"
+        helpText: "正文抛出此错误码时用户读到的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
       },
       "refusals.status": {
         label: "状态码",
         helpText: "拒绝的 HTTP 状态码（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一错误码下的更多句子，以正文在错误码旁抛出的 snake_case 原因为键（{ code, reason }）。线上的错误码和状态码仍取本条目的；未在此声明的原因会被拒绝。不填：抛出的原因不被读取"
+      },
+      "refusals.reasons.message": {
+        label: "提示语",
+        helpText: "正文在此错误码下抛出此原因时用户读到的句子。其中的 {{ }} 占位符遵循本条目的参数"
+      },
+      "refusals.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 state）：正文抛出 { code, params: { state } }，{{ state }} 占位符即显示该值。不填：句子为纯文本"
       },
       handler: {
         label: "处理器",

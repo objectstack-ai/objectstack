@@ -374,9 +374,10 @@ export type {
   ProposedChanges,
   ReplayOutcome,
 } from './mapMessages';
-// The answer-source block's type is the published contract's; the package
-// keeps exporting it under the name its consumers already import.
-export type { ObjectQuerySource as AnswerSource } from '@objectstack/spec/ai';
+// The answer-source block's type: the union of the two published contracts it
+// is lifted through (an object query's `source`, `query_dataset`'s
+// `provenance`), under the name its consumers already import.
+export type { AnswerSource } from './mapMessages';
 
 // `@object-ui/types` ChatMessage (the JSON/SDUI AUTHORING contract) → the
 // runtime `ChatbotEnhancedMessage` above. Exported for the same reason as the
