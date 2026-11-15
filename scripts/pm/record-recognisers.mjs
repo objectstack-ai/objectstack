@@ -77,9 +77,12 @@
 // dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins the key table both ways against project-forms.md's 〈信箱 PR〉 section (every key named there, no other key named there), the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, and the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, so a change to any of those spellings is judged here
 
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CONTRACT_REVIEW_HEADING_MARKER,
@@ -444,6 +447,10 @@ export function regenChainToHead(pair) {
   return chain.length === 0 ? null : chain;
 }
 
+// The one argv the carry lists a hop's paths with — `--no-renames`, so a rename names BOTH sides
+// (why: `unexplainedPathsBetween` below).
+const CARRY_DIFF_ARGV = Object.freeze(['diff', '-z', '--name-only', '--no-renames']);
+
 /**
  * The ruled test on COMMITTED trees: which moved paths are explained by NONE of
  * the arms of 「every touched path is a generated artefact OR THE MERGE COMMIT'S
@@ -468,9 +475,16 @@ export function regenChainToHead(pair) {
  * hand-resolved merge leaves its resolution in the delta at the NEW head, and a
  * slipped-in edit in whichever delta carries it. `-z` throughout: a path may
  * hold a space, a quote or a colon and the parse must not be the weak link.
+ *
+ * ⛔ `--no-renames` on every read, owned by the ONE helper both reads go
+ * through: with rename detection on (git's default) a rename is listed by its
+ * DESTINATION alone, so a hop that moves a reviewed file onto a prose face
+ * (`skills/a/rules/security.md` → `content/docs/security.md`) would list only
+ * the prose path and carry the record past a file that left its face. Read as
+ * a delete plus an add, the SOURCE path is listed and judged like any other.
  */
 export function unexplainedPathsBetween(runGit, { from, to, base }) {
-  const names = (a, b) => String(runGit(['diff', '-z', '--name-only', a, b])).split('\0').filter((p) => p !== '');
+  const names = (a, b) => String(runGit([...CARRY_DIFF_ARGV, a, b])).split('\0').filter((p) => p !== '');
   const moved = names(from, to).filter((p) => !isOutsideReviewSurface(p));
   if (moved.length === 0) return [];
   const f = String(runGit(['check-attr', '--source', to, '-z', 'merge', '--stdin'], moved.join('\0'))).split('\0');
@@ -2509,7 +2523,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the locator: the newest `## Contract review` on this head, on EITHER thread (#17302)': 19,
   '#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head': 14,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
-  '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
+  '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 24,
   // Raised 30 → 32 with ③'s SQL push-down check in the legend on every face, and its faceless-PR carrier: two pins.
   // Raised 32 → 38 with the `Security-touching:` line the low-risk skills arm reads: the record line and its
   // shipped `yes`, the whole template read through the record reader, the `no` reading, the faces and hits it
@@ -2899,7 +2913,9 @@ export async function selfTest() {
     if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
     if (args[0] === 'check-attr') return spec.attrs;
     if (args[0] === 'rev-parse') return `${HEAD_9AF9}00\n`;
-    const [, , , a, b] = args; // diff -z --name-only A B
+    // ⛔ Exact argv or nothing: a diff spelled any other way answers no paths, so a dropped flag cannot ride through.
+    if (args.length !== CARRY_DIFF_ARGV.length + 2 || CARRY_DIFF_ARGV.some((w, i) => args[i] !== w)) return '';
+    const [a, b] = args.slice(CARRY_DIFF_ARGV.length); // diff -z --name-only --no-renames A B
     return a === HEAD_9AF9 && b === NEW_HEAD ? spec.moved : (spec.own?.[b] ?? '');
   };
   const REGEN_ONLY = { moved: 'packages/spec/api-surface/data.txt\0', attrs: 'packages/spec/api-surface/data.txt\0merge\0os-regen\0' };
@@ -2926,7 +2942,7 @@ export async function selfTest() {
   t('⛔ a thread with no line carries none, so the ordinary rule is untouched where nobody claims the exception', regenChainToHead(moved([RECORD_ON_9AF9])) === null && regenCarry(moved([RECORD_ON_9AF9])).state === 'none' && locateReviewOfRecord(moved([RECORD_ON_9AF9], GIT_EMPTY)).state === 'absent');
   // the tree test — and it reads COMMITTED trees, never the working one
   t('⭐ an EMPTY non-`merge=os-regen` diff CARRIES the record', regenCarry(CARRIED()).state === 'carried');
-  t('…and a generated path DID move: the test named two COMMITS and read `.gitattributes` out of the new one', GIT_SEEN.includes(`diff -z --name-only ${HEAD_9AF9} ${NEW_HEAD}`) && GIT_SEEN.includes(`check-attr --source ${NEW_HEAD} -z merge --stdin`), GIT_SEEN.join(' | '));
+  t('…and a generated path DID move: the test named two COMMITS and read `.gitattributes` out of the new one', GIT_SEEN.includes(`diff -z --name-only --no-renames ${HEAD_9AF9} ${NEW_HEAD}`) && GIT_SEEN.includes(`check-attr --source ${NEW_HEAD} -z merge --stdin`), GIT_SEEN.join(' | '));
   t('…so the record is FOUND on the new head, naming the head it actually judged and the hop count', (() => { const r = locateReviewOfRecord(CARRIED()); return r.state === 'found' && r.carriedFrom.startsWith(HEAD_9AF9) && r.carriedHops === 1; })());
   t('⛔ a HAND-WRITTEN path in the same range certifies nothing — refused, and the reason says which path', (() => { const r = regenCarry(moved([RECORD_ON_9AF9, PROV()], GIT_HAND)); return r.state === 'refused' && says(r.reason, 'scripts/pm/x.mjs'); })() && locateReviewOfRecord(moved([RECORD_ON_9AF9, PROV()], GIT_HAND)).state === 'absent');
   t('⛔ a chain whose hops name DIFFERENT records certifies nothing', regenCarry(moved([RECORD_ON_9AF9, PROV(HEAD_9AF9, 'bbbbbbbb', 3301), PROV('bbbbbbbb', NEW_HEAD, 9999)], GIT_EMPTY)).state === 'refused');
@@ -2942,8 +2958,40 @@ export async function selfTest() {
   t('⭐ (i) a MERGE-FORWARD carrying ANOTHER PR\'s hand-written path beside the regeneration is CARRIED', regenCarry(withGit(GIT(CARRY_OVER))).state === 'carried' && locateReviewOfRecord(withGit(GIT(CARRY_OVER))).state === 'found');
   t('⛔ (iii) the SAME path, hand-resolved so the new head no longer holds what main brought, is REFUSED', (() => { const r = regenCarry(withGit(GIT(HAND_RESOLVED))); return r.state === 'refused' && says(r.reason, 'AGENTS.md'); })());
   t('⇒ the DELTA decides, ⛔ never the path name: one path, two specimens, two verdicts', unexplainedPathsBetween(GIT(CARRY_OVER), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).length === 0 && unexplainedPathsBetween(GIT(HAND_RESOLVED), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).join() === 'AGENTS.md');
-  t('…and the delta is read ONCE PER HEAD against `merge-base BASE head`, ⛔ never once per path', GIT_SEEN.includes(`merge-base ${BASE} ${HEAD_9AF9}`) && GIT_SEEN.includes(`diff -z --name-only mb-${NEW_HEAD} ${NEW_HEAD}`), GIT_SEEN.slice(-4).join(' | '));
+  t('…and the delta is read ONCE PER HEAD against `merge-base BASE head`, ⛔ never once per path', GIT_SEEN.includes(`merge-base ${BASE} ${HEAD_9AF9}`) && GIT_SEEN.includes(`diff -z --name-only --no-renames mb-${NEW_HEAD} ${NEW_HEAD}`), GIT_SEEN.slice(-4).join(' | '));
   t('⛔ (iv) a run naming NO base ref cannot tell main\'s carry-over from a hand edit — UNREADABLE, ⛔ never clean', (() => { const r = regenCarry(withGit(GIT(CARRY_OVER), { baseRef: null })); return r.state === 'unreadable' && r.gaps.some((g) => g.includes('base ref')); })());
+  // ⛔ A rename is read as a delete plus an add (`--no-renames`), so a hop that moves a reviewed file onto
+  // a prose face lists the SOURCE path and is judged by it: the fake git above answers nothing to any
+  // other spelling, and every diff it was sent is the one argv the reader owns.
+  t('⛔ every name list the carry reads is sent as `diff -z --name-only --no-renames A B`, ⛔ never with rename detection on', (() => { const diffs = GIT_SEEN.filter((c) => c.startsWith('diff ')); return diffs.length > 0 && diffs.every((c) => /^diff -z --name-only --no-renames \S+ \S+$/.test(c)); })(), GIT_SEEN.filter((c) => c.startsWith('diff ')).join(' | '));
+  const RENAMED_OUT = (() => {
+    const dir = mkdtempSync(join(tmpdir(), 'carry-rename-'));
+    try {
+      // GIT_* stripped (GIT_ENV_ISOLATION_RULE) and no global or system config read: identity, signing and
+      // rename detection are all set here, so the row reads the same on every machine.
+      const env = { ...gitFreeEnv(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+      const realGit = (args, input) => execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', '-c', 'diff.renames=true', ...args], { cwd: dir, encoding: 'utf8', env, input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+      realGit(['init', '-q']);
+      mkdirSync(join(dir, 'skills/a/rules'), { recursive: true });
+      writeFileSync(join(dir, 'skills/a/rules/security.md'), 'Never echo a token back.\n'.repeat(20));
+      realGit(['add', '-A']);
+      realGit(['commit', '-q', '-m', 'base']);
+      const from = realGit(['rev-parse', 'HEAD']).trim();
+      realGit(['checkout', '-q', '-b', 'pr']);
+      mkdirSync(join(dir, 'content/docs'), { recursive: true });
+      realGit(['mv', 'skills/a/rules/security.md', 'content/docs/security.md']);
+      realGit(['commit', '-q', '-m', 'move']);
+      const to = realGit(['rev-parse', 'HEAD']).trim();
+      const destinationOnly = realGit(['diff', '-z', '--name-only', from, to]).split('\0').filter(Boolean);
+      const unexplained = unexplainedPathsBetween(realGit, { from, to, base: 'main' });
+      return destinationOnly.join() === 'content/docs/security.md' && unexplained.join() === 'skills/a/rules/security.md' ? true : JSON.stringify({ destinationOnly, unexplained });
+    } catch (error) {
+      return String(error?.message ?? error);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  })();
+  t('⛔ on REAL git, a reviewed file RENAMED onto a prose face is unexplained by its SOURCE path — the destination alone would carry the record', RENAMED_OUT === true, RENAMED_OUT);
 
   // ⭐ the PROSE arm (B′ with C, ruling record 6159870311): a head that moves only on faces outside the
   // review surface keeps the record — decided on the same committed trees, by the same line.
