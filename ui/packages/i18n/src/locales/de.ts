@@ -2731,6 +2731,7 @@ const de = {
         directSignInIncomplete: "Die Anmeldung wurde nicht abgeschlossen: Sie sind vom Single Sign-on zurückgekehrt, ohne angemeldet zu sein. Prüfen Sie, ob dieser Browser Cookies für diese Website zulässt, und versuchen Sie es erneut.",
         directSignInUnavailable: "Das Single Sign-on für dieses System konnte nicht gestartet werden. Bitten Sie Ihren Administrator, den verwendeten Anmeldedienst zu prüfen.",
         directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
+        networkNotAllowed: "Dieses System erlaubt keine Anmeldung aus Ihrem Netzwerk. Verbinden Sie sich über ein zugelassenes Netzwerk (zum Beispiel das Büronetz oder VPN Ihrer Organisation), oder wenden Sie sich an Ihren Administrator.",
         ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",

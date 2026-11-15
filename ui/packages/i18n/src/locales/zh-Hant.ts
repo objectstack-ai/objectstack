@@ -2803,6 +2803,7 @@ const zhHant = {
         directSignInIncomplete: "登入沒有完成：你從單點登入返回時仍未登入。請確認瀏覽器允許本站點的 Cookie，然後重試。",
         directSignInUnavailable: "無法為本系統發起單點登入。請聯絡管理員檢查本系統使用的登入服務。",
         directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
+        networkNotAllowed: "本系統不允許從你當前的網路登入。請從允許的網路（例如組織的辦公網路或 VPN）連線，或聯絡管理員。",
         ssoAccessDenied: "你登入所用的賬號無權訪問本系統。請使用有權訪問的賬號登入，或請本系統所屬組織的管理員將你新增為成員。",
         ssoSwitchAccount: "切換賬號",
         ssoBackToConsole: "返回控制台",

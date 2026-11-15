@@ -2797,6 +2797,7 @@ const fr = {
         directSignInIncomplete: "La connexion n'a pas abouti : vous êtes revenu de l'authentification unique sans être connecté. Vérifiez que ce navigateur autorise les cookies pour ce site, puis réessayez.",
         directSignInUnavailable: "L'authentification unique n'a pas pu être lancée pour ce système. Demandez à votre administrateur de vérifier le service de connexion utilisé.",
         directSignInRateLimited: "Trop de connexions ont été lancées depuis ce réseau à l'instant. Patientez quelques secondes, puis réessayez.",
+        networkNotAllowed: "Ce système n'autorise pas la connexion depuis votre réseau. Connectez-vous depuis un réseau autorisé (par exemple le réseau du bureau ou le VPN de votre organisation), ou contactez votre administrateur.",
         ssoAccessDenied: "Le compte avec lequel vous vous êtes connecté n'a pas accès à cet environnement. Connectez-vous avec un compte qui y a accès, ou demandez à un administrateur de l'organisation de cet environnement de vous ajouter comme membre.",
         ssoSwitchAccount: "Changer de compte",
         ssoBackToConsole: "Retour à la console",

@@ -2796,6 +2796,7 @@ const pt = {
         directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",
         directSignInUnavailable: "Não foi possível iniciar o login único para este sistema. Peça ao seu administrador para verificar qual serviço de login ele usa.",
         directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
+        networkNotAllowed: "Este sistema não permite entrar a partir da sua rede. Conecte-se de uma rede permitida (por exemplo, a rede do escritório ou a VPN da sua organização) ou fale com o administrador.",
         ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",

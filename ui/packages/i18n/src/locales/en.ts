@@ -3391,6 +3391,7 @@ const en = {
         directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
         directSignInUnavailable: "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
         directSignInRateLimited: "Too many sign-ins were started from this network just now. Wait a few seconds, then try again.",
+        networkNotAllowed: "This system does not allow sign-in from your network. Connect from an allowed network (for example your organization's office network or VPN), or ask your administrator.",
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
