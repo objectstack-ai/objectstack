@@ -611,11 +611,14 @@ The standard catalog names no `413` member.
 - **An upload over the File Storage settings' `max_upload_mb`.** The presigned-upload door (the
   declared `size`), the chunked-upload start (the declared `totalSize`), the local adapter's raw
   upload (the body) and the chunk door (the bytes the upload already holds plus the chunk) refuse
-  it before anything is stored. The message names the size, the limit and the setting.
+  it before anything is stored. The message names the size, the limit and the setting. With no
+  storage settings bound, the bound is the storage plugin's `maxUploadMb` option, else the built-in
+  100 MB: an upload bound is never unset.
 - **An import over its route's row ceiling** — 5,000 rows on the synchronous route, 50,000 on the
   job route ([size limits](/docs/data-modeling/import-mappings#size-limits)).
 
-**Fix:** Raise the setting or send a smaller file; split the import across requests. Resending
+**Fix:** Raise the setting (or, with no storage settings bound, the host's `maxUploadMb`) or send a
+smaller file; split the import across requests. Resending
 the same request cannot succeed.  
 **Retry:** `no_retry`
 
