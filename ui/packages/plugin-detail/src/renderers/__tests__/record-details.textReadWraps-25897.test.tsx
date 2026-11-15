@@ -42,7 +42,6 @@ import { RecordContextProvider } from '@object-ui/react';
 import {
   FormulaCellRenderer,
   FormulaField,
-  SummaryField,
   TextField,
   TextCellRenderer,
   getCellRenderer,
@@ -209,14 +208,14 @@ describe('objectstack#25897 — CONTROLS', () => {
 });
 
 /**
- * objectstack#34148 — a text-returning formula and a text roll-up wrap in
- * `record:details` read mode too.
+ * objectstack#34148 — a text-returning formula wraps in `record:details` read
+ * mode too.
  *
  * A downstream CRM read a margin-precheck explanation (a text formula of about
  * 120 characters) cut to one line with an ellipsis, the whole sentence only in
- * a hover `title`. `formula` and `summary` map to `FormulaCellRenderer`, whose
- * text face is the grid's one-line `TextCellRenderer`. The row now reads them
- * through `FormulaField` / `SummaryField`, the faces the record form draws.
+ * a hover `title`. `formula` maps to `FormulaCellRenderer`, whose text face is
+ * the grid's one-line `TextCellRenderer`. The row now reads it through
+ * `FormulaField`, the face the record form draws.
  * The change is a renderer choice and a class list, so a viewport-sized
  * happy-dom render covers 1440 px and phone width alike: no layout engine
  * runs, and none is needed to read which element draws the value.
@@ -236,21 +235,14 @@ const quoteLineSchema = {
     case_number: { type: 'text', label: 'Line' },
     explanation: { type: 'formula', label: 'Precheck Explanation', returnType: 'text', expression: 'record.case_number' },
     undeclared: { type: 'formula', label: 'Undeclared Formula', expression: 'record.case_number' },
-    latest_note: { type: 'summary', label: 'Latest Note' },
     margin: { type: 'formula', label: 'Margin', returnType: 'number', scale: 2, expression: '1' },
   },
 } as unknown as typeof caseSchema;
-const QUOTE_LINE_FIELDS = ['explanation', 'undeclared', 'latest_note', 'margin'];
-const QUOTE_LINE = { explanation: EXPLANATION, undeclared: EXPLANATION, latest_note: EXPLANATION, margin: 1234.5 };
+const QUOTE_LINE_FIELDS = ['explanation', 'undeclared', 'margin'];
+const QUOTE_LINE = { explanation: EXPLANATION, undeclared: EXPLANATION, margin: 1234.5 };
 
-const computedReadDisplay = (name: string, type: 'formula' | 'summary', value: unknown, extra: Record<string, unknown> = {}) =>
-  markupOf(
-    type === 'summary' ? (
-      <SummaryField field={{ name, type, label: name, ...extra } as never} value={value} onChange={() => {}} readonly />
-    ) : (
-      <FormulaField field={{ name, type, label: name, ...extra } as never} value={value} onChange={() => {}} readonly />
-    ),
-  );
+const formulaReadDisplay = (name: string, value: unknown, extra: Record<string, unknown>) =>
+  markupOf(<FormulaField field={{ name, type: 'formula', label: name, ...extra } as never} value={value} onChange={() => {}} readonly />);
 
 for (const [layout, width] of [['desktop 1440', 1440], ['phone', MOBILE_WIDTH]] as const) {
   describe(`objectstack#34148 — record:details read mode, ${layout}: a long text formula wraps`, () => {
@@ -261,15 +253,14 @@ for (const [layout, width] of [['desktop 1440', 1440], ['phone', MOBILE_WIDTH]] 
       expect(EXPLANATION).toHaveLength(120);
     });
 
-    for (const [label, name, type, extra] of [
-      ['Precheck Explanation', 'explanation', 'formula', { returnType: 'text', expression: 'record.case_number' }],
-      ['Undeclared Formula', 'undeclared', 'formula', { expression: 'record.case_number' }],
-      ['Latest Note', 'latest_note', 'summary', {}],
+    for (const [label, name, extra] of [
+      ['Precheck Explanation', 'explanation', { returnType: 'text', expression: 'record.case_number' }],
+      ['Undeclared Formula', 'undeclared', { expression: 'record.case_number' }],
     ] as const) {
-      it(`a ${type} \`${name}\` cell holds the read display its widget renders, and wraps`, async () => {
+      it(`a formula \`${name}\` cell holds the read display FormulaField renders, and wraps`, async () => {
         await renderBody(QUOTE_LINE, quoteLineSchema, QUOTE_LINE_FIELDS);
         const cell = valueCellOf(label, cellLayout);
-        expect(cell.innerHTML).toBe(computedReadDisplay(name, type, EXPLANATION, extra));
+        expect(cell.innerHTML).toBe(formulaReadDisplay(name, EXPLANATION, extra));
         const node = drawingNodeOf(cell, EXPLANATION);
         expect(node.textContent).toBe(EXPLANATION);
         expect(oneLineClassesBetween(node, cell)).toEqual([]);
@@ -285,7 +276,6 @@ describe('objectstack#34148 — CONTROLS', () => {
 
   it('the grid keeps its one-line formula cell, titled with the whole value', () => {
     expect(getCellRenderer('formula')).toBe(FormulaCellRenderer);
-    expect(getCellRenderer('summary')).toBe(FormulaCellRenderer);
     const { container } = render(
       <FormulaCellRenderer value={EXPLANATION} field={{ name: 'explanation', type: 'formula', returnType: 'text' } as never} />,
     );
