@@ -382,8 +382,7 @@ describe('[#31698] a name two packages declare: the lock names every holder', ()
  * classifier reads those slots as the tenant-authored sets they are, in either
  * order the store reads the rows: two namespaces' stored sets of one name lock
  * nothing, and a set stored beside a set another namespace ships never lends
- * the lock its own package. BASE: a set stored beside a shipped one wore the
- * shipper's envelope, so the shipper's grants conferred the stored body.
+ * the lock its own package.
  */
 describe('[#32780] a stored permission set in its package\'s registry slot is never read as shipped', () => {
   const CRM = 'com.qa.crm';
@@ -429,7 +428,7 @@ describe('[#32780] a stored permission set in its package\'s registry slot is ne
     });
   }
 
-  it('a set stored beside the set another namespace ships: the lock names the shipper alone, and each package serves its own set (BASE: the shipper served the stored body)', async () => {
+  it('a set stored beside the set another namespace ships: the lock names the shipper alone, and each package serves its own set', async () => {
     const { ql, label } = await hydrate([{ packageId: HR, label: `row:${HR}` }], CRM);
     expect([label(CRM), label(HR)]).toEqual([`shipped:${CRM}`, `row:${HR}`]);
     expect(classifyPackagedPermissionSet(N, ql)).toEqual({ status: 'packaged', packageId: CRM, packageIds: [CRM] });

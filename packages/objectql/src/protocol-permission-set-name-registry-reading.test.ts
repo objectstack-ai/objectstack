@@ -441,10 +441,8 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
  *
  * FROM (main at the change): the save door refused the second namespace's
  * stored set (`422 NAMESPACE_CONFLICT`, "a set another package stores holds its
- * name"), and a set stored beside a set another namespace SHIPS took the
- * shipper's envelope into the name's one bare slot: the shipper's grants
- * conferred the stored body, the stored package's conferred nothing, and the
- * restart's environment-catalog check refused the boot.
+ * name"), and a set stored beside a set another namespace SHIPS was not served
+ * at its own package.
  *
  * The restart is a second kernel over the same driver stores, the packages
  * installed before its boot hydration (`ObjectQLPlugin.start`), as a cold boot
@@ -575,7 +573,7 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
         ship(engine);
         expect(await grants(engine, [CRM]), 'the shipped set').toEqual({ [CRM]: ['cap_crm_shipped'] });
         expect((await save(protocol, HR, 'cap_hr')).success).toBe(true);
-        // hr's stored set never takes crm's place: crm's grant still confers the shipped set.
+        // Each package's grant confers its own package's set.
         expect(await grants(engine, [CRM, HR]), 'hr beside the shipped set').toEqual({ [CRM]: ['cap_crm_shipped'], [HR]: ['cap_hr'] });
         expect((await save(protocol, CRM, 'cap_crm_stored')).success, 'crm\'s own save').toBe(true);
         expect((await save(protocol, FIN, 'cap_fin')).success, 'a third namespace\'s save').toBe(true);

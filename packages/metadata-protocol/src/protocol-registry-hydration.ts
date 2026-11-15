@@ -272,12 +272,9 @@ function takesPackageOverlaySlot(canonicalType: string): boolean {
  * to `bound` wears: `artifact` only when it is the row's own package's set, or
  * the set of the base whose customization pair `bound` is (ADR-0146). The
  * artifact lookup scoped to a package that ships no set of the name falls back
- * to the first package that does, so a set stored by a package of another
- * namespace wore that package's envelope (`_packageId`, `_provenance:
- * 'package'`): the registry bound it to that package, whose grants then
- * conferred the stored body, and the lock read the stored set as shipped.
- * Without an envelope it registers as the tenant-authored set it is, bound to
- * its own package. Any other type, or a package-less row, keeps `artifact`.
+ * to a package that does; that package's envelope is never this row's. With
+ * none of its own, the row registers as the tenant-authored set it is, bound
+ * to its own package. Any other type, or a package-less row, keeps `artifact`.
  */
 function ownPermissionEnvelope(
     registry: InstalledPackageSource,
