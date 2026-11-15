@@ -377,24 +377,39 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
    * other. FROM (this branch before `main`'s #32741 was merged in): the
    * first-installed holder's exact address served the package-less row as its
    * own; the second served its own.
+   *
+   * The two row saves and the three installs are this pin's SETUP, so they run
+   * in the `beforeAll` below and the `it`s time only the reads they judge
+   * (clocked windows measure behaviour, never loading). Measured: each
+   * install-local re-syncs the whole showcase (123 object schemas, 33 flows),
+   * ~0.9 s apiece on an idle box; the setup was ~2.8 s of a ~3.1 s test, and
+   * under merge-queue shard load the single `it` crossed vitest's default 5 s
+   * test clock (2.2–4.4 s green, 5.0–5.1 s red). The hook's budget is a
+   * loading budget, like the boot hook's above.
    */
-  it('[#31985] a package-less tool row saved before two namespaces\' packages install the name is declined at each holder\'s exact address, both install orders, before and after the hydrator; the bare read refuses naming both', async () => {
+  describe('[#31985] a package-less tool row saved before two namespaces\' packages install the name', () => {
     const UP = 'qa_row_tool_up';
     const DOWN = 'qa_row_tool_down';
-    for (const name of [UP, DOWN]) {
-      const saved = await stack.apiAs(admin, 'PUT', `/meta/tool/${name}`, tool('env', name));
-      expect(saved.status, await saved.text()).toBeLessThan(300);
-    }
-    for (const [p, tools] of [['kappa', [UP]], ['lambda', [UP, DOWN]], ['iota', [DOWN]]] as const) {
-      const { status, body } = await installLocal(inline(p, { tools: tools.map((n) => tool(p, n)) }));
-      expect(status, `${p}: ${JSON.stringify(body)}`).toBeLessThan(300);
-    }
+
+    beforeAll(async () => {
+      for (const name of [UP, DOWN]) {
+        const saved = await stack.apiAs(admin, 'PUT', `/meta/tool/${name}`, tool('env', name));
+        expect(saved.status, await saved.text()).toBeLessThan(300);
+      }
+      for (const [p, tools] of [['kappa', [UP]], ['lambda', [UP, DOWN]], ['iota', [DOWN]]] as const) {
+        const { status, body } = await installLocal(inline(p, { tools: tools.map((n) => tool(p, n)) }));
+        expect(status, `${p}: ${JSON.stringify(body)}`).toBeLessThan(300);
+      }
+    }, 60_000);
+
     const layeredAt = async (name: string, pkg: string) => {
       const r = await stack.apiAs(admin, 'GET', `/meta/tool/${name}/layers?package=${pkg}`);
       const body = (await r.json()) as any;
       return [r.status, body?.overlay ?? null, body?.effective?.label];
     };
-    for (const when of ['before the hydrator', 'after the hydrator']) {
+
+    // In declaration order: the second runs the hydrator (`GET /meta/tool`) first.
+    it.each(['before the hydrator', 'after the hydrator'])('%s: it is declined at each holder\'s exact address, both install orders; the bare read refuses naming both', async (when) => {
       if (when === 'after the hydrator') expect((await stack.apiAs(admin, 'GET', '/meta/tool')).status).toBe(200);
       for (const [name, holders] of [[UP, ['kappa', 'lambda']], [DOWN, ['lambda', 'iota']]] as const) {
         for (const p of holders) {
@@ -404,7 +419,7 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
         }
         await expectMetaRefused('tool', name, holders.map((p) => `com.qa.bare.${p}`));
       }
-    }
+    });
   });
 });
 
