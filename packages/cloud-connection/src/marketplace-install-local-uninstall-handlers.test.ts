@@ -43,7 +43,11 @@
  *   - CONTROL: the remaining package's handler and hook are still registered,
  *     and its package-qualified call still runs;
  *   - CONTROL: a re-install binds the handler again, and the bare call is
- *     refused as ambiguous again — two holders, as before the uninstall.
+ *     refused as ambiguous again — two holders, as before the uninstall;
+ *   - a withdrawal the registry refuses leaves the package's handlers bound;
+ *   - a second unbind of the same package is a no-op;
+ *   - host code and the environment's authored-action handler under the same
+ *     key survive the unbind.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -52,7 +56,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // The plugin reaches `@objectstack/runtime` through a lazy `import()`; its first
 // load is paid here, at module top, never inside a clocked `it`.
-import { AppPlugin, bindAppArtifactHandlers } from '@objectstack/runtime';
+import { AppPlugin, bindAppArtifactHandlers, unbindAppArtifactHandlers } from '@objectstack/runtime';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
@@ -221,7 +225,7 @@ async function boot() {
     /** The packages holding a handler of their own under the action key, from the engine's package-scoped listing. */
     const holders = () => [A, B].filter((id) => ql.listRegisteredActions({ packageId: id })
         .some((row) => row.objectName === OBJECT && row.actionName === ACTION && row.coordinate === id));
-    return { ql, install, uninstall, call, holders };
+    return { ql, doorQl, logger, install, uninstall, call, holders };
 }
 
 /** The refusal a bare call answers while two packages hold the key: its ADR-0112 envelope and the owners it names. */
@@ -269,5 +273,53 @@ describe('install-local uninstall withdraws the package\'s action handlers and h
         expect(await refusalOf(call())).toEqual({
             code: 'RESOURCE_CONFLICT', status: 409, owners: [`app:${A}`, `app:${B}`],
         });
+    });
+
+    it('a withdrawal the registry refuses leaves the package\'s handlers bound: it stays loaded, so it keeps running', async () => {
+        const { ql, uninstall, call, holders } = await boot();
+        // Refused at the withdrawal itself, after every check asked ahead of it
+        // let the uninstall through — the door's `registry.uninstallPackage` entry on `cleanups`.
+        vi.spyOn(ql.registry, 'uninstallPackage').mockImplementation(() => { throw new Error('refused by the test'); });
+
+        const res = await uninstall(B);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.cleanups).toContainEqual(expect.objectContaining({ name: 'registry.uninstallPackage', success: false }));
+        expect(ql.registry.getPackage(B), 'precondition: the registry still holds it').toBeDefined();
+
+        expect(holders()).toEqual([A, B]);
+        await expect(call(B)).resolves.toEqual({ by: 'b' });
+        expect(await refusalOf(call())).toEqual({
+            code: 'RESOURCE_CONFLICT', status: 409, owners: [`app:${A}`, `app:${B}`],
+        });
+    });
+
+    it('a second unbind of the same package is a no-op', async () => {
+        const { ql, doorQl, logger, uninstall, call, holders } = await boot();
+        expect((await uninstall(B)).status).toBe(200);
+
+        const again = unbindAppArtifactHandlers(doorQl as never, B, { logger: logger as never, source: 'test' });
+
+        expect(again.owners).toEqual([`app:${B}`]);
+        expect(holders()).toEqual([A]);
+        await expect(call()).resolves.toEqual({ by: 'a' });
+        expect(ql.unregisterHooksByPackage(`app:${A}`), 'the remaining package\'s hook is still bound').toBe(1);
+        expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it('host code and the environment\'s authored-action handler under the same key survive the unbind', async () => {
+        const { ql, uninstall, call } = await boot();
+        // Host code (registered with no owner) and an environment-authored
+        // handler (the authored-action resync's owner) under the very key.
+        ql.registerAction(OBJECT, ACTION, () => 'host');
+        ql.registerAction(OBJECT, ACTION, () => 'environment', 'metadata-service');
+
+        expect((await uninstall(B)).status).toBe(200);
+
+        // B holds nothing of its own now, so a call naming it falls back to the
+        // ONE shared handler under the key: host code's.
+        await expect(call(B)).resolves.toBe('host');
+        // The environment's own slot (coordinate '') keeps its handler.
+        await expect(call('')).resolves.toBe('environment');
+        await expect(call(A)).resolves.toEqual({ by: 'a' });
     });
 });
