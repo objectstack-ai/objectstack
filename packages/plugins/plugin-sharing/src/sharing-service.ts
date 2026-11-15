@@ -2018,9 +2018,9 @@ export class SharingService implements ISharingService {
     // rule wrote last — revoking that rule took away access the other rule
     // still grants, and the other rule's revoke found nothing to remove.
     // Only the rule evaluator's SYSTEM path supplies a `source_id` that names a
-    // rule. A manual grant names none, and a direct (non-system) grant may send
-    // any `source` / `sourceId` its body carries, so both keep the four-part
-    // key: a repeated direct grant still upserts its one row.
+    // rule. A manual grant, and any grant made outside the rule evaluator, keeps
+    // the four-part key, so a repeated grant of that kind still upserts its one
+    // row.
     const sourceId = context?.isSystem && source !== 'manual' && input.sourceId ? input.sourceId : undefined;
     const existing = await this.engine.find('sys_record_share', {
       where: {
