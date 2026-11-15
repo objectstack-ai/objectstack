@@ -304,6 +304,57 @@ export async function judgeBareActionRead(
 }
 
 /**
+ * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The bare by-name read of
+ * a `doc` (`GET /meta/doc/NAME`, both faces), judged before any layer is read
+ * by the registry's own read of it (`resolveItem` naming no package, which
+ * `MetadataFacade.get` asks too): a name two or more enabled packages hold is
+ * refused naming every holder (`409 RESOURCE_CONFLICT`). It served one holder
+ * by registration order: the MetadataService's copy (kept by name alone, the
+ * holder registered last) or the registry's first composite.
+ *
+ * The environment's own saved row still answers first: when the registry
+ * refuses and the store holds an active package-less row of the name, the
+ * read is left to its layers, whose step 1 serves that row. Otherwise the
+ * judged item is served at step 3, and a MetadataService answer is served
+ * only when it is that same holder's ({@link serviceAnswerFitsBareDoc}): one
+ * enabled holder beside a disabled one reads the enabled holder's doc.
+ *
+ * @returns the judged item, or `undefined` when nothing holds the name or the
+ *   registry cannot judge it (the layers answer as before).
+ * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
+ */
+export async function judgeBareDocRead(
+    host: Pick<ProtocolHost, 'engine' | 'readItemActiveRows'>,
+    name: string,
+    member: string | undefined,
+): Promise<{ item: unknown } | undefined> {
+    const registry = host.engine?.registry as { resolveItem?(type: string, name: string, caller: null, member?: string): unknown } | undefined;
+    if (typeof registry?.resolveItem !== 'function') return undefined;
+    let item: unknown;
+    try {
+        item = registry.resolveItem('doc', name, null, member);
+    } catch (error) {
+        if (packageScopedRefusalOf(error) === undefined) throw error;
+        const rows = await host.readItemActiveRows('doc', name);
+        if ((rows ?? []).some((row) => row?.package_id === null || row?.package_id === undefined || row?.package_id === '')) return undefined;
+        throw error;
+    }
+    return item === undefined || item === null ? undefined : { item };
+}
+
+/**
+ * [ruling 6893582352] Is the MetadataService's answer to a bare `doc` read
+ * the judged holder's ({@link judgeBareDocRead})? The service keeps a doc by
+ * name alone, so its copy may be another holder's: a disabled package's that
+ * registered last. It fits unless both carry a package and the packages differ.
+ */
+export function serviceAnswerFitsBareDoc(judged: { item: unknown }, data: unknown): boolean {
+    const served = storedItemPackageId(data);
+    const holder = storedItemPackageId(judged.item);
+    return served === undefined || holder === undefined || served === holder;
+}
+
+/**
  * [ADR-0150 D3, #32365] Does the MetadataService's answer to a bare action
  * read agree with the judged answer ({@link judgeBareActionRead})? The
  * service is read before the registry, and holds its own copies, so its bare
@@ -591,6 +642,14 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         }
         bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused, opts.face);
     }
+    // [ADR-0150 D1 bucket 1, ruling 6893582352 option A] A `doc` name two or
+    // more enabled packages hold is refused here when the read names no
+    // package, naming each, before any layer is read ({@link judgeBareDocRead});
+    // the environment's own saved row still answers first. Steps 2 and 3
+    // serve the judged holder's item.
+    const bareDocAnswer = !request.packageId && request.type === 'doc'
+        ? await judgeBareDocRead(host, request.name, member)
+        : undefined;
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }
@@ -1082,7 +1141,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             // ({@link servedFromDisabledHolder}).
             if (fromService.data !== undefined && fromService.data !== null
                 && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
-                    || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
+                    || await servedFromDisabledHolder(host, request.name, fromService.data)))
+                && !(bareDocAnswer && !serviceAnswerFitsBareDoc(bareDocAnswer, fromService.data))) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
@@ -1145,6 +1205,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             item = packagelessScopedRead.item;
         } else if (bareActionAnswer) {
             item = bareActionAnswer.item;
+        } else if (bareDocAnswer) {
+            item = bareDocAnswer.item;
         } else {
             item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
             if (item === undefined) {
