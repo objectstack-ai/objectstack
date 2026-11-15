@@ -32,13 +32,16 @@
  *
  * ## Who grants the bits
  *
- * The object-level create / read / delete bits come from an ordinary
- * position-distributed set an application ships (as an app grants the
- * `sys_comment` delete bit; the baseline grants comments' read, create and
- * edit, never delete), never from the `everyone`-bound baseline, which
- * ADR-0090 D5 keeps free of delete bits. Which shipped set — if any — carries
- * them is an open decision on #22566; the floor pinned here holds whatever set
- * hands the delete bit out.
+ * Read and create on reactions are the baseline's: `member_default` carries
+ * them (maintainer decision on #33584, option A, "members may react by
+ * default"), as it carries comments' read, create and edit. The delete bit is
+ * never the baseline's: ADR-0090 D5 keeps the `everyone`-bound baseline free
+ * of delete bits, so a member's unreact is plugin-audit's own-row door
+ * (`comment-reaction-unreact-door.integration.test.ts`). On the generic data
+ * door the delete bit comes from an ordinary position-distributed set an
+ * application ships (as an app grants the `sys_comment` delete bit) — the
+ * `qa_comment_reactor` set below — and the floor pinned here holds whatever
+ * set hands that bit out.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';

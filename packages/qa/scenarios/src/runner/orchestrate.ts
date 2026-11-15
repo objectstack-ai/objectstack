@@ -10,7 +10,9 @@
  *             its persona, each over the app's own MCP, and a probed
  *             operation's declared write — the validation operation's and
  *             each permission overstep's — re-sent by the runner itself as
- *             that persona, `observeProbe`) → the iterate change →
+ *             that persona, `observeProbe`; an `applied` operation's too
+ *             when the agent's own write was denied 403, `probesBuildDenial`)
+ *             → the iterate change →
  *             rebuild + re-score Build, and (unless disabled) re-run the Run half.
  *             A build whose authoring turn did not finish (killed by the
  *             runner's timeout, no result, an error result) is NOT MEASURED,
@@ -32,10 +34,12 @@
  */
 
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
-import { isProbedOperation, PERSON_USER_FIELD, scenarioNamespace, type CardTitle } from '../schema.js';
+import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
+  buildDeniesWrite,
   gradeCardOperation,
+  isWriteDenial,
   readArtifactFacts,
   scoreCardArtifact,
   type OperationGrade,
@@ -47,7 +51,7 @@ import {
 import type { AppHarness, PersonaAccount } from './app.js';
 import { servedAsRequested, type AgentDriver, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
+import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
@@ -150,8 +154,19 @@ export interface QuestionResult {
 export interface OperationResult {
   operation: string;
   persona: string;
-  /** Why this operation was not run: it acts on a row the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  /**
+   * Why this operation is not measured: it was not run, because it acts on a
+   * row the seed could not load ({@link seedDependence}); or it ran and its
+   * grade measured nothing (`OperationGrade.notMeasured`: the build denies the
+   * persona the write the card gives it, `buildDeniesWrite`). Never a fail.
+   */
   notMeasured?: string;
+  /**
+   * The write the build denies the acting persona, when the grade charged a
+   * check to it (`buildDeniesWrite`): the persona, the operation's object as
+   * the app names it, and the verb. The scorecard lists it as a Build finding.
+   */
+  buildDenial?: { persona: string; object: string; verb: 'create' | 'update' };
   observation?: OperationObservation;
   grade?: OperationGrade;
   turn?: TurnSummary;
@@ -743,12 +758,20 @@ export async function runHalf(
           const id = touchedRowId(op, rowsByObject, today);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        // A probed operation's probe (the validation operation, or a permission
-        // overstep): the runner sends the declared write itself, as the same
-        // persona through the same MCP door, after the turn. A probe that cannot
-        // be sent leaves the platform half "not observed".
+        const observed = { op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}) };
+        // The runner's probe: it sends the declared write itself, as the same
+        // persona through the same MCP door, after the turn. A probed operation
+        // (the validation operation, or a permission overstep) is always
+        // probed; an `applied` one only when the agent's own write was denied
+        // 403 and nothing was written (`probesBuildDenial`), so the build's
+        // denial is told from the agent's (`buildDeniesWrite`). A probe that
+        // cannot be sent leaves the platform half "not observed".
+        const agentDenied = () => {
+          const seen = observeOperation(observed);
+          return writeCallsOn(turn, op.object).length > 0 && isWriteDenial(seen.answer, seen.writes);
+        };
         let probe: ProbeObservation | undefined;
-        if (isProbedOperation(card, op.id)) {
+        if (isProbedOperation(card, op.id) || (probesBuildDenial(card, op.id) && agentDenied())) {
           try {
             const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
             const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
@@ -759,8 +782,12 @@ export async function runHalf(
             res.error = `probe: ${errText(e)}`;
           }
         }
-        res.observation = observeOperation({ op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
+        res.observation = observeOperation({ ...observed, ...(probe ? { probe } : {}) });
         res.grade = gradeCardOperation(scenario, op.id, res.observation);
+        if (res.grade.notMeasured !== undefined) res.notMeasured = res.grade.notMeasured;
+        if (op.kind !== 'delete' && res.grade.checks.some((c) => c.notMeasured?.startsWith(buildDeniesWrite))) {
+          res.buildDenial = { persona: op.actingAs, object: op.object, verb: op.kind };
+        }
       } catch (e) {
         res.error = errText(e);
       }

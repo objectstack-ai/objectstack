@@ -223,6 +223,14 @@ export interface ObjectPresenceReading {
    * `presence`: `absent` skips the read, anything else performs it.
    */
   settled: boolean;
+  /**
+   * The object's definition as the registry served it, when `presence` is
+   * `present`; otherwise `undefined`. A reader that chooses a path by what the
+   * deployment's object declares (the record chatter asks whether
+   * `sys_comment` still declares its retired `reactions` column) reads it here
+   * rather than asking the registry a second time.
+   */
+  definition?: unknown;
 }
 
 /** @see ObjectPresenceReading.settled */
@@ -271,17 +279,24 @@ export function useObjectPresence(name: string): ObjectPresenceReading {
   if (readObjectScope && getTypeStatus?.('object') === 'idle') {
     const readNames = readObjectScope as ReadNamesWithoutViews;
     const scope = readNames(packageId ? { packageId, names: [name], views: false } : { names: [name], views: false });
-    const presence: ObjectPresence = !scope.settled
-      ? 'unknown'
-      : scope.objects.some((o) => (o as { name?: unknown } | null | undefined)?.name === name)
-        ? 'present'
-        : 'absent';
-    return { presence, settled: scope.settled };
+    const definition = scope.settled ? definitionNamed(scope.objects, name) : undefined;
+    const presence: ObjectPresence = !scope.settled ? 'unknown' : definition !== undefined ? 'present' : 'absent';
+    return { presence, settled: scope.settled, definition };
   }
   // Reading the items is also what ENSURES the type is fetched (MetadataProvider
   // `readType`), so a surface that only ever asks this question still gets an
   // answer instead of waiting on somebody else to populate the cache.
   const objects = getItemsByType('object');
   const status = getTypeStatus?.('object');
-  return { presence: objectPresence(name, status, objects), settled: metadataTypeSettled(status) };
+  const presence = objectPresence(name, status, objects);
+  return {
+    presence,
+    settled: metadataTypeSettled(status),
+    definition: presence === 'present' ? definitionNamed(objects, name) : undefined,
+  };
+}
+
+/** The definition in `objects` named `name`, if one is. */
+function definitionNamed(objects: readonly unknown[], name: string): unknown {
+  return objects.find((o) => (o as { name?: unknown } | null | undefined)?.name === name) ?? undefined;
 }

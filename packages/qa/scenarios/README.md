@@ -76,6 +76,14 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   scorecard's findings, when the probe met the build's own lock: refused 403
   `PERMISSION_DENIED`, nothing written, and the build locks a field the probe writes for the
   persona and declares an action on the object (`buildLockOf`; ruling A on #31999 item 9).
+  Beside it, `buildDeniesWrite`: a write the card gives the persona that the build denies it.
+  An `applied` create or update whose agent write was refused 403 `PERMISSION_DENIED` with
+  nothing written is probed too (`probesBuildDenial`); a probe denied the same way, with no
+  such lock, makes the whole operation not measured (`OperationGrade.notMeasured`), and the
+  `write_validation` probe that meets it leaves its platform half not measured (the agent
+  half too when the agent's own write met it). Each is a Build finding naming persona,
+  object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
+  before.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
@@ -257,7 +265,10 @@ npx @objectstack/scenarios help                                      # the comma
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
   the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the platform's
   failure, never the agent's. Every other `refused` create or update is probed the same way, so a permission
-  overstep the agent declined still measures the platform's refusal. An answer that carries no code is reported
+  overstep the agent declined still measures the platform's refusal. An `applied` create or update is probed only
+  when the agent's own write met 403 `PERMISSION_DENIED` and nothing was written (a probe after a write that
+  landed would apply it twice): a denied probe charges the write to the build. A probe the door applies leaves the
+  runner's row in place for the operations after it. An answer that carries no code is reported
   with whose throw it was (`uncodedNote`: the build's own hook or action, named off the sandbox's wrapper, or the
   door's text). The runner also records the run dates (each clock instant's UTC and local date) and the fields
   the agent's own write calls set (`agentSetOf`: a create's or update's `data`, a `run_action`'s `params`); a
