@@ -33,7 +33,17 @@ export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 export { HTTP_SIGNATURE_HEADER as SIGNATURE_HEADER, signHttpBody as signBody };
 
 /**
- * The exact request body for a delivery — the bytes that get POSTed, and
+ * Whether a request of this method goes out with no body at all. `fetch`
+ * refuses a GET or HEAD request that carries one (any one, `''` included), so
+ * a delivery of either verb is sent bodyless whatever its payload, and signed
+ * as such. The inline `http` node arm sends the same: no body for a GET.
+ */
+export function isBodylessMethod(method: string | undefined): boolean {
+    return method !== undefined && /^(GET|HEAD)$/i.test(method);
+}
+
+/**
+ * The exact request body for a delivery — the bytes that get sent, and
  * therefore the bytes the signature covers.
  *
  * A string payload is sent verbatim (a pre-rendered body); anything else is
@@ -42,8 +52,14 @@ export { HTTP_SIGNATURE_HEADER as SIGNATURE_HEADER, signHttpBody as signBody };
  * `JSON.stringify(JSON.parse(s)) === s` for any `s` that `JSON.stringify`
  * produced — so signing at enqueue and sending after a reload agree byte for
  * byte. `http-signature-at-rest.integration.test.ts` pins that.
+ *
+ * A bodyless method ({@link isBodylessMethod}) sends no body, so its bytes are
+ * the empty string — what the published scheme signs for a request with no
+ * body — whatever the payload holds. Pass the delivery's `method` wherever the
+ * body is signed, or the signature covers bytes that are never sent.
  */
-export function deliveryBody(payload: unknown): string {
+export function deliveryBody(payload: unknown, method?: string): string {
+    if (isBodylessMethod(method)) return '';
     return typeof payload === 'string' ? payload : JSON.stringify(payload ?? null);
 }
 
@@ -55,7 +71,8 @@ export type FetchImpl = (
     init: {
         method: string;
         headers: Record<string, string>;
-        body: string;
+        /** Absent for a bodyless method ({@link isBodylessMethod}). */
+        body?: string;
         signal: AbortSignal;
     },
 ) => Promise<{
@@ -88,10 +105,13 @@ export async function sendOnce(
     delivery: HttpDelivery,
     fetchImpl: FetchImpl,
 ): Promise<HttpAttemptOutcome> {
-    const body = deliveryBody(delivery.payload);
+    const method = delivery.method ?? 'POST';
+    // The bytes the enqueue-time signature covers. A GET or HEAD sends none.
+    const body = deliveryBody(delivery.payload, method);
+    const bodyless = isBodylessMethod(method);
 
     const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
+        ...(bodyless ? {} : { 'Content-Type': 'application/json' }),
         'User-Agent': 'ObjectStack-Http/1.0',
         'X-Objectstack-Delivery': delivery.id,
         'X-Objectstack-Attempt': String(delivery.attempts + 1),
@@ -111,9 +131,9 @@ export async function sendOnce(
     const start = Date.now();
     try {
         const res = await fetchImpl(delivery.url, {
-            method: delivery.method ?? 'POST',
+            method,
             headers,
-            body,
+            ...(bodyless ? {} : { body }),
             signal: controller.signal,
         });
         clearTimeout(timer);

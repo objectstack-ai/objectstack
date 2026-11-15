@@ -45,7 +45,7 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         assertEnqueueDeliverable(input);
         return this.insert(input, {
             signature: input.signingSecret
-                ? signBody(deliveryBody(input.payload), input.signingSecret)
+                ? signBody(deliveryBody(input.payload, input.method), input.signingSecret)
                 : undefined,
             status: 'pending',
             error: undefined,
