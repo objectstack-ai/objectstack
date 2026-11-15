@@ -207,8 +207,21 @@ describe('the first /me/apps read is pending from the first render (objectstack#
 
   it('a page behind the gate mounts once, so its child reads once per load', async () => {
     const childRead = vi.fn();
-    renderWith(meApps(['crm']) as unknown as typeof fetch, <GatedPage childRead={childRead} />);
+    let answer!: (res: Response) => void;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => (answer = resolve)));
+    renderWith(fetcher as unknown as typeof fetch, <GatedPage childRead={childRead} />);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      answer(new Response(JSON.stringify({ apps: [{ name: 'crm' }] }), { status: 200 }));
+    });
+    // The page in the DOM is not its effect having run: a commit outside `act`
+    // flushes passive effects on a later task, so wait for the read itself,
+    // then let the load run out before counting.
     await waitFor(() => expect(screen.getByTestId('page')).toBeInTheDocument());
+    await waitFor(() => expect(childRead).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
     expect(childRead).toHaveBeenCalledTimes(1);
   });
 

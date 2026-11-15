@@ -145,7 +145,11 @@ async function openListPage() {
   await preflightAuth('/api/v1/auth');
   render(<App />);
   await waitFor(() => expect(screen.getByTestId('app-content')).toBeInTheDocument(), { timeout: 5000 });
-  await waitFor(() => expect(readsOf(FOUR['me/apps']).length).toBeGreaterThan(0));
+  // Each read is sent from an effect, which a busy run can flush after the DOM
+  // shows the page: wait until all four have gone out, then let the load run out.
+  await waitFor(() => {
+    for (const test of Object.values(FOUR)) expect(readsOf(test).length).toBeGreaterThan(0);
+  });
   await settle();
 }
 
