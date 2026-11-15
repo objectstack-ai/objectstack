@@ -33,7 +33,11 @@ export const entry: SemanticMigration = {
     + 'held. Worse, the next upgrade of the parent\'s owner was refused over the extension\'s field, blaming a package '
     + 'that changed nothing. Every object layer is now judged as its served object, so the run that completes a bad '
     + 'pair is refused 422 `INVALID_METADATA` whichever end it holds, and a run that leaves a pair as it found it is '
-    + 'not refused over it. A field another extension supplies counts only while that extension is installed and '
+    + 'not refused over it. For runs (an install, an upgrade, a reload) this supersedes the entry '
+    + '`record-currency-follow-pair-refused-on-install-and-reload` where it says the next upgrade or reload of a '
+    + 'package holding only the other end of a pair is refused "although nothing in that package is wrong": such a run '
+    + 'is now refused only when it changes the pair. A single save and the batch writers keep their answer. '
+    + 'A field another extension supplies counts only while that extension is installed and '
     + 'enabled. An extension of an object no package owns yet is no verdict until the owner registers. Packages '
     + 'installed before this release keep loading at every boot, which is not asked. There is no mechanical rewrite: '
     + 'only the author knows which parent field holds the code',
