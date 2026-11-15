@@ -5678,6 +5678,20 @@ export class AuthPlugin implements Plugin {
           // `status` is the number 400, answered 400 from the same door. A
           // throw that declares no status is a server fault and stays 500.
           const { status } = resolveThrownHttpError(err, 500);
+          // A refusal the vendor classifies carries a body and keeps its own
+          // description and status; a body-less throw with a 4xx status is a
+          // refusal addressed to the caller and keeps its answer too. Anything
+          // else is an unclassified internal failure: it is answered in the
+          // generic words this file's other catches use, and logged once. The
+          // thrown error's own text never reaches the caller.
+          const vendorClassified = err?.body !== null && typeof err?.body === 'object';
+          if (!vendorClassified && !(status >= 400 && status <= 499)) {
+            ctx.logger.error(
+              '[AuthPlugin] sys-oauth-application/register failed',
+              err instanceof Error ? err : new Error(String(err)),
+            );
+            return c.json({ success: false, error: { code: 'OAUTH_REGISTER_FAILED', message: INTERNAL_ERROR_MESSAGE } }, status);
+          }
           // better-auth's `body.error` is an arbitrary upstream string, so it
           // cannot be `error.code` — that field is a closed set (ADR-0112) and
           // an unbounded source defeats it. Keep the code ours and carry the
