@@ -121,6 +121,22 @@ function makeMemoryDriver(stores: Stores) {
     return driver;
 }
 
+/**
+ * What one grant of the permission set `name`, bound to the package `column`
+ * (`null`: no package column), confers to a member of `org_a`, read by the
+ * authorization resolver through `catalog`.
+ */
+async function grantConfers(engine: ObjectQL, catalog: unknown, name: string, column: string | null): Promise<unknown> {
+    const rows: Record<string, unknown[]> = {
+        sys_user: [{ id: 'u1', email: 'u1@example.com' }],
+        sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
+        sys_user_permission_set: [{ user_id: 'u1', permission_set: name, permission_set_package: column, organization_id: 'org_a' }],
+    };
+    const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return rows[object]?.[0]; }, count: async () => 0 };
+    bindSecurityCatalogReader(ql, catalog as any);
+    return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
+}
+
 /** The package whose install declares the set's name, and a second installed package. */
 const HOLDER = 'com.qa.holder';
 const OTHER = 'com.qa.other';
@@ -409,16 +425,7 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
         engine.registry.registerItem('permission', set('cap_hr') as any, 'name', INCOMING);
         const catalog = createSecurityCatalogReader({ registry: engine.registry as any, metadata: { get: () => undefined, list: () => [] } as any });
         /** What one grant of `qa_reader` with this column confers, read by the authorization resolver. */
-        const confers = async (column: string | null) => {
-            const rows: Record<string, unknown[]> = {
-                sys_user: [{ id: 'u1', email: 'u1@example.com' }],
-                sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
-                sys_user_permission_set: [{ user_id: 'u1', permission_set: 'qa_reader', permission_set_package: column, organization_id: 'org_a' }],
-            };
-            const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return rows[object]?.[0]; }, count: async () => 0 };
-            bindSecurityCatalogReader(ql, catalog);
-            return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
-        };
+        const confers = (column: string | null) => grantConfers(engine, catalog, 'qa_reader', column);
         const read = async () => ({ columnLess: await confers(null), crm: await confers(HOLDING), hr: await confers(INCOMING) });
         expect(await read()).toEqual({ columnLess: [], crm: ['cap_crm'], hr: ['cap_hr'] });
         engine.registry.disablePackage(INCOMING);
@@ -493,14 +500,7 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
     /** What one grant of {@link N} with this package column confers, read by the authorization resolver. */
     async function confers(engine: ObjectQL, column: string | null): Promise<unknown> {
         const catalog = createSecurityCatalogReader({ registry: engine.registry as any, metadata: { get: () => undefined, list: () => [] } as any });
-        const rows: Record<string, unknown[]> = {
-            sys_user: [{ id: 'u1', email: 'u1@example.com' }],
-            sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
-            sys_user_permission_set: [{ user_id: 'u1', permission_set: N, permission_set_package: column, organization_id: 'org_a' }],
-        };
-        const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return rows[object]?.[0]; }, count: async () => 0 };
-        bindSecurityCatalogReader(ql, catalog);
-        return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
+        return grantConfers(engine, catalog, N, column);
     }
 
     /** Each package's grant, by its package column. */

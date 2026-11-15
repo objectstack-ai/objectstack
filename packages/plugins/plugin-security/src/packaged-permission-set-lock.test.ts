@@ -30,7 +30,6 @@ import {
   PackagedPermissionSetProvenanceUnknownError,
 } from './packaged-permission-set-lock.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 
@@ -407,10 +406,6 @@ describe('[#32780] a stored permission set in its package\'s registry slot is ne
         const where = opts?.where ?? {};
         const found = stored.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || typeof v === 'object' || (r as any)[k] === v));
         return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
-      },
-      async findOne(object: string, query?: any) {
-        assertEngineFindOnePredicate(object, query);
-        return null;
       },
       registry,
     };
