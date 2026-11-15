@@ -235,3 +235,44 @@ function declareSystemKeyPlans(cell: DialectCell): void {
 
 declareDialectCell(dialectCell('sqlite'), 'system-column key plans (#33695)', declareSystemKeyPlans);
 declareDialectCell(PG_CELL, 'system-column key plans (#33695)', declareSystemKeyPlans);
+
+/** An existing table gains both keys on the next sync (CONCURRENTLY on PostgreSQL, #31901), and the plan reads empty. */
+function declareExistingTableSync(cell: DialectCell): void {
+  describe(`an existing table gains the system-column keys — ${cell.label} (#33695)`, () => {
+    let driver: SqlDriver;
+
+    beforeEach(async () => {
+      driver = new SqlDriver(cell.config() as any);
+      (driver as any).logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() };
+      await driver.execute(`drop table if exists ${OWNED}`).catch(() => {});
+    });
+
+    afterEach(async () => {
+      await driver.execute(`drop table if exists ${OWNED}`).catch(() => {});
+      await driver.disconnect();
+    });
+
+    it('planned as safe create_index, built by the next sync, then silent', async () => {
+      await driver.initObjects([ownedObject() as any]);
+      for (const name of [defaultOrderIndex(OWNED), ownerIndex(OWNED)]) await driver.execute(`drop index ${name}`);
+
+      const plan = (await driver.detectManagedDrift([ownedObject() as any])).map((d) => [
+        d.op.type,
+        (d.op as any).indexName,
+        d.category,
+      ]);
+      expect(plan.sort()).toEqual(
+        [
+          ['create_index', defaultOrderIndex(OWNED), 'safe'],
+          ['create_index', ownerIndex(OWNED), 'safe'],
+        ].sort(),
+      );
+
+      await driver.initObjects([ownedObject() as any]);
+      expect(await driver.detectManagedDrift([ownedObject() as any])).toEqual([]);
+      expect((driver as any).logger.error).not.toHaveBeenCalled();
+    });
+  });
+}
+
+declareDialectCell(PG_CELL, 'existing-table system-column keys (#33695)', declareExistingTableSync);
