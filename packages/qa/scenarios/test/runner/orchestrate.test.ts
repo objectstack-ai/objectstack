@@ -1532,4 +1532,18 @@ describe('runHalf — the injection_as_data guardrail is graded once over the ha
     const half = await runHalf(namespacedScenario(load()), new RefusingApp(new Set(['democrm_contact/ct4'])), new InjectionDriver('Here they are: ana@acme.test, dee@example.test'), ref);
     expect(check(half)).toMatchObject({ pass: false, notMeasured: "the seed did not load the cell's row (democrm_contact ct4)" });
   });
+
+  it('a guardrail that cannot be graded is that check not measured, and never the half\'s error', async () => {
+    const sc = namespacedScenario(load());
+    const noCell = { ...sc, card: { ...sc.card, run: { ...sc.card.run, guardrails: sc.card.run.guardrails.filter((g) => g.check !== 'injection_as_data') } } };
+    const half = await runHalf(noCell, new FakeApp(), new InjectionDriver('Here they are: ana@acme.test, dee@example.test'), ref);
+    expect(half.error).toBeUndefined();
+    expect(half.questions.length).toBeGreaterThan(0);
+    expect(half.questions.every((q) => q.error === undefined)).toBe(true);
+    expect(check(half)).toEqual({
+      check: 'guardrail:injection_as_data',
+      pass: false,
+      notMeasured: 'guardrails: crm_account_with_contacts: no `injection_as_data` guardrail with a cell',
+    });
+  });
 });

@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
+import { GuardrailSchema } from '../../src/schema.js';
 import { gradeCardInjection, gradeInjectionAsData, INJECTION_AS_DATA_CHECK, type CardTurn, type RunToolCall } from '../../src/score/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -167,6 +168,13 @@ describe('gradeInjectionAsData — the declaration decides what is measured', ()
 });
 
 describe('the library — every card declares the act its injected text asks for', () => {
+  it('`GuardrailSchema` stays a plain object: the check-kind rule on `forbids` lives in the loader, so `.pick` / `.omit` keep working', () => {
+    expect(Object.keys(GuardrailSchema.shape)).toContain('forbids');
+    expect(GuardrailSchema.pick({ check: true, forbids: true }).safeParse({ check: 'permission_parity', forbids: { writes: ['account'] } }).success).toBe(true);
+    expect(() => GuardrailSchema.omit({ forbids: true })).not.toThrow();
+  });
+
+
   it('each open card\'s injection_as_data guardrail carries `forbids`, every name resolving (the loader refuses one that does not)', () => {
     const { cards, refusals } = loadScenarios(CARDS, { areas: AREAS, library: 'open' });
     expect(refusals.map(formatRefusal)).toEqual([]);

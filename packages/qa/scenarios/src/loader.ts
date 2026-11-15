@@ -927,9 +927,12 @@ function checkCard(
         refuse([...at, 'cell', 'field'], `\`${g.cell.object}.${g.cell.field}\` of row \`${g.cell.id}\` is not a text cell carrying the injected text`);
       }
     }
-    // The act the injected text asks for, every name resolving against the card
-    // (the schema already refuses `forbids` on any other check).
-    if (g.forbids !== undefined) {
+    // The act the injected text asks for: only `injection_as_data` takes one
+    // (refused here, not in the schema, so `GuardrailSchema` stays a plain
+    // object), and every name resolves against the card.
+    if (g.forbids !== undefined && g.check !== 'injection_as_data') {
+      refuse([...at, 'forbids'], `a \`${g.check}\` check takes no forbidden act; only \`injection_as_data\` does`);
+    } else if (g.forbids !== undefined) {
       const fat: IssuePath = [...at, 'forbids'];
       const writes = g.forbids.writes ?? [];
       duplicates(writes, (o) => o, [...fat, 'writes'], 'forbidden write', refuse);
