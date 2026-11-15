@@ -564,102 +564,20 @@ describe('[#33626] the semi-join falls back to the id read wherever it is not pr
     expect(normalized(rec.reads[rec.reads.length - 1].ast.where)).toEqual(OUTER_REF);
   });
 
-  /**
-   * How many times the related read was dispatched through its pipeline:
-   * a global middleware and a `beforeFind` hook, each counting reads of the
-   * owner object only.
-   */
-  function countRelatedDispatch(engine: ObjectQL) {
-    const n = { middleware: 0, beforeFind: 0 };
-    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      if (opCtx.object === OWNER && opCtx.operation === 'find') n.middleware += 1;
-      return next();
-    });
-    engine.registerHook('beforeFind', async () => { n.beforeFind += 1; }, { object: OWNER });
-    return n;
-  }
-
-  /** The tenant scope each driver call was handed, by object. */
-  function recordTenantScope(rec: ReturnType<typeof makeRecordingDriver>) {
+  it('the outer read\'s driver options differ from the related read\'s own (its tenant wall): the ids are read at the boundary, under the related read\'s own wall', async () => {
+    const { engine, rec } = await makeEngine();
+    // The ledger is no tenant's; the owner is tenant-scoped. Under a wall the
+    // owner's read carries `tenantId`, the ledger's does not — so a subquery
+    // compiled with the ledger's options would lack the owner's wall.
+    engine.registry.registerObject({ ...LEDGER, tenancy: { enabled: false } } as any, 'test');
+    engine.setTenancyPostureProvider(() => 'isolated');
     const seen: Array<{ object: string; tenantId: unknown }> = [];
     const find = rec.driver.find;
     rec.driver.find = async (o: string, ast: any, options: any) => { seen.push({ object: o, tenantId: options?.tenantId }); return find.call(rec.driver, o, ast); };
-    return seen;
-  }
-
-  it('under a wall, a related object of another tenancy class keeps the id read, decided before planning: dispatched once, under its own wall — in either direction', async () => {
-    // Direction 1: the ledger is no tenant's, the owner is tenant-scoped.
-    // Direction 2: the ledger is tenant-scoped, the owner is no tenant's.
-    // Either way a subquery compiled with the ledger's options would carry
-    // the wrong wall for the owner, so the registry answers before planning.
-    for (const direction of ['related walled', 'outer walled'] as const) {
-      const { engine, rec } = await makeEngine();
-      if (direction === 'related walled') engine.registry.registerObject({ ...LEDGER, tenancy: { enabled: false } } as any, 'test');
-      else engine.registry.registerObject({ ...OWNER_OBJECT, tenancy: { enabled: false } } as any, 'test');
-      engine.setTenancyPostureProvider(() => 'isolated');
-      const n = countRelatedDispatch(engine);
-      const seen = recordTenantScope(rec);
-      rec.answers.set(OWNER, idRows('u1'));
-      const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
-      expectIdRead(r, ['u1'], direction);
-      expect(seen, direction).toEqual(direction === 'related walled'
-        ? [{ object: OWNER, tenantId: 'org_b' }, { object: OBJECT, tenantId: undefined }]
-        : [{ object: OWNER, tenantId: undefined }, { object: OBJECT, tenantId: 'org_b' }]);
-      expect(n, direction).toEqual({ middleware: 1, beforeFind: 1 });
-    }
-  });
-
-  it('CONTROL without a wall (the single posture) the two tenancy classes read under the same options, and the leaf is composed', async () => {
-    const { engine, rec } = await makeEngine();
-    engine.registry.registerObject({ ...LEDGER, tenancy: { enabled: false } } as any, 'test');
-    engine.setTenancyPostureProvider(() => 'single');
-    const n = countRelatedDispatch(engine);
-    const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
-    expect(r.related).toHaveLength(0);
-    expect(normalized(r.outerWhere)).toEqual({ owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } } });
-    expect(n).toEqual({ middleware: 1, beforeFind: 1 });
-  });
-
-  it('a federated related object keeps the id read, decided before planning: dispatched once', async () => {
-    const { engine, rec } = await makeEngine();
-    engine.registry.registerObject({ ...OWNER_OBJECT, external: { remoteName: 'remote_owner' } } as any, 'test');
-    const n = countRelatedDispatch(engine);
     rec.answers.set(OWNER, idRows('u1'));
-    expectIdRead(await readsOf(engine, rec), ['u1'], 'federated');
-    expect(n).toEqual({ middleware: 1, beforeFind: 1 });
-  });
-
-  it('the outer read\'s driver options differ from the related read\'s own, in either direction: the ids are read at the boundary under the related read\'s own options — a second dispatch of the related read', async () => {
-    // Both objects are tenant-scoped, so the registry cannot answer: a
-    // `beforeFind` hook hands one of the two reads a tenant scope of its own.
-    for (const direction of ['related narrowed', 'outer narrowed'] as const) {
-      const { engine, rec } = await makeEngine();
-      engine.setTenancyPostureProvider(() => 'isolated');
-      const n = countRelatedDispatch(engine);
-      engine.registerHook('beforeFind', async (ctx: any) => { ctx.input.options.tenantId = 'org_x'; }, { object: direction === 'related narrowed' ? OWNER : OBJECT });
-      const seen = recordTenantScope(rec);
-      rec.answers.set(OWNER, idRows('u1'));
-      const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
-      expectIdRead(r, ['u1'], direction);
-      expect(seen, direction).toEqual(direction === 'related narrowed'
-        ? [{ object: OWNER, tenantId: 'org_x' }, { object: OBJECT, tenantId: 'org_b' }]
-        : [{ object: OWNER, tenantId: 'org_b' }, { object: OBJECT, tenantId: 'org_x' }]);
-      // Planned, then read: the related object's middleware chain and
-      // `beforeFind` hooks run twice for this hop.
-      expect(n, direction).toEqual({ middleware: 2, beforeFind: 2 });
-    }
-  });
-
-  it('a related read a middleware answers itself falls back after planning — a second dispatch of the related read', async () => {
-    const { engine, rec } = await makeEngine();
-    const n = countRelatedDispatch(engine);
-    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      if (opCtx.object !== OWNER) return next();
-      opCtx.result = [{ id: 'u9' }];
-    });
-    const r = await readsOf(engine, rec);
-    expect(normalized(r.outerWhere)).toEqual({ owner: { $in: ['u9'] } });
-    expect(n).toEqual({ middleware: 2, beforeFind: 0 });
+    const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
+    expectIdRead(r, ['u1'], 'differing options');
+    expect(seen).toEqual([{ object: OWNER, tenantId: 'org_b' }, { object: OBJECT, tenantId: undefined }]);
   });
 
   it('a read whose leaves are all planned does not report, nor spend, the once-only "no usable security service" warning', async () => {

@@ -38,17 +38,11 @@
  * ({@link relationSemiJoinServes}, then the planned read's own outcome, then
  * the executor boundary's comparison):
  *
- * - **Before planning** — what the registry already answers, so the related
- *   read is dispatched once, as the id read: the related object has a
- *   restriction no planned `where` can carry (an object-scoped middleware or
- *   an `afterFind` hook on it, both acting after its driver call); it is
- *   federated (ADR-0015 `external`: the driver prepares a federated object
- *   for the object a read names, which a subquery is not); it is bound to
- *   another datasource than the read's object; the read's driver is outside
- *   {@link SEMI_JOIN_COMPILING_DRIVERS}; or, under a posture that walls
- *   organizations, the two objects are of different tenancy classes (one
- *   tenant-scoped, the other platform-global or federated), so the driver
- *   would scope the two reads differently.
+ * - **Before planning** — the related object has a restriction no planned
+ *   `where` can carry, or the read's driver compiles no subquery: an
+ *   object-scoped middleware or an `afterFind` hook on the related object
+ *   (both act after its driver call), another datasource than the read's
+ *   object, or a driver outside {@link SEMI_JOIN_COMPILING_DRIVERS}.
  * - **After planning** — the related read did not reach exactly one driver
  *   call, or came back with rows the driver never returned (a middleware
  *   answered without the driver, or added rows after it).
@@ -57,13 +51,6 @@
  *   ({@link sameReadDriverOptions}): the subquery is compiled with the outer
  *   read's options, so only identical options make it the related read's own
  *   statement. The ids are then read there, as the caller, under the cap.
- *
- * A hop that falls back after planning or at the boundary has dispatched the
- * related read twice — once planned, once as the id read — so the related
- * object's middleware chain and `beforeFind` hooks run twice for it. Only
- * what the registry cannot answer reaches those two points: a middleware's
- * answer, and driver options a `beforeFind` hook or the security layer's
- * per-object verdict set differently on the two objects.
  *
  * ## What the semi-join means at its edges
  *
@@ -93,8 +80,7 @@
  * object the map does not hold.
  */
 
-import { ReadableIds, RLS_DENY_FILTER, isTenancyDisabled, type FilterCondition } from '@objectstack/spec/data';
-import { isFederatedObject } from './federated-object.js';
+import { ReadableIds, RLS_DENY_FILTER, type FilterCondition } from '@objectstack/spec/data';
 
 /**
  * The key of the internal read option that turns a `find` into a PLAN: when
@@ -127,45 +113,23 @@ export interface RelationSemiJoinServesHost {
   uncomposableReadableIdsParent(object: string, parent: string): unknown;
   hasHooksFor(event: string, object: string): boolean;
   getDriver(object: string): { readonly name?: unknown } | undefined;
-  /** The registered schema of `object` (the registry's own lookup). */
-  getSchema(object: string): unknown;
-  /** Whether the posture in force walls organizations (`postureEnforcesWall`). */
-  wallInForce(): boolean;
 }
 
 /**
- * Whether the driver scopes a read of `schema` by organization at all: the
- * engine hands it a tenant scope only for an object that is neither
- * tenancy-disabled nor federated (`buildDriverOptions`).
- */
-const tenantScopedAtDriver = (schema: unknown): boolean => !isTenancyDisabled(schema) && !isFederatedObject(schema);
-
-/**
  * Whether a read of `object` may PLAN its relation condition on `target` as a
- * semi-join at all. `false` keeps the id read, and the related read is then
- * dispatched once. Registry facts only — nothing is read and the caller's
- * context is not consulted:
+ * semi-join at all. `false` keeps the id read. Registry facts only — nothing
+ * is read and the caller's context is not consulted:
  *
  * - `target` is in neither of ADR-0139 D5's remaining classes for `object`
  *   (an object-scoped read middleware narrows its rows after its driver call;
  *   it is bound to another datasource than `object`);
  * - no `afterFind` hook is registered for `target` (a hook may filter the
  *   rows the id read returns, after its driver call);
- * - `target` is not federated: the driver prepares a federated object's
- *   remote facts for the object a read names, and a subquery's object is
- *   not one it names;
- * - under a posture that walls organizations, `object` and `target` are both
- *   scoped by organization at the driver or both not: otherwise their reads'
- *   driver options differ for every walled caller, and the boundary would
- *   only answer the planned read with a second dispatch, the id read;
  * - `object`'s driver compiles the composed leaf ({@link SEMI_JOIN_COMPILING_DRIVERS}).
  */
 export function relationSemiJoinServes(this: RelationSemiJoinServesHost, object: string, target: string): boolean {
   if (this.uncomposableReadableIdsParent(object, target) !== undefined) return false;
   if (this.hasHooksFor('afterFind', target)) return false;
-  const targetSchema = this.getSchema(target);
-  if (isFederatedObject(targetSchema)) return false;
-  if (this.wallInForce() && tenantScopedAtDriver(this.getSchema(object)) !== tenantScopedAtDriver(targetSchema)) return false;
   const name = this.getDriver(object)?.name;
   return typeof name === 'string' && SEMI_JOIN_COMPILING_DRIVERS.has(name);
 }
