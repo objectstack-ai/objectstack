@@ -284,10 +284,11 @@ describe('[ADR-0149 D3] the SKILL.md teaches the selection rule where the pair r
     const rule = md.indexOf('**When the data cannot answer.**');
     expect(rule).toBeGreaterThan(md.indexOf('Choosing between a metric and an object query'));
     const text = md.slice(rule, md.indexOf('\n- ', rule) === -1 ? undefined : md.indexOf('\n- ', rule));
-    expect(text).toContain('name what is missing');
+    expect(text).toContain('say the data you can read does not record it');
     expect(text).toContain('offer the computation');
     expect(text).toContain('Never fill the gap with an assumed value');
-    expect(text).toContain('comes from a tool');
+    expect(text).toContain('nor draw a conclusion from one');
+    expect(text).toContain('Any figure you add comes from a tool answer; cite it.');
     expect(renderSkillMarkdown({})).not.toContain('When the data cannot answer');
   });
 

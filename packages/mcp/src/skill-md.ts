@@ -279,11 +279,11 @@ const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed dat
   dimension match alone (a grouping such as "by stage") is not an answer: you
   still need a measure match, or ask.
 - **When the data cannot answer.** No metric, object or field records what the
-  question needs: say the data does not record it and name what is missing
-  (say, a warranty end date), and offer the computation if the user supplies
-  it. Never fill the gap with an assumed value, nor draw a conclusion from one
-  ("under a typical term, none would…"). Any figure you add comes from a tool
-  answer.
+  question needs: say the data you can read does not record it and name what
+  is missing (such as a shipment's weight), and offer the computation if the
+  user supplies it. Never fill the gap with an assumed value,
+  nor draw a conclusion from one ("under a typical term, none would…").
+  Any figure you add comes from a tool answer; cite it.
 `;
 
 /** The dataset pair's entries for a host whose bridge carries them, under the grant that registers them. */
