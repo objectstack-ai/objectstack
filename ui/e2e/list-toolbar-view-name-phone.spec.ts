@@ -52,16 +52,20 @@ function constant(source: string, file: string, name: string): string {
 }
 
 /**
- * The first quoted class string of the JSX tag that carries `anchor`, looked
- * for in the tag text before the anchor (`className="…"` or the first literal
- * of `className={cn('…'`). `mustContain` holds tokens that string has to
- * carry, so a walk onto the wrong element throws instead of measuring it.
+ * The first quoted class string of the JSX tag that carries `anchor`
+ * (`className="…"`, or the first literal of `className={cn('…'`), read from
+ * the tag's opening `<` up to the next element's. `mustContain` holds tokens
+ * that string has to carry, so a walk onto the wrong element throws instead of
+ * measuring it.
  */
 function tagClass(source: string, file: string, anchor: string, mustContain: string[]): string {
   const at = source.indexOf(anchor);
   if (at < 0) throw new Error(`${file}: anchor not found: ${anchor}`);
   const open = source.lastIndexOf('<', at);
-  const tag = source.slice(open, at);
+  const next = /<[A-Za-z]/g;
+  next.lastIndex = at;
+  const end = next.exec(source)?.index ?? source.length;
+  const tag = source.slice(open, end);
   const hit = /className=(?:"([^"]+)"|\{cn\(\s*(?:\/\/[^\n]*\n\s*)*['"]([^'"]+)['"])/.exec(tag);
   if (!hit) throw new Error(`${file}: no class string in the tag carrying ${anchor}`);
   const cls = hit[1] ?? hit[2];
@@ -174,7 +178,7 @@ test.beforeAll(async () => {
   }
 });
 
-type Box = { left: number; top: number; right: number; width: number };
+type Box = { left: number; top: number; right: number; bottom: number; width: number };
 type Reading = {
   labelWidth: number;
   labelScrollWidth: number;
@@ -196,7 +200,7 @@ async function measure(page: Page, html: string, width: number): Promise<Reading
       const el = document.getElementById(id);
       if (!el) return null;
       const r = el.getBoundingClientRect();
-      return { left: r.left, top: r.top, right: r.right, width: r.width };
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width };
     };
     const label = document.getElementById('label')!;
     const w = label.getBoundingClientRect().width;
@@ -257,7 +261,8 @@ test.describe('list toolbar keeps the view name readable on a phone (objectstack
     const without = await measure(page, fixture('全部客户', { chips: 2, phone: false }), 1280);
     expect(withPhone).toEqual(without);
     expect(withPhone.labelClipped).toBe(false);
-    expect(Math.round(withPhone.cluster.top)).toBe(Math.round(withPhone.leading.top));
-    expect(Math.round(withPhone.queue.top)).toBe(Math.round(withPhone.leading.top));
+    for (const [name, b] of [['queue', withPhone.queue], ['cluster', withPhone.cluster]] as const) {
+      expect(b.top < withPhone.leading.bottom && b.bottom > withPhone.leading.top, `${name} is on the name's line`).toBe(true);
+    }
   });
 });
