@@ -2871,7 +2871,9 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   const returnType = field && 'returnType' in field ? field.returnType : undefined;
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
-  // `record` roll-up reads the parent's code as its children's amounts do.
+  // `record` roll-up reads the parent's code as its children's amounts do, and
+  // a `dynamic` one (a roll-up of a stored home amount, objectstack#33659)
+  // reads the tenant default, as its home field's own cells do.
   const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
   const valueType = declaresMoney && typeof value === 'number'
     ? 'currency'
