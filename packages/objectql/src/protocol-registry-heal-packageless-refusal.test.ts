@@ -168,17 +168,17 @@ describe('[#32366, ruling 6812637203 Q2] a refused package-less heal retires the
  */
 describe('[#32620, ruling 6818436831] a refused heal of a non-holder\'s row retires its bare-slot entry', () => {
     const O = 'com.acme.other';
-    const typed = (type: string, label: string, extra: Record<string, unknown> = {}) => ({ name: NAME, label, description: label, ...extra });
+    const item = (label: string, extra: Record<string, unknown> = {}) => ({ name: NAME, label, description: label, ...extra });
 
     async function boot(type: string, order: readonly string[]) {
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent' as never;
         for (const id of [O, ...order]) registry.installPackage(manifest(id), 'code');
         const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-        for (const id of order) manager.registerInMemory(type as never, NAME, typed(type, `shipped:${id}`, { _packageId: id }));
+        for (const id of order) manager.registerInMemory(type as never, NAME, item(`shipped:${id}`, { _packageId: id }));
         const rows: Array<Record<string, unknown>> = [{
             id: 'row_other', type, name: NAME, organization_id: null, package_id: O, state: 'active', checksum: 'sha256:head',
-            metadata: JSON.stringify(typed(type, 'row:other')),
+            metadata: JSON.stringify(item('row:other')),
         }];
         const engine = engineOver(registry, rows);
         const protocol: any = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', manager]]) as never, undefined);
