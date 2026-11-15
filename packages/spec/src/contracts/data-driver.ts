@@ -227,9 +227,12 @@ export interface IDataDriver {
    * deliberately no `queryAggregations` bit — and otherwise falls back to
    * `find()` plus in-memory grouping. Two things the engine keeps for itself
    * even when it dispatches here: `having` is applied AFTER this call, over the
-   * returned rows (#4286); and `aggregations[].filter` (#10576) or a non-UTC
-   * `timezone` with date bucketing (ADR-0053) force the in-memory path, so a
-   * driver never sees either on this road today.
+   * returned rows (#4286); and a non-UTC `timezone` with date bucketing
+   * (ADR-0053) forces the in-memory path, so a driver never sees it on this
+   * road. `aggregations[].filter` (#10576) reaches this method only on a driver
+   * that declares `supports.aggregationFilter` (#33698, `DriverCapabilities`),
+   * which then evaluates each measure's filter with the in-memory path's
+   * answers; on every other driver it forces the in-memory path.
    *
    * What a driver returns: one row per group, keyed by the `groupBy` field
    * names and by each aggregation's `alias`, with the per-function value
