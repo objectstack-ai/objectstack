@@ -11,4 +11,6 @@ Metadata-protocol: none
 
 A removed item is reported the same way. When the revert soft-removes an item the reverted commit created and the registry heal after the removal stops (a registry throw, or the registry refusing a row of the item still stored under another package), the item goes into `failed[]` naming "its row was removed from sys_metadata" and that the registry may still serve the removed row, with the reason and its `code`. Before, the heal's stop was only an `error` line in the server log, and the item answered `removed`. The `error` line is unchanged.
 
+This supersedes the sentence of the note on the previous change to this door that says a write-through fault of every type other than `object` "is still not seen by the revert": after this change, the revert sees it, and a stopped heal too.
+
 Save, publish and delete do not change. Save and publish do not ask the write-through for these faults: under the same fault, `saveMetaItem` and `publishMetaItem` of a non-object item still answer success with no advisory, and the fault is still the same `warn` line in the server log. `deleteMetaItem`, a publish's undo and a peer's convergence ignore the heal's answer, so a stopped heal still answers what it answered before there, with the same `error` line.
