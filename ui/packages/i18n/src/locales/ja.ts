@@ -4004,7 +4004,9 @@ const ja = {
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
+      query_dataset: "指標で照会する",
       query_records: "該当するレコードを探す",
       read_package_doc: "アプリのガイドを読む",
       search_knowledge: "ナレッジベースで調べる",

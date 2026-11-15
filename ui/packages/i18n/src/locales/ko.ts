@@ -4001,7 +4001,9 @@ const ko = {
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
+      list_datasets: "사용 가능한 지표 확인하기",
       query_data: "필요한 데이터 조회하기",
+      query_dataset: "지표로 조회하기",
       query_records: "해당 레코드 찾기",
       read_package_doc: "앱 안내서 읽기",
       search_knowledge: "지식 베이스에서 찾아보기",

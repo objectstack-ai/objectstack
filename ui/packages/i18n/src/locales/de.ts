@@ -4002,7 +4002,9 @@ const de = {
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",
+      list_datasets: "Die verfügbaren Kennzahlen ansehen",
       query_data: "Die benötigten Daten abfragen",
+      query_dataset: "Über eine Kennzahl abfragen",
       query_records: "Passende Datensätze suchen",
       read_package_doc: "Die Anleitung der App lesen",
       search_knowledge: "In der Wissensdatenbank nachsehen",

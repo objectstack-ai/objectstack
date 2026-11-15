@@ -4082,7 +4082,9 @@ const pt = {
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",
+      list_datasets: "Ver as métricas disponíveis",
       query_data: "Consultar os dados necessários",
+      query_dataset: "Consultar por métrica",
       query_records: "Buscar os registros",
       read_package_doc: "Ler o guia do aplicativo",
       search_knowledge: "Consultar a base de conhecimento",
