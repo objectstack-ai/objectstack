@@ -34,7 +34,7 @@ import { AuditPlugin } from '@objectstack/plugin-audit';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { commentsFixtureStack, cmtFixtureBaselineSet, commentManagerSet } from './fixtures/comments-fixture.js';
-import { assertArmed, principalArmed } from './armed.js';
+import { armedWhen, assertArmed, principalArmed, resolveAuthzFor } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
@@ -188,5 +188,176 @@ describe('records-forms.comment-reactions-and-edit-stamps — over the REST data
     expect(Boolean(after.is_edited)).toBe(true);
     expect(after.edited_at).toBeTruthy();
     expect(new Date(after.edited_at).getUTCFullYear()).toBeGreaterThan(2000);
+  });
+});
+
+// ── A stock member reacts by default (#33584) ───────────────────────────────
+//
+// Maintainer decision on #33584, option A ("members may react by default"):
+// `member_default` names `sys_comment_reaction` read + create. Pinned here at
+// the REST doors a stock member reaches, on the same fixture app, with NO
+// reaction grant from the app: the app's own baseline (`rxs_app_member`, its
+// `isDefault` posture) reads its records and nothing else, so every reaction
+// bit the members hold is the platform baseline's. The suite above holds an app
+// grant with the delete bit (`rx_reactor`) and measures the floor; this one
+// holds none and measures the default.
+//
+//   - a member reacts to a comment they can read (201) and lists its reactions;
+//   - they unreact their own (the own-row door, `DELETE
+//     /api/v1/comments/reactions/:id`: the baseline carries no delete bit);
+//   - they cannot remove another member's reaction, on that door (403) or the
+//     data door (no delete bit), and the row stays;
+//   - CONTROL: on a comment they cannot read, a reaction is neither listed,
+//     read by id, removed, nor inserted (403 RECORD_NOT_ACCESSIBLE).
+
+/** The app's every-member baseline: its own records, read-only — no comment or reaction bit. */
+const appMemberSet = PermissionSetSchema.parse({
+  name: 'rxs_app_member',
+  label: 'Reactions fixture — app member baseline',
+  objects: {
+    cmt_open: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+    cmt_private: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+  },
+});
+
+describe('a stock member reacts to the comments they can read — member_default only (#33584)', () => {
+  let stack: VerifyStack;
+  let ql: any;
+  let adminTok = '';
+  let aliceTok = '';
+  let bobTok = '';
+  let aliceId = '';
+  let bobId = '';
+  let commentId = '';
+  let privateCommentId = '';
+  let privateReactionId = '';
+
+  const call = async (token: string, method: string, path: string, body?: unknown): Promise<Answer> => {
+    const res = await stack.apiAs(token, method, path, body);
+    return { status: res.status, json: await res.json().catch(() => ({})) };
+  };
+  const uid = async (email: string) => String((await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id);
+  const reactionRows = (where: Record<string, unknown>) => ql.find(REACTION, { where, context: SYS });
+  /** A list answer's rows — the shape asserted, so an empty CONTROL never reads an unrecognised answer as no rows. */
+  const listed = (json: any): any[] => {
+    expect(Array.isArray(json?.records), `a list answer carries records[]: ${JSON.stringify(json)}`).toBe(true);
+    return json.records;
+  };
+  const react = (token: string, comment: string, emoji: string) => call(token, 'POST', `/data/${REACTION}`, { comment_id: comment, emoji });
+  const reactionId = async (where: Record<string, unknown>) => String((await reactionRows(where))[0]?.id);
+
+  beforeAll(async () => {
+    stack = await bootStack(commentsFixtureStack as never, {
+      security: new SecurityPlugin({
+        defaultPermissionSets: [...securityDefaultPermissionSets, appMemberSet],
+        // The app's `isDefault` posture: its baseline COMPOSED with the
+        // platform's `member_default` (ADR-0090 D5), as a showcase member holds.
+        fallbackPermissionSet: appMemberSet.name,
+      }),
+      extraPlugins: [new AuditPlugin()],
+      orgContext: true,
+    });
+    adminTok = await stack.signIn();
+    aliceTok = await stack.signUp('rxs-alice@verify.test');
+    bobTok = await stack.signUp('rxs-bob@verify.test');
+    ql = await stack.kernel.getServiceAsync('objectql');
+    const adminId = await uid('admin@objectos.ai');
+    aliceId = await uid('rxs-alice@verify.test');
+    bobId = await uid('rxs-bob@verify.test');
+
+    // Stock: each member resolves the two baselines and nothing else, so no
+    // reaction bit comes from anywhere but `member_default`.
+    const stock = async (token: string) => (await resolveAuthzFor(stack, token)).permissions;
+    await assertArmed(
+      [aliceTok, bobTok].map((token, i) =>
+        armedWhen({
+          control: `${i === 0 ? 'alice' : 'bob'} holds member_default as the only set naming ${REACTION}`,
+          disarmedBy: 'a permission set beyond the two baselines (an app or fixture grant) would make a 201 its answer, not the default’s',
+          observe: () => stock(token),
+          armed: (held) => [...held].sort().join() === ['member_default', appMemberSet.name].sort().join(),
+        }),
+      ),
+    );
+
+    // A record both members read (public_read_write), with one comment by the admin.
+    const open = await call(adminTok, 'POST', '/data/cmt_open', { name: 'stock reactions record' });
+    expect(open.status, JSON.stringify(open.json)).toBeLessThan(300);
+    const openId = String(open.json.id ?? open.json.record?.id);
+    const posted = await call(adminTok, 'POST', '/data/sys_comment', { thread_id: `cmt_open:${openId}`, body: 'admin comment' });
+    expect(posted.status, JSON.stringify(posted.json)).toBeLessThan(300);
+    commentId = String((await ql.findOne('sys_comment', { where: { thread_id: `cmt_open:${openId}` }, context: SYS })).id);
+
+    // A comment on a record no member reads (cmt_private, owner-only), with the admin's reaction on it.
+    const privateId = String((await ql.insert('cmt_private', { name: 'admin only', owner_id: adminId }, { context: SYS })).id);
+    const privatePost = await call(adminTok, 'POST', '/data/sys_comment', { thread_id: `cmt_private:${privateId}`, body: 'private comment' });
+    expect(privatePost.status, JSON.stringify(privatePost.json)).toBeLessThan(300);
+    privateCommentId = String((await ql.findOne('sys_comment', { where: { thread_id: `cmt_private:${privateId}` }, context: SYS })).id);
+    const adminReaction = await react(adminTok, privateCommentId, '👀');
+    expect(adminReaction.status, JSON.stringify(adminReaction.json)).toBe(201);
+    privateReactionId = await reactionId({ comment_id: privateCommentId });
+  }, 180_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('a member reacts to a comment they can read (201, user_id is the caller) and lists its reactions', async () => {
+    const created = await react(aliceTok, commentId, '👍');
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    expect((await reactionRows({ comment_id: commentId, emoji: '👍' })).map((r: any) => r.user_id)).toEqual([aliceId]);
+
+    const bobs = await react(bobTok, commentId, '🎉');
+    expect(bobs.status, JSON.stringify(bobs.json)).toBe(201);
+
+    const filter = encodeURIComponent(JSON.stringify(['comment_id', '=', commentId]));
+    const list = await call(aliceTok, 'GET', `/data/${REACTION}?$filter=${filter}`);
+    expect(list.status, JSON.stringify(list.json)).toBe(200);
+    expect(listed(list.json).map((r: any) => r.user_id).sort()).toEqual([aliceId, bobId].sort());
+  });
+
+  it('a member unreacts their own reaction through the own-row door', async () => {
+    const created = await react(aliceTok, commentId, '🚀');
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const mineId = await reactionId({ comment_id: commentId, emoji: '🚀' });
+
+    const removed = await call(aliceTok, 'DELETE', `/comments/reactions/${mineId}`);
+    expect(removed.status, JSON.stringify(removed.json)).toBe(200);
+    expect(await reactionRows({ id: mineId })).toHaveLength(0);
+  });
+
+  it('a member cannot remove another member’s reaction — on the own-row door or the data door — and the row stays', async () => {
+    const theirs = await react(bobTok, commentId, '❤️');
+    expect(theirs.status, JSON.stringify(theirs.json)).toBe(201);
+    const theirsId = await reactionId({ comment_id: commentId, emoji: '❤️' });
+
+    const door = await call(aliceTok, 'DELETE', `/comments/reactions/${theirsId}`);
+    expect(door.status, JSON.stringify(door.json)).toBe(403);
+    expect(door.json.error?.code).toBe('PERMISSION_DENIED');
+
+    // The baseline carries no delete bit, so the data door refuses before the floor.
+    const data = await call(aliceTok, 'DELETE', `/data/${REACTION}/${theirsId}`);
+    expect(data.status, JSON.stringify(data.json)).toBe(403);
+    expect(data.json.code).toBe('PERMISSION_DENIED');
+
+    expect(await reactionRows({ id: theirsId })).toHaveLength(1);
+  });
+
+  it('CONTROL: on a comment the member cannot read, a reaction is neither listed, read, removed nor inserted', async () => {
+    const filter = encodeURIComponent(JSON.stringify(['comment_id', '=', privateCommentId]));
+    const list = await call(aliceTok, 'GET', `/data/${REACTION}?$filter=${filter}`);
+    expect(list.status, JSON.stringify(list.json)).toBe(200);
+    expect(listed(list.json)).toEqual([]);
+
+    const byId = await call(aliceTok, 'GET', `/data/${REACTION}/${privateReactionId}`);
+    expect(byId.status, JSON.stringify(byId.json)).toBe(404);
+
+    const door = await call(aliceTok, 'DELETE', `/comments/reactions/${privateReactionId}`);
+    expect(door.status, JSON.stringify(door.json)).toBe(404);
+    expect(await reactionRows({ id: privateReactionId })).toHaveLength(1);
+
+    const denied = await react(aliceTok, privateCommentId, '🎉');
+    expect(denied.status, JSON.stringify(denied.json)).toBe(403);
+    expect(denied.json.code).toBe('RECORD_NOT_ACCESSIBLE');
+    expect(await reactionRows({ comment_id: privateCommentId, user_id: aliceId })).toHaveLength(0);
   });
 });
