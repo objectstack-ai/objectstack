@@ -170,7 +170,7 @@ One of the largest consumers of the flag;
 | 31 | **Sharing-rule REVOCATION is skipped on the record-`afterDelete` hook** — and on that hook only | Lose: nothing permanently — the revoke is **delivered, but deferred on the unbounded shape**. The payload belongs to another subscriber: `packages/plugins/plugin-sharing/src/record-share-cascade.ts` binds on every sharing-capable object and stashes for system writes on its own account (#5103). When the deleted ids are enumerable it revokes inline; when they are not — a predicate delete whose row set the stash could not resolve — it hands the reclaim to a queued background orphan sweep instead, so the share rows outlive the deleted records until that sweep runs, with the boot orphan sweep behind it. No surviving record loses access either way, and a restart re-runs the same sweep. This is one subscriber declining work another owns, not elevation silencing a consequence. ⚠️ **Grant MATERIALISATION no longer asks** — the `afterInsert` / `afterUpdate` skips, and the `before*` stash skip that fed them, were removed by the 2026-08-31 ruling on #13533; a system write materialises exactly as a user write does | `bindRuleHooks` |
 | 32 | Sharing write verdict short-circuits to `allow` | Get: writes pass the sharing gate unconditionally | `bypassVerdict` |
 | 33 | Record visibility / manage-shares checks return true | Get: no ownership or Modify-All requirement | `canManageShares`, `assertCanManageShares`, `shouldBypass` |
-| 34 | `grant()` skips the enforcement + manage-shares assertions | Get: the rule evaluator can materialise through the public API. Note it is **not** a bare skip: the system branch asserts the grant is not *inert* instead (a grant on an object no verdict can consult is refused) | `grant` |
+| 34 | `grant()` skips the enforcement + manage-shares assertions | Get: the rule evaluator can materialise through the public API. Note it is **not** a bare skip: the system branch asserts the grant is not *inert* instead (a grant on an object no verdict can consult is refused). The system path alone also keys the upsert on the rule's `source_id`, so two rules reaching one user on one record keep one row each; any other caller keeps one row per recipient | `grant` |
 | 35 | `revoke()` deletes directly, **before** the non-manual-source guard | Get: the evaluator can revoke its own grants. Lose: the `CONFLICT` guard that warns a rule-materialised grant will be silently re-granted on the next reconcile | `revoke` (the guard it deletes in front of is in the same function) |
 | 36 | `listShares()` skips the management gate | Get: full enumeration of who can see a record | `listShares` |
 | 37 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `buildSharingMiddleware` |
@@ -635,7 +635,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#assertCanManageShares` | 1 | 33 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#bypassVerdict` | 1 | 32 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#canManageShares` | 1 | 33 |
-| `packages/plugins/plugin-sharing/src/sharing-service.ts#grant` | 1 | 34 |
+| `packages/plugins/plugin-sharing/src/sharing-service.ts#grant` | 2 | 34 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#listShares` | 1 | 36 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#revoke` | 1 | 35 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts#shouldBypass` | 1 | 33 |

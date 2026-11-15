@@ -11,7 +11,11 @@
  *  - the sign-out purge that runs before the page unloads keeps it;
  *  - the first `AuthProvider` mount after the round trip starts with
  *    `sessionEndedBySignOut: true`, and drops the note, so it is read once;
- *  - a note older than the round trip's window is a fresh visit.
+ *  - a note older than the round trip's window is a fresh visit;
+ *  - the note names the sign-in page the provider returns to, and only a load
+ *    of that page reads it: a provider that never sends the browser back
+ *    leaves it behind, and the next load of another page in the tab (a deep
+ *    link) is a fresh visit, so `LoginRedirect` keeps its `?redirect=`.
  */
 
 import React, { useEffect } from 'react';
@@ -28,6 +32,17 @@ import {
   markSignOutRoundTrip,
   readSignOutRoundTrip,
 } from '../signOutRoundTrip';
+
+/** The sign-in page the sign-out returns to (`resolveSpaRoute('/login')` with no base element). */
+const SIGN_IN_PAGE = '/login';
+
+/** Load `pathname` in this tab, as a full page load lands on it. */
+function loadAt(pathname: string) {
+  Object.defineProperty(window, 'location', {
+    writable: true,
+    value: { ...window.location, pathname } as unknown as Location,
+  });
+}
 
 const END_SESSION_URL =
   'https://idp.example.com/end-session?post_logout_redirect_uri=https%3A%2F%2Fenv.example.com%2Flogin';
@@ -61,7 +76,12 @@ beforeEach(() => {
   });
   Object.defineProperty(window, 'location', {
     writable: true,
-    value: { ...originalLocation, origin: 'https://env.example.com', assign: assignSpy } as unknown as Location,
+    value: {
+      ...originalLocation,
+      origin: 'https://env.example.com',
+      pathname: SIGN_IN_PAGE,
+      assign: assignSpy,
+    } as unknown as Location,
   });
 });
 
@@ -100,6 +120,9 @@ describe('createAuthClient.signOut writes the note only for a provider logout', 
     expect(noteAtAssign).toHaveLength(1);
     expect(noteAtAssign[0]).not.toBeNull();
     expect(readSignOutRoundTrip()).toBe(true);
+    // The note names the sign-in page the provider returns to, and only a load of it reads the note.
+    expect(readSignOutRoundTrip(Date.now(), SIGN_IN_PAGE)).toBe(true);
+    expect(readSignOutRoundTrip(Date.now(), '/apps/crm/crm_account')).toBe(false);
   });
 
   it('CONTROL: writes nothing when the sign-out stays in the page', async () => {
@@ -152,7 +175,7 @@ describe('createAuthClient.signOut writes the note only for a provider logout', 
 
 describe('AuthProvider reads the note once, on the mount after the round trip', () => {
   it('starts with sessionEndedBySignOut raised, and drops the note', async () => {
-    markSignOutRoundTrip();
+    markSignOutRoundTrip(SIGN_IN_PAGE);
     const view = render(
       <AuthProvider authUrl="/api/v1/auth" client={signedOutClient()}>
         <Probe />
@@ -164,7 +187,7 @@ describe('AuthProvider reads the note once, on the mount after the round trip', 
   });
 
   it('a second load (a reload) is a fresh visit', async () => {
-    markSignOutRoundTrip();
+    markSignOutRoundTrip(SIGN_IN_PAGE);
     const first = render(
       <AuthProvider authUrl="/api/v1/auth" client={signedOutClient()}>
         <Probe />
@@ -190,7 +213,7 @@ describe('AuthProvider reads the note once, on the mount after the round trip', 
   });
 
   it('a note older than the round trip window is a fresh visit', () => {
-    markSignOutRoundTrip(Date.now() - SIGN_OUT_ROUND_TRIP_MAX_AGE_MS - 1000);
+    markSignOutRoundTrip(SIGN_IN_PAGE, Date.now() - SIGN_OUT_ROUND_TRIP_MAX_AGE_MS - 1000);
     const view = render(
       <AuthProvider authUrl="/api/v1/auth" client={signedOutClient()}>
         <Probe />
@@ -199,8 +222,40 @@ describe('AuthProvider reads the note once, on the mount after the round trip', 
     expect(view.getByTestId('ended').textContent).toBe('false');
   });
 
+  it('a load of another page in the tab (the provider never sent the browser back) is a fresh visit, and drops the note', async () => {
+    markSignOutRoundTrip(SIGN_IN_PAGE);
+    loadAt('/apps/crm/crm_account');
+    const deepLink = render(
+      <AuthProvider authUrl="/api/v1/auth" client={signedOutClient()}>
+        <Probe />
+      </AuthProvider>,
+    );
+    expect(deepLink.getByTestId('ended').textContent).toBe('false');
+    await waitFor(() => expect(sessionStorage.getItem(SIGN_OUT_ROUND_TRIP_KEY)).toBeNull());
+    deepLink.unmount();
+    // The provider's late return to the sign-in page then finds no note either.
+    loadAt(SIGN_IN_PAGE);
+    const late = render(
+      <AuthProvider authUrl="/api/v1/auth" client={signedOutClient()}>
+        <Probe />
+      </AuthProvider>,
+    );
+    expect(late.getByTestId('ended').textContent).toBe('false');
+  });
+
+  it('reads the return path without its query or a trailing slash, under a Console base path too', () => {
+    markSignOutRoundTrip('/_console/login');
+    expect(readSignOutRoundTrip(Date.now(), '/_console/login')).toBe(true);
+    expect(readSignOutRoundTrip(Date.now(), '/_console/login/')).toBe(true);
+    expect(readSignOutRoundTrip(Date.now(), '/_console/apps/crm')).toBe(false);
+    expect(readSignOutRoundTrip(Date.now(), '/login')).toBe(false);
+    // A note that does not parse, or names no path, is no note.
+    sessionStorage.setItem(SIGN_OUT_ROUND_TRIP_KEY, String(Date.now()));
+    expect(readSignOutRoundTrip(Date.now(), '/_console/login')).toBe(false);
+  });
+
   it('a session on return lowers it, whoever it belongs to', async () => {
-    markSignOutRoundTrip();
+    markSignOutRoundTrip(SIGN_IN_PAGE);
     const client = {
       ...signedOutClient(),
       getSession: vi.fn().mockResolvedValue({

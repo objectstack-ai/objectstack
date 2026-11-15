@@ -41,6 +41,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+// The dispatcher's reach loads `@objectstack/metadata` inside a function body
+// (`standalone-stack.ts`); paid here, during collection, so no case's clocked
+// window pays that first load (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { LiteKernel, Plugin, PluginContext, isAuthGateAllowlisted, hashApiKey } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
@@ -330,6 +334,19 @@ describe('ADR-0069 at the declared-endpoint fallback (real boot, real socket)', 
         const res = await request(OPEN, undefined, { 'x-api-key': API_KEY });
         expect(res.status, await res.text()).toBe(200);
         expect(observed.taskReads).toBe(1);
+    });
+
+    // [ADR-0151 D3 rule 3] The declared `type: 'flow'` endpoint is a door that
+    // starts a flow by name, and an AI service account authenticates by key:
+    // on the default `authRequired`, a key alone is refused before the
+    // executor, so no key starts the endpoint's flow there (the trigger routes
+    // judge the account instead, `flow-start-confirmation-gated-target.test.ts`).
+    it('API KEY alone: a flow endpoint on the default authRequired answers 401 UNAUTHENTICATED, and its flow never runs', async () => {
+        const res = await request(WRITE, undefined, { 'x-api-key': API_KEY });
+        const text = await res.text();
+        expect(res.status, text).toBe(401);
+        expect((JSON.parse(text) as { error?: { code?: string } }).error?.code).toBe('UNAUTHENTICATED');
+        expect(observed.flowRuns, 'the endpoint ran its flow').toBe(0);
     });
 
     it('API KEY beside a held session: the key answers, the session is not asked', async () => {

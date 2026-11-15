@@ -600,3 +600,108 @@ describe('[#33593] an extension\'s record-mode amount on a single save and in th
         expect(registry.objectRegistrationRefusal(plainLine('ledger') as never, P, 'own', { againstRegistry: true })).toBeNull();
     });
 });
+
+// ── [#33713, ADR-0144 D6 and D8 rule 5] A `dynamic` roll-up on a metadata-API save ──
+//
+// `defineStack` admits a `dynamic` summary only over a stored home amount
+// (case (d)); a published save through the metadata API answers the same,
+// with the same sentence, through the registry's follow door.
+describe('[#33713] a metadata-API save of a `dynamic` roll-up over a child field that is not a stored home amount', () => {
+    const P = 'com.qa.homeroll';
+    /** The #33659 probe's child: an amount converted at write into `amount_home`, beside amounts that are not home amounts. */
+    const expense = {
+        name: 'homeroll_expense', label: 'Expense', sharingModel: 'private',
+        fields: {
+            project: { name: 'project', type: 'master_detail', reference: 'homeroll_project', label: 'Project' },
+            currency_code: { name: 'currency_code', type: 'text', label: 'Currency', ...CODE },
+            expense_date: { name: 'expense_date', type: 'date', label: 'Date' },
+            rate_used: { name: 'rate_used', type: 'number', label: 'Rate', readonly: true },
+            amount: {
+                name: 'amount', type: 'currency', label: 'Amount',
+                currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: { field: 'amount_home', rateDate: 'expense_date', rateField: 'rate_used' } },
+            },
+            amount_home: { name: 'amount_home', type: 'currency', label: 'Amount (home)', readonly: true },
+            eur_amount: { name: 'eur_amount', type: 'currency', label: 'EUR', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
+            plain: { name: 'plain', type: 'number', label: 'Plain' },
+            doubled: { name: 'doubled', type: 'formula', label: 'Doubled', expression: 'record.plain * 2', returnType: 'number' },
+        },
+    };
+    const total = (field: string, extra: Record<string, unknown> = { currencyConfig: { currencyMode: 'dynamic' } }, fn = 'sum') => ({
+        name: 'total', type: 'summary', label: 'Total',
+        summaryOperations: { object: 'homeroll_expense', field, function: fn, relationshipField: 'project' },
+        ...extra,
+    });
+    const project = (fields: Record<string, unknown> = {}) => ({
+        name: 'homeroll_project', label: 'Project', sharingModel: 'private',
+        fields: { title: { name: 'title', type: 'text', label: 'Title' }, ...fields },
+    });
+    const publish = (h: Harness, type: string, item: Record<string, unknown>, name = String(item.name ?? item.extend)) =>
+        h.protocol.saveMetaItem({ type, name, packageId: P, item, mode: 'publish', writeFace: 'meta-envelope' });
+    const caught = async (run: () => Promise<unknown>): Promise<any> => {
+        try {
+            await run();
+        } catch (e) {
+            return e;
+        }
+        return undefined;
+    };
+    const DYNAMIC_HEAD = "Object 'homeroll_project' field 'total' currencyConfig: `currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of a stored home amount";
+    async function bootWithExpense(): Promise<Harness> {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Home roll-up', type: 'app' } });
+        await publish(h, 'object', expense);
+        return h;
+    }
+
+    it('refuses one over a fixed EUR amount, a plain number and a formula 422 INVALID_METADATA, with case (d)\'s sentence, and stores nothing', async () => {
+        for (const [field, says] of [['eur_amount', 'is fixed to EUR'], ['plain', 'is not a stored home amount'], ['doubled', 'is not a stored home amount']] as const) {
+            const h = await bootWithExpense();
+            const err = await caught(() => publish(h, 'object', project({ total: total(field) })));
+            expect(err, field).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError' });
+            expect(String(err.message).startsWith(DYNAMIC_HEAD), field).toBe(true);
+            expect(err.message, field).toContain(`This summary rolls up sum(homeroll_expense.${field})`);
+            expect(err.message, field).toContain(says);
+            expect(activeRow(h, 'object', 'homeroll_project', P), field).toBeUndefined();
+            expect(registered(h, 'homeroll_project'), field).toBeUndefined();
+            await h.kernel.shutdown();
+        }
+    });
+
+    it('CONTROL: the #33659 probe shape, a `dynamic` roll-up over the stored home amount, saves and is served', async () => {
+        const h = await bootWithExpense();
+        await publish(h, 'object', project({ total: total('amount_home') }));
+        expect(registered(h, 'homeroll_project')?.fields?.total?.currencyConfig).toEqual({ currencyMode: 'dynamic' });
+        expect(bodyOf(activeRow(h, 'object', 'homeroll_project', P))?.fields?.total?.summaryOperations?.field).toBe('amount_home');
+    });
+
+    it('CONTROL: a `count` roll-up, and a roll-up declaring no currency, save as before', async () => {
+        const h = await bootWithExpense();
+        await publish(h, 'object', project({
+            total: total('plain', {}),
+            lines: { name: 'lines', type: 'summary', label: 'Lines', summaryOperations: { object: 'homeroll_expense', function: 'count', relationshipField: 'project' } },
+        }));
+        expect(registered(h, 'homeroll_project')?.fields?.lines?.type).toBe('summary');
+    });
+
+    it('a `record` roll-up over the fixed EUR amount answers as before: 422, with case (c)\'s sentence', async () => {
+        const h = await bootWithExpense();
+        const err = await caught(() => publish(h, 'object', project({
+            currency_code: { name: 'currency_code', type: 'text', label: 'Currency', ...CODE },
+            total: total('eur_amount', { currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } }),
+        })));
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA', name: 'RecordCurrencyFollowRefusedError' });
+        expect(err.message).toContain("`currencyMode: 'record'` on a summary is admitted only for a roll-up through a master_detail");
+        expect(err.message).toContain("'homeroll_expense.eur_amount' is fixed to EUR");
+    });
+
+    it('[N6] an object_extension adding the roll-up to the parent is refused 422 with the same sentence, and stores nothing', async () => {
+        const h = await bootWithExpense();
+        await publish(h, 'object', project());
+        const err = await caught(() => publish(h, 'object_extension', { extend: 'homeroll_project', fields: { total: total('plain') } }));
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA' });
+        expect(String(err.message).startsWith(DYNAMIC_HEAD)).toBe(true);
+        expect(registered(h, 'homeroll_project')?.fields?.total).toBeUndefined();
+        expect(activeRow(h, 'object_extension', 'homeroll_project', P)).toBeUndefined();
+    });
+});
