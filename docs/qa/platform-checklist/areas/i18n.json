@@ -9,7 +9,7 @@
       "title": "Notification mark-as-read is server-authoritative, the deep-link target is localized — and the title is the flow-authored literal string, because notification copy has no translation group",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": ["zh-CN session user receiving an app-flow notification", "en session recipient (the control that proves the title is recipient-INDEPENDENT)"],
@@ -26,7 +26,7 @@
       },
       "steps": [
         "boot the showcase under os dev/standalone and sign in as admin",
-        "put the RECIPIENT in Chinese the way a user does: signed in as the recipient, pick 中文 in the avatar-menu language switcher, which writes the recipient's own sys_user.locale (zh-CN) and the console's UI locale together (objectui packages/app-shell/src/layout/LocaleSwitcher.tsx). The server-side equivalent is the recipient's own PATCH /api/v1/data/sys_user/RECIPIENT_ID {\"locale\":\"zh-CN\"} followed by a reload. Seeding browser storage alone is not a language switch — it leaves sys_user.locale empty (i18n.studio-follows-app-locale step 0 records the harness gap that cost a run)",
+        "put the RECIPIENT in Chinese the way a user does: signed in as the recipient, pick 中文 in the avatar-menu language switcher, which writes the recipient's own sys_user.locale and the console's UI locale together (ui/packages/app-shell/src/layout/LocaleSwitcher.tsx). The switcher's entries are platform locale table tags, so it stores 'zh-Hans', not 'zh-CN'; a stored 'zh-CN' resolves to the same zh bundle, so either spelling scores this step (QA run #33853 read 'zh-Hans'). The server-side equivalent is the recipient's own PATCH /api/v1/data/sys_user/RECIPIENT_ID {\"locale\":\"zh-Hans\"} followed by a reload. Seeding browser storage alone is not a language switch — it leaves sys_user.locale empty (i18n.studio-follows-app-locale step 0 records the harness gap that cost a run)",
         "read the showcase flow's notify-node config first (examples/app-showcase/src/automation/flows/index.ts — the record-after-update flow on `assignee != previous.assignee`, notify node `notify_assignee`, topic `task.assigned`, channel inbox) and write down cfg.title verbatim (stock: 'New task assigned: {{ record.title }}'); confirm the node authors an inline `title` and no `template`. The title expectation is that literal template with its {{ record.* }} placeholders rendered, derived from the flow, not from a locale",
         "trigger it by changing a seeded showcase_task's assignee to the recipient. ⛔ Not `collab.assignment` — the kernel stopped emitting assignment notifications in #3403; that topic survives only in regression pins",
         "sign in as the recipient (own browser context — never a shared tab), open the top-bar bell's inbox POPOVER (InboxPopover, ui/packages/app-shell/src/layout/InboxPopover.tsx) on its Notifications tab, beside Approvals (the Activity tab is drawn only for a caller who may read the activity feed, activity.readable, objectui#12081; a member may, so do not expect it absent: QA run #31486 (owed:weekly, at 0647dabb)'s contributor-bound member recipient drew 通知 / 审批 / 活动动态), and screenshot the notification entry there. The Home page's notifications card lists the same row and is a SECOND door: opening the row there runs the bell's own open action (openInboxNotification), which marks the notification read before following its link (ui/packages/app-shell/src/console/home/HomePage.tsx). Drive steps 4–6 from the popover, and do not open the row from Home first, or the read is spent before step 6 can capture it",
@@ -93,7 +93,8 @@
         { "revision": 5, "date": "2026-10-26", "change": "steps[6], steps[7] and acceptance[2].verify read the server's unreadCount (GET /api/v1/notifications), never the header badge (checklist-accuracy finding of QA run #25817, release-18.2.0-manual-set at 6679644a; wave anchor #25807): the badge counts notifications plus pending approvals, so a pending approval reads as a failed clear. The clauses are unchanged", "ref": "#25842" },
         { "revision": 6, "date": "2026-10-31", "change": "steps[4] and steps[5] said 'open the bell'. QA run #27441 asked that the surface be named. The steps now name the top-bar bell's inbox popover, Notifications tab (InboxPopover.tsx). They also name the second door: the Home page's notifications card opens a row through the same openInboxNotification, which marks it read before following the link (HomePage.tsx). Since #27447 and #27653, opening a row from Home spends the read before step 6 captures it. No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726", "ref": "#27441" },
         { "revision": 7, "date": "2026-11-04", "change": "steps[4] corrected from QA run #29890 (W5-FAIL, at 589049b0): a member recipient's inbox popover has no Activity tab; InboxPopover.tsx draws it only while activity.readable. Read at base f68b47ca", "ref": "#29906" },
-        { "revision": 8, "date": "2026-11-08", "change": "steps[4] no longer says a member recipient's popover has no Activity tab: a contributor-bound member's popover drew one. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1", "ref": "#31499" }
+        { "revision": 8, "date": "2026-11-08", "change": "steps[4] no longer says a member recipient's popover has no Activity tab: a contributor-bound member's popover drew one. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1", "ref": "#31499" },
+        { "revision": 9, "date": "2026-11-15", "change": "step-text correction, no clause change. steps[1]: the language switcher stores the platform locale tag 'zh-Hans', not 'zh-CN'; both spellings resolve to the zh bundle. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -101,23 +102,23 @@
       "title": "Studio follows the in-app locale switch — no mixed-language session",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the console's own zh catalogue for the Studio designers: the object editor's section and field labels are objectui's metadata-admin `designer.object.*` strings (objectui packages/app-shell/src/views/metadata-admin/i18n.ts, read by inspectors/ObjectDefaultInspector.tsx), NOT the served metadataForms translation group — QA run #23951 read 标识、显示名与分类 / 显示名 where the served group carries …分类标签 / 显示名称. The metadataForms group stays platform-owned (platform-objects translates it, and scripts/check-i18n-coverage.mjs folds that baseline away)"
+          "the console's own zh catalogue for the Studio designers: the object editor's section and field labels are the console's `designer.object.*` strings in the Studio namespace of @object-ui/i18n (ui/packages/i18n/src/namespaces/studio/zh.ts; ui/packages/app-shell/src/views/metadata-admin/i18n.ts now holds no designer table and names that namespace as the strings' new home; read by inspectors/ObjectDefaultInspector.tsx), NOT the served metadataForms translation group — QA run #23951 read 标识、显示名与分类 / 显示名 where the served group carries …分类标签 / 显示名称. The metadataForms group stays platform-owned (platform-objects translates it, and scripts/check-i18n-coverage.mjs folds that baseline away)"
         ],
         "knownGaps": [
-          "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (examples/app-showcase/objectstack.config.ts: 414 untranslated declared labels in scripts/i18n-coverage-baseline.json, held flat — growth fails the gate, and the count only shrinks). Residual English strings on an otherwise-Chinese Studio surface (#7640 recorded `Announcement`, `Business Unit`, `Owning Business Unit`, `Sales Region`) render their EN SOURCE label, never a raw key, and are legitimate — exactly as i18n.surface-matrix's knownGaps already declares for the same fixture. This item asserts consistency WITH the bundle, not 100% coverage"
+          "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (examples/app-showcase/objectstack.config.ts: 317 untranslated declared labels in scripts/i18n-coverage-baseline.json at base 895783a1, held flat — growth fails the gate, and the count only shrinks, so read the current count there rather than trusting this line). Residual English strings on an otherwise-Chinese Studio surface (#7640 recorded `Announcement`, `Business Unit`, `Owning Business Unit`, `Sales Region`) render their EN SOURCE label, never a raw key, and are legitimate — exactly as i18n.surface-matrix's knownGaps already declares for the same fixture. This item asserts consistency WITH the bundle, not 100% coverage"
         ]
       },
       "steps": [
         "sign in as admin on the showcase, switch the in-app locale to zh-CN, and confirm the app shell followed (nav in zh-CN). To switch, use the avatar-menu language switcher (it writes the user's locale); seeding browser storage alone is not a language switch — a run that only seeds the UI language in browser storage leaves the user's stored locale empty, so dates follow the browser and a FAIL read off it is the harness's, not the product's",
-        "navigate into Studio / metadata-admin: open the object editor for showcase_project and the dashboard designer for showcase_chart_gallery",
-        "screenshot the object editor's form — its section and field labels come from objectui's metadata-admin catalogue (`designer.object.*` in ui/packages/app-shell/src/views/metadata-admin/i18n.ts, in this checkout), not from the served metadataForms translation group (packages/spec/src/system/translation.zod.ts): judge them against that catalogue (e.g. section 基础信息 with hint 标识、显示名与分类)",
+        "navigate into Studio / metadata-admin: open the object editor for showcase_project and the dashboard designer for showcase_chart_gallery. The Studio object surface opens on its 记录 (records) tab; the object editor's form is the 设置 (settings) tab (engine.studio.data.tab.settings), so switch to it before steps[2]",
+        "screenshot the object editor's form — its section and field labels come from the Studio namespace's catalogue (`designer.object.*` in ui/packages/i18n/src/namespaces/studio/zh.ts, in this checkout), not from the served metadataForms translation group (packages/spec/src/system/translation.zod.ts): judge them against that catalogue (e.g. section 基础信息 with hint 标识、显示名与分类)",
         "read the relative date in the switched locale on the Studio Data pillar's records grid (/_console/studio/<package>/data, an object's records). In a grid column a `date` field that declares no format paints the absolute face (10月28日 / Oct 28) and carries the relative phrase as the cell's title, its tooltip (6天前 / 6 days ago): the #25884 ruling, absolute in a sortable column and relative at most as a tooltip (DateCellRenderer and its inGridColumn prop, ui/packages/fields/src/index.tsx). Pick a record whose date is within the last 7 days: outside that window the relative phrase is the absolute face, and the title falls back to the ISO instant. Screenshot the grid, then read the cell's title attribute. The metadata list and history surfaces show none — history renders absolute timestamps — so they cannot score this step",
         "reload the browser fully and re-screenshot one Studio surface — the locale choice must survive the reload",
         "switch back to en through the same avatar-menu language switcher and re-screenshot the same two Studio surfaces"
@@ -175,7 +176,8 @@
         { "revision": 5, "date": "2026-10-13", "change": "steps[3] and acceptance[2].verify re-pointed to the surface that renders relative dates (stale step, #23163 A2; parked on #23121, carried by #23169). The metadata list and history surfaces carry no relative dates — history is absolute — so the step pointed at nothing scorable. QA run #23163 read relative dates (6天前) on the Studio Data pillar's records grid under zh-CN, through the avatar-menu switcher, and passed", "ref": "#23169" },
         { "revision": 6, "date": "2026-10-16", "change": "knownGaps[0], fixtures.requires[0], steps[2], acceptance[0] (clause, verify), negative[0] and source re-pointed (checklist-accuracy notes 2 and 3 of QA run #23951, wave #23878). The clause-0 premise was wrong: the Studio object editor's strings come from objectui's metadata-admin catalogue (designer.object.* in packages/app-shell/src/views/metadata-admin/i18n.ts, ObjectDefaultInspector.tsx), not the served metadataForms group — #23951 read 标识、显示名与分类 / 显示名 where the group carries …分类标签 / 显示名称 — so the clause passed on its verify text while naming the wrong source, and negative[0] judged residual English against the wrong bundle. Both now name the catalogue that feeds the surface. The frozen debt count is 414, not 451 (scripts/i18n-coverage-baseline.json). Not loosened: a zh session still FAILS on any English string the feeding bundle translates, and on any raw dotted key", "ref": "#24036" },
         { "revision": 7, "date": "2026-10-26", "change": "steps[2] names the metadata-admin catalogue at its path under ui/ instead of 'at the .objectui-sha pin': the objectui pin is retired and the console builds from this tree (pnpm console:build). Wording only, left to this file's card by #26035; the catalogue still carries 基础信息 / 标识、显示名与分类", "ref": "#25842" },
-        { "revision": 8, "date": "2026-11-03", "change": "acceptance[2] (clause, oracle, verify, evidence) and steps[3] read the relative date where it is drawn now, and acceptance[1] and negative[0] carry the authored-override exception. Relative dates: the #25884 ruling paints the absolute face in a grid column and the relative phrase as the cell's tooltip (DateCellRenderer, inGridColumn, ui/packages/fields/src/index.tsx), so QA run #29672 read 10月28日 painted with title 6天前 (en: Oct 28, 6 days ago) and scored the clause FAIL as stale spec; the card names it acceptance[3], the run's one-based number. The clause now reads the tooltip, as a dom read of the title attribute, in both directions; the locale-following phrase it asks for is unchanged. Mixed language (the addendum, 6593917345, from #29675 closed not planned): the run counted Account (Success Overlay) on a zh-CN Studio as a fail, but it is the showcase's code-shipped objectExtensions label (examples/app-showcase/src/data/extensions/account.extension.ts), and ADR-0029 D9.2a makes an explicit override beat the packaged catalog in every locale (translateObject; the i18n-resolver.test.ts case \"a code-shipped extension's scalars beat the catalog\", and packages/rest/src/meta-object-i18n-explicit-override.test.ts). A bundle-translated string drawn English with no override is still the FAIL. Read at base 339f63da30. Card #29679, from QA run #29672", "ref": "#29679" }
+        { "revision": 8, "date": "2026-11-03", "change": "acceptance[2] (clause, oracle, verify, evidence) and steps[3] read the relative date where it is drawn now, and acceptance[1] and negative[0] carry the authored-override exception. Relative dates: the #25884 ruling paints the absolute face in a grid column and the relative phrase as the cell's tooltip (DateCellRenderer, inGridColumn, ui/packages/fields/src/index.tsx), so QA run #29672 read 10月28日 painted with title 6天前 (en: Oct 28, 6 days ago) and scored the clause FAIL as stale spec; the card names it acceptance[3], the run's one-based number. The clause now reads the tooltip, as a dom read of the title attribute, in both directions; the locale-following phrase it asks for is unchanged. Mixed language (the addendum, 6593917345, from #29675 closed not planned): the run counted Account (Success Overlay) on a zh-CN Studio as a fail, but it is the showcase's code-shipped objectExtensions label (examples/app-showcase/src/data/extensions/account.extension.ts), and ADR-0029 D9.2a makes an explicit override beat the packaged catalog in every locale (translateObject; the i18n-resolver.test.ts case \"a code-shipped extension's scalars beat the catalog\", and packages/rest/src/meta-object-i18n-explicit-override.test.ts). A bundle-translated string drawn English with no override is still the FAIL. Read at base 339f63da30. Card #29679, from QA run #29672", "ref": "#29679" },
+        { "revision": 9, "date": "2026-11-15", "change": "fixture- and step-text correction, no clause change. fixtures.requires[0] and steps[2]: the designer.object.* strings now live in ui/packages/i18n/src/namespaces/studio/zh.ts. steps[1] names the 设置 tab, since the object surface opens on 记录. fixtures.knownGaps[0]: the showcase's coverage baseline reads 317, not 414. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -183,7 +185,7 @@
       "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -197,7 +199,7 @@
           "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + i18n-coverage-baseline.json — expect some declared strings to legitimately fall back to en; the per-surface check is 'translated keys render translated, untranslated keys render the SOURCE label (never a raw dotted key)', not 100% coverage",
           "objects._views.<view>.emptyState WAS unafforded and no longer is: the #7714 specimen has landed. examples/app-showcase/src/ui/views/task.view.ts authors an emptyState on the `urgent` view (its comment block cites #7714) and src/system/translations/index.ts carries the zh-CN half under objects.showcase_task._views.urgent.emptyState.{title,message}. The variant is runnable; the only setup it needs is an empty `urgent` view (demote the two urgent seed rows)",
           "objects._sections is addressable ONLY on sections that declare a `name` (packages/spec/src/ui/component.zod.ts: a nameless section renders its authored label in every locale; packages/lint's translation-section-name-missing rule nudges authors toward the name). On the stock showcase every surface this item reads declares one: showcase_task's DEFAULT form (the New/Edit form, section `task`), the task record page — examples/app-showcase/src/ui/pages/task-detail.page.ts's record:details block names its sections overview / schedule / details since #22036, reusing objects.showcase_task._sections — and showcase_contact's default form. QA run #23163 read all three in zh under zh-CN, so the old reading (the record page renders EN in every locale) is stale. ⚠ The named formViews tabbed / wizard / split are reachable from NO console door: `…/showcase_task/view/tabbed` is a LIST-view route and renders the grid (records-forms.form-view-gallery says why), so do not read _sections there",
-          "acceptance[5]'s CONFIRM half HAS a stock specimen, so it is no longer pin-only (the old reading, QA run #21782's blocked(fixture) 'no zh confirmText', parked on #22017 row 8, is stale): sys_session's revoke_my_other_sessions, a list_toolbar action on the sys_session list (packages/platform-objects/src/identity/sys-session.object.ts; confirmText 'Sign out of every other device where you're currently logged in? Your current session will remain active.'), whose zh-CN entry in platform-objects' bundle (packages/platform-objects/src/apps/translations/zh-CN.objects.generated.ts) reads 要退出你当前已登录的其他所有设备吗？当前会话将保持活跃。 with successMessage 其他所有会话已撤销. Read from source at base f68b47ca and not yet driven live: drive it as the zh-CN admin with a second session open, capture the confirm and the toast, and record it. No showcase action declares a `confirmText` still, so the showcase's live row is the toast half (e.g. showcase_recalc_estimate's zh successMessage); the unit pins `automated` names stay the copy's pin"
+          "acceptance[5]'s CONFIRM half HAS a stock specimen, so it is no longer pin-only (the old reading, QA run #21782's blocked(fixture) 'no zh confirmText', parked on #22017 row 8, is stale): sys_session's revoke_my_other_sessions, a list_toolbar action on the sys_session list (packages/platform-objects/src/identity/sys-session.object.ts; confirmText 'Sign out of every other device where you're currently logged in? Your current session will remain active.'), whose zh-CN entry in platform-objects' bundle (packages/platform-objects/src/apps/translations/zh-CN.objects.generated.ts) reads 要退出你当前已登录的其他所有设备吗？当前会话将保持活跃。 with successMessage 其他所有会话已撤销. Read from source at base f68b47ca and since driven live (QA run #33853: as the zh-CN admin with a second session open, the 退出其他设备 toolbar action on /_console/apps/setup/sys_session showed the zh confirm and the zh toast): drive it the same way, capture the confirm and the toast, and record it. No showcase action declares a `confirmText` still, so the showcase's live row is the toast half (e.g. showcase_recalc_estimate's zh successMessage); the unit pins `automated` names stay the copy's pin"
         ]
       },
       "steps": [
@@ -219,7 +221,7 @@
         "GET /api/v1/i18n/translations/zh-CN — record whether it is non-empty and whether every key path sits under a declared translation group",
         "GET /api/v1/i18n/labels/showcase_task/zh-CN — record its { object, locale, labels } and hold it next to the zh-CN list-header the browser rendered for showcase_task",
         "unknown-locale probe: GET /api/v1/i18n/translations/zz-ZZ and GET /api/v1/i18n/labels/showcase_task/zz-ZZ — capture WHICH degradation the running server does (the FileI18nAdapter returns an empty {} map for an unloaded locale; getTranslations does NOT synthesize the default bundle — record the observed shape, do not assume a fallback)",
-        "feed verb variant (E11): with the tenant locale left at its default, trigger an activity-feed entry (an assignment or a record edit), then read the record's feed as a zh-CN reader (the user's language set to zh-CN, which the console sends as Accept-Language) and screenshot its rendered verb/template. Since #26167 a sys_activity row stores its summary as a code beside the English sentence, and a read with a locale re-composes it in the READER's language, so an entry written before any switch renders zh-CN too (packages/plugins/plugin-audit/src/activity-summary-message.ts)",
+        "feed verb variant (E11): with the tenant locale left at its default, trigger an activity-feed entry (an assignment or a record edit), then read the feed as a zh-CN reader (the user's language set to zh-CN, which the console sends as Accept-Language) and screenshot its rendered verb/template. The task record page (task-detail.page.ts) draws no activity timeline, so read the feed where stock renders it: the inbox popover's 活动动态 tab, or GET /api/v1/data/sys_activity with Accept-Language. Since #26167 a sys_activity row stores its summary as a code beside the English sentence, and a read with a locale re-composes it in the READER's language, so an entry written before any switch renders zh-CN too (packages/plugins/plugin-audit/src/activity-summary-message.ts)",
         "record a per-variant verdict table with the screenshot evidence"
       ],
       "acceptance": [
@@ -238,7 +240,7 @@
         {
           "clause": "fallback is honest: an untranslated declared string renders its SOURCE-language label — never a raw dotted key path, never an empty cell",
           "oracle": "screenshot",
-          "verify": "spot-check at least two known-untranslated keys — derive them as keys the showcase declares but the served zh tree lacks: scripts/i18n-coverage-baseline.json records only a COUNT per config (414 for examples/app-showcase at base 9a7838edf5), never a key list; each shows the en label, no 'objects.x.fields.y.label' literals anywhere in the session",
+          "verify": "spot-check at least two known-untranslated keys — derive them as keys the showcase declares but the served zh tree lacks: scripts/i18n-coverage-baseline.json records only a COUNT per config (317 for examples/app-showcase at base 895783a1; the count only shrinks, so read it at run time), never a key list; each shows the en label, no 'objects.x.fields.y.label' literals anywhere in the session",
           "evidence": "the fallback screenshots"
         },
         {
@@ -360,6 +362,12 @@
           "date": "2026-11-04",
           "change": "automated.ref, variants, steps and fixtures.knownGaps[3] corrected from QA run #29890 (W5-FAIL, at 589049b0): the pins run at --maxWorkers=1 (RUNNER's container cap); a field-help variant and its step are added (showcase_contact lead_score, translated help 由评分规则计算,不可手动编辑。), placed after the sys_ object step so steps[6] keeps its number; knownGaps[3] was stale, because platform-objects' zh-CN bundle translates sys_session revoke_my_other_sessions' confirmText, a stock confirm specimen (read from source, not yet driven live). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-15",
+          "change": "verify-, step- and fixture-text correction, no clause change. acceptance[2].verify: the showcase's coverage baseline reads 317, not 414. fixtures.knownGaps[3]: the revoke confirm has now been driven live. steps[18]: the task record page draws no activity timeline; the feed is read on the inbox popover's 活动动态 tab or GET /api/v1/data/sys_activity. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -470,7 +478,7 @@
       "title": "The i18n build gates hold and can go red: bundle drift, undeclared extract keys, and the coverage ratchet",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "build",
       "personas": ["ci"],
@@ -484,7 +492,7 @@
         "build the workspace, then run node scripts/check-i18n-bundles.mjs and capture the output (two distinct verdicts: bundle drift; undeclared extract key)",
         "run node scripts/check-i18n-bundles.mjs --self-test and node scripts/check-i18n-coverage.mjs --self-test — the classifiers must be provably able to go red (#4690: a gate observed only green is indistinguishable from a gate matching nothing)",
         "run node scripts/check-i18n-coverage.mjs against the baseline",
-        "prove the drift gate bites — the perturbation must be STRUCTURAL: remove or rename a KEY in one committed bundle, re-run check-i18n-bundles.mjs, capture the red verdict, then revert. Prefer perturbing OUTSIDE the repo: #7640 drove this red-then-green from a /tmp symlink farm (every workspace entry symlinked, one real copy of the package under test), so no repo file was ever touched",
+        "prove the drift gate bites — the perturbation must be STRUCTURAL: remove or rename a KEY in one committed bundle, re-run check-i18n-bundles.mjs, capture the red verdict, then revert. Prefer perturbing OUTSIDE the repo: #7640 drove this red-then-green from a /tmp symlink farm (every workspace entry symlinked, one real copy of the package under test), so no repo file was ever touched. The config walk does not follow a symlinked directory (scripts/i18n-bundle-surface.mjs findExtractConfigs descends only where the Dirent isDirectory), so the farm needs REAL directories along each packages/**/scripts path the gate must find, with only the files inside symlinked (QA run #33829)",
         "⛔ do NOT perturb a translation VALUE — the extract runs in merge mode, so a committed bundle is its own baseline for values and an edited string stays green BY DESIGN (check-i18n-bundles.mjs's own regenerate hint: 'Merge mode is on, so no existing translation is overwritten'; AGENTS.md §Documentation Guardrails: 'editing a string is fine, while adding or dropping keys is drift'). #7640 ran the literal value perturbation this step used to prescribe, watched the gate stay green, and only then found the structural perturbation that bites — the step is worded structurally now so the next runner does not repeat that lap or misread the green as a gate defect",
         "prove the ratchet bites: the baseline check must fail on an INCREASED untranslated count — verify by inspecting that the current counts equal the baseline (growth would fail), and capture the baseline comparison output",
         "in an UNBUILT state (or by consulting the gates' own prerequisite check), confirm the failure mode is the named build-prerequisite verdict, not nine phantom bundle problems"
@@ -535,7 +543,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the i18n build lane — drift gate, undeclared-key gate, ratchet, and their provable red paths", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "step 4 was a no-op as written: 'perturb one committed bundle VALUE' is green by design under merge mode, where the committed file is its own baseline. Reworded to the STRUCTURAL perturbation (remove/rename a KEY) that actually bites, split into a do/don't pair, with the #7640 symlink-farm technique that drives it without touching a repo file; the drift-bites clause and both negatives are reconciled so a green value edit can no longer be read (or filed) as a gate defect", "ref": "#7686" }
+        { "revision": 2, "date": "2026-08-11", "change": "step 4 was a no-op as written: 'perturb one committed bundle VALUE' is green by design under merge mode, where the committed file is its own baseline. Reworded to the STRUCTURAL perturbation (remove/rename a KEY) that actually bites, split into a do/don't pair, with the #7640 symlink-farm technique that drives it without touching a repo file; the drift-bites clause and both negatives are reconciled so a green value edit can no longer be read (or filed) as a gate defect", "ref": "#7686" },
+        { "revision": 3, "date": "2026-11-15", "change": "step-text correction, no clause change. steps[3]: the config walk does not follow symlinked directories, so the symlink farm needs real directories along each packages/**/scripts path. Read from source at base 895783a1. Source records: QA record #33829 (comment 6893937847) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -543,7 +552,7 @@
       "title": "Flow copy is translatable on v18: a flow refusal message and a paused screen's title/description resolve in the caller's Accept-Language with holes filled, `os i18n extract` scaffolds the refusal / screen / option keys, a translated screen title is judged by the {{ }} text-slot rule, and a host translation bundle overrides a platform key in either load order",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -580,7 +589,7 @@
         {
           "clause": "`os i18n extract` writes the refusal, screen, option and toast keys",
           "oracle": "build",
-          "verify": "diff of the bundle file. The three packages/cli/test/i18n-flow-*-coverage pins in automated.ref (refusal, screen, toast-option) prove that extractTranslations, the function the command runs, emits these keys; none of them runs the command or its file write, so the diff stays the run's evidence",
+          "verify": "diff of the bundle file. The toast keys are flows.FLOW.successMessage and flows.FLOW.errorMessage (packages/spec/src/system/i18n-resolver.ts FLOW_TERMINAL_MESSAGE_KEYS), extracted only from a flow that authors successMessage / errorMessage: a scratch flow without them extracts no toast key, so author one before reading this clause (QA run #33853). The three packages/cli/test/i18n-flow-*-coverage pins in automated.ref (refusal, screen, toast-option) prove that extractTranslations, the function the command runs, emits these keys; none of them runs the command or its file write, so the diff stays the run's evidence",
           "evidence": "the added keys"
         },
         {
@@ -624,6 +633,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, acceptance[2].verify and acceptance[3].verify corrected (checklist-accuracy findings a2 and a3 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807). a2: no file in the ref touched `os i18n extract`, while the extraction of refusal, screen, option and toast keys is pinned in the three packages/cli/test/i18n-flow-*-coverage tests through extractTranslations, so the ref now names them and the verify says they prove the function, not the command's file write. a3: translation.test.ts pins the single-brace title rule and its {{ name }} remedy, and nothing runs `os validate`, so the verify keeps the exit code on the run. No clause is loosened",
           "ref": "#25842"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "verify-text correction, no clause change. acceptance[2].verify names the toast keys, flows.FLOW.successMessage and flows.FLOW.errorMessage, extracted only from a flow that authors them. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },

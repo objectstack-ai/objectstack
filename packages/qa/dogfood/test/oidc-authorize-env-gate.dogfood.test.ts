@@ -328,6 +328,97 @@ describe('#8102: the D5.1 /oauth2/authorize env-access gate runs on every creden
     ]);
   });
 
+  describe('the gate judges every client the request names, from the query and the body', () => {
+    /** A client id the patched gate below admits; the request's body names the seeded one. */
+    const ADMITTED_CLIENT_ID = 'project_envgate_admitted';
+
+    /** A form-encoded authorize request, as a fetch caller sends it. */
+    async function authorizeForm(query: Record<string, string>): Promise<Response> {
+      const { res: signInRes } = await signIn();
+      expect(signInRes.status, await signInRes.clone().text()).toBe(200);
+      const search = new URLSearchParams(query).toString();
+      return stack.api(`/auth/oauth2/authorize${search ? `?${search}` : ''}`, {
+        method: 'POST',
+        headers: {
+          Cookie: cookieHeader(signInRes),
+          origin: 'http://localhost:3000',
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: authorizeQuery(),
+        redirect: 'manual',
+      });
+    }
+
+    /** Where the answer sends the caller: a `302`'s `Location`, or a fetch caller's `{ url }`. */
+    async function nextUrl(res: Response): Promise<string> {
+      const location = res.headers.get('location');
+      if (location) return location;
+      const body: any = await res.clone().json().catch(() => null);
+      return typeof body?.url === 'string' ? body.url : '';
+    }
+
+    async function expectRefused(res: Response): Promise<void> {
+      const text = await res.clone().text();
+      expect(res.status, text).toBe(403);
+      const refusal: any = JSON.parse(text);
+      expect(refusal?.code ?? refusal?.error?.code).toBe('ENV_ACCESS_DENIED');
+      expect(await nextUrl(res)).toBe('');
+      expect(text).not.toContain('code=');
+    }
+
+    /** Install `admits` as the gate for one leg, then put the denying recorder back. */
+    async function withGate(admits: (clientId: string) => boolean, leg: () => Promise<void>): Promise<void> {
+      const auth = await stack.kernel.getServiceAsync<any>('auth');
+      auth.applyConfigPatch({
+        oidcAuthorizeGate: (params: { userId: string; clientId: string }) => {
+          gateCalls.push({ userId: params.userId, clientId: params.clientId });
+          return admits(params.clientId);
+        },
+      });
+      try {
+        await leg();
+      } finally {
+        auth.applyConfigPatch({
+          oidcAuthorizeGate: (params: { userId: string; clientId: string }) => {
+            gateCalls.push({ userId: params.userId, clientId: params.clientId });
+            return false;
+          },
+        });
+      }
+    }
+
+    it('a form-encoded POST naming the client in the body only is refused by a denying gate', async () => {
+      gateCalls = [];
+      const res = await authorizeForm({});
+
+      expect(gateCalls).toEqual([{ userId: adminUserId, clientId: CLIENT_ID }]);
+      await expectRefused(res);
+    }, 120_000);
+
+    it('a form-encoded POST naming an admitted client in the query and a refused client in the body is refused', async () => {
+      await withGate((clientId) => clientId === ADMITTED_CLIENT_ID, async () => {
+        gateCalls = [];
+        const res = await authorizeForm({ client_id: ADMITTED_CLIENT_ID });
+
+        expect(gateCalls).toContainEqual({ userId: adminUserId, clientId: CLIENT_ID });
+        await expectRefused(res);
+      });
+    }, 120_000);
+
+    it('control: the same form-encoded POST with an admitting gate is handed a code', async () => {
+      await withGate(() => true, async () => {
+        gateCalls = [];
+        const res = await authorizeForm({});
+
+        expect(gateCalls).toEqual([{ userId: adminUserId, clientId: CLIENT_ID }]);
+        const url = await nextUrl(res);
+        expect(url.startsWith(REDIRECT_URI), `${res.status}: ${await res.clone().text()}`).toBe(true);
+        expect(new URL(url).searchParams.get('code')).toBeTruthy();
+      });
+    }, 120_000);
+  });
+
   it('an UNAUTHENTICATED caller still falls through to the OP login redirect (the fail-open default is deliberate)', async () => {
     gateCalls = [];
     const res = await stack.api(`/auth/oauth2/authorize?${authorizeQuery()}`, {
