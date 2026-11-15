@@ -376,12 +376,16 @@ export function registerStartHooks(
   //
   // [#32983, #33238] The position-rename holder carry runs at `kernel:bootstrapped`
   // over every claim (below, ahead of the report), and on each `metadata:reloaded`
-  // after it over the claims of what the announcement names as registered then:
-  // `app/ID` of a package the registry holds (the marketplace install-local
-  // door's hot install or upgrade; its uninstall names a withdrawn package and
-  // carries nothing) and `position/NAME` (the per-item publish, the package
-  // publish-drafts route). An artifact reload names a file path, so it carries
-  // nothing. One runner, so the runs never overlap and a reload heard before
+  // after it over the claims of what the announcement names as registered then,
+  // whichever announcer sends the entry: `app/ID` of a package the registry
+  // holds (the marketplace install-local door's hot install or upgrade; its
+  // uninstall names a withdrawn package and carries nothing; publish-drafts'
+  // unhidden `app/NAME` counts only when NAME is a held package id) and
+  // `position/NAME` of any grammar-valid name (the per-item publish, the
+  // package publish-drafts route). An artifact reload from the file watcher
+  // names a file path and carries nothing; the dev HMR POST announces its
+  // caller's `changed` list, whose entries in those two spellings count.
+  // One runner, so the runs never overlap and a reload heard before
   // the boot run is ignored. The catalog read is built at each run. See
   // `position-renamed-holder-carry.ts`, "When it runs".
   const positionRenameCarry = createPositionRenameCarryRuns(ql as any, () => ({
@@ -478,7 +482,8 @@ export function registerStartHooks(
       }
     });
     // [#33238] A hot install or upgrade announces `metadata:reloaded` once its
-    // package is registered: carry the holders of the positions THAT package or
+    // package is registered, and a per-item publish or a publish-drafts once
+    // its items are: carry the holders of the positions THAT package or
     // position renamed now, not at the next restart. Only what the announcement
     // names is judged (ruling A1 condition 2 on the reload path); ignored until
     // the boot run above has started; never fails the announcing door.

@@ -15,7 +15,12 @@
 import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
-import { PlatformBaselineSets, type PlatformBaselineHost, type PlatformBaselineRegistry } from './platform-baseline-sets.js';
+import {
+  PlatformBaselineSets,
+  readPlatformBaselineOverridesOption,
+  type PlatformBaselineHost,
+  type PlatformBaselineRegistry,
+} from './platform-baseline-sets.js';
 
 const CONTRIBUTOR = 'com.example.service.notes';
 const OWN = 'pbs_note';
@@ -230,5 +235,95 @@ describe('a refused contribution changes nothing', () => {
       },
     });
     expect(message).toMatch(/the registry refused the set: permission 'pbs_notes_member' is held/);
+  });
+});
+
+describe('#33132 — the host\'s overrides narrow an admitted contribution, and never widen one', () => {
+  const TWO = Object.freeze({
+    name: SET.name,
+    objects: { [OWN]: { allowRead: true, allowCreate: true }, pbs_draft: { allowRead: true, allowCreate: true } },
+  });
+
+  it("'read' keeps the object's read and withholds its create; the narrowed body is what is registered", () => {
+    const r = rig();
+    const seams = new PlatformBaselineSets(readPlatformBaselineOverridesOption({ [SET.name]: { [OWN]: 'read' } }));
+    const admitted = seams.contribute(CONTRIBUTOR, SET, r.host);
+    expect(admitted).toMatchObject({ joined: true, overridden: [`${OWN}: kept at read`] });
+    expect(admitted.set.objects?.[OWN]).toMatchObject({ allowRead: true, allowCreate: false });
+    expect(r.registered).toHaveLength(1);
+    expect((r.registered[0].item.objects as any)[OWN]).toMatchObject({ allowRead: true, allowCreate: false });
+    expect(r.host.baseline).toContain(SET.name);
+    expect(seams.body(SET.name)?.objects?.[OWN]).toMatchObject({ allowCreate: false });
+  });
+
+  it("'decline' on one of two objects withholds that object and keeps the other as contributed", () => {
+    const r = rig();
+    const seams = new PlatformBaselineSets(readPlatformBaselineOverridesOption({ [SET.name]: { pbs_draft: 'decline' } }));
+    const admitted = seams.contribute(CONTRIBUTOR, TWO, r.host);
+    expect(admitted).toMatchObject({ joined: true, overridden: ['pbs_draft: declined'] });
+    expect(Object.keys(admitted.set.objects ?? {})).toEqual([OWN]);
+    expect(admitted.set.objects?.[OWN]).toMatchObject({ allowRead: true, allowCreate: true });
+  });
+
+  it('a set the overrides leave granting nothing is not registered and joins no baseline', () => {
+    const r = rig();
+    const before = [...r.host.baseline];
+    const seams = new PlatformBaselineSets(readPlatformBaselineOverridesOption({ [SET.name]: { [OWN]: 'decline' } }));
+    const admitted = seams.contribute(CONTRIBUTOR, SET, r.host);
+    expect(admitted).toMatchObject({ joined: false, overridden: [`${OWN}: declined`] });
+    expect(r.registered).toEqual([]);
+    expect(r.host.baseline).toEqual(before);
+    expect(seams.unmatchedOverrides()).toEqual([]);
+  });
+
+  it("'read' on an object the set grants create only withholds it: an override never adds read", () => {
+    const r = rig();
+    const createOnly = { name: SET.name, objects: { [OWN]: { allowCreate: true } } };
+    const seams = new PlatformBaselineSets(readPlatformBaselineOverridesOption({ [SET.name]: { [OWN]: 'read' } }));
+    const admitted = seams.contribute(CONTRIBUTOR, createOnly, r.host);
+    expect(admitted).toMatchObject({ joined: false, overridden: [`${OWN}: declined (the set grants it no read to keep)`] });
+    expect(r.registered).toEqual([]);
+  });
+
+  it('a contribution the seam refuses is refused with an override too, and the override stays unmatched', () => {
+    const seams = new PlatformBaselineSets(readPlatformBaselineOverridesOption({ [SET.name]: { [OWN]: 'read' } }));
+    const message = refusalOf({ ...SET, objects: { [OWN]: { allowRead: true, allowEdit: true } } }, { seams });
+    expect(message).toContain("carries 'allowEdit'");
+    expect(seams.unmatchedOverrides()).toEqual([`${SET.name}.${OWN}`]);
+  });
+
+  it('another set is admitted as contributed, and an override naming nothing admitted is reported unmatched', () => {
+    const r = rig();
+    const seams = new PlatformBaselineSets(
+      readPlatformBaselineOverridesOption({ pbs_other_member: { [OWN]: 'decline' }, [SET.name]: { pbs_gone: 'decline' } }),
+    );
+    const admitted = seams.contribute(CONTRIBUTOR, SET, r.host);
+    expect(admitted).toMatchObject({ joined: true, overridden: [] });
+    expect(admitted.set.objects?.[OWN]).toMatchObject({ allowRead: true, allowCreate: true });
+    expect(seams.unmatchedOverrides()).toEqual([`pbs_other_member.${OWN}`, `${SET.name}.pbs_gone`]);
+  });
+
+  it('no override declared: the admitted set is the contribution, with nothing overridden', () => {
+    const r = rig();
+    const admitted = new PlatformBaselineSets().contribute(CONTRIBUTOR, SET, r.host);
+    expect(admitted.overridden).toEqual([]);
+    expect(admitted.set.objects?.[OWN]).toMatchObject({ allowRead: true, allowCreate: true });
+  });
+});
+
+describe('#33132 — readPlatformBaselineOverridesOption refuses a malformed declaration', () => {
+  it('reads undefined as no override', () => {
+    expect(readPlatformBaselineOverridesOption(undefined)).toEqual({});
+  });
+
+  it.each([
+    ['a non-object', ['x'], 'not an object keyed by contributed permission set name'],
+    ['an empty set name', { '': { [OWN]: 'read' } }, 'a set name is empty'],
+    ['a set entry naming no object', { [SET.name]: {} }, `the entry for '${SET.name}' names no object`],
+    ["object '*'", { [SET.name]: { '*': 'decline' } }, "names object '*'"],
+    ['an unknown verdict', { [SET.name]: { [OWN]: 'none' } }, `'${SET.name}.${OWN}' is "none"`],
+  ])('refuses %s', (_label, raw, fragment) => {
+    expect(() => readPlatformBaselineOverridesOption(raw)).toThrow(fragment);
+    expect(() => readPlatformBaselineOverridesOption(raw)).toThrow('[security] SecurityPlugin option platformBaselineOverrides refused');
   });
 });

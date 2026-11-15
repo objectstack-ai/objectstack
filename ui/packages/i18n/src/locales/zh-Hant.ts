@@ -2805,6 +2805,7 @@ const zhHant = {
         ssoSwitchAccount: "切換賬號",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切換賬號”會在新標籤頁中開啟你的登入服務並在那裡退出登入。之後請在此處使用有權訪問的賬號重新登入。",
+        linkEmailMismatch: "該賬號未關聯：它的郵箱地址與你當前登入賬號的郵箱地址不一致。請關聯使用相同郵箱地址的賬號。",
         twoFactorInvalidCode: '驗證碼無效，請檢查身份驗證器應用後重試。',
         twoFactorInvalidBackupCode: '該備用碼無效或已被使用。',
         twoFactorTooManyAttempts: '錯誤次數過多，請重新使用密碼登入。',
