@@ -2952,7 +2952,7 @@
       "title": "Customize a read-only base's flow in Studio: the pair's item under the base's name, declaring the override, is armed in place of the base in one reload, keeps the base's ledger switch, lets a waiting run finish on the base, and Restore re-arms the base — New similar stays a separate copy under a new name",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2979,8 +2979,8 @@
         "edit the flow (e.g. a node's label) and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and PUT /api/v1/meta/flow/showcase_budget_approval?mode=draft&package=com.example.showcase.custom; confirm no POST /api/v1/automation/showcase_budget_approval/toggle and no sys_metadata_activation write",
         "publish the pair; then GET /api/v1/automation/_status (one row for the name) and GET /api/v1/meta/flow/showcase_budget_approval (no package); read the header: the override badge is folded into the item's More menu (open auto-item-more; studio-override-chip sits in studio-item-header-folded-chips) beside the ledger switch (auto-ledger-switch) — no definition switch",
         "as the approver, approve the step-1 run's pending request; GET /api/v1/automation/showcase_budget_approval/runs/RUN_ID",
-        "PATCH the project budget again (a new value above 100000): the new run's step log. Then decide that run's pending request as in step 4 before any later budget change on this project: while an approval request on the same project is still pending, the next run's request is refused DUPLICATE_REQUEST and that run reads failed, so the runs acceptance[3] and acceptance[4] read would fail for the fixture's sake (QA run #33853). A fresh showcase_project per budget change avoids it too",
-        "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on",
+        "PATCH the project budget again (a new value above 100000): the new run's step log. Then decide that run's pending request as in step 5 before any later budget change on this project: while an approval request on the same project is still pending, the next run's request is refused DUPLICATE_REQUEST and that run reads failed, so the runs acceptance[3] and acceptance[4] read would fail for the fixture's sake (QA run #33853). A fresh showcase_project per budget change avoids it too",
+        "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on, and PATCH the budget once more: that change starts a run that follows the override's definition, which is the 'on re-arms it' half acceptance[3] reads (the engine's trigger dispatch skips a flow only while isFlowEnabled answers false, packages/services/service-automation/src/engine.ts, so the switch turned back on arms the next change, it does not replay the change made while off). Decide that run's pending request before step 8's budget change, as in step 6",
         "Restore package original from the override chip's popover (studio-override-restore, as in studio-authoring.package-customize-restore-display steps[6]), read the confirmation (studio-restore-original-dialog) and confirm (studio-restore-original-confirm): capture the two DELETEs at the pair; PATCH the budget once more and read the new run",
         "New similar on the same flow (auto-new-similar-*): give a new name and label; read where the copy opens and its status",
         "Customize and publish the flow again (as steps 2–4), and while that override is live press New similar on it with another new name and label; read the answer, the copy's draft in the pair, and GET /api/v1/meta/flow/showcase_budget_approval; then Restore package original as in step 8"
@@ -3081,6 +3081,12 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[5]: decide the override run's pending request before the next budget change on the same project, or the later runs read failed DUPLICATE_REQUEST (QA run #33853 saw it on the runs acceptance[3] and acceptance[4] read). Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[6] now makes the budget change after switching the ledger back on, the change acceptance[3].verify reads ('with it on the next change runs the override'); the step stopped at switching it on, so the re-arm half had no step. steps[5] cites step 5, the approval step, not step 4. Read from source at base 895783a1 (engine.ts, the trigger dispatch's isFlowEnabled guard). Found while doing #33966 (batch D of the #33761 close-out); QA record #33853 (comment 6894307378) made that change as its R4",
           "ref": "#33984"
         }
       ]
