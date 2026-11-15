@@ -1,6 +1,6 @@
 # ADR-0067: Commit history and rollback for AI authoring — turns become atomic, revertible commits
 
-**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten. · **Amended** (2026-11-12, #32396/#32480 — Decision-2's atomicity holds where the engine can roll back (`engineCanRollBack`), which is not the same line as "a SQL driver"; elsewhere a package publish is judged first and undone by compensation, best effort; see the 2026-11-12 Amendment at the end). · **Amended** (2026-11-14, #32504 — Decision-3's revert doors are not atomic across items: `revertCommit` reverts item by item and reports `reverted[]` and `failed[]`, and `rollbackToPackageCommit` runs one `revertCommit` per commit; neither opens a transaction around the whole; see the 2026-11-14 Amendment at the end). · **Amended** (2026-11-15, #33850 — after PR #33805 and PR #33979, a fault after an item's row write is named in `failed[]` with the row state and makes `success` false; the revert commit is written from the revert's own plan (`revertPlan`) and records the version each row held, so reverting a revert restores; an item recorded as existing with no version to restore is named in `failed[]`; the doors are still not atomic across items; see the 2026-11-15 Amendment at the end).
+**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten. · **Amended** (2026-11-12, #32396/#32480 — Decision-2's atomicity holds where the engine can roll back (`engineCanRollBack`), which is not the same line as "a SQL driver"; elsewhere a package publish is judged first and undone by compensation, best effort; see the 2026-11-12 Amendment at the end). · **Amended** (2026-11-14, #32504 — Decision-3's revert doors are not atomic across items: `revertCommit` reverts item by item and reports `reverted[]` and `failed[]`, and `rollbackToPackageCommit` runs one `revertCommit` per commit; neither opens a transaction around the whole; see the 2026-11-14 Amendment at the end). · **Amended** (2026-11-15, #33850 — after PR #33805 and PR #33979, the faults a revert reads after an item's row write (the registry write-through's answer, a storage advisory, the projector's `success: false`, the heal's answered stop where a row was removed, a later throw) are named in `failed[]` with the row state and make `success` false, while a heal outcome that answers no stop is still only logged; the revert commit is written from the revert's own plan and records the version each row held, so reverting a revert restores; an item recorded as existing with no version to restore is named in `failed[]`; the doors are still not atomic across items; see the 2026-11-15 Amendment at the end).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on / amends**: [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) (**amended**: ADR-0045 keeps a *draft + human-confirm* gate on mutations as the safety mechanism; this ADR replaces *confirm-before* with *revert-after* for everything except irreversible data loss, and unifies the two authoring regimes under one primitive — the commit), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft workspace — retained as a *review affordance*, demoted from *safety mechanism*), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) ("AI never publishes — it drafts" → **AI commits; commits are revertible**), [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) (per-write transaction — **extended to span a whole turn**), [ADR-0038](./0038-build-verification-loop.md) (machine gate — runs per commit, before it lands)
 **Consumers**: `@objectstack/objectql` (commit grouping, atomic turn-apply, `revertCommit`, history query — built on the existing `sys_metadata_history` + `restoreVersion`), `@objectstack/runtime` + `@objectstack/rest` (commit/revert routes), `../cloud/service-ai-studio` (turn = commit; auto-commit policy; data-loss confirmation), `../objectui` (commit timeline + "revert to here")
@@ -366,14 +366,17 @@ whether a revert should stay this way (below).
 
 > ⚠️ **Amended 2026-11-15 (#33850 — PR #33805, PR #33979).** This section is
 > the reading at `ba35dfd7`, and `main` has moved on four points since. ⛔ On
-> these the text below is no longer a statement of what the doors do: a fault
-> after an item's row write (now named in `failed[]`, and `success` is false);
-> the skipped item (now named in `failed[]`, nothing written); what the revert
-> commit is written from (the revert's own plan, with the version each row
-> held); and "reverting it still restores nothing" (reverting a revert commit
-> recorded since PR #33805 restores). The last sentence of the closing
-> paragraph goes with them. The rest of the section stands. See the Amendment
-> (2026-11-15, #33850) at the end.
+> these the text below is no longer a statement of what the doors do: the
+> faults the revert reads after an item's row write (now named in `failed[]`,
+> and `success` is false); the skipped item (now named in `failed[]`, nothing
+> written); what the revert commit is written from (the revert's own plan,
+> with the version each row held); and "reverting it still restores nothing"
+> (reverting a revert commit recorded since PR #33805 restores). In the
+> closing paragraph, the sentence "A fault after an item's row write is not
+> named there, and a skipped item is not named at all." goes with them. Still
+> true: on the soft-remove limb, a registry heal outcome that answers no stop
+> is not reported, and the item is in `reverted[]`. The rest of the section
+> stands. See the Amendment (2026-11-15, #33850) at the end.
 
 Read from the code on `main` at `ba35dfd7` — a reading of that date, not part
 of the decision:
@@ -438,10 +441,11 @@ revert side — reported, not prevented.
   D3's "a revert is itself revertible" holds, and **whether a fault after an
   item's row write should reach `failed[]`**. Both are code questions; this
   record states what the code does today.
-  ⚠️ **Amended 2026-11-15 (#33850 — PR #33805).** The code has answered both:
-  a revert commit records the version each row held, and a fault after an
-  item's row write reaches `failed[]`. See the Amendment (2026-11-15, #33850)
-  at the end. The first bullet, atomicity, is still open.
+  ⚠️ **Amended 2026-11-15 (#33850 — PR #33805, PR #33979).** The code has
+  answered both: a revert commit records the version each row held, and the
+  faults the revert reads after an item's row write reach `failed[]`. A heal
+  outcome that answers no stop still does not. See the Amendment (2026-11-15,
+  #33850) at the end. The first bullet, atomicity, is still open.
 - It changes nothing in Decision-2, the package-publish door, or the
   2026-08-06 carve-out (audit rows written during rolled-back work still
   remain).
@@ -457,9 +461,16 @@ record states the code. Pinned by
 `protocol.revert-stored-type-canonical.test.ts` ("reverts the neighbours of a
 refused item and reports the mix honestly").
 
+> ⚠️ **Amended 2026-11-15 (#33850).** Two of the three places named above,
+> where the docblocks said more than the code, no longer do: a revert is
+> revertible in the code, and the rollback docblock now says each step
+> attempts its revert commit, best effort. The first still says more than the
+> code, for the outcomes the revert does not read. See the Amendment
+> (2026-11-15, #33850) below.
+
 ---
 
-## Amendment (2026-11-15, #33850) — a fault after an item's row write is now named in `failed[]`, and a revert commit records what it replaced
+## Amendment (2026-11-15, #33850) — the faults a revert reads after an item's row write are now named in `failed[]`, and a revert commit records what it replaced
 
 The 2026-11-14 Amendment recorded what the two revert doors did on `main` at
 `ba35dfd7`. Two code changes have landed since: PR #33805 (`568f214a`,
@@ -471,71 +482,81 @@ rewritten: the parts this one replaces are marked there and listed below.
 ### What the doors do now
 
 Read from the code on `main` at `fb79d47c` — a reading of that date, not part
-of the decision. Quoted code is quoted from that tree
-(`packages/metadata-protocol/src/protocol-package-commits.ts#revertCommit`
-unless another file is named).
+of the decision. The door is
+`packages/metadata-protocol/src/protocol-package-commits.ts#revertCommit`.
 
-- **A fault after an item's row write is named in `failed[]`** (PR #33805).
-  Once an item's row write lands, the walk keeps the row state in
-  `rowWritten`: "its row was removed from sys_metadata", or "its row was
-  restored to the body of version N". Each later step that does not land is
-  collected for that item in `notApplied`. On the restore limb those steps
-  are the registry write-through answering a refusal, the storage sync being
-  refused (its advisory still rides `advisories`), and the mutation projector
-  answering `success: false`. On the soft-remove limb they are the registry
-  heal answering a stop, and the projector answering `success: false`. When
-  the limb ends, `settle` files the item: "an item with any `notApplied` step
-  goes into `failed[]`, not `reverted[]`". The entry names the row state and
-  each step that did not land. A throw after the row write goes to the same
-  `catch` as before, and the entry now names the row state too:
-  `error: rowWritten === undefined ? failureText : …`. The rule for `success`
-  is the one the 2026-11-14 Amendment records
-  (`failed.length === 0 && reverted.length > 0`), so one such item makes the
-  answer `success: false`.
-- **Which registry faults are read** (PR #33979, not PR #33805). After
-  PR #33805 the write-through answered only the registry's refusal of an
-  `object`; a fault on any other type, and the heal's stop on the soft-remove
-  limb, were still only logged. Since PR #33979 the restore limb asks with
-  `answerFaults: true`, so the write-through's two other branches (the
-  `object_extension` registration, and the overlay hydration every remaining
-  type takes) answer a throw as well
-  (`packages/metadata-protocol/src/protocol-registry-hydration.ts#applyRegistryWriteThrough`).
-  The heal answers its stop
+- **The faults the revert reads after an item's row write are named in
+  `failed[]`.** There are five. On the restore limb: the registry
+  write-through answering a refusal or a fault; the storage sync answering
+  any advisory (a refused sync, or column changes that were not applied; the
+  advisory still rides `advisories`); and the mutation projector answering
+  `success: false`. On the soft-remove limb, where a row was removed: the
+  registry heal answering a stop, and the projector answering
+  `success: false`. On either limb: a throw after the row write. Such an
+  item goes into `failed[]`, not `reverted[]`. Its entry names the row state
+  ("its row was removed from sys_metadata", or "its row was restored to the
+  body of version N") beside each step that did not land. The rule for
+  `success` is the one the 2026-11-14 Amendment records (true only when
+  `failed[]` is empty and at least one item was reverted), so one such item
+  makes the answer `success: false`.
+- **Which PR reads which.** PR #33805 reads the storage advisory, the
+  projector, the later throw, and the write-through's answer, which at that
+  time carried only the registry's refusal of an `object`. PR #33979 adds
+  the rest. The restore limb now asks the write-through to answer its
+  faults (`answerFaults` on
+  `packages/metadata-protocol/src/protocol-registry-hydration.ts#RegistryWriteThroughRequest`),
+  so its two other branches (the `object_extension` registration, and the
+  overlay hydration every remaining type takes) answer a throw as well. The
+  heal answers its stop
   (`packages/metadata-protocol/src/protocol-registry-hydration.ts#restoreArtifactRegistryView`, `#RegistryHealStop`),
-  and the soft-remove limb reads it only where it removed a row:
-  `if (healStop && current)`. With no row removed, the heal's stop stays on
-  the log and the item is reported in `reverted[]`. The exception the
-  2026-11-14 Amendment names for an `object_extension` item still ends in
-  `failed[]`, by the throw path (the heal re-reads the stored extensions
-  outside its own `try`), and its entry now names the removed row.
+  and the soft-remove limb reads it only where it removed a row. The
+  exception the 2026-11-14 Amendment names for an `object_extension` item
+  still ends in `failed[]`, by the throw path, and its entry now names the
+  removed row.
+- **What still does not reach `failed[]` after a row write.** Three things.
+  - Heal outcomes that answer no stop, on the soft-remove limb. The
+    registry refusing to unregister a removed `object` is caught and logged
+    at `warn`, and the object stays registered. A package-scoped refusal
+    of the baseline read is logged at `error`, with the entry retired or
+    not. A degraded baseline read keeps the entry. The
+    heal's docblock calls the last two designed outcomes. With no row
+    removed, a stop the heal does answer also stays on the log.
+  - The mutation event: it is emitted and its result is not read.
+  - The stored-expression fill, which runs after the revert commit is
+    written and reports on `advisories` only.
+
+  An item with one of these is reported in `reverted[]`, and `success` does
+  not see it. For the heal outcomes, the 2026-11-14 sentences about the
+  registry heal stay the account: the outcome is not reported, the item is
+  in `reverted[]`, and the registry may keep serving the removed row.
 - **The revert commit is written from the revert's own plan**, not from
-  `reverted[]` (PR #33805): `items: revertPlan`. An item enters `revertPlan`
-  when its row write returns, whether or not it then reaches `reverted[]`, so
-  a row that changed under an item reported in `failed[]` is still on the
-  commit timeline. A soft-remove that found no row to remove enters the plan
-  too, recorded as `existedBefore: false`. An item refused or thrown before
-  its row write is in `failed[]` and not in the plan.
+  `reverted[]` (PR #33805). An item enters the plan when its row write
+  returns, whether or not it then reaches `reverted[]`, so a row that
+  changed under an item reported in `failed[]` is still on the commit
+  timeline. A soft-remove that found no row to remove enters the plan too,
+  recorded as `existedBefore: false`. An item refused or thrown before its
+  row write is in `failed[]` and not in the plan.
 - **Each plan item records what the revert replaced** (PR #33805). Before
-  the row write, `replacedVersion` reads the version of the committing
-  package's active row, and the plan item is written as
-  `existedBefore: current !== null, prevVersion: …` with that version. A
-  read that fails there fails the item into `failed[]` with nothing written.
-  So reverting a revert commit restores on both limbs: an item the revert
+  the row write, the revert reads the version of the committing package's
+  active row. The plan item carries that version as `prevVersion`, and
+  `existedBefore` is true exactly when the row was there. A read that fails
+  at that point fails the item into `failed[]` with nothing written. So
+  reverting a revert commit restores on both limbs: an item the revert
   restored goes back to the version the revert replaced; an item the revert
   removed is written again at the version it held; and an item the revert
-  wrote again because its row had been deleted is removed. Where that read
+  wrote again because its row had been deleted is removed. Where the read
   finds no version on a row that exists, the item is recorded without one
   and takes the next bullet's path when the revert is reverted.
 - **An item recorded as existing, with no version to restore, is named and
-  nothing is written for it** (PR #33805):
-  `if (it.existedBefore && restoreToVersion === null)` puts it in `failed[]`
-  and moves to the next item before any read or write. The entry carries no
-  `code`; its text says the commit records no version to restore the item to,
-  and points at the item's own version history. Every revert commit recorded
-  before PR #33805 wrote its restored items that way (the 2026-11-14
-  Amendment's "skipped" bullet), so reverting one of those now names each of
-  them in `failed[]` and answers `success: false`. The items such a commit
-  removed still go down the soft-remove limb, as that bullet says.
+  nothing is written for it** (PR #33805). It goes into `failed[]` before
+  any read or write, and the walk moves to the next item. The entry carries
+  no `code`; its text says the commit records no version to restore the item
+  to, and points at the item's own version history. Every revert commit
+  recorded before PR #33805 wrote its restored items that way (the
+  2026-11-14 Amendment's "skipped" bullet), so reverting one of those now
+  names each of them in `failed[]` and answers `success: false`. The items
+  such a commit removed still go down the soft-remove limb, as that bullet's
+  parenthetical says.
 - **The revert commit record is still best effort, and the rollback door's
   docblock now says so** (PR #33805, for #33486). The code is as the
   2026-11-14 Amendment reads it: `recordPackageCommit` catches every error
@@ -553,16 +574,19 @@ unless another file is named).
 So a partly reverted package now has one more shape, and it is reported: an
 item in `failed[]` whose row **was** changed. Its entry says so, and says
 that the stored row and what the process serves disagree until the failed
-steps run again. Two things that follow a row write still do not reach
-`failed[]`: the mutation event is emitted and its result is not read, and
-the stored-expression fill, which runs after the revert commit is written,
-reports on `advisories` only.
+steps run again.
 
 ### What this replaces in the 2026-11-14 Amendment
 
 - In "What the doors do", first bullet: the sentences from "What follows an
-  item's row write does not reach `failed[]`" to the end of the bullet.
-- The bullet "An item can also be skipped", whole.
+  item's row write does not reach `failed[]`" to the end of the bullet, for
+  the faults the revert reads (listed above). For a heal outcome that
+  answers no stop, those sentences still hold.
+- In the bullet "An item can also be skipped": "it appears in neither
+  `reverted[]` nor `failed[]`" (it is named in `failed[]`), and, for a revert
+  commit recorded since PR #33805, the account of what its plan holds and of
+  what reverting it restores. The bullet's parenthetical still holds for a
+  revert commit recorded before PR #33805.
 - In "The revert commit": "it is written from `reverted[]`". The `success`
   rule in that bullet stands.
 - In "The revert commit itself is best effort": the last sentence, "Where
@@ -570,15 +594,18 @@ reports on `advisories` only.
   a revert commit recorded before PR #33805, as a named failure, not a
   silent one.
 - In the closing paragraph: "A fault after an item's row write is not named
-  there, and a skipped item is not named at all."
+  there, and a skipped item is not named at all." A fault the revert reads
+  is named, and so is that item. The paragraph's last sentence stands.
 - In "What this amendment does not decide", second bullet: both code
   questions are answered by the code. A revert commit carries the versions
-  it replaced, and a fault after an item's row write reaches `failed[]`.
-- In the "Recorded by" paragraph: the three places where the docblocks said
-  more than the code. For the faults listed above, a revert that answers
-  `success: true` is one the process has acted on; a revert is revertible;
-  and the rollback docblock no longer says each step records its revert
-  commit.
+  it replaced, and the faults the revert reads after an item's row write
+  reach `failed[]`.
+- In the "Recorded by" paragraph: two of the three places where the
+  docblocks said more than the code. A revert is revertible, and the
+  rollback docblock no longer says each step records its revert commit. The
+  third still says more than the code: a revert that answers `success: true`
+  is one the process has acted on only as far as the faults the revert
+  reads.
 - In D3's first bullet, the 2026-11-14 parenthetical's last clause,
   "reverting a revert commit restores nothing today". TL;DR 3's parenthetical
   and D3's second one still hold.
@@ -592,6 +619,8 @@ neighbours are still reverted, and the half-land is reported, not prevented.
 - **Whether a revert should be atomic** is still open, exactly as the
   2026-11-14 Amendment leaves it. Nothing in PR #33805 or PR #33979 opens a
   transaction around the items.
+- **Whether a heal outcome that answers no stop should reach `failed[]`.**
+  This record states what the code does today.
 - It changes nothing in Decision-2, the package-publish door, or the
   2026-08-06 carve-out.
 
