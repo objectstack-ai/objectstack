@@ -2734,10 +2734,10 @@ describe('[#32814] the read naming no package withholds a pair row of a name onl
  * answers as if no row were stored; the row is kept and served on re-enable.
  *
  * FROM (`main` 1e65a389, measured on this fixture and on the REST door): the
- * row (200), on the served and the execution face, in every order below. A
- * row the holder's own member overlays, and the same row once hydrated into
- * the registry, were already withheld (CONTROLs below). TO: the holder's
- * withheld item, the answer with no row stored.
+ * row (200), on the served and the execution face, in every order below,
+ * stored or hydrated. A row the holder's own member overlays was already
+ * withheld (CONTROL below). TO: the holder's withheld item, the answer with
+ * no row stored.
  */
 describe('[#33401] the read naming no package withholds a package-less row of a key only disabled packages hold', () => {
   const custom = (name: string, locale: string) => rows.push({
@@ -2829,7 +2829,7 @@ describe('[#33401] the read naming no package withholds a package-less row of a 
     expect(JSON.stringify(answer ?? null)).not.toContain('custom en-US');
   });
 
-  it('CONTROL — the fr-FR row hydrated into the registry: withheld, as on BASE', async () => {
+  it('the fr-FR row stored and hydrated into the registry: withheld too (BASE: the row)', async () => {
     tpl(A);
     custom('welcome', 'fr-FR');
     await hydrate();
