@@ -48,7 +48,7 @@
 - 卡线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
   ACCEPT 点名其评论 id;`Scope:` 窄于 `hits` 不采纳;席的补缺记录只管缺口,⛔ 不单充 head 记录。
 - 轮次报告设复审清单专节,与呈裁清单同为强制审计。
-- 请审/求批与落地前检两条,过则 Tier S 入队、Tier H 等人批:① 现 head 同形达档 PASS 在案。
+- 请审/求批与落地前检两条,过则 S 入队、H 等人批:① 现 head 同形达档 PASS 在案,无前两级。
 - head 后移例外:纯重生成或只动散文面原记录续管,落 `Regen-provenance:` 行;余移或现 head 落 FAIL
   而已挂 auto-merge ⇒ 派发席读到即照 AGENTS.md disarm 句撤挂,FAIL 记录点名欠撤挂;重挂照 ①。
 - ② PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
