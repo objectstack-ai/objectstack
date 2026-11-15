@@ -185,6 +185,7 @@ export async function runAuthoringGate(
     this: Pick<AuthoringGateHost, 'authoringGates' | 'engine' | 'isArtifactBacked'>,
     evt: {
     type: string; name: string; state: 'draft' | 'active'; body: unknown;
+    userTextLocales?: readonly (string | undefined)[];
 }): Promise<void> {
     const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
     const gate = this.authoringGates.get(singular);
@@ -203,6 +204,9 @@ export async function runAuthoringGate(
         body: evt.body,
         isArtifactBacked: artifactBacked,
         ...(declaredBody !== undefined ? { declaredBody } : {}),
+        ...(evt.userTextLocales !== undefined
+            ? { userTextLocales: evt.userTextLocales.filter((l): l is string => typeof l === 'string' && l.length > 0) }
+            : {}),
     });
 }
 

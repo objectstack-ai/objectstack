@@ -5,6 +5,11 @@
 > **Updated:** 2026-05-31 — §1–2 and §6 aligned to ADR-0019 (App as the
 > consumer-facing unit; no "suite contains apps"; consumer Marketplace lists
 > only `type: app`).  
+> **Updated:** 2026-11-14 — §1, §2.1, §6 and the Summary follow ADR-0019 D3 as
+> amended on 2026-11-12 (`958734cbac`): a suite (one install: an app package
+> plus the module packages it composes) may surface more than one app, each
+> defined by a different package, and an app package defines at most one app.
+> The 2026-05-31 line above is kept as written.  
 > **Status:** Design Specification  
 > **Target Version:** v3.2 – v4.0
 
@@ -49,14 +54,19 @@ The marketplace protocol consists of three primary schema files:
 
 ### Reference Implementation
 
-**HotCRM** (`objectstack-ai/hotcrm`) demonstrates a real-world application. Per
-ADR-0019, it is being refolded into a **single consumer App** (download = open =
-uninstall) whose internal plugins are invisible "frameworks inside the bundle":
-- Root `objectstack.config.ts` with `type: 'app'` — one consumer-facing App
-- The former sub-plugins (crm, finance, marketing, …) are internal
-  contributions bundled inside the App, not separately listed or installed
-- The App owns the set of namespaces those contributions use; uninstall is
-  atomic over that set
+**HotCRM** (`objectstack-ai/hotcrm`) demonstrates a real-world application. It
+ships as a **suite** under ADR-0019 D3 as amended on 2026-11-12: one release
+artifact whose consumer unit is its `type: 'app'` package, plus the module
+packages it composes (ADR-0130):
+- The `type: 'app'` package is the one thing listed, installed and uninstalled
+  (ADR-0019 D1, D2); its modules are not separately listed or installed
+- The suite surfaces several apps, each defined by a different package: sales
+  in the app package, service and marketing in their module packages (hotcrm
+  `main` at `ac4dd3d`: `src/sales/apps/crm.app.ts`,
+  `src/service/apps/service.app.ts`, `src/marketing/apps/marketing.app.ts`);
+  no package defines more than one app
+- The app package owns the set of namespaces its modules use; uninstall is
+  atomic over that set (ADR-0019 D4)
 
 ---
 
@@ -70,7 +80,7 @@ The ObjectStack ecosystem exposes **one consumer-facing noun: the App.**
 App  ← the only consumer unit (download = open = uninstall)
 ├── Type: app   (the only consumer-installable type; see isConsumerInstallable)
 ├── Namespace(s): the App owns a set; uninstall is atomic over the set
-├── Apps:   at most one app surface per package (one app, many tabs — no suite)
+├── Apps:   at most one app surface per package (a suite surfaces one per package)
 └── Internal contributions (invisible): plugin | driver | server | ui | theme | agent | module
        — "frameworks inside the .app bundle": bundled or operator-provisioned,
          never independently listed or installed by a consumer
@@ -380,12 +390,16 @@ Steps:
 
 ## 6. Composing a Multi-Plugin Application (ADR-0019)
 
-The consumer model has **one user-visible noun — the App — and no "suite
-contains apps" aggregator**. A solution built from many internal plugins has
-exactly two valid shapes; both ship as *one App* (or several independent Apps)
-to the consumer, never as a wrapper that surfaces N apps.
+The consumer model has **one listed, installed and uninstalled noun — the App,
+that is the `type: app` package — and no package that surfaces N apps**. Under
+ADR-0019 D3 as amended on 2026-11-12 (`958734cbac`), a suite (one install: an
+app package plus the module packages it composes) may surface more than one
+app, provided each app is defined by a different package of the suite; an app
+package, and a module package, defines at most one app. A solution built from
+many internal plugins has three valid shapes, and each ships to the consumer as
+*one App* per listing.
 
-### 6.1 Shape A — One App, internal plugins bundled (recommended for HotCRM)
+### 6.1 Shape A — One App, internal plugins bundled
 
 Compose all internal plugins into a single `type: 'app'` package. The plugins
 are "frameworks inside the .app bundle" — invisible to the consumer. The App
@@ -425,10 +439,30 @@ os publish   # com.hotcrm.finance (type: app)
 **Cons:** verticals do not share one install; cross-app data sharing is a
 separate concern (see ADR-0019 §Out of scope).
 
-> **Not allowed:** a "meta-package" / suite whose only job is to surface N apps
-> to the consumer — the Office "suite contains applications" model ADR-0019
-> removes. `defineStack` enforces *at most one app* per `type: app` package, and
-> the consumer Marketplace lists only `type: app`.
+### 6.3 Shape C — A suite: one app package, modules that each surface an app (HotCRM)
+
+Ship one release artifact (ADR-0130) holding the `type: 'app'` package and the
+`type: 'module'` packages it composes. The consumer lists, installs and
+uninstalls the app package; the modules come with it. Each package may define
+one app, so the suite offers several apps, switched from the app launcher.
+
+```typescript
+// objectstack.config.ts
+export default composeStacks(
+  [serviceStack, marketingStack, salesStack], // each a defineStack() with at most one app
+  { manifest: 'preserve' },                   // one artifact, one package per stack
+);
+```
+
+**Pros:** one listing and one install, with an app per business area.
+**Cons:** the modules version with the app package (ADR-0130 D6).
+
+> **Not allowed:** one package that surfaces N apps, and a suite as a second
+> consumer unit: a suite "is no second consumer unit. It has no listing and no
+> package type of its own" (ADR-0019 D3 amendment note). `defineStack` refuses
+> a `type: app` or `type: module` package that defines more than one app
+> (`STACK_SINGLE_APP_VIOLATION`), and the consumer Marketplace lists only
+> `type: app`.
 
 ---
 
@@ -617,7 +651,7 @@ This comprehensive design document establishes the **Marketplace Protocol** for 
 2. **Publishing**: 6-step flow (develop → validate → build → submit → review → publish)
 3. **Installation**: 4 channels (CLI, SDK, API, UI) with 30+ metadata type registration
 4. **Lifecycle**: State machine for install/enable/disable/upgrade/uninstall
-5. **Composition** (ADR-0019): one App (internal plugins bundled) or several independent Apps — never a suite
+5. **Composition** (ADR-0019, D3 as amended 2026-11-12): one App (internal plugins bundled), several independent Apps, or a suite whose app package and modules each surface at most one app — never one package that surfaces N apps
 6. **Security**: 5-level verification, signing, automated scanning, permission review
 7. **Pricing**: 6 models (free to enterprise) with license validation
 8. **Roadmap**: 5 phases across 4 quarters

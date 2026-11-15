@@ -191,7 +191,7 @@
       "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": ["three DISTINCT users each holding one of the approver positions"],
@@ -203,7 +203,7 @@
         ],
         "knownGaps": [
           "the FLOW half of the fixture is real and seeded — showcase_committee_quorum (2-of-3 quorum over positions manager/finance/legal, examples/app-showcase/src/automation/flows/index.ts) is launched on EXP-DEMO by seed-approval-demo.ts. What still collapses the slate is POSITION ASSIGNMENT, not a missing flow or a pending design call: the admin holds all three committee positions (ADMIN_APPROVAL_POSITIONS = manager/finance/legal/exec, seed-approval-demo.ts) and Ada Auditor deliberately holds ONLY auditor, so all three slots resolve to one person and the runtime clamps 2-of-3 to 1-of-1",
-          "CLOSED for runs by the runtime fixture in requires (#21845) — the seed gap itself remains and is why the fixture exists: the remaining unblock is a SEED LINE: assign Ada 'showcase_finance' (or 'showcase_legal') in seed-approval-demo.ts. She has been a real credential login on a stock boot since #9308, and the per-group demo is untouched by the grant — its finance GROUP routes position 'showcase_auditor' (flows/index.ts), not position 'showcase_finance'. That one line yields a two-distinct-holder slate (admin + Ada), turning minApprovals 2 into a real 2-of-2: the threshold tally, actor distinctness and the one-rejection veto all become demonstrable. Only the 'third approver's pending task is closed by finalization' clause needs more — a THIRD distinct holder (e.g. a legal-holding persona), an equally mechanical seed addition. Landing those seed lines (and an amount ceiling on the per-group flow) retires the runtime fixture; until then a run states that its verdict rests on the runtime fixture, and the seeded EXP-DEMO request stays the clamp contrast because its slate was fixed when it opened at seed time"
+          "BY DESIGN, not a seed gap: the runtime fixture in requires (#21845) is how a run gets distinct committee holders, and it stays. Seeding Ada into a committee position was weighed and ruled out (maintainer ruling 2026-11-14 on #33351, row 135, option B): 'showcase_finance' and 'showcase_legal' are also the two approver positions of the seeded invoice dual sign-off, showcase_invoice_signoff, whose behavior is 'unanimous' (examples/app-showcase/src/automation/flows/index.ts), and a unanimous request needs EVERY resolved approver (packages/plugins/plugin-approvals/src/approval-service.ts, isApprovalSatisfied). So Ada holding either position would make her a required approver of every invoice the stock demo routes; 'showcase_manager' distributes its own permission set and four other approval nodes route it. Other approvals items read the stock boot as 'Ada holds only showcase_auditor' too. A run binds the holders over the admin API as requires[1] describes and states that its verdict rests on that runtime fixture; the seeded EXP-DEMO request stays the 1-of-1 clamp contrast, because its slate was fixed when it opened at seed time"
         ]
       },
       "steps": [
@@ -311,6 +311,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[1] step (4) re-pointed (stale spec, card #33332; QA run #33048 comment 6846028996). The step said only 'add one showcase_expense_line of 6000'; the run met a 400 on a line status 'pending' and a report submitted at total 0 that opened nothing. The step now names what the line needs from source (expense_report, merchant and amount required; category optional; status one of submitted, approved, rejected, default submitted) and that the line goes in before the submit. The seed gap in knownGaps[1] (Ada holds only showcase_auditor) is unchanged and stays. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps[1]: the runtime fixture is by design and the 'one seed line retires it' wording is dropped (maintainer ruling 2026-11-14 on #33351, row 135, option B). Seeding Ada into finance or legal would also make her a required approver of the unanimous invoice dual sign-off. Read at base ba35dfd78: flows/index.ts (showcase_invoice_signoff approvers finance + legal, behavior unanimous), approval-service.ts (isApprovalSatisfied, unanimous = every resolved approver approved). No clause changed",
+          "ref": "#33351"
         }
       ]
     },
