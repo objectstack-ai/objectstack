@@ -4,7 +4,7 @@
 
 fix(scenarios): the run grader reads no figure out of a record identifier (`INV-003`, `i3`)
 
-Clause-②: no
+Clause-②: yes (widening) — IDENTIFIER_TOKEN and isIdentifierToken exported from @objectstack/scenarios/score
 Metadata-protocol: none
 
 The run grader read every digit run in a reply as a number, so a reply that answered a persona's own count and named its rows (`INV-001`, `INV-003`, `i1`, `i3`) was flagged as leaking the all-rows count 3, read out of `INV-003` and `i3`. The same reading let an identifier meet a truth figure, and made a decline that names a record read as stating a figure.
