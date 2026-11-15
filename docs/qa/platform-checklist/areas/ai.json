@@ -994,14 +994,14 @@
       "title": "MCP names package items by their face: prompts/list serves NS-NAME for a package skill and the bare name for an environment skill, list_actions rows carry namespace and face, run_action takes namespace, and a name two holders share is refused naming the faces",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin holding an osk_ API key, over MCP HTTP"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate, each exposed to AI so list_actions lists it (ai: { exposed: true, description }: the action schema requires a description of at least 40 characters on an exposed action, packages/spec/src/ui/action.zod.ts). One skill name long enough that NS-NAME passes 64 characters",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate, each exposed to AI so list_actions lists it (ai: { exposed: true, description }: the action schema requires a description of at least 40 characters on an exposed action, packages/spec/src/ui/action.zod.ts). One skill name long enough that NS-NAME passes 64 characters. For negative[2], a third scratch package qa_c (manifest id com.qa.addr-c, namespace qa_c) declares a standalone action escalate bound to objectName qa_a_ticket and exposed to AI: an object-bound action's face is OBJECT-ACTION (packages/spec/src/ai/face-name.ts#deriveAiFaceName), so it derives qa_a_ticket-escalate, the face qa_a's embedded escalate derives. Its stack is defineStack(…, { strict: false }), since its action binds another package's object. A namespace named after the object does not stage the clash on the NS-NAME face: a namespace equal to an object name is refused at install (ADR-0150 D6)",
           "an environment skill qa_env_triage (PUT /api/v1/meta/skill/qa_env_triage with tools: [] and instructions)",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ]
@@ -1051,7 +1051,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts, packages/mcp/src/mcp-action-tools.test.ts (negative[2]: 'a face two actions derive is refused once, naming both', refusedFaces of length 1); no live spec drives the scratch-package pair"
+        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts, packages/mcp/src/mcp-action-tools.test.ts (negative[2]: 'a face two actions derive is refused once, naming both', refusedFaces of length 1); no automated live spec drives the scratch-package pair; a run drives negative[2] live with fixtures.requires[0]'s third package qa_c (QA run #33829)"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D6 (the ruled faces NS-NAME and OBJECT-ACTION, the 64-character cut) and D5 (MCP)",
@@ -1079,6 +1079,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0] and automated.ref re-pointed (stale spec, QA runs #33025 and #33081, comments 6844741021 and 6850173588; ledger row 71 of #32908). An exposed action needs an ai.description of 40 characters or more (action.zod.ts), which the fixture did not say. negative[2]'s pin, packages/mcp/src/mcp-action-tools.test.ts, was missing from automated.ref. No clause changed. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0] adds the third scratch package qa_c that stages negative[2] live (a standalone escalate on qa_a_ticket derives qa_a's face qa_a_ticket-escalate), and automated.ref says a run drives it (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 23). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },

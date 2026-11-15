@@ -700,7 +700,7 @@
       "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -711,7 +711,7 @@
         "requires": [
           "the Revenue Pulse dashboard (showcase_revenue_pulse) — the framework#2501 acceptance fixture: one dateRange (default field issued_on) + one region filter (default field region) driving invoice AND account widgets, account widgets re-mapping via filterBindings (dateRange→signed_on, region→sales_region), one KPI opted out of both (filterBindings false) as the all-time reference",
           "seeded accounts spread across sales_region amer/emea/apac with signed_on dates (src/data/seed/index.ts)",
-          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG): the Studio Interfaces pillar IS the app navigation tree (objectui app-shell StudioDesignSurface.tsx: \"Interfaces: the real App navigation tree\"), so a package with no app shows no dashboard to select (QA run #24573); D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. Delete the scratch package at teardown"
+          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages with the body {id, name, version: '0.1.0', type: 'app'}: the manifest is strict, so a `label` key is refused as unrecognized, and `type` is required) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG): the Studio Interfaces pillar IS the app navigation tree (objectui app-shell StudioDesignSurface.tsx: \"Interfaces: the real App navigation tree\"), so a package with no app shows no dashboard to select (QA run #24573); D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. A scratch dashboard that carries Revenue Pulse's global filters gives each account-bound widget a filterBindings for them (e.g. dateRange→signed_on, region: false) before its first save: a widget the issued_on / region defaults cannot reach is refused 422 dashboard-filter-field-unknown. Delete the scratch package at teardown"
         ]
       },
       "steps": [
@@ -834,6 +834,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[2] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612), re-read at the console pin 4016370af3c9: the scratch package needs an app whose navigation points at the dashboard, because Studio's Interfaces pillar is the app navigation tree (StudioDesignSurface.tsx), and its create paths return early with no app. The recipe named only the package and the dashboard. No clause changed. Wave anchor #24579 §3",
           "ref": "#24671"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[2] names the scratch package body POST /api/v1/packages takes ({id, name, version, type}; 'label' is refused) and the filterBindings a scratch dashboard needs before its first save (else 422 dashboard-filter-field-unknown) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 71). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -1043,7 +1049,7 @@
       "title": "The showcase_delivery analytics cube serves /api/v1/analytics/*: meta discovers its measures/dimensions, a query answers a known aggregate that reconciles against a direct /data aggregate, and an unwired analytics slot degrades honestly to 404",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1057,7 +1063,7 @@
         ]
       },
       "steps": [
-        "probe the slot first: GET /api/v1/analytics/meta and record the status — a 404 (handled:false) means the analytics service slot is empty or filled by a self-declared stub; go straight to the degradation clause and record the honest absence",
+        "probe the slot first: GET /api/v1/analytics/meta and record the status — a 404 (handled:false) means the analytics service slot is empty or filled by a self-declared stub; go straight to the degradation clause and record the honest absence. On a stock boot the slot is always filled: `analytics` is on PLATFORM_ALWAYS_ON_CAPABILITIES (packages/spec/src/kernel/platform-capabilities.ts), which every served boot mounts unless it is booted with `--preset minimal` (packages/core/src/capability-composition.ts#resolveServedCapabilities). So the absent-slot arm (acceptance[4]'s 404 half, negative[1]) has no stock door: a run that stages no minimal-preset boot records that arm skipped with this reason, never a pass and never a FAIL",
         "GET /api/v1/analytics/meta?cube=showcase_delivery and record the returned cube descriptor",
         "establish ground truth: POST /api/v1/data/showcase_task/query with a status group-by count (and a SUM of estimate_hours per status), recording each bucket's count and hour total",
         "POST /api/v1/analytics/query { cube: 'showcase_delivery', measures: ['showcase_delivery.count'], dimensions: ['showcase_delivery.status'] } and record rows",
@@ -1152,6 +1158,12 @@
           "date": "2026-10-16",
           "change": "acceptance[0].verify and source[3] re-pointed to the meta wire shape (checklist-accuracy finding C1 of QA run #23927, wave #23878). GET /api/v1/analytics/meta answers `data` as a BARE array of CubeMeta projections — AnalyticsMetadataResponseSchema says outright there is no `cubes` wrapper (#6442) — so the verify text's 'cubes[] entry' named a key the body never carries. The clause still requires every listed measure and dimension on the showcase_delivery entry; source gains the response schema's anchor",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "steps[0] says the absent-slot arm has no stock door: analytics is always on (PLATFORM_ALWAYS_ON_CAPABILITIES) unless a boot uses --preset minimal, so QA could not reach negative[1] and the step did not say how to record that (QA run #33829, negative[1] skipped; ledger 6896511848 of #33761 row 66). Whether the showcase boots under --preset minimal is not measured here. No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -1273,7 +1285,7 @@
       "title": "Analytics on v18 asks each object's `enable` block and internal flags: a cube or dataset over an apiEnabled:false object is 404, an internal field as dimension / measure / filter is 400 even for admin, an unexposed configured cube is warned at boot and absent from /analytics/meta, and a dataset answer's measure column states its aggregate",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1289,7 +1301,7 @@
       },
       "steps": [
         "POST /api/v1/analytics/query on the cube over the unexposed object, then the same query reaching the OBJECT itself: its inferred cube (cube: '<the object name>') or an inline dataset over it",
-        "POST /api/v1/analytics/query using the internal field as a dimension, then as a filter",
+        "POST /api/v1/analytics/query using the internal field as a dimension, then as a filter: the query key is `where` (where: { FIELD: VALUE }); `filters` is no key of the body and is refused 400 naming `where` (packages/spec/src/api/analytics.zod.ts)",
         "GET /api/v1/analytics/meta and the boot log",
         "POST /api/v1/analytics/dataset/query {datasetName: \"sys_user_metrics\", selection: {measures: [\"user_count\"]}} (a saved dataset is named by `datasetName`; `dataset` is an INLINE definition object); read fields[]. sys_user_metrics declares NO dimensions (packages/platform-objects/src/apps/dashboards/system.datasets.ts), so read the dimension half on a dimensioned dataset too: {datasetName: \"showcase_task_metrics\", selection: {dimensions: [\"status\"], measures: [\"task_count\"]}}"
       ],
@@ -1352,6 +1364,12 @@
           "date": "2026-11-08",
           "change": "fixtures.requires[2] spells the scratch object's key enable: { apiEnabled: false }: a top-level apiEnabled is refused at compile. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "steps[1] names the filter key, `where` (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 29). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
