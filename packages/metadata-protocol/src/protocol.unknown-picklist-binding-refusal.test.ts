@@ -184,7 +184,7 @@ const object = (name: string, bindings: Array<[string, string]>, extra: Record<s
     sharingModel: 'public_read_write',
     fields: {
         name: { type: 'text', label: 'Name' },
-        ...Object.fromEntries(bindings.map(([field, picklist]) => [field, { type: 'select', label: 'Tier', picklist }])),
+        ...Object.fromEntries(bindings.map(([field, picklist]) => [field, { type: 'select', label: `Tier (${field})`, picklist }])),
     },
     ...extra,
 });

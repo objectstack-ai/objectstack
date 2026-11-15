@@ -410,7 +410,7 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
                 name: 'leave_request',
                 label: 'Leave Request',
                 sharingModel: 'private',
-                fields: { owner: { type: 'text', label: 'Owner' } },
+                fields: { owner: { type: 'text', label: 'Owner Name' } },
             },
         });
         expect(result.success).toBe(true);
@@ -700,7 +700,7 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
         label: 'Task',
         sharingModel: 'private',
         fields: {
-            owner: { type: 'text', label: 'Owner' },
+            owner: { type: 'text', label: 'Owner Name' },
             task_no: { type: 'autonumber', label: 'Task No', autonumberFormat: '{plan_no}{000}' },
         },
     });
@@ -711,7 +711,7 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
         label: 'Task',
         sharingModel: 'private',
         fields: {
-            owner: { type: 'text', label: 'Owner' },
+            owner: { type: 'text', label: 'Owner Name' },
         },
     });
 
@@ -788,7 +788,7 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
         // rule objects to would pin nothing…
         const body = {
             ...cleanTaskObject(),
-            fields: { owner: { type: 'text', label: 'Owner', group: 'main_info' } },
+            fields: { owner: { type: 'text', label: 'Owner Name', group: 'main_info' } },
         };
         const wouldFire = validateSemanticRoles({ objects: [body] });
         expect(
