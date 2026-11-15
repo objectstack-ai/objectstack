@@ -83,6 +83,8 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CONTRACT_REVIEW_HEADING_MARKER,
+  CONTRACT_REVIEW_SECURITY_TOUCHING_KEY,
+  CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES,
   H51_SHA_MIN_HEX,
   branchNameTarget,
   closingKeywordTargets,
@@ -102,6 +104,10 @@ import {
 // (#33501 for the low-risk skills arm, #33541 for every other leg), and, through the whole
 // reading, no FAIL spelled elsewhere and no open must-fix or should-fix (#33604). ⛔ Never a second parser.
 export { contractReviewRecordReading, contractReviewVerdictLines };
+// The record's `Security-touching:` line — the low-risk skills arm's machine line, read through the same
+// reading (`securityTouching`). Its key and its two values are re-exported so the template below prints
+// exactly what that reader takes, ⛔ never a second spelling.
+export { CONTRACT_REVIEW_SECURITY_TOUCHING_KEY, CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES };
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
@@ -1777,6 +1783,28 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
 });
 
 /**
+ * Does the record printed for this face carry the `Security-touching:` line — the ONE machine line the
+ * low-risk skills arm stands on (`lowRiskArmVerdict`, `check-governed-merges.mjs`)? With the `hits`
+ * known (`--paths`), exactly when one sits under a low-risk row (`lowRiskRowHit`, the register's own
+ * test); with none known, on every at-tier face a governed path can sit on — the bare template, the
+ * rules face and the schema face — since a record printed blind must not drop a line an arm PR lands
+ * on. ⛔ Not on the narrowing or the declaration face: neither holds a governed path. The brief hands
+ * the reviewer the duty on the same predicate, so the two printed shapes cannot disagree. Pure.
+ */
+export function recordCarriesSecurityTouching(face, tierName, scopeHits) {
+  if (tierName !== CONTRACT_REVIEW_TIER_NAME) return false;
+  if (scopeHits !== undefined) return lowRiskRowHit(scopeHits);
+  return face?.id !== 'narrowing';
+}
+
+/**
+ * The value the printed record ships on its `Security-touching:` line: `yes`. Like every placeholder
+ * above it PARSES through the reader that judges the real thing, and it fails closed — a record pasted
+ * with it left in keeps the pull request at Tier H, so `no` is only ever a reviewer's own statement.
+ */
+export const RECORD_SECURITY_TOUCHING_DEFAULT = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES[1];
+
+/**
  * The record itself — the lines a seat copies, and nothing else.
  *
  * ⭐ Rendered from the same constants the readers compare against
@@ -1816,6 +1844,11 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
  * The heading is prose to every reader in this file: the locator, the `Served-tier:` and head
  * readers are unchanged by it, which the self-test drives.
  *
+ * ⭐ `Security-touching:` rides the header block, after `Scope:`, where `recordCarriesSecurityTouching`
+ * says the record carries it: the low-risk skills arm reads it through `contractReviewRecordReading`
+ * and keeps the pull request at Tier H unless it reads `no`. It ships `yes`
+ * (`RECORD_SECURITY_TOUCHING_DEFAULT`), so an unedited paste fails closed.
+ *
  * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[], faceId?: string}} values
  * @returns {string[]}
  */
@@ -1838,6 +1871,7 @@ export function contractReviewRecordLines(values = {}) {
     `Head-sha: \`${headSha}\``,
     'Local-runs: none',
     ...(tierName === CONTRACT_REVIEW_TIER_NAME ? [`Scope: ${scopeHits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}`] : []),
+    ...(recordCarriesSecurityTouching(face, tierName, values.scopeHits) ? [`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}: ${RECORD_SECURITY_TOUCHING_DEFAULT}`] : []),
     '',
     '### ① Derived judgments',
     '',
@@ -2061,6 +2095,15 @@ export function contractReviewTemplateLines(values = {}) {
     '                    named there; Tier H approval and the queue guard stay whole-PR. On the narrowing',
     '                    face the floor is every path of the diff outside the prose faces: no path is a remainder,',
     '                    and `+` names every file those hunks make a claim about, read in the cited code.',
+    ...(recordCarriesSecurityTouching(face, tierName, scopeHits) ? [
+      `  · ${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}  read by the low-risk skills arm alone (skill wording, add-only ADR notes): that arm`,
+      '                    lands a PR on this record with no human approval, and only when this line reads `no`.',
+      '                    Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,',
+      '                    authentication or other security behaviour, whatever the path is called; else `yes`, and',
+      '                    the seat adopting the record adds the `security` label. A missing line, `yes`, a second',
+      '                    line, one that is quoted, fenced or code-indented, or anything after the value keeps the',
+      `                    PR at Tier H. The template ships \`${RECORD_SECURITY_TOUCHING_DEFAULT}\`, so an unedited paste never lands on the arm.`,
+    ] : []),
     '  · ③ Boundary flags  every dev flag and every `open_questions` entry answered, or escalated; and on',
     '                    every face the SQL push-down check:',
     ...TEMPLATE_PUSH_DOWN_LINES,
@@ -2250,15 +2293,24 @@ export function contractReviewBriefLines(values = {}) {
   // `--paths` the brief cannot know the hits, and the skill teaches the bare `--brief-template`, so every
   // at-tier brief over unknown paths carries the duty in its conditional form.
   const securityDuty = "  behaviour the path name doesn't show, the record says so and the seat adopting the record adds the `security` label.";
-  const lowRiskLines = scopeHits !== undefined ? (lowRiskRowHit(scopeHits) ? [
+  // WHERE the record says so: its `Security-touching:` line, which the arm reads and stands on at `no` alone.
+  // Printed on the predicate the record template prints the line on, so the brief never asks for a line the
+  // record does not carry.
+  const securityLine = [
+    `  The record says so on its \`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}:\` line, and the arm lands on \`no\` alone: write \`no\` ONLY when no changed`,
+    '  hunk teaches permission, sharing, credential, token, authentication or other security behaviour, else `yes`.',
+  ];
+  const lowRiskLines = !recordCarriesSecurityTouching(face, tierName, scopeHits) ? [] : scopeHits !== undefined ? [
     'Security — a `hits` path sits on the low-risk skills arm: when the change teaches security, auth or permission',
     securityDuty,
+    ...securityLine,
     '',
-  ] : []) : atTier && face?.id !== 'narrowing' ? [
+  ] : [
     'Security — if a `hits` path is under `skills/**` or `ui/skills/**` and the change teaches security, auth or permission',
     securityDuty,
+    ...securityLine,
     '',
-  ] : [];
+  ];
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
@@ -2459,7 +2511,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
   // Raised 30 → 32 with ③'s SQL push-down check in the legend on every face, and its faceless-PR carrier: two pins.
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 32,
+  // Raised 32 → 38 with the `Security-touching:` line the low-risk skills arm reads: the record line and its
+  // shipped `yes`, the whole template read through the record reader, the `no` reading, the faces and hits it
+  // prints on, the one predicate, and the legend — six pins.
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 38,
   // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
   // posted by an untrusted author not read — two pins, two cases.
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 19,
@@ -2468,7 +2523,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 24,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
-  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 22,
+  // Raised 22 → 24 with the brief's `Security-touching:` duty: where the record says so, and never on a brief whose record lacks the line.
+  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 24,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
@@ -2784,6 +2840,9 @@ export async function selfTest() {
   t('⭐ the brief over a low-risk skills path hands the `security` label duty, unconditionally, on either catalog row and through the CLI — the record says so, the adopting seat labels', (() => { const own = ['skills/objectstack-data/SKILL.md', 'ui/skills/objectui-forms/SKILL.md']; return own.every((p) => { const b = contractReviewBriefLines({ paths: [p, ...DECL_PATHS] }).join('\n'); return says(b, SECURITY_DUTY) && says(b, 'sits on the low-risk skills arm') && !says(b, SECURITY_IF); }) && says(faceCli(['--brief-template', '--paths', own[0]]).stdout, "behaviour the path name doesn't show, the record says so") && !says(contractReviewBriefLines({ paths: [own[0]] }).join('\n'), 'reviewer adds'); })());
   t('⭐ SF5: the bare `--brief-template` and `--face rules` brief — the spelling the skill teaches — carry the duty in its CONDITIONAL form', (() => { const forms = [contractReviewBriefLines(), contractReviewBriefLines({ face: 'rules' }), contractReviewBriefLines({ face: 'schema' })].map((b) => b.join('\n')); return forms.every((b) => says(b, SECURITY_IF) && says(b, SECURITY_DUTY)) && says(faceCli(['--brief-template']).stdout, SECURITY_IF) && says(faceCli(['--brief-template', '--face', 'rules']).stdout, SECURITY_IF); })());
   t('⛔ …and a brief whose `hits` are known and off the arm carries none, nor does the declaration or the narrowing face', [contractReviewBriefLines({ paths: MIXED }), contractReviewBriefLines({ face: 'declaration' }), contractReviewBriefLines({ face: 'narrowing' })].every((b) => !says(b.join('\n'), SECURITY_DUTY)));
+  const SECURITY_LINE_DUTY = 'The record says so on its `Security-touching:` line, and the arm lands on `no` alone: write `no` ONLY when no changed';
+  t('⭐ the brief names WHERE the record says so — its `Security-touching:` line, `no` only when no changed hunk teaches security behaviour — on every brief that hands the duty, the CLI included', [contractReviewBriefLines({ paths: ['skills/objectstack-data/SKILL.md'] }), contractReviewBriefLines(), contractReviewBriefLines({ face: 'rules' }), contractReviewBriefLines({ face: 'schema' })].every((b) => says(b.join('\n'), SECURITY_LINE_DUTY) && says(b.join('\n'), 'hunk teaches permission, sharing, credential, token, authentication or other security behaviour, else `yes`.')) && says(faceCli(['--brief-template', '--paths', 'skills/objectstack-data/SKILL.md']).stdout, SECURITY_LINE_DUTY));
+  t('⛔ …and a brief never asks for a line its record does not carry: off the arm, on the narrowing face and on the declaration face neither names `Security-touching`', [{ paths: MIXED }, { face: 'declaration' }, { face: 'narrowing' }].every((v) => !says(contractReviewBriefLines(v).join('\n'), 'Security-touching') && !says(contractReviewTemplateLines(v).join('\n'), 'Security-touching')) && [{}, { face: 'rules' }, { paths: ['skills/objectstack-data/SKILL.md'] }].every((v) => says(contractReviewBriefLines(v).join('\n'), 'Security-touching') && says(fenced(contractReviewTemplateLines(v)), 'Security-touching: yes')));
   t('⭐ `--template --paths` and `--brief-template --paths` print exactly the function output and exit 0', (() => { const a = faceCli(['--template', '--paths', ...MIXED]); const b = faceCli(['--brief-template', '--paths', ...MIXED]); return a.status === 0 && a.stdout === `${contractReviewTemplateLines({ paths: MIXED }).join('\n')}\n` && b.status === 0 && b.stdout === `${contractReviewBriefLines({ paths: MIXED }).join('\n')}\n`; })());
   t('⛔ `--paths` naming no path, or beside `--face` in either order, is REFUSED with the usage, exit 1', [['--template', '--paths'], ['--template', '--paths', RULES_PATH, '--face', 'rules'], ['--brief-template', '--face', 'rules', '--paths', RULES_PATH], ['--template', '--paths', '']].every((args) => { const r = faceCli(args); return r.status === 1 && says(r.stderr, 'usage:'); }));
   t('…and the usage names the flag, the face it reads and the line it fills', ['--paths PATH...', '`reviewFace`', '`Scope:`'].every((s) => usageLines().join('\n').includes(s)));
@@ -3274,6 +3333,17 @@ export async function selfTest() {
   t('⭐ the record carries `Local-runs: none` — the read-only shape, declared where the reader reads it', TPL_RECORD.includes('Local-runs: none') && readLocalRuns(TPL_RECORD).value === 'none' && localRunsStand(readLocalRuns(TPL_TEXT)));
   t('…and the notes explain both values and that an absent line is not re-judged', says(TPL_TEXT, 'probe — REASON') && says(TPL_TEXT, 'not re-judged'));
   t('the printed location is the ONE thread set\'s own words', says(TPL_TEXT, `ONE comment on ${REVIEW_OF_RECORD_LOCATION};`));
+  // -- the `Security-touching:` line: the low-risk skills arm's machine line, printed where an arm PR can sit --
+  const ST_LINE = (value) => `Security-touching: ${value}`;
+  const stOf = (text) => contractReviewRecordReading(text)?.securityTouching;
+  const ARM_PATHS = [['skills', 'objectstack-data', 'SKILL.md'].join('/'), ['ui', 'skills', 'objectui-forms', 'SKILL.md'].join('/'), ['docs', 'adr', '0001-x.md'].join('/')];
+  const OFF_ARM_PATH = ['.claude', 'agents', 'os-dev.md'].join('/');
+  t('⭐ the bare record carries ONE `Security-touching:` line, right after `Scope:`, and it ships `yes` — read by the fleet\'s record reader as `yes`, never as `no`', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(ST_LINE('yes')); return i > 0 && rec[i - 1].startsWith('Scope: ') && rec[i + 1] === '' && rec.filter((l) => l.startsWith('Security-touching')).length === 1 && JSON.stringify(stOf(TPL_RECORD)) === '{"state":"read","value":"yes"}' && RECORD_SECURITY_TOUCHING_DEFAULT === 'yes'; })());
+  t('⭐ the WHOLE printed template reads that one line too — the legend around the fence carries no second declaration, on any face that prints it', [{}, { face: 'rules' }, { face: 'schema' }, ...ARM_PATHS.map((path) => ({ paths: [path] }))].every((v) => JSON.stringify(stOf(contractReviewTemplateLines(v).join('\n'))) === '{"state":"read","value":"yes"}'));
+  t('…and a reviewer who writes `no` over it is read as `no` — the one value the arm stands on', JSON.stringify(stOf(TPL_RECORD.replace(ST_LINE('yes'), ST_LINE('no')))) === '{"state":"read","value":"no"}' && TPL_RECORD.includes(`\n${ST_LINE('yes')}\n`));
+  t('⛔ the line prints exactly where an arm PR can sit: with the `hits` known, under a low-risk row (skills, ui/skills, an ADR) and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face', ARM_PATHS.every((path) => fenced(contractReviewTemplateLines({ paths: [path] })).includes(`\n${ST_LINE('yes')}\n`)) && !contractReviewTemplateLines({ paths: [OFF_ARM_PATH] }).join('\n').includes('Security-touching') && !contractReviewTemplateLines({ paths: MIXED }).join('\n').includes('Security-touching') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(ST_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Security-touching')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Security-touching'));
+  t('the predicate is ONE function over face, tier and hits — below tier never, a narrowing never, known hits by the register\'s own low-risk row test', recordCarriesSecurityTouching(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, undefined) && !recordCarriesSecurityTouching(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined) && recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [ARM_PATHS[0]]) && !recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [OFF_ARM_PATH]) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, [ARM_PATHS[0]]));
+  t('the notes explain the line where the record carries it — who reads it, when `no` may be written, what keeps Tier H — and the key and values are the reader\'s own constants', ['· Security-touching  read by the low-risk skills arm alone', 'only when this line reads `no`', 'Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,', 'adds the `security` label', 'PR at Tier H', 'The template ships `yes`'].every((frag) => says(TPL_TEXT, frag)) && CONTRACT_REVIEW_SECURITY_TOUCHING_KEY === 'Security-touching' && CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join() === 'no,yes');
   // -- item ④: the owner's full-review order rides THIS record as a fourth section ------------
   const DJ = '### ④ Design judgment';
   const headings = (lines) => lines.filter((line) => line.startsWith('### '));
