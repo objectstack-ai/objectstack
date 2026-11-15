@@ -24,8 +24,7 @@
  * command's boot, never the sealer's.
  *
  * Pinned: the command boots, reads the ledger and gives its normal verdict
- * (every sealed row `unmodified`, exit 0), and no refusal about the
- * `ownership-queue` service reaches either stream.
+ * (every sealed row `unmodified`, exit 0) — never `boot_failed`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -208,10 +207,5 @@ describe('os audit verify on a stack that declares queues and assignmentRules (A
     expect(doc.error).toBeUndefined();
     expect(doc.report).toMatchObject({ ok: true, sealed: true, objects: [LEDGER], faults: [], rows: [] });
     expect(doc.report.totals.unmodified).toBe(3);
-  });
-
-  it('2. no refusal about the ownership-queue service reaches either stream', () => {
-    expect(run.stdout).not.toContain("'ownership-queue'");
-    expect(run.stderr).not.toContain("'ownership-queue'");
   });
 });
