@@ -15,6 +15,7 @@
  *   - no `knowledge` manifest in the hub list, and its doors refuse;
  *   - no `embedder_*` key and no `test_embedder` button on the `ai` page, and a
  *     write of an embedder key is refused like any undeclared key;
+ *   - neither test button's door reaches a handler;
  *   - no Setup entry opening the knowledge page;
  *   - the AI page's description names no knowledge base, in any locale.
  *
@@ -32,6 +33,7 @@ import { registerSettingsRoutes } from './settings-routes.js';
 import { MockHttp } from './__tests__/settings-door.testkit.js';
 import { aiEmbedderSettingsSpecifiers, aiSettingsManifest, builtinSettingsManifests } from './manifests/index.js';
 import { settingsBuiltinTranslations } from './translations/index.js';
+import { settingsActionCopy } from './settings-action-copy.js';
 
 const EMBEDDER_KEYS = aiEmbedderSettingsSpecifiers.map((s) => s.key).filter((k): k is string => !!k);
 
@@ -113,6 +115,21 @@ describe('#33933 — no knowledge settings on a default boot', async () => {
     const write = await call(http, 'PUT /api/settings/:namespace', { namespace: 'ai' }, { embedder_provider: 'openai' });
     expect(write.status).toBe(400);
     expect(write.body?.error?.code).toBe('UNKNOWN_KEY');
+  });
+
+  it('neither test button reaches a handler at its door', async () => {
+    const route = 'POST /api/settings/:namespace/:actionId';
+    const embedder = await call(http, route, { namespace: 'ai', actionId: 'test_embedder' }, {
+      values: { embedder_provider: 'openai', embedder_api_key: 'sk-test', embedder_model: 'text-embedding-3-small' },
+    });
+    expect(embedder.status).toBe(400);
+    expect(embedder.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    // "Not reached" is judged against the hub's own no-handler answer for this
+    // id, never against a copy of its wording.
+    expect(embedder.body?.error?.details?.message).toBe(settingsActionCopy(undefined).noHandler('test_embedder', 'ai'));
+    const knowledge = await call(http, route, { namespace: 'knowledge', actionId: 'test' }, { values: { adapter: 'ragflow' } });
+    expect(knowledge.status).toBe(404);
+    expect(knowledge.body?.error?.code).toBe('UNKNOWN_NAMESPACE');
   });
 
   it('the stock Setup navigation opens no knowledge page', () => {
