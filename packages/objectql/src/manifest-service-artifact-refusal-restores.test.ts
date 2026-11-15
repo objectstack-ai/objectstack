@@ -598,6 +598,26 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(followedBy(ql)).toBe('invoice.currency_code');
   });
 
+  it('[#33593 R6] CONTROL: the child\'s upgrade that re-points the pair onto ANOTHER parent lacking the code is refused, though the pointer reads the same', async () => {
+    // The cold boot admits the amount following `invoice.title` of
+    // `suite_invoice`, which holds no code; `suite_other` holds none either.
+    const { ql, manifest } = await bootWith([
+      { ...ledger(), objects: [invoice(), object('suite_other')] },
+      billing([line('invoice.title')]),
+    ]);
+
+    // 1.1.0 changes only the master_detail's reference: the pointer is the
+    // same string, but the pair it makes is new, so the upgrade answers for it.
+    const repointed = line('invoice.title');
+    (repointed.fields as Record<string, any>).invoice = { type: 'master_detail', label: 'Invoice', reference: 'suite_other' };
+    const err = await refusal(() => manifest.register(billing([repointed], '1.1.0')));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
+    expect(String(err?.message)).toContain("'suite_other.title'");
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.0');
+    expect(fieldOf(ql, 'suite_line', 'invoice')?.reference).toBe('suite_invoice');
+  });
+
   /** What the refusal adds when only the environment's own object of the name, served over the package's, earns it. */
   const OVER_ENVIRONMENT_OBJECT = "On this server 'suite_invoice' is served from the environment's own object of that name, "
     + "which lies over the one a package ships. Read against the package's own definition this pair is not refused, "
@@ -957,5 +977,23 @@ describe('[#33593] an extension\'s record-mode amount is judged against its obje
 
     expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('2.0.0');
     expect(fieldOf(ql, 'suite_invoice', 'cc')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('R6: an extension upgrade that re-points its own master_detail onto ANOTHER parent lacking the code is refused, though the pointer reads the same', async () => {
+    const viaInv2 = (reference: string) => ({
+      inv2: { type: 'master_detail', label: 'Invoice 2', reference },
+      ext_amount: follows('inv2.title'),
+    });
+    const { ql, manifest } = await bootWith([
+      { ...ledger(), objects: [invoice(), object('suite_other')] },
+      billing([line()]),
+      extender(viaInv2('suite_invoice')),
+    ]);
+
+    const err = await refusal(() => manifest.register(extender(viaInv2('suite_other'), '1.0.1')));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(ql.registry.getPackage(EXTENDER)?.manifest?.version).toBe('1.0.0');
+    expect(fieldOf(ql, 'suite_line', 'inv2')?.reference).toBe('suite_invoice');
   });
 });

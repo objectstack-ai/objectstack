@@ -550,7 +550,10 @@ export function recordCurrencyFollowRefusal(
  * One refused PAIR's identity across the two readings
  * {@link recordCurrencyFollowRefusal} compares: the kind of pair, the object
  * and field declaring it, and what it points at — never the sentence, which
- * lists the parent's code fields and so moves when a run only adds one.
+ * lists the parent's code fields and so moves when a run only adds one. A
+ * following amount's target names the OBJECT its master_detail reaches as
+ * well as the pointer: a run that re-points the pair's master_detail onto
+ * another parent makes a new pair, so it is that run's to answer for.
  */
 function followPairKey(kind: 'follow' | 'rollup', object: string, field: string, target: string): string {
   return `${kind}\u0000${object}\u0000${field}\u0000${target}`;
@@ -590,7 +593,7 @@ function* followRefusalsOf(
     const message = recordCurrencyFollowedCodeError({
       object: name, field, via: path.via, code: path.code, parent: path.master, parentFields,
     });
-    if (message !== undefined) yield [followPairKey('follow', name, field, String(pointer)), new RecordCurrencyFollowRefusedError(name, field, message)];
+    if (message !== undefined) yield [followPairKey('follow', name, field, `${path.master}.${String(pointer)}`), new RecordCurrencyFollowRefusedError(name, field, message)];
   }
 
   // The other ends, already registered: (a) at the parent, (c) at the child.
@@ -609,7 +612,7 @@ function* followRefusalsOf(
         // R6: an amount an extension adds is named with its package, so the
         // upgrade's author learns whose field the change breaks.
         const extendedBy = view.extensionPackageOf(otherName, field);
-        yield [followPairKey('follow', otherName, field, String(pointer)), new RecordCurrencyFollowRefusedError(
+        yield [followPairKey('follow', otherName, field, `${name}.${String(pointer)}`), new RecordCurrencyFollowRefusedError(
           otherName,
           field,
           extendedBy === undefined

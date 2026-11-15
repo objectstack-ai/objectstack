@@ -17,9 +17,11 @@ export const entry: SemanticMigration = {
     + '/api/v1/marketplace/install-local, the artifact hot reload), a published single save of an `object_extension` '
     + 'item through the `/meta` doors, and the batch writers. Also the owner of the extended object, registering after '
     + 'the extension, over the amounts the extension adds. A published single save of an `object_extension` item also '
-    + 'meets D6\'s roll-up door, as the batch writer\'s extension row already did: a `summary` the extension adds that '
-    + 'rolls up `sum` / `avg` / `min` / `max` of a child amount whose rows carry their own currency is refused 422 '
-    + 'instead of being stored. Not the cold boot',
+    + 'meets D6\'s roll-up door, as the batch writer\'s extension row already did, in both directions: a `summary` the '
+    + 'extension adds that rolls up `sum` / `avg` / `min` / `max` of a child amount, or an amount the extension adds '
+    + 'that a registered parent\'s such roll-up reads, is refused 422 instead of being stored when that child amount is '
+    + 'declared `currencyMode: \'record\'` (in each row\'s own currency, or following a parent\'s code but not read on '
+    + 'that parent through the master_detail it follows). Not the cold boot',
   replacement:
     'Name in the second segment of `currencyField` a field of the master_detail target that declares '
     + '`valueDomain: \'iso_4217_currency\'` (the refusal lists the candidates), or install the package that supplies '
@@ -27,7 +29,10 @@ export const entry: SemanticMigration = {
     + 'extension\'s amount, the correction is the extension\'s package: it upgrades with the amount corrected, or is '
     + 'uninstalled, and the owner is then installed again unchanged. When a parent\'s upgrade is refused because it '
     + 'removes or de-codes a field an extension\'s amount follows, the refusal names that package and field: keep the '
-    + 'field in the upgrade, or have that package move its amount first',
+    + 'field in the upgrade, or have that package move its amount first. When a published `object_extension` save is '
+    + 'refused by D6\'s roll-up door, roll up through the master_detail the amount follows '
+    + '(`summaryOperations.relationshipField`, on the parent it follows), use `function: \'count\'`, or roll up a '
+    + 'stored home-currency amount field of the child instead',
   reason:
     'An extension\'s following amount was judged as the extension\'s body alone, which holds only the fields it adds, '
     + 'so the following half was never asked: an extension-only package could add an amount following a parent field '
@@ -39,7 +44,9 @@ export const entry: SemanticMigration = {
     + 'not refused over it. For runs (an install, an upgrade, a reload) this supersedes the entry '
     + '`record-currency-follow-pair-refused-on-install-and-reload` where it says the next upgrade or reload of a '
     + 'package holding only the other end of a pair is refused "although nothing in that package is wrong": such a run '
-    + 'is now refused only when it changes the pair (the pair is compared, not the refusal sentence). A single save and '
+    + 'is now refused only when it changes the pair (the pair is compared, not the refusal sentence: the object and field '
+    + 'declaring it, the pointer, and the object the pointer\'s master_detail reaches, so re-pointing that master_detail '
+    + 'onto another parent lacking the code is refused). A single save and '
     + 'the batch writers judge against the slot left empty, so re-publishing an unchanged extension whose amount a cold '
     + 'boot admitted is refused there, as an unchanged own body already was. '
     + 'A field another extension supplies counts only while that extension is installed and '
