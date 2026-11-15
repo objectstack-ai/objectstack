@@ -339,23 +339,32 @@ workload needs it. Ship correct-and-uniform first.
 > - **`Field.date` is untouched.** A timezone-naive calendar day is never zone-shifted (#24618):
 >   the native arm keeps its calendar-day expression under every zone, as the in-memory path
 >   does. Only an instant column takes the zone.
-> - **Only an IANA zone name is pushed down.** `timezone` is an unvalidated string, and the two
->   sides read the other spellings differently, some of them silently: the in-memory path reads
->   a zone it cannot resolve as UTC (`calendarPartsInTzOrUtc`) where PostgreSQL rejects it; an
->   offset string such as `+08:00` is east of UTC in `Intl` and west of it under PostgreSQL's
->   POSIX reading in `AT TIME ZONE`; abbreviations and POSIX forms (`CST`, `UTC+8`) are known to
->   PostgreSQL and fall back to UTC in memory. So a zone string goes to the database only when
->   the runtime resolves it as an IANA zone name; anything else keeps the in-memory path, which
->   answers it as it does today.
+> - **Only the runtime's resolved IANA zone name is pushed down, never the raw string.**
+>   `timezone` is an unvalidated string, and the two sides read other spellings differently,
+>   some of them silently (measured on Node 22): a zone `Intl` cannot resolve (`Bogus/Zone`,
+>   the POSIX form `UTC+8`) throws there, and the in-memory path then reads UTC
+>   (`calendarPartsInTzOrUtc`), where PostgreSQL rejects the name or, for `UTC+8`, reads it as
+>   POSIX; an offset string such as `+08:00` is east of UTC in `Intl` and west of it under
+>   PostgreSQL's POSIX reading in `AT TIME ZONE`; and an abbreviation resolves in `Intl` to a
+>   zone with DST (`CST` to `America/Chicago`, `CET` to `Europe/Brussels`) where PostgreSQL
+>   reads it as a fixed offset, an hour apart in summer. The test is therefore: resolve the
+>   string through the runtime (the `resolvedOptions().timeZone` of an `Intl.DateTimeFormat`
+>   built with it); if that throws, or the resolved name is an offset or an abbreviation, keep
+>   the in-memory path; otherwise push down the resolved canonical name.
+>   Membership in `Intl.supportedValuesOf('timeZone')` is not the test: it refuses every link
+>   name, such as `US/Eastern`, which resolves to `America/New_York`.
 > - **Parity is the acceptance rule.** In-database buckets equal the in-memory buckets
 >   (`applyInMemoryAggregation`, the side `checkDateBucketParity` in `@objectstack/verify`
 >   reads) for a DST zone across both DST boundaries — Europe/Berlin in March and in October —
->   and for Asia/Taipei, with a `Field.date` column in the fixtures under the non-UTC zone
->   beside the instant columns. This turns the risk the paragraph above named (different bucket
->   boundaries per driver for the same data) into a test that fails, instead of a reason not to
->   push down. One residual is recorded here, not closed: the database's tz data and the Node
->   runtime's ICU tz data are two copies, so a zone whose rules changed between their versions
->   can differ near the changed instants.
+>   and for Asia/Taipei. The fixtures also carry a `Field.date` column under a zone WEST of UTC
+>   (America/New_York): a calendar day wrongly read as an instant at UTC midnight lands on the
+>   previous day only there, so an east-of-UTC zone cannot catch that defect. This turns the
+>   risk the paragraph above named (different bucket boundaries per driver for the same data)
+>   into a test that fails, instead of a reason not to push down. One residual is recorded
+>   here, not closed: the database's tz data and the Node runtime's ICU tz data are two copies,
+>   so a zone whose rules changed between their versions can bucket differently near the
+>   changed instants, and a name that exists in one copy but not the other shows as a query the
+>   database rejects.
 > - **Security does not move.** The read scope and the tenant wall stay in the aggregate's
 >   `WHERE`: both paths take the AST `composeReadableIdsAtBoundary` returns and the same driver
 >   options, and only the bucketing expression changes. The other reasons the engine takes the
