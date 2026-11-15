@@ -32,6 +32,14 @@
  *   (`POST /api/v1/packages/:id/rollback`), a loop of `revertCommit`, whose
  *   answer carries every step's notices.
  *
+ * [#32958] …and the delete door that hands an object back the definition
+ * beneath it (`protocol-diff-delete-load.ts`): `deleteMetaItem`
+ * (`DELETE /api/v1/meta/:type/:name`) removing an `object_extension` that
+ * re-declared a stored computed field captures before its registry heal and
+ * fills after it. Like the
+ * revert door's removal limb it runs no storage sync, so its answer carries
+ * no refused sync.
+ *
  * A draft save makes nothing live and fills nothing. A peer applying another
  * node's mutation (`applyRemoteMetadataMutation`) fills nothing either: the
  * node whose door took the change filled the shared rows once.
@@ -53,7 +61,7 @@
  *   write, an object it could not read, or a storage sync that was refused,
  *   with what is left and how to fill it.
  *
- * The save, publish, rollback or revert itself is never failed by its fill:
+ * The save, publish, rollback, revert or delete itself is never failed by its fill:
  * the definition is live and stays live, and the answer says what the rows hold.
  */
 

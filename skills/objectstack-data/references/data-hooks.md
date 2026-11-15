@@ -125,32 +125,6 @@ const myHook = defineHook({
 
 ### Key Properties Explained
 
-#### `object` — Target Scope
-
-```typescript
-// Single object
-object: 'account'
-
-// Multiple objects
-object: ['account', 'contact', 'lead']
-
-// All objects (use sparingly — performance impact)
-object: '*'
-```
-
-#### `events` — Lifecycle Events
-
-```typescript
-// Single event
-events: ['beforeInsert']
-
-// Multiple events (common pattern)
-events: ['beforeInsert', 'beforeUpdate']
-
-// After events for side effects
-events: ['afterInsert', 'afterUpdate', 'afterDelete']
-```
-
 #### `body` — Implementation
 
 A `source` of statements against `ctx`; a throw aborts the write
@@ -165,42 +139,6 @@ body: {
 
 The deprecated `handler` takes an inline function or a registered function's
 name ([Registration Methods](#registration-methods)).
-
-#### `priority` — Execution Order
-
-Lower numbers execute first:
-
-```typescript
-// System hooks (framework internals)
-priority: 50
-
-// Application hooks (your app logic)
-priority: 100  // default
-
-// User customizations
-priority: 1000
-```
-
-#### `async` — Background Execution
-
-Only applicable for `after*` events:
-
-```typescript
-// Blocking (default) — runs within transaction
-async: false
-
-// Fire-and-forget — runs in background
-async: true
-```
-
-**When to use async: true:**
-- Sending notifications
-- Non-critical side effects
-
-**When to use async: false:**
-- Creating related records
-- Updating dependent data
-- Critical consistency requirements
 
 #### `condition` — Declarative Filtering
 
@@ -273,30 +211,10 @@ in neither). So:
 ⚠️ **An unevaluable condition ABORTS the operation.** A typo'd key
 (`record.stauts`), a column read off `previous` on an insert, or a comparison
 CEL has no overload for does **not** degrade to "the hook did not fire" — it
-**fails the write**. Until protocol 17 the gate emitted a `logger.warn` and
-returned `false`, which is why the `previous`-on-insert and `has(...)` bullets
-above are load-bearing rather than stylistic: a `before*` guard swallowed into
-`false` silently let writes through, and an audit hook swallowed into `false`
-silently dropped records.
+**fails the write**.
 
-Practical consequence when authoring: spell keys against the object's **declared**
-fields, and on an insert event read `previous` only against `null` — a column
-read off it there is the mistake that used to cost you a hook that quietly never
-ran, and now costs you every write the hook is attached to.
-
-#### `onError` — Error Handling
-
-The default is `'abort'` **unconditionally** — for `after*` hooks too, a sync
-after-hook that throws rolls back the transaction. Set `onError: 'log'`
-explicitly on `after*` side-effect hooks:
-
-```typescript
-// Abort operation on error — the default for ALL hooks (before* AND after*)
-onError: 'abort'
-
-// Log error and continue — set this on after* side-effect hooks
-onError: 'log'
-```
+So spell keys against the object's **declared** fields, and on an insert event
+read `previous` only against `null`: the mistake fails every write the hook is on.
 
 ---
 
@@ -346,7 +264,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
-| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0 (declared, never produced). |
+| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0. |
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
@@ -360,10 +278,6 @@ The sandbox is handed a **JSON snapshot** of these (built by
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
 the first arg.)
-
-Because the VM only holds a snapshot, mutating `ctx.previous` / `ctx.result` is
-local and thrown away; the only way to change the persisted write is
-`ctx.input.x = …` or `return { … }`.
 
 ### `ctx.api.object(name)` — the cross-object repo
 
@@ -387,7 +301,7 @@ same DSL as the [objectstack-query](../../objectstack-query/SKILL.md) skill:
 await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
 await ctx.api.object('candidate').find({ where: { stage: 'hired' } });
 await ctx.api.object('invoice').count({ where: { amount: { $gte: 1000 } } });
-await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner: uid }] } });
+await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner_id: uid }] } });
 ```
 
 > `filter:` is tolerated as an **object-valued** alias (normalised to `where`),
@@ -697,31 +611,6 @@ result: {
 }
 ```
 
-### `previous` — Previous State
-
-Available in update/delete hooks:
-
-```typescript
-// beforeUpdate, afterUpdate
-ctx.previous: {
-  id: '123',
-  status: 'pending',  // Old value
-  updated_at: '2026-04-01T00:00:00Z',
-}
-
-// beforeDelete, afterDelete
-ctx.previous: {
-  id: '123',
-  name: 'Old Account',
-  // ... full record state
-}
-```
-
-### Cross-Object API
-
-Access other objects within the same transaction. `ctx.api.object(name)` is the
-same repository in both forms; the canonical query key is **`where`**.
-
 ---
 
 ## Common Patterns
@@ -736,17 +625,20 @@ const protectStrategicAccounts = defineHook({
   name: 'crm_protect_strategic_accounts',
   object: 'account',
   events: ['beforeDelete'],
+  refusals: {
+    STRATEGIC_ACCOUNT: { message: 'A strategic account cannot be deleted.' },
+    OPEN_OPPORTUNITIES: { message: 'Close its open opportunities first.', status: 409 },
+  },
   body: {
     language: 'js',
     source: `
       // A delete's ctx.input is empty: ctx.previous is the row being deleted.
       if (ctx.previous && ctx.previous.type === 'Strategic')
-        throw new Error('Cannot delete Strategic accounts');
+        throw Object.assign(new Error(), { code: 'STRATEGIC_ACCOUNT' });
       const open = await ctx.api.object('opportunity').count({
         where: { account_id: ctx.previous.id, stage: { $in: ['Prospecting', 'Negotiation'] } },
       });
-      if (open > 0)
-        throw new Error('Cannot delete an account with ' + open + ' open opportunities');
+      if (open > 0) throw Object.assign(new Error(), { code: 'OPEN_OPPORTUNITIES' });
     `,
     capabilities: ['api.read'],
   },
@@ -852,6 +744,48 @@ const maskSensitiveData = defineHook({
 });
 ```
 
+### 5. No two of mine overlap (sandboxed `body`)
+
+No declarative key refuses two overlapping leave requests of one person; copy
+this hook, renaming its `name`, `object` and fields (`date` fields: set `DATE_ONLY`).
+
+<!-- os:check -->
+```typescript
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'leave_request_no_overlap',
+  object: 'leave_request',
+  events: ['beforeInsert', 'beforeUpdate'],
+  runAs: 'system', // count the rows the saver cannot read too
+  refusals: { OVERLAP: { message: 'This overlaps another request of yours.', status: 409 } },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const DATE_ONLY = false; // true when start_at / end_at are date fields: the end day is booked too
+      const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
+      const off = ['rejected', 'cancelled'];
+      if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
+      const where = {
+        owner_id: r.owner_id,
+        status: { $nin: off },  // fail closed: a new status counts until listed here
+        start_at: DATE_ONLY ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: DATE_ONLY ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
+      };
+      if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
+      if (await ctx.api.object(ctx.object).count({ where }) > 0)
+        throw Object.assign(new Error(), { code: 'OVERLAP' });
+    `,
+  },
+});
+```
+
+Known limits: it is a read-then-write check, so two concurrent saves can both
+pass; a recycle-bin restore runs no insert hook; an import with automations off
+skips hooks; rows of one bulk insert or update do not see each other; and a row
+with no start or end is neither checked nor counted.
+
 ---
 
 ## Registration Methods
@@ -893,8 +827,8 @@ the layout both real hook modules in the repo use.
 
 ✅ **DO** — use `before*` for validation and `after*` for side effects; set
 `async: true` for non-critical background work; go through `ctx.api` for
-cross-object operations; give a thrown error a message the caller can act on;
-test hooks in isolation.
+cross-object operations; refuse a business rule by a
+[declared code](#declared-refusals-refusals); test hooks in isolation.
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
 hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
@@ -907,25 +841,40 @@ hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 ## Error Handling
 
 A throw aborts the operation and rolls back its transaction; `onError: 'log'`
-(above) makes an `after*` hook log and continue instead.
+(above) makes an `after*` hook log and continue instead; neither gives the hook's own code.
 
 ### Declared refusals (`refusals`)
 
-With a `refusals` catalogue, a sandboxed `body` refuses **by code only** and the
-runtime answers with that entry:
+A hook that enforces a business rule declares a `refusals` catalogue, one
+SCREAMING_SNAKE code per rule, and its body throws the code. Without one, a `body`'s
+throw is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
+plan, not for a rule the user can act on. A cross-object guard a validation rule
+cannot read:
 
+<!-- os:check -->
 ```typescript
-refusals: {
-  CREDIT_LIMIT: { message: 'Over the credit limit.' },
-  ON_HOLD: { message: 'Account on hold.', status: 409 }, // default 400
-},
-body: { language: 'js', source: `
-  if (ctx.input.amount > 100000) throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' });
-` },
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'checkout_requires_stock',
+  object: 'asset_checkout',
+  events: ['beforeInsert'],
+  refusals: { ASSET_NOT_IN_STOCK: { message: 'Only an in-stock asset can be checked out.', status: 409 } },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const id = ctx.input.asset_id;
+      const asset = id && await ctx.api.object('asset').findOne({ where: { id } });
+      if (asset?.status !== 'in_stock') throw Object.assign(new Error(), { code: 'ASSET_NOT_IN_STOCK' });
+    `,
+  },
+});
 ```
 
-- Codes are SCREAMING_SNAKE; the envelope carries one as `declaredCode`.
-- Refused at save without a `js` body (e.g. a bare `handler`).
+- Only a `js` `body` can declare one: a `handler` hook, inline TS included, is
+  refused at save.
+- The wire `code` is the status's (default 400), with the hook's as `declaredCode`.
 - The message is plain text (a `{{ }}` hole is refused), translated via
   `hooks.<hook>.refusals.<CODE>.message`; the body's own text and `status` are unused.
 - An undeclared code, or none, is refused: at save if thrown literally, else as

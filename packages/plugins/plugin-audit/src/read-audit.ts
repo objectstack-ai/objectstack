@@ -160,9 +160,9 @@ export interface ReadAuditEvent {
 }
 
 /** Handle returned by {@link createReadAuditBatcher}. */
-export interface ReadAuditBatcher {
+export interface ReadAuditBatcher<E = ReadAuditEvent> {
   /** Record a view. Returns immediately — never awaits the ledger write. */
-  enqueue(event: ReadAuditEvent): void;
+  enqueue(event: E): void;
   /** Persist everything buffered right now. */
   flush(): Promise<void>;
   /** How many views are buffered and not yet persisted. */
@@ -190,9 +190,9 @@ const DEFAULT_TIMERS: ReadAuditTimers = {
   },
 };
 
-export interface ReadAuditBatcherOptions {
+export interface ReadAuditBatcherOptions<E = ReadAuditEvent> {
   /** Persist one drained batch. Must not be called concurrently with itself. */
-  persist(events: ReadAuditEvent[]): Promise<void>;
+  persist(events: E[]): Promise<void>;
   /** Flush as soon as this many views are buffered. Default 50. */
   maxBatchSize?: number;
   /** Flush this long after the first view of a batch. Default 2000ms. */
@@ -206,6 +206,12 @@ export interface ReadAuditBatcherOptions {
   maxBufferedEvents?: number;
   logger?: ReadAuditLogger;
   timers?: ReadAuditTimers;
+  /**
+   * The overflow warning's text, for a batcher that buffers another kind of
+   * row (the `dataset_query` writer, `dataset-query-audit.ts`). Absent, the
+   * record-view sentence below.
+   */
+  overflowMessage?: string;
 }
 
 /**
@@ -221,7 +227,7 @@ export interface ReadAuditBatcherOptions {
  * turn a valid read into an error, and a retry storm against an unreachable
  * table is the shape that turns a degradation into an outage.
  */
-export function createReadAuditBatcher(opts: ReadAuditBatcherOptions): ReadAuditBatcher {
+export function createReadAuditBatcher<E = ReadAuditEvent>(opts: ReadAuditBatcherOptions<E>): ReadAuditBatcher<E> {
   const {
     persist,
     maxBatchSize = 50,
@@ -229,9 +235,10 @@ export function createReadAuditBatcher(opts: ReadAuditBatcherOptions): ReadAudit
     maxBufferedEvents = 10_000,
     logger,
     timers = DEFAULT_TIMERS,
+    overflowMessage,
   } = opts;
 
-  let buffer: ReadAuditEvent[] = [];
+  let buffer: E[] = [];
   let timer: unknown = null;
   /** Serializes flushes so two never interleave against the same driver. */
   let inFlight: Promise<void> = Promise.resolve();
@@ -245,6 +252,7 @@ export function createReadAuditBatcher(opts: ReadAuditBatcherOptions): ReadAudit
     }
     overflowReported = true;
     logger?.warn?.(
+      overflowMessage ??
       'Read-audit buffer OVERFLOWED — record-view rows are being DROPPED, so the compliance trail now has ' +
         'holes that no error anywhere else will show: every read still succeeded and returned 200. The buffer ' +
         'only grows this far when ledger writes are not draining (an unreachable `sys_audit_log`, or a view rate ' +
@@ -287,7 +295,7 @@ export function createReadAuditBatcher(opts: ReadAuditBatcherOptions): ReadAudit
   };
 
   return {
-    enqueue(event: ReadAuditEvent): void {
+    enqueue(event: E): void {
       if (stopped) return;
       buffer.push(event);
       if (buffer.length > maxBufferedEvents) {

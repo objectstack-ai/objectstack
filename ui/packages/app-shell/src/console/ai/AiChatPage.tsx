@@ -16,8 +16,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
+import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
@@ -25,6 +26,8 @@ import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
 import { useMetadataClient } from '../../views/metadata-admin/useMetadata.js';
 import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
+import { useMetadataLocale } from '../../views/metadata-admin/i18n.js';
+import { fieldTypeName } from '../../views/metadata-admin/previews/fieldTypeName.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { resolveKeyedI18nLabel } from '../../utils/index.js';
 import { resolvePublicShareBase } from '../organizations/resolveHomeUrl.js';
@@ -925,6 +928,24 @@ export interface PendingFirstMessage {
  *
  * Exported for unit testing.
  */
+/** Two attachments are one file when they are the same object, or agree on name, size, type and lastModified. */
+function isSameFile(a: File, b: File): boolean {
+  return (
+    a === b ||
+    (a.name === b.name && a.size === b.size && a.type === b.type && a.lastModified === b.lastModified)
+  );
+}
+
+/**
+ * objectstack#32984 — is this submit a repeat of the held first message? The
+ * same text and the same files, file for file; anything that differs joins.
+ */
+function isSameFirstSend(held: PendingFirstMessage, content: string, files?: File[]): boolean {
+  const a = held.files ?? [];
+  const b = files ?? [];
+  return content === held.content && a.length === b.length && a.every((f, i) => isSameFile(f, b[i]));
+}
+
 export function useDeferredFirstSend(opts: {
   /** The chat endpoint — defined once an agent is resolved (server-backed mode). */
   chatApi: string | undefined;
@@ -958,16 +979,67 @@ export function useDeferredFirstSend(opts: {
    * the wire makes no second row. Absent = wait for an id someone else makes.
    */
   ensureConversation?: () => unknown;
+  /**
+   * objectstack#33420 — told which message the user sent is waiting in the
+   * stash (`null` once it is replayed or rolled back), so the pane draws it at
+   * once. A stash targeted at an agent surface (the handoff seed) is not one
+   * the user sent here, and is never reported. Also called on mount with the
+   * stash a replaced pane left behind, so the message stays drawn across the
+   * id-keyed remount.
+   */
+  onHeldChange?: (held: PendingFirstMessage | null) => void;
+  /**
+   * objectstack#33420 — the host's create failure (`useChatConversation`'s
+   * `createError`). A new one drops the user's held message: it was never
+   * sent, and the composer puts its text back in the box (the not-sent
+   * rollback), so keeping it would send it twice with the next attempt.
+   * objectstack#33562 — the box gets the whole held message, joined parts
+   * included: the pane hands it to the composer as its `unsentText`.
+   */
+  createError?: Error;
 }): (content: string, files?: File[]) => void {
-  const { chatApi, conversationId, pendingRef, doSend, pendingSignal, agentRoute, ensureConversation } = opts;
+  const { chatApi, conversationId, pendingRef, doSend, pendingSignal, agentRoute, ensureConversation, onHeldChange, createError } = opts;
   const apiMode = Boolean(chatApi);
   // Read through a ref: the replay effect must not re-run (or depend for
   // correctness) on the identity of a host callback — ui/AGENTS.md #10. Synced
   // in a layout effect, which runs before the replay effect below.
   const ensureConversationRef = useRef(ensureConversation);
+  const onHeldChangeRef = useRef(onHeldChange);
   useLayoutEffect(() => {
     ensureConversationRef.current = ensureConversation;
-  }, [ensureConversation]);
+    onHeldChangeRef.current = onHeldChange;
+  }, [ensureConversation, onHeldChange]);
+  // Only a committed pane is told: a send can reach a render React has not
+  // committed (or has thrown away), and a state update there loses the render
+  // the stash belongs to. The mount report below covers that pane once it commits.
+  const committedRef = useRef(false);
+  useLayoutEffect(() => {
+    committedRef.current = true;
+    return () => {
+      committedRef.current = false;
+    };
+  }, []);
+  const reportHeld = useCallback(() => {
+    if (!committedRef.current) return;
+    const held = pendingRef.current;
+    onHeldChangeRef.current?.(held && !held.targetAgentRoute ? held : null);
+  }, [pendingRef]);
+
+  // A message held over from the pane this one replaced is drawn before the
+  // first paint, so the id-keyed remount never shows an empty thread.
+  useLayoutEffect(() => {
+    if (apiMode && pendingRef.current) reportHeld();
+  }, [apiMode, pendingRef, reportHeld]);
+
+  // The create failed: the user's held message goes (its text is restored to
+  // the composer by the host's not-sent rollback). A handoff seed is kept.
+  useEffect(() => {
+    if (!createError) return;
+    const held = pendingRef.current;
+    if (!held || held.targetAgentRoute) return;
+    pendingRef.current = null;
+    onHeldChangeRef.current?.(null);
+  }, [createError, pendingRef]);
 
   // Replay a deferred first message the instant a conversation id exists — in
   // the freshly-mounted pane after the remount, or in place if none happened.
@@ -1002,6 +1074,7 @@ export function useDeferredFirstSend(opts: {
     const timer = setTimeout(() => {
       if (pendingRef.current !== pending) return;
       pendingRef.current = null;
+      onHeldChangeRef.current?.(null);
       doSend(pending.content, pending.files);
     }, 0);
     return () => clearTimeout(timer);
@@ -1021,15 +1094,126 @@ export function useDeferredFirstSend(opts: {
         // replayed once the id lands, and the host's create is shared, so no
         // second row is made either. (A held handoff seed is still replaced
         // by what the user typed, as before.)
+        // objectstack#32984 — nor may the second one vanish: it used to be
+        // dropped without a word. It joins the held first message, which has
+        // not left the client yet, so both reach the agent as the first turn.
+        // A repeat of the held message (a doubled submit event: the same
+        // text AND the same files) is not sent twice.
         const held = pendingRef.current;
         if (!held || held.targetAgentRoute) pendingRef.current = { content, files };
+        else if (!isSameFirstSend(held, content, files)) {
+          const heldFiles = held.files ?? [];
+          const joined = [
+            ...heldFiles,
+            ...(files ?? []).filter((f) => !heldFiles.some((h) => isSameFile(h, f))),
+          ];
+          pendingRef.current = {
+            content: [held.content, content].filter((part) => part.trim() !== '').join('\n\n'),
+            files: joined.length > 0 ? joined : undefined,
+          };
+        }
+        reportHeld();
         void ensureConversationRef.current?.();
         return;
       }
       doSend(content, files);
     },
-    [apiMode, conversationId, pendingRef, doSend],
+    [apiMode, conversationId, pendingRef, doSend, reportHeld],
   );
+}
+
+/** Composer text a `…:pending` pane hands to the pane that replaces it. */
+interface ComposerDraftHandoff {
+  text: string;
+  /** The chat endpoint the text was typed for. */
+  chatApi: string | undefined;
+  /** The conversation the host was asking for when the text was last typed. */
+  requestedConversationId: string | undefined;
+  /** The replaced box had focus, so typing goes on in the new one. */
+  focused: boolean;
+}
+
+/**
+ * Keyed by the host's page-owned first-message stash: the one object a host
+ * keeps across the pane's id-keyed remount, and its own, so two hosts never
+ * trade drafts. An entry lives for one commit only (see
+ * {@link useComposerDraftHandoff}).
+ */
+const composerDraftHandoffs = new WeakMap<object, ComposerDraftHandoff>();
+
+/**
+ * objectstack#33674 — the text typed (and not sent) into the composer of a
+ * pane that does not know its conversation yet survives the remount that
+ * follows when the id lands: the conversation GET of a deep link answering, or
+ * the create of a new conversation answering. `<ChatPane>` stays keyed on the
+ * id, because everything else in it (the chat runtime, its messages) belongs
+ * to one conversation; only the composer's text is carried.
+ *
+ * The replaced pane writes the text as it unmounts and the new pane reads it
+ * as it mounts. React runs both in the same commit, so the hand-off is never
+ * read later: a microtask drops an entry no pane took. Only a pending pane
+ * hands text on, and only to a pane on the same endpoint whose host still asks
+ * for the conversation it asked for when the text was last typed, so opening
+ * another conversation leaves the draft behind, as before. The new box gets
+ * the same text with the cursor at its end, and focus when the old box had it.
+ * Nothing is sent.
+ *
+ * Returns the composer's `onInputChange`, which records what the host was
+ * asking for when the user typed.
+ */
+export function useComposerDraftHandoff(opts: {
+  /** The host's page-owned stash (`pendingFirstMessageRef`), the hand-off's key. */
+  hostStash: object;
+  /** The pane's root element; the composer is the `message` textarea inside it. */
+  containerRef: React.RefObject<HTMLElement | null>;
+  chatApi: string | undefined;
+  conversationId: string | undefined;
+  /** The conversation the host asks `useChatConversation` for (its `activeId`). */
+  requestedConversationId: string | undefined;
+}): () => void {
+  const { hostStash, containerRef, chatApi, conversationId, requestedConversationId } = opts;
+  const requestedRef = useRef(requestedConversationId);
+  const typedForRef = useRef(requestedConversationId);
+  useLayoutEffect(() => {
+    requestedRef.current = requestedConversationId;
+  }, [requestedConversationId]);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const composerBox = () => container?.querySelector<HTMLTextAreaElement>('textarea[name="message"]') ?? null;
+    const handoff = composerDraftHandoffs.get(hostStash);
+    composerDraftHandoffs.delete(hostStash);
+    if (
+      handoff &&
+      conversationId &&
+      handoff.chatApi === chatApi &&
+      handoff.requestedConversationId === requestedRef.current
+    ) {
+      const box = composerBox();
+      if (box && box.value === '') {
+        box.value = handoff.text;
+        box.setSelectionRange(handoff.text.length, handoff.text.length);
+        if (handoff.focused) box.focus();
+      }
+    }
+    return () => {
+      if (conversationId) return;
+      const box = composerBox();
+      if (!box || box.value.trim() === '') return;
+      const entry: ComposerDraftHandoff = {
+        text: box.value,
+        chatApi,
+        requestedConversationId: typedForRef.current,
+        focused: box.ownerDocument.activeElement === box,
+      };
+      composerDraftHandoffs.set(hostStash, entry);
+      queueMicrotask(() => {
+        if (composerDraftHandoffs.get(hostStash) === entry) composerDraftHandoffs.delete(hostStash);
+      });
+    };
+  }, [hostStash, containerRef, chatApi, conversationId]);
+  return useCallback(() => {
+    typedForRef.current = requestedRef.current;
+  }, []);
 }
 
 export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentProp }: AiChatPageProps = {}) {
@@ -1185,7 +1369,14 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     [editPackageId],
   );
 
-  const { conversationId, conversationScope, initialMessages, rekeyScope, ensureConversation } = useChatConversation({
+  const {
+    conversationId,
+    conversationScope,
+    initialMessages,
+    rekeyScope,
+    ensureConversation,
+    createError: conversationCreateError,
+  } = useChatConversation({
     // Gate resolution on the agent being known: resolving while `activeAgent`
     // is still undefined (catalog loading) would bind a SCOPELESS conversation
     // that the per-(user,scope) guard then sticks with — so the agent surface
@@ -1655,6 +1846,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             chatApi={chatApi}
             apiBase={apiBase}
             conversationId={paneConversationId}
+            requestedConversationId={urlConversationId ?? legacyConversationId}
             editPackageId={editPackageId}
             onPackageBound={handlePackageBound}
             canBind={Boolean(urlConversationId)}
@@ -1663,6 +1855,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
             ensureConversation={ensureConversation}
+            conversationCreateError={conversationCreateError}
             selectedModelId={selectedModelId}
             onSelectedModelChange={setSelectedModelId}
             onSent={handleSent}
@@ -1705,6 +1898,11 @@ interface ChatPaneProps {
   chatApi: string | undefined;
   apiBase: string;
   conversationId: string | undefined;
+  /** objectstack#33674 — the conversation the host asks `useChatConversation`
+   *  for (its `activeId`: the deep link's id); absent when the host asks for
+   *  none. A draft typed before this pane knew its id is carried into the
+   *  replacing pane only while this is unchanged. See {@link useComposerDraftHandoff}. */
+  requestedConversationId?: string;
   /** ADR-0070 "Edit with AI": the package the user opened to edit (from `?package=`),
    *  forwarded to the build agent as `context.packageId` to scope it to that app. */
   editPackageId?: string;
@@ -1739,6 +1937,9 @@ interface ChatPaneProps {
    *  `useChatConversation().ensureConversation`); no row exists before it.
    *  See {@link useDeferredFirstSend}. */
   ensureConversation?: () => unknown;
+  /** objectstack#33420 — the host's `useChatConversation().createError`: the
+   *  create the held first message waits on failed. See {@link useDeferredFirstSend}. */
+  conversationCreateError?: Error;
   /**
    * ADR-0028 — the model the user picked in the composer, held by the HOST.
    * The pane is keyed on the conversation id and remounts when the first send
@@ -1768,6 +1969,7 @@ export function ChatPane({
   chatApi,
   apiBase,
   conversationId,
+  requestedConversationId,
   editPackageId,
   activeAppPackageId,
   surfaceContext,
@@ -1779,6 +1981,7 @@ export function ChatPane({
   pendingFirstMessageRef,
   pendingFirstMessageSeq,
   ensureConversation,
+  conversationCreateError,
   selectedModelId: hostSelectedModelId,
   onSelectedModelChange,
   onSent,
@@ -1966,6 +2169,15 @@ export function ChatPane({
   }, [canvasOpen, onCanvasOpenChange]);
   // Draggable chat ↔ preview split (active only while the preview is open).
   const split = useResizableChatPane(canvasOpen);
+  // objectstack#33674 — what is typed into the composer before this pane knows
+  // its conversation outlives the id-keyed remount. See useComposerDraftHandoff.
+  const noteComposerInput = useComposerDraftHandoff({
+    hostStash: pendingFirstMessageRef,
+    containerRef: split.containerRef,
+    chatApi,
+    conversationId,
+    requestedConversationId,
+  });
   // A pane too narrow for the split (the console dock at a laptop width, the
   // Studio copilot's slot) previews the way a phone does: full-width chat, the
   // pill, the full-surface overlay. Every phone switch below reads this.
@@ -2280,6 +2492,7 @@ export function ChatPane({
   // a send made before the id is minted is stashed in the page-owned ref and
   // replayed once the id lands, so the magic-moment first message reliably
   // reaches `…/chat` instead of being dropped. See useDeferredFirstSend.
+  const [heldFirstMessage, setHeldFirstMessage] = useState<PendingFirstMessage | null>(null);
   const handleSend = useDeferredFirstSend({
     chatApi,
     conversationId,
@@ -2290,14 +2503,32 @@ export function ChatPane({
     // (the handoff seed → 'build') is held, never consumed here.
     agentRoute: activeAgent ? agentRouteName(activeAgent) : undefined,
     ensureConversation,
+    onHeldChange: setHeldFirstMessage,
+    createError: conversationCreateError,
   });
+  // objectstack#33420 — the thread as drawn: a first message waiting on the
+  // conversation's create shows at once, as the user's bubble with the
+  // assistant's thinking dots under it, the way a sent message looks before
+  // its first token.
+  const shownMessages = useMemo<ChatMessage[]>(
+    () =>
+      heldFirstMessage
+        ? [
+            ...runtimeMessages,
+            { id: 'held-first-message', role: 'user', content: heldFirstMessage.content },
+            { id: 'held-first-message-reply', role: 'assistant', content: '', streaming: true },
+          ]
+        : runtimeMessages,
+    [runtimeMessages, heldFirstMessage],
+  );
 
   // #2458 / ADR-0057 Amendment A1.a — the package this build conversation is
   // bound to, surfaced as a header chip so the edit blast-radius is always
   // visible (the Claude-Code-shows-the-repo idiom). The magic flow starts
   // unbound ("New app") and binds the moment its build mints a package.
   const isBuildSurface = activeAgent ? agentRouteName(activeAgent) === 'build' : false;
-  const { apps } = useMetadata();
+  const metadata = useMetadata();
+  const { apps } = metadata;
   // Narrow the loosely-typed provider apps once (see MetadataAppItem) so the
   // derivations below read fields without per-access casts.
   const metadataApps = apps as MetadataAppItem[] | undefined;
@@ -2346,6 +2577,47 @@ export function ChatPane({
       return app ? appLabel(app) : undefined;
     },
     [metadataApps, appLabel, t],
+  );
+
+  // objectstack#32984 — the change card names objects, fields and field types
+  // by their labels (the producer sends machine names only: 「字段
+  // b6bl_quote_item · line_total · currency」). An object or field the change is
+  // about to create is not in metadata yet and answers undefined: the card
+  // then shows the name as given.
+  const { objectLabel: i18nObjectLabel, fieldLabel: i18nFieldLabel } = useObjectLabel();
+  const metadataLocale = useMetadataLocale();
+  // By name, when a change card asks (objectui#12811): the chat dock mounts
+  // this pane on an app's object-list open, where reading the whole
+  // `objects` registry at render would bring it back onto that open.
+  const findMetadataObject = useCallback(
+    (objectName: string) =>
+      (readObjectsByName(metadata, [objectName]) as Array<{
+        name?: string;
+        label?: string;
+        fields?: Record<string, { label?: string }>;
+      }>).find((o) => o?.name === objectName),
+    [metadata],
+  );
+  const resolveObjectLabel = useCallback(
+    (objectName: string) => {
+      const object = findMetadataObject(objectName);
+      return object ? i18nObjectLabel({ name: objectName, label: object.label ?? objectName }) : undefined;
+    },
+    [findMetadataObject, i18nObjectLabel],
+  );
+  const resolveFieldLabel = useCallback(
+    (objectName: string, fieldName: string) => {
+      const field = findMetadataObject(objectName)?.fields?.[fieldName];
+      return field ? i18nFieldLabel(objectName, fieldName, field.label ?? fieldName) : undefined;
+    },
+    [findMetadataObject, i18nFieldLabel],
+  );
+  const resolveFieldTypeLabel = useCallback(
+    (type: string) => {
+      const name = fieldTypeName(type, metadataLocale);
+      return name === type ? undefined : name;
+    },
+    [metadataLocale],
   );
 
   // Per-surface empty-state branding (Build = authoring, Ask = data Q&A). On the
@@ -2772,6 +3044,7 @@ export function ChatPane({
             : undefined
         }
         onOpenBuilder={openBuilder}
+        onInputChange={noteComposerInput}
         // objectui#11667 — the ADR-0057 P4 handoff card's three strings. Left
         // unset, the component's English defaults rendered in every locale.
         builderHandoffTitleLabel={t('console.ai.builderHandoffTitle')}
@@ -2820,7 +3093,7 @@ export function ChatPane({
         // in flow, the conversation gives up the room instead, at every width,
         // here and in the console dock, which mounts this same pane.
         promptHeaderSlot={promptHeaderRows}
-        messages={runtimeMessages}
+        messages={shownMessages}
         placeholder={
           activeAgent
             ? agentRouteName(activeAgent) === 'ask'
@@ -2905,7 +3178,14 @@ export function ChatPane({
         onStop={isLoading ? stop : undefined}
         onReload={reload}
         isLoading={isLoading}
-        error={errorSuppressed ? undefined : error}
+        // objectstack#33420 — a failed create is a send that never left the
+        // client: the composer's not-sent notice and text restore answer it.
+        error={conversationCreateError ?? (errorSuppressed ? undefined : error)}
+        // objectstack#33562 — what that failed create held back is the whole
+        // held first message: a second send made during the wait joined it, and
+        // the composer only knows the part it last submitted. Read in the
+        // render the error arrives in, before the held message is dropped.
+        unsentText={conversationCreateError ? heldFirstMessage?.content : undefined}
         enableMarkdown
         onToolApprove={hitl.decide}
         toolDecisions={hitl.decisions}
@@ -2965,6 +3245,7 @@ export function ChatPane({
             const payload = (await metadataClient.publishPackageDrafts(packageId)) as
               | (Record<string, unknown> & {
                   success?: boolean;
+                  outcome?: string;
                   error?: { message?: string };
                   failedCount?: number;
                   failed?: PublishFailure[];
@@ -2974,7 +3255,11 @@ export function ChatPane({
             // A non-2xx now throws inside the client with the server's own
             // message, caught below like any other failure. What is left here
             // is the 2xx batch verdict.
-            if (payload?.success === false) {
+            // objectstack#33277 — `published_unregistered` answers `success:
+            // false` over drafts that DID land (the registry refused an object,
+            // whose warning the client has already reported): not a failure
+            // here, as it was not while the server answered `published`.
+            if (payload?.success === false && payload?.outcome !== 'published_unregistered') {
               // The status is no longer in hand — a non-2xx threw above — so
               // the last rung is a sentence rather than "HTTP 200".
               throw new Error(
@@ -3042,6 +3327,9 @@ export function ChatPane({
         nextStepsLabel={t('console.ai.nextSteps', { defaultValue: "What's next" })}
         planTitleLabel={t('console.ai.planTitle', { defaultValue: 'Proposed plan' })}
         resolveAppLabel={resolveAppLabel}
+        resolveObjectLabel={resolveObjectLabel}
+        resolveFieldLabel={resolveFieldLabel}
+        resolveFieldTypeLabel={resolveFieldTypeLabel}
         planQuestionsLabel={t('console.ai.planQuestions', { defaultValue: 'Confirm before building' })}
         planAssumptionsLabel={t('console.ai.planAssumptions', { defaultValue: 'Assumptions' })}
         planDeferredLabel={t('console.ai.planDeferred', { defaultValue: 'Not yet built' })}

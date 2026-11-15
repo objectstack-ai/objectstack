@@ -287,6 +287,8 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlProviderScope } from './sso-sign-in-options.js';
+import { readSamlAssertionPreview } from './sso-saml-standard-claims.js';
+import { samlAccountKeyAttributeOf, samlAccountKeyReadingOf } from './sso-saml-account-key.js';
 import {
   judgeSignOutOfIdpCapability,
   parkOidcEndSessionEndpoint,
@@ -300,6 +302,16 @@ import {
 } from './sso-sign-out-of-idp.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
+import {
+  chooseDirectSignInProvider,
+  readSsoProviderIds,
+  resolveDirectSignIn,
+  runDirectSignIn,
+  type DirectSignInOptions,
+  type DirectSignInProvider,
+  type DirectSignInProviderMiss,
+  type ResolvedDirectSignIn,
+} from './direct-sign-in.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -796,6 +808,45 @@ export interface AuthRouteSurface {
   owns(method: string, pathname: string): boolean;
 }
 
+/**
+ * What {@link AuthManagerOptions.organizationDeleteGate} is asked with: one
+ * organization delete the platform has already admitted.
+ */
+export interface OrganizationDeleteGateRequest {
+  /** The organization being deleted: the `organizationId` better-auth parsed from the request body. */
+  organizationId: string;
+  /** The signed-in caller, a member of that organization whose role holds `organization: ['delete']`. */
+  session: {
+    userId: string;
+    /** The session's active organization, when it has one. */
+    activeOrganizationId?: string;
+    /** The administrator an impersonation session names, when the session is one. */
+    impersonatedBy?: string;
+  };
+  /** The request's `Accept-Language` header, for a refusal's `userMessage` in the request's language. */
+  acceptLanguage?: string;
+}
+
+/**
+ * A refusal {@link AuthManagerOptions.organizationDeleteGate} answers with.
+ * The platform answers `status` and `body` unchanged and deletes nothing.
+ */
+export interface OrganizationDeleteGateRefusal {
+  /** A client-error status, `400`–`499` (e.g. `409` for a delete refused while something remains). */
+  status: number;
+  /**
+   * The response body. `code` and `message` are required (ADR-0112),
+   * `userMessage` is the end-user text in the request's language; any other
+   * field the host adds (`steps`, …) is answered as it is.
+   */
+  body: {
+    code: string;
+    message: string;
+    userMessage?: string;
+    readonly [field: string]: unknown;
+  };
+}
+
 export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * Better-Auth instance (for advanced use cases)
@@ -918,6 +969,44 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   oidcAuthorizeGate?: (params: { userId: string; clientId: string }) => boolean | Promise<boolean>;
 
   /**
+   * The host's own check on `POST /organization/delete`: answer a
+   * {@link OrganizationDeleteGateRefusal} to refuse the delete, or nothing
+   * (`undefined` / `null`) to let it go ahead. The cloud control plane uses it
+   * to refuse while a subscription will charge again or environments remain.
+   *
+   * It is called once per delete, from the delete admission in better-auth's
+   * `hooks.before` (`assertOrganizationDeletable`), so it runs:
+   *
+   *  - only for a request the auth mount admitted: the IP allow-list and the
+   *    one-account refusal answer first, and a request they refuse never
+   *    reaches it;
+   *  - only for a delete the platform itself would let through: a caller who
+   *    is signed in and a member whose role holds `organization: ['delete']`,
+   *    an organization that exists, and none of the platform's own refusals
+   *    (`403 PERMISSION_DENIED` on the Default Organization's last
+   *    administrator, `409 DELETE_RESTRICTED` while records remain, `503` on a
+   *    read that failed);
+   *  - before better-auth's first write, so a refusal deletes nothing.
+   *
+   * It receives the `organizationId` better-auth parsed from the body, so a
+   * host needs no body reader of its own.
+   *
+   * A refusal is answered unchanged: its `status` (`400`–`499`) and its
+   * `body`. Fail-closed on anything else: a check that throws, or answers
+   * something that is neither nothing nor such a refusal, is answered
+   * `503 SERVICE_UNAVAILABLE` and nothing is deleted; the throw rides the
+   * error's `cause`.
+   *
+   * Read per call, so a value set by an `auth:configure` handler or
+   * `updateConfig` is the one asked. Unset = no host check. Asked only where
+   * the delete admission runs: a manager with no data engine (an in-memory
+   * composition) runs no admission, so the check is not asked there either.
+   */
+  organizationDeleteGate?: (
+    request: OrganizationDeleteGateRequest,
+  ) => OrganizationDeleteGateRefusal | null | undefined | void | Promise<OrganizationDeleteGateRefusal | null | undefined | void>;
+
+  /**
    * Base path for auth routes
    * Forwarded to better-auth's basePath option so it can match incoming
    * request URLs without manual path rewriting.
@@ -930,6 +1019,15 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * Each entry is passed to better-auth's genericOAuth plugin.
    */
   oidcProviders?: OidcProvidersConfig;
+
+  /**
+   * Direct sign-in (`direct-sign-in.ts`): with it set, a person who opens the
+   * deployment signed out goes straight to the identity provider and comes
+   * back to the page they opened. Absent ⇒ off. The environment wins field by
+   * field: `OS_AUTH_DIRECT_SIGN_IN_ENABLED`, `OS_AUTH_DIRECT_SIGN_IN_PROVIDER`,
+   * `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` (`hidden` | `off`).
+   */
+  directSignIn?: DirectSignInOptions;
 
   /**
    * `additionalOrgRoles` was REMOVED in ADR-0108 (#3723). The organization-role
@@ -1987,6 +2085,11 @@ export class AuthManager {
     // the merged result, and `buildPluginList()` re-checks for env vars that
     // appear after boot.
     assertScimAdminCoherence(config.plugins);
+
+    // Direct sign-in: an off-vocabulary local sign-in path refuses the boot
+    // loudly (`resolveDirectSignIn` throws) instead of quietly opening or
+    // closing the sign-in page.
+    this.directSignInSetting();
 
     // A completed password reset ends the account's other sessions, always;
     // the retired `emailAndPassword.revokeSessionsOnPasswordReset` is refused
@@ -4207,7 +4310,28 @@ export class AuthManager {
               const auth: any = await this.getOrCreateAuth();
               return readStoredSamlConfig(await auth.$context, callback.providerId);
             };
-            return runWithSamlProviderScope({ allowIdpInitiated: options.allowIdpInitiated, singleLogout: options.signOutOfIdp }, () =>
+            // An unmapped member reads the standard claim the assertion
+            // carries, before the NameID (`sso-saml-standard-claims.ts`): the
+            // attribute names, read before the vendor consumes the body.
+            const preview = await readSamlAssertionPreview(callback.request);
+            // A provider keyed on a stable attribute (named, or Entra's object
+            // id) finds and makes its account by that value, not the NameID
+            // (`sso-saml-account-key.ts`): the provider's key attribute, and
+            // the NameID and value the posted assertion carries.
+            const accountKeyAttribute = preview
+              ? samlAccountKeyAttributeOf(
+                  await createEngineSsoProviderConfigReader(() => this.config.dataEngine as SsoProviderConfigEngine | undefined)(
+                    callback.providerId,
+                  ).catch(() => null),
+                )
+              : null;
+            return runWithSamlProviderScope({
+              allowIdpInitiated: options.allowIdpInitiated,
+              singleLogout: options.signOutOfIdp,
+              providerId: callback.providerId,
+              assertionAttributeNames: preview?.attributeNames ?? [],
+              accountKey: samlAccountKeyReadingOf(preview, accountKeyAttribute),
+            }, () =>
               runSsoSamlRefusalCauseScope(callback, this.config.logger, readSamlConfig, run),
             );
           }
@@ -5659,6 +5783,7 @@ export class AuthManager {
     // suppresses the password form via `features.ssoEnforced` below. A
     // cloud-managed environment forces signup off too (`signUpForcedOff`).
     const ssoOnly = this.resolveSsoOnly();
+    const directSignIn = this.directSignInSetting();
     // [#11739] The audience posture, resolved once for this response: the
     // forced-verification mirror below and `features.audiencePosture` must
     // answer from the same read the enforcement path uses (getAudience —
@@ -5772,6 +5897,11 @@ export class AuthManager {
       // form + self-registration. A break-glass "use a password" link remains
       // for the env owner / local admin. Driven by `ssoOnlyMode` / `OS_AUTH_SSO_ONLY`.
       ssoEnforced: ssoOnly,
+      // Direct sign-in (`direct-sign-in.ts`): the sign-in page navigates
+      // straight to the identity provider. The coarse "setting on" here; the
+      // `/auth/config` route refines it to "able to start" with
+      // `isDirectSignInUsable()`, as it refines `sso`.
+      directSignIn: directSignIn.enabled,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       // Mirrors `enabled.admin` in buildPluginList() (SCIM forces the admin
       // plugin on, ADR-0134) — previously `?? false`, which advertised the
@@ -5805,6 +5935,10 @@ export class AuthManager {
       // stable), so `false` when the host declares no developer choice. It
       // only advertises the host's own create door; nothing here acts on it.
       developerEditionCreate: organizationEditions?.some((choice) => choice.edition === 'developer') ?? false,
+      // The local sign-in path behind direct sign-in (`hidden` | `off`), a
+      // value served only while direct sign-in is on (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge
@@ -5860,8 +5994,11 @@ export class AuthManager {
    * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
    * mounted, a provider signs nobody in until its listed domains are verified,
-   * and a provider creates an account only for an email address at a domain it
-   * has proven (`sso-account-at-proven-domain.ts`, which asks this method).
+   * and an account a provider reaches holds an email address only at a domain
+   * it has proven: a provider creates an account only for such an address
+   * (`sso-account-at-proven-domain.ts`), links to an existing account only
+   * with one, and changes a linked account's stored address only to one
+   * (`implicit-account-linking.ts`, rule 4). All three ask this method.
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
    * `domainVerification.enabled` option, so the bridge can return a clear
    * "not enabled for this environment" instead of a bare 404 when off.
@@ -5894,6 +6031,69 @@ export class AuthManager {
     } catch {
       return true; // provider introspection failed — keep the wired behaviour
     }
+  }
+
+  /**
+   * The direct sign-in setting in force (`direct-sign-in.ts`), read live: the
+   * environment wins over the `directSignIn` option field by field, so a
+   * deployment can turn it on or off whatever the host passed.
+   */
+  public directSignInSetting(): ResolvedDirectSignIn {
+    const env = ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>;
+    return resolveDirectSignIn(this.config.directSignIn, env);
+  }
+
+  /**
+   * The identity provider a signed-out visit goes to: the named one, or the
+   * one candidate across `oidcProviders` and the `sys_sso_provider` rows
+   * (read with system context, only while the SSO plugin is wired).
+   */
+  public async chooseDirectSignInProvider(): Promise<DirectSignInProvider | { miss: DirectSignInProviderMiss }> {
+    const setting = this.directSignInSetting();
+    const provider = setting.enabled ? setting.provider : undefined;
+    const engine = this.getDataEngine();
+    const ssoProviderIds = this.isSsoWired() && engine
+      ? await readSsoProviderIds(withSystemReadContext(engine) as never, provider)
+      : [];
+    return chooseDirectSignInProvider({
+      ...(provider !== undefined ? { provider } : {}),
+      oauthProviderIds: [...this.enterpriseOAuthProviderIds()],
+      ssoProviderIds,
+    });
+  }
+
+  /**
+   * Is direct sign-in on AND able to start: the setting is on and it resolves
+   * to one provider. `/auth/config` serves this as `features.directSignIn`, so
+   * the sign-in page navigates only to a door that starts a sign-in.
+   */
+  public async isDirectSignInUsable(): Promise<boolean> {
+    if (!this.directSignInSetting().enabled) return false;
+    try {
+      return !('miss' in (await this.chooseDirectSignInProvider()));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Answer `GET {basePath}/sign-in/direct` (`direct-sign-in.ts`
+   * `runDirectSignIn`): `302` to the identity provider through the vendor's
+   * own start, returning to a same-origin path only. It mints nothing.
+   */
+  public startDirectSignIn(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    const origin = this.getCanonicalOrigin();
+    return runDirectSignIn(request, {
+      setting: () => this.directSignInSetting(),
+      chooseProvider: () => this.chooseDirectSignInProvider(),
+      origin: () => origin,
+      consolePageUrl: (path) => this.getConsolePageUrl(path),
+      startUrl: (kind) =>
+        new URL(`${this.getBasePath()}${kind === 'oauth' ? '/sign-in/social' : '/sign-in/sso'}`, request.url).href,
+      // The vendor's own start, so never back through the route table.
+      dispatch: (vendorRequest) => this.handleVendorRequest(vendorRequest, transport),
+      ...(this.config.logger ? { logger: this.config.logger as never } : {}),
+    });
   }
 
   /**
@@ -6126,15 +6326,23 @@ export class AuthManager {
    * Default Organization is asked the last-administrator guard's question
    * first (a 403), then its own record count (the same 409), both here, before
    * the first write.
+   *
+   * Last, a delete all of that admits is asked the host's own check
+   * ({@link AuthManagerOptions.organizationDeleteGate}, read per call), with
+   * the parsed organization id and the caller: its refusal is answered
+   * unchanged, and a check that throws or answers anything else refuses with
+   * 503 (`organizationDeleteGateAnswer` in `auth-manager-actor-guards.ts`).
    */
   private assertOrganizationDeletable(ctx: any): Promise<void> {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
     const readOrgRolesMap = () => this.orgRolesMap;
     const readOrganizationDeleteStandingJudge = () => this.organizationDeleteStandingJudge;
-    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+    const readOrganizationDeleteGate = () => this.config.organizationDeleteGate;
+    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteGate' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
       getAudience: (...a) => this.getAudience(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       get orgRolesMap() { return readOrgRolesMap(); },
+      get organizationDeleteGate() { return readOrganizationDeleteGate(); },
       get organizationDeleteStandingJudge() { return readOrganizationDeleteStandingJudge(); },
       resolveActor: (...a) => this.resolveActor(...a),
     };
@@ -6383,11 +6591,12 @@ export class AuthManager {
     // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
-    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isAdminPluginMounted' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       get idpLocale() { return readIdpLocale(); },
       isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
+      isAdminPluginMounted: () => this.isAdminPluginMounted(),
       enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
       judgeSessionScoping: (...a) => this.judgeSessionScoping(...a),
       judgeSessionSwitch: (...a) => this.judgeSessionSwitch(...a),
@@ -7518,6 +7727,19 @@ export class AuthManager {
    */
   public isScimWired(): boolean {
     return resolveScimEnabled(this.config.plugins);
+  }
+
+  /**
+   * Is better-auth's admin plugin mounted on the built instance? Asked of the
+   * instance itself (its `banUser` endpoint, the seam `admin/create-user` and
+   * `admin/ban-user` have always tested), never of the configuration, so a
+   * plugin that failed to mount reads as absent. Where it is absent the
+   * platform enforces a ban itself (`user-session-admission.ts`) and writes
+   * one through the data engine (`user-ban-write.ts`).
+   */
+  public async isAdminPluginMounted(): Promise<boolean> {
+    const api = (await this.getApi()) as { banUser?: unknown } | undefined;
+    return typeof api?.banUser === 'function';
   }
 
   /**

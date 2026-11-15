@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "An infinite-scroll activity feed over millions of `activity` rows, newest first.",
-      "expected_output": "Keyset paging: a `where` on the sort key past the last row seen (`created_at: { $lt: lastSeenCreatedAt }`), `orderBy: [{ field: 'created_at', order: 'desc' }]` in the same direction, and a `limit`. Not `offset` (the database still scans the skipped rows) and not `query.cursor`, which was removed in 17.",
+      "expected_output": "Use keyset paging: a `where` on the sort key past the last row seen (`created_at: { $lt: lastSeenCreatedAt }`), `orderBy: [{ field: 'created_at', order: 'desc' }]` in the same direction, and a `limit`. Not `offset` (the database still scans the skipped rows) and not `query.cursor`, which was removed in 17.",
       "files": [],
       "assertions": {
         "must_contain": ["orderBy", "limit", "$lt", "keyset"],
@@ -34,10 +34,10 @@
     {
       "id": 4,
       "prompt": "Search tasks by keyword across the title and the parent project's name, and show each task's assignee name and email.",
-      "expected_output": "`engine.find('task', { search: 'term', searchFields: ['title', 'project_name'], fields: ['title', 'status', 'assignee'], expand: { assignee: { object: 'user', fields: ['name', 'email'] } } })`: `search` never traverses, so the project name is a stored mirror field on `task` (objectstack-data), never a dotted `project_id.name`; the projection keeps the `assignee` FK column or `expand` resolves nothing. No `fuzzy` / `boost` / `highlight` knobs — validated then ignored.",
+      "expected_output": "`engine.find('task', { search: 'term', searchFields: ['title', 'project_name'], fields: ['title', 'status', 'owner_id'], expand: { owner_id: { object: 'user', fields: ['name', 'email'] } } })`: `search` never traverses, so the project name is a stored mirror field on `task` (objectstack-data), never a dotted `project_id.name`; the assignee is the record owner `owner_id`, and the projection keeps that FK column or `expand` resolves nothing. No `fuzzy` / `boost` / `highlight` knobs — validated then ignored.",
       "files": [],
       "assertions": {
-        "must_contain": ["searchFields", "expand", "fields", "stored"],
+        "must_contain": ["searchFields", "expand", "fields", "stored", "owner_id"],
         "must_not_contain": ["'project_id.name'", "fuzzy:"]
       }
     },

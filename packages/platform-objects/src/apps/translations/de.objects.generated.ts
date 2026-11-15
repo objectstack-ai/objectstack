@@ -120,7 +120,8 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         help: "Wie diese Identität angelegt wurde – idp_provisioned (föderiertes SSO, Just-in-Time) oder env_native (lokale Registrierung / Endbenutzer der App). Vom System verwaltet; nicht bearbeiten.",
         options: {
           idp_provisioned: "Vom IdP bereitgestellt",
-          env_native: "Lokales Konto"
+          env_native: "Lokales Konto",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -2167,6 +2168,18 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             label: "Discovery-URL",
             helpText: "Optional. URL des OIDC-Discovery-Dokuments (https). Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "Userinfo-URL",
             helpText: "Optional. URL des OIDC-Userinfo-Endpunkts (https); ersetzt den im Discovery-Dokument genannten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig: Geben Sie ihn an, wenn die Registrierung abgelehnt wird, weil das Discovery-Dokument einen Userinfo-Host nennt, dem der Server nicht vertraut."
@@ -2253,6 +2266,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             label: "Zuordnung: Gruppenattribut",
             helpText: "Optional. Assertion-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

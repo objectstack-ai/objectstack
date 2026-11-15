@@ -51,9 +51,14 @@ import {
   BOOLEAN_COMPARAND_DOOR_FIXTURE_OBJECT,
   BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS,
   BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS,
+  FILTER_STRING_STORED_COMPARAND_CASES,
+  FILTER_STRING_STORED_COMPARAND_FIELDS,
   NON_BOOLEAN_STRING_FORMS,
   NON_BOOLEAN_VALUE_FORMS,
+  STRING_STORED_COMPARAND_DOOR_LIST_OPERATORS,
+  STRING_STORED_COMPARAND_DOOR_SCALAR_OPERATORS,
   lowerFilterCondition,
+  stringStoredComparandDoorVerdict,
   normalizeFilterComparandTypes,
   type BooleanComparandDoorCase,
   type BooleanComparandDoorNarrowsCase,
@@ -217,7 +222,14 @@ describe('[#21333] the boolean-comparand arm at the engine collection point', ()
   it('lets every passing case through UNCHANGED — a boolean, null, a non-boolean field, a flag, a reference', async () => {
     for (const c of PASSES) {
       const filter = c.filter();
-      expect(await driverWhere(filter), c.name).toEqual(lowered(filter));
+      // [#29486] …except where the walk's string-stored arm judges it: the
+      // table's number on `f_text` (not THIS arm's subject) reaches the
+      // driver as the string the write stores, by that arm's verdict.
+      const other = stringStoredComparandDoorVerdict({ type: c.declaredType }, c.comparand);
+      const expected = other.verdict === 'narrows'
+        ? JSON.parse(JSON.stringify(filter).replace(JSON.stringify(c.comparand), JSON.stringify(other.value)))
+        : filter;
+      expect(await driverWhere(filter), c.name).toEqual(lowered(expected));
     }
   });
 
@@ -651,5 +663,144 @@ describe('[#21333] the boolean-comparand arm at the engine collection point', ()
         expect(text, v).not.toContain(`"${v}"`);
       }
     });
+  });
+});
+
+/**
+ * [#29486] The walk's STRING-STORED arm: a number or boolean comparand against
+ * a declared text- or option-family field reaches the driver as `String(value)`,
+ * the string the write door stores for it (`@objectstack/spec/data`'s
+ * `filter-string-stored-comparand-declared-type.ts` is the verdict). The
+ * cross-driver table `FILTER_STRING_STORED_COMPARAND_CASES` is driven here
+ * end to end through a recording driver: the driver receives exactly each
+ * case's `stored()` filter, which every driver suite pins against real stored
+ * rows (memory, SQL, mongodb). Measured before the arm on InMemoryDriver and
+ * SQLite: `{ code: 42 }` and `{ stage: 3 }` matched no row written `42` / `3`.
+ */
+describe('[#29486] the string-stored arm at the engine collection point', () => {
+  const STRING_OBJECT = 'string_stored_probe';
+  const FIXTURE = {
+    name: STRING_OBJECT,
+    label: 'String-stored comparand probe',
+    fields: {
+      ...FILTER_STRING_STORED_COMPARAND_FIELDS,
+      email: { name: 'email', type: 'email' },
+      tags: { name: 'tags', type: 'multiselect' },
+      qty: { name: 'qty', type: 'number' },
+      flag: { name: 'flag', type: 'boolean' },
+      at: { name: 'at', type: 'datetime' },
+    },
+  };
+  let engine: ObjectQL;
+  let reads: SeenRead[];
+  let writes: SeenRead[];
+
+  beforeEach(async () => {
+    const rec = makeRecordingDriver();
+    reads = rec.reads;
+    writes = rec.writes;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(FIXTURE as any, 'test');
+    for (const row of [{ id: 'a', code: 42, stage: 3, qty: 1 }, { id: 'b', code: 'x', stage: true, qty: 2 }]) {
+      await engine.insert(STRING_OBJECT, { ...row });
+    }
+    reads.length = 0;
+    writes.length = 0;
+  });
+
+  const driverWhere = async (where: unknown): Promise<unknown> => {
+    reads.length = 0;
+    await engine.find(STRING_OBJECT, { where } as EngineQueryOptions);
+    expect(reads, JSON.stringify(where, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v))).toHaveLength(1);
+    return reads[0]?.ast?.where;
+  };
+
+  it('the write side stored the strings the arm narrows to — the two halves read one value one way', async () => {
+    const rows = await engine.find(STRING_OBJECT, { where: { id: { $in: ['a', 'b'] } } });
+    expect(rows.map((r) => [(r as any).code, (r as any).stage])).toEqual([['42', '3'], ['x', 'true']]);
+  });
+
+  it('FILTER_STRING_STORED_COMPARAND_CASES: the driver receives exactly each case\'s stored filter, the caller\'s is untouched', async () => {
+    expect(FILTER_STRING_STORED_COMPARAND_CASES.length).toBeGreaterThan(0);
+    for (const c of FILTER_STRING_STORED_COMPARAND_CASES) {
+      const filter = c.filter();
+      const asWritten = JSON.stringify(filter);
+      expect(await driverWhere(filter), c.name).toEqual(lowered(c.stored()));
+      expect(JSON.stringify(filter), `${c.name}: the caller's filter must not be edited`).toBe(asWritten);
+    }
+  });
+
+  it('narrows at every judged position, on every family member probed — implicit, each scalar operator, each list member', async () => {
+    for (const key of ['code', 'stage', 'email', 'tags']) {
+      expect(await driverWhere({ [key]: 7 }), key).toEqual(lowered({ [key]: '7' }));
+      for (const op of STRING_STORED_COMPARAND_DOOR_SCALAR_OPERATORS) {
+        expect(await driverWhere({ [key]: { [op]: false } }), `${key}.${op}`).toEqual(lowered({ [key]: { [op]: 'false' } }));
+      }
+      for (const op of STRING_STORED_COMPARAND_DOOR_LIST_OPERATORS) {
+        expect(await driverWhere({ [key]: { [op]: [1, 'z'] } }), `${key}.${op}`).toEqual(lowered({ [key]: { [op]: ['1', 'z'] } }));
+      }
+    }
+  });
+
+  it('leaves alone what is not a number or boolean, and every field outside the two families', async () => {
+    const at = new Date(Date.UTC(2026, 0, 1));
+    for (const where of [
+      { code: '42' },
+      { code: null },
+      { code: { $ne: null } },
+      { code: { $null: true } },
+      { code: { $eq: { $field: 'email' } } },
+      { code: { $gt: at } },
+      { qty: 42 },
+      { flag: true },
+      { at: { $gt: at } },
+    ]) {
+      expect(await driverWhere(where), JSON.stringify(where)).toEqual(lowered(where));
+    }
+    const schema = engine.registry.getObject(STRING_OBJECT);
+    for (const where of [{ code: '42' }, { code: null }, { qty: 42 }]) {
+      expect(narrowNumberComparands(STRING_OBJECT, 'find', schema, where), JSON.stringify(where)).toBe(where);
+    }
+  });
+
+  it('reads a bigint as the number it names on both spellings, and leaves one beyond 2^53 to the comparand-type door', async () => {
+    expect(await driverWhere({ code: BigInt(42) })).toEqual(lowered({ code: '42' }));
+    expect(await driverWhere([['code', '=', BigInt(42)]])).toEqual(lowered({ code: '42' }));
+    reads.length = 0;
+    const err = await refusalOf(engine.find(STRING_OBJECT, { where: { code: BigInt(2) ** BigInt(53) + BigInt(1) } } as unknown as EngineQueryOptions));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(reads).toHaveLength(0);
+  });
+
+  it('answers the FilterArray sugar and nested structure the same', async () => {
+    expect(await driverWhere([['code', '=', 42]])).toEqual(lowered({ code: '42' }));
+    expect(await driverWhere([['stage', '!=', true]])).toEqual(lowered({ stage: { $ne: 'true' } }));
+    expect(await driverWhere({ $or: [{ code: 42 }, { $not: { stage: { $in: [3] } } }] }))
+      .toEqual(lowered({ $or: [{ code: '42' }, { $not: { stage: { $in: ['3'] } } }] }));
+  });
+
+  it('reaches the write verbs and aggregate\'s `where`', async () => {
+    await engine.update(STRING_OBJECT, { code: 'y' }, { where: { code: 42 }, multi: true });
+    await engine.delete(STRING_OBJECT, { where: { stage: { $in: [3, true] } }, multi: true });
+    expect(writes.map((w) => w.ast?.where)).toEqual([lowered({ code: '42' }), lowered({ stage: { $in: ['3', 'true'] } })]);
+    reads.length = 0;
+    await engine.aggregate(STRING_OBJECT, { where: { code: 42 }, aggregations: [{ function: 'count', alias: 'n' }] } as EngineAggregateOptions);
+    expect(reads[0]?.ast?.where).toEqual(lowered({ code: '42' }));
+  });
+
+  it('a per-aggregation filter and `having` — the engine\'s own evaluator — count what the stored string counts', async () => {
+    const counted = async (filter: FilterCondition) => Number(((await engine.aggregate(STRING_OBJECT, {
+      aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'm', filter }],
+    } as EngineAggregateOptions))[0] as Record<string, unknown>).m);
+    expect(await counted({ code: 42 })).toBe(1);
+    expect(await counted({ code: 42 })).toBe(await counted({ code: '42' }));
+    expect(await counted({ stage: { $in: [3, true] } })).toBe(2);
+    const groups = async (having: FilterCondition) => (await engine.aggregate(STRING_OBJECT, {
+      groupBy: ['stage'], aggregations: [{ function: 'count', alias: 'n' }], having,
+    } as EngineAggregateOptions)).map((r) => (r as Record<string, unknown>).stage);
+    expect(await groups({ stage: 3 })).toEqual(['3']);
+    expect(await groups({ stage: { $ne: true } })).toEqual(['3']);
   });
 });

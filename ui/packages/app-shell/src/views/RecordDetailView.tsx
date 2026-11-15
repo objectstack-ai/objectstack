@@ -633,6 +633,21 @@ const COMMENT_REACTION_REMOVE_PATH = '/api/v1/comments/reactions';
 const COMMENT_OBJECT = 'sys_comment';
 
 /**
+ * Whether a served `sys_comment` definition still declares the retired
+ * `reactions` column: the one deployment the column store writes to. The
+ * column left `sys_comment` in the release that added
+ * {@link COMMENT_REACTION_OBJECT} (`sys-comment-reactions-column-retired`), so
+ * a definition that declares it is a framework without that object, and one
+ * that does not refuses a write naming it (`400 INVALID_FIELD`). No definition
+ * (none served, or not read yet) is not evidence of the column.
+ */
+function declaresReactionsColumn(definition: unknown): boolean {
+  const fields = (definition as { fields?: unknown } | null | undefined)?.fields;
+  if (Array.isArray(fields)) return fields.some((f) => (f as { name?: unknown } | null)?.name === 'reactions');
+  return !!fields && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, 'reactions');
+}
+
+/**
  * `sys_approval_request`'s declared recall. While the decision bar draws it,
  * the DetailView approval band yields its own Recall (objectstack#25877).
  */
@@ -3176,12 +3191,38 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // path, and every uncertain answer takes the records path. `null` until the
   // registry has answered, and the feed read waits for it: comments and their
   // reactions are read as one answer.
-  const reactionPresence = useObjectPresence(COMMENT_REACTION_OBJECT);
-  const reactionStore: 'records' | 'column' | null = !reactionPresence.settled
-    ? null
-    : reactionPresence.presence === 'absent'
-      ? 'column'
-      : 'records';
+  //
+  // A caller whose loaded grants hold no read on the object is not asked about
+  // it: the metadata door serves an object's definition only to a caller its
+  // read check admits (ADR-0106 as amended by ruling record 6787890900), and
+  // the object declares no `schemaReadDelegate`, so that read could only
+  // answer absent (a 404 on every record page). It takes the path that answer
+  // takes. With no permission provider every grant reads open, as before.
+  //
+  // Neither answer tells an undeployed object from a refused one: the door
+  // answers both as absent, and a caller's grants name neither. What does is
+  // `sys_comment`'s own definition, which this caller reads: the release that
+  // added `sys_comment_reaction` retired the `reactions` column in the same
+  // step (`sys-comment-reactions-column-retired`), so a framework without the
+  // object still declares the column, and one with it does not. So the column
+  // path is taken only where `sys_comment` declares `reactions`. Anywhere else
+  // the object is there and this caller may not read it: `none`, no reaction
+  // is read or offered. The column write there answered `400 INVALID_FIELD`
+  // on every click, and the caller's own reaction row is refused too.
+  const reactionReadRefused = perms.isLoaded && !perms.can(COMMENT_REACTION_OBJECT, 'read');
+  const reactionPresence = useObjectPresence(reactionReadRefused ? '' : COMMENT_REACTION_OBJECT);
+  const reactionObjectUnread =
+    reactionReadRefused || (reactionPresence.settled && reactionPresence.presence === 'absent');
+  const commentPresence = useObjectPresence(reactionObjectUnread ? COMMENT_OBJECT : '');
+  const reactionStore: 'records' | 'column' | 'none' | null = !reactionObjectUnread
+    ? reactionPresence.settled
+      ? 'records'
+      : null
+    : !commentPresence.settled
+      ? null
+      : declaresReactionsColumn(commentPresence.definition)
+        ? 'column'
+        : 'none';
   /**
    * The signed-in user's own reaction rows, per comment (`[thread, comment]`)
    * and emoji: the row id a click that takes the reaction back deletes. Filled
@@ -3373,7 +3414,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           reactions:
             reactionStore === 'records'
               ? toReactions(records?.stored.get(String(c.id)))
-              : parseReactions(c.reactions),
+              : reactionStore === 'column'
+                ? parseReactions(c.reactions)
+                : undefined,
         }));
         // Into THIS record's slice — `threadId` is the key the effect closed
         // over, so a response that arrives after the user navigated away
@@ -4095,6 +4138,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     //   2) auto-grouping (primary + collapsible "More details").
     const sections = deriveRecordDetailSections(objectDef, {
       moreDetails: sectionLabel(objectDef.name, 'details', t('detail.sectionMoreDetails', 'More details')),
+      ungrouped: t('common.ungroupedSection', 'Other'),
     });
 
     // Audit fields (created_at/created_by/updated_at/updated_by) are NOT

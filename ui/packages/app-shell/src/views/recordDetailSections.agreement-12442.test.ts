@@ -26,11 +26,13 @@
  *   no `record:details` of its own to drift from the runtime's;
  * - an explicit `full`, on an object with no `fieldGroups`: the seed's
  *   `record:details` carries the runtime's sections, written in the persisted
- *   shape (field names), and that shape parses under the spec's
- *   `RecordDetailsProps`;
- * - CONTROL: an explicit `full` on an object with `fieldGroups` seeds exactly
- *   what the synthesizer alone writes, the `{ group }` references it has
- *   written since objectui#11630;
+ *   shape (field names) and headed by the persisted headings (the "More
+ *   details" locale map, objectstack#33471), and that shape parses under the
+ *   spec's `RecordDetailsProps`;
+ * - CONTROL: an explicit `full` on an object with `fieldGroups` seeds the
+ *   synthesizer's own `{ group }` references (objectui#11630), its ungrouped
+ *   bucket headed (objectstack#33377, pinned in
+ *   `recordDetailSections.studioUngroupedHeading-33377.test.tsx`);
  * - the three call sites go through the one derivation, and no second copy of
  *   the split exists.
  *
@@ -51,11 +53,17 @@ import {
   deriveRecordDetailSections,
   deriveStudioDetailSections,
   toAuthoredDetailSections,
+  loadPersistedSectionLabels,
   MORE_DETAILS_DEFAULT_LABEL,
+  UNGROUPED_SECTION_DEFAULT_LABEL,
 } from './recordDetailSections';
 import { registerBuiltinAnchors } from './metadata-admin/anchors';
 import { resolveResourceConfig } from './metadata-admin/registry';
+// The grouped seed loads every catalogue for its ungrouped heading
+// (objectstack#33377): make them resident at import, not inside a test's clock.
+import { registerBuiltInLocales } from '@object-ui/i18n/locales';
 
+registerBuiltInLocales();
 registerBuiltinAnchors();
 
 /** No `fieldGroups`: the split yields a primary section and "More details". */
@@ -88,7 +96,7 @@ const groupedDef = {
   },
 };
 
-const LABELS = { moreDetails: MORE_DETAILS_DEFAULT_LABEL };
+const LABELS = { moreDetails: MORE_DETAILS_DEFAULT_LABEL, ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL };
 
 /** Every `record:details` node in a page document, depth-first. */
 function detailsNodes(node: unknown): Array<Record<string, any>> {
@@ -146,14 +154,18 @@ describe('objectui#12442 — an explicit full page-create seed carries the runti
 
     const seeded = theDetailsNode(await fullSeedFor(flatDef));
     expect(seeded.properties?.sections, 'the seed wrote a bare record:details').toBeDefined();
-    expect(seeded.properties.sections).toEqual(toAuthoredDetailSections(runtimeSections));
+    const persisted = await loadPersistedSectionLabels(flatDef);
+    expect(seeded.properties.sections).toEqual(
+      toAuthoredDetailSections(deriveRecordDetailSections(flatDef, persisted)),
+    );
 
     // The same members, in the same sections, in the same order as the runtime.
     expect(seeded.properties.sections.map((s: any) => s.fields)).toEqual([
       ['name', 'subject', 'priority', 'account'],
       ['notes'],
     ]);
-    expect(seeded.properties.sections[1]).toMatchObject({ name: 'details', label: 'More details' });
+    // The heading is the runtime's, in every shipped language (objectstack#33471).
+    expect(seeded.properties.sections[1]).toMatchObject({ name: 'details', label: { en: 'More details' } });
   });
 
   it('the seeded sections are spec-legal: they parse under RecordDetailsProps', async () => {
@@ -166,20 +178,25 @@ describe('objectui#12442 — an explicit full page-create seed carries the runti
 
   it('the seed and the runtime build the same record:details node from those sections', async () => {
     const runtimePage = buildDefaultPageSchema(flatDef as any, {
-      sections: toAuthoredDetailSections(deriveRecordDetailSections(flatDef, LABELS)) as any,
+      sections: toAuthoredDetailSections(deriveRecordDetailSections(flatDef, await loadPersistedSectionLabels(flatDef))) as any,
     });
     expect(theDetailsNode(await fullSeedFor(flatDef))).toEqual(theDetailsNode(runtimePage));
   });
 
-  it('CONTROL: an object with fieldGroups seeds exactly what the synthesizer alone writes', async () => {
-    expect(deriveStudioDetailSections(groupedDef, LABELS)).toBeUndefined();
+  it('CONTROL: an object with fieldGroups seeds the synthesizer\'s group references, the ungrouped bucket headed', async () => {
     const today = buildDefaultPageSchema(groupedDef as any) as Record<string, any>;
     const seeded = await fullSeedFor(groupedDef);
-    expect(seeded.regions).toEqual(today.regions);
+    const todaySections = theDetailsNode(today).properties.sections as Array<Record<string, any>>;
+    const seededSections = theDetailsNode(seeded).properties.sections as Array<Record<string, any>>;
     // Firing control: that body is the `{ group }` reference form, not bare.
-    expect(theDetailsNode(seeded).properties.sections[0]).toEqual(
-      expect.objectContaining({ group: 'basic_info' }),
-    );
+    expect(seededSections[0]).toEqual(expect.objectContaining({ group: 'basic_info' }));
+    // Every section is the synthesizer's; only the keyless bucket gains a heading.
+    expect(seededSections).toHaveLength(todaySections.length);
+    seededSections.forEach((section, i) => {
+      const { label, ...rest } = section;
+      expect(rest).toEqual(todaySections[i]);
+      expect(label === undefined).toBe(typeof section.group === 'string');
+    });
   });
 });
 

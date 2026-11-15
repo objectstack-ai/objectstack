@@ -66,6 +66,8 @@
       "@objectstack/trigger-schedule": ["../../triggers/trigger-schedule/src/index.ts"]
     }
   },
-  "include": ["test/**/*"],
+  // `bench/**` holds the SQL performance baseline's fixture app
+  // (`bench/sql-perf/app/objectstack.config.ts`), compiled here like any test input.
+  "include": ["test/**/*", "bench/**/*.ts"],
   "exclude": ["node_modules"]
 }

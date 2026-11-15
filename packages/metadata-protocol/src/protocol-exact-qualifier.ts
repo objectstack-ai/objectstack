@@ -54,7 +54,6 @@ import {
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
     type PackageScopedResolvableType,
-    type PackageScopedType,
 } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
@@ -119,6 +118,13 @@ export interface ExactQualifierAddress {
      * when only a stored row bound to the package carries it.
      */
     readonly registryHolders: readonly string[];
+    /**
+     * [#32662, ADR-0150 D3] The one base a customization pair's address was
+     * admitted at through that base's stored row, when the registry holds the
+     * name for no base it pairs and the pair stores no row of its own: the
+     * package whose stored content the address serves. Absent otherwise.
+     */
+    readonly storedRowBase?: string;
 }
 
 /** The engine's registry, as the reads below probe it. */
@@ -278,8 +284,9 @@ function refusal(
  *   `getEnvironmentScopedItem`, `getPackageScopedItem`).
  */
 export async function admitExactQualifier(
-    host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow'>,
+    host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'packagelessAddress'>,
     request: { type: string; name: string; packageId?: string; member?: string },
+    options: { readonly storedRowBases?: boolean } = {},
 ): Promise<ExactQualifierAddress | undefined> {
     const packageId = request.packageId;
     if (!packageId || !isPackageScopedType(request.type)) return undefined;
@@ -318,6 +325,24 @@ export async function admitExactQualifier(
         });
         if ((served?.row as { package_id?: unknown } | undefined)?.package_id === packageId) {
             return { packageId, registryHolders: [] };
+        }
+    }
+
+    // [#32662, ADR-0150 D3, red line 2] A pair address of a name its bases
+    // hold only as stored rows is judged from the rows' bindings, as the read
+    // naming no package judges such a name ({@link servedRowHolderOf}), never
+    // from the registry alone: a type the registry keeps one bare slot per
+    // name for (`dashboard`) holds the row hydrated last, so after a reboot
+    // the later saver's pair address answered its row and the earlier one's
+    // was refused naming only the other. Admitted at every base whose row is
+    // stored, one base read for its content ({@link ExactQualifierAddress.storedRowBase});
+    // two are refused naming both by {@link exactQualifierItem}, as two
+    // registry bases are. Asked by the plain item read (`options.storedRowBases`).
+    if (options.storedRowBases === true) {
+        const bindings = (await host.packagelessAddress(request.type, request.name, request.member, 'active')).candidates;
+        const rowBases = bindings.filter((binding) => binding !== packageId && pairsOf(binding, installed).includes(packageId));
+        if (rowBases.length > 0) {
+            return { packageId, registryHolders: rowBases, ...(rowBases.length === 1 ? { storedRowBase: rowBases[0] } : {}) };
         }
     }
 
@@ -612,8 +637,13 @@ export function resolveCallerPackageAddress(
  * narrowed type lets two namespaces hold one name whether or not its readers
  * are wired, so the refusal is in place from the change that narrows it
  * (`action` since #31697, read through `getItem`), never one reader card later.
+ *
+ * A plain `boolean`, never the type predicate `type is PackageScopedType`:
+ * the `false` answer depends on the registry (`readsByPackage`), not on the
+ * type alone, so a predicate would narrow a package-scoped type to `never` in
+ * a caller's `false` branch (#32716 N1).
  */
-export function judgesPackageLessRows(registry: { readsByPackage?(type: string): boolean }, type: string): type is PackageScopedType {
+export function judgesPackageLessRows(registry: { readsByPackage?(type: string): boolean }, type: string): boolean {
     if (!isPackageScopedType(type)) return false;
     return registry.readsByPackage?.(type) === true || isNamespaceScopedBareNameType(type);
 }
@@ -643,7 +673,9 @@ export function packageLessRowOwners(
     name: string,
     options?: { includeDisabledPackages?: boolean },
 ): string[] {
-    if (!judgesPackageLessRows(registry, type)) return [];
+    // `isPackageScopedType` narrows `type` (its answer is the type's alone);
+    // `judgesPackageLessRows` is a plain boolean (its answer is the registry's too).
+    if (!isPackageScopedType(type) || !judgesPackageLessRows(registry, type)) return [];
     if (isPlatformRequestedBareName(type, name)) return [];
     // [#32183] The served holders: a read judges them, so a package-less row
     // of a name an enabled and a disabled package hold is the enabled one's.

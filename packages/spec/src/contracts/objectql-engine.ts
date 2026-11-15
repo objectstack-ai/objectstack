@@ -148,7 +148,8 @@ export interface EngineTransactionOptions {
      * Default (`undefined` / `false`) keeps ADR-0119 D1's declared degrade: a
      * driver without `beginTransaction` runs the callback with no transaction
      * and no rollback, warning once. That degrade is right for callers who can
-     * live without atomicity (test doubles, in-memory drivers) and wrong for
+     * live without atomicity (test doubles; the in-memory driver is not one of
+     * these drivers: it implements `beginTransaction`) and wrong for
      * callers whose whole reason to open a transaction is the rollback.
      *
      * With `require: true` the engine THROWS instead of degrading, before the

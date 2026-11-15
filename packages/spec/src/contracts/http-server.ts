@@ -34,6 +34,12 @@ export interface IHttpRequest {
      * handler must not catch the refusal and carry on, because anything it
      * does after the catch acts on a request that has already been refused.
      *
+     * A body larger than the transport's request-body limit is refused the
+     * same way, with 413 `PAYLOAD_TOO_LARGE`. That refusal alone has one way
+     * out: a handler that then reads {@link rawBody} takes the read over under
+     * its own bound (an upload door whose limit is above the transport's), and
+     * its own answer stands. Such a handler owes that bound to `rawBody`.
+     *
      * A handler that needs the raw bytes (a file upload, a media type not
      * listed above) reads {@link rawBody} and never reads `body`.
      */
@@ -49,8 +55,31 @@ export interface IHttpRequest {
      * Implementations should consume the underlying request stream lazily so
      * handlers that only need `body` do not pay the parsing cost. May be
      * undefined when the underlying framework cannot expose the raw stream.
+     *
+     * The bytes are NOT bounded by the transport's request-body limit: the
+     * reader is a door that bounds them by its own. It states that bound as
+     * `options.maxBytes`, and an implementation MUST then hold the body to it
+     * whether or not the request declares a length:
+     *
+     * - a declared `Content-Length` over `maxBytes` is refused without reading
+     *   the body;
+     * - a body with no declared length is counted as it is read, and refused
+     *   once it passes `maxBytes`: the read stops there and the rest is not
+     *   buffered;
+     * - exactly `maxBytes` is read whole.
+     *
+     * `maxBytes` is a non-negative whole number of bytes. Any other value is
+     * the calling door's bug, never "no bound": the call itself throws a
+     * `TypeError`, before anything is read, rather than returning a promise.
+     *
+     * A refusal rejects with an error carrying `status` 413 and `code`
+     * `PAYLOAD_TOO_LARGE`. The door answers it with its own refusal; one that
+     * lets it escape is answered 413 `PAYLOAD_TOO_LARGE`. Without `maxBytes`
+     * the whole body is read, as before, so a door that has a bound passes it.
+     * The first call reads the body; a later call answers those same bytes
+     * judged against its own `maxBytes`, or the first call's refusal.
      */
-    rawBody?: () => Promise<Buffer>;
+    rawBody?: (options?: { maxBytes?: number }) => Promise<Buffer>;
 
     /**
      * The TRANSPORT's own peer address for this request — the socket's remote

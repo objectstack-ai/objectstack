@@ -14,6 +14,12 @@
  * schema an author picks the action by on `GET /connectors`, so what is
  * enforced is what was shown. Each door words its own refusal around the
  * sentence {@link judgeConnectorInput} returns.
+ *
+ * [#33553] A door may also ask for the keys the schema does not declare
+ * ({@link ConnectorInputJudgeOptions.refuseUndeclaredKeys}): the
+ * `connector_action` node does, so a key left in `connectorConfig.input` by a
+ * connector or action switch is refused at run time instead of being sent to
+ * the provider. See {@link declaredKeysOf} for which schemas declare their keys.
  */
 
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
@@ -21,6 +27,12 @@ import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 /** Where a door reads an action's declared `inputSchema` — the automation engine's descriptor list. */
 export interface ConnectorInputSchemaSource {
     getConnectorDescriptors(): ConnectorDescriptor[];
+    /**
+     * [#31699] The schema of one instance's action, by its package: the
+     * engine's (`AutomationEngine.resolveConnectorActionInputSchema`). A
+     * source without it is read through its descriptor list, by name.
+     */
+    resolveConnectorActionInputSchema?(connectorId: string, actionId: string, packageId?: string | null): unknown;
 }
 
 /** What one judgment found: the violations as one sentence, and whether any was text where a number or boolean is declared. */
@@ -29,6 +41,19 @@ export interface ConnectorInputVerdict {
     violations: string;
     /** A text value met an `integer` / `number` / `boolean` parameter — the door appends {@link TEXT_FOR_SCALAR_HINT}. */
     textForScalar: boolean;
+    /** [#33553] A key the schema does not declare was found — the door appends {@link UNDECLARED_KEY_HINT}. */
+    undeclaredKey: boolean;
+}
+
+/** How a door asks {@link judgeConnectorInput} to judge. */
+export interface ConnectorInputJudgeOptions {
+    /**
+     * [#33553] Also refuse every key of an object the schema declares its keys
+     * for ({@link declaredKeysOf}) that is not one of them, at every level the
+     * walk reaches. Off by default: a door that sends only keys it adds itself
+     * leaves it off until its own authors are told.
+     */
+    refuseUndeclaredKeys?: boolean;
 }
 
 /**
@@ -41,12 +66,25 @@ export const TEXT_FOR_SCALAR_HINT =
     ` A text value for an integer, number or boolean parameter is not converted: `
     + `cast it in a CEL envelope with int(), double() or bool().`;
 
+/**
+ * [#33553] The hint a refusal appends when {@link ConnectorInputVerdict.undeclaredKey}
+ * is set: the key is refused, never passed through, and a connector or action
+ * switch is the usual way one is left behind.
+ */
+export const UNDECLARED_KEY_HINT =
+    ` A key the action does not declare is not sent to the provider: remove it (a connector or action `
+    + `switch can leave the previous action's keys behind), or pick the action that declares it.`;
+
 /** The `inputSchema` `connectorId.actionId` declares, or `undefined` when it declares none (or is not registered). */
 export function findConnectorActionInputSchema(
     source: ConnectorInputSchemaSource,
     connectorId: string,
     actionId: string,
+    packageId?: string | null,
 ): unknown {
+    if (typeof source.resolveConnectorActionInputSchema === 'function') {
+        return source.resolveConnectorActionInputSchema(connectorId, actionId, packageId);
+    }
     return source
         .getConnectorDescriptors()
         .find((d) => d.name === connectorId)
@@ -58,8 +96,17 @@ export function findConnectorActionInputSchema(
  * every value it adds — against `inputSchema`. `undefined` means nothing is
  * wrong (or the action declares no schema), so the call may be dispatched.
  */
-export function judgeConnectorInput(inputSchema: unknown, input: unknown): ConnectorInputVerdict | undefined {
-    const found: InputSchemaViolations = { lines: [], textForScalar: false };
+export function judgeConnectorInput(
+    inputSchema: unknown,
+    input: unknown,
+    options: ConnectorInputJudgeOptions = {},
+): ConnectorInputVerdict | undefined {
+    const found: InputSchemaViolations = {
+        lines: [],
+        textForScalar: false,
+        undeclaredKey: false,
+        refuseUndeclaredKeys: options.refuseUndeclaredKeys === true,
+    };
     collectInputSchemaViolations(inputSchema, input, '', found);
     if (found.lines.length === 0) return undefined;
     const shown = found.lines.slice(0, MAX_NAMED_VIOLATIONS);
@@ -67,6 +114,7 @@ export function judgeConnectorInput(inputSchema: unknown, input: unknown): Conne
     return {
         violations: shown.join('; ') + (more > 0 ? `; and ${more} more` : ''),
         textForScalar: found.textForScalar,
+        undeclaredKey: found.undeclaredKey,
     };
 }
 
@@ -74,6 +122,59 @@ export function judgeConnectorInput(inputSchema: unknown, input: unknown): Conne
 interface InputSchemaViolations {
     lines: string[];
     textForScalar: boolean;
+    undeclaredKey: boolean;
+    /** The door's {@link ConnectorInputJudgeOptions.refuseUndeclaredKeys}. */
+    readonly refuseUndeclaredKeys: boolean;
+}
+
+/** How many declared keys an undeclared-key violation lists before it summarises the rest as a count. */
+const MAX_LISTED_DECLARED_KEYS = 8;
+
+/**
+ * Keywords that can admit a key {@link declaredKeysOf} would not see in
+ * `properties` / `required`: pattern-matched keys, and every way a schema
+ * pulls in another schema's keys. A schema carrying one is read as OPEN.
+ */
+const KEY_ADMITTING_KEYWORDS = [
+    'patternProperties', '$ref', '$dynamicRef', '$recursiveRef', 'allOf', 'anyOf', 'oneOf',
+    'if', 'then', 'else', 'dependentSchemas', 'dependencies',
+];
+
+/**
+ * [#33553] The keys an object schema DECLARES, or `undefined` when it declares
+ * an open key set — the decision the `connector_action` node refuses by.
+ *
+ * Declared = the names in `properties` plus those in `required`. A schema
+ * declares its key set when it lists `properties`, or says
+ * `additionalProperties: false` (then an absent `properties` declares none).
+ * It is OPEN — every key accepted — when it explicitly admits more:
+ * `additionalProperties` (or `unevaluatedProperties`) set to anything but
+ * `false`, i.e. `true` or a schema, or a keyword in
+ * {@link KEY_ADMITTING_KEYWORDS}; and when it lists no `properties` at all,
+ * since it then names no input to hold a key against. This reads
+ * `properties` as the action's contract, not as JSON Schema's open default:
+ * none of the shipped connector producers writes `additionalProperties`, so
+ * under the default every key would pass — which is how a key no action
+ * reads reached the provider.
+ */
+function declaredKeysOf(schema: Record<string, unknown>): string[] | undefined {
+    if (KEY_ADMITTING_KEYWORDS.some((k) => Object.prototype.hasOwnProperty.call(schema, k))) return undefined;
+    const additional = schema.additionalProperties;
+    if (additional !== undefined && additional !== false) return undefined;
+    const unevaluated = schema.unevaluatedProperties;
+    if (unevaluated !== undefined && unevaluated !== false) return undefined;
+    const properties = isPlainRecord(schema.properties) ? schema.properties : undefined;
+    if (!properties && additional !== false) return undefined;
+    const required = Array.isArray(schema.required) ? schema.required.filter((k): k is string => typeof k === 'string') : [];
+    return [...new Set([...Object.keys(properties ?? {}), ...required])];
+}
+
+/** The declared keys as an undeclared-key violation lists them: quoted, at most {@link MAX_LISTED_DECLARED_KEYS}. */
+function listDeclaredKeys(keys: readonly string[]): string {
+    if (keys.length === 0) return 'none';
+    const shown = keys.slice(0, MAX_LISTED_DECLARED_KEYS).map((k) => `'${k}'`).join(', ');
+    const more = keys.length - MAX_LISTED_DECLARED_KEYS;
+    return more > 0 ? `${shown} and ${more} more` : shown;
 }
 
 /** How many violations one refusal names before it summarises the rest as a count. */
@@ -111,8 +212,10 @@ function matchesType(type: string, value: unknown, kind: string): boolean {
  * an OpenAPI document's operation (which may keep an unresolved `$ref`), an
  * MCP server's `tools/list` entry (any draft), or a code connector's literal.
  * A keyword outside the subset (`$ref`, `oneOf`/`anyOf`/`allOf`, `enum`,
- * `format`, bounds, `additionalProperties`, …) never refuses a call: the
- * remote still judges those, as it did before. A missing piece is the narrow
+ * `format`, bounds, …) never refuses a call: the remote still judges those,
+ * as it did before. [#33553] With `refuseUndeclaredKeys`, a key an object
+ * schema does not declare ({@link declaredKeysOf}) is refused at the level it
+ * appears, and those keywords only ever read a key set as open. A missing piece is the narrow
  * direction on purpose — a call this check refuses is one the declared
  * schema itself says is wrong under every draft. `null` on an optional
  * property counts as absent (see the property loop), and text is never
@@ -163,6 +266,23 @@ function collectInputSchemaViolations(schema: unknown, value: unknown, path: str
                 // it is still judged — it would be sent as a placeholder.
                 if (record[key] === null && !required.has(key)) continue;
                 collectInputSchemaViolations(sub, record[key], path ? `${path}.${key}` : key, out);
+            }
+        }
+        // [#33553] A key the schema does not declare is refused where it
+        // appears, naming what is declared there. `undefined` is absent (it
+        // has no JSON spelling, so it is never sent); every other value —
+        // `null` included — would reach the provider.
+        const declared = out.refuseUndeclaredKeys ? declaredKeysOf(schema) : undefined;
+        if (declared) {
+            const known = new Set(declared);
+            for (const key of Object.keys(record)) {
+                if (known.has(key) || record[key] === undefined) continue;
+                const at = path ? `${path}.${key}` : key;
+                out.lines.push(
+                    `'${at}' is not an input the action declares `
+                    + `(declared${path ? ` in '${path}'` : ''}: ${listDeclaredKeys(declared)})`,
+                );
+                out.undeclaredKey = true;
             }
         }
     } else if (kind === 'array' && isPlainRecord(schema.items)) {

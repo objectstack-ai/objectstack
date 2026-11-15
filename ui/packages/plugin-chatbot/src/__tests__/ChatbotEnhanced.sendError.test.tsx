@@ -7,6 +7,9 @@
  * the box (not silently dropped) and a clear inline notice shown — NOT the
  * "Response failed / Retry" banner (which would regenerate the rolled-back turn).
  * A streamed-response error still shows the banner. A clean submit clears the box.
+ * A host that held the message itself names the text to restore (`unsentText`,
+ * objectstack#33562), a held suggestion chip included; absent, the composer
+ * restores its own last typed submit and no chip text.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -94,6 +97,60 @@ describe('ChatbotEnhanced send-failure UX', () => {
     expect(screen.getByTestId('chat-send-error')).toHaveTextContent('GENERIC_MSG');
   });
 
+  it('restores the host-named unsentText instead of its own last-submitted text (objectstack#33562)', async () => {
+    const onSendMessage = vi.fn();
+    const { rerender } = render(
+      <ChatbotEnhanced placeholder="Ask…" onSendMessage={onSendMessage} labels={LABELS} />,
+    );
+    // The host held an earlier message and joined this one to it.
+    const textarea = await submit('second part', onSendMessage);
+
+    rerender(
+      <ChatbotEnhanced
+        placeholder="Ask…"
+        onSendMessage={onSendMessage}
+        labels={LABELS}
+        error={notSentError(503)}
+        unsentText={'first part\n\nsecond part'}
+      />,
+    );
+
+    await waitFor(() => expect(textarea.value).toBe('first part\n\nsecond part'));
+    expect(screen.getByTestId('chat-send-error')).toHaveTextContent('GENERIC_MSG');
+  });
+
+  it('a suggestion chip the host held comes back through unsentText; without it a chip restores nothing (objectstack#33562)', async () => {
+    const onSendMessage = vi.fn();
+    const chip = 'Build a CRM';
+    const { rerender } = render(
+      <ChatbotEnhanced placeholder="Ask…" onSendMessage={onSendMessage} labels={LABELS} suggestions={[chip]} />,
+    );
+    fireEvent.click(screen.getByText(chip));
+    await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith(chip));
+    const textarea = screen.getByPlaceholderText('Ask…') as HTMLTextAreaElement;
+
+    // CONTROL: the composer alone restores no chip text (objectui#7253).
+    const first = notSentError(503);
+    rerender(
+      <ChatbotEnhanced placeholder="Ask…" onSendMessage={onSendMessage} labels={LABELS} suggestions={[chip]} error={first} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('chat-send-error')).toBeInTheDocument());
+    expect(textarea.value).toBe('');
+
+    // The host held the chip's message and names it: that is what was not sent.
+    rerender(
+      <ChatbotEnhanced
+        placeholder="Ask…"
+        onSendMessage={onSendMessage}
+        labels={LABELS}
+        suggestions={[chip]}
+        error={notSentError(503)}
+        unsentText={chip}
+      />,
+    );
+    await waitFor(() => expect(textarea.value).toBe(chip));
+  });
+
   it('shows the Response-failed banner (not the send notice) for a streamed-response error', async () => {
     const onSendMessage = vi.fn();
     render(
@@ -122,7 +179,8 @@ describe('ChatbotEnhanced send-failure UX', () => {
 
 /**
  * objectui#2627 — the ROLLBACK half of the plan card's optimistic approve.
- * Clicking "Build it" flips the card to a "Building…" badge before the server
+ * Clicking "Build it" flips the card to a "Confirmed" badge (objectstack#32984;
+ * it read "Building…" before) before the server
  * has said anything (#2632, pinned in ChatbotEnhanced.test.tsx). When that
  * approval never left the client — a 429 or an offline send, tagged `notSent` —
  * the optimistic badge is a lie AND a dead end: the badge replaces the buttons,
@@ -152,7 +210,7 @@ const planMessage: ChatbotEnhancedMessage[] = [
 ];
 
 describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', () => {
-  it('rolls the "Building…" badge back to the buttons when the approval never left the client', async () => {
+  it('rolls the "Confirmed" badge back to the buttons when the approval never left the client', async () => {
     const onSendMessage = vi.fn();
     const { rerender } = render(
       <ChatbotEnhanced
@@ -165,7 +223,7 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
     );
 
     fireEvent.click(screen.getByTestId('proposed-plan-approve'));
-    expect(screen.getByTestId('proposed-plan-building')).toHaveTextContent('BUILDING_NOW');
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
 
     // The approval was rejected before reaching the model (rate limit).
@@ -184,7 +242,7 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
     await waitFor(() =>
       expect(screen.getByTestId('proposed-plan-approve')).toBeInTheDocument(),
     );
-    expect(screen.queryByTestId('proposed-plan-building')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('proposed-plan-confirmed')).not.toBeInTheDocument();
     // …and the failure is surfaced, not swallowed.
     expect(screen.getByTestId('chat-send-error')).toHaveTextContent('RATE_LIMIT_MSG');
   });
@@ -216,7 +274,7 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
       />,
     );
 
-    expect(screen.getByTestId('proposed-plan-building')).toBeInTheDocument();
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
   });
 
@@ -246,10 +304,10 @@ describe('ChatbotEnhanced plan approval — optimistic flip rollback (#2627)', (
       />,
     );
 
-    // The composer text is restored, but the plan card stays "Building…" —
+    // The composer text is restored, but the plan card stays "Confirmed" —
     // rolling it back would offer a second build of a plan already building.
     await waitFor(() => expect(screen.getByTestId('chat-send-error')).toBeInTheDocument());
-    expect(screen.getByTestId('proposed-plan-building')).toBeInTheDocument();
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
   });
 });

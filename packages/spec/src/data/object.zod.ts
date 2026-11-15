@@ -2227,19 +2227,31 @@ function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown
  *    number of rows, never an amount, so a currency on it is wrong whichever
  *    reader sees it (the analytics layer relays both a `fixed` code and a
  *    `record` pointer for any field type);
- *  - `dynamic` is refused on every summary. No reader consumes it there (the
- *    Console's roll-up faces read no `currencyConfig`, and the analytics layer
- *    relays only `fixed` and `record`), so it declares a currency nothing
- *    draws. An absent `currencyMode` parses as `dynamic`, so `{}` meets it too;
+ *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of a
+ *    stored home amount only (#33659): a child field some
+ *    `homeAmount.field` on the child object names. Such a field is "a
+ *    `dynamic`-mode currency field" (ADR-0144 D8 rule 5), every row of it is
+ *    in the organization's home currency (`localization.currency`), so its
+ *    total is too, and the Console's roll-up faces draw a `dynamic` summary in
+ *    that currency, as a metric tile over the same home field does. Whether the
+ *    child field is a home field needs the child object, so this door lets a
+ *    `dynamic` roll-up through only when its `summaryOperations` names a child
+ *    object and field, and `defineStack`'s cross-reference pass judges the
+ *    rest (`collectRecordCurrencyPathErrors`, stack.zod.ts). A `dynamic`
+ *    summary that names no child amount, or carries a `defaultCurrency` (which
+ *    `dynamic` never reads, and which would name the home currency in
+ *    metadata), is refused here. An absent `currencyMode` parses as
+ *    `dynamic`, so `{}` meets the same rule;
  *  - `record` on a roll-up that reads no child amount (no `summaryOperations`)
  *    is refused: it is not the admitted roll-up, whatever it names.
  *
  * `fixed` stays accepted on a `sum` / `min` / `max` / `avg` roll-up: the
  * analytics layer reads its code (`assertMeasureCurrenciesCoherent` refuses a
  * measure labelling it another currency), and a fixed roll-up over amounts in
- * that one currency is honest. Whether a `record` roll-up is the admitted one
- * needs the child object, so `defineStack`'s cross-reference pass judges it
- * (`collectRecordCurrencyPathErrors`, stack.zod.ts).
+ * that one currency is honest. Whether a `record` or a `dynamic` roll-up is
+ * the admitted one needs the child object, so `defineStack`'s
+ * cross-reference pass judges it (`collectRecordCurrencyPathErrors`,
+ * stack.zod.ts).
  *
  * Judged on the authored object only, as the other currency doors are: a
  * standalone `FieldSchema`, `CurrencyConfigSchema` and an extension's fields
@@ -2261,10 +2273,12 @@ function refuseUnadmittedSummaryCurrency(
     const at = `\`${name}\` is a \`summary\` field of object \`${objectName}\``;
     const path = ['fields', name, 'currencyConfig'];
     const admitted =
-      'A roll-up carries a currency in two cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
-      + 'one currency, and `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
+      'A roll-up carries a currency in three cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
+      + 'one currency; `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
       + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
-      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`).';
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up a '
+      + 'stored home amount, a child field that a `homeAmount.field` on the child object names, which is in the '
+      + 'organization\'s home currency.';
     if (ops?.function === 'count') {
       ctx.addIssue({
         code: 'custom',
@@ -2276,12 +2290,22 @@ function refuseUnadmittedSummaryCurrency(
       continue;
     }
     if (mode === 'dynamic') {
+      const namesChild = ops !== undefined && typeof ops.object === 'string' && typeof ops.field === 'string';
+      const named = (config as { defaultCurrency?: unknown }).defaultCurrency;
+      // [#33659] The admitted `dynamic` roll-up reads a stored home amount; the
+      // child object says whether it does, so the stack pass judges that half.
+      if (namesChild && named === undefined) continue;
       ctx.addIssue({
         code: 'custom',
         path,
-        message: `${at} declaring \`currencyMode: 'dynamic'\` (an absent \`currencyMode\` is \`dynamic\`). No reader `
-          + 'draws a roll-up in the tenant default currency, so the declaration changes nothing: delete `currencyConfig`, '
-          + 'or declare the currency the amounts are in. ' + admitted,
+        message: `${at} declaring \`currencyMode: 'dynamic'\` (an absent \`currencyMode\` is \`dynamic\`)`
+          + (named !== undefined
+            ? ` with \`defaultCurrency: '${String(named)}'\`. \`dynamic\` reads no \`defaultCurrency\`, and metadata never `
+              + 'names the home currency: delete `defaultCurrency`, or declare `currencyMode: \'fixed\'` if every amount '
+              + 'it reads is in that one currency. '
+            : ' with no `summaryOperations` naming a child field, so it rolls up no stored home amount that would put it '
+              + 'in the organization\'s home currency: delete `currencyConfig`, or declare the roll-up. ')
+          + admitted,
       });
       continue;
     }
@@ -3144,6 +3168,54 @@ function refuseControlledByParentOwnerMayEditOffDetail(
       'already writes under that model, and nothing reads this key. Delete the key, or make this object a ' +
       "detail: sharingModel: 'controlled_by_parent' plus one required master_detail field.",
   });
+}
+
+/**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] `sharing.controlledByParent.writeRequiresMasterRead: true`
+ * is read by exactly one door, the master-write gate of a
+ * `sharingModel: 'controlled_by_parent'` detail, so on any other object it is a
+ * declared capability the runtime never delivers (ADR-0049), refused exactly as
+ * {@link refuseControlledByParentOwnerMayEditOffDetail} refuses its sibling.
+ *
+ * On a detail, declaring it beside `ownerMayEdit: true` is refused too: with
+ * read on the master as the master question for every write, the owner leg can
+ * admit nobody the gate does not already admit, so the second key is a
+ * declaration that changes nothing. The fix names the key to delete. No
+ * shipped object can carry the pair: the key is new in this release.
+ */
+function refuseControlledByParentWriteRequiresMasterReadMisplaced(
+  objectName: unknown,
+  sharingModel: unknown,
+  sharing: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (!controlledByParentWriteRequiresMasterRead({ sharing })) return;
+  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+  if (sharingModel !== 'controlled_by_parent') {
+    const model = typeof sharingModel === 'string' ? `'${sharingModel}'` : 'no sharingModel';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sharing', 'controlledByParent', 'writeRequiresMasterRead'],
+      message:
+        `Object "${name}" declares sharing.controlledByParent.writeRequiresMasterRead: true under ${model}. ` +
+        "The opt-in is read only on a sharingModel: 'controlled_by_parent' detail (ADR-0055 §3): it lets anyone " +
+        "who can read the master insert, update and delete the detail under the detail's own permissions. Under " +
+        'any other sharing model the master gate does not run, and nothing reads this key. Delete the key, or ' +
+        "make this object a detail: sharingModel: 'controlled_by_parent' plus one required master_detail field.",
+    });
+    return;
+  }
+  if (controlledByParentOwnerMayEdit({ sharing })) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sharing', 'controlledByParent', 'ownerMayEdit'],
+      message:
+        `Object "${name}" declares both sharing.controlledByParent.writeRequiresMasterRead: true and ` +
+        'ownerMayEdit: true. With writeRequiresMasterRead the master gate asks only read access to the master ' +
+        "for every write, the owner's included, so ownerMayEdit admits no one more. Delete ownerMayEdit; " +
+        'writeRequiresMasterRead already admits the owner.',
+    });
+  }
 }
 
 /**
@@ -4159,12 +4231,23 @@ const ObjectSchemaBase = strictObject(
    *   on-behalf-of write keep the master-edit rule, and the detail's own
    *   row-level policies still compose (AND) on the admitted write, so an
    *   owner-keyed `update` policy on the detail decides as authored.
+   *   `writeRequiresMasterRead: true` (ADR-0055 §3 as amended for #33250,
+   *   ruling A+) makes READ access to the master the master question for
+   *   EVERY write of the detail — insert (single or batch), by-id and
+   *   predicate update and delete, a re-point, and each hop of a chain whose
+   *   detail declares it — so whoever reads the master writes the detail as
+   *   the detail's own object grants, row-level policies and field-level
+   *   security admit. Absent or `false`: master edit, as before.
    *
-   * The parse refuses the opt-in on an object whose `sharingModel` is not
-   * `controlled_by_parent` ({@link refuseControlledByParentOwnerMayEditOffDetail}):
-   * a declaration no door reads is a capability the runtime never delivers.
-   * The runtime reads the block through {@link controlledByParentOwnerMayEdit},
-   * exported beside this declaration, so the gate and the lint
+   * The parse refuses either opt-in on an object whose `sharingModel` is not
+   * `controlled_by_parent` ({@link refuseControlledByParentOwnerMayEditOffDetail},
+   * {@link refuseControlledByParentWriteRequiresMasterReadMisplaced}): a
+   * declaration no door reads is a capability the runtime never delivers. It
+   * refuses the two together as well: with read as the master question the
+   * owner leg admits no one more. The runtime reads the block through
+   * {@link controlledByParentOwnerMayEdit} and
+   * {@link controlledByParentWriteRequiresMasterRead}, exported beside this
+   * declaration, so the gate and the lint
    * (`security-controlled-by-parent-owner-policy-without-opt-in`) ask one
    * question one way.
    */
@@ -4182,6 +4265,9 @@ const ObjectSchemaBase = strictObject(
       ownerMayEdit:
         '`ownerMayEdit` lives one level down, under `sharing.controlledByParent`, because it is read ' +
         "only on a `sharingModel: 'controlled_by_parent'` detail.",
+      writeRequiresMasterRead:
+        '`writeRequiresMasterRead` lives one level down, under `sharing.controlledByParent`, because it is ' +
+        "read only on a `sharingModel: 'controlled_by_parent'` detail.",
     },
   }, {
     controlledByParent: strictObject({
@@ -4197,13 +4283,24 @@ const ObjectSchemaBase = strictObject(
         'access to the master. Absent or false: the default, master edit for every write. Refused on an ' +
         'object whose sharingModel is not controlled_by_parent.',
       ),
+      writeRequiresMasterRead: z.boolean().optional().describe(
+        "Opt-in on a sharingModel: 'controlled_by_parent' detail (ADR-0055 §3 as amended): true makes READ " +
+        'access to the master enough for every write of the detail. Anyone who can read the master may ' +
+        "insert, update and delete detail rows as the detail's own object permissions, row-level security " +
+        'and field-level security allow, by id or by predicate, single or batch, on behalf of another user ' +
+        'when both can read the master. Absent or false: the default, master edit for every write. Refused ' +
+        'on an object whose sharingModel is not controlled_by_parent, and beside ownerMayEdit: true, which ' +
+        'it already covers.',
+      ),
     }).optional().describe(
-      "Opt-ins read only under sharingModel: 'controlled_by_parent' (ADR-0055 §3): ownerMayEdit.",
+      "Opt-ins read only under sharingModel: 'controlled_by_parent' (ADR-0055 §3): ownerMayEdit, " +
+      'writeRequiresMasterRead.',
     ),
   }).optional().describe(
     'Per-object sharing opt-ins that refine the org-wide default sharingModel declares. ' +
     "controlledByParent.ownerMayEdit: on a controlled_by_parent detail, the row's owner may update it with " +
-    'read access to the master (ADR-0055 §3 amendment).',
+    'read access to the master (ADR-0055 §3 amendment). controlledByParent.writeRequiresMasterRead: anyone ' +
+    "who reads the master may write the detail under the detail's own permissions.",
   ),
 
   /**
@@ -4512,6 +4609,10 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0055 §3 amendment · ruling 6398566164] `sharing.controlledByParent.ownerMayEdit`
   // is read only on a `controlled_by_parent` detail. See the helper's docblock.
   refuseControlledByParentOwnerMayEditOffDetail(object.name, object.sharingModel, object.sharing, ctx);
+  // [ADR-0055 §3 as amended for #33250 · ruling A+] `writeRequiresMasterRead` is
+  // read only on a `controlled_by_parent` detail, and not beside `ownerMayEdit`.
+  // See the helper's docblock.
+  refuseControlledByParentWriteRequiresMasterReadMisplaced(object.name, object.sharingModel, object.sharing, ctx);
   // [ADR-0015 §4.2 · #25168] An `external` binding is not on the platform's
   // managed primary datasource. See the helper's docblock.
   refuseExternalBindingOnPrimaryDatasource(object.name, object.external, object.datasource, ctx);
@@ -4590,6 +4691,28 @@ export function isPublicSharingEnabled(schema: unknown): boolean {
 export function controlledByParentOwnerMayEdit(schema: unknown): boolean {
   return (schema as { sharing?: { controlledByParent?: { ownerMayEdit?: unknown } } } | null | undefined)
     ?.sharing?.controlledByParent?.ownerMayEdit === true;
+}
+
+/**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] Has this object opted in to
+ * READ on the master being the master question for every write of its rows —
+ * `sharing.controlledByParent.writeRequiresMasterRead: true`?
+ *
+ * The ONE reading of the opt-in, exported beside the declaration so every
+ * surface asks it one way: the master-write gate
+ * (`@objectstack/plugin-security`, through the relation it resolves per
+ * object), the parse refusal above
+ * (`refuseControlledByParentWriteRequiresMasterReadMisplaced`), explain and
+ * the security-posture lint (`@objectstack/lint`). The same shape as
+ * {@link controlledByParentOwnerMayEdit}.
+ *
+ * Fail-CLOSED: an absent block, an absent schema and an unreadable schema are
+ * one answer, `false`. Only the boolean `true` opts in. It does NOT read
+ * `sharingModel`: whether the object is a detail is the caller's question.
+ */
+export function controlledByParentWriteRequiresMasterRead(schema: unknown): boolean {
+  return (schema as { sharing?: { controlledByParent?: { writeRequiresMasterRead?: unknown } } } | null | undefined)
+    ?.sharing?.controlledByParent?.writeRequiresMasterRead === true;
 }
 
 /**

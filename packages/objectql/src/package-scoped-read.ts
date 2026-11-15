@@ -118,6 +118,9 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   // redelivery veto and the activation door read by `(package, name)` in
   // plugin-webhooks' `declared-webhooks.ts`.
   'webhook',
+  // [ADR-0150 D9, #31699 PR 3] `/meta/connector/NAME`; the automation engine
+  // holds and dispatches a connector instance by `(package, name)`.
+  'connector',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */

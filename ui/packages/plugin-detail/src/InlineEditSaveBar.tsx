@@ -385,7 +385,8 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   /**
    * Build the conflict payload for `<ConcurrentUpdateDialog>` from a 409. A
    * single-field draft shows the classic per-field before/after; a multi-field
-   * draft shows a record-level summary (the dialog JSON-stringifies objects).
+   * draft names the record and lists each field with its label and both values
+   * (`fields`, objectstack#33346), never the two maps as raw JSON.
    */
   const buildConflict = React.useCallback<BuildConflict>(
     (draft, err) => {
@@ -415,6 +416,12 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         currentValue: currentSubset,
         currentVersion: err?.currentVersion,
         currentRecord: current,
+        fields: keys.map((k) => ({
+          field: k,
+          label: fieldLabelFor?.(k),
+          pendingValue: draft[k],
+          currentValue: current ? current[k] : undefined,
+        })),
       };
     },
     [fieldLabelFor, t],

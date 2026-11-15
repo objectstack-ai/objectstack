@@ -144,6 +144,18 @@ function packageScopedRegistryOf(registry: EmailTemplateRegistrySources['registr
 }
 
 /**
+ * [#32670] The answer that sends no template: the send finds nothing, and no
+ * list is read.
+ */
+const NO_BUNDLE = Symbol('no bundle');
+
+/**
+ * Where a bundle is read: a package's own address (the list scoped to it),
+ * the environment-wide list (`undefined`), or nowhere ({@link NO_BUNDLE}).
+ */
+type BundleAddress = string | undefined | typeof NO_BUNDLE;
+
+/**
  * [ADR-0150 D3/D9, #31699] The package whose own address the bundle of `name`
  * is read at, for a send made from `callerPackageId`; `undefined` to read the
  * environment-wide list, as before. Throws the refusal when the name does not
@@ -156,36 +168,118 @@ function packageScopedRegistryOf(registry: EmailTemplateRegistrySources['registr
  * which holds no name for anyone else) meets its base: the name is resolved
  * again from its closure over the holders every other reader sees.
  *
- * [ADR-0150 D3, #32183] Every read here counts every holder, a disabled
- * package's included (`includeDisabledPackages`): the address and the
- * refusal never move with a reversible disable. The door reads a flat list
- * after the resolve, so judging the served holders here would hand a send
- * another package's body; until #32670 lands, a disabled package still
- * counts at the send and a refusal still names it, as before.
+ * [ADR-0150 D3, #32183, #32670] A disabled package holds no name at the send.
+ * When no holder of the name is disabled, the reads below are the ones they
+ * were: the served holders ARE every holder. When one is, the name is judged
+ * over the served holders ({@link servedBundleAddressOf}); `servedCountDecides`
+ * says the bundle is read from the protocol's execution list, which withholds
+ * every member of a disabled holder's side.
  */
-function bundleAddressOf(scoped: PackageScopedRegistry, name: string, callerPackageId: string | null): string | undefined {
+function bundleAddressOf(
+  scoped: PackageScopedRegistry,
+  name: string,
+  callerPackageId: string | null,
+  servedCountDecides: boolean,
+): BundleAddress {
+  const holdersOf = (options?: { includeDisabledPackages: true }) =>
+    (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name, null, options) ?? [])
+      .filter((id) => id !== BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
+  const holders = holdersOf({ includeDisabledPackages: true });
+  const served = holdersOf();
+  if (served.length < holders.length) {
+    return servedBundleAddressOf(scoped, name, callerPackageId, served, holders, servedCountDecides);
+  }
   const resolved = resolvePackageScopedName(scoped, {
     type: EMAIL_TEMPLATE_TYPE, name, callerPackageId, includeDisabledPackages: true,
   });
   if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
   if (resolved.status !== 'resolved' || resolved.holder.kind !== 'package') return undefined;
-  const holders = (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name, null, { includeDisabledPackages: true }) ?? [])
-    .filter((id) => id !== BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
   if (holders.length < 2) return undefined;
   const holder = resolved.holder.packageId;
   if (holders.includes(holder)) return holder;
   // The caller holds an addition only: resolve from its closure over the
   // holders every other reader sees (its own addition left out).
-  const shared: PackageScopedRegistry = {
+  const base = resolvePackageScopedName(withoutCallerHolding(scoped, { includeDisabledPackages: true }), {
+    type: EMAIL_TEMPLATE_TYPE, name, callerPackageId,
+  });
+  if (base.status === 'refused') throw new EmailTemplateAmbiguousError(base);
+  return base.status === 'resolved' && base.holder.kind === 'package' ? base.holder.packageId : undefined;
+}
+
+/**
+ * [ADR-0150 D3, #32670] The address of a name one of whose holders is
+ * disabled: judged over the served holders, so a disabled package is never
+ * the answer, and a refusal names only the packages that serve the name.
+ *
+ * Over the protocol's execution list (`servedCountDecides`), the address is
+ * then chosen on the served count alone, as {@link bundleAddressOf} chooses
+ * it on the holder count: a name one served package holds is read from the
+ * environment-wide list, a name two or more hold at the answering holder's own
+ * address. That list holds no member of a disabled holder's side: its own
+ * items are filtered out, and the metadata lists withhold the rows its
+ * customization pair stores and the locales a dependent adds to it (ADR-0150
+ * D3, #32354). So a name an enabled and a disabled package hold sends what it
+ * sends when only the enabled one holds it. The registry's own list
+ * (`listItems`, read when no protocol is registered) withholds neither, so
+ * there the answer is always read at one address: the answering holder's own.
+ * So:
+ *
+ *  - the name resolves to a served holder: the environment-wide list when it
+ *    is the one served holder and the served count decides, else that
+ *    holder's own address;
+ *  - the caller's own holding is the disabled one, or no served holder
+ *    answers it: no template. Its own items are withheld, and no other
+ *    holder's are its own;
+ *  - the name resolves to the environment's own item: no template. A name a
+ *    package holds resolves to no environment item (the registry answers none
+ *    for it), so this answer is unreachable while a holder is disabled; it is
+ *    spelled so that no read is made beside a disabled holder for it;
+ *  - the caller holds an addition only, or the name resolves to the
+ *    built-ins: resolved again from the caller's closure over the served
+ *    holders, so a dependent of a disabled base never gets a template from
+ *    outside its closure; the answer is read like a served holder's (the
+ *    built-ins answer an `auth.*` name only when no served package holds it,
+ *    so over the protocol it is the environment-wide list).
+ */
+function servedBundleAddressOf(
+  scoped: PackageScopedRegistry,
+  name: string,
+  callerPackageId: string | null,
+  served: readonly string[],
+  holders: readonly string[],
+  servedCountDecides: boolean,
+): BundleAddress {
+  const resolved = resolvePackageScopedName(scoped, { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
+  if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
+  if (resolved.status !== 'resolved' || resolved.holder.kind !== 'package') return NO_BUNDLE;
+  const onServedCount = (holder: string): BundleAddress => (servedCountDecides && served.length < 2 ? undefined : holder);
+  const holder = resolved.holder.packageId;
+  if (served.includes(holder)) return onServedCount(holder);
+  if (holders.includes(holder)) return NO_BUNDLE;
+  const base = resolvePackageScopedName(withoutCallerHolding(scoped), { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
+  if (base.status === 'refused') throw new EmailTemplateAmbiguousError(base);
+  if (base.status !== 'resolved' || base.holder.kind !== 'package') return NO_BUNDLE;
+  const baseHolder = base.holder.packageId;
+  return baseHolder === BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID || served.includes(baseHolder) ? onServedCount(baseHolder) : NO_BUNDLE;
+}
+
+/**
+ * The registry as every reader but the caller sees it: the holders of a name
+ * with no caller's own holding counted (a dependent's addition holds no name
+ * for anyone else). `options` reads every holder, a disabled package's
+ * included; without it, the served holders.
+ */
+function withoutCallerHolding(
+  scoped: PackageScopedRegistry,
+  options?: { includeDisabledPackages: true },
+): PackageScopedRegistry {
+  return {
     getPackage: (id) => scoped.getPackage(id),
     getAllPackages: () => scoped.getAllPackages(),
     getPackageScopedItem: (type, n, packageId, member) => scoped.getPackageScopedItem(type, n, packageId, member),
     getEnvironmentScopedItem: (type, n, member) => scoped.getEnvironmentScopedItem(type, n, member),
-    packageScopedHoldersOf: (type, n) => scoped.packageScopedHoldersOf(type, n, null, { includeDisabledPackages: true }),
+    packageScopedHoldersOf: (type, n) => scoped.packageScopedHoldersOf(type, n, null, options),
   } as PackageScopedRegistry;
-  const base = resolvePackageScopedName(shared, { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
-  if (base.status === 'refused') throw new EmailTemplateAmbiguousError(base);
-  return base.status === 'resolved' && base.holder.kind === 'package' ? base.holder.packageId : undefined;
 }
 
 /** An item's locale as the bundle key reads it: the schema default when it declares none. */
@@ -263,12 +357,15 @@ export function createRegistryEmailTemplateLoader(
     // [ADR-0150 D3] The name first, from the package the send is made from (a
     // caller with no package when it names none). A refusal fails the send,
     // naming every candidate; a name two packages hold is read at the
-    // resolved holder's own address; any other answer leaves the bundle to the
-    // environment-wide read below, as before.
+    // resolved holder's own address; a send no served holder answers, beside a
+    // disabled holder, finds nothing (#32670); any other answer leaves the
+    // bundle to the environment-wide read below, as before.
     const scoped = packageScopedRegistryOf(registry);
-    const address = scoped ? bundleAddressOf(scoped, name, options?.callerPackageId ?? null) : undefined;
+    const viaProtocol = typeof protocol?.getMetaItemsForExecution === 'function';
+    const address = scoped ? bundleAddressOf(scoped, name, options?.callerPackageId ?? null, viaProtocol) : undefined;
+    if (address === NO_BUNDLE) return [];
     let items: unknown[];
-    if (typeof protocol?.getMetaItemsForExecution === 'function') {
+    if (viaProtocol) {
       const listed = await protocol.getMetaItemsForExecution(
         address === undefined ? { type: EMAIL_TEMPLATE_TYPE } : { type: EMAIL_TEMPLATE_TYPE, packageId: address },
       );

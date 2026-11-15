@@ -52,7 +52,8 @@
  * page/hasMore fallback logic turns it red.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /** An adapter whose data-fetch response is fully controlled by the caller. */
 function makeAdapter(dataResponse: unknown) {

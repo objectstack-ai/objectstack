@@ -105,7 +105,11 @@ export interface AuthRouteLedgerEntry {
    * exactly the fact the row is there to record.
    */
   client?: string;
-  /** Optional better-auth plugin this route needs (absent = always mounted). */
+  /**
+   * What this route needs to be mounted (absent = always mounted): a
+   * better-auth plugin, or a setting of this plugin that mounts an
+   * ObjectStack route (`directSignIn`, `scim`).
+   */
   requires?: string;
   /**
    * Name of the `@objectstack/spec/api` export declaring this route's response
@@ -179,6 +183,10 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'GET /api/v1/auth/oauth2/public-client', family: 'oauth-provider', source: 'better-auth', disposition: 'sdk', client: 'oauth.applications.getPublic', requires: 'oidcProvider' },
   { route: 'GET /api/v1/auth/bootstrap-status', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.bootstrapStatus' },
   { route: 'GET /api/v1/auth/config', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.getConfig' },
+  // Direct sign-in's start door (`direct-sign-in.ts`): mounted only while the
+  // setting is on (the `directSignIn` option or OS_AUTH_DIRECT_SIGN_IN_ENABLED),
+  // so `requires` names that setting rather than a better-auth plugin.
+  { route: 'GET /api/v1/auth/sign-in/direct', family: 'objectstack-mount', source: 'objectstack', disposition: 'public', requires: 'directSignIn', note: 'no SDK method builds this URL — the Console sign-in page navigates the browser here with ?callbackURL=<same-origin path> and no session; it starts the configured identity provider through the vendor start (/sign-in/social or /sign-in/sso) and answers 302 to it with the vendor state cookie, minting nothing; a return path that is not a same-origin path is dropped, and a start that cannot happen redirects to the sign-in page with error=direct_sign_in_unavailable (error=direct_sign_in_rate_limited when the vendor sign-in rate limit refused it)' },
   // #10974 / #10975 — the ninth ObjectStack mount from the #10534 census,
   // ledgered `sdk` on the maintainer's option-C ruling (2026-08-22) rather
   // than on either word that was available before it. The two halves landed
@@ -248,6 +256,10 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   // #16678 note below.
   { route: 'GET /api/v1/auth/admin/client-address', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the console\'s Authentication settings page reads it beside the Allowed IP ranges field. Answers { clientAddress, trustProxy }: the caller\'s address exactly as the allowed_ip_ranges save check and the sign-in gate judge it (the save check\'s own call to AuthManager.resolveClientAddress, server.trustProxy deciding whether forwarded headers count), null when the server cannot establish one; Cache-Control: no-store; closed, empty query set; platform-admin gated (ADR-0068), ADR-0069 D5' },
   { route: 'POST /api/v1/auth/admin/import-users', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — objectui app-shell\'s identity-import wizard (views/identityImport.ts) posts it directly from the Users list; platform-admin gated (ADR-0068). A dedicated identity-import door rather than the generic sys_user import, because a direct ObjectQL write would bypass better-auth\'s password hashing and mint no sys_account credential' },
+  // #33181 — the tracker id stays HERE and never in the `note` string, per the
+  // #16678 note below.
+  { route: 'POST /api/v1/auth/admin/add-sso-user', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — Setup → Users on a cloud-managed environment posts it; adds one person who signs in only through the hosting organisation identity provider: a sys_user row marked idp_pending (no password, refused a session) with optional positions, permission sets and manager, joined to the organization; 201, or 200 alreadyPending for a person already pending (the host is told again); 409 RESOURCE_CONFLICT off a managed environment or for an address already in use; closed body key set; the environment-user host is told after the write commits, and its answer rides host; platform-admin gated (ADR-0068)' },
+  { route: 'POST /api/v1/auth/admin/import-sso-users', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — Setup → Users on a cloud-managed environment posts it; the CSV or JSON twin of admin/add-sso-user (columns email, name, positions, permission_sets, manager_id), at most 500 rows, each judged and written on its own so a bad row fails alone; answers a summary and one result per row; 409 RESOURCE_CONFLICT off a managed environment; platform-admin gated (ADR-0068)' },
   { route: 'POST /api/v1/auth/admin/list-platform-admins', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_user list_platform_admins action posts it directly from the Users list; answers who holds platform-admin standing (the last-admin guard\'s enumerator, each id confirmed by hasPlatformAdminStanding), served only to a caller who holds that standing; reads no body. ADR-0095 D3' },
   { route: 'POST /api/v1/auth/admin/oauth2/toggle-disabled', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_oauth_application disable/enable actions post it directly; ObjectStack mount closing a vendor gap (better-auth\'s /admin/oauth2/update-client strips `disabled` from its body schema), platform-admin gated (ADR-0068)' },
   // #30958 — the tracker id stays HERE and never in the `note` string, per the

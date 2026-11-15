@@ -30,11 +30,12 @@ import { noteTenantCurrencyReadFault } from './builtin/template.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`,
-// `applyResumeSignal` and `engineBuilt`) are read only inside the function bodies, at call
+// `applyResumeSignal`, `engineBuilt`, `activeMsAtPause` and `waitOfPausedRun`) are read only inside the function bodies, at call
 // time, never while a module is evaluating, so the import cycle with
 // ./engine.js is safe under ESM live bindings; the tsup bundle is one file and
 // has no cycle.
 import {
+    activeMsAtPause,
     buildRunTrigger,
     FlowRefusalSignal,
     isRefusalSignal,
@@ -43,6 +44,7 @@ import {
     carriesSubflowChildOutput,
     applyResumeSignal,
     engineBuilt,
+    waitOfPausedRun,
     type AutomationEngine,
     type ChildRunRefusal,
     type ExecutionLogEntry,
@@ -843,6 +845,8 @@ export async function failSuspendedRun(
         ? this.journalConsumedSuspension(run, run.steps.length, error, run.variables)
         : undefined;
     await this.forgetSuspendedRun(run, 'failed');
+    // [#32284] It failed WHERE it waited: everything since its pause is wait.
+    const durationMs = Date.now() - run.startTime;
     this.recordLog({
         id: run.runId,
         flowName: run.flowName,
@@ -850,7 +854,8 @@ export async function failSuspendedRun(
         status: 'failed',
         startedAt: run.startedAt,
         completedAt: new Date().toISOString(),
-        durationMs: Date.now() - run.startTime,
+        durationMs,
+        waitMs: waitOfPausedRun(run, durationMs),
         trigger: buildRunTrigger(run.context),
         steps: run.steps,
         error,
@@ -942,6 +947,8 @@ export async function settleUnresumableSuspension(this: Pick<RunResumeHost, 'nod
     }
     await this.forgetSuspendedRun(run, 'failed', claim.kind === 'claimed');
     try {
+        // [#32284] Settled where it waited: everything since its pause is wait.
+        const durationMs = Date.now() - run.startTime;
         this.recordLog({
             id: run.runId,
             flowName: run.flowName,
@@ -949,7 +956,8 @@ export async function settleUnresumableSuspension(this: Pick<RunResumeHost, 'nod
             status: 'failed',
             startedAt: run.startedAt,
             completedAt: new Date().toISOString(),
-            durationMs: Date.now() - run.startTime,
+            durationMs,
+            waitMs: waitOfPausedRun(run, durationMs),
             trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error: cause,
@@ -1023,6 +1031,8 @@ export async function cancelRun(this: Pick<RunResumeHost, 'loadSuspendedRunStric
     }
     if (!run) return false;
     await this.forgetSuspendedRun(run, 'cancelled');
+    // [#32284] Cancelled where it waited: everything since its pause is wait.
+    const durationMs = Date.now() - run.startTime;
     this.recordLog({
         id: run.runId,
         flowName: run.flowName,
@@ -1030,7 +1040,8 @@ export async function cancelRun(this: Pick<RunResumeHost, 'loadSuspendedRunStric
         status: 'cancelled',
         startedAt: run.startedAt,
         completedAt: new Date().toISOString(),
-        durationMs: Date.now() - run.startTime,
+        durationMs,
+        waitMs: waitOfPausedRun(run, durationMs),
         trigger: buildRunTrigger(run.context),
         steps: run.steps,
         error: reason,
@@ -1822,6 +1833,14 @@ export async function resumeInternal(
             };
         }
         await this.forgetSuspendedRun(run, 'resumed', claim.kind === 'claimed');
+        // [#32284] The pause ENDS here: this resume won the claim and consumed
+        // it. Everything since the run's start that was not execution was
+        // waiting — this pause and every earlier one (`SuspendedRun.activeMs`)
+        // — and nothing after this line adds to it unless the run pauses again,
+        // where the re-suspend below records the clock forward. A resume
+        // refused above (a lost claim, an invalid screen, a child still parked)
+        // never reaches here, so its run keeps waiting on the same clock.
+        const waitMs = waitOfPausedRun(run, Date.now() - run.startTime);
 
         const steps = run.steps;
         // [#31696] A persisted context keeps no slot stamp: a run of a slot
@@ -1918,6 +1937,7 @@ export async function resumeInternal(
                     startedAt: run.startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
+                    waitMs,
                     trigger: buildRunTrigger(context),
                     steps,
                     output,
@@ -2004,6 +2024,7 @@ export async function resumeInternal(
                     flowVersion: run.flowVersion,
                     startedAt: run.startedAt,
                     durationMs: Date.now() - run.startTime,
+                    waitMs,
                     steps, flow, variables,
                     refusalMessage: err.message, context,
                 });
@@ -2076,6 +2097,11 @@ export async function resumeInternal(
                     nodeType: err.nodeType,
                     variables: variablesSnapshot,
                     steps,
+                    // [#32284] The clock forward: the wait this run has
+                    // accumulated so far, taken off its age at THIS pause.
+                    // Overrides the `...run` above, which carries the clock
+                    // of the pause the resume just consumed.
+                    activeMs: activeMsAtPause(durationMs, waitMs),
                     correlation: err.correlation,
                     screen: err.screen,
                 });
@@ -2086,6 +2112,7 @@ export async function resumeInternal(
                     status: 'paused',
                     startedAt: run.startedAt,
                     durationMs,
+                    waitMs,
                     trigger: buildRunTrigger(context),
                     steps,
                     variables: variablesSnapshot,
@@ -2171,6 +2198,7 @@ export async function resumeInternal(
                     startedAt: run.startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
+                    waitMs,
                     trigger: buildRunTrigger(context),
                     steps,
                     error: errorMessage,

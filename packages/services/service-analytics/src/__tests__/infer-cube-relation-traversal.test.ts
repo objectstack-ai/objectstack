@@ -193,21 +193,26 @@ async function run(query: unknown, opts: { native?: boolean; fields?: string[] }
 // ── 1. The four combinations the issue measured ──────────────────────────────
 
 describe('[#5739] a dotted member traverses on the ad-hoc path — the silent wrong column is gone', () => {
-  it('① ObjectQL / `where` — declines LOUDLY instead of filtering the base column', async () => {
-    // The ad-hoc cube is single-table and `engine.aggregate()` cannot join, so a
-    // cross-object FILTER is out of the envelope. That is the answer a REGISTERED
-    // cube already gives for this member (issue #5739's own control measurement),
-    // and the ruling requires this path to give the same loud one — never a third,
-    // quieter answer. The engine must not run at all.
+  it('① ObjectQL / `where` — filters the RELATED value through the engine, not the base column', async () => {
+    // The ad-hoc cube is single-table and `engine.aggregate()` cannot join. It
+    // used to decline loudly here, the answer a REGISTERED cube gave for this
+    // member. [#33335] Both now hand the engine the nested-relation condition
+    // beneath the relation field — the engine reads `owner` as the caller and
+    // matches `owner` against the ids it returns — which is the same answer on
+    // both cube paths, and still never the base `region` column.
     const { error, calls } = await run({
       cube: 'crm_account',
       measures: ['count'],
       where: { 'owner.region': 'NA' },
     });
 
-    expect(error?.message).toMatch(/cannot evaluate a cross-object filter \("owner\.region"\)/);
-    // The floor: no aggregate ran, so nothing was filtered on the base `region`.
-    expect(calls).toEqual([]);
+    expect(error, String(error?.message)).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].object).toBe('crm_account');
+    expect(calls[0].filter).toMatchObject({ $and: [{ owner: { region: 'NA' } }] });
+    // The floor: the base `region` column is named nowhere in the engine filter.
+    expect(Object.keys(calls[0].filter as object)).not.toContain('region');
+    expect(JSON.stringify(calls[0].filter)).not.toContain('owner.region');
   });
 
   it('② NativeSQL / `where` — joins the relation instead of filtering the base column', async () => {
@@ -322,7 +327,7 @@ describe('[#5739] the object and array `where` spellings converge on one travers
     expect(object.dimensions).not.toContain('region');
   });
 
-  it('declines identically on ObjectQL for both spellings', async () => {
+  it('serves identically on ObjectQL for both spellings', async () => {
     const object = await run({
       cube: 'crm_account',
       measures: ['count'],
@@ -334,8 +339,10 @@ describe('[#5739] the object and array `where` spellings converge on one travers
       where: [['owner.region', '=', 'NA']],
     });
 
-    expect(array.error?.message).toBe(object.error?.message);
-    expect(object.error?.message).toMatch(/cannot evaluate a cross-object filter/);
+    // [#33335] Served now, where both spellings used to decline with one message.
+    expect([object.error, array.error]).toEqual([undefined, undefined]);
+    expect(array.calls.map((c) => c.filter)).toEqual(object.calls.map((c) => c.filter));
+    expect(object.calls[0].filter).toMatchObject({ $and: [{ owner: { region: 'NA' } }] });
   });
 
   it('unifies a dotted key riding alongside a bare one, on both spellings', async () => {

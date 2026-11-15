@@ -222,8 +222,14 @@ export interface ThrownHttpError {
  * error that crossed a second copy of `@objectstack/core`. Read here, by
  * {@link resolveThrownHttpError}, by the `/data` classification and by the
  * batch row error, so no door carries a second recogniser.
+ *
+ * [#32744] Each element of the list is checked against the four kinds of
+ * core's `PackageScopedHolder` ({@link isPackageScopedRefusalHolder}); a list
+ * with any element that is not a holder is answered as no list, as a
+ * `candidates` that is not an array is. Every holder core constructs passes,
+ * so the answer is typed as holders and no door casts it.
  */
-export function packageScopedRefusalCandidates(error: unknown): readonly unknown[] | undefined {
+export function packageScopedRefusalCandidates(error: unknown): readonly PackageScopedRefusalHolder[] | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
   const e = error as { code?: unknown; status?: unknown; statusCode?: unknown; refusal?: { status?: unknown; candidates?: unknown } | null };
   if (e.code !== 'RESOURCE_CONFLICT') return undefined;
@@ -237,7 +243,36 @@ export function packageScopedRefusalCandidates(error: unknown): readonly unknown
   if (declared === undefined || !(declared >= 400 && declared < 500)) return undefined;
   const refusal = e.refusal;
   if (typeof refusal !== 'object' || refusal === null || refusal.status !== 'refused') return undefined;
-  return Array.isArray(refusal.candidates) ? refusal.candidates : undefined;
+  const candidates: unknown = refusal.candidates;
+  if (!Array.isArray(candidates)) return undefined;
+  return candidates.every(isPackageScopedRefusalHolder) ? candidates : undefined;
+}
+
+/**
+ * One holder a package-scoped refusal names: core's `PackageScopedHolder`,
+ * spelled by shape because this package cannot import core.
+ */
+type PackageScopedRefusalHolder =
+  | { readonly kind: 'package'; readonly packageId: string }
+  | { readonly kind: 'environment' }
+  | { readonly kind: 'platform' }
+  | { readonly kind: 'residual'; readonly ownerId: string };
+
+/**
+ * Whether one element of a refusal's `candidates` is a holder of one of the
+ * four kinds: `package` (with a string `packageId`), `environment`,
+ * `platform` and `residual` (with a string `ownerId`).
+ */
+function isPackageScopedRefusalHolder(candidate: unknown): candidate is PackageScopedRefusalHolder {
+  if (typeof candidate !== 'object' || candidate === null) return false;
+  const holder = candidate as { kind?: unknown; packageId?: unknown; ownerId?: unknown };
+  switch (holder.kind) {
+    case 'package': return typeof holder.packageId === 'string';
+    case 'residual': return typeof holder.ownerId === 'string';
+    case 'environment':
+    case 'platform': return true;
+    default: return false;
+  }
 }
 
 /**

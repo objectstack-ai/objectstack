@@ -60,6 +60,8 @@ import { diffShallow } from './protocol-write-face.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { DeleteMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
+import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
+import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 export class ProtocolDiffDeleteLoadFacet {
@@ -383,6 +385,8 @@ export class ProtocolDiffDeleteLoadFacet {
             seq?: number;
             /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
             projectionApplied?: MutationProjectionOutcome;
+            /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+            advisories?: RuntimeAuthoringIssue[];
         }> {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
         return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
@@ -399,6 +403,8 @@ export class ProtocolDiffDeleteLoadFacet {
             seq?: number;
             /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
             projectionApplied?: MutationProjectionOutcome;
+            /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+            advisories?: RuntimeAuthoringIssue[];
         }> {
         // [ADR-0131 D6] FIRST: an organization-scoped delete is refused.
         // See {@link organizationScopedWriteRefusal}.
@@ -810,6 +816,17 @@ export class ProtocolDiffDeleteLoadFacet {
                 // overlay used to retire the plain-key entry belonging to the
                 // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
                 // the item for every other tenant and the control plane.
+                //
+                // [#32958] The object's stored computed fields as served BEFORE
+                // the heal: removing an `object_extension` hands the object
+                // back the definition beneath it, which can give a stored
+                // computed field another expression.
+                // What the fill below diffs against, as the save door captures
+                // before its write-through and the revert door before its
+                // removal limb's heal. A draft discard changes nothing served.
+                const storedExpressions = targetState === 'active'
+                    ? captureStoredExpressionChange(host.engine, singularTypeForRepo, request.name)
+                    : undefined;
                 if (targetState === 'active') {
                     // [#32366] For the package of the row it deleted.
                     await host.restoreArtifactRegistryView(request.type, request.name, null, packageId, member);
@@ -856,12 +873,27 @@ export class ProtocolDiffDeleteLoadFacet {
                     // [#32451] The package of the row it deleted, as the heal above.
                     ...mutationEventPackage(packageId),
                 });
+                // [#32958] A stored computed field the removal made compute
+                // something new (the extended object's own expression handed
+                // back by a removed `object_extension`) is filled over the
+                // object's existing rows by the save door's fill
+                // (`protocol-stored-expression-fill.ts`, the one fill path),
+                // and reported per field on the omitted-when-empty
+                // `advisories`. After the audit row and the event, before the
+                // answer, as the save door orders it. A removed `object`
+                // serves no field afterwards, so it changes none and reads no
+                // row (its table may be gone with it). The delete itself is
+                // never failed by its fill.
+                const advisories = await fillStoredExpressionChange(storedExpressions);
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
                     success: true,
                     reset: true,
                     seq: result.seq,
                     ...(deleteProjection ? { projectionApplied: deleteProjection } : {}),
+                    // Omitted, never `[]`, when there is nothing to report: a
+                    // clean delete's answer bytes are unchanged.
+                    ...(advisories.length > 0 ? { advisories } : {}),
                     // #5927 — the same split #5265/PR #5926 made on the save
                     // side, on the reset path. `artifactBacked` is exactly the
                     // difference between the two things a delete can be:

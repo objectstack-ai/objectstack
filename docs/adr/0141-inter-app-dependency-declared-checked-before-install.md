@@ -611,6 +611,14 @@ an App), the artifact as a control-plane noun that installs whole (ADR-0130 D2),
 version per artifact (ADR-0130 D6), permission sets (ADR-0086 D4), the save door's closure rules, the snapshot shape
 (D8, until its own card), and the compile-time boundary (`os validate` refuses a lookup into another artifact, D1).
 
+> ⚠️ **Pointer (2026-11-14): ADR-0019 D3 was amended on 2026-11-12**
+> ([#32585](https://github.com/objectstack-ai/objectstack/issues/32585), merged as `958734cbac`). The consumer-model
+> item of the **Unchanged** line above is the reading of 2026-10-25 and is kept as written. The amended rule: "A suite
+> (one install: an app package plus the module packages it composes) MAY surface more than one app, provided each app is
+> defined by a different package of the suite, and an app package defines at most one app." D1, D2 and D4 are not
+> amended, so one app package still installs and uninstalls as one; of the three verbs only "opens" reads differently: a
+> user opens an app, and a suite may offer more than one (ADR-0019's note under D1).
+
 ---
 
 ## Alternatives considered

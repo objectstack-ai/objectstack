@@ -71,7 +71,7 @@ import {
 import type { AutomationContext, Logger } from '@objectstack/spec/contracts';
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { ConnectorOrigin } from '@objectstack/spec/integration';
-import type { ConnectorActionHandler } from './engine.js';
+import type { ConnectorActionHandler, ConnectorInstanceResolution } from './engine.js';
 import {
     findConnectorActionInputSchema,
     judgeConnectorInput,
@@ -109,9 +109,17 @@ export interface ConnectorPullProtocol extends ImportProtocolLike {
  * (#28040), the read the `connector_action` node makes.
  */
 export interface ConnectorPullRegistry extends ConnectorInputSchemaSource {
-    resolveConnectorAction(connectorId: string, actionId: string): ConnectorActionHandler | undefined;
-    getConnectorOrigin(name: string): ConnectorOrigin | undefined;
-    getConnectorDegradedReason(name: string): string | undefined;
+    /** [#31699] `packageId` addresses one instance; absent, the one instance of the name. */
+    resolveConnectorAction(connectorId: string, actionId: string, packageId?: string | null): ConnectorActionHandler | undefined;
+    getConnectorOrigin(name: string, packageId?: string | null): ConnectorOrigin | undefined;
+    getConnectorDegradedReason(name: string, packageId?: string | null): string | undefined;
+    /**
+     * [ADR-0150 D9, #31699] Which instance the bare name means for a caller of
+     * a package (`null`: none): the engine's
+     * (`AutomationEngine.resolveConnectorInstanceFor`). A registry without it
+     * is read by the bare name.
+     */
+    resolveConnectorInstanceFor?(connectorId: string, callerPackageId: string | null): ConnectorInstanceResolution;
 }
 
 export interface ConnectorPullDeps {
@@ -123,7 +131,7 @@ export interface ConnectorPullDeps {
      * registered connector definition carries no provider key, so this is the
      * one place the answer lives.
      */
-    providerOf(connector: string): string | undefined;
+    providerOf(connector: string, packageId?: string | null): string | undefined;
     logger: Logger;
     /**
      * [ADR-0150 D3, #32071] The mapping read for a caller of a package
@@ -623,7 +631,30 @@ async function pullOnce(
     const objectName = artifact.targetObject;
 
     // 2. The connector: a DECLARED rest/openapi instance, and its action.
-    const origin = registry.getConnectorOrigin(connector);
+    //
+    // [ADR-0150 D9, #31699] `connectorSource.connector` is a bare name the
+    // mapping writes, so it resolves from the package that holds the mapping
+    // (a mapping no package holds: as a caller with no package), as a flow's
+    // `connector_action` resolves from the flow's package. Two packages may
+    // each declare an instance of one name: the pull reads exactly the
+    // instance the name resolves to, and a name that resolves to no single
+    // instance is refused naming every candidate, never pulled through one.
+    let instancePackage: string | null | undefined;
+    let noInstance = false;
+    if (typeof registry.resolveConnectorInstanceFor === 'function') {
+        const meant = registry.resolveConnectorInstanceFor(connector, holderPackage ?? null);
+        if (meant.status === 'refused') {
+            const refused = new PackageScopedNameRefusedError(meant.refusal);
+            return refuse(
+                refused.code, refused.status, 'connector_name_refused',
+                `Mapping "${mappingName}" pulls from connector "${connector}": ${refused.message}`,
+            );
+        }
+        // `none` reads as not registered below.
+        if (meant.status === 'instance') instancePackage = meant.packageId;
+        else noInstance = true;
+    }
+    const origin = noInstance ? undefined : registry.getConnectorOrigin(connector, instancePackage);
     if (origin === undefined) {
         return refuse(
             'VALIDATION_ERROR', 400, 'connector_not_registered',
@@ -638,7 +669,7 @@ async function pullOnce(
             + 'not a `connectors[]` entry; a pull reads only a declared rest or openapi instance',
         );
     }
-    const degraded = registry.getConnectorDegradedReason(connector);
+    const degraded = registry.getConnectorDegradedReason(connector, instancePackage);
     if (degraded !== undefined) {
         return refuse(
             'SERVICE_UNAVAILABLE', 503, 'connector_degraded',
@@ -646,7 +677,7 @@ async function pullOnce(
             + 'nothing was pulled',
         );
     }
-    const provider = deps.providerOf(connector);
+    const provider = deps.providerOf(connector, instancePackage);
     if (provider === undefined || !CONNECTOR_PULL_PROVIDERS.includes(provider)) {
         return refuse(
             'VALIDATION_ERROR', 400, 'connector_provider_unsupported',
@@ -654,7 +685,7 @@ async function pullOnce(
             + `${provider === undefined ? 'unknown' : `"${provider}"`}; a pull reads only a rest or openapi connector`,
         );
     }
-    const handler = registry.resolveConnectorAction(connector, action);
+    const handler = registry.resolveConnectorAction(connector, action, instancePackage);
     if (!handler) {
         return refuse(
             'VALIDATION_ERROR', 400, 'connector_action_unknown',
@@ -755,7 +786,7 @@ async function pullOnce(
     // hint is the pull door's own: `connectorSource.input` is JSON spread as
     // written and the watermark is the stored value, so no CEL envelope runs
     // here and the node's `int()` / `double()` / `bool()` advice cannot apply.
-    const verdict = judgeConnectorInput(findConnectorActionInputSchema(registry, connector, action), input);
+    const verdict = judgeConnectorInput(findConnectorActionInputSchema(registry, connector, action, instancePackage), input);
     if (verdict) {
         return refuse(
             'VALIDATION_ERROR', 400, 'input_schema_mismatch',

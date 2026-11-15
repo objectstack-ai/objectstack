@@ -117,6 +117,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
+import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -134,7 +135,14 @@ import type { FlowNodeParsed, FlowEdgeParsed, FlowTriggerKind } from '@objectsta
 // hand-written notion of "blank" here — that drift is what #15662 built the
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
-import { referenceCarrierOf, referenceTargetOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import {
+  injectedSystemColumnDefs,
+  isInjectedColumnDefinition,
+  platformProvisionsStorage,
+  referenceCarrierOf,
+  referenceTargetOf,
+  REFERENCE_VALUE_TYPES,
+} from '@objectstack/spec/data';
 import {
   isStoredMetadataBodyObject,
   STORED_METADATA_BODY_PRESCRIPTION,
@@ -157,11 +165,12 @@ import {
 import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
-import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
+import type { NullGuardFinding, NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import type { StoredObjectExtension } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
-import { formulaCycleIssues } from './formula-cycle-issues.js';
+import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -565,6 +574,99 @@ interface FlowBareNames {
    * here because every flow site that reads the names reads it too.
    */
   readonly timeRelativeSweep: boolean;
+}
+
+/**
+ * [#33246] The injected system columns the platform writes on EVERY stored
+ * row, so a read of one is never `null`: the wildcard audit hook
+ * (`sys_stamp_audit_insert` in `@objectstack/objectql`) writes `created_at`
+ * and `updated_at` unconditionally, and driver-sql creates both on every
+ * table it provisions (`PLATFORM_PROVISIONED_COLUMNS`, which adds the
+ * primary key `id`; the registry never injects `id` into the field map, so
+ * it has no entry here). The other injected columns are stamped only when
+ * there is something to stamp: a system-context insert stores `NULL` in
+ * `owner_id`, `created_by`, `updated_by`, `owning_business_unit_id` and
+ * `queue` (measured on the real engine), so they stay nullable. This package
+ * may not import a runtime, so the two names are spelled here.
+ */
+const PLATFORM_STAMPED_COLUMNS: ReadonlySet<string> = new Set(['created_at', 'updated_at']);
+
+/**
+ * [#33246] Is this served field a platform-stamped column that is never `null`
+ * on a stored row? Only the platform's own definition counts
+ * (`isInjectedColumnDefinition` against the object's injection plan): a
+ * column the author declared keeps the author's keys and the author's
+ * verdict. An object whose schema the platform does not provision (an
+ * ADR-0015 `external` binding, `platformProvisionsStorage`) has no stamp
+ * behind the column, so it is no exception there.
+ */
+function isPlatformStampedColumn(obj: AnyRec, fname: string, def: AnyRec): boolean {
+  if (!PLATFORM_STAMPED_COLUMNS.has(fname) || !platformProvisionsStorage(obj)) return false;
+  const injected = injectedSystemColumnDefs(obj)[fname];
+  return injected !== undefined && isInjectedColumnDefinition(def, injected);
+}
+
+/**
+ * [#33246] object name → the platform-stamped columns
+ * ({@link isPlatformStampedColumn}) it serves. Read only at a runtime publish
+ * door, whose objects are SERVED: the registry injects its system columns as
+ * declared `required: false` fields with no default, so the null-guard gate
+ * reads `created_at` / `updated_at` as nullable there, while `os build`
+ * (declared fields only) never judges them. The nullable index keeps them;
+ * {@link isStampedComparisonFinding} says which of its findings the door
+ * leaves out.
+ */
+function buildPlatformStampedIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const stamped = new Set<string>();
+    for (const [fname, def] of fieldEntries(obj)) {
+      if (isPlatformStampedColumn(obj, fname, def)) stamped.add(fname);
+    }
+    if (stamped.size > 0) idx.set(name, stamped);
+  }
+  return idx;
+}
+
+/**
+ * [#33246] The null-guard verdicts the door leaves out: an ORDERING comparison
+ * (`<`, `<=`, `>`, `>=`) whose operand is a platform-stamped column of the
+ * CURRENT row, spelled bare (a record-triggered flow's flattened trigger
+ * record) or `record.<column>`, which a stored row never holds `null` in.
+ * Every other finding keeps its verdict:
+ *
+ * - an arithmetic operand (`+`, `-`, `*`, `/`, `%`): at a record-triggered
+ *   flow's `record.` read the null guard is the only refusal date arithmetic
+ *   on the column meets (the flattened site type-checks only the bare
+ *   spelling);
+ * - a `previous.<column>` operand: an insert binds `previous` itself to
+ *   `null`, so the read faults there whatever the column holds, and the
+ *   finding's message names the full guard (`PREVIOUS_GUARD_CLAUSE`).
+ */
+const STAMPED_COMPARISON_OPERATORS: ReadonlySet<string> = new Set(['<', '<=', '>', '>=']);
+function isStampedComparisonFinding(stamped: ReadonlySet<string> | undefined, finding: NullGuardFinding): boolean {
+  if (!stamped || !stamped.has(finding.field) || !STAMPED_COMPARISON_OPERATORS.has(finding.operator)) return false;
+  return finding.operand === finding.field || finding.operand === 'record.' + finding.field;
+}
+
+/**
+ * [#33246] The hook events on which a hook condition reads a STORED row the
+ * platform has already stamped: `record` is the stored row (overlaid with the
+ * write's payload) after the stamp on an `afterInsert`, and the prior row on
+ * an update or a delete. Not here: `beforeInsert`, which a hook can run on
+ * ahead of `sys_stamp_audit_insert` (priority 10) and read both columns as
+ * `null`, at any priority; `beforeFind` / `afterFind`, which carry no record
+ * at all. A hook keeps every stamped-column verdict unless each of its events
+ * is listed.
+ */
+const STAMPED_ROW_HOOK_EVENTS: ReadonlySet<string> = new Set([
+  'afterInsert', 'beforeUpdate', 'afterUpdate', 'beforeDelete', 'afterDelete',
+]);
+function hookReadsStampedRow(hookEvents: unknown): boolean {
+  return Array.isArray(hookEvents) && hookEvents.length > 0
+    && hookEvents.every((e) => typeof e === 'string' && STAMPED_ROW_HOOK_EVENTS.has(e));
 }
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
@@ -2272,8 +2374,9 @@ export interface StackExpressionOptions {
    * build locates it. [#33154] The same walk judges each validation rule the
    * written entry adds, by the object walk's own rule pass
    * (`judgeValidationRule`), its `record.FIELD` reads resolved against the
-   * same served fields (the leaf of a hop through a reference an extension
-   * adds is not judged; see the walk), and located at the entry
+   * same served fields (#33216: and a one-hop leaf through a reference an
+   * extension adds judged as one through a declared reference), and located
+   * at the entry
    * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write the
    * live objects are read without the system columns the registry injects
    * (`stripInjectedSystemColumns`), as the build reads them. The
@@ -2286,6 +2389,19 @@ export interface StackExpressionOptions {
    * through the per-item door works.
    */
   runtimeWriteType?: string;
+  /**
+   * [#33494] On an `object_extension` write only: the written entry's target's
+   * OTHER packages' published extensions, as the host's registry holds them
+   * (`AuthoringRuleContext.storedObjectExtensions`). The door's live target
+   * carries their fields as plain fields with no package and no priority, so
+   * without them the walk folded the written entry over all of them and served
+   * its definition of every name it adds. With them the fold
+   * (`objectsAsServed` and `objectExtensionsByTarget`, the build's own) places
+   * the written entry among them by priority: a sibling that outranks it is
+   * served, and a name they add at the priority that decides it is a tie, left
+   * out as the build leaves it out. Read on no other write.
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
    * [#32872] Set only by `judgeAuthoredSiteExpression`
    * (`authored-site-expression.ts`), the entry the MCP `validate_expression`
@@ -2351,6 +2467,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // after that walk, so the claim holds by construction. See
   // {@link StackExpressionOptions.runtimeWriteType}.
   const extensionWrite = options.runtimeWriteType === 'object_extension';
+  // [#33494] The target's other packages' published extensions the door folds
+  // the written entry among, by priority. See
+  // {@link StackExpressionOptions.storedObjectExtensions}.
+  const storedExtensions = extensionWrite ? options.storedObjectExtensions ?? [] : [];
   // [#32872] See {@link StackExpressionOptions.sharedValidatorRunByCaller}.
   const validatorRunByCaller = options.sharedValidatorRunByCaller === true;
   // [#24798] On a `view` write exactly ONE pass judges — the bulk `confirmText`
@@ -2373,7 +2493,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // through `stripInjectedSystemColumns` (`@objectstack/metadata-core`, the
   // write path's own strip of exactly those, as `authored-site-expression.ts`
   // reads the served objects), and the indexes re-derive the injected columns
-  // themselves, as they do at the build.
+  // themselves, as they do at the build. Every other runtime door keeps the
+  // served objects, so its type verdicts on an injected column stand; only an
+  // ordering comparison over the two platform-stamped timestamps leaves the
+  // null-guard verdicts (#33246, {@link buildPlatformStampedIndex}).
   if (extensionWrite) stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
   const objects = recordsOf(stack.objects);
   // [#30471] The field indexes read the objects as the registry SERVES them,
@@ -2387,24 +2510,42 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // the registry serves is registration order, which the stack does not state,
   // so such a field is a known name with no type and no null-guard verdict.
   // The read-attachment index is object-level and an extension carries none.
-  const { objects: servedObjects, tied } = objectsAsServed(stack);
+  const { objects: servedObjects, tied } = objectsAsServed(stack, storedExtensions);
   const typedObjects = objectsWithoutTiedFields({ objects: servedObjects, tied });
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
+  // [#33246] Read at a runtime publish door only: the build passes no write
+  // type, so its null-guard verdicts are what they were.
+  const platformStampedIndex = options.runtimeWriteType !== undefined
+    ? buildPlatformStampedIndex(typedObjects)
+    : new Map<string, Set<string>>();
   // [#24316] object name → its references into a stored-metadata-body table,
   // read the first time a site of that object serves a hop, or (#24677) when
   // the walk reaches the object's fields, whichever comes first — never before
   // the walk reaches the object, so a carrier the spec cannot read is refused
   // by the pass that owned that verdict before this one existed.
+  //
+  // [#33216] Two readings, one per question. A HOP (`served`) is planned by
+  // the engine over the registered schema, so a site that serves one reads the
+  // object as served (`typedObjects`: every `objectExtensions` field folded in,
+  // a field two packages tie on left out): a reference an extension adds is
+  // refused like a declared one. The object walk's #24677 field verdict judges
+  // the object's OWN fields and stays on the declared body, so a field an
+  // extension adds is never charged to the object's location.
+  // One map holds both readings; a served reading is keyed `served:NAME` (an
+  // object name carries no `:`).
   const storedMetadataBodyReferenceIndex = new Map<string, Map<string, string>>();
-  const storedMetadataBodyReferencesFor = (objectName: string): Map<string, string> => {
-    let familyRefs = storedMetadataBodyReferenceIndex.get(objectName);
+  const storedMetadataBodyReferencesFor = (objectName: string, served = false): Map<string, string> => {
+    const key = served ? `served:${objectName}` : objectName;
+    let familyRefs = storedMetadataBodyReferenceIndex.get(key);
     if (!familyRefs) {
       familyRefs = new Map();
-      for (const obj of objects) if (obj.name === objectName) familyRefs = storedMetadataBodyReferencesOf(obj);
-      storedMetadataBodyReferenceIndex.set(objectName, familyRefs);
+      for (const obj of served ? typedObjects : objects) {
+        if (obj.name === objectName) familyRefs = storedMetadataBodyReferencesOf(obj);
+      }
+      storedMetadataBodyReferenceIndex.set(key, familyRefs);
     }
     return familyRefs;
   };
@@ -2427,7 +2568,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (!source) return;
     const traversals = analyzeRelationshipTraversals(source, 'record')?.traversals;
     if (!traversals || traversals.size === 0) return;
-    const familyRefs = storedMetadataBodyReferencesFor(objectName);
+    // [#33216] The hop's reference as served: one an extension adds counts.
+    const familyRefs = storedMetadataBodyReferencesFor(objectName, true);
     for (const [field, columns] of traversals) {
       const target = familyRefs.get(field);
       if (!target) continue;
@@ -2454,7 +2596,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    *
    * Judged against the target's field index — its declared fields and the
    * system columns the platform injects on it, the set the registry carries —
-   * and the primary key, which no field map carries and the loader reads. A
+   * and the primary key, which no field map carries and the loader reads.
+   *
+   * [#33216] The reference itself is read off the hopping object AS SERVED
+   * (`typedObjects`), as the engine plans the hop over the registered schema:
+   * a lookup an `objectExtensions` entry adds is judged like a declared one,
+   * and so is a leaf an extension adds to the target (`fieldIndex` is built
+   * over the served objects too). A reference two packages tie on is left
+   * out, since which definition the registry serves is registration order. A
    * target outside the stack (or the door's snapshot, which carries the live
    * registry's objects, another package's included) has no index here and is
    * not judged; a hop into the stored-metadata-body family is refused by
@@ -2471,7 +2620,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const analysis = analyzeRelationshipTraversals(source, 'record');
     const traversals = analysis?.traversals;
     if (!traversals || traversals.size === 0) return;
-    for (const obj of objects) {
+    for (const obj of typedObjects) {
       if (obj.name !== objectName) continue;
       for (const [field, def] of fieldEntries(obj)) {
         // [#24468] A reference read more than one hop deep is refused whole by
@@ -2582,13 +2731,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     outcome: NullGuardOutcome = 'fail-closed',
     // [#29026] A flow's flattened bare names and its start condition's proofs.
     scope: Pick<NullGuardOptions, 'bareFields' | 'presumed'> = {},
+    // [#33246] At a runtime door, leave out an ordering comparison over a
+    // platform-stamped column ({@link isStampedComparisonFinding}). A caller
+    // whose predicate can run before the stamp passes `false`.
+    { stampedComparisons = true }: { stampedComparisons?: boolean } = {},
   ): void => {
     if (!objectName) return;
     const nullableFields = nullableIndex.get(objectName);
     if (!nullableFields || nullableFields.size === 0) return;
     const source = celSourceOf(raw);
     if (!source) return;
+    const stamped = stampedComparisons ? platformStampedIndex.get(objectName) : undefined;
     for (const finding of findUnguardedNullableOperands(source, { nullableFields, ...scope })) {
+      if (isStampedComparisonFinding(stamped, finding)) continue;
       issues.push({
         where,
         message: nullGuardMessage(subject, objectName, finding, outcome),
@@ -4082,8 +4237,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // `objectExtensions` and the door's live objects as `objects`, so the field
   // (and, #33154, the rule's field reads) is judged against its target as
   // served and located where the build locates it (`objectExtensions[0]` for
-  // a one-entry stack).
-  for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack)) {
+  // a one-entry stack). [#33494] The target's other packages' published
+  // extensions join the fold there (`storedExtensions`), each at its priority,
+  // so the written entry is served where the build serves it; they are folded
+  // in, never judged or located (`stored`).
+  for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack, storedExtensions)) {
     // The target's position in `objects`, which is its position in
     // `typedObjects` too (see `objectPosition` above); -1 when undeclared.
     let position = -1;
@@ -4100,8 +4258,16 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // Its fields by name as the registry serves them, built as the object
     // walk builds its own `fieldDefs`.
     const fieldDefs = new Map<string, AnyRec>(servedTarget ? fieldEntries(servedTarget) : []);
+    // [#33494] On the door's pass `base` already carries the stored entries'
+    // fields as plain fields, folded before the write; filled back from it, a
+    // name they tie on would be served again as one sibling's definition. Their
+    // names come from the fold above alone, as in the build.
+    const storedNames = new Set<string>();
+    for (const { fields: held, stored } of entries) {
+      if (stored) for (const [n] of fieldEntries({ fields: held })) storedNames.add(n);
+    }
     if (base) {
-      for (const [n, def] of fieldEntries(base)) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
+      for (const [n, def] of fieldEntries(base)) if (!fieldDefs.has(n) && !storedNames.has(n)) fieldDefs.set(n, def);
       for (const [n, def] of injectedColumnDefsFor(base)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
     } else {
       for (const { fields: added } of entries) {
@@ -4111,7 +4277,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const extensionOptionFields = [...fieldDefs]
       .filter(([, def]) => declaresOptionsOnceServed(def))
       .map(([n]) => n);
-    for (const { path: entryPath, fields: added, validations: rules } of entries) {
+    for (const { path: entryPath, fields: added, validations: rules, stored } of entries) {
+      // [#33494] A stored entry is another package's, already published: folded
+      // in above, judged on its own write, never located here.
+      if (stored) continue;
       for (const f of added) {
         const fname = typeof f.name === 'string' ? f.name : '?';
         judgeFieldFormula(fname, f, {
@@ -4129,12 +4298,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // over `objectsAsServed`), so a field this or a sibling extension adds
       // resolves and a field nothing serves is unknown; an undeclared target
       // is judged on what does not depend on its fields, as its fields'
-      // formulas are. Not every check reads the fold: the hop checks
-      // (`refuseUndeclaredHopField`, `storedMetadataBodyReferencesFor`) read
-      // the declared objects, so the leaf of a one-hop read through a
-      // reference an extension ADDS is not judged here (`record.manager__c.
-      // nmae` passes), while a hop through a reference the target declares
-      // is. Located at the entry (`object 'T' · objectExtensions[0] ·
+      // formulas are. [#33216] The hop checks (`refuseUndeclaredHopField`,
+      // `storedMetadataBodyReferencesFor`) read the fold too, so the leaf of
+      // a one-hop read through a reference an extension ADDS
+      // (`record.manager__c.nmae`) is refused as one through a reference the
+      // target declares is. Located at the entry (`object 'T' · objectExtensions[0] ·
       // validation 'N'`), the key path at the rule's slot under the entry
       // (`objectExtensions[0].validations[0].condition`): the door's 422
       // carries that path as is, and only a draft read's `_diagnostics`
@@ -4153,6 +4321,33 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         });
       }
     }
+    // [#33153] The formula-cycle pass, over the target as served
+    // (`fieldDefs`: on a declared target its served body, every kept entry's
+    // fields folded in and a field two packages tie on left out; on an
+    // undeclared one the entries' own fields, the later entry's definition of
+    // a shared name), so a formula an entry adds that reads itself, or two that
+    // read each other, are refused as the object's own are (#33100). Each
+    // member an entry adds is located at that entry
+    // ({@link extensionFormulaLoci}).
+    //
+    // In the build `base` is the authored object, and a member it declares is
+    // the object walk's, located at the object: a cycle closing through a
+    // declared formula keeps that location and is named once. On the door's
+    // one pass `base` is the target as served BEFORE the write and the object
+    // walk does not run, so no name is left out there. [#33494] The other
+    // packages' published extensions of the target are folded in with the
+    // written entry by priority (`storedExtensions`, the build's fold), so the
+    // door serves the definition the build serves: the written entry's where
+    // it decides a name, a sibling's where the sibling outranks it, none where
+    // they add it at the priority that decides it (a tie, left out as the
+    // build leaves it out on a declared target). A stored entry locates
+    // nothing ({@link extensionFormulaLoci}), so a cycle a sibling's
+    // definition closes through another field of the written entry is named
+    // on that field, and a member the target or a sibling package stored is
+    // never this write's: the target's own cycle, a sibling's, and a formula
+    // that only reads a cycle are not charged to it.
+    const ownNames = new Set(base && !extensionWrite ? fieldEntries(base).map(([n]) => n) : []);
+    issues.push(...formulaCycleIssues(target, fieldDefs, extensionFormulaLoci(target, entries, ownNames)));
   }
 
   // [#33072] An extension write's one pass ends here.
@@ -4272,6 +4467,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // run on every record (or never) instead of the intended subset.
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
+    // [#33246] Only a hook whose every event reads a stamped stored row may
+    // leave out an ordering over `created_at` / `updated_at`
+    // ({@link hookReadsStampedRow}): not on `beforeInsert`, `beforeFind` or
+    // `afterFind`.
+    const stampedComparisons = hookReadsStampedRow(hook.events);
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
@@ -4280,6 +4480,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         `hook '${hookName}' condition`,
         hook.condition,
         hook.object,
+        undefined,
+        undefined,
+        { stampedComparisons },
       );
       continue;
     }
@@ -4312,6 +4515,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         `hook '${hookName}' condition`,
         hook.condition,
         target,
+        undefined,
+        undefined,
+        { stampedComparisons },
       );
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];
@@ -4328,6 +4534,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     issues.length = before;
     issues.push(...kept);
   }
+
+  // [#33214] A hook refusal sentence over declared `params` is a template:
+  // compiled here (logic, an unknown formatter, an empty hole and an
+  // argument-less `currency` are errors), off an object write, like the hook
+  // `condition` walk above.
+  if (!objectWrite) issues.push(...hookRefusalTemplateIssues(stack));
 
   // [#24798] The bulk `confirmText` template slots: an object's own
   // `listViews` on every run (an object write included — they are the

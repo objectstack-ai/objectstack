@@ -120,7 +120,7 @@ to a new protocol major — never to silence a mismatch.
 
 **Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
-**`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). Never `actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger` (route literals; `os validate` and build refuse).
+**`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). Never `actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger` (route literals; `os validate` and build refuse).
 
 **Which names carry the namespace (ADR-0150):** object and doc names, capabilities (`crm.export_data`) and positions (one slot per environment). Every other name stays short (`send_email`): flows, actions, hooks, apps, pages, dashboards, reports, datasets, permission sets, tools, skills, agents are identified by package and name. A prefixed name stays valid; no name starts with `_`, which the router reserves. `os lint`'s `naming/namespace-prefix` warns on a bare capability or position name, and when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
 
@@ -197,12 +197,12 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 ## Driver Selection Guide
 
-Drivers are the storage layer:
+Memory and MongoDB may loudly refuse a query capability SQL serves.
 
 | Driver | Package | Best For | Notes |
 |:-------|:--------|:---------|:------|
 | **Memory** | `@objectstack/driver-memory` | Dev, testing, prototyping | `InMemoryDriver` — data lost on restart |
-| **SQL** | `@objectstack/driver-sql` | Production (PostgreSQL, MySQL, SQLite) | `SqlDriver` — Knex.js under the hood (`pg` / `mysql` / `better-sqlite3` clients) |
+| **SQL** | `@objectstack/driver-sql` | Production (PostgreSQL, MySQL, SQLite) | `SqlDriver` (`pg` / `mysql` / `better-sqlite3` clients) |
 | **MongoDB** | `@objectstack/driver-mongodb` | Production (document store) | `MongoDBDriver` |
 | **SQLite WASM** | `@objectstack/driver-sqlite-wasm` | Browser / WebContainer | `SqliteWasmDriver` — in-process, no server |
 | **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only**. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
@@ -211,7 +211,7 @@ Drivers are the storage layer:
 
 Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
 from the database URL and registers `DriverPlugin` for you. Do **not** put a
-driver in your config's `plugins:` array: no example app does, and the
+driver in your config's `plugins:` array: the
 `plugins:` key is for plugins the CLI cannot infer (connector executors, your
 own plugins).
 

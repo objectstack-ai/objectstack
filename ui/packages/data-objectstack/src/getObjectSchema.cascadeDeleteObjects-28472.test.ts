@@ -10,7 +10,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readCascadeDeleteObjects } from '@object-ui/core';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 const LEAD = { name: 'crm_lead', fields: { name: { type: 'text' } } };
 

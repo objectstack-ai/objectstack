@@ -42,6 +42,7 @@ import {
     SysMetadataObject,
 } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -1709,5 +1710,80 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
         expect(servedField, 'precondition: the member is served the field').toBeDefined();
         expect(servedField.expression, 'precondition: the mask deleted the expression').toBeUndefined();
         expect((engine.getSchema(OBJ) as any).fields.marked_up.expression, 'the declaration still carries it').toBeDefined();
+    });
+});
+
+// The hidden search companion the registry provisions beside an object's
+// display field (`provisionSearchCompanion`, `@objectstack/objectql`) is a
+// column no caller may read, write or name: a record never echoes it, a
+// `$searchFields` override naming it is refused, and `validate_expression`
+// answers `unknown-field` for a read of it. `describe_object` is the door that
+// offers an agent a field to use, so it does not list it either. The stdio
+// twin is pinned in `packages/mcp/src/stdio-data-bridge.object-schema-mask.test.ts`.
+describe('describe_object never lists the hidden search companion â€” the real engine', () => {
+    const OBJ = 'mcp_search_contact';
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+    const CALLER = { userId: 'usr_search_member', positions: [] as string[], permissions: [] as string[], systemPermissions: [] as string[] };
+    const prevPinyin = process.env.OS_SEARCH_PINYIN_ENABLED;
+
+    beforeAll(async () => {
+        // The deployment switch the registry provisions the companion under,
+        // read once, when the registry is built.
+        process.env.OS_SEARCH_PINYIN_ENABLED = 'true';
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: 'com.objectstack.qa.mcp-describe-search-companion',
+            name: 'MCP describe search companion',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [{
+                name: OBJ,
+                label: 'Contact',
+                sharingModel: 'public_read_write',
+                fields: {
+                    // The display field: the companion's source.
+                    name: { name: 'name', type: 'text', label: 'Name', required: true },
+                    email: { name: 'email', type: 'email', label: 'Email' },
+                },
+            }],
+        } as never);
+        await engine.syncSchemas();
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = { protocol: new ObjectStackProtocolImplementation(engine as any), objectql: engine };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        if (prevPinyin === undefined) delete process.env.OS_SEARCH_PINYIN_ENABLED;
+        else process.env.OS_SEARCH_PINYIN_ENABLED = prevPinyin;
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    const describedNames = async (): Promise<string[]> => {
+        const { bridge } = await bridgeFor(kernelOver(services), CALLER);
+        return ((await bridge.describeObject(OBJ)) as any).fields.map((f: any) => f.name);
+    };
+
+    it('precondition: the registry serves the object WITH the companion', async () => {
+        expect(Object.keys((engine.getSchema(OBJ) as any).fields)).toContain(SEARCH_COMPANION_FIELD);
+        const { bridge } = await bridgeFor(kernelOver(services), CALLER);
+        expect(Object.keys((await bridge.servedObjectDefinitionOf(OBJ)).fields)).toContain(SEARCH_COMPANION_FIELD);
+    });
+
+    it('the answer has no companion, and keeps the declared fields and the platform\'s other system columns', async () => {
+        const names = await describedNames();
+        expect(names).not.toContain(SEARCH_COMPANION_FIELD);
+        expect(names).toEqual(expect.arrayContaining(['name', 'email', 'created_at', 'updated_at', 'organization_id']));
+        const { bridge } = await bridgeFor(kernelOver(services), CALLER);
+        expect(JSON.stringify(await bridge.describeObject(OBJ))).not.toContain(SEARCH_COMPANION_FIELD);
     });
 });

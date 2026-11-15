@@ -76,11 +76,13 @@ import {
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Logger } from '@objectstack/core';
-import { isUniqueViolationError, keysetWalk, redactBoundStatement, uniqueViolationColumn } from '@objectstack/types';
+import { isUniqueViolationError, keysetWalk, redactBoundStatement, uniqueViolationField } from '@objectstack/types';
 import { objectPermissionGrants, type EffectiveObjectPermission, type TenantLayer0Verdict } from '@objectstack/spec/security';
 import type { OperationContext } from '../engine-top-level.js';
 import { declaredMultiValued } from '../engine-top-level.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from '../summary-errors.js';
+import { displayLabels } from '../duplicate-record-error.js';
+import type { ValidationMessageContext } from '../validation/record-validator.js';
 import { resolveTenantFieldName } from '../tenancy/system-write-organization.js';
 import { recycleBinCallRefusal, recycleBinWallDenies } from './purge.js';
 
@@ -107,6 +109,8 @@ export interface RecycleBinRestoreHost {
     object: string,
     input: { recordId: unknown; after?: unknown; organizationRow?: unknown; context?: ExecutionContext },
   ): Promise<void>;
+  /** The caller's locale and translator, which a refusal names a field's label in (`engine-validation-messages.ts`). */
+  validationMessageContext(object: string, context?: { locale?: string }): ValidationMessageContext;
 }
 
 /** The options `ObjectQL.restore` takes. */
@@ -230,8 +234,26 @@ function parentInRecycleBinRefusal(
   );
 }
 
-/** `RESTORE_UNIQUE_VALUE_TAKEN`: a live row holds a unique value of a snapshotted row. */
-function uniqueValueTakenRefusal(entryId: string, row: { object: string; id: string }, field: string | undefined, cause?: unknown): Error {
+/**
+ * `RESTORE_UNIQUE_VALUE_TAKEN`: a live row holds a unique value of a snapshotted row.
+ *
+ * `field` is the field the conflict is about, when it is known: the probe
+ * names the field it read, and a store's own violation at the write names it
+ * only when `uniqueViolationField` determinably does (an organization-scoped
+ * unique field's `(organization_id, FIELD)` key names FIELD; an index name or a
+ * composite of authored columns names none, and the refusal then names no
+ * field). `fieldLabel` is its display name in the caller's locale, resolved as
+ * the engine's unique envelope resolves it (`displayLabels`), and only when it
+ * has one: the user-facing `message` names the field by it, `developerMessage`
+ * by its API name.
+ */
+function uniqueValueTakenRefusal(
+  entryId: string,
+  row: { object: string; id: string },
+  field: string | undefined,
+  fieldLabel: string | undefined,
+  cause?: unknown,
+): Error {
   const err: any = new Error();
   err.code = 'RESTORE_UNIQUE_VALUE_TAKEN';
   const named = field !== undefined ? `'${field}'` : 'a unique value';
@@ -239,14 +261,25 @@ function uniqueValueTakenRefusal(entryId: string, row: { object: string; id: str
     err,
     field === 'id'
       ? `This record cannot be restored: a record with its id exists again.`
-      : `This record cannot be restored: another record now holds a value it must keep unique (${named}).`,
+      : `This record cannot be restored: another record now holds a value it must keep unique (${fieldLabel !== undefined ? `'${fieldLabel}'` : named}).`,
     `Recycle-bin entry '${entryId}' holds '${row.object}' '${row.id}', and a live row of '${row.object}' now holds ` +
       `${field === 'id' ? 'its id' : `its value of ${named}`}. A restore never forces a write over a live row: change ` +
       'or delete that row, then restore the entry again.',
-    { object: row.object, recordId: row.id, field, entryId },
+    { object: row.object, recordId: row.id, field, fieldLabel: field !== undefined ? fieldLabel : undefined, entryId },
   );
   if (cause !== undefined) err.cause = redactBoundStatement(cause);
   return err;
+}
+
+/** The display label of an object's field in the caller's locale, or `undefined` when it has none (no field, or no label declared or translated). */
+function fieldLabelOf(
+  this: Pick<RecycleBinRestoreHost, '_registry' | 'validationMessageContext'>,
+  object: string,
+  field: string | undefined,
+  context: ExecutionContext | undefined,
+): string | undefined {
+  if (field === undefined) return undefined;
+  return displayLabels(this._registry.getObject(object), object, field, this.validationMessageContext(object, context)).field;
 }
 
 /** A stored snapshot, read off a driver that may hand JSON back as text; `undefined` when it does not parse. */
@@ -507,7 +540,7 @@ async function judgeRestore(
       missingParents.set(key, parent);
     }
     // 3. No live row holds its id, or a unique value of it.
-    if (await isLive(row.object, { id: row.id })) throw uniqueValueTakenRefusal(entryId, row, 'id');
+    if (await isLive(row.object, { id: row.id })) throw uniqueValueTakenRefusal(entryId, row, 'id', fieldLabelOf.call(this, row.object, 'id', context));
     const tenantField = resolveTenantFieldName(schema);
     for (const [field, def] of Object.entries(fields)) {
       if (field === 'id' || !(def?.unique === true || def?.unique === 'organization' || def?.unique === 'global')) continue;
@@ -516,7 +549,7 @@ async function judgeRestore(
       const where: Record<string, unknown> = { [field]: value };
       // A per-organization unique value is unique within the row's own organization.
       if (def.unique !== 'global' && tenantField && holdsValue(row.values[tenantField])) where[tenantField] = row.values[tenantField];
-      if (await isLive(row.object, where)) throw uniqueValueTakenRefusal(entryId, row, field);
+      if (await isLive(row.object, where)) throw uniqueValueTakenRefusal(entryId, row, field, fieldLabelOf.call(this, row.object, field, context));
     }
   }
   if (missing.length === 0) return;
@@ -636,7 +669,13 @@ async function writeBack(
         try {
           await driver.create(row.object, { ...row.values, id: row.id }, driverOptions);
         } catch (error) {
-          if (isUniqueViolationError(error)) throw uniqueValueTakenRefusal(entryId, row, uniqueViolationColumn(error), error);
+          if (isUniqueViolationError(error)) {
+            // The refusal's question, not a routing one: `uniqueViolationField`
+            // sets an organization-scoped unique field's implied
+            // `organization_id` key part aside, so it names the field.
+            const field = uniqueViolationField(error);
+            throw uniqueValueTakenRefusal(entryId, row, field, fieldLabelOf.call(this, row.object, field, context), error);
+          }
           throw error;
         }
         done.push({

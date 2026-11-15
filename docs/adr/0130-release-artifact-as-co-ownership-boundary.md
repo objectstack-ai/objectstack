@@ -208,6 +208,16 @@ already filters them out of the consumer marketplace and
 `MarketplaceListingSchema.packageType` already cannot represent a non-App listing — neither
 changes.
 
+> ⚠️ **Pointer (2026-11-14): ADR-0019 D3 was amended on 2026-11-12**
+> ([#32585](https://github.com/objectstack-ai/objectstack/issues/32585), merged as `958734cbac`).
+> "D1–D3 stand verbatim and unamended" above is the reading of 2026-09-01 and is kept as written.
+> The amended rule: "A suite (one install: an app package plus the module packages it composes) MAY
+> surface more than one app, provided each app is defined by a different package of the suite, and
+> an app package defines at most one app." D1 and D2 are not amended, so the consumer still
+> installs and uninstalls one thing, the single `type: app` package. Of the three verbs only
+> "opens" reads differently: a user opens an app, and a suite may offer more than one (ADR-0019's
+> note under D1).
+
 D4 of ADR-0019 accommodates this case in its own words, unchanged: *"An App declares and owns
 **a set of namespaces**; uninstall is atomic over that set"* (`docs/adr/0019-app-as-consumer-unit.md`,
 `docs/adr/0019-app-as-consumer-unit.md`) — a **set**, and its parenthetical already cites the very `Map<namespace, Set<packageId>>`
@@ -221,6 +231,14 @@ in the consumer marketplace, never be an install target a consumer selects, and 
 a consumer can partially uninstall. It has exactly one consumer-visible consequence — the App
 you installed brought its modules — and that is the same consequence a plugin inside a package
 has today.
+
+> ⚠️ **Pointer (2026-11-14), the same amendment** (`958734cbac`). ADR-0019's amendment note,
+> under "Records that restate D3", reads this paragraph: the line "stands as drawn", and "What
+> ADR-0130 calls a suite is a container a consumer browses or installs, and that stays removed."
+> From the amendment ADR-0019 uses "suite" for one install of an app package with its modules, "a
+> descriptive word, not a package type"; that is not the container this line excludes. "Exactly
+> one consumer-visible consequence" above is the reading of 2026-09-01 and is kept as written; it
+> "gains a second: a module the app package brought may surface an app of its own."
 
 **Recording convention.** ADR-0019's text is **not rewritten**. This record cross-references it
 and is listed in its own `Builds on` line; per this repository's convention a governed record is
@@ -430,6 +448,10 @@ It is listed again under Non-goals.
   become the wedge that reintroduces one.
 - **The artifact as a consumer-visible unit.** D2's ⛔ line. Not a suite, not a browse target, not
   an install target, not partially uninstallable.
+  ⚠️ *Pointer (2026-11-14):* "suite" here is the container a consumer browses or installs, which
+  stays removed after ADR-0019 D3's 2026-11-12 amendment (`958734cbac`); the amended D3 uses the
+  word for one install of an app package with its modules, which may surface several apps, each
+  defined by a different package (see the pointers under D2).
 - **Implementing segmented artifact loading.** D4 reserves the key position only. The segmented
   form itself needs its own decision.
 - **A second ordering mechanism.** D5. `resolvePluginOrder` or nothing.
@@ -515,6 +537,10 @@ turn into a mechanism, and it does not become one until the cards above ship.
 5. **Let the artifact be a consumer-visible container ("a suite, but a good one").** Rejected
    outright: it is ADR-0019 D3 by another name, and that record's argument does not weaken
    because the container is better built.
+   ⚠️ *Pointer (2026-11-14):* ADR-0019 D3 was amended on 2026-11-12 (`958734cbac`): its fold is
+   reversed, and a suite may surface several apps, each defined by a different package. The
+   rejection stands on what the amendment keeps: D1 and D2 are unchanged, and a suite "is no
+   second consumer unit. It has no listing and no package type of its own."
 
 ---
 

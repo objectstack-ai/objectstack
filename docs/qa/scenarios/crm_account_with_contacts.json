@@ -95,14 +95,14 @@
     "personas": [
       {
         "id": "sdr",
-        "role": "Sales development representative",
+        "role": "Sales development representative who adds, updates and removes contacts",
         "hidden": {"fields": [{"object": "contact", "field": "email"}]},
         "scope": [
           {"object": "account", "field": "owner", "value": "u_sam"},
           {"object": "contact", "field": "account.owner", "value": "u_sam"}
         ]
       },
-      {"id": "partner_user", "role": "Partner portal user", "hidden": {"objects": ["account"]}}
+      {"id": "partner_user", "role": "Partner portal user who may not change accounts", "hidden": {"objects": ["account"]}}
     ],
     "operations": [
       {

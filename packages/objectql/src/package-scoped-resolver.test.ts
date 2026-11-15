@@ -820,11 +820,15 @@ describe('phase 1 parity — under the one-holder rule the resolver answers as `
     }
   });
 
-  it('a second package holder is still refused by phase 1, so no reader can meet two', () => {
+  it('a second package holder of the same namespace is still refused by phase 1, so no reader can meet two there', () => {
     sealedWithHolder(false);
-    install(B);
-    // A type whose rule has not narrowed to the namespace (`flow` has, #31696; `webhook` too, #31699 PR 2).
-    expect(() => ship('connector', NAME, B)).toThrow();
+    // [#31699 PR 3] Every covered type has narrowed to the namespace (the
+    // connector last), so the refusal that stands is the one inside a
+    // namespace: B co-owns A's namespace (a declared dependency, ADR-0141 D5).
+    install(B, [A], A.split('.').pop()!);
+    for (const type of ['connector', 'flow', 'webhook'] as const) {
+      expect(() => ship(type, NAME, B), type).toThrow();
+    }
   });
 });
 

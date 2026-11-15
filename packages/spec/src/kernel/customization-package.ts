@@ -249,8 +249,8 @@ export type OverrideCondition =
 /**
  * Where a classification comes from:
  * - `adr_0146_d2_listed` — named in D2's "Which types" list;
- * - `adr_0146_d6_security_catalog` — D6: one name per deployment (permission
- *   sets, positions, capabilities);
+ * - `adr_0146_d6_security_catalog` — D6: the security catalog takes no override
+ *   (permission sets, positions, capabilities);
  * - `adr_0146_d10_extended` — D10: objects are extended, never replaced;
  * - `adr_0126_code_only` — D2 and D6: the types ADR-0126 §3 places outside the
  *   regimes as code gain no override channel;

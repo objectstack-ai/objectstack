@@ -359,3 +359,20 @@ export function resolveSearchFields(opts: SearchFieldResolutionOptions): string[
   }
   return allowed;
 }
+
+/**
+ * Name of the hidden search companion column (#2486): the lowercase,
+ * normalised copy of an object's searchable text that the engine provisions
+ * where pinyin search is on, and the one extra `$contains` clause above scans.
+ * It is platform plumbing: every record read strips it, `resolveSearchFields`
+ * never returns it, and no expression may read it.
+ *
+ * ONE name for every layer that must recognise the column: the engine
+ * (`@objectstack/objectql` provisions and strips it under this name and
+ * re-exports it) and the MCP `validate_expression` tool (which leaves it out
+ * of the fields an expression may name). It lives here, not in the engine, so
+ * a layer that only needs the name does not have to load the engine to read it.
+ * Double-underscore prefixed so it can never collide with an author-declared
+ * field (machine names are snake_case words).
+ */
+export const SEARCH_COMPANION_FIELD = '__search';
