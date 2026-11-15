@@ -144,8 +144,11 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  *     It reaches the column under a SYSTEM context — by context, ⛔ not by a
  *     whitelist entry — which is why the whitelist reading above is unchanged.
  *     It refuses self-assignment, a link that closes a cycle, a chain past its
- *     depth cap, a manager provably outside the user's organizations, and any
- *     identity whose `sys_user.source` is `idp_provisioned`.
+ *     depth cap, a manager provably outside the user's organizations, and an
+ *     identity a SCIM directory holds (`sys_user.source` `idp_provisioned` AND
+ *     a `sys_scim_subject` row). An `idp_provisioned` identity with no SCIM
+ *     subject — a person who only signs in through SSO — is set like any other
+ *     (maintainer ruling record 6895645364).
  *   - Seed, or any other system-context write — AVAILABLE HERE, unchanged.
  *     Both write guards gate on `isUserContextWrite`, spelled identically in
  *     each: `Boolean(userId) && isSystem !== true` (plugin-security
@@ -179,7 +182,7 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  * one may well populate the column through it — but named as something the
  * operator's own provisioning supplies, ⛔ never as something this repo gives
  * them. They also now have PRECEDENCE over the endpoint rather than merely
- * sitting beside it: on an `idp_provisioned` identity the endpoint refuses, so
+ * sitting beside it: on an identity a SCIM directory holds the endpoint refuses, so
  * the directory is the one authoring surface for those rows.
  *
  * ⛔ WHAT DID NOT CHANGE — and why this rule is not deleted. The dead end the

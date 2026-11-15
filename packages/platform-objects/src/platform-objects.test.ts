@@ -772,7 +772,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // The rest of the platform-admin family. Three carry no feature gate, so
     // the authored predicate is served as written — no lowering — and is
     // pinned here anyway, beside add_member, so every member has its row.
-    ['SysUser', SysUser, 'set_user_manager', `${STANDING} && has(record.source) && record.source != "idp_provisioned"`],
+    ['SysUser', SysUser, 'set_user_manager', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'register_sso_provider', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'register_saml_provider', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'request_domain_verification', STANDING],
