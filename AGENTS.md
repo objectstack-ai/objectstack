@@ -284,17 +284,17 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: every register row outside Tier S): those four lift only for an authorized APPROVED review by an account in
+    (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
     `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
-    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`, and
-    objectstack workflow edits (`readWorkflowDiff`) and skills-only wording (`lowRiskArmVerdict`) read as S): those four
-    lift once the PR thread or its card carries a `## Contract review` record for the PR's current head with
-    `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning seat then lands it
-    through the queue; the post-merge audit is the compensating control. A PR whose only governed paths are register
-    rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a
-    hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR,
-    under any account** — an authorized account is agent-operated too; "CI is green" carries no information about a
-    governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
+    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`,
+    objectstack workflow edits (`readWorkflowDiff`) and skills-only wording (`lowRiskArmVerdict`; the reviewer labels
+    unnamed security teaching) read as S): those four lift once the PR thread or its card carries a `## Contract review`
+    record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is
+    green — the owning seat lands it through the queue; the post-merge audit is the compensating control. A PR whose
+    only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving
+    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
+    says nothing about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
     an unqueued PR; no seat act, those two included, is measured to dequeue one (`platform-readings.md`, queue

@@ -601,15 +601,16 @@ import {
   applyLowRiskArm,
   applyWorkflowSplit,
   assertGovernedRepo,
+  forkVerdict,
   generatedExceptionFor,
   governedPathsIn,
   governedSurfacesFor,
   governedTierFor,
   groupHitsByException,
   landsByHumanMerge,
+  lowRiskArmVerdict,
   mergeWorkflowReadings,
   pullNumberFromSubject,
-  forkVerdict,
   pullSizeFrom,
   recomputeProvenanceFor,
   readWorkflowDiff,
@@ -669,7 +670,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 44,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 46,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5815,6 +5816,7 @@ export async function selfTest() {
         g(['init', '-q']);
         mkdirSync(join(dir, 'skills/a/rules'), { recursive: true });
         writeFileSync(join(dir, 'skills/a/rules/security.md'), 'Never echo a token back.\n'.repeat(20));
+        writeFileSync(join(dir, 'skills/a/rules/guide.md'), 'Grant the narrowest set.\n'.repeat(20));
         g(['add', '-A']);
         g(['commit', '-q', '-m', 'a']);
         const from = g(['rev-parse', 'HEAD']).trim();
@@ -5826,8 +5828,19 @@ export async function selfTest() {
         const rec = { state: 'stands', id: 5, carriedFrom: from, carriedHops: 1 };
         const rows = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [], headSha: to, runGit: g };
         const v = lowRiskRecordVerdict(rec, rows, live);
+        // ⭐ And a rename INTO a security name inside the catalog: `--no-renames` lists BOTH sides, so the
+        // carry check names both and the arm's own name test reads the new name (ruling 「标签和路径都读」).
+        g(['mv', 'skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md']);
+        g(['commit', '-q', '-m', 'c']);
+        const to2 = g(['rev-parse', 'HEAD']).trim();
+        const into = lowRiskRecordVerdict({ ...rec, carriedFrom: to }, { ...rows, headSha: to2 }, live);
+        const bothSides = g(['diff', '-z', '--name-only', '--no-renames', to, to2]).split('\0').filter(Boolean).sort();
+        const intoTier = lowRiskArmVerdict(governedPathsIn(bothSides, REPO), REPO, { measured: true, reason: null, paths: [...bothSides, CS], body: LOW, labels: [], timeline: { measured: true, reason: null, events: [] }, fork: SAME_REPO, changesets: { measured: true, reason: null, files: [{ path: CS, text: CS_TEXT }] } });
         // The plain diff names the destination alone (the blind spot); the check names the catalog path.
-        return renamesOn.join() === 'content/docs/security.md' && v.state === 'not-pass' && /skills\/a\/rules\/security\.md/.test(v.verdictReason);
+        return renamesOn.join() === 'content/docs/security.md' && v.state === 'not-pass' && /skills\/a\/rules\/security\.md/.test(v.verdictReason) &&
+          bothSides.join() === 'skills/a/rules/guide.md,skills/a/rules/permission-guide.md' && into.state === 'not-pass' &&
+          /guide\.md/.test(into.verdictReason) && /permission-guide\.md/.test(into.verdictReason) &&
+          intoTier.tier === TIER_H && intoTier.reasons.some((r) => /names security, auth or permission: skills\/a\/rules\/permission-guide\.md/.test(r));
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -5870,6 +5883,9 @@ export async function selfTest() {
       const forked = await makePullReader({ ...args, fetchImpl: respond({ head: { sha: HEAD, repo: null }, base: { repo: { full_name: 'o/r' } } }) })(7);
       return same.fork.measured === true && same.fork.isFork === false && forked.fork.isFork === true;
     })());
+    // ⛔ The security NAME test at the queue (ruling 「标签和路径都读」): the label OR the path; a rename read as both paths.
+    assert('⛔ SEC-a-security-named-skill-file-stays-H-with-a-PASS-record-and-no-label', JSON.stringify(await hCase({ files: ['skills/objectstack-data/rules/security.md', CS] })) === H);
+    assert('⛔ SEC-a-rename-into-or-out-of-a-security-name-in-one-commit-stays-H', JSON.stringify(await hCase({ files: ['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS] })) === H && JSON.stringify(await hCase({ files: ['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS] })) === H);
     // ⛔ S4: under the catalog only Markdown and `evals/*.json`.
     assert('⛔ S4-a-script-under-skills-stays-H-an-evals-json-does-not', JSON.stringify(await hCase({ files: [SK, CS, 'skills/objectstack-data/hook.mjs'] })) === H && (await tierRun({ ...arm, files: [SK, CS, 'skills/objectstack-data/evals/evals.json'] })).exitCode === EXIT_CLEAR);
 

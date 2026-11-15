@@ -497,7 +497,10 @@
  *   - at least one changeset, each read at the head, releasing nothing but
  *     `'@objectstack/skills': patch` and carrying the same two bare lines;
  *   - the labels were read and none is `security`, and the timeline was read and
- *     never removed one;
+ *     never removed one; and no catalog path names security, auth or permission
+ *     (`LOW_RISK_SECURITY_NAME`, any segment below the row, any case) — the label
+ *     OR the name sends the PR to H; security teaching the name cannot see is the
+ *     contract reviewer's to label `security`;
  *   - the head lives in the base repository (`forkVerdict`).
  *
  * Then the landing is Tier S's: a `## Contract review` record for the current
@@ -1147,7 +1150,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 54,
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 61,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2261,6 +2264,16 @@ function lowRiskArmIn(surface, repo) {
  */
 export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals\/[^/]+\.json$/]);
 
+/**
+ * The security NAME test (maintainer ruling on the security-scope card, 「标签和路径都读」):
+ * a changed path under a catalog row whose name below the row — any segment, so a
+ * skill FOLDER named for it counts as well as a file — says security, auth or
+ * permission (any case) keeps the PR H, with or without the label. A segment
+ * rather than the basename alone, because a security skill's entry file is
+ * `SKILL.md`. Teaching the name cannot see is the contract reviewer's to label.
+ */
+export const LOW_RISK_SECURITY_NAME = /security|auth|permission/i;
+
 /** A changeset path, as the rider allowlist spells it. */
 export const LOW_RISK_CHANGESET_PATH = /^\.changeset\/[^/]+\.md$/;
 
@@ -2365,6 +2378,11 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   if (stray.length > 0) reasons.push(`a path outside skills wording and prose: ${more(stray, 4)}`);
   const odd = paths.filter((p) => underArm(p) && !LOW_RISK_ARM_FILE_PATTERNS.some((re) => re.test(p)));
   if (odd.length > 0) reasons.push(`a skills file that is neither Markdown nor an \`evals/*.json\`: ${more(odd, 4)}`);
+  const securityNamed = paths.filter((p) => {
+    const prefix = armPrefixes.find((pre) => p.startsWith(pre));
+    return prefix !== undefined && LOW_RISK_SECURITY_NAME.test(p.slice(prefix.length));
+  });
+  if (securityNamed.length > 0) reasons.push(`a catalog path that names security, auth or permission: ${more(securityNamed, 4)}`);
   const listed = new Set(paths);
   const unlisted = rows.flatMap((s) => s.files ?? []).filter((f) => !listed.has(f));
   if (paths.length > 0 && unlisted.length > 0) reasons.push(`the reading's path list does not hold ${unlisted.slice(0, 2).join(', ')}`);
@@ -2419,7 +2437,7 @@ export function renderLowRiskLines(matched) {
     );
   }
   if (v.tier === GOVERNED_TIER_S) {
-    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — skills wording and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever, no fork.\n`;
+    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — skills wording and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever and no catalog path named for it, no fork.\n`;
   }
   return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
@@ -5846,6 +5864,15 @@ async function selfTest() {
     // ⛔ S4: under the catalog rows only Markdown and `evals/*.json`.
     assert('S4-skill-Markdown-and-an-evals-json-are-S', tier([SK, 'skills/objectstack-data/evals/evals.json', CS], read([SK, 'skills/objectstack-data/evals/evals.json', CS])) === GOVERNED_TIER_S && tier(['ui/skills/x/evals/a.json', CS], read(['ui/skills/x/evals/a.json', CS])) === GOVERNED_TIER_S);
     assert('⛔ S4-any-other-file-under-the-catalog-is-H', ['skills/objectstack-data/hook.js', 'skills/objectstack-data/data.json', 'skills/objectstack-data/evals/sub/a.json', 'skills/objectstack-data/evals/a.yaml', 'skills/objectstack-data/logo.png', 'ui/skills/x/run.sh'].every((p) => tier([p, CS], read([p, CS])) === GOVERNED_TIER_H) && /neither Markdown nor/.test(reasons(['skills/x/hook.js', CS], read(['skills/x/hook.js', CS]))));
+    // ⛔ The security NAME test: the label OR the path sends the PR to H (ruling 「标签和路径都读」).
+    const SEC_MAIN = ['skills/objectstack-api/evals/endpoints-auth-routes.json', 'skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 'skills/objectstack-data/rules/security.md', 'skills/objectui/evals/auth-permissions.json', 'skills/objectui/guides/auth-permissions.md'];
+    assert('⛔ SEC-a-security-named-Markdown-file-is-H-and-the-reason-names-it', tier(['skills/objectstack-data/rules/security.md', CS], read(['skills/objectstack-data/rules/security.md', CS])) === GOVERNED_TIER_H && /names security, auth or permission: skills\/objectstack-data\/rules\/security\.md/.test(reasons(['skills/objectstack-data/rules/security.md', CS], read(['skills/objectstack-data/rules/security.md', CS]))));
+    assert('⛔ SEC-an-auth-named-evals-json-is-H', tier(['skills/objectstack-api/evals/endpoints-auth-routes.json', CS], read(['skills/objectstack-api/evals/endpoints-auth-routes.json', CS])) === GOVERNED_TIER_H);
+    assert('⛔ SEC-each-of-the-five-matching-files-on-main-is-H-ui-catalog-and-any-case-too', SEC_MAIN.every((p) => tier([p, CS], read([p, CS])) === GOVERNED_TIER_H) && tier(['ui/skills/x/guides/Permissions.md', CS], read(['ui/skills/x/guides/Permissions.md', CS])) === GOVERNED_TIER_H && tier(['skills/x/rules/SECURITY.md', CS], read(['skills/x/rules/SECURITY.md', CS])) === GOVERNED_TIER_H);
+    assert('⛔ SEC-a-skill-FOLDER-named-for-it-is-H-though-its-file-is-SKILL-md', tier(['skills/objectstack-security/SKILL.md', CS], read(['skills/objectstack-security/SKILL.md', CS])) === GOVERNED_TIER_H);
+    assert('⛔ SEC-a-rename-INTO-a-security-name-is-H-both-paths-are-read', tier(['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS], read(['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS])) === GOVERNED_TIER_H);
+    assert('⛔ SEC-a-rename-OUT-OF-a-security-name-is-H-both-paths-are-read', tier(['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS], read(['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS])) === GOVERNED_TIER_H);
+    assert('SEC-CONTROL-the-name-test-reads-below-the-catalog-row-only-a-security-word-in-a-rider-path-stays-S', tier([SK, CS, 'docs/agents/security-notes.md'], read([SK, CS, 'docs/agents/security-notes.md'])) === GOVERNED_TIER_S && tier(['skills/objectstack-data/rules/hooks.md', CS], read(['skills/objectstack-data/rules/hooks.md', CS])) === GOVERNED_TIER_S);
     assert('LOW_RISK_ARM_FILE_PATTERNS-are-frozen-and-two', Object.isFrozen(LOW_RISK_ARM_FILE_PATTERNS) && LOW_RISK_ARM_FILE_PATTERNS.length === 2);
     assert('pullChangesetReading-reads-each-changeset-at-the-head-or-is-NOT-MEASURED', (() => {
       const H = 'a'.repeat(40);
