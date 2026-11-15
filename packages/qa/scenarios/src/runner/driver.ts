@@ -95,6 +95,10 @@ export interface DriverInfo {
   authorModel?: string;
   /** The model the live driver asks for on a question or operation turn (`--model` / `--ask-model`); absent ⇒ the login's default. */
   askModel?: string;
+  /** The effort level the live driver asks for on an authoring turn (`--effort` / `--author-effort`); absent ⇒ the CLI's default effort. */
+  authorEffort?: string;
+  /** The effort level the live driver asks for on a question or operation turn (`--effort` / `--ask-effort`); absent ⇒ the CLI's default effort. */
+  askEffort?: string;
 }
 
 export interface AgentDriver {
@@ -120,6 +124,18 @@ export class ApiBillingRefusedError extends Error {
   }
 }
 
+/**
+ * The `claude` CLI's own effort setting. Read in Claude Code 2.1.325's own
+ * code (the CLI reports no served effort to measure it by): when it is set, it
+ * wins over the `--effort` flag, so a turn the runner asks for
+ * one effort would run at another while its record named the first. The live
+ * driver therefore reads it once from the caller's environment (as the effort
+ * when no effort flag is given), passes the effort as `--effort`, and removes
+ * the variable from every turn's environment. `unset` and `auto` mean the
+ * CLI's default effort, as the CLI reads them.
+ */
+export const CLAUDE_EFFORT_ENV = 'CLAUDE_CODE_EFFORT_LEVEL';
+
 /** The child environment: the caller's, with every API-billing variable removed. */
 export function subscriptionOnlyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = { ...env };
@@ -137,6 +153,43 @@ export function assertSubscriptionLogin(env: NodeJS.ProcessEnv, authStatus: unkn
   const method = typeof s.authMethod === 'string' ? s.authMethod : 'unknown';
   if (/api[_-]?key/i.test(method)) throw new ApiBillingRefusedError(`\`claude auth status\` reports an API-key login (${method})`);
   return method;
+}
+
+/**
+ * The effort levels a `claude` CLI accepts, read off its own `--help`: the
+ * parenthesised list in the `--effort` entry (Claude Code 2.1.325 prints
+ * `--effort <level>  Effort level for the current session (low, medium, high,
+ * xhigh, max)`, the list wrapped onto the next line). `undefined` ⇒ the help
+ * has no `--effort` entry, or the entry names no list. Pure over its input.
+ */
+export function effortLevelsFromHelp(help: string): string[] | undefined {
+  const lines = help.split('\n');
+  const at = lines.findIndex((l) => /^\s*--effort\b/.test(l));
+  if (at === -1) return undefined;
+  const entry = [lines[at]!];
+  for (const l of lines.slice(at + 1)) {
+    if (l.trim() === '' || /^\s*-/.test(l)) break;
+    entry.push(l);
+  }
+  const list = /\(([a-z]+(?:\s*,\s*[a-z]+)*)\)/i.exec(entry.join(' '));
+  return list ? list[1]!.split(',').map((x) => x.trim()) : undefined;
+}
+
+/**
+ * Refuse an effort level the CLI would not take. Measured on Claude Code
+ * 2.1.325: an unknown `--effort` value is not an error — the CLI warns on
+ * stderr, runs the turn at its default effort and exits 0 — so a misspelt
+ * level would put a level on the record that no turn ran at. Each entry of
+ * `wanted` is a level and where it came from (a flag, or the variable), for
+ * the message.
+ */
+function assertEffortLevels(levels: string[] | undefined, wanted: ReadonlyArray<readonly [string, string]>, cli = 'the `claude` CLI'): void {
+  if (wanted.length === 0) return;
+  const named = wanted.map(([, from]) => from).join(', ');
+  if (levels === undefined) throw new Error(`${named}: ${cli} lists no \`--effort\` levels in its \`--help\`, so it cannot be asked for an effort; update Claude Code, or run without an effort flag`);
+  for (const [level, from] of wanted) {
+    if (!levels.includes(level)) throw new Error(`${from} takes one of the levels ${cli} accepts (${levels.join(', ')}), not \`${level}\``);
+  }
 }
 
 /**
@@ -179,6 +232,12 @@ export interface ClaudeCodeDriverOptions {
   authorModel?: string;
   /** The model for a question or operation turn, in place of {@link model}. */
   askModel?: string;
+  /** The effort level passed as `--effort` on every turn; else the caller's {@link CLAUDE_EFFORT_ENV}; else none, the CLI's default. */
+  effort?: string;
+  /** The effort level for an authoring turn (build and iterate), in place of {@link effort}. */
+  authorEffort?: string;
+  /** The effort level for a question or operation turn, in place of {@link effort}. */
+  askEffort?: string;
 }
 
 /** `claude-sonnet-4-5-20250929[1m]` → `['claude', 'sonnet', '4', '5', '20250929']`: the name's parts, the context-size suffix dropped. */
@@ -252,6 +311,27 @@ export class ClaudeCodeDriver implements AgentDriver {
       /* refused below as "no login" */
     }
     this.authMethod = assertSubscriptionLogin(process.env, parsed);
+    // An effort the CLI does not list would run at its default effort while the record named it.
+    const wanted: Array<readonly [string, string]> = [];
+    if (this.authorEffort !== undefined) wanted.push([this.authorEffort, opts.authorEffort !== undefined ? '--author-effort' : opts.effort !== undefined ? '--effort' : CLAUDE_EFFORT_ENV]);
+    if (this.askEffort !== undefined) wanted.push([this.askEffort, opts.askEffort !== undefined ? '--ask-effort' : opts.effort !== undefined ? '--effort' : CLAUDE_EFFORT_ENV]);
+    if (wanted.length) {
+      const help = spawnSync(this.bin, ['--help'], { encoding: 'utf8', env: this.turnEnv() });
+      assertEffortLevels(effortLevelsFromHelp(help.stdout ?? ''), wanted, `\`${this.bin}\` ${this.version}`);
+    }
+  }
+
+  /** The effort the caller's environment sets for the CLI ({@link CLAUDE_EFFORT_ENV}); `unset` / `auto` / empty ⇒ none. */
+  private get envEffort(): string | undefined {
+    const raw = process.env[CLAUDE_EFFORT_ENV]?.trim().toLowerCase();
+    return raw === undefined || raw === '' || raw === 'unset' || raw === 'auto' ? undefined : raw;
+  }
+
+  /** A turn's environment: no API-billing variable, and no {@link CLAUDE_EFFORT_ENV} to override the `--effort` the turn passes. */
+  private turnEnv(): NodeJS.ProcessEnv {
+    const env = subscriptionOnlyEnv();
+    delete env[CLAUDE_EFFORT_ENV];
+    return env;
   }
 
   private get authorTimeoutMs(): number {
@@ -274,6 +354,14 @@ export class ClaudeCodeDriver implements AgentDriver {
     return this.opts.askModel ?? this.opts.model;
   }
 
+  private get authorEffort(): string | undefined {
+    return this.opts.authorEffort ?? this.opts.effort ?? this.envEffort;
+  }
+
+  private get askEffort(): string | undefined {
+    return this.opts.askEffort ?? this.opts.effort ?? this.envEffort;
+  }
+
   info(): DriverInfo {
     return {
       driver: 'claude-code-cli',
@@ -285,12 +373,15 @@ export class ClaudeCodeDriver implements AgentDriver {
       askMaxTurns: this.askMaxTurns,
       ...(this.authorModel ? { authorModel: this.authorModel } : {}),
       ...(this.askModel ? { askModel: this.askModel } : {}),
+      ...(this.authorEffort ? { authorEffort: this.authorEffort } : {}),
+      ...(this.askEffort ? { askEffort: this.askEffort } : {}),
     };
   }
 
-  private base(maxTurns: number, model: string | undefined): string[] {
+  private base(maxTurns: number, model: string | undefined, effort: string | undefined): string[] {
     const a = ['--output-format', 'stream-json', '--verbose', '--max-turns', String(maxTurns)];
     if (model) a.push('--model', model);
+    if (effort) a.push('--effort', effort);
     return a;
   }
 
@@ -300,16 +391,17 @@ export class ClaudeCodeDriver implements AgentDriver {
     try {
       const maxTurns = this.authorMaxTurns(task.tier);
       const model = this.authorModel;
+      const effort = this.authorEffort;
       const args = [
         '-p',
-        ...this.base(maxTurns, model),
+        ...this.base(maxTurns, model, effort),
         '--mcp-config', empty, '--strict-mcp-config',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
-      const run = await runTurnProcess(this.bin, args, { cwd: task.cwd, input: task.prompt, timeoutMs: this.authorTimeoutMs, env: subscriptionOnlyEnv() });
+      const run = await runTurnProcess(this.bin, args, { cwd: task.cwd, input: task.prompt, timeoutMs: this.authorTimeoutMs, env: this.turnEnv() });
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}), ...(effort ? { requestedEffort: effort } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
@@ -330,10 +422,11 @@ export class ClaudeCodeDriver implements AgentDriver {
     try {
       const maxTurns = this.askMaxTurns;
       const model = this.askModel;
-      const args = ['-p', ...this.base(maxTurns, model), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
-      const run = await runTurnProcess(this.bin, args, { cwd: dir, input: task.prompt, timeoutMs: this.opts.askTimeoutMs ?? 5 * 60_000, env: subscriptionOnlyEnv() });
+      const effort = this.askEffort;
+      const args = ['-p', ...this.base(maxTurns, model, effort), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      const run = await runTurnProcess(this.bin, args, { cwd: dir, input: task.prompt, timeoutMs: this.opts.askTimeoutMs ?? 5 * 60_000, env: this.turnEnv() });
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}), ...(effort ? { requestedEffort: effort } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return turn;
     } finally {

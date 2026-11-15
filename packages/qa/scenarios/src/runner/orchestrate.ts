@@ -106,6 +106,13 @@ export interface TurnSummary {
   requestedModel?: string;
   /** The served model is not the requested one ({@link servedAsRequested}); only when both are known. */
   modelMismatch?: true;
+  /**
+   * The effort level the driver asked for (`--effort` / `--author-effort` /
+   * `--ask-effort`, `meta.process`); absent ⇒ the CLI's default effort, or a
+   * turn recorded before the runner kept it. No stream reports the effort a
+   * turn was served, so there is no served effort to compare it with.
+   */
+  requestedEffort?: string;
   /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
   elapsedMs?: number;
   /**
@@ -242,6 +249,7 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(t.meta.model ? { model: t.meta.model } : {}),
     ...(p?.requestedModel ? { requestedModel: p.requestedModel } : {}),
     ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
+    ...(p?.requestedEffort ? { requestedEffort: p.requestedEffort } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
     ...(t.meta.reportedCostUsd !== undefined ? { reportedCostUsd: t.meta.reportedCostUsd } : {}),

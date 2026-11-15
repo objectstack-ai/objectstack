@@ -20,7 +20,7 @@
  *     Code's `--mcp-config` file; the file is deleted when the call returns.
  *     The key is never on argv, never in the environment, never in stdin as a
  *     value — and so never in a run record, a scorecard or a gallery export.
- *   - The run's limits (`--author-timeout`, the turn caps, the models) travel
+ *   - The run's limits (`--author-timeout`, the turn caps, the models, the effort) travel
  *     in `limits`; the command may ignore them. The timeout is the runner's
  *     own: a call still running at `limits.timeoutMs` is killed (SIGTERM).
  *   - At start the runner makes one `info` call: the command names itself and
@@ -56,6 +56,13 @@ export interface ExternalLimits {
   maxTurns?: number;
   /** `--model`, or `--author-model` / `--ask-model`, when given. */
   model?: string;
+  /**
+   * `--effort`, or `--author-effort` / `--ask-effort`, when given: the level
+   * name exactly as typed (the runner does not check it against any tool's
+   * levels). A command that cannot set an effort should refuse the call, not
+   * run at its default, or the record names an effort no turn ran at.
+   */
+  effort?: string;
 }
 
 export interface ExternalInfoInput {
@@ -186,6 +193,9 @@ export interface ExternalDriverOptions {
   model?: string;
   authorModel?: string;
   askModel?: string;
+  effort?: string;
+  authorEffort?: string;
+  askEffort?: string;
   /** Relative command words resolve against this; default the runner's working directory. */
   base?: string;
 }
@@ -222,6 +232,14 @@ export class ExternalDriver implements AgentDriver {
     return this.opts.askModel ?? this.opts.model;
   }
 
+  private get authorEffort(): string | undefined {
+    return this.opts.authorEffort ?? this.opts.effort;
+  }
+
+  private get askEffort(): string | undefined {
+    return this.opts.askEffort ?? this.opts.effort;
+  }
+
   info(): DriverInfo {
     return {
       driver: `external:${this.name}`,
@@ -235,11 +253,13 @@ export class ExternalDriver implements AgentDriver {
       ...(this.opts.askMaxTurns !== undefined ? { askMaxTurns: this.opts.askMaxTurns } : {}),
       ...(this.authorModel ? { authorModel: this.authorModel } : {}),
       ...(this.askModel ? { askModel: this.askModel } : {}),
+      ...(this.authorEffort ? { authorEffort: this.authorEffort } : {}),
+      ...(this.askEffort ? { askEffort: this.askEffort } : {}),
     };
   }
 
-  private limits(timeoutMs: number, maxTurns: number | undefined, model: string | undefined): ExternalLimits {
-    return { timeoutMs, ...(maxTurns !== undefined ? { maxTurns } : {}), ...(model ? { model } : {}) };
+  private limits(timeoutMs: number, maxTurns: number | undefined, model: string | undefined, effort: string | undefined): ExternalLimits {
+    return { timeoutMs, ...(maxTurns !== undefined ? { maxTurns } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
   }
 
   /** One call: its input on stdin, its answer read into a turn — or a failed turn that says why. */
@@ -249,6 +269,7 @@ export class ExternalDriver implements AgentDriver {
       ...run.process,
       ...(input.limits.maxTurns !== undefined ? { maxTurns: input.limits.maxTurns } : {}),
       ...(input.limits.model ? { requestedModel: input.limits.model } : {}),
+      ...(input.limits.effort ? { requestedEffort: input.limits.effort } : {}),
     };
     if (run.process.exit !== 0 || run.process.timedOut) {
       return { replyText: '', toolCalls: [], meta: { process: proc, resultSubtype: noResult(run.process) } };
@@ -288,7 +309,7 @@ export class ExternalDriver implements AgentDriver {
       prompt: task.prompt,
       cwd: task.cwd,
       tier: task.tier,
-      limits: this.limits(this.authorTimeoutMs, this.opts.authorMaxTurns, this.authorModel),
+      limits: this.limits(this.authorTimeoutMs, this.opts.authorMaxTurns, this.authorModel, this.authorEffort),
     };
     const turn = await this.call(input, task.cwd);
     return { turn, files: snapshotSources(task.cwd) };
@@ -310,7 +331,7 @@ export class ExternalDriver implements AgentDriver {
         step: stepOf(task),
         prompt: task.prompt,
         mcp: { url: task.mcp.url, configFile },
-        limits: this.limits(this.opts.askTimeoutMs ?? 5 * 60_000, this.opts.askMaxTurns, this.askModel),
+        limits: this.limits(this.opts.askTimeoutMs ?? 5 * 60_000, this.opts.askMaxTurns, this.askModel, this.askEffort),
       };
       return await this.call(input, dir);
     } finally {
