@@ -3782,7 +3782,7 @@
       "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3811,7 +3811,7 @@
         {
           "clause": "the anonymous floor is the first statement on every listed v18 door and the form submit answers {id} only — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3886,6 +3886,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[1]'s error.code on each of steps[0]'s six doors with the admin's served control (new anonymous-floor-v18-doors); acceptance[2]'s admin leg of the retired /docs comparison (showcase-anonymous-deny-surfaces); acceptance[3]'s bogus-token refusal asserted not 401; acceptance[4]'s exact 201 and {id} body with the forged owner_id and status sent. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3894,7 +3900,7 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -3924,7 +3930,7 @@
         {
           "clause": "every environment-metadata and catalog write door refuses a non-operator under a walled posture — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time, never through a bare `--`: RUNNER environment facts hold the Tier 1 vitest pins under this container's memory limit only at --maxWorkers=1); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`: RUNNER environment facts hold the Tier 1 vitest pins under this container's memory limit only at --maxWorkers=1); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4010,6 +4016,12 @@
           "date": "2026-11-14",
           "change": "Three fixture-text findings re-pointed (card #33332; QA run #32953 R1 comment 6840054712 and #33087 comment 6850382730). knownGaps[0] said no example app declares the multi-org runtime; examples/app-showcase/package.json declares @objectstack/organizations (workspace:*), as RUNNER.md's walled-boot entry already says. personas[0] now names the organization_admin grant the owner holds automatically (auto-org-admin-grant.ts), so a runner does not read it as a stray grant. fixtures.requires[2] notes that a scratch package the operator creates must carry a reverse-domain id (manifest.zod.ts), since a bare id fails quietly downstream. knownGaps[1] (install-local scored from the pins) was already right and is unchanged. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4018,7 +4030,7 @@
       "title": "/meta read gates added on v18: the authoring-trail doors (history / audit / diff / package commits) refuse a setup.access-only caller, and a list view or dashboard carrying requiredPermissions is withheld from a caller without them on EVERY alternate door",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4042,7 +4054,7 @@
         {
           "clause": "trail doors demand authoring access and the view/dashboard audience gate holds on every alternate door — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4098,6 +4110,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin meta-view-audience-alternate-doors at the api oracle's layer: acceptance[2]'s list prune and the /published, /layers and ?state=draft refusals for a setup.access-only member, the /history leg for a studio.access member (audience refusal) beside the trail gate's FORBIDDEN, the admin control on every door, and negative[0]'s ETag replay over the real server. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4106,7 +4124,7 @@
       "title": "Security-catalog doors new on v18: POST /security/_activation/:type/:name switches a position or permission set off and on (holders lose and regain its grants), and POST /security/permission-sets/:name/clone copies a set with its refusal arms; both take ?package= for a permission set and refuse any other query",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4132,7 +4150,7 @@
         {
           "clause": "the activation door and the clone door with every refusal arm — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4211,6 +4229,12 @@
           "date": "2026-11-14",
           "change": "acceptance[4] (clause, verify) re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588): it named the 409's refusal `not-held-by-qualifier` as if on the wire. That is the resolver's internal reason (package-scoped-resolution.ts); the wire body carries RESOURCE_CONFLICT, the sentence naming the holder and details.candidates only (error-response.ts packageScopedCandidatesMember), which is what QA read. The arm's substance is unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4219,7 +4243,7 @@
       "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4243,7 +4267,7 @@
         {
           "clause": "one-holder refusal, owner binding, the overlay migration and the catalog-reference report — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4321,6 +4345,12 @@
           "date": "2026-11-15",
           "change": "acceptance[1].verify and fixtures.requires[1] re-pointed: a permission set is one name per namespace since ADR-0150 D2/D9, so a manifest with its own namespace redeclaring a showcase set is admitted for the set and the 422 names only the position (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 67). The fixture now asks for a manifest with no namespace or the holder's. The clause is unchanged. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4329,7 +4359,7 @@
       "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4357,7 +4387,7 @@
         {
           "clause": "the grant-table write contract — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4442,6 +4472,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned over the REST data door: acceptance[1]'s INVALID_FIELD and UNIQUE_VIOLATION and acceptance[3]'s granted_by read-back (new grant-table-write-contract); acceptance[2]'s authored message, the absent 'unevaluable' constraint and the valid-window 201 control (permission-set-assignment-window). acceptance[4] stays the walled leg. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4450,7 +4486,7 @@
       "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4478,7 +4514,7 @@
         {
           "clause": "organization-removal refusal, unreadable-header parity and the cbp attach/comment/explain gates — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4558,6 +4594,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 4 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned over the REST data door: acceptance[1] on a posture-only walled showcase boot (the organization-emptying PATCH refused 403 PERMISSION_DENIED, empty-org inserts stamped); acceptance[2] and negative[0] as the unreadable/nonexistent master comparison, field by field, on a plain master_detail detail, and the same parity on the controlled_by_parent line, where the master-edit gate's 403 answers first (new parent-and-organization-write-guards). No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4566,7 +4608,7 @@
       "title": "Seven deployment tables (sys_job, sys_job_run, sys_job_queue, sys_flow_dispatch, sys_migration, sys_migration_journal, sys_presence) carry no organization column on v18 and are readable only with manage_platform_settings — an org admin who is not platform admin is refused even on single",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4589,7 +4631,7 @@
         {
           "clause": "the seven tables are platform-level and gated by manage_platform_settings — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4641,6 +4683,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 4 (#26571; Tier 1 record #26468 scored the item PARTIAL: no pin drove either door over HTTP). Pinned over the REST data door: acceptance[1]'s org admin 403 PERMISSION_DENIED and platform admin 200 on all seven tables, and acceptance[2]'s 400 INVALID_FIELD on an organization_id filter (new deployment-tables-platform-only). automated.kind unit -> dogfood, since the ref now leads with the dogfood pin. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4649,7 +4697,7 @@
       "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages opens exactly where /resolve opens",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4672,7 +4720,7 @@
         {
           "clause": "combined share-link gates and resolve/messages parity — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4736,6 +4784,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 4 (#26571; Tier 1 record #26468 scored the item PARTIAL: the runtime pins drive the route entries with no HTTP). Pinned over HTTP on anonymous calls: acceptance[1] and negative[0]'s byte-identical 401 SIGN_IN_REQUIRED across the password variants, acceptance[2]'s byte-identical 404 INVALID_OR_EXPIRED across the non-entitled variants and the unknown token with the allowlisted 200 control, and acceptance[3]'s resolve/messages pairing (new share-link-combined-gates). automated.kind conformance -> dogfood, since the ref now leads with the dogfood pin. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4744,7 +4798,7 @@
       "title": "An organization administrator creates and removes its own members' position and permission-set assignments inside the organization boundary, in all three tenancy postures; an out-of-boundary set answers 403 naming the set and the condition",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4770,7 +4824,7 @@
         {
           "clause": "the three-posture matrix passes at the run subject sha (RUNNER rule 6: cite the pin's output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter @objectstack/plugin-security exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter @objectstack/plugin-security exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4818,6 +4872,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (negative[2]), re-read on main b4199c96: org-admin-assignment-boundary.posture.test.ts exercises only admin_full_access out of boundary in each posture; the rest of negative[2]'s set list is asserted only by the unit gate in delegated-admin-gate.test.ts. automated.ref says so. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4982,7 +5042,7 @@
       "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
       "since": "v18.4",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4992,19 +5052,17 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares the object qa_b_note and a permission set of the same name, qa_a_reader (read on qa_b_note, nothing else): one name, two holders in two namespaces. The install door admits the second holder, because two packages whose declared namespaces differ, neither of them a shareable platform namespace, do not meet (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet, ADR-0150 D2/D9); acceptance[5] scores both installs",
           "a boot on a file database, as platform-core.activation-ledger-row-contract boots, because two steps stop the server and write the ledger directly",
-          "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record owned by M (create it as admin with owner_id set to M). qa_a_ticket's declared sharingModel decides who reads a row; on a private object M reads only rows M owns, so a record the admin owns reads as 0 rows for M though the qa_a_reader grant holds"
-        ],
-        "knownGaps": [
-          "two packages each shipping qa_a_reader is not reachable through install today (#32027's own note), so the cases this change exists for (one name, two holders, each grant reaching only its own) are held by packages/plugins/plugin-security/src/permission-set-address.test.ts, not driven live"
+          "a member M (any signed-up person) granted com.qa.addr-a's qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\", \"permission_set_package\": \"com.qa.addr-a\"}: with two holders the grant names its package, which it then holds alone (packages/plugins/plugin-security/src/grant-permission-set-name.ts; access-security.permission-set-package-resolution), and the same POST without the package is refused (acceptance[5]); one qa_a_ticket record owned by M (create it as admin with owner_id set to M). qa_a_ticket's declared sharingModel decides who reads a row; on a private object M reads only rows M owns, so a record the admin owns reads as 0 rows for M though the qa_a_reader grant holds"
         ]
       },
       "steps": [
         "as M: GET /api/v1/auth/me/permissions and GET /api/v1/data/qa_a_ticket. As admin: POST /api/v1/security/explain {\"userId\": M, \"object\": \"qa_a_ticket\", \"operation\": \"read\"}, and read M's grant row (GET /api/v1/data/sys_user_permission_set) for its permission_set_package",
-        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. com.qa.addr-b holds no qa_a_reader, so the row's package_id is a stale column: it names no holder of the name. Restart and repeat step 1. Then stop, DELETE that row, restart and repeat step 1",
-        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}; read the row it wrote (GET /api/v1/data/sys_metadata_activation); repeat step 1",
-        "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": true} and repeat step 1 once more"
+        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-gone', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. No installed package has the id com.qa.addr-gone, so the row's package_id is a stale column: it names no holder of the name. Restart and repeat step 1. Then stop, DELETE that row, restart and repeat step 1",
+        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}, naming no package, and read the ledger (GET /api/v1/data/sys_metadata_activation). Then POST /api/v1/security/_activation/permission/qa_a_reader?package=com.qa.addr-a {\"enabled\": false}; read the row it wrote; repeat step 1",
+        "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader?package=com.qa.addr-a {\"enabled\": true} and read the ledger. Then stop, DELETE the package-less row, restart and repeat step 1 once more",
+        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader?package=com.qa.addr-b {\"enabled\": false}; read the ledger; repeat step 1. Then POST the same address with {\"enabled\": true}"
       ],
       "acceptance": [
         {
@@ -5014,38 +5072,51 @@
           "evidence": "the effective-permissions body, the data read and the grant row"
         },
         {
-          "clause": "a ledger row whose package_id names a package holding no set of the name is a stale column: it switches off the holder the name resolves to, never nothing; a real second holder's row switching nothing off for M's is the pin's case",
+          "clause": "a ledger row whose package_id names a package holding no set of the name is a stale column: it switches the name off, never nothing, and with two holders it switches off every holder of the name",
           "oracle": "api",
-          "verify": "after step 2's restart M no longer lists qa_a_reader, the data read no longer returns the record (record its status), and explain carries qa_a_reader 'held — deactivated': the ledger reads a stale package_id by the D3 rule with no caller and keeps disabling the holder that rule answers, here com.qa.addr-a, and a holder outside the stale package's namespace is switched off too, because a switch-off is never read as none (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698). After the row is deleted and the server restarted, step 1's answers are back. The case this clause first meant, a real second holder of the name whose row switches nothing off for M's, is not reachable through install (knownGaps): score it from packages/plugins/plugin-security/src/permission-set-address.test.ts, 'a holder of a grant the user does not hold switches nothing off for the one they do', which reports ≥1 test and 0 failed at the run subject sha (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027)",
-          "evidence": "the three answers after the restart and after the delete, and the pin file's vitest summary line with the subject sha"
+          "verify": "after step 2's restart M no longer lists qa_a_reader, the data read no longer returns the record (record its status), and explain carries qa_a_reader 'held — deactivated': the ledger reads a stale package_id by the D3 rule with no caller, and with two holders that rule picks none, so the row switches off every holder of the name, com.qa.addr-a's included, because a switch-off is never read as none (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698). After the row is deleted and the server restarted, step 1's answers are back. While such a row stands the door refuses to switch any holder back on (packages/runtime/src/domains/permission-set-package-doors.test.ts, 'a row naming a package that no longer serves the name keeps both holders off too')",
+          "evidence": "the three answers after the restart and after the delete"
         },
         {
-          "clause": "the holder's own row switches the set off, and explain names it deactivated",
+          "clause": "the holder's own row switches the set off, and explain names it deactivated; the door switches a holder only by its package, because the bare name has two",
           "oracle": "api",
-          "verify": "the door's row carries package_id com.qa.addr-a and active false; M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
-          "evidence": "the ledger row and the three answers"
+          "verify": "the bare POST answers 409 RESOURCE_CONFLICT, its error.details.candidates naming com.qa.addr-a and com.qa.addr-b, and the ledger holds no qa_a_reader row after it (packages/runtime/src/domains/catalog-activation.ts, the ?package= qualifier). The ?package=com.qa.addr-a POST answers 200, and its row carries package_id com.qa.addr-a and active false. M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
+          "evidence": "the 409 body, the two ledger reads and the three answers"
         },
         {
-          "clause": "a package-less row switches every holder of the name off, and re-enabling restores the grant",
+          "clause": "a package-less row switches every holder of the name off, and no holder's own switch outvotes it: switching com.qa.addr-a back on is refused until that row is deleted",
           "oracle": "api",
-          "verify": "with package_id NULL, step 1's answers are those of the previous clause (packages/core/src/security/resolve-authz-context.ts#readDisabledCatalogNames); after {\"enabled\": true} M lists qa_a_reader again and reads the record",
-          "evidence": "both sets of answers"
+          "verify": "with package_id NULL, step 1's answers are those of the previous clause (packages/core/src/security/resolve-authz-context.ts#readDisabledCatalogNames: a row naming no package, on a name two packages hold, switches every holder off). The ?package=com.qa.addr-a {\"enabled\": true} POST answers 409 RESOURCE_CONFLICT naming the row that names no package, and the ledger read after it is unchanged: nothing was written. After that row is deleted and the server restarted, M lists qa_a_reader again and reads the record",
+          "evidence": "both sets of answers, the 409 body and the ledger reads"
         },
         {
           "clause": "an OAuth client acting for a user carries no address; an AI service account carries its own",
           "oracle": "test",
           "verify": "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext sets permissionSetAddresses to undefined on the OAuth agent arm: its permissions are the scope-derived ceiling names, which resolve by D3 with no caller, as #32027's comment on the line states. The AI service account (ADR-0151) is the account arm, not that one, and carries authz.permissionSetAddresses. ⚠️ No pin tells the arms apart: assemble-execution-context.test.ts's 'decided but not yet filled' case asserts the agent context has no key, but its authz fixture carries no addresses either. Score this clause from the source reading and say so in the run record (FOLLOW-UPS §16b)",
           "evidence": "the source lines read, and the run record's note"
+        },
+        {
+          "clause": "a second package of another namespace holds the same name: both install, a grant naming no package is refused naming both holders, and the grant naming com.qa.addr-a holds that package's set alone",
+          "oracle": "api",
+          "verify": "qa_b's install succeeds beside qa_a's (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet). As admin, POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"} answers 409 RESOURCE_CONFLICT, its error.details.candidates naming com.qa.addr-a and com.qa.addr-b, and writes no row (packages/plugins/plugin-security/src/grant-permission-set-name.ts; packages/rest/src/data-package-scoped-refusal-candidates.test.ts). The fixture's grant naming com.qa.addr-a lands, and in step 1 M reads the qa_a_ticket record while GET /api/v1/data/qa_b_note returns M no row (record its status)",
+          "evidence": "the two install answers, the refused and the landed grant, and M's two reads"
+        },
+        {
+          "clause": "a real second holder's row switches only that holder off: M's set keeps granting",
+          "oracle": "api",
+          "verify": "after step 5's switch-off the ledger row carries package_id com.qa.addr-b and active false, and M still lists qa_a_reader, still reads the record, and explain carries no deactivated contributor for qa_a_reader: the ledger is judged per holder (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027). The same case is pinned in packages/plugins/plugin-security/src/permission-set-address.test.ts, 'a holder of a grant the user does not hold switches nothing off for the one they do'",
+          "evidence": "the ledger row and the three answers"
         }
       ],
       "negative": [
-        "the stale row of step 2 leaving M's set granting is a FAIL: a row naming a package that holds no set of the name is read by the D3 rule, never as no switch-off. A real second holder's row switching M's set off is a FAIL too (the pin's case): the ledger is judged per holder",
-        "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr-a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
+        "the stale row of step 2 leaving M's set granting is a FAIL: a row naming a package that holds no set of the name is read by the D3 rule, never as no switch-off. A real second holder's row switching M's set off (step 5) is a FAIL too: the ledger is judged per holder",
+        "⛔ leaving step 2's stale row in place before step 3 keeps every holder off whatever the door then writes: with two holders the door never re-addresses such a row, each holder writing its own (packages/runtime/src/domains/catalog-activation.ts#PERMISSION_LEDGER_ADDRESSING), so step 3's answers would be the stale row's. That is a fixture error, never a verdict on this item",
+        "a grant or an activation switch naming qa_a_reader without a package answering 200 is a FAIL: with two holders the bare name picks none (ADR-0150 D3), so the write would land on a holder nobody named"
       ],
       "traps": ["cache-staleness", "wrong-persona"],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-security/src/permission-set-address.test.ts and packages/core/src/security/request-execution-context.test.ts; no live spec drives the ledger per holder"
+        "ref": "packages/plugins/plugin-security/src/permission-set-address.test.ts and packages/core/src/security/request-execution-context.test.ts; for the two-holder doors packages/runtime/src/domains/permission-set-package-doors.test.ts (the activation door), packages/plugins/plugin-security/src/grant-permission-set-package.test.ts (the grant door) and packages/objectql/src/protocol-permission-set-name-registry-reading.test.ts (the install door admitting a second namespace's holder); no live spec drives the ledger per holder"
       },
       "source": [
         "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext (permissionSetAddresses: agent ? undefined : authz.permissionSetAddresses)",
@@ -5054,7 +5125,9 @@
         "packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor (the evaluator reads each set at its address)",
         "packages/plugins/plugin-security/src/explain-engine.ts (dropped grants per holder)",
         "packages/spec/src/kernel/execution-context.zod.ts#PermissionSetAddressSchema (declared by #31978)",
-        "#32027 (part of #31971), #31698 (permission-set family narrowing, open)"
+        "#32027 (part of #31971), #31698 (the permission-set family's narrowing to the namespace)",
+        "packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet (two packages of two namespaces may each hold one set name)",
+        "packages/runtime/src/domains/catalog-activation.ts#PERMISSION_LEDGER_ADDRESSING (the activation door's ?package= qualifier and one ledger row per holder)"
       ],
       "history": [
         {
@@ -5080,6 +5153,12 @@
           "date": "2026-11-15",
           "change": "fixtures.requires[2] says the qa_a_ticket record is owned by M: on a private scratch object a row the admin owns reads 0 rows for M, which hides the grant the item reads (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 24). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "knownGaps[0] closed: since the permission-set narrowing (#31698, ADR-0150 D2/D9) two packages of two namespaces each install a set of one name (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet), so the two-holder case is driven live. qa_b now ships its own qa_a_reader, and the fixture's grant names its package. steps[1]'s stale column names a package id nothing installs; steps[2] meets the bare door's 409 first and switches com.qa.addr-a's own row by ?package=; steps[3]'s re-enable is refused 409 while the package-less row stands, and the row is deleted instead (acceptance[3] rewritten). New steps[4] with acceptance[6] drives a real second holder's row, until now scored from the pin only; new acceptance[5] scores both installs and the refused bare grant. negative[1] rewritten: the permission ledger is addressed by (package, name). Read at main 159757ab, and measured there: the four pins (permission-set-address 24 tests, grant-permission-set-package 25, permission-set-package-doors 40, protocol-permission-set-name-registry-reading 18, 0 failed) and a throwaway resolver probe (on a name two packages hold, a stale row naming an unknown package, or an installed package holding no set, switches the granted holder off; a real second holder's row does not). Seat scope addition 6897734692 on card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -5330,6 +5409,193 @@
           "date": "2026-11-14",
           "change": "fixtures.knownGaps[0] re-pointed (card #33332; QA run #33081 comment 6850173588): the gap worried that installing qa_decl might itself be refused, leaving the assignment leg no position. The run built and installed it without a refusal, and source agrees: no lint or build rule judges a position's permissionSets against the MCP agent ceiling (mcp_agent_data_read is only named in packages/spec/src/ai/mcp.zod.ts and judged at grant time). The gap now states the measured admit and keeps the blocked(fixture) fallback for a future refusal. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        }
+      ]
+    },
+    {
+      "id": "access-security.cbp-master-read-opt-in",
+      "title": "A controlled_by_parent detail that declares sharing.controlledByParent.writeRequiresMasterRead lets whoever reads its master insert, update and delete it under the detail's own grants; without read on the master an insert is refused 403 and a stored row is hidden 404; a detail without the key still asks edit on the master; and the save door refuses the key off a detail or beside ownerMayEdit",
+      "since": "v18.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin, admin@objectos.ai): authors the fixture and makes every admin call",
+        "reader: a member holding a set with read and View All on the master and full CRUD on both details; reads the master row and cannot edit it",
+        "blind: a member holding full CRUD on both details and no grant on the master object",
+        "hidden: a member holding read without View All on the master, whose private OWD hides the admin's master row, and full CRUD on both details",
+        "looker: a member who reads the master (read and View All) and holds READ alone on the opted-in detail"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch copy of the showcase (never the shared example), compiled into its own dist and booted from it, adding: a master object with a private OWD (e.g. showcase_qa_contract) and one admin-owned row C1; an opted-in detail (sharingModel 'controlled_by_parent', one required master_detail field to the master, sharing: { controlledByParent: { writeRequiresMasterRead: true } }, e.g. showcase_qa_milestone) with one admin-owned row under C1; and a CONTROL detail identical but without the key (e.g. showcase_qa_step) with one admin-owned row under C1. The recipe QA run #33785 drove at a557fa38 (record comment 6893194178)",
+          "one permission set and one member per persona above: create each member as admin with POST /api/v1/auth/admin/create-user and change its password (the session lands held until then), then grant its set with POST /api/v1/data/sys_user_permission_set",
+          "for acceptance[5]: a package the metadata save door can address, the scratch app's own or one authored with POST /api/v1/packages"
+        ]
+      },
+      "steps": [
+        "as reader: GET the master row C1, then PATCH it",
+        "as reader on the opted-in detail: POST /api/v1/data/DETAIL naming C1, then POST /api/v1/data/DETAIL/createMany with two rows under C1; PATCH and DELETE the admin-owned row by id. Read the detail back as admin",
+        "as blind, then as hidden, on the opted-in detail: POST a row naming C1, and PATCH and DELETE the admin-owned row by id. Read that row back as admin",
+        "as looker on the opted-in detail: POST, PATCH and DELETE as in step 2",
+        "as reader on the CONTROL detail: POST a row naming C1, and PATCH and DELETE its admin-owned row by id",
+        "as reader: POST /api/v1/security/explain for an update of the opted-in admin-owned row and for an update of the CONTROL row",
+        "as admin through the save door (PUT /api/v1/meta/object/NAME?package=PKG): an object declaring the key under sharingModel 'private'; a controlled_by_parent detail declaring the key beside ownerMayEdit: true; and a controlled_by_parent detail declaring the key alone"
+      ],
+      "acceptance": [
+        {
+          "clause": "the opt-in's admit side, its refusals by door, explain's answer and the parse refusals — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`; `--reporter=tree` prints the one line per file this clause is scored on, RUNNER.md's environment facts); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a master reader writes the opted-in detail with no edit on the master: an insert, a batch insert, and an update and a delete of a row the reader neither owns nor created all land",
+          "oracle": "api",
+          "verify": "step 1's PATCH of C1 answers 403 PERMISSION_DENIED, while the single POST answers 201, /createMany 201 with two rows, and the by-id PATCH and DELETE 200; the admin's read-back holds exactly those rows. On an opted-in hop the gate asks READ on the master in place of the three edit legs (packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts#assertControlledByParentChainEditable)",
+          "evidence": "each status line and the admin read-back"
+        },
+        {
+          "clause": "without read on the master every write of the opted-in detail is refused, and the door decides the status: an insert meets the master gate (403, asking READ), a by-id update or delete meets the read door (404), and the stored row is unchanged",
+          "oracle": "api",
+          "verify": "blind's and hidden's inserts each answer 403 PERMISSION_DENIED whose message asks for read access to the master, never edit access; their by-id PATCH and DELETE each answer 404 RECORD_NOT_FOUND, because a detail's rows are read through its master (ADR-0055 §2), so the row is hidden before the gate runs; the admin read-back shows the row as seeded",
+          "evidence": "the six refusal bodies and the read-back"
+        },
+        {
+          "clause": "the detail's own grants still decide: a master reader holding READ alone on the detail is refused insert, update and delete",
+          "oracle": "api",
+          "verify": "looker's three writes each answer 403 PERMISSION_DENIED with the object-permission refusal, not the master gate's sentence",
+          "evidence": "the three bodies"
+        },
+        {
+          "clause": "a detail without the key asks edit on the master as before, and explain answers what the write path does",
+          "oracle": "api",
+          "verify": "reader's three writes on the CONTROL detail each answer 403 PERMISSION_DENIED whose message asks for edit access to the master. Explain reports the opted-in row writable (its PATCH answered 200) and the CONTROL row excluded by sharing on the object_permission leg (its PATCH answered 403) (packages/plugins/plugin-security/src/explain-engine.ts; packages/spec/src/contracts/security-service.ts#ControlledByParentWriteDenialLeg)",
+          "evidence": "the CONTROL bodies and both explain answers beside their PATCH status"
+        },
+        {
+          "clause": "the save door refuses the key where nothing reads it: off a controlled_by_parent detail, and beside ownerMayEdit",
+          "oracle": "api",
+          "verify": "the 'private' object answers 422 INVALID_METADATA at path sharing.controlledByParent.writeRequiresMasterRead; the detail with both keys answers 422 at path sharing.controlledByParent.ownerMayEdit, naming that key to delete; the detail with the key alone saves 200 (packages/spec/src/data/object.zod.ts#refuseControlledByParentWriteRequiresMasterReadMisplaced)",
+          "evidence": "the three save answers"
+        }
+      ],
+      "negative": [
+        "a 403 for reader on an opted-in write (the edit question asked anyway) is a FAIL, and so is any write landing for blind, hidden or looker",
+        "an insert naming the unreadable C1 and one naming a master id that exists nowhere answering different bodies is an existence-oracle FAIL: both are the one 403 (access-security.parent-and-organization-write-guards negative[0])"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/controlled-by-parent-owner-may-edit.test.ts + packages/plugins/plugin-security/src/explain-controlled-by-parent-write.test.ts + packages/spec/src/data/controlled-by-parent-owner-may-edit.test.ts + packages/lint/src/validate-security-posture-owner-may-edit.test.ts. The plugin-security files are engine pins (a real ObjectQL over SqlDriver with the security wiring; their '[#33250]' describes carry this opt-in); the spec and lint files are schema and rule units"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/security-plugin-cbp-relation.ts#resolveCbpRelation (reads the key onto the detail's resolved relation)",
+        "packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts#assertControlledByParentChainEditable (the one hop where the master question becomes READ)",
+        "packages/spec/src/data/object.zod.ts#refuseControlledByParentWriteRequiresMasterReadMisplaced",
+        "packages/spec/src/contracts/security-service.ts#ControlledByParentWriteDenialLeg",
+        "#33250 (fix PR #33369; ADR-0055 §3 as amended), driven live by QA run #33785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-15",
+          "change": "initial — new coverage for the #33250 opt-in (ledger 6896511848 of #33761, rows 11 and 16): no item drove writeRequiresMasterRead, and security-plugin-cbp-relation.ts had no exact citer, so `checklist-select file:` fell back to its directory. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893194178); sources re-read at main 159757ab. Card #33969",
+          "ref": "#34068"
+        }
+      ]
+    },
+    {
+      "id": "access-security.position-renamed-holder-carry",
+      "title": "A position renamed with renamedFrom carries its holders to the new name on a hot install or upgrade and on the per-item publish door, with no restart: the holders keep their access, a holder of an untouched position stays as it was, a repeat is idempotent, and a package never claims another package's position holders",
+      "since": "v18.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin, admin@objectos.ai): authors the fixture and makes every admin call",
+        "pu1: a member holding the position the upgrade renames",
+        "pu2: a member holding the CONTROL position, which no release renames",
+        "pu3: a member holding the authored package's position for the publish-door leg"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch package sent to the install-local door, POST /api/v1/marketplace/install-local with admin credentials (the body `os package install` sends). POST /api/v1/packages cannot carry it: ManifestSchema declares no positions key, so that door refuses the manifest 400 naming its keys. v1 ships one object, two permission sets (one granting read and create on the object, one granting read) and two positions, P_old (the first set) and P_ctl (the second, the CONTROL); v2 ships P_new { renamedFrom: ['P_old'] } with the first set, and the same P_ctl. The recipe QA run #33785 drove at a557fa38 (com.qa.posren, record comment 6893194178)",
+          "pu1 holding P_old and pu2 holding P_ctl, each given its position as admin with POST /api/v1/data/sys_user_position after v1 installs",
+          "for steps[3]: an authored package (POST /api/v1/packages) and pu3; for steps[4]: a third scratch package whose position declares renamedFrom naming P_ctl, a name another package holds"
+        ],
+        "knownGaps": [
+          "a rename saved through the metadata save door's default ACTIVE mode does not carry its holders until a restart (#33788, open): only a draft and its publish announce the reload. steps[3] drives the draft and publish door; an active-save reading belongs to that card, never to a verdict here"
+        ]
+      },
+      "steps": [
+        "install v1 through install-local. As pu1 GET and POST the object; as pu2 POST it",
+        "install v2 through install-local in the same server process. Read pu1's and pu2's sys_user_position rows (GET /api/v1/data/sys_user_position), GET /api/v1/auth/me/permissions as pu1, then as pu1 GET and POST the object again; GET /api/v1/meta/position",
+        "send v2 to install-local again; read both holder rows' updated_at",
+        "in the authored package: save a position P_a (PUT /api/v1/meta/position/P_a?package=PKG) and give pu3 that position; DELETE P_a; save P_b { renamedFrom: ['P_a'] } as a draft and publish it (POST /api/v1/meta/position/P_b/publish). Read pu3's row and drive pu3's write the position grants",
+        "install the third package through install-local; read pu2's row and the served log"
+      ],
+      "acceptance": [
+        {
+          "clause": "the carry at boot, on a hot install and on the publish door, and its refusals — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`; `--reporter=tree` prints the one line per file this clause is scored on, RUNNER.md's environment facts); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a hot upgrade that renames a position carries its holders, with no restart",
+          "oracle": "api",
+          "verify": "v2 answers success with hotLoaded true; pu1's row now names P_new, its updated_at moved; me/permissions lists P_new and still the first set; pu1's GET answers 200 and POST 201 in the same process; GET /api/v1/meta/position serves P_new and P_ctl and no P_old (packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHolders)",
+          "evidence": "the install answer, both holder rows, the permissions body and pu1's two writes"
+        },
+        {
+          "clause": "a holder of an untouched position stays as it was, and a repeat changes nothing",
+          "oracle": "api",
+          "verify": "pu2's row still names P_ctl with its updated_at unchanged, and pu2's POST still answers 403; the repeated install answers success and neither row's updated_at moves",
+          "evidence": "the rows' updated_at before and after, and pu2's answer"
+        },
+        {
+          "clause": "the per-item publish door carries the holders too",
+          "oracle": "api",
+          "verify": "after the publish pu3's row names P_b and pu3's write lands",
+          "evidence": "pu3's row and the write's answer"
+        },
+        {
+          "clause": "a package never claims another package's position holders",
+          "oracle": "log",
+          "verify": "the third package installs; the served log carries one warning that the rename of P_ctl was not carried, naming it held by another package (the 'held-by-other' refusal of position-renamed-holder-carry.ts); pu2's row is unchanged",
+          "evidence": "the log line and pu2's row"
+        }
+      ],
+      "negative": [
+        "pu1 losing access across the upgrade, or keeping only P_old until a restart, on the install-local or the publish door is a FAIL; the active-save door is knownGaps[0]",
+        "the third package moving pu2 to its own position is a FAIL"
+      ],
+      "traps": [
+        "cache-staleness",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/position-renamed-holder-carry.test.ts + packages/cloud-connection/src/marketplace-install-local-hot-resync.test.ts + packages/runtime/src/domains/packages-reload-announce.test.ts. The plugin-security file boots a real ObjectKernel over SqlDriver with SecurityPlugin; the cloud-connection file drives the real install-local route handler over a real kernel; the runtime file drives HttpDispatcher over a real kernel"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHolders (the hot carry, its report and its refusals)",
+        "packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHoldersAtBoot",
+        "#33238 (fix PR #33245, completed by #33448, #33473 and #33304), driven live by QA run #33785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-15",
+          "change": "initial — new coverage for the #33238 renamedFrom holder carry (ledger 6896511848 of #33761, row 12): no item covered it, at boot or hot. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893194178); its active-save finding is #33788 (knownGaps[0]). Sources re-read at main 159757ab. Card #33969",
+          "ref": "#34068"
         }
       ]
     }
