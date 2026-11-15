@@ -265,7 +265,11 @@ export function sessionLockDatabase(dialect: 'postgres' | 'mysql' = 'postgres') 
   };
 }
 
-/** `store`, made a datasource the database session lock can be taken on: `db`'s `face` on it. */
-export function lockableStore<T extends object>(store: T, db: ReturnType<typeof sessionLockDatabase>): T {
+/**
+ * `store`, made a datasource the database session lock can be taken on: `db`'s
+ * `face` on it. A face naming another dialect (`'sqlite'`) makes a datasource
+ * that offers no session lock.
+ */
+export function lockableStore<T extends object>(store: T, db: { face: { dialectName: string; getKnex(): unknown } }): T {
   return Object.assign(store, db.face);
 }
