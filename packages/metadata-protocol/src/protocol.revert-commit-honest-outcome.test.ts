@@ -17,6 +17,10 @@
  * `{ success: true, reverted: [{ …, action: 'restored' | 'removed' }],
  * failed: [] }`, and the only trace was a `warn` line on stderr.
  *
+ * §3 [#33851] …and so does a restored non-object item (`view`, `permission`,
+ * `object_extension`) whose registry write-through throws, while save and
+ * publish under the same fault keep their answers.
+ *
  * The harness is an in-memory stub engine under the real
  * `SysMetadataRepository` (the pattern of
  * `protocol.recovery-doors-mutation-projector.test.ts`), with a commit store
@@ -445,5 +449,300 @@ describe('[#33564] reverting a revert commit restores what the revert replaced',
         expect(res.failed[0].error).toContain('records no version to restore it to, so nothing was written');
         expect(res.failed[0].error).toContain('/api/v1/meta/object/ticket/rollback');
         expect(storedLabel(rows)).toBe('Renamed');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §3 [#33851] A non-object type's write-through fault is a failed item too
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The write-through's non-object branches (the overlay hydration every type
+// but `object` and `object_extension` takes, and the `object_extension`
+// registration) caught their own faults and only logged them, so a revert of
+// a `view`, a `permission` or an `object_extension` whose registration threw
+// answered `success: true`. Measured on this harness before the fix: each
+// fault case below answered `{ success: true, reverted: [{ …, action:
+// 'restored' }], failed: [] }`. The revert now asks those branches for the
+// fault and reports it as §1 reports an object's refusal. Save and publish do
+// not ask: under the same fault they answer what they answered before, and
+// the fault stays a `warn` line (the controls below, green before the fix too).
+//
+// The kernel is one whose registry takes this kernel's stored rows
+// (`storeHydratedIntoRegistry`), so the overlay branch reaches the registry at
+// all; on the plain `env_prod` kernel of §1 it returns before it.
+
+const REFUSAL = (type: string) =>
+    Object.assign(new Error(`The registry is sealed for ${type} entries.`), { code: 'NOT_OVERRIDABLE', status: 403 });
+
+interface NonObjectCase {
+    readonly type: string;
+    readonly name: string;
+    readonly body: (label: string) => Record<string, unknown>;
+    /** The label a stored body carries. */
+    readonly labelOf: (body: any) => unknown;
+    /** The registry verb this type's write-through branch registers through. */
+    readonly verb: 'registerItem' | 'registerObjectExtension';
+}
+
+const NON_OBJECT_CASES: readonly NonObjectCase[] = [
+    {
+        // The overlay hydration branch.
+        type: 'view',
+        name: 'ticket.grid',
+        body: (label) => ({
+            name: 'ticket.grid', label, object: 'ticket', viewKind: 'list',
+            config: { type: 'grid', data: { provider: 'object', object: 'ticket' }, columns: ['title'] },
+        }),
+        labelOf: (body) => body.label,
+        verb: 'registerItem',
+    },
+    {
+        // The overlay hydration branch, a type with no container.
+        type: 'permission',
+        name: 'ticket_reader',
+        body: (label) => ({ name: 'ticket_reader', label, objects: {} }),
+        labelOf: (body) => body.label,
+        verb: 'registerItem',
+    },
+    {
+        // The `object_extension` branch.
+        type: 'object_extension',
+        name: 'ticket',
+        body: (label) => ({ extend: 'ticket', fields: { tier: { type: 'text', label } } }),
+        labelOf: (body) => body.fields?.tier?.label,
+        verb: 'registerObjectExtension',
+    },
+];
+
+/** The stored active row's label for the case's item. */
+const storedLabelOf = (rows: Map<string, Row>, c: NonObjectCase): unknown => {
+    for (const r of rows.values()) {
+        if (r.type === c.type && r.name === c.name && r.state === 'active') return c.labelOf(JSON.parse(r.metadata));
+    }
+    return undefined;
+};
+
+/**
+ * A kernel whose registry takes its stored rows, so the non-object
+ * write-through registers, with the object the view and the extension read
+ * already saved. `registered` records each registration of the case's verb.
+ */
+async function makeHydratingProtocol(c: NonObjectCase) {
+    const rig = makeProtocol();
+    rig.protocol.storeHydratedIntoRegistry = true;
+    await rig.protocol.saveMetaItem({ type: 'object', name: 'ticket', item: objectBody('Ticket'), packageId: PKG });
+    // The stub registry keeps no objects: served here, for the extension's `extend`.
+    rig.engine.registry.getObject = (name: string) => (name === 'ticket' ? objectBody('Ticket') : undefined);
+    const registered: unknown[] = [];
+    rig.engine.registry[c.verb] = (...args: unknown[]) => { registered.push(args); };
+    /** Make the case's verb throw from now on. */
+    const refuse = () => { rig.engine.registry[c.verb] = () => { throw REFUSAL(c.type); }; };
+    return { ...rig, registered, refuse };
+}
+
+async function nonObjectEditedTwice(c: NonObjectCase) {
+    const rig = await makeHydratingProtocol(c);
+    await rig.protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+    await rig.protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('Renamed'), packageId: PKG });
+    recordApply(rig.commits, 'c1', [{ type: c.type, name: c.name, existedBefore: true, prevVersion: 1 }]);
+    return rig;
+}
+
+/** The `warn` line the write-through's non-object branch logs for a fault. */
+const writeThroughWarnLine = (c: NonObjectCase) =>
+    `[Protocol] registry write-through failed for ${c.type}/${c.name}: The registry is sealed for ${c.type} entries.`;
+
+describe('[#33851] revertCommit reports a non-object write-through fault in failed[]', () => {
+    for (const c of NON_OBJECT_CASES) {
+        describe(c.type, () => {
+            it('control: a clean restore reverts it, registers the restored body and answers success', async () => {
+                const { protocol, rows, registered } = await nonObjectEditedTwice(c);
+                registered.length = 0;
+
+                const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+                expect(res).toMatchObject({ success: true, revertedCount: 1, failedCount: 0, failed: [] });
+                expect(res.reverted).toEqual([{ type: c.type, name: c.name, action: 'restored' }]);
+                expect(storedLabelOf(rows, c)).toBe('First');
+                // Non-vacuity: the restore reached the branch's registry verb.
+                expect(registered.length).toBeGreaterThan(0);
+            });
+
+            it('a write-through that throws: failed[], row state and code named, success false', async () => {
+                const { protocol, rows, commits, refuse } = await nonObjectEditedTwice(c);
+                vi.spyOn(console, 'warn').mockImplementation(() => {});
+                refuse();
+
+                const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+                expect(res.success).toBe(false);
+                expect(res.reverted).toEqual([]);
+                expect(res.failedCount).toBe(1);
+                expect(res.failed[0]).toMatchObject({ type: c.type, name: c.name, code: 'NOT_OVERRIDABLE' });
+                expect(res.failed[0].error).toContain('its row was restored to the body of version 1');
+                expect(res.failed[0].error).toContain(`The registry is sealed for ${c.type} entries.`);
+                // The row change happened, and the revert's own commit records it.
+                expect(storedLabelOf(rows, c)).toBe('First');
+                const [revert] = revertsOf(commits, 'c1');
+                expect(JSON.parse(revert.items).map((i: any) => [i.type, i.name])).toEqual([[c.type, c.name]]);
+            });
+
+            it('control: a save under the same fault answers as before, the fault only logged', async () => {
+                const { protocol, rows, refuse } = await makeHydratingProtocol(c);
+                const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+                refuse();
+
+                const res = await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+
+                expect(res.success).toBe(true);
+                expect(res.advisories ?? []).toEqual([]);
+                expect(storedLabelOf(rows, c)).toBe('First');
+                expect(warn.mock.calls.map((a) => String(a[0]))).toContain(writeThroughWarnLine(c));
+            });
+
+            it('control: a publish of a draft under the same fault answers as before, the fault only logged', async () => {
+                const { protocol, rows, refuse } = await makeHydratingProtocol(c);
+                await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG, mode: 'draft' });
+                const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+                refuse();
+
+                const res = await protocol.publishMetaItem({ type: c.type, name: c.name, packageId: PKG });
+
+                expect(res.success).toBe(true);
+                expect(res.advisories ?? []).toEqual([]);
+                expect(storedLabelOf(rows, c)).toBe('First');
+                expect(warn.mock.calls.map((a) => String(a[0]))).toContain(writeThroughWarnLine(c));
+            });
+        });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §4 [#33851] A removed item whose registry heal stops is a failed item too
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The soft-remove limb heals the registry after it removes the row
+// (`restoreArtifactRegistryView`). A throw that stopped the heal was logged at
+// `error` and not read, so the revert answered `{ success: true, action:
+// 'removed' }` while the registry could still serve the removed row (measured
+// on this harness before the fix). The heal now answers its stop, and the
+// revert reports the item as §1 and §3 report theirs. The heal's `error` line
+// is unchanged, and every other caller ignores the answer: the delete, save
+// and publish controls answer what they answered before.
+//
+// So does a row still stored under another package that the heal registers
+// again and the registry refuses.
+
+/** The non-object cases whose heal walks the overlay tiers (an extension resyncs instead). */
+const HEAL_CASES = NON_OBJECT_CASES.filter((c) => c.verb === 'registerItem');
+
+/** Saved once, by the commit under revert: the revert soft-removes it. */
+async function nonObjectCreatedByTheCommit(c: NonObjectCase) {
+    const rig = await makeHydratingProtocol(c);
+    await rig.protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+    recordApply(rig.commits, 'c1', [{ type: c.type, name: c.name, existedBefore: false, prevVersion: null }]);
+    return rig;
+}
+
+/** The registry's tier-1 verbs throwing, which stops the heal's walk at its outer catch. */
+function healStops(engine: any, type: string) {
+    engine.registry.removePackageOverlaySlots = () => { throw REFUSAL(type); };
+    engine.registry.removeRuntimeShadow = () => { throw REFUSAL(type); };
+}
+
+const healStoppedLine = (c: NonObjectCase) =>
+    `[Protocol] the registry heal after the removal of ${c.type} '${c.name}' stopped: The registry is sealed for ${c.type} entries.`;
+
+describe('[#33851] revertCommit reports a removed item whose registry heal stops in failed[]', () => {
+    for (const c of HEAL_CASES) {
+        describe(c.type, () => {
+            it('control: a clean soft-remove reverts it and answers success', async () => {
+                const { protocol, rows } = await nonObjectCreatedByTheCommit(c);
+
+                const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+                expect(res).toMatchObject({ success: true, revertedCount: 1, failedCount: 0, failed: [] });
+                expect(res.reverted).toEqual([{ type: c.type, name: c.name, action: 'removed' }]);
+                expect(storedLabelOf(rows, c)).toBeUndefined();
+            });
+
+            it('a heal that stops: failed[], the removed row and the code named, success false, the error line kept', async () => {
+                const { protocol, rows, commits, engine } = await nonObjectCreatedByTheCommit(c);
+                const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+                healStops(engine, c.type);
+
+                const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+                expect(res.success).toBe(false);
+                expect(res.reverted).toEqual([]);
+                expect(res.failedCount).toBe(1);
+                expect(res.failed[0]).toMatchObject({ type: c.type, name: c.name, code: 'NOT_OVERRIDABLE' });
+                expect(res.failed[0].error).toContain('its row was removed from sys_metadata');
+                expect(res.failed[0].error).toContain('may still serve the removed row');
+                expect(res.failed[0].error).toContain(`The registry is sealed for ${c.type} entries.`);
+                expect(error.mock.calls.some((a) => String(a[0]).startsWith(healStoppedLine(c)))).toBe(true);
+                // The row is gone, and the revert's own commit records it.
+                expect(storedLabelOf(rows, c)).toBeUndefined();
+                expect(JSON.parse(revertsOf(commits, 'c1')[0].items)).toHaveLength(1);
+            });
+
+            it('control: a delete under the same fault answers as before, the stop only logged', async () => {
+                const { protocol, rows, engine } = await makeHydratingProtocol(c);
+                await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+                const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+                healStops(engine, c.type);
+
+                const res = await protocol.deleteMetaItem({ type: c.type, name: c.name, packageId: PKG });
+
+                expect(res.success).toBe(true);
+                expect(storedLabelOf(rows, c)).toBeUndefined();
+                expect(error.mock.calls.some((a) => String(a[0]).startsWith(healStoppedLine(c)))).toBe(true);
+            });
+
+            it('control: a save and a publish under the same fault answer as before', async () => {
+                const { protocol, rows, engine } = await makeHydratingProtocol(c);
+                vi.spyOn(console, 'error').mockImplementation(() => {});
+                healStops(engine, c.type);
+
+                const saved = await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+                await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('Draft'), packageId: PKG, mode: 'draft' });
+                const published = await protocol.publishMetaItem({ type: c.type, name: c.name, packageId: PKG });
+
+                expect(saved.success).toBe(true);
+                expect(saved.advisories ?? []).toEqual([]);
+                expect(published.success).toBe(true);
+                expect(published.advisories ?? []).toEqual([]);
+                expect(storedLabelOf(rows, c)).toBe('Draft');
+            });
+        });
+    }
+
+    it('a row still stored under another package that the registry refuses: failed[], success false', async () => {
+        // An `action`: a type two packages may each hold a row of under one name.
+        const c: NonObjectCase = {
+            type: 'action', name: 'close_ticket', verb: 'registerItem', labelOf: (body) => body.label,
+            body: (label) => ({ name: 'close_ticket', label, type: 'url', target: 'https://example.com/close' }),
+        };
+        const OTHER = 'app.other';
+        const { protocol, rows, commits, engine } = await makeHydratingProtocol(c);
+        engine.registry.getPackage = (id: string) => (id === PKG || id === OTHER ? { manifest: { id } } : undefined);
+        await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('Other'), packageId: OTHER });
+        await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+        recordApply(commits, 'c1', [{ type: c.type, name: c.name, existedBefore: false, prevVersion: null }]);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        engine.registry.registerItem = () => { throw REFUSAL(c.type); };
+
+        const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+        expect(res.success).toBe(false);
+        expect(res.failed[0]).toMatchObject({ type: c.type, name: c.name, code: 'NOT_OVERRIDABLE' });
+        expect(res.failed[0].error).toContain('its row was removed from sys_metadata');
+        // Non-vacuity: the stop is the remaining row's write-through fault, not
+        // the walk's outer catch.
+        expect(warn.mock.calls.map((a) => String(a[0]))).toContain(writeThroughWarnLine(c));
+        expect(error.mock.calls.some((a) => String(a[0]).startsWith(healStoppedLine(c)))).toBe(false);
+        // The other package's row stays stored.
+        expect(storedLabelOf(rows, c)).toBe('Other');
     });
 });
