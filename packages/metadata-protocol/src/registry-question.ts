@@ -12,7 +12,11 @@
  * makes one body live and relays the refusal to its author asks it; on a
  * sealed registry it then also asks the record-currency doors that read other
  * objects (D6's roll-up half, and the follow door), so a refused body is
- * answered `422 INVALID_METADATA` and nothing is stored or promoted.
+ * answered `422 INVALID_METADATA` and nothing is stored or promoted. An
+ * `object_extension` item published on the same faces asks both
+ * record-currency doors too — D6's roll-up half (the roll-ups it adds, and a
+ * registered parent's roll-up over an amount it adds), and the follow door
+ * of the extension judged as its object will be served.
  *
  * The follow door is not that save's alone. `registerObject` never asks it —
  * a unit registers in an order a later member can still complete — so each
@@ -27,8 +31,11 @@
  *    outermost run (`SchemaRegistry.restoringOnRefusal`). It calls neither
  *    callee below, so it is no producer in
  *    {@link REGISTRY_QUESTION_PRODUCERS}.
- * An `extend` layer is asked only of its own roll-ups (the door's `partial`
- * rule), by whichever asker registers it.
+ * An `extend` layer is judged like any other layer, by whichever asker
+ * registers it: as its object will be served, with every enabled extension
+ * and the layer in its slot, in both directions — the amounts and roll-ups
+ * the layer adds against their other ends, and the registered amounts and
+ * roll-ups whose other end is that object.
  *
  * Every other producer (a draft save, the batch writers, a package publish)
  * keeps the body-only question per row. A batch that makes object rows live

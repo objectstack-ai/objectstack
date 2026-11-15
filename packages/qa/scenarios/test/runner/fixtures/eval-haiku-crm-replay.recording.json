@@ -1,0 +1,485 @@
+{
+  "driver": {
+    "driver": "claude-code-cli",
+    "version": "2.1.325 (Claude Code)",
+    "authMethod": "oauth_token",
+    "apiBilled": false,
+    "authorTimeoutMs": 3600000,
+    "authorMaxTurns": {
+      "control": 80,
+      "starter": 300,
+      "delivery": 600
+    },
+    "askMaxTurns": 12,
+    "authorModel": "haiku",
+    "askModel": "haiku"
+  },
+  "turns": {
+    "crm_account_with_contacts/scratch/run/add_contact/sdr": {
+      "replyText": "Fay Wu is now a contact on the Bitworks account.\n\n- **Record:** Contact `-2L4k8rglFSeR_mf`, full name \"Fay Wu\", linked to Account `ac3` (Bitworks).\n- **Owner:** Set automatically to the account running the write.\n- **Checks:** Bitworks exists once, so the link is unambiguous. There was no existing Fay Wu contact, so this is not a duplicate.\n\nI didn't fill in any other fields because you only gave a name and company. Tell me if you want an email, phone, or title added.",
+      "toolCalls": [
+        {
+          "name": "ToolSearch",
+          "rawName": "ToolSearch",
+          "input": {
+            "query": "select:mcp__app__query_records,mcp__app__create_record,mcp__app__list_objects,mcp__app__describe_object,mcp__app__update_record",
+            "max_results": 5
+          },
+          "output": [
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__query_records"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__create_record"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__list_objects"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__describe_object"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__update_record"
+            }
+          ]
+        },
+        {
+          "name": "list_objects",
+          "rawName": "mcp__app__list_objects",
+          "input": {},
+          "output": "{\n  \"objects\": [\n    {\n      \"name\": \"democrm_account\",\n      \"label\": \"Account\",\n      \"fieldCount\": 11\n    },\n    {\n      \"name\": \"democrm_contact\",\n      \"label\": \"Contact\",\n      \"fieldCount\": 10\n    }\n  ],\n  \"totalCount\": 2\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "account",
+            "where": {
+              "name": "Bitworks"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"OBJECT_NOT_FOUND\",\n    \"message\": \"Object 'account' not found\",\n    \"status\": 404\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_account",
+            "where": {
+              "name": "Bitworks"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"object\": \"democrm_account\",\n  \"records\": [\n    {\n      \"id\": \"ac3\",\n      \"created_at\": \"2026-11-15T02:04:36.573Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.573Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"name\": \"Bitworks\",\n      \"industry\": \"tech\",\n      \"owner\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\"\n    }\n  ],\n  \"total\": 1,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "describe_object",
+          "rawName": "mcp__app__describe_object",
+          "input": {
+            "objectName": "democrm_contact"
+          },
+          "output": "{\n  \"name\": \"democrm_contact\",\n  \"label\": \"Contact\",\n  \"fields\": [\n    {\n      \"name\": \"organization_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Organization\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Created At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Created By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Last Modified At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Last Modified By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"owner_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owner\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"owning_business_unit_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owning Business Unit\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"queue\",\n      \"type\": \"text\",\n      \"label\": \"Queue\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"full_name\",\n      \"type\": \"text\",\n      \"label\": \"Full Name\",\n      \"required\": true,\n      \"readonly\": false,\n      \"system\": false\n    },\n    {\n      \"name\": \"account\",\n      \"type\": \"lookup\",\n      \"label\": \"Account\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": false\n    }\n  ],\n  \"validations\": [],\n  \"enableFeatures\": {\n    \"trackHistory\": false,\n    \"searchable\": true,\n    \"apiEnabled\": true,\n    \"files\": false,\n    \"feeds\": true,\n    \"activities\": true,\n    \"clone\": true,\n    \"approvalsVisibleToReaders\": false\n  }\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "name": "Fay Wu"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"INVALID_FIELD\",\n    \"message\": \"Query parameter 'where' filters on 'name', which is not a field on object 'democrm_contact'. A filter on a field that does not exist can only match zero records, so the query was refused instead of answered with an empty list.\",\n    \"status\": 400\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "full_name": "Fay Wu"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"records\": [],\n  \"total\": 0,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "create_record",
+          "rawName": "mcp__app__create_record",
+          "input": {
+            "objectName": "democrm_contact",
+            "data": {
+              "full_name": "Fay Wu",
+              "account": "ac3"
+            }
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"id\": \"-2L4k8rglFSeR_mf\",\n  \"record\": {\n    \"id\": \"-2L4k8rglFSeR_mf\",\n    \"created_at\": \"2026-11-15T02:07:18.458Z\",\n    \"updated_at\": \"2026-11-15T02:07:18.458Z\",\n    \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n    \"created_by\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n    \"updated_by\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n    \"owner_id\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n    \"owning_business_unit_id\": null,\n    \"queue\": null,\n    \"full_name\": \"Fay Wu\",\n    \"account\": \"ac3\"\n  }\n}"
+        }
+      ],
+      "meta": {
+        "model": "claude-haiku-5-5",
+        "mcpServers": [
+          {
+            "name": "app",
+            "status": "connected"
+          }
+        ],
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 9,
+        "reportedCostUsd": 0.00579414,
+        "process": {
+          "elapsedMs": 15429,
+          "exit": 0,
+          "timedOut": false,
+          "timeoutMs": 300000,
+          "maxTurns": 12,
+          "requestedModel": "haiku"
+        }
+      }
+    },
+    "crm_account_with_contacts/scratch/run/move_eli/sdr": {
+      "replyText": "Eli Moss is now linked to Acme instead of Bitworks. I changed the contact's Account field from Bitworks (ac3) to Acme (ac1) on the contact record ct5. Nothing else on the record changed; its owner is still the same.",
+      "toolCalls": [
+        {
+          "name": "ToolSearch",
+          "rawName": "ToolSearch",
+          "input": {
+            "query": "select:mcp__app__query_records,mcp__app__update_record,mcp__app__describe_object,mcp__app__list_objects,mcp__app__get_record",
+            "max_results": 5
+          },
+          "output": [
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__query_records"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__update_record"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__describe_object"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__list_objects"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__get_record"
+            }
+          ]
+        },
+        {
+          "name": "list_objects",
+          "rawName": "mcp__app__list_objects",
+          "input": {},
+          "output": "{\n  \"objects\": [\n    {\n      \"name\": \"democrm_account\",\n      \"label\": \"Account\",\n      \"fieldCount\": 11\n    },\n    {\n      \"name\": \"democrm_contact\",\n      \"label\": \"Contact\",\n      \"fieldCount\": 10\n    }\n  ],\n  \"totalCount\": 2\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "contact",
+            "where": {
+              "name": "Eli Moss"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"OBJECT_NOT_FOUND\",\n    \"message\": \"Object 'contact' not found\",\n    \"status\": 404\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "name": "Eli Moss"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"INVALID_FIELD\",\n    \"message\": \"Query parameter 'where' filters on 'name', which is not a field on object 'democrm_contact'. A filter on a field that does not exist can only match zero records, so the query was refused instead of answered with an empty list.\",\n    \"status\": 400\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_account",
+            "limit": 50
+          },
+          "output": "{\n  \"object\": \"democrm_account\",\n  \"records\": [\n    {\n      \"id\": \"ac1\",\n      \"created_at\": \"2026-11-15T02:04:36.503Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.503Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"name\": \"Acme\",\n      \"industry\": \"tech\",\n      \"owner\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\"\n    },\n    {\n      \"id\": \"ac3\",\n      \"created_at\": \"2026-11-15T02:04:36.573Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.573Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"name\": \"Bitworks\",\n      \"industry\": \"tech\",\n      \"owner\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\"\n    }\n  ],\n  \"total\": 2,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "describe_object",
+          "rawName": "mcp__app__describe_object",
+          "input": {
+            "objectName": "democrm_contact"
+          },
+          "output": "{\n  \"name\": \"democrm_contact\",\n  \"label\": \"Contact\",\n  \"fields\": [\n    {\n      \"name\": \"organization_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Organization\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Created At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Created By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Last Modified At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Last Modified By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"owner_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owner\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"owning_business_unit_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owning Business Unit\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"queue\",\n      \"type\": \"text\",\n      \"label\": \"Queue\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"full_name\",\n      \"type\": \"text\",\n      \"label\": \"Full Name\",\n      \"required\": true,\n      \"readonly\": false,\n      \"system\": false\n    },\n    {\n      \"name\": \"account\",\n      \"type\": \"lookup\",\n      \"label\": \"Account\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": false\n    }\n  ],\n  \"validations\": [],\n  \"enableFeatures\": {\n    \"trackHistory\": false,\n    \"searchable\": true,\n    \"apiEnabled\": true,\n    \"files\": false,\n    \"feeds\": true,\n    \"activities\": true,\n    \"clone\": true,\n    \"approvalsVisibleToReaders\": false\n  }\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "limit": 50
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"records\": [\n    {\n      \"id\": \"-2L4k8rglFSeR_mf\",\n      \"created_at\": \"2026-11-15T02:07:18.458Z\",\n      \"updated_at\": \"2026-11-15T02:07:18.458Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n      \"updated_by\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n      \"owner_id\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Fay Wu\",\n      \"account\": \"ac3\"\n    },\n    {\n      \"id\": \"ct1\",\n      \"created_at\": \"2026-11-15T02:04:36.629Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.629Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Ana Ruiz\",\n      \"account\": \"ac1\"\n    },\n    {\n      \"id\": \"ct2\",\n      \"created_at\": \"2026-11-15T02:04:36.660Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.660Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Ben Ode\",\n      \"account\": \"ac1\"\n    },\n    {\n      \"id\": \"ct5\",\n      \"created_at\": \"2026-11-15T02:04:36.767Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.767Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Eli Moss\",\n      \"account\": \"ac3\"\n    }\n  ],\n  \"total\": 4,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "update_record",
+          "rawName": "mcp__app__update_record",
+          "input": {
+            "objectName": "democrm_contact",
+            "recordId": "ct5",
+            "data": {
+              "account": "ac1"
+            }
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"id\": \"ct5\",\n  \"record\": {\n    \"id\": \"ct5\",\n    \"created_at\": \"2026-11-15T02:04:36.767Z\",\n    \"updated_at\": \"2026-11-15T02:07:35.388Z\",\n    \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n    \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n    \"updated_by\": \"9Ryli14uDDzDUncnMVRGErdtz35168Ah\",\n    \"owner_id\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n    \"owning_business_unit_id\": null,\n    \"queue\": null,\n    \"full_name\": \"Eli Moss\",\n    \"account\": \"ac1\"\n  }\n}"
+        }
+      ],
+      "meta": {
+        "model": "claude-haiku-5-5",
+        "mcpServers": [
+          {
+            "name": "app",
+            "status": "connected"
+          }
+        ],
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 9,
+        "reportedCostUsd": 0.00597606,
+        "process": {
+          "elapsedMs": 16935,
+          "exit": 0,
+          "timedOut": false,
+          "timeoutMs": 300000,
+          "maxTurns": 12,
+          "requestedModel": "haiku"
+        }
+      }
+    },
+    "crm_account_with_contacts/scratch/run/remove_ben/sdr": {
+      "replyText": "I couldn't delete Ben Ode. The contact exists, but the delete was refused with a permission error: \"You do not have permission to perform this action. Contact your administrator if you need access.\"\n\nWhat I found:\n- The contact object is `democrm_contact`; there is no `contact` object.\n- Exactly one record matches \"Ben Ode\": record id `ct2`, linked to account `ac1`, owned by `su2J6d797pstGa7XnWwVEHwDHdsM34MY`.\n- The record is still there. Nothing was changed.\n\nYour Sales development representative access does not include deleting contacts. Someone with delete rights on `democrm_contact` would need to remove record `ct2`, or grant that permission to this role. If you want, I can keep the record id ready for them.",
+      "toolCalls": [
+        {
+          "name": "ToolSearch",
+          "rawName": "ToolSearch",
+          "input": {
+            "query": "select:mcp__app__query_records,mcp__app__delete_record,mcp__app__list_objects,mcp__app__describe_object",
+            "max_results": 4
+          },
+          "output": [
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__query_records"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__delete_record"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__list_objects"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__describe_object"
+            }
+          ]
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "contact",
+            "where": {
+              "name": "Ben Ode"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"OBJECT_NOT_FOUND\",\n    \"message\": \"Object 'contact' not found\",\n    \"status\": 404\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "list_objects",
+          "rawName": "mcp__app__list_objects",
+          "input": {},
+          "output": "{\n  \"objects\": [\n    {\n      \"name\": \"democrm_account\",\n      \"label\": \"Account\",\n      \"fieldCount\": 11\n    },\n    {\n      \"name\": \"democrm_contact\",\n      \"label\": \"Contact\",\n      \"fieldCount\": 10\n    }\n  ],\n  \"totalCount\": 2\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "name": "Ben Ode"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"INVALID_FIELD\",\n    \"message\": \"Query parameter 'where' filters on 'name', which is not a field on object 'democrm_contact'. A filter on a field that does not exist can only match zero records, so the query was refused instead of answered with an empty list.\",\n    \"status\": 400\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "describe_object",
+          "rawName": "mcp__app__describe_object",
+          "input": {
+            "objectName": "democrm_contact"
+          },
+          "output": "{\n  \"name\": \"democrm_contact\",\n  \"label\": \"Contact\",\n  \"fields\": [\n    {\n      \"name\": \"organization_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Organization\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Created At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Created By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Last Modified At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Last Modified By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"owner_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owner\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"owning_business_unit_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owning Business Unit\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"queue\",\n      \"type\": \"text\",\n      \"label\": \"Queue\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"full_name\",\n      \"type\": \"text\",\n      \"label\": \"Full Name\",\n      \"required\": true,\n      \"readonly\": false,\n      \"system\": false\n    },\n    {\n      \"name\": \"account\",\n      \"type\": \"lookup\",\n      \"label\": \"Account\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": false\n    }\n  ],\n  \"validations\": [],\n  \"enableFeatures\": {\n    \"trackHistory\": false,\n    \"searchable\": true,\n    \"apiEnabled\": true,\n    \"files\": false,\n    \"feeds\": true,\n    \"activities\": true,\n    \"clone\": true,\n    \"approvalsVisibleToReaders\": false\n  }\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "full_name": "Ben Ode"
+            },
+            "fields": [
+              "full_name",
+              "account",
+              "owner_id"
+            ],
+            "limit": 10
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"records\": [\n    {\n      \"full_name\": \"Ben Ode\",\n      \"account\": \"ac1\",\n      \"owner_id\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\"\n    }\n  ],\n  \"total\": 1,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "full_name": "Ben Ode"
+            },
+            "limit": 10
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"records\": [\n    {\n      \"id\": \"ct2\",\n      \"created_at\": \"2026-11-15T02:04:36.660Z\",\n      \"updated_at\": \"2026-11-15T02:04:36.660Z\",\n      \"organization_id\": \"org_mwh6yubp3r5tsvkf\",\n      \"created_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"updated_by\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owner_id\": \"su2J6d797pstGa7XnWwVEHwDHdsM34MY\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Ben Ode\",\n      \"account\": \"ac1\"\n    }\n  ],\n  \"total\": 1,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "delete_record",
+          "rawName": "mcp__app__delete_record",
+          "input": {
+            "objectName": "democrm_contact",
+            "recordId": "ct2",
+            "confirm": true
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"PERMISSION_DENIED\",\n    \"message\": \"You do not have permission to perform this action. Contact your administrator if you need access.\",\n    \"status\": 403\n  }\n}",
+          "isError": true
+        }
+      ],
+      "meta": {
+        "model": "claude-haiku-5-5",
+        "mcpServers": [
+          {
+            "name": "app",
+            "status": "connected"
+          }
+        ],
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 9,
+        "reportedCostUsd": 0.00714466,
+        "process": {
+          "elapsedMs": 22669,
+          "exit": 0,
+          "timedOut": false,
+          "timeoutMs": 300000,
+          "maxTurns": 12,
+          "requestedModel": "haiku"
+        }
+      }
+    },
+    "crm_account_with_contacts/scratch/run/contact_bad_email/partner_user": {
+      "replyText": "I couldn't add Gil Ray. The create call on the Contact object was refused with `PERMISSION_DENIED` (403), so the connection's credential doesn't allow creating contacts. No record was created.\n\nI sent the email as `gil@acme`, reading \"at\" as \"@\". The Contact object's email field is typed as an email, so that address may also be rejected once the permission issue is fixed. If you meant a different address, tell me and I'll retry with it.\n\nTo get this done, ask your administrator to grant create access on Contact (`democrm_contact`) for this Partner portal user, or add the contact yourself in the app. Once access is in place, I can retry with the same details.",
+      "toolCalls": [
+        {
+          "name": "ToolSearch",
+          "rawName": "ToolSearch",
+          "input": {
+            "query": "select:mcp__app__list_objects,mcp__app__describe_object,mcp__app__create_record",
+            "max_results": 3
+          },
+          "output": [
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__list_objects"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__describe_object"
+            },
+            {
+              "type": "tool_reference",
+              "tool_name": "mcp__app__create_record"
+            }
+          ]
+        },
+        {
+          "name": "list_objects",
+          "rawName": "mcp__app__list_objects",
+          "input": {},
+          "output": "{\n  \"objects\": [\n    {\n      \"name\": \"democrm_contact\",\n      \"label\": \"Contact\",\n      \"fieldCount\": 11\n    }\n  ],\n  \"totalCount\": 1\n}"
+        },
+        {
+          "name": "describe_object",
+          "rawName": "mcp__app__describe_object",
+          "input": {
+            "objectName": "democrm_contact"
+          },
+          "output": "{\n  \"name\": \"democrm_contact\",\n  \"label\": \"Contact\",\n  \"fields\": [\n    {\n      \"name\": \"organization_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Organization\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Created At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"created_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Created By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_at\",\n      \"type\": \"datetime\",\n      \"label\": \"Last Modified At\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"updated_by\",\n      \"type\": \"lookup\",\n      \"label\": \"Last Modified By\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"owner_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owner\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"owning_business_unit_id\",\n      \"type\": \"lookup\",\n      \"label\": \"Owning Business Unit\",\n      \"required\": false,\n      \"readonly\": true,\n      \"system\": true\n    },\n    {\n      \"name\": \"queue\",\n      \"type\": \"text\",\n      \"label\": \"Queue\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": true\n    },\n    {\n      \"name\": \"full_name\",\n      \"type\": \"text\",\n      \"label\": \"Full Name\",\n      \"required\": true,\n      \"readonly\": false,\n      \"system\": false\n    },\n    {\n      \"name\": \"email\",\n      \"type\": \"email\",\n      \"label\": \"Email\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": false\n    },\n    {\n      \"name\": \"account\",\n      \"type\": \"lookup\",\n      \"label\": \"Account\",\n      \"required\": false,\n      \"readonly\": false,\n      \"system\": false\n    }\n  ],\n  \"validations\": [],\n  \"enableFeatures\": {\n    \"trackHistory\": false,\n    \"searchable\": true,\n    \"apiEnabled\": true,\n    \"files\": false,\n    \"feeds\": true,\n    \"activities\": true,\n    \"clone\": true,\n    \"approvalsVisibleToReaders\": false\n  }\n}"
+        },
+        {
+          "name": "create_record",
+          "rawName": "mcp__app__create_record",
+          "input": {
+            "objectName": "democrm_contact",
+            "data": {
+              "full_name": "Gil Ray",
+              "email": "gil@acme"
+            }
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"PERMISSION_DENIED\",\n    \"message\": \"You do not have permission to perform this action. Contact your administrator if you need access.\",\n    \"status\": 403\n  }\n}",
+          "isError": true
+        }
+      ],
+      "meta": {
+        "model": "claude-haiku-5-5",
+        "mcpServers": [
+          {
+            "name": "app",
+            "status": "connected"
+          }
+        ],
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 5,
+        "reportedCostUsd": 0.00478951,
+        "process": {
+          "elapsedMs": 15340,
+          "exit": 0,
+          "timedOut": false,
+          "timeoutMs": 300000,
+          "maxTurns": 12,
+          "requestedModel": "haiku"
+        }
+      }
+    }
+  },
+  "files": {}
+}

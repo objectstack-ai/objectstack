@@ -1,5 +1,134 @@
 # @object-ui/data-objectstack
 
+## 18.5.0
+
+### Patch Changes
+
+- 854d383: refactor(data-objectstack)!: retire the test-only `clearSharedDiscoveryCache` from the package entry
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/data-objectstack#clearSharedDiscoveryCache) the retired operand is a test-only function that empties the adapter's in-memory per-origin discovery cache; nothing in the workspace or in hotcrm calls it outside tests, and no packages/spec schema, registered node type, conversion surface or stored shape names it, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports `clearSharedDiscoveryCache` from `@object-ui/data-objectstack`. It reset module state between tests, and no code outside a test called it, in the workspace or in hotcrm, so the Console and every `@object-ui/*` package are unaffected. Nothing fetches or renders differently.
+  
+  The per-origin discovery cache moves verbatim into the package's own module `sharedDiscovery.ts`. `ObjectStackAdapter.connect()` still reads through it, and `getSharedDiscovery` stays exported from the entry unchanged. Only the reset helper stops being published, the same way the package roots already keep `resetRuntimeConfigForTesting`, `resetInflightGetsForTesting` and `__clearRecordEditableCache` off their barrels. The workspace's own tests import it from the module.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `clearSharedDiscoveryCache` TO no replacement. The helper was test-only; a host test that needs a fresh discovery read gives each case its own `baseUrl`, or stubs the fetch its adapter makes.
+- d95ddeb: fix(console): a metadata save's advisories and refusals show the server's sentence in the user's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Advisory toast.** After a save or publish, each advisory finding that carries a `userMessage` (the sentence the server composes for the person who saved, in the request's language, else the workspace default, else English) shows that sentence after its rule id and location, in place of the developer-facing English `message` and `hint`. A finding the server wrote no sentence for keeps the `message` and `hint`.
+  
+  **Refused save.** The issues of a `422` refusal from the runtime authoring gate carry the same `userMessage`. `formatMetadataIssue` (and so `formatMetadataError` and the Studio publish-failure list) shows it after the issue's path in place of the English `message`, and Studio's refusal sentence carries it verbatim instead of reading the English `message` through the console's own validation-message table. A spec-validation issue carries no `userMessage` and is shown as before.
+  
+  **Type.** `MetadataValidationIssue` on `@object-ui/data-objectstack` gains the optional `userMessage`, typed from `RuntimeAuthoringIssue['userMessage']` in `@objectstack/spec/api`.
+- 9499dcc: fix(console, data-objectstack): a report drill that rebuilds its filter reads the dataset as the report's reader (ADR-0150 D3)
+  
+  Clause-②: yes (widening) — `MetadataGetOptions` (`@object-ui/data-objectstack`) gains an optional `callerPackage`, which `MetadataClient.get` sends as `?callerPackage=`; omitted, every read is sent exactly as before.
+  Metadata-protocol: none
+  
+  **The drill.** A report row drills straight to its records when the dataset answer carries the drill metadata. When it does not, the Console reads the dataset definition to rebuild the filter from the clicked group. That is not only an older server's answer: the server names the dataset's object on every answer but sends no drill metadata for a `type: 'date'` dimension with no `dateGranularity`, so a click on a report grouped by one takes this read. The read named no package, so for a report shipped in a package it read the bare name: another package's dataset of that name, or a `409` when two packages hold the name, where the report's own queries read the dataset its package resolves. The read now names the report's package as the reader (`?callerPackage=`), the dataset the report's queries resolve. A report authored in the environment reads the name bare, as before. A refusal opens no drill and is not retried with the bare name.
+  
+  **The client.** `MetadataClient.get(type, name, { callerPackage })` reads an item as the package that reads it: that package's own item, else the one holder among its declared dependencies plus `sys`, else `409 RESOURCE_CONFLICT` naming the candidates. It is distinct from `packageId` (`?package=`), which names the holder exactly. The server serves the caller arm on the `dataset` read only, and refuses it beside `packageId`.
+- b462444: fix(metadata-protocol)!: the history and rollback doors of a by-package name refuse the bare name two holders hold, and `?package=` addresses one holder's versions (ADR-0150 D3/D4, #32905)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/history` and `POST /meta/:type/:name/rollback` naming no package are refused `409 RESOURCE_CONFLICT` before any row is read or written wherever the bare plain read refuses the name: its active rows held by two or more row slots (two packages', or a package's beside the package-less row; `ambiguous-in-environment`, `details.candidates` naming every holder), one row held while a second package ships the name in code, or a name two packages ship with no stored row (the read's own refusal) — where the history answered every holder's versions as one log and the rollback wrote the chosen version into whichever row the bare read served. An addressed rollback (`?package=`) to a version of another holder's row, or to a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is; a `?package=` naming a package that neither holds a row of the name nor ships it is refused `409` (`not-held-by-qualifier`) while another slot holds one, and `422 WRITABLE_PACKAGE_REQUIRED` while no row is stored and no such package is installed; nothing is restored. Widened: both doors accept `?package=` on a by-package type (the `/layers?package=` spelling), which reads or restores that holder's versions only; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds answers bare exactly as on `main`: its whole log, and its bare rollback restores any of its versions into its row, including a version saved package-less before a package took the name over.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the history or rollback door, and the docs that do (`content/docs/api/metadata-api.mdx`, `content/docs/kernel/contracts/metadata-service.mdx`, `content/docs/plugins/adding-a-metadata-type.mdx`, `content/docs/permissions/system-context.mdx`) list the routes without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `packageId` field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (one optional request key, `HistoryMetaItemRequest.packageId`, is added, and `RollbackMetaItemRequestSchema` is a new schema declaring a request the door already took, so nothing written before needs rewriting), and no stored row changes shape: `sys_metadata_history.package_id` already existed and is now also written by the `/meta` doors. What moves is which versions a door answers and which row a rollback may write, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare history or rollback request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/history` TO `GET /meta/TYPE/NAME/history?package=PKG`, once per holder the `409` names.
+  - FROM `POST /meta/TYPE/NAME/rollback` TO `POST /meta/TYPE/NAME/rollback?package=PKG`, with `toVersion` one of that holder's versions (its `?package=` history lists them).
+  
+  An `action` name is judged here by its row slots and the registry's package-scoped resolver only: the bare read's own action judges (an object-less name two packages ship, two packages binding the name to their own objects) are not asked by these doors yet, so such a name with no stored row still answers its (empty) history bare.
+  
+  `?package=` names a holder the way the item read does: the row a read naming that package serves — the package's own row, its `.custom` pair's declared override of it (so a base package addresses its customization pair), or the package-less row that read falls back to — else the package's own slot when it ships the name and holds no row yet. A package that neither holds nor ships the name, while another slot holds it, is refused `409` (`not-held-by-qualifier`); with no row stored, a package that is not installed is refused `422` as a save naming it is. `all` and the empty string name no package. For a type not stored per package, `?package=` is refused `400`, as it was before this release.
+  
+  The `/meta` doors' history rows now record whose row they snapshot (`sys_metadata_history.package_id`, the rule `DatabaseLoader` already applies; the package-less row is marked `sys_metadata`). A version recorded before this release carries no attribution, and an environment-attributed version stays with a package that took the package-less row over: each is listed and restorable while the name has one holder, and never guessed once two hold it. `@objectstack/metadata` exports that rule as `historyRowAttribution` and `ENVIRONMENT_HISTORY_MARK`.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (`HistoryMetaItemRequestSchema.packageId`, the authorable-surface entry `api/HistoryMetaItemRequest:packageId`, the new `RollbackMetaItemRequestSchema` that declares the rollback door's request with its `packageId` and a `toVersion` of at least 1, and `PACKAGE_SLOTTED_METADATA_TYPES` / `isPackageSlottedMetaType`, the one list of types stored per package that the doors and the console both read), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`historyMetaItem` and `RollbackMetaItemRequest` take `packageId`), `@objectstack/rest` (both doors accept `?package=`; the rollback door reads `toVersion` through its declaration), `@objectstack/metadata` (new exports `historyRowAttribution`, `ENVIRONMENT_HISTORY_MARK`; `PACKAGE_SLOTTED_STORE_TYPES` is now built from the spec list, same members), `@object-ui/data-objectstack` (`history()` / `rollback()` take `packageId`), `@objectstack/metadata-core` (a field description only) and `@object-ui/app-shell` (no exported signature changes: `HistoryPanel` and `StudioItemTools` are not exported, and `MetadataResourceHistoryPage` keeps its props).
+  
+  The console follows: `MetadataClient.history()` and `rollback()` take `packageId` (sent as `?package=`), and the History item tool (routed page, the edit page's sheet and Studio's item tools) names the package its item page reads, for a type stored per package only (`isPackageSlottedMetaType`): an object, view or page opened under a package reads and restores its history bare, as before, since the doors refuse `?package=` on those types.
+- 1169d64: fix(console): Set as Default over a view a package ships leaves one default view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Set as Default.** When the previous default list view was one a read-only package ships (the showcase's All Tasks, an installed app's view), Set as Default on another view left the object with two default views. Clearing the shipped view's default was refused by the server, since a write naming no package is closed on an item a read-only package ships, but the new default was written beside it in the same click. The clear now lands, and Manage views writes one view at a time, clearing the previous defaults first and setting the new one last: a refused clear stops the click, says the server's reason, and leaves the new view not made the default.
+  
+  **Editing a shipped view's row state.** `updateView` on `@object-ui/data-objectstack` now writes a view a read-only package ships into that package's customization pair (`BASE.custom`, `?package=`), declaring `overrides: { package, basedOn }`, as the server's refusal prescribes. The pair is the one `POST /packages/BASE/ensure-customization` answers, which creates it on first use, and `basedOn` is the version the view's customization already declares, else the package's own version. This covers every row-state write the console sends through `updateView`: the default flag, a pin and a rename. A view no package ships, and a view a writable package ships, are written exactly as before. When the pair cannot be had (the ensure door refuses the caller, or the package records no version), nothing is written and the refusal reaches the caller.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/client@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

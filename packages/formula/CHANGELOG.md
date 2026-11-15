@@ -1,5 +1,97 @@
 # @objectstack/formula
 
+## 18.5.0
+
+### Minor Changes
+
+- 6482c08: fix(objectql): a formula that reads another formula field reads its computed value; a cycle of formulas is refused where it is authored (#33100)
+  
+  Clause-②: no (narrowing) — `os build`, `os validate` and the object save and publish door refuse a `formula` field that reads its own value, itself or through the formulas it reads, where they accepted it. First-party: a source scan of `examples/**`, `packages/**` and HotCRM finds no formula reading another formula, so no first-party stack moves.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-formula` teaches no rule about one formula reading another; `content/docs/data-modeling/formulas.mdx` already said not to create circular references and now says they are refused.
+  
+  <!-- adr-0087: registered formula-cycle-refused -->
+  
+  **BREAKING** accept-set narrowing of `os build` / `os validate` / the object door (`validateStackExpressions`), and one read answer: a formula on a cycle whose read of the cycle is guarded (`has(record.f_self) ? record.f_self : 1`, or an optional spelling such as `record.?f_self.orValue(1)`) could evaluate before, to a value that depended on the order its formulas were computed in; it now reads null with the cycle fault, like every other member.
+  
+  The engine computed an object's formula fields in the order they were declared, or the order a projection named them, over the same row. A formula reading another formula (`f_total = record.f_sibling * 2`) therefore read null with "No such key: f_sibling" whenever it came first: when it was declared before the formula it reads, and on every projection naming it without that formula. The authoring doors accepted the expression.
+  
+  - The read plan now carries every formula a planned formula reads, transitively, and computes each formula after the formulas it reads (`formulaReadOrder` in `@objectstack/formula`). It holds on `find`, `findOne`, a projection (a formula computed only because another reads it is cut back off the answer), the write response, `evaluateFormulaField` and `serveFormulaField`. A field that is not a formula reads exactly as before.
+  - A formula on a cycle (`f_total = record.f_total * 2`, or `f_x` and `f_y` reading each other) has no order to be computed in. The engine never evaluates it: it reads null, and its fault names the cycle instead of "No such key". An unguarded member read null before too; a guarded one is the read answer named above. Every formula of a strongly connected component of more than one formula, or reading itself, is a member, whatever order the formulas are declared or requested in. A formula that reads a cycle member without being read back is computed over that null.
+  - A read that admits a formula by what the formula reads judges the whole plan the read will run, the formulas it reads included, and answers what it answered before.
+  - The build and the object door refuse each declared formula on a cycle with the same sentence, located on its `expression` (`object 'x_job' · field 'f_total' expression`).
+  
+  Migration: break the cycle. Have one of the formulas read the stored fields the other formula reads, instead of the other formula.
+
+### Patch Changes
+
+- 1bbeb94: fix(formula): the date-subtraction refusals name the sub-day form next to `daysBetween`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `date-text-arithmetic` refusal (and its flow and fail-closed / fail-open arms) and the `date-duration-value` refusal sent an author who wanted an hour span, such as overtime hours from two date-time fields, to `daysBetween(a, b)`, which counts whole days only. Both refusals now add: for a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration, `(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`. That form already validated and evaluated; only the refusal wording changes, and the refusal codes and params are unchanged.
+  
+  FROM `record.end_at - record.start_at` (refused, `date-text-arithmetic`) TO `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` for the hours between them.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
