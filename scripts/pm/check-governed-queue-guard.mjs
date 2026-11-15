@@ -351,8 +351,10 @@
  * predicate of the pull object it already fetched for the head, the timeline the
  * enqueue leg already read, and each changeset at the commit that touched it
  * (`git show`), and each governed commit's status and mode per path
- * (`catalogFilesOf`, `diff-tree --raw --no-renames`) — through the register's
- * `governedTierFor`. An unread pull,
+ * (`catalogFilesOf`, `diff-tree --raw --no-renames`, and for a modified file
+ * under the `adr` row that commit's full-context diff, which the register's
+ * `addOnlyNoteReasons` reads add-only — the ADR leg, #33539) — through the
+ * register's `governedTierFor`. An unread pull,
  * timeline or changeset stays Tier H. An entry the arm puts at Tier S clears on
  * a same-head record that READS PASS (`lowRiskRecordVerdict`), and a record
  * carried from an older head stands for it only when the hops moved no
@@ -690,6 +692,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
   '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 54,
+  '⚖️ the ADR leg at the queue: an add-only note clears on its PASS record, any other ADR change is H (#33539)': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -703,7 +706,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 28 → 29 with the cheap early-warning leg battery: one battery, one row.
 // Raised 29 → 30 with the workflows split battery (ruling record 6722205630): one battery, one row.
 // Raised 30 → 31 with the low-risk skills arm battery (#33501): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 31;
+// Raised 31 → 32 with its ADR leg battery (#33539): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 32;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2041,7 +2045,10 @@ const RAW_STATUS = Object.freeze({ M: 'modified', A: 'added', D: 'deleted', T: '
  * commit's first parent (the same comparison `enumerateRows` lists the paths
  * from): `{ path, status, oldMode, mode }`, the raw line's two modes, so a mode
  * change reads H in the arm. One row per commit per path, so an add in one
- * commit and an edit in the next reads `added`.
+ * commit and an edit in the next reads `added`. A modified file under an
+ * add-only row (`lowRisk.addOnly`, the ADR leg) also carries `patch`: that
+ * commit's diff against its first parent at full context (`addOnlyDiffArgv`),
+ * or null when the read threw — which the arm reads as H.
  * No git reader, a commit with no sha, or a read that throws is NOT MEASURED.
  */
 export function catalogFilesOf(entry, runGit) {
@@ -6222,6 +6229,62 @@ export async function selfTest() {
     // The pull_request leg reads no body: the early warning says Tier H, NOT MEASURED, and that the queue leg reads it.
     const early = await tierRun({ ...arm, event: EVENT_PULL_REQUEST });
     assert('the-pull_request-leg-names-the-arm-NOT-MEASURED-and-never-reddens', early.entries[0].tier === TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderGuardVerdict(early)) && /queue guard reads it on the queue leg/.test(renderGuardVerdict(early)), renderGuardVerdict(early));
+  }
+
+  battery('⚖️ the ADR leg at the queue: an add-only note clears on its PASS record, any other ADR change is H (#33539)');
+  {
+    const ADR = 'docs/adr/0097-upstream-availability.md';
+    const LOW = `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: none\n`;
+    const RECORD = ['# ADR-0097: Upstream availability', '', '**Status**: Accepted (2026-07-15)', '', '## Context', '', 'Why.', '', '## Decision', '', 'Refuse it.', '', '## Consequences', '', 'Some.'];
+    const patchOf = (ops) => {
+      const oldN = ops.filter(([m]) => m !== '+').length;
+      const newN = ops.filter(([m]) => m !== '-').length;
+      return `diff --git a/${ADR} b/${ADR}\n--- a/${ADR}\n+++ b/${ADR}\n@@ -1,${oldN} +1,${newN} @@\n${ops.map(([m, t]) => `${m}${t}`).join('\n')}\n`;
+    };
+    const keep = (lines) => lines.map((t) => [' ', t]);
+    const NOTE = patchOf([...keep(RECORD), ['+', ''], ['+', '## Amendment notes'], ['+', ''], ['+', '> **Note (2026-11-15).** The refusal names its code.']]);
+    const REMOVED = patchOf([...keep(RECORD.slice(0, 10)), ['-', 'Refuse it.'], ['+', 'Refuse it loudly.'], ...keep(RECORD.slice(11))]);
+    const STATUS = patchOf([...keep(RECORD.slice(0, 3)), ['+', '**Status**: Superseded by ADR-0200'], ...keep(RECORD.slice(3))]);
+    const UNDER = patchOf([...keep(RECORD.slice(0, 11)), ['+', '> **Note.** It also logs.'], ...keep(RECORD.slice(11))]);
+    const rawOf = (rows) => rows.map(([st, mode, p, oldMode = '100644']) => `:${oldMode} ${mode} ${'1'.repeat(40)} ${'2'.repeat(40)} ${st}\0${p}\0`).join('');
+    // `diff-tree --raw` names the status; `diff-tree -p` the commit's diff of the one ADR path; anything else throws, as git does.
+    const adrGit = (patch = NOTE, raw = rawOf([['M', '100644', ADR]])) => (args) => {
+      if (args[0] === 'diff-tree' && args.includes('--raw')) return raw;
+      if (args[0] === 'diff-tree' && args.includes('-p') && args[args.length - 1] === ADR && args[args.length - 2] === '--') {
+        if (patch === null) throw new Error('fatal: bad object');
+        return patch;
+      }
+      throw new Error(`fatal: unexpected read (${args.join(' ')})`);
+    };
+    const arm = { files: [ADR], prBody: LOW, comments: [recordComment()], timeline: [], runGit: adrGit() };
+    const hCase = async (over) => { const v = await tierRun({ ...arm, ...over }); return [v.exitCode, v.entries[0].tier, v.entries[0].record === undefined]; };
+    const H = JSON.stringify([EXIT_REFUSED_UNAPPROVED, TIER_H, true]);
+
+    // ⭐ ROW 1: an add-only note, no changeset owed, a same-head PASS record ⇒ the seat's enqueue clears with zero approvals.
+    const pass = await tierRun(arm);
+    assert('⭐ ROW-1-an-add-only-ADR-note-with-a-same-head-PASS-record-CLEARS-at-the-queue-with-zero-approvals', pass.exitCode === EXIT_CLEAR && pass.entries[0].tier === TIER_S && pass.entries[0].record.verdict === 'PASS', renderGuardVerdict(pass));
+    const noRecord = await tierRun({ ...arm, comments: [] });
+    assert('⛔ CONTROL: the-same-ADR-note-with-NO-record-is-REFUSED-Tier-S-without-its-record', noRecord.exitCode === EXIT_REFUSED_UNAPPROVED && noRecord.entries[0].tier === TIER_S && noRecord.entries[0].record.state === 'absent');
+    // ⛔ ROWS 2–6, each WITH a valid PASS record: the record leg is never consulted.
+    assert('⛔ ROW-2-a-removed-line-stays-H', JSON.stringify(await hCase({ runGit: adrGit(REMOVED) })) === H);
+    assert('⛔ ROW-3-a-changed-or-added-Status-line-stays-H', JSON.stringify(await hCase({ runGit: adrGit(STATUS) })) === H);
+    assert('⛔ ROW-4-a-line-under-the-Decision-heading-stays-H', JSON.stringify(await hCase({ runGit: adrGit(UNDER) })) === H);
+    assert('⛔ ROW-5-a-new-ADR-file-stays-H', JSON.stringify(await hCase({ files: ['docs/adr/0200-new.md'], runGit: adrGit(NOTE, rawOf([['A', '100644', 'docs/adr/0200-new.md', '000000']])) })) === H);
+    assert('⛔ ROW-6-a-rename-read-as-delete-plus-add-stays-H', JSON.stringify(await hCase({ files: [ADR, 'docs/adr/0097-upstream.md'], runGit: adrGit(NOTE, rawOf([['D', '000000', ADR], ['A', '100644', 'docs/adr/0097-upstream.md', '000000']])) })) === H);
+    // ⛔ Fail closed, and the arm's other conditions held for the ADR leg.
+    assert('⛔ a-diff-the-leg-could-not-read-stays-H-and-catalogFilesOf-carries-it-as-null', JSON.stringify(await hCase({ runGit: adrGit(null) })) === H && catalogFilesOf({ shas: ['a'.repeat(40)] }, adrGit(null)).files[0].patch === null && catalogFilesOf({ shas: ['a'.repeat(40)] }, adrGit()).files[0].patch === NOTE);
+    assert('⛔ an-ADR-note-on-Clause-2-yes-with-a-security-label-or-beside-NORTH-STAR-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: yes\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ labels: ['security'] })) === H && JSON.stringify(await hCase({ files: [ADR, 'docs/NORTH-STAR.md'] })) === H);
+    assert('⛔ an-ADR-note-in-one-commit-and-an-edit-in-another-commit-of-the-same-PR-stays-H', JSON.stringify(await hCase({ extraRows: [row(70, [ADR], 'd'.repeat(40), 'y (#70)')], runGit: (args) => (args.includes('-p') ? (args.includes('d'.repeat(40)) ? REMOVED : NOTE) : rawOf([['M', '100644', ADR]])) })) === H);
+    // The pull_request leg reads no body: the early warning stays Tier H, NOT MEASURED.
+    const early = await tierRun({ ...arm, event: EVENT_PULL_REQUEST });
+    assert('the-pull_request-leg-reads-an-ADR-note-NOT-MEASURED-and-never-reddens', early.entries[0].tier === TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderGuardVerdict(early)), renderGuardVerdict(early));
+    // The diff argv the leg asks git for is the register's, one commit against its first parent.
+    assert('catalogFilesOf-asks-for-the-commit-diff-against-its-first-parent-at-full-context', (() => {
+      const asked = [];
+      catalogFilesOf({ shas: ['a'.repeat(40)] }, (args) => { asked.push(args); return args.includes('--raw') ? rawOf([['M', '100644', ADR]]) : NOTE; });
+      const p = asked.find((a) => a.includes('-p'));
+      return Boolean(p) && p.join(' ') === addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], ['a'.repeat(40)], ADR).join(' ');
+    })());
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

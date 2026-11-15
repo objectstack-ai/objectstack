@@ -484,8 +484,9 @@
  * timeline, the fork predicate and the changesets read at the head) moves them
  * to Tier S only when ALL hold:
  *
- *   - every governed path lies under a catalog row — `.claude/**`, a workflow,
- *     `AGENTS.md`, an ADR or any other row beside it is H;
+ *   - every governed path lies under a catalog row (or the `adr` row, read
+ *     add-only: the ADR leg below) — `.claude/**`, a workflow, `AGENTS.md`,
+ *     `docs/NORTH-STAR.md` or any other row beside it is H;
  *   - every changed path lies under a hit catalog row or matches
  *     `LOW_RISK_RIDER_PATTERNS` (a changeset, Markdown prose under the docs
  *     trees) — an ALLOWLIST, so `packages/**`, `ui/packages/**`, a gate script,
@@ -495,7 +496,7 @@
  *     `Metadata-protocol: none` (`readBareDeclaration`, the fleet's readers run
  *     per line): `yes`, an arm, trailing words, a second declaration, or the
  *     line quoted or fenced is H;
- *   - at least one changeset, each read at the head, releasing nothing but
+ *   - with a catalog path, at least one changeset; each read at the head, releasing nothing but
  *     `'@objectstack/skills': patch` and carrying the same two bare lines;
  *   - the labels were read and none is `security`, and the timeline was read and
  *     never removed one; and no catalog path names security, auth or permission
@@ -516,9 +517,18 @@
  * same pull object and file walk; the queue guard's `merge_group` leg
  * off the pull it already reads, over every commit of the PR in the group.
  *
- * NOT moved: `docs/adr/**` stays Tier H. The ruling names ADR notes, but a path
- * cannot tell a note from a changed decision, and no mechanical reading was
- * ruled; the seat carries that question. Ungoverned `docs/**` and
+ * The ADR leg (#33539, the same ruling's "ADR annotations or notes"): the `adr`
+ * row keeps `tier: H` too and carries `lowRisk` with `addOnly`, one more path
+ * family under the SAME arm and the same conditions above — but a path cannot
+ * tell a note from a changed decision, so the arm reads the DIFF at the head
+ * (`addOnlyNoteReasons`, merge base to head; each queued commit against its
+ * first parent at the queue), one full-context hunk per file: every ADR path
+ * is a modified Markdown file (no record created, renamed or deleted), the hunk
+ * removes no line, and no added line is a `Status:` line, a heading naming the
+ * decision or the status, or a line under one (`addOnlyHeadingReading`; the
+ * record's title scopes nothing). An ADR note publishes nothing, so it owes no
+ * changeset; one it carries is held to the catalog's shape. `ui/docs/adr/**`
+ * and `docs/NORTH-STAR.md` stay Tier H. Ungoverned `docs/**` and
  * `content/docs/**` prose needs nothing — it was never on the register.
  *
  * The post-merge sweep (#33603) still lists every catalog merge (membership did
@@ -2271,7 +2281,8 @@ export const LOW_RISK_ARM_RULING = 'maintainer ruling 2026-11-14 on #33501, 「�
  * file under a docs tree — keeps the PR Tier H however harmless it reads,
  * because the ruling's arm is wording and a denylist fails open on the next
  * published tree. `docs/adr/**` and `docs/NORTH-STAR.md` match the prose shape
- * but are register rows outside the arm, so the governed-rows rule keeps them H.
+ * but are register rows: the first is the arm's ADR leg (read add-only), the
+ * second sits outside the arm, so the governed-rows rule keeps it H.
  */
 export const LOW_RISK_RIDER_PATTERNS = Object.freeze([/^\.changeset\/[^/]+\.md$/, /^(?:content\/)?docs\/.+\.mdx?$/]);
 
@@ -2528,17 +2539,22 @@ export function lowRiskChangesetReasons(file) {
  * its timeline events, `forkVerdict` of the pull object, the changesets read at
  * the head (`{ measured, reason, files: [{ path, text }] }`) and the status and
  * modes of each catalog file (`{ measured, reason, files: [{ path, status,
- * oldMode, mode }] }`, one row per commit that touched it). Pure.
+ * oldMode, mode, patch? }] }`, one row per commit that touched it; `patch` the
+ * full-context diff of a modified file under an add-only row). Pure.
  *
  * Tier S only when ALL of these hold, each a reason when it does not:
  *   - every governed row hit is a low-risk row (a `.claude/**`, workflow or
  *     any Tier H row beside it is H — the card's "no other governed path");
  *   - every changed path lies under a hit low-risk row or matches `LOW_RISK_RIDER_PATTERNS`,
- *     and every path under a low-risk row matches `LOW_RISK_ARM_FILE_PATTERNS`;
+ *     every path under a catalog row matches `LOW_RISK_ARM_FILE_PATTERNS`, and every
+ *     path under an add-only row (`lowRisk.addOnly`, the ADR leg) `LOW_RISK_ADD_ONLY_FILE_PATTERNS`;
+ *   - every status row of an add-only path carries its diff (`patch`) and reads add-only
+ *     (`addOnlyNoteReasons`, card #33539);
  *   - the reading's path list holds every governed file of the slice;
  *   - the body carries one bare `Clause-②: no` and one bare `Metadata-protocol: none`
  *     (`readBareDeclaration` over the fleet's readers);
- *   - at least one changeset, every one read at the head and clean (`lowRiskChangesetReasons`);
+ *   - with a catalog path, at least one changeset; every one read at the head and clean
+ *     (`lowRiskChangesetReasons`) — an ADR-only PR owes none;
  *   - no path below a low-risk row names security, auth or permission
  *     (`LOW_RISK_SECURITY_NAME`, any segment, any case; ruling B on card #33501);
  *   - every catalog path's every status row reads `modified`, with a regular mode
@@ -2677,7 +2693,7 @@ export function renderLowRiskLines(matched) {
     );
   }
   if (v.tier === GOVERNED_TIER_S) {
-    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — modified skill files and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever and no catalog path named for it, no fork.\n`;
+    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — modified skill files, add-only ADR notes and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever and no catalog path named for it, no fork.\n`;
   }
   return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
