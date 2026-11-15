@@ -629,9 +629,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             </>
           }
           // objectui#12705 — too narrow for both actions and the description:
-          // New stays labelled and Save as view goes into a `⋯`.
+          // New stays labelled and Save as view goes into a `⋯`. With no New
+          // to keep labelled there is no folded face (objectstack#33988): it
+          // would send the page's one action into the `⋯` for the description.
           foldedActions={
-            <>
+            newButton && <>
               {newButton}
               {isAdmin && (
                 <DropdownMenu>
