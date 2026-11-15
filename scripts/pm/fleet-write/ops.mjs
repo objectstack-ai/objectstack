@@ -391,8 +391,8 @@
  *     more leading hex characters of it) — the maintainer's confirmation that
  *     the approval carries to this head. The comment is read by its own GET
  *     (`/repos/{repo}/issues/comments/{id}`); a comment on another pull, by
- *     another author, or naming another head lifts nothing. Nor does one whose
- *     first non-empty line is a seat signature (`LANE#N · ACCOUNT · SESSION`):
+ *     another author, or naming another head lifts nothing. Nor does one with
+ *     a seat signature (`LANE#N · ACCOUNT · SESSION`) on ANY line, not only the first:
  *     an authorised account is agent-operated too (AGENTS.md Prime Directive
  *     #14), and a seat's knock or record quoting the head is no confirmation
  *     by the maintainer's own hand.
@@ -1469,9 +1469,10 @@ export function enqueueFrontSizeLift({ verdict = null, headSha = null, comment =
   const author = c.user?.login ?? null;
   if (!approvers.includes(author)) return { lifts: false, way: null, reading: `${earlier}; the approval_comment's author ${author ?? 'unread'} is not an authorised approver` };
   if (!new RegExp(`/issues/${pull}$`).test(String(c.issue_url ?? ''))) return { lifts: false, way: null, reading: `${earlier}; the approval_comment is not on #${pull}` };
-  if (typeof signatureOf !== 'function') return { lifts: false, way: null, reading: `${earlier}; the approval_comment's opening line was not judged` };
-  const seat = signatureOf(c.body);
-  if (seat) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} opens with the seat signature ${seat.lane}#${seat.seat} · ${seat.account} — a seat's comment is no carried approval` };
+  if (typeof signatureOf !== 'function') return { lifts: false, way: null, reading: `${earlier}; the approval_comment's lines were not judged for a seat signature` };
+  // Every line is read, not only the first: a signature lower down is a seat's record all the same (header).
+  const seat = String(c.body ?? '').split(/\r?\n/u).map((line) => signatureOf(line)).find(Boolean) ?? null;
+  if (seat) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} holds the seat signature ${seat.lane}#${seat.seat} · ${seat.account} — a seat's comment is no carried approval` };
   const tokens = String(c.body ?? '').match(/\b[0-9a-f]{7,40}\b/giu) ?? [];
   const carries = head !== '' && tokens.some((tok) => tok.length >= CARRIED_HEAD_MIN_CHARS && head.startsWith(tok.toLowerCase()));
   if (!carries) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} names no prefix of the current head` };
@@ -1626,8 +1627,9 @@ export function dequeueReadBack({ pull, queue } = {}) {
 }
 
 /**
- * The second half of a dequeue's landing (header): the pull's own GET once the queue no longer lists it — still open
- * and `merged` false, so it left the queue without landing. `{ ok, pending, why }`: a read that is not a 200 object
+ * The second half of a dequeue's landing (header): ONE of the pull's own GETs once the queue no longer lists it —
+ * still open and `merged` false, so it left the queue without landing. The executor takes TWO such reads, one poll
+ * apart, and lands only when both are `ok`. `{ ok, pending, why }` for each read: a read that is not a 200 object
  * is `pending` (read again inside the window); a merged pull, or one closed unmerged, is a terminal failure. Pure.
  */
 export function dequeuePullAfter(answer) {
