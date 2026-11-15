@@ -37,8 +37,13 @@
  * What the bodies read at module level they import from where `protocol.ts`
  * imported it; `ShippingPackages` is `protocol.ts`'s own exported type.
  * Nothing re-exports this module, so the published surface does not move.
+ *
+ * [ADR-0150 D4, #33456] Since the move, `lookupArtifactItem` takes one more
+ * argument, an action's owner key: the by-name body is
+ * `lookupArtifactItemByName`, unedited, and the owner-key rule wraps it.
  */
 
+import { boundObjectOf } from '@objectstack/metadata/stored-item-package';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { resolveArtifactLockLayer, type ItemAddress } from './item-lock.js';
 import type { ObjectStackProtocolImplementation, ShippingPackages } from './protocol.js';
@@ -57,8 +62,48 @@ export interface ArtifactLookupHost {
     shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
 }
 
+/**
+ * [ADR-0150 D4, #33456] The owner key an `action` artifact must be bound to
+ * for {@link lookupArtifactItem} to answer it: the object of the item the
+ * envelope is for, `undefined` for an object-less one.
+ */
+export interface ArtifactOwnerKey {
+    readonly object: string | undefined;
+}
+
 /** The body of `ObjectStackProtocolImplementation#lookupArtifactItem`; the method's docblock there is its contract. */
 export function lookupArtifactItem(
+    this: Pick<ArtifactLookupHost, 'engine'>,
+    type: string, name: string, currentPackageId?: string, member?: string, owner?: ArtifactOwnerKey,
+): unknown {
+    const artifact = lookupArtifactItemByName.call(this, type, name, currentPackageId, member);
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (owner === undefined || singular !== 'action') return artifact;
+    // [ADR-0150 D4, #33456] An action is keyed `(package, object, name)`: an
+    // artifact bound to another owner key is another item, and lends this one
+    // no envelope. A package-less item's holder is the ONE package whose own
+    // artifact is bound to the item's owner key; none, or two, and no
+    // artifact answers (an ambiguity is not guessed).
+    if (artifact !== undefined && boundObjectOf(artifact) === owner.object) return artifact;
+    if (currentPackageId) return undefined;
+    const registry = (this.engine as any)?.registry;
+    if (typeof registry?.packageScopedHoldersOf !== 'function') return undefined;
+    let holders: unknown;
+    try {
+        holders = registry.packageScopedHoldersOf(singular, name, null, { includeDisabledPackages: true });
+    } catch {
+        return undefined;
+    }
+    const owners: unknown[] = [];
+    for (const packageId of new Set(Array.isArray(holders) ? holders : [])) {
+        const own = lookupArtifactItemByName.call(this, type, name, packageId, member) as { _packageId?: unknown } | undefined;
+        if (own?._packageId === packageId && boundObjectOf(own) === owner.object) owners.push(own);
+    }
+    return owners.length === 1 ? owners[0] : undefined;
+}
+
+/** The artifact {@link lookupArtifactItem} answers by name alone, as it did before #33456. */
+function lookupArtifactItemByName(
     this: Pick<ArtifactLookupHost, 'engine'>,
     type: string, name: string, currentPackageId?: string, member?: string,
 ): unknown {
