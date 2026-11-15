@@ -261,4 +261,9 @@ describe('the Codex driver against a stand-in `codex`: the prompt on stdin, the 
     expect(() => makeDriver('codex', parseArgs(['--author-max-turns', '300']))).toThrow(/^--author-max-turns has no equivalent in the Codex CLI/);
     expect(() => makeDriver('codex', parseArgs(['--author-max-turns', '300', '--ask-max-turns', '20']))).toThrow(/^--author-max-turns, --ask-max-turns have no equivalent in the Codex CLI/);
   });
+
+  it('`codex exec` takes no effort flag, so `--effort`, `--author-effort` and `--ask-effort` are refused at the start', () => {
+    expect(() => makeDriver('codex', parseArgs(['--effort', 'high']))).toThrow(/^--effort has no equivalent in the Codex CLI: `codex exec` takes no effort flag$/);
+    expect(() => makeDriver('codex', parseArgs(['--author-effort', 'high', '--ask-effort', 'low']))).toThrow(/^--author-effort, --ask-effort have no equivalent in the Codex CLI/);
+  });
 });

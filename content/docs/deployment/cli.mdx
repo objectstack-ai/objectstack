@@ -800,6 +800,12 @@ Each row a checkpoint lists reads as one of:
 A row in a sealed window that no checkpoint lists is reported `late` and **unsealed**: on
 the host alone it cannot be told from a forged insert.
 
+A checkpoint removed from a chain shows as a gap in the chain's links, unless it was the
+chain's newest: the links cannot see that one. Its rows then read `late` and unsealed
+while their window still counts as sealed (another checkpoint of the object names that
+window, or one's sealed-through passes it); otherwise the removal does not show. A row
+that two checkpoints list is a fault of its own.
+
 Trust comes only from the deployment's own signing key. A key is trusted only when its
 wrapped private half opens with the crypto provider `os serve` seals with (the declaring
 plugin's, or the existing data key from `OS_SECRET_KEY` or the persisted key file; this
@@ -811,8 +817,9 @@ Exit codes:
 
 - **0**: every chain, link and signature verifies under a trusted key, and every row is
   `unmodified`, `late` (sealed), `redacted` or `expired`. Also 0 when nothing is sealed.
-- **1**: a row is `modified`, `missing` or `late` and unsealed, or a link or signature
-  fails. The report names every row that is not `unmodified` and every fault.
+- **1**: a row is `modified`, `missing` or `late` and unsealed, a link or signature
+  fails, or two checkpoints list the same row. The report names every row that is not
+  `unmodified` and every fault.
 - **2**: no verdict is given. The cause is one of these: a usage error, a stack that would
   not boot, a crypto provider that cannot open what is sealed, an archive datasource a
   sealed object declares that this run did not connect (every archived row would read

@@ -170,6 +170,26 @@ function resolveGatedInput(path: string): { visibleSource: string | undefined } 
   return { visibleSource: param!.visible?.source };
 }
 
+/**
+ * Inputs a `hide-when-on` flag SHOWS while it is on — the one polarity the
+ * registry does not model. `PUBLIC_AUTH_FEATURES` books each flag's inputs
+ * under ONE predicate (`featureGatePredicate`, `features.cloudManaged != true`
+ * for this flag), and the forward rows hold every booked input to it, so an
+ * input gated the other way cannot be booked there. These are: Setup → Users'
+ * managed counterparts of `create_user` and the invitation mirrors, whose
+ * doors (`admin/add-sso-user`, `admin/import-sso-users`) answer only on a
+ * cloud-managed environment. Each must carry the flag's INVERSE as `&&`
+ * conjuncts — `has(features.F)` (so a console holding no flag hides it rather
+ * than faulting, and a faulting action predicate SHOWS) and
+ * `features.F == true` — and its verdicts are pinned in
+ * `identity/cloud-managed-visibility.test.ts`. Kept here, beside the reverse
+ * walk that reads it, rather than as a registry member no runtime reads.
+ */
+const SHOWN_WHEN_ON: ReadonlyArray<[string, PublicAuthFeatureName]> = [
+  ['sys_user.actions.add_sso_user', 'cloudManaged'],
+  ['sys_user.actions.import_sso_users', 'cloudManaged'],
+];
+
 describe('feature-gate completeness guard (#2874)', () => {
   it('sanity: the walker actually sees the platform objects', () => {
     for (const name of ['sys_user', 'sys_organization', 'sys_oauth_application', 'sys_two_factor']) {
@@ -254,7 +274,21 @@ describe('feature-gate completeness guard (#2874)', () => {
     it.each(referencedInputs)('%s references registered flag %s and is booked', (path, flag) => {
       const booked = inputsByFlag.get(flag);
       expect(booked, `features.${flag} is a registry flag`).toBeDefined();
-      expect(booked!.has(path), `${path} is booked in ${flag}.gatedInputs`).toBe(true);
+      const shown = SHOWN_WHEN_ON.some(([p, f]) => p === path && f === flag);
+      expect(booked!.has(path) || shown, `${path} is booked in ${flag}.gatedInputs (or in SHOWN_WHEN_ON)`).toBe(true);
+    });
+  });
+
+  describe('the inputs a hide-when-on flag shows while on (SHOWN_WHEN_ON)', () => {
+    it.each(SHOWN_WHEN_ON)('%s carries the inverse of %s as && conjuncts', (path, flag) => {
+      expect(PUBLIC_AUTH_FEATURES[flag].semantics, `${flag} is hide-when-on, or the input belongs in gatedInputs`).toBe('hide-when-on');
+      const booked = (PUBLIC_AUTH_FEATURES[flag] as { gatedInputs?: readonly string[] }).gatedInputs ?? [];
+      expect(booked, `${path} is not also booked the other way`).not.toContain(path);
+      const { visibleSource } = resolveGatedInput(path);
+      expect(visibleSource, `${path} has a visible predicate`).toBeDefined();
+      for (const term of [`has(features.${flag})`, `features.${flag} == true`]) {
+        expect(carriesGateConjunct(visibleSource!, term), `${path}: "${visibleSource}" must carry "${term}"`).toBe(true);
+      }
     });
   });
 });

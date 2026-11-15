@@ -27,7 +27,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../s
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
 import { runCard, runHalf, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
-import { buildDenialFindings, cardScorecard, opsTally, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
+import { buildDenialFindings, cardScorecard, modelTally, opsTally, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -1023,6 +1023,7 @@ describe('runCard — every turn states the model it was served, and a mismatch 
       served: { 'claude-sonnet-4-5-20250929': firstTurns - firstFellBack, 'claude-opus-5-5': firstFellBack },
       requested: ['sonnet'],
       mismatched: firstFellBack,
+      requestedEfforts: [],
     });
     const table = renderScorecard(sc);
     expect(table).toContain(' · claude-opus-4-1-20250805 |'); // the build's author row
@@ -1052,7 +1053,7 @@ describe('runCard — every turn states the model it was served, and a mismatch 
   it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
     const { scenario, ops, driver } = setup();
     const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
-    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0 });
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0, requestedEfforts: [] });
     const table = renderScorecard(sc);
     expect(table).toContain('| Run · model | — |');
     expect(table).toContain('| Build · author | success · elapsed not recorded |');
@@ -1275,6 +1276,66 @@ describe('runHalf — a write the build denies the persona is charged to the bui
     // The one call the app saw is the replay's re-send of the agent's create; the runner sent no probe.
     expect(app.toolCalls).toEqual([{ apiKey: 'key-contractor', tool: 'create_record', args: landed.toolCalls[0]!.input }]);
     expect(half.operations[0]!.observation!.probe).toBeUndefined();
+  });
+});
+
+// ── The effort each turn asked for ──────────────────────────────────────────
+
+/**
+ * A driver that answers as `inner` does, each turn stamped as the live driver
+ * stamps it under `--author-effort xhigh --ask-effort medium --model haiku`:
+ * the model and effort it asked for (`meta.process`) and the model it was
+ * served (`meta.model`). No stream reports an effort, so none is served.
+ */
+class AskedEfforts implements AgentDriver {
+  constructor(private readonly inner: AgentDriver) {}
+  info(): DriverInfo {
+    return { ...this.inner.info(), authorModel: 'haiku', askModel: 'haiku', authorEffort: 'xhigh', askEffort: 'medium' };
+  }
+  private stamp(t: ParsedTurn, requestedEffort: string): ParsedTurn {
+    return { ...t, meta: { ...t.meta, model: 'claude-haiku-5-5', process: { elapsedMs: 1_000, exit: 0, timedOut: false, timeoutMs: 60_000, maxTurns: 12, requestedModel: 'haiku', requestedEffort } } };
+  }
+  async author(task: AuthorTask) {
+    const r = await this.inner.author(task);
+    return { ...r, turn: this.stamp(r.turn, 'xhigh') };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    return this.stamp(await this.inner.ask(task), 'medium');
+  }
+}
+
+describe('runCard — every turn states the effort it asked for, beside the model it was served', () => {
+  it('the record carries the requested effort per turn and on the driver, and the scorecard shows it on the author rows and the Run · model rows', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const driver = new RecordingDriver(new AskedEfforts(scripted));
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+
+    expect(scratch.build!.author).toMatchObject({ model: 'claude-haiku-5-5', requestedModel: 'haiku', requestedEffort: 'xhigh' });
+    expect(scratch.iterate!.build.author).toMatchObject({ requestedEffort: 'xhigh' });
+    const turns = [...scratch.run!.questions, ...scratch.run!.operations, ...scratch.iterate!.run!.questions, ...scratch.iterate!.run!.operations];
+    expect(turns.length).toBeGreaterThan(0);
+    expect(turns.map((x) => x.turn!.requestedEffort)).toEqual(turns.map(() => 'medium'));
+
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.models).toEqual({ served: { 'claude-haiku-5-5': scratch.run!.questions.length + scratch.run!.operations.length }, requested: ['haiku'], mismatched: 0, requestedEfforts: ['medium'] });
+    expect(sc.modes[0]!.first.build!.author).toMatchObject({ model: 'claude-haiku-5-5', requestedEffort: 'xhigh' });
+    const table = renderScorecard(sc);
+    expect(table).toContain(' · claude-haiku-5-5 · effort xhigh |'); // the build's author row
+    expect(table).toMatch(/\| Iterate · author \| [^|]* · claude-haiku-5-5 · effort xhigh \|/);
+    expect(table).toMatch(/\| Run · model \| claude-haiku-5-5 ×\d+ · effort medium \|/);
+    expect(table).toMatch(/\| Iterate · Run · model \| claude-haiku-5-5 ×\d+ · effort medium \|/);
+
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-15', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect(written.env.driver).toMatchObject({ authorEffort: 'xhigh', askEffort: 'medium' });
+    expect(written.cardRun.modes[0].build.author).toMatchObject({ requestedEffort: 'xhigh' });
+    expect(written.cardRun.modes[0].run.questions[0].turn).toMatchObject({ requestedEffort: 'medium' });
+    expect(written.scorecard.modes[0].first.models.requestedEfforts).toEqual(['medium']);
+  });
+
+  it('a Run half whose turns named no model but asked for an effort still shows the effort', () => {
+    const half = { questions: [{ turn: { toolCalls: 0, requestedEffort: 'low' } }], operations: [] } as unknown as Parameters<typeof modelTally>[0];
+    expect(modelTally(half)).toEqual({ served: { '(not reported)': 1 }, requested: [], mismatched: 0, requestedEfforts: ['low'] });
   });
 });
 

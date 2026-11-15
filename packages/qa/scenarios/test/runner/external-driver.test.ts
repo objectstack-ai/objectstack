@@ -166,6 +166,27 @@ describe('the external driver contract — one process per call, JSON in on stdi
     expect(asked.meta.process).toMatchObject({ maxTurns: 20, requestedModel: 'm2' });
     expect(d.info()).toMatchObject({ authorTimeoutMs: 90 * 60_000, authorMaxTurns: { control: 450, starter: 450, delivery: 450 }, askMaxTurns: 20, authorModel: 'm1', askModel: 'm2' });
   });
+
+  it('`--effort` reaches the command in `limits.effort` as typed, `--author-effort` / `--ask-effort` set the two kinds apart, and the record states each', async () => {
+    const limitsOf = (t: ParsedTurn) => echoed(t).input.limits as Record<string, unknown>;
+    const every = makeDriver(`external:${COMMAND}`, parseArgs(['--effort', 'deep']));
+    expect(echoed((await every.author(author('ECHO'))).turn).input.limits).toEqual({ timeoutMs: 60 * 60_000, effort: 'deep' });
+    const askedEvery = await every.ask(ask('ECHO'));
+    expect([limitsOf(askedEvery).effort, askedEvery.meta.process!.requestedEffort]).toEqual(['deep', 'deep']);
+    expect(every.info()).toMatchObject({ authorEffort: 'deep', askEffort: 'deep' });
+
+    const apart = makeDriver(`external:${COMMAND}`, parseArgs(['--effort', 'deep', '--ask-effort', 'quick']));
+    const built = (await apart.author(author('ECHO'))).turn;
+    const asked = await apart.ask(ask('ECHO'));
+    expect([limitsOf(built).effort, built.meta.process!.requestedEffort]).toEqual(['deep', 'deep']);
+    expect([limitsOf(asked).effort, asked.meta.process!.requestedEffort]).toEqual(['quick', 'quick']);
+    expect(apart.info()).toMatchObject({ authorEffort: 'deep', askEffort: 'quick' });
+
+    // With no effort flag, `limits` carries none and no turn records one.
+    const plain = makeDriver(`external:${COMMAND}`, parseArgs([]));
+    const none = await plain.ask(ask('ECHO'));
+    expect(['effort' in limitsOf(none), none.meta.process!.requestedEffort, plain.info().askEffort]).toEqual([false, undefined, undefined]);
+  });
 });
 
 /**

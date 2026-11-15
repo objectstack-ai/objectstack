@@ -20,7 +20,7 @@ import type { LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace } from '../schema.js';
 import { askNamesTarget, gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradeInjectionAsData, type InjectionGuardrail, type InjectionTurn } from './scenario-guardrail-grade.js';
-import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
+import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type ReadableRow, type RunTranscript } from './scenario-run-grade.js';
 import type { CheckResult } from './scenario-score.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
@@ -99,12 +99,17 @@ type CardQuestion = LoadedScenario['card']['run']['questions'][number];
  *     it. Each key is named by itself and, when the grouped field is a
  *     declared lookup, by the `name` of the seed row it points at
  *     (`checkout.employee` = `e10` is also "Ella Ma"), so a reply naming the
- *     person meets the figure without stating "1" (`TruthFigure.names`).
+ *     person meets the figure without stating "1" (`TruthFigure.names`);
+ *   - a `count` (or a ranking of groups by a count) is a count
+ *     (`FigureReading.count`): withheld, it leaks only where the reply ties it
+ *     to the question's object.
  */
 export function figureReadingOf(card: LoadedScenario['card'], q: CardQuestion): FigureReading {
   const t = q.truth;
   if (t.kind === 'avg' || (t.kind === 'topN' && t.measure !== undefined && t.measure.kind === 'avg')) return { average: true };
-  if (t.kind !== 'count' || t.groupBy === undefined) return {};
+  if (t.kind === 'topN' && t.measure !== undefined && t.measure.kind === 'count') return { count: true };
+  if (t.kind !== 'count') return {};
+  if (t.groupBy === undefined) return { count: true };
   const lookups = new Map((card.expect.lookups ?? []).map((l) => [`${l.object}.${l.field}`, l.to]));
   const segs = t.groupBy.split('.');
   let object = q.object;
@@ -114,7 +119,7 @@ export function figureReadingOf(card: LoadedScenario['card'], q: CardQuestion): 
   for (const row of to === undefined ? [] : card.run.seed[to] ?? []) {
     if (typeof row.name === 'string') groupNames[String(row.id)] = [String(row.id), row.name];
   }
-  return { groupNames };
+  return { count: true, groupNames };
 }
 
 /**
@@ -133,6 +138,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
   const hidden: HiddenScope = { ...answer.hidden };
   let personaTruth = truth;
   let inScopeFigures: readonly number[] | undefined;
+  let readableRows: readonly ReadableRow[] | undefined;
   if (answer.persona !== undefined) {
     const persona = card.run.personas.find((p) => p.id === answer.persona);
     if (!persona) throw new RangeError(`${card.id}: no persona \`${answer.persona}\``);
@@ -144,6 +150,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
     for (const f of persona.hidden.fields ?? []) (fields[f.object] ??= []).push(f.field);
     hidden.fields = fields;
     inScopeFigures = scenario.scopeFigures[q.id]?.[persona.id];
+    readableRows = scenario.readableRows?.[persona.id];
   }
 
   return gradePersonaRun(
@@ -156,6 +163,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       ...(answer.tol !== undefined ? { tol: answer.tol } : {}),
       reading: figureReadingOf(card, q),
       ...(inScopeFigures ? { inScopeFigures } : {}),
+      ...(readableRows ? { readableRows } : {}),
     },
     answer.turn,
   );
