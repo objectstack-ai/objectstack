@@ -1162,7 +1162,7 @@ describe('[#33759] Ban / Unban are offered and work without the admin plugin', (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Removing a pending person, and the outbox every host call is recorded in
+// Removing a pending person, and the outbox the invitation calls are recorded in
 // ─────────────────────────────────────────────────────────────────────────────
 
 const outboxRows = (s: Awaited<ReturnType<typeof stage>>) =>
@@ -1198,7 +1198,7 @@ async function addPending(s: Awaited<ReturnType<typeof stage>>, email: string): 
   return String(s.row(email)!.id);
 }
 
-describe('[#33228] every host call about a person is recorded in the outbox', () => {
+describe('[#33228] every invitation call about a person is recorded in the outbox', () => {
   it('an add records its invitation sent, under the delivery id the host was told', async () => {
     const s = await managedStage();
     const res = await s.fire('/admin/add-sso-user', { email: 'outbox.add@example.com', name: 'Outbox' }, s.bearers.admin);
@@ -1454,5 +1454,102 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
     const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member }, s.bearers.admin));
     expect([v.status, v.code, v.message]).toEqual([409, 'RESOURCE_CONFLICT', PENDING_SSO_MESSAGES.notManagedRemove]);
     expect(s.row(EMAILS.member)).toBeDefined();
+  });
+});
+
+describe('[#33228] a deactivated person is never sent an invitation, and a removal is held to pending people', () => {
+  /** Make the delete of `sys_user` answer a `restrict` refusal, as the engine's delete walk does. */
+  const restrictDelete = (s: Awaited<ReturnType<typeof stage>>) => {
+    const realDelete = s.engine.delete.bind(s.engine);
+    s.engine.delete = async (name: string, q: any = {}) => {
+      if (name === 'sys_user') {
+        throw Object.assign(new Error('This User cannot be deleted because an Approval Rule still refers to it.'), {
+          code: 'DELETE_RESTRICTED',
+          status: 409,
+        });
+      }
+      return realDelete(name, q);
+    };
+  };
+  const RESTRICTED = 'This User cannot be deleted because an Approval Rule still refers to it.';
+
+  it('a refused removal of a deactivated pending person sends no new invitation, and says the old one is cancelled', async () => {
+    const { host } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.banned@example.com');
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(outboxRows(s).filter((r) => r.kind === 'added' && r.status === 'pending')).toEqual([]);
+    expect(outboxRows(s).find((r) => r.kind === 'removed')).toMatchObject({ status: 'sent', user_id: id });
+  });
+
+  it('a refused removal the host never took sends no new invitation, and says the cancellation was not confirmed', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new Error('host down');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.unreached@example.com');
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostUnconfirmed}`);
+    expect(outboxRows(s).map((r) => [r.kind, r.status])).toEqual([['added', 'sent']]);
+  });
+
+  it('deactivating a pending person stops an invitation whose sender died mid-call, so it is not sent when its claim lapses', async () => {
+    const s = await managedStage();
+    const id = await addPending(s, 'stranded@example.com');
+    const [sent] = outboxRows(s);
+    outboxRows(s).push({ ...sent, id: 'stranded_row', status: 'in_flight', claim_token: 'dead', claimed_until: Date.now() + 60_000 });
+
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    expect(outboxRows(s).find((r) => r.id === 'stranded_row')).toMatchObject({ status: 'superseded' });
+    expect(outboxRows(s).find((r) => r.id === sent.id)).toMatchObject({ status: 'sent' });
+  });
+
+  it('a person who signs in while the host is asked is not removed: 409, and the call the host took is recorded', async () => {
+    const email = 'signs.in@example.com';
+    let s!: Awaited<ReturnType<typeof stage>>;
+    const { host } = removingHost({
+      removed: () => {
+        s.row(email)!.source = 'idp_provisioned';
+      },
+    });
+    s = await managedStage({ host });
+    const id = await addPending(s, email);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('RESOURCE_CONFLICT');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+    expect(outboxRows(s).find((r) => r.kind === 'removed')).toMatchObject({ status: 'sent', user_id: id });
+  });
+
+  it('off a cloud-managed kernel a wired host is still asked, but nothing is recorded and no retry is claimed', async () => {
+    const { host, told } = removingHost();
+    host.userReactivated = () => {
+      throw new Error('host down');
+    };
+    const s = await stage({ host });
+    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+    const body: any = await (await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).json();
+
+    expect(told.map((t) => t.kind)).toEqual(['deactivated']);
+    expect(body.data).toMatchObject({ banned: false, host: { notified: false, reason: 'host_failed' } });
+    expect(body.data.invitation).toBeUndefined();
+    expect(outboxRows(s)).toEqual([]);
   });
 });

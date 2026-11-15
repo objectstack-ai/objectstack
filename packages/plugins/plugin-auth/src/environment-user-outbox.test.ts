@@ -211,6 +211,28 @@ describe('the worker\'s pass', () => {
     expect(active.calls.map((c) => c.member)).toEqual(['userReactivated']);
   });
 
+  it('an invitation for a pending person who was deactivated is superseded, waiting or stranded in flight; the host is not called', async () => {
+    const h = harness({ user: { banned: 1 } });
+    h.seed(h.pendingRow());
+    h.seed(h.pendingRow({ id: 'row_2', status: 'in_flight', claim_token: 'dead', claimed_until: NOW - 1 }));
+    await runEnvironmentUserOutboxTick(h.deps);
+    expect(h.calls).toHaveLength(0);
+    expect(h.rows().map((r) => r.status)).toEqual(['superseded', 'superseded']);
+  });
+
+  it('a cancellation for a person who signed in meanwhile is superseded; CONTROL: one for a person still pending is sent', async () => {
+    const signedIn = harness({ user: { source: 'idp_provisioned' } });
+    signedIn.seed(signedIn.pendingRow({ kind: 'removed' }));
+    await runEnvironmentUserOutboxTick(signedIn.deps);
+    expect(signedIn.calls).toHaveLength(0);
+    expect(signedIn.rows()[0]).toMatchObject({ status: 'superseded' });
+
+    const pending = harness();
+    pending.seed(pending.pendingRow({ kind: 'removed' }));
+    await runEnvironmentUserOutboxTick(pending.deps);
+    expect(pending.calls.map((c) => c.member)).toEqual(['userDeactivated']);
+  });
+
   it('a removal is sent on userRemoved, or on userDeactivated by a host without it', async () => {
     const removed = vi.fn();
     const own = harness({ user: null, host: { userRemoved: removed } });

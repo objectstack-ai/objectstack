@@ -45,6 +45,14 @@ export const PENDING_SSO_MESSAGES = {
   removeRefusedReinvited:
     'Their invitation had already been cancelled at the hosting organisation, so it is being sent again and they '
     + 'stay pending as before.',
+  removeRefusedNotReinvited:
+    'Their invitation had already been cancelled at the hosting organisation, and a new one could not be queued: '
+    + 'add them again to send it.',
+  removeHostCancelled:
+    'The hosting organisation had already been told to cancel their invitation, and it is not sent again.',
+  removeHostUnconfirmed:
+    'The hosting organisation was asked to cancel their invitation but did not confirm it, and the request is not '
+    + 'retried.',
   alreadyExists:
     'A user with this email address already exists in this environment, so no one was added. Change the existing '
     + "user's positions, permission sets or manager on their record instead.",

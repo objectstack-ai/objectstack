@@ -121,7 +121,9 @@ import {
   insertOutboxRow,
   newOutboxId,
   outboxDoc,
+  isDeactivated,
   outboxNextAttemptAt,
+  OUTBOX_UNSENT_STATUSES,
   settleOutboxAttempt,
   supersedeOpenOutboxRows,
   type EnvironmentUserOutboxEngine,
@@ -477,6 +479,7 @@ async function sendAdded(
     'added',
     claim ? { ...event, deliveryId: claim.id } : event,
     deps.logger,
+    { retried: claim !== undefined },
   );
   if (!claim) return { host };
   return { host, invitation: await settleHeld(deps, engine, claim, event, host) };
@@ -565,12 +568,14 @@ async function takeBackPerson(
   userId: string,
   settlement: RequestSettlement,
   alongside?: () => Promise<void>,
+  first?: () => Promise<void>,
 ): Promise<void> {
   if (typeof engine.delete !== 'function') {
     throw new Error(`The host refused user ${userId}, and this data engine cannot take the row back out`);
   }
   const remove = engine.delete.bind(engine);
   const work = async (): Promise<void> => {
+    if (first) await first();
     const context = await authSystemWriteContext();
     for (const object of TAKE_BACK_OBJECTS) {
       await remove(object, { where: { user_id: userId }, multi: true, context });
@@ -804,9 +809,11 @@ const REMOVE_KEYS = new Set(['userId']);
  * outbox row recording the cancellation, in one unit of work, through the
  * engine's delete, so a record that points at the person follows its lookup's
  * `deleteBehavior`: a `restrict` refuses the removal with the engine's own
- * answer and nothing is removed. A host that could not be reached does not
- * block the removal: the cancellation is queued and retried. With no host
- * wired nothing is called and no row is written.
+ * answer and nothing is removed. "Pending only" is held at the removal too: a
+ * person who signs in while the host is asked is answered `409` and kept. A
+ * host that could not be reached does not block the removal: the
+ * cancellation is queued and retried. With no host wired nothing is called
+ * and no row is written.
  */
 export async function runRemoveSsoUser(
   deps: PendingSsoUserDeps,
@@ -855,7 +862,9 @@ export async function runRemoveSsoUser(
       ...(await environmentUserAttribution(engine, actor, deps.logger)),
       occurredAt: new Date().toISOString(),
     };
-    const answer = await notifyEnvironmentUserHost(deps.host, 'removed', { ...event, deliveryId }, deps.logger);
+    const answer = await notifyEnvironmentUserHost(deps.host, 'removed', { ...event, deliveryId }, deps.logger, {
+      retried: true,
+    });
     if ('refused' in answer) return hostRefusal(answer);
     host = answer;
   } else {
@@ -867,26 +876,29 @@ export async function runRemoveSsoUser(
     ? ({ status: 'sent' } as const)
     : ({ status: 'pending', lastError: 'The hosting organisation could not be reached, or failed to take the call.' } as const);
 
+  // Pending only, held at the write: the person may have signed in while the
+  // host was asked, and then they are not removed.
+  const stillPending = async (): Promise<void> => {
+    const now = await engine.find('sys_user', { where: { id: userId }, fields: ['id', 'source'], limit: 1, context: SYSTEM_CTX });
+    const row = (Array.isArray(now) ? now[0] : undefined) as { source?: unknown } | undefined;
+    if (!row || !isPendingSsoSource(row.source)) throw new NoLongerPending();
+  };
   try {
-    await takeBackPerson(deps, engine, userId, {}, async () => {
-      if (!recorded) return;
-      const context = await authSystemWriteContext();
-      await supersedeOpenOutboxRows(outboxEngine(engine), userId, ['added', 'reactivated']);
-      await insertOutboxRow(outboxEngine(engine), outboxDoc(deliveryId, 'removed', recorded, birth), context);
-    });
-  } catch (error) {
-    // The removal did not happen. If the host was already told to cancel the
-    // invitation, the person is pending without one: send it again.
-    const reinvited = recorded ? await reinvite(deps, engine, recorded) : false;
-    const thrown = resolveThrownHttpError(error, 500);
-    const cause = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
-    return fail(
-      thrown.status,
-      thrown.code,
-      [PENDING_SSO_MESSAGES.removeRefused, cause, reinvited ? PENDING_SSO_MESSAGES.removeRefusedReinvited : '']
-        .filter(Boolean)
-        .join(' '),
+    await takeBackPerson(
+      deps,
+      engine,
+      userId,
+      {},
+      async () => {
+        if (!recorded) return;
+        const context = await authSystemWriteContext();
+        await supersedeOpenOutboxRows(outboxEngine(engine), userId, ['added', 'reactivated'], OUTBOX_UNSENT_STATUSES);
+        await insertOutboxRow(outboxEngine(engine), outboxDoc(deliveryId, 'removed', recorded, birth), context);
+      },
+      stillPending,
     );
+  } catch (error) {
+    return removalNotDone(deps, engine, error, { host, recorded, deliveryId });
   }
   if (recorded && birth.status === 'pending') deps.wakeOutbox?.(outboxNextAttemptAt(1, Date.now()));
 
@@ -905,9 +917,95 @@ export async function runRemoveSsoUser(
   };
 }
 
+/** Thrown inside the removal's unit of work when the person is no longer pending there. */
+class NoLongerPending extends Error {
+  constructor() {
+    super('The person is no longer pending');
+  }
+}
+
+/**
+ * The answer when the removal's unit of work did not commit: no one was
+ * removed. What the host was told is said as it happened, and an invitation
+ * is sent again only when the host took the cancellation and the person is
+ * still pending and not deactivated.
+ */
+async function removalNotDone(
+  deps: PendingSsoUserDeps,
+  engine: PendingSsoUserEngine,
+  error: unknown,
+  call: { host: EnvironmentUserHostOutcome; recorded: EnvironmentUserEvent | undefined; deliveryId: string },
+): Promise<EndpointResult> {
+  const { host, recorded, deliveryId } = call;
+  const told = recorded !== undefined && host.notified;
+  // The cancellation the host took is recorded, so the person's status says so.
+  const recordCancellation = async (): Promise<void> => {
+    if (!told) return;
+    try {
+      await insertOutboxRow(outboxEngine(engine), outboxDoc(deliveryId, 'removed', recorded!, { status: 'sent' }));
+    } catch (e) {
+      deps.logger?.warn(
+        `[AuthPlugin] the hosting organisation cancelled the invitation of user ${recorded!.userId}, but the record `
+          + `of it could not be written. Cause: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  };
+  const hostSentence = told
+    ? PENDING_SSO_MESSAGES.removeHostCancelled
+    : recorded
+      ? PENDING_SSO_MESSAGES.removeHostUnconfirmed
+      : '';
+
+  if (error instanceof NoLongerPending) {
+    await recordCancellation();
+    return fail(
+      PENDING_SSO_REFUSAL_STATUS,
+      PENDING_SSO_REFUSAL_CODE,
+      [PENDING_SSO_MESSAGES.removeNotPending, hostSentence].filter(Boolean).join(' '),
+    );
+  }
+
+  const thrown = resolveThrownHttpError(error, 500);
+  const cause = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
+  let after = hostSentence;
+  if (told) {
+    const person = await readPersonState(engine, recorded!.userId);
+    if (person.pending && !person.deactivated) {
+      // The re-send is the person's newest row, so the cancellation is not recorded beside it.
+      after = (await reinvite(deps, engine, recorded!))
+        ? PENDING_SSO_MESSAGES.removeRefusedReinvited
+        : PENDING_SSO_MESSAGES.removeRefusedNotReinvited;
+    } else {
+      await recordCancellation();
+      after = PENDING_SSO_MESSAGES.removeHostCancelled;
+    }
+  }
+  return fail(thrown.status, thrown.code, [PENDING_SSO_MESSAGES.removeRefused, cause, after].filter(Boolean).join(' '));
+}
+
+/** Whether the person is pending and whether they are deactivated, read now; unreadable reads as neither safe. */
+async function readPersonState(
+  engine: PendingSsoUserEngine,
+  userId: string,
+): Promise<{ pending: boolean; deactivated: boolean }> {
+  try {
+    const rows = await engine.find('sys_user', {
+      where: { id: userId },
+      fields: ['id', 'source', 'banned'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row = (Array.isArray(rows) ? rows[0] : undefined) as { source?: unknown; banned?: unknown } | undefined;
+    if (!row) return { pending: false, deactivated: false };
+    return { pending: isPendingSsoSource(row.source), deactivated: isDeactivated(row) };
+  } catch {
+    return { pending: false, deactivated: true };
+  }
+}
+
 /**
  * Queue a fresh invitation for a pending person whose removal failed after
- * the host was told to cancel theirs. Answers whether it was queued; a
+ * the host took the cancellation of theirs. Answers whether it was queued; a
  * failure is logged at `error`: the person stays pending with no invitation.
  */
 async function reinvite(deps: PendingSsoUserDeps, engine: PendingSsoUserEngine, event: EnvironmentUserEvent): Promise<boolean> {

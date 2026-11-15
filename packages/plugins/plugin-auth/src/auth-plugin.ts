@@ -394,12 +394,15 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * [#33181] The environment-user host (`environment-user-host.ts`): told
    * after a person is added through `admin/add-sso-user` or
    * `admin/import-sso-users`, and asked before a person is deactivated
-   * through `admin/ban-user` or reactivated through `admin/unban-user`. Read
-   * per call, so a host wired after boot is still found. A typed
-   * `EnvironmentUserHostRefusal` refuses the operation (a refused add is
-   * taken back out); any other failure refuses a deactivation (`503`) and is
-   * reported on an add or a reactivation as `host: { notified: false,
-   * reason }`, which it never undoes.
+   * through `admin/ban-user`, reactivated through `admin/unban-user`, or a
+   * pending person is removed through `admin/remove-sso-user` (`userRemoved`,
+   * else `userDeactivated`). Read per call, so a host wired after boot is
+   * still found. A typed `EnvironmentUserHostRefusal` refuses the operation
+   * (a refused add is taken back out); any other failure refuses a
+   * deactivation (`503`) and is reported on an add, a reactivation or a
+   * removal as `host: { notified: false, reason }`, which it never undoes.
+   * On a cloud-managed kernel those calls are recorded in the
+   * environment-user outbox and retried (`environment-user-outbox.ts`).
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 
@@ -2294,14 +2297,24 @@ export class AuthPlugin implements Plugin {
         // The environment-user outbox (`environment-user-outbox.ts`): on a
         // cloud-managed kernel with a host wired, a pending person's
         // invitation reads `accepted` once they sign in, and the worker
-        // retries every call the host did not take. Elsewhere no outbox row
-        // is ever written, so neither runs.
+        // retries every recorded call the host did not take. The doors
+        // record only on a cloud-managed kernel, so elsewhere neither runs.
+        // A boot that fails is logged here, never left to the catch below:
+        // the rows it would drain wait for the next boot.
         if (!this.environmentUserOutbox) {
-          this.environmentUserOutbox = bootEnvironmentUserOutbox(engine as unknown as OutboxHookEngine, {
-            host: this.options.environmentUserHost,
-            isCloudManaged,
-            logger: ctx.logger,
-          }) ?? null;
+          try {
+            this.environmentUserOutbox = bootEnvironmentUserOutbox(engine as unknown as OutboxHookEngine, {
+              host: this.options.environmentUserHost,
+              isCloudManaged,
+              logger: ctx.logger,
+            }) ?? null;
+          } catch (e) {
+            ctx.logger.error(
+              '[AuthPlugin] the environment-user outbox worker did not start, so invitations and cancellations '
+                + 'the hosting organisation did not take are not retried until the next boot. Cause: '
+                + `${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
         }
         try {
           await refreshAllMappingMatches(engine);
@@ -4951,6 +4964,7 @@ export class AuthPlugin implements Plugin {
         ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
         getDataEngine: () => this.authManager!.getDataEngine(),
         wakeOutbox: this.wakeEnvironmentUserOutbox,
+        isCloudManaged: () => isCloudManaged(),
         logger: ctx.logger,
       });
 

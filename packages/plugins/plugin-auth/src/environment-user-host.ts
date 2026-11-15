@@ -236,13 +236,16 @@ export async function environmentUserAttribution(
 /**
  * Tell the host, once. Never throws. A typed refusal is answered as
  * `{ refused }` for the door to return; any other failure as `host_failed`
- * on the caller's row, logged at `warn` with its message.
+ * on the caller's row, logged at `warn` with its message. `opts.retried`
+ * says the caller records the call in the outbox, so the log may say it is
+ * retried; a caller that records nothing leaves it unset.
  */
 export async function notifyEnvironmentUserHost(
   accessor: EnvironmentUserHostAccessor | undefined,
   kind: EnvironmentUserEventKind,
   event: EnvironmentUserEvent,
   logger?: { warn(msg: string): void },
+  opts: { retried?: boolean } = {},
 ): Promise<EnvironmentUserHostOutcome | EnvironmentUserHostRefused> {
   let host: EnvironmentUserHost | undefined;
   try {
@@ -266,7 +269,7 @@ export async function notifyEnvironmentUserHost(
     logger?.warn(
       `[AuthPlugin] the environment-user host refused or failed to take the news that user ${event.userId} was `
         + `${kind}. ${goesAhead(kind)} The answer says so. `
-        + (kind === 'deactivated' ? '' : 'The call is retried. ')
+        + (opts.retried && kind !== 'deactivated' ? 'The call is retried. ' : '')
         + `Cause: ${describe(error)}`,
     );
     return { notified: false, reason: 'host_failed' };

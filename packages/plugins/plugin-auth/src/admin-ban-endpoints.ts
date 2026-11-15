@@ -117,6 +117,7 @@ import {
   newOutboxId,
   outboxDoc,
   outboxNextAttemptAt,
+  OUTBOX_UNSENT_STATUSES,
   supersedeOpenOutboxRows,
   type OutboxBirth,
 } from './environment-user-outbox.js';
@@ -149,6 +150,11 @@ export interface AdminBanEndpointDeps {
   getDataEngine?(): any;
   /** Wakes the outbox worker for a reactivation queued for retry (`environment-user-outbox.ts`). */
   wakeOutbox?(atMs: number): void;
+  /**
+   * Whether the kernel is cloud-managed. Only there does the outbox worker
+   * run, so only there is a call recorded; absent reads as not managed.
+   */
+  isCloudManaged?(): boolean;
   logger?: { warn(msg: string): void; error?(msg: string, err?: Error): void };
 }
 
@@ -188,7 +194,9 @@ async function askHost(
     occurredAt: new Date().toISOString(),
   };
   const deliveryId = newOutboxId();
-  const outcome = await notifyEnvironmentUserHost(deps.host, kind, { ...event, deliveryId }, deps.logger);
+  const outcome = await notifyEnvironmentUserHost(deps.host, kind, { ...event, deliveryId }, deps.logger, {
+    retried: deps.isCloudManaged?.() === true,
+  });
   return { outcome, event, deliveryId };
 }
 
@@ -205,13 +213,15 @@ async function recordAsk(
   kind: 'deactivated' | 'reactivated',
   ask: HostAsk,
 ): Promise<{ id: string; status: 'sent' | 'pending' } | undefined> {
+  // Off a cloud-managed kernel no worker drains the outbox, so nothing is recorded.
+  if (deps.isCloudManaged?.() !== true) return undefined;
   const engine = deps.getDataEngine?.();
   if (!engine || 'refused' in ask.outcome) return undefined;
   const outcome = ask.outcome;
   if (!outcome.notified && outcome.reason === 'no_host') return undefined;
   try {
     if (kind === 'deactivated') {
-      await supersedeOpenOutboxRows(engine, ask.event.userId, ['added', 'reactivated']);
+      await supersedeOpenOutboxRows(engine, ask.event.userId, ['added', 'reactivated'], OUTBOX_UNSENT_STATUSES);
       if (!outcome.notified || !isPendingSsoSource(ask.event.source)) return undefined;
     } else {
       await supersedeOpenOutboxRows(engine, ask.event.userId, ['reactivated']);

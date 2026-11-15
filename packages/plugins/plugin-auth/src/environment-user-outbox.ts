@@ -2,9 +2,14 @@
 
 /**
  * The durable outbox of the environment-user host seam
- * (`environment-user-host.ts`): every call the environment makes to its host
- * about one person is a row of `sys_environment_user_outbox`, and a call the
- * host did not take is retried here until it does or the attempts run out.
+ * (`environment-user-host.ts`). On a cloud-managed kernel these calls about
+ * one person are rows of `sys_environment_user_outbox`: every invitation sent
+ * (an add or re-add), every re-send (a reactivation), every cancellation
+ * (a removal, and the deactivation of a person still pending). A call the host
+ * did not take is retried here until it does or the attempts run out. The
+ * deactivation of a person who has signed in is asked of the host but not
+ * recorded: there is no invitation to show, and a refused deactivation is
+ * never retried. Off a cloud-managed kernel nothing is recorded.
  *
  * ## Why the door still calls first
  *
@@ -68,7 +73,7 @@ import {
   type EnvironmentUserHostRefused,
 } from './environment-user-host.js';
 
-/** The object every call is recorded in. */
+/** The object the recorded calls are kept in (see the module header for which calls). */
 export const ENVIRONMENT_USER_OUTBOX_OBJECT = 'sys_environment_user_outbox';
 
 /** The statuses a row moves through. */
@@ -180,19 +185,29 @@ export async function insertOutboxRow(
 /**
  * Mark a person's unsent rows of `kinds` `superseded`: a re-send replaces an
  * older invitation still waiting, and a deactivation or removal stops every
- * invitation still waiting, so no stale retry is sent after it.
+ * invitation still waiting, so no stale retry is sent after it. A
+ * deactivation or removal also passes `in_flight`: a row whose sender died
+ * holds a claim that lapses, and it must not be sent once it does.
  */
 export async function supersedeOpenOutboxRows(
   engine: EnvironmentUserOutboxEngine,
   userId: string,
   kinds: readonly EnvironmentUserEventKind[],
+  statuses: readonly ('pending' | 'in_flight')[] = ['pending'],
 ): Promise<void> {
   await engine.update(
     ENVIRONMENT_USER_OUTBOX_OBJECT,
     { status: 'superseded', next_attempt_at: null },
-    { where: { user_id: userId, kind: { $in: [...kinds] }, status: 'pending' }, multi: true, context: SYSTEM_CTX },
+    {
+      where: { user_id: userId, kind: { $in: [...kinds] }, status: { $in: [...statuses] } },
+      multi: true,
+      context: SYSTEM_CTX,
+    },
   );
 }
+
+/** The statuses a deactivation or removal stops: every invitation not yet taken. */
+export const OUTBOX_UNSENT_STATUSES = ['pending', 'in_flight'] as const;
 
 /** What one attempt's outcome makes of the row. */
 export function outboxSettlement(
@@ -332,12 +347,15 @@ export interface EnvironmentUserOutboxDeps {
   now?(): number;
 }
 
+/** Whether a `sys_user` row is deactivated (the memory engine stores `banned` as `0` / `1`). */
+export const isDeactivated = (user: { banned?: unknown }): boolean => user.banned === true || user.banned === 1;
+
 /** Whether a row still has a reason to be sent, read from the person as they are now. */
 async function stillOwed(
   engine: EnvironmentUserOutboxEngine,
   row: EnvironmentUserOutboxRow,
 ): Promise<'send' | 'accepted' | 'superseded'> {
-  if (row.kind !== 'added' && row.kind !== 'reactivated') return 'send';
+  if (row.kind === 'deactivated') return 'send';
   const users = await engine.find('sys_user', {
     where: { id: row.user_id },
     fields: ['id', 'source', 'banned'],
@@ -345,10 +363,13 @@ async function stillOwed(
     context: SYSTEM_CTX,
   });
   const user = (Array.isArray(users) ? users[0] : undefined) as { source?: unknown; banned?: unknown } | undefined;
+  // A cancellation is owed while the person is gone, or still pending.
+  if (row.kind === 'removed') return !user || isPendingSsoSource(user.source) ? 'send' : 'superseded';
   if (!user) return 'superseded';
+  // An invitation or a re-send is never sent to a deactivated person.
+  if (isDeactivated(user)) return 'superseded';
   if (row.kind === 'added') return isPendingSsoSource(user.source) ? 'send' : 'accepted';
-  // A reactivation still owed only while the person is still active.
-  return user.banned === true || user.banned === 1 ? 'superseded' : 'send';
+  return 'send';
 }
 
 /** Send one claimed row. Answers the status written. */
@@ -392,7 +413,9 @@ export async function deliverOutboxRow(
     deps.logger?.warn(`[AuthPlugin] environment-user outbox row ${row.id} holds an unreadable event; it is failed.`);
     return 'failed';
   }
-  const outcome = await notifyEnvironmentUserHost(deps.host, row.kind, { ...event, deliveryId: row.id }, deps.logger);
+  const outcome = await notifyEnvironmentUserHost(deps.host, row.kind, { ...event, deliveryId: row.id }, deps.logger, {
+    retried: true,
+  });
   if ('refused' in outcome) {
     deps.logger?.warn(
       `[AuthPlugin] the environment-user host refused a retried call that ${row.email} was ${row.kind} `
@@ -537,9 +560,9 @@ export function registerOutboxAcceptedTrigger(engine: OutboxHookEngine, opts: { 
 /**
  * Boot the outbox at `kernel:ready`: the accepted trigger and the worker,
  * both only on a cloud-managed kernel with a host wired. Elsewhere no door
- * writes a row (the doors answer `no_host`, or refuse off a managed
- * environment), so there is nothing to mark or retry, and this answers
- * `undefined` without touching the engine.
+ * writes a row (the doors record only on a cloud-managed kernel, and answer
+ * `no_host` without a host), so there is nothing to mark or retry, and this
+ * answers `undefined` without touching the engine.
  */
 export function bootEnvironmentUserOutbox(
   engine: OutboxHookEngine,

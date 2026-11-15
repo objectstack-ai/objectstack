@@ -3,11 +3,12 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
- * sys_environment_user_outbox — the durable record of every call the
- * environment makes to its environment-user host (the cloud, on a hosted
- * environment) about one person: an invitation sent when a pending person is
- * added or re-added, cancelled when one is deactivated or removed, and
- * re-sent when a person is reactivated.
+ * sys_environment_user_outbox — on a cloud-managed environment, the durable
+ * record of the calls the environment makes to its environment-user host (the
+ * cloud) about one person's invitation: sent when a pending person is added or
+ * re-added, cancelled when a pending person is deactivated or removed, and
+ * re-sent when a person is reactivated. The deactivation of a person who has
+ * signed in is asked of the host but not recorded here.
  *
  * Why it exists: the execution terms of the hosting rulings (relayed on the
  * pending-people card) ask for "a durable outbox with retry … with per-row

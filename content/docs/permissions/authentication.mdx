@@ -1338,15 +1338,20 @@ first, through its `userRemoved` member; a host without that member is asked
 through `userDeactivated` for the pending person instead, which means the same
 thing, but a host should implement `userRemoved`. A host's refusal leaves the
 person as they are. A person who is not pending (they have signed in, or were
-not added this way) is refused with `409`: deactivate them instead. A record
+not added this way) is refused with `409`: deactivate them instead. That holds
+at the removal itself, so a person who signs in while the host is asked is not
+removed either, and the answer says the host was already told. A record
 that still points at the person through a lookup that restricts deletes
 refuses the removal with that lookup's own answer, and nothing is removed.
 Like the add doors, it is platform-admin gated and answers `409` off a managed
 environment.
 
-Every call to the host about a person is recorded in
+On a cloud-managed environment these calls are recorded in
 `sys_environment_user_outbox`, one row per call, readable by platform
-administrators. The door still makes the first call itself, so a refusal
+administrators: every invitation sent (an add or re-add), every re-send (a
+reactivation), and every cancellation (a removal, or the deactivation of a
+person still pending). The deactivation of a person who has signed in is asked
+of the host but not recorded. The door still makes the first call itself, so a refusal
 reaches the administrator on that request, row by row. A call the host did not
 take stays `pending` and is retried in the background with a growing wait (one
 minute at first, up to twelve hours), and after twelve attempts it is
@@ -1358,8 +1363,10 @@ newest row of a person is their invitation status: `sent`, `accepted` once
 their first sign-in clears the pending state, `failed`, or, for a deactivation
 or removal, the cancelled invitation. A call can reach the host more than
 once, so each carries the row's id as `deliveryId` for the host to drop a
-repeat. The add, deactivate, reactivate and remove answers name the row as
-`invitation: { id, status }`.
+repeat. A host cancels an invitation by the event's `userId` or `deliveryId`, never by
+its email address, which an administrator may have typed wrong and may type
+again for someone else. The add, deactivate, reactivate and remove answers
+name the row as `invitation: { id, status }`.
 
 `admin/ban-user` and `admin/unban-user` work without the admin plugin: on a
 deployment without it the ban is written by the platform, and a banned user is
