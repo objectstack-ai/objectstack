@@ -327,8 +327,9 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * Absent on every other provenance, and the ABSENCE is the record: a write
    * carrying no `performedBy` was performed by the principal itself, so the
    * delegated and the personal write are told apart by a key being there
-   * rather than by guesswork. A present `performedBy` names exactly one
-   * performer: {@link clientId} or {@link agentId}.
+   * rather than by guesswork. A present `performedBy` names its performer —
+   * at least one of {@link clientId} and {@link agentId}, each set only by its
+   * own producer — and a context naming neither is refused at parse.
    *
    * The pair rule 4 names is deliberately asymmetric on this envelope, because
    * the envelope already carries one half: {@link userId} stays the human, so
@@ -392,7 +393,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
     confirmationId: z.string().optional().describe('The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Absent when the operation needed no confirmation.'),
   }).refine(requiredOneOf(['clientId', 'agentId']), {
     message: 'performedBy names its performer: clientId (the /mcp OAuth door) or agentId (the in-product AI path)',
-  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names exactly one performer, clientId or agentId. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
+  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
 
   /**
    * [#27908 — ruling 6513869839 on #27681, parameter 3] WHICH DOOR an action
