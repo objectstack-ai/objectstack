@@ -41,6 +41,8 @@ describe('sys_audit_log.action option labels', () => {
       'scim_refused',
       // #31908: a new value, added writer-first; no existing value moved.
       'audit_signing_key_change',
+      // A new value, added writer-first; no existing value moved.
+      'dataset_query',
     ]);
   });
 

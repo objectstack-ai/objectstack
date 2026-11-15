@@ -65,6 +65,8 @@ import { PackageScopedNameRefusedError } from '@objectstack/core';
 import type { ApiError, DatasetQueryBatchEntry, GetMetaItemRequest } from '@objectstack/spec/api';
 import { DATASET_QUERY_BATCH_MAX_QUERIES, DatasetQueryBatchRequestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+// The ledger's `dataset_query` row: one per saved-dataset query that reached the read.
+import { runAuditedDatasetQuery } from './analytics-dataset-query-audit.js';
 import {
     boundedDeclaredUserMessage,
     classifiedRefusalAnswer,
@@ -100,6 +102,8 @@ export interface AnalyticsRouteHost {
     enforceAuth: RestServer['enforceAuth'];
     resolveProtocol: RestServer['resolveProtocol'];
     translateMetaItem: RestServer['translateMetaItem'];
+    /** The `audit` slot, for the ledger's `dataset_query` row ({@link runAuditedDatasetQuery}). */
+    resolveAuditService: RestServer['resolveAuditService'];
 }
 
 /**
@@ -550,6 +554,8 @@ async function answerDatasetQuery(
         // Resolve the dataset definition: inline draft (Studio
         // preview) or a saved dataset by name.
         let dataset = body.dataset;
+        // The item the by-name read served, for the ledger row's holder package.
+        let served: unknown;
         if (!dataset && body.datasetName) {
             const p = await this.resolveProtocol(environmentId, req);
             // [#32072, ADR-0150 D3/D5] The saved dataset is read BY
@@ -723,6 +729,7 @@ async function answerDatasetQuery(
                 read = judged.read;
             }
             dataset = read?.item;
+            served = read?.item;
             if (!dataset) {
                 return datasetNotFoundAnswer(body.datasetName);
             }
@@ -787,12 +794,16 @@ async function answerDatasetQuery(
             };
         }
 
-        const result = await svc.queryDataset(
+        // The read. A saved dataset's query hands the ledger one
+        // `dataset_query` event here, answered or failed; every refusal above
+        // returned before it and hands none ({@link runAuditedDatasetQuery}).
+        const queried = { req, environmentId, context, dataset, served, selection, datasetName: body.dataset ? undefined : body.datasetName };
+        const result = await runAuditedDatasetQuery(this, queried, () => svc.queryDataset(
             dataset,
             selection,
             context ?? undefined,
             previewDrafts ? { previewDrafts: true } : undefined,
-        );
+        ));
         return { status: 200, body: result };
     } catch (error: any) {
         return datasetQueryFaultAnswer(error);
