@@ -123,18 +123,6 @@ describe('an allowlisted target passes; a metadata address never does', () => {
         expect(verdict('fe80::1', 'meta.internal', 'meta.internal').allow).toBe(false);
         expect(verdict('::ffff:169.254.169.254', 'meta.internal', 'meta.internal').allow).toBe(false);
     });
-
-    it('a policy decision carries the organization and source it was asked for', async () => {
-        const seen: unknown[] = [];
-        const policy = {
-            canConnect: (target: unknown, c: unknown) => {
-                seen.push(c);
-                return { allow: true };
-            },
-        };
-        await policy.canConnect({ address: '8.8.8.8', hostname: 'x' }, { source: 'flow-http', organizationId: 'org_1' });
-        expect(seen).toEqual([{ source: 'flow-http', organizationId: 'org_1' }]);
-    });
 });
 
 describe('a malformed or over-broad allowlist refuses to build', () => {
