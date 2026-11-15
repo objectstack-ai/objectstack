@@ -843,7 +843,7 @@ export async function runRemoveSsoUser(
   const name = typeof target.name === 'string' ? target.name : '';
 
   // The host first, outside any transaction: a refusal leaves the person as they are.
-  let host: EnvironmentUserHostOutcome | undefined;
+  let host: EnvironmentUserHostOutcome;
   let event: EnvironmentUserEvent | undefined;
   const deliveryId = newOutboxId();
   if (deps.host) {
@@ -858,10 +858,12 @@ export async function runRemoveSsoUser(
     const answer = await notifyEnvironmentUserHost(deps.host, 'removed', { ...event, deliveryId }, deps.logger);
     if ('refused' in answer) return hostRefusal(answer);
     host = answer;
+  } else {
+    host = { notified: false, reason: 'no_host' };
   }
   // A row records the call whenever the host was called; `no_host` means it was not.
-  const recorded = event && host && !(!host.notified && host.reason === 'no_host') ? event : undefined;
-  const birth = host?.notified
+  const recorded = event && !(!host.notified && host.reason === 'no_host') ? event : undefined;
+  const birth = host.notified
     ? ({ status: 'sent' } as const)
     : ({ status: 'pending', lastError: 'The hosting organisation could not be reached, or failed to take the call.' } as const);
 
@@ -896,7 +898,7 @@ export async function runRemoveSsoUser(
         userId,
         email,
         removed: true,
-        ...(host ? { host } : {}),
+        host,
         ...(recorded ? { invitation: { id: deliveryId, status: birth.status } } : {}),
       },
     },

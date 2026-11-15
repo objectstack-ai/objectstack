@@ -288,6 +288,10 @@ describe('auth route ledger hygiene', () => {
       // below holds it to the same proof — better-auth serves no roster.
       'POST /api/v1/auth/admin/list-platform-admins',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
+      // The pending-person remove door, on the same terms as the two above:
+      // `auth-plugin.ts` mounts it itself (a `rawApp.post` on the
+      // `${basePath}/admin/remove-sso-user` template); better-auth serves none.
+      'POST /api/v1/auth/admin/remove-sso-user',
       // [#30958] On this pin's own terms: `auth-plugin.ts` mounts both itself
       // (`rawApp.post` on the `${basePath}/admin/scim/mint-credential` and
       // `${basePath}/admin/scim/revoke-credential` templates, ahead of the

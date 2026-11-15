@@ -407,19 +407,23 @@ export async function runEnvironmentUserOutboxTick(deps: EnvironmentUserOutboxDe
   const engine = deps.getDataEngine();
   if (!engine) return 0;
   const now = deps.now?.() ?? Date.now();
-  const due = await engine.find(ENVIRONMENT_USER_OUTBOX_OBJECT, {
-    where: {
-      $or: [
-        { status: 'pending', next_attempt_at: { $lte: now } },
-        { status: 'in_flight', claimed_until: { $lt: now } },
-      ],
-    },
-    orderBy: [{ field: 'next_attempt_at', order: 'asc' }],
-    limit: OUTBOX_TICK_LIMIT,
-    context: SYSTEM_CTX,
-  });
+  // Two reads, not one `$or`: rows that came due, then rows whose claim lapsed
+  // (a process that died mid-call).
+  const read = async (where: Record<string, unknown>, field: string): Promise<unknown[]> => {
+    const rows = await engine.find(ENVIRONMENT_USER_OUTBOX_OBJECT, {
+      where,
+      orderBy: [{ field, order: 'asc' }],
+      limit: OUTBOX_TICK_LIMIT,
+      context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) ? rows : [];
+  };
+  const due = [
+    ...(await read({ status: 'pending', next_attempt_at: { $lte: now } }, 'next_attempt_at')),
+    ...(await read({ status: 'in_flight', claimed_until: { $lt: now } }, 'claimed_until')),
+  ].slice(0, OUTBOX_TICK_LIMIT);
   let held = 0;
-  for (const raw of Array.isArray(due) ? due : []) {
+  for (const raw of due) {
     const row = readRow(raw);
     if (!row) continue;
     const token = await claimOutboxRow(engine, row, now);

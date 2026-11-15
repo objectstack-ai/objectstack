@@ -1308,7 +1308,8 @@ in the directory.
 
 A host can be told about people as they come and go: the `environmentUserHost`
 option of the auth plugin is called after a person is added, and before a
-person is deactivated (`admin/ban-user`) or reactivated (`admin/unban-user`).
+person is deactivated (`admin/ban-user`), reactivated (`admin/unban-user`) or,
+while still pending, removed (`admin/remove-sso-user`).
 It is never called inside a database transaction. Each event names the
 administrator who acted, the administrator at the keyboard when the session
 is an impersonation (`impersonatedBy`), and, when the acting administrator
@@ -1324,9 +1325,41 @@ reactivation writes nothing, and a refused add takes that person back out
 deactivation with `503` and writes nothing, since only the host can say
 whether the person is an organization owner or admin. It never undoes or
 blocks an add or a reactivation: the answer carries `host: { notified: false,
-reason }`. Adding a person who is still pending again tells the host again
-and changes nothing else: positions, permission sets or a manager sent with
-it are listed on the answer as `notApplied`; set them on the person's record.
+reason }`. Adding a person who is still pending again re-sends their
+invitation and changes nothing else: positions, permission sets or a manager
+sent with it are listed on the answer as `notApplied`; set them on the
+person's record.
+
+A pending person who never signs in, for example one added with a mistyped
+address, can be removed: `POST /api/v1/auth/admin/remove-sso-user` takes
+`{ userId }`, removes the person with their positions, permission sets and
+membership, and cancels their invitation at the host. The host is asked
+first, through its `userRemoved` member; a host without that member is asked
+through `userDeactivated` for the pending person instead, which means the same
+thing, but a host should implement `userRemoved`. A host's refusal leaves the
+person as they are. A person who is not pending (they have signed in, or were
+not added this way) is refused with `409`: deactivate them instead. A record
+that still points at the person through a lookup that restricts deletes
+refuses the removal with that lookup's own answer, and nothing is removed.
+Like the add doors, it is platform-admin gated and answers `409` off a managed
+environment.
+
+Every call to the host about a person is recorded in
+`sys_environment_user_outbox`, one row per call, readable by platform
+administrators. The door still makes the first call itself, so a refusal
+reaches the administrator on that request, row by row. A call the host did not
+take stays `pending` and is retried in the background with a growing wait (one
+minute at first, up to twelve hours), and after twelve attempts it is
+`failed`; a refusal that arrives on a retry is `failed` too, with the host's
+code and sentence, and the person is left as they are. A failed reactivation
+and a failed removal are retried the same way; a deactivation is never
+retried, because a deactivation the host did not answer does not happen. The
+newest row of a person is their invitation status: `sent`, `accepted` once
+their first sign-in clears the pending state, `failed`, or, for a deactivation
+or removal, the cancelled invitation. A call can reach the host more than
+once, so each carries the row's id as `deliveryId` for the host to drop a
+repeat. The add, deactivate, reactivate and remove answers name the row as
+`invitation: { id, status }`.
 
 `admin/ban-user` and `admin/unban-user` work without the admin plugin: on a
 deployment without it the ban is written by the platform, and a banned user is
