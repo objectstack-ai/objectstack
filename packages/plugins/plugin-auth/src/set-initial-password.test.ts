@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { runSetInitialPassword, type SetPasswordCapableApi } from './set-initial-password.js';
 
 function makeRequest(body: unknown): Request {
@@ -87,10 +88,41 @@ describe('runSetInitialPassword', () => {
     expect(res.body.error?.code).toBe('UNAUTHORIZED');
   });
 
-  it('falls back to 500 internal for a plain (non-APIError) throw', async () => {
-    const setPassword = vi.fn().mockRejectedValue(new Error('adapter exploded'));
-    const res = await runSetInitialPassword({ setPassword }, makeRequest({ newPassword: 'x'.repeat(12) }));
+});
+
+describe('an unclassified internal failure is answered with the generic message and logged once', () => {
+  const MARKER = 'unclassified-failure-marker-5b1e';
+
+  it('a throw with no vendor code answers 500 INTERNAL_ERROR in the generic words, and the logger receives the error once', async () => {
+    const thrown = new Error(`adapter exploded ${MARKER}`);
+    const setPassword = vi.fn().mockRejectedValue(thrown);
+    const logger = { error: vi.fn() };
+    const res = await runSetInitialPassword({ setPassword }, makeRequest({ newPassword: 'x'.repeat(12) }), { logger });
     expect(res.status).toBe(500);
-    expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: 'adapter exploded' });
+    expect(res.body).toEqual({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } });
+    expect(JSON.stringify(res)).not.toContain(MARKER);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith('[AuthPlugin] set-initial-password failed', thrown);
+  });
+
+  it('a thrown non-Error is answered the same way, and reaches the logger as an Error', async () => {
+    const setPassword = vi.fn().mockRejectedValue(MARKER);
+    const logger = { error: vi.fn() };
+    const res = await runSetInitialPassword({ setPassword }, makeRequest({ newPassword: 'x'.repeat(12) }), { logger });
+    expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE });
+    expect(JSON.stringify(res)).not.toContain(MARKER);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][1]).toBeInstanceOf(Error);
+  });
+
+  it('CONTROL: a refusal the vendor classifies keeps its own message, code and status, and is not logged', async () => {
+    const setPassword = vi.fn().mockRejectedValue(apiError(400, 'PASSWORD_TOO_SHORT', 'Password is too short'));
+    const logger = { error: vi.fn() };
+    const res = await runSetInitialPassword({ setPassword }, makeRequest({ newPassword: 'short' }), { logger });
+    expect(res).toEqual({
+      status: 400,
+      body: { success: false, error: { code: 'PASSWORD_TOO_SHORT', message: 'Password is too short' } },
+    });
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });

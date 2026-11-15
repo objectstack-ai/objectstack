@@ -29,7 +29,7 @@
  *    D4), and nothing is written; an undeclared throw still fails.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthzStoreUnavailableError, hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
@@ -87,6 +87,7 @@ const OBJECTS = [
 let engine: ObjectQL;
 let refuseMembership: Error | undefined;
 let failMemberReads = false;
+let logError = vi.fn();
 
 const POLICY = { defaultExpiryDays: 90, maxExpiryDays: 365, inactivityDays: 90 } as any;
 
@@ -108,6 +109,7 @@ const deps = (): ServiceAccountDoorDeps => ({
   runAtomically: (work) => engine.transaction(async () => work()),
   resolveApiKeyLifecyclePolicy: () => POLICY,
   now: () => NOW,
+  logger: { error: (message, error) => logError(message, error) },
 });
 
 const caller = (id: string, opts: Partial<ServiceAccountCaller> = {}): ServiceAccountCaller => ({
@@ -127,6 +129,7 @@ const rows = async (object: string, where: Record<string, unknown> = {}) =>
 beforeEach(async () => {
   refuseMembership = undefined;
   failMemberReads = false;
+  logError = vi.fn();
   engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -452,5 +455,43 @@ describe('[ADR-0151 D7] register: a licence refusal declared on either write kee
   it('an unreadable authorization store inside the write is still the route\'s outage, not a declared refusal', async () => {
     refuseUserInsert(() => new AuthzStoreUnavailableError('sys_member', new Error('down')));
     await expect(register()).rejects.toSatisfy(isAuthzStoreUnavailableError);
+  });
+});
+
+describe('register: an unclassified membership failure is answered with the generic message and logged once', () => {
+  const MARKER = 'unclassified-failure-marker-3d07';
+  const register = () => runRegisterServiceAccount(deps(), caller('usr_admin'), post({ name: 'Bot', ownerId: 'usr_owner' }));
+
+  it('a membership call that fails without a vendor code answers INTERNAL_ERROR in the generic words, logs once, and writes nothing', async () => {
+    const thrown = new Error(`adapter failed ${MARKER}`);
+    refuseMembership = thrown;
+    const users = (await rows('sys_user')).length;
+    const r = await register();
+    expect(r).toEqual({
+      status: 500,
+      body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } },
+    });
+    expect(JSON.stringify(r)).not.toContain(MARKER);
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith('[AuthPlugin] service-account/register failed', thrown);
+    expect((await rows('sys_user')).length).toBe(users);
+  });
+
+  it('CONTROL: a membership refusal the vendor classifies keeps its own message and status, and is not logged', async () => {
+    refuseMembership = Object.assign(new Error('limit'), {
+      statusCode: 403, body: { code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED', message: 'Organization membership limit reached' },
+    });
+    const r = await register();
+    expect(r).toEqual({
+      status: 403,
+      body: {
+        success: false,
+        error: {
+          code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED',
+          message: 'The AI service account could not be added to the organization, so it was not registered: Organization membership limit reached',
+        },
+      },
+    });
+    expect(logError).not.toHaveBeenCalled();
   });
 });

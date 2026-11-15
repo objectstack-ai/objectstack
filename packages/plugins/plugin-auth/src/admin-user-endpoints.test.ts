@@ -3,8 +3,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SysUser } from '@objectstack/platform-objects/identity';
-import { validationFailure } from '@objectstack/types';
+import { validationFailure, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import {
+  mapAuthApiError,
   runAdminCreateUser,
   runAdminSetUserPassword,
   generateTemporaryPassword,
@@ -1644,5 +1645,83 @@ describe("create-user: the must_change_password stamp names the administrator th
     const bare = makeDeps();
     expect((await runAdminCreateUser(bare.deps, makeRequest({ email: 'new.user@example.com', generatePassword: true }), ACTOR)).status).toBe(200);
     expect(stampContext(bare)).toEqual({ isSystem: true, positions: [], permissions: [] });
+  });
+});
+
+// ── An unclassified internal failure is answered with the generic message ──
+//
+// The rule every route catch in auth-plugin.ts already applies, held at the
+// shared result mapper the admin user doors answer through: a failure that
+// carries no vendor code is answered `INTERNAL_ERROR` in the generic words
+// and logged once at error level with the route named; a refusal the vendor
+// classifies (a body code) keeps its own message and status.
+describe('an unclassified internal failure is answered with the generic message and logged once', () => {
+  const MARKER = 'unclassified-failure-marker-9c42';
+
+  function withLogger() {
+    const m = makeDeps();
+    const error = vi.fn();
+    m.deps.logger = { warn: m.warn, error };
+    return { m, error };
+  }
+
+  it('the shared mapper: no vendor code answers INTERNAL_ERROR in the generic words, and the logger receives the error once', () => {
+    const thrown = new Error(`adapter failed ${MARKER}`);
+    const logger = { error: vi.fn() };
+    const result = mapAuthApiError(thrown, 'create-user failed', logger);
+    expect(result).toEqual({
+      status: 500,
+      body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } },
+    });
+    expect(JSON.stringify(result)).not.toContain(MARKER);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith('[AuthPlugin] create-user failed', thrown);
+  });
+
+  it('create-user: a vendor call that fails without a code answers the generic message', async () => {
+    const { m, error } = withLogger();
+    m.createUser.mockRejectedValueOnce(new Error(`adapter failed ${MARKER}`));
+    const res = await runAdminCreateUser(m.deps, makeRequest({ email: 'a@b.co', generatePassword: true }), ACTOR);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE });
+    expect(JSON.stringify(res)).not.toContain(MARKER);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toBe('[AuthPlugin] create-user failed');
+  });
+
+  it('set-user-password: a credential write that fails without a code answers the generic message', async () => {
+    const { m, error } = withLogger();
+    m.authCtx.internalAdapter.updatePassword.mockRejectedValueOnce(new Error(`adapter failed ${MARKER}`));
+    const res = await runAdminSetUserPassword(m.deps, makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass' }), ACTOR);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE });
+    expect(JSON.stringify(res)).not.toContain(MARKER);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toBe('[AuthPlugin] set-user-password failed');
+  });
+
+  it('CONTROL: a refusal the vendor classifies keeps its own message and status, and is not logged', async () => {
+    const { m, error } = withLogger();
+    m.createUser.mockRejectedValueOnce({
+      statusCode: 400,
+      body: { code: 'USER_ALREADY_EXISTS', message: 'User already exists' },
+    });
+    const res = await runAdminCreateUser(m.deps, makeRequest({ email: 'a@b.co', generatePassword: true }), ACTOR);
+    expect(res).toEqual({
+      status: 409,
+      body: { success: false, error: { code: 'USER_ALREADY_EXISTS', message: 'User already exists' } },
+    });
+    expect(error).not.toHaveBeenCalled();
+
+    const direct = mapAuthApiError(
+      { statusCode: 403, body: { code: 'YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS', message: 'You are not allowed to create users' } },
+      'create-user failed',
+      { error },
+    );
+    expect(direct).toEqual({
+      status: 403,
+      body: { success: false, error: { code: 'YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS', message: 'You are not allowed to create users' } },
+    });
+    expect(error).not.toHaveBeenCalled();
   });
 });
