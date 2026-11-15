@@ -10,11 +10,16 @@
 // Provider-bound declarative instances (which upgrade this warning to an
 // error) are tracked in #2977 / ADR-0097.
 
-import { describe, it, expect, vi } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, describe, it, expect, vi } from 'vitest';
+import { LiteKernel, ObjectKernel } from '@objectstack/core';
+import { ObjectQLPlugin, SchemaRegistry, type ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import type { ConnectorProviderFactory } from '@objectstack/spec/integration';
 import { AutomationServicePlugin, findInertDeclaredConnectors } from './plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -179,5 +184,122 @@ describe('kernel:ready audit (wiring)', () => {
         const { kernel, warnSpy } = await bootWithConnectors([]);
         expect(auditWarnings(warnSpy)).toHaveLength(0);
         await kernel.shutdown();
+    });
+});
+
+/**
+ * [#33839] The metadata door. A catalog descriptor saved ACTIVE through
+ * `PUT /api/v1/meta/connector/:name` raises the protocol's mutation signal
+ * and no `metadata:reloaded`, so an audit wired on the reload alone never
+ * reported it until a later publish or a restart. Real write path:
+ * ObjectKernel, ObjectQLPlugin's metadata protocol, driver-sql on a file.
+ */
+describe('[#33839] the audit on the metadata save door', () => {
+    const kernels: ObjectKernel[] = [];
+    const dirs: string[] = [];
+    afterEach(async () => {
+        for (const k of kernels.splice(0)) {
+            if (k.getState() === 'running') await k.shutdown().catch(() => {});
+        }
+        for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    });
+
+    interface Protocol {
+        saveMetaItem(request: { type: string; name: string; item: unknown; mode?: 'draft' | 'publish' }): Promise<unknown>;
+        publishMetaItem(request: { type: string; name: string }): Promise<unknown>;
+    }
+
+    async function bootOverStore() {
+        const dir = mkdtempSync(join(tmpdir(), 'os-33839-'));
+        dirs.push(dir);
+        let warnSpy!: ReturnType<typeof vi.spyOn>;
+        const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
+        kernels.push(kernel);
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory', credentialResolver: () => undefined }));
+        await kernel.use({
+            name: 'test.harness.33839',
+            type: 'standard' as const,
+            version: '1.0.0',
+            dependencies: ['com.objectstack.service-automation'],
+            async init(ctx: any) {
+                // One logger instance across contexts: this spy sees the automation plugin's warns.
+                warnSpy = vi.spyOn(ctx.logger, 'warn');
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        const ql = kernel.getService<ObjectQL>('objectql');
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'store.sqlite') }, useNullAsDefault: true });
+        await driver.connect();
+        ql.registerDriver(driver as never, true);
+        await ql.syncSchemas();
+        await installDefaultOrganization(ql);
+        const protocol = kernel.getService<Protocol>('protocol');
+        return {
+            warnings: () => auditWarnings(warnSpy),
+            save: (name: string, item: unknown) => protocol.saveMetaItem({ type: 'connector', name, item }),
+            saveDraft: (name: string, item: unknown) => protocol.saveMetaItem({ type: 'connector', name, item, mode: 'draft' }),
+            publish: async (name: string, item: unknown) => {
+                await protocol.saveMetaItem({ type: 'connector', name, item, mode: 'draft' });
+                await protocol.publishMetaItem({ type: 'connector', name });
+            },
+        };
+    }
+
+    /** Every descriptor audit; a case waits for the ones its write queues to finish. */
+    const auditSpy = vi.spyOn(
+        AutomationServicePlugin.prototype as unknown as { auditDeclaredConnectors(...args: unknown[]): Promise<void> },
+        'auditDeclaredConnectors',
+    );
+    afterAll(() => auditSpy.mockRestore());
+    /** Run `write`, then wait until `count` audits after it have finished. */
+    async function audited(count: number, write: () => Promise<unknown>) {
+        const before = auditSpy.mock.results.length;
+        await write();
+        await vi.waitFor(() => expect(auditSpy.mock.results.length - before).toBeGreaterThanOrEqual(count), { timeout: 3000 });
+        await Promise.all(auditSpy.mock.results.slice(before).map((r) => r.value));
+        for (let i = 0; i < 5; i++) await flush();
+        expect(auditSpy.mock.results.length - before).toBe(count);
+    }
+
+    it('warns, naming it, when a catalog descriptor is saved active through the direct door', async () => {
+        const store = await bootOverStore();
+        expect(store.warnings()).toEqual([]);
+
+        await audited(1, () => store.save('qa_erp_rt', declaredConnector('qa_erp_rt')));
+        expect(store.warnings()).toHaveLength(1);
+        expect(store.warnings()[0]).toContain('1 declarative connector(s)');
+        expect(store.warnings()[0]).toContain(': qa_erp_rt.');
+    });
+
+    it('a later publish says the changed set once, naming every inert descriptor', async () => {
+        const store = await bootOverStore();
+        await audited(1, () => store.save('qa_erp_rt', declaredConnector('qa_erp_rt')));
+
+        // A publish raises the mutation signal AND `metadata:reloaded`: two audits, one warning.
+        await audited(2, () => store.publish('qa_erp_rt2', declaredConnector('qa_erp_rt2')));
+        expect(store.warnings()).toHaveLength(2);
+        expect(store.warnings()[1]).toContain('2 declarative connector(s)');
+        expect(store.warnings()[1]).toContain('qa_erp_rt, qa_erp_rt2');
+    });
+
+    it('control: a re-save that leaves the inert set as it was adds no warning; one that empties it and restores it warns again', async () => {
+        const store = await bootOverStore();
+        await audited(1, () => store.save('qa_erp_rt', declaredConnector('qa_erp_rt')));
+        await audited(1, () => store.save('qa_erp_rt', { ...declaredConnector('qa_erp_rt'), label: 'Relabelled' }));
+        expect(store.warnings()).toHaveLength(1);
+
+        await audited(1, () => store.save('qa_erp_rt', declaredConnector('qa_erp_rt', { enabled: false })));
+        expect(store.warnings()).toHaveLength(1);
+        await audited(1, () => store.save('qa_erp_rt', declaredConnector('qa_erp_rt')));
+        expect(store.warnings()).toHaveLength(2);
+        expect(store.warnings()[1]).toContain(': qa_erp_rt.');
+    });
+
+    it('control: a draft save runs no audit', async () => {
+        const store = await bootOverStore();
+        await audited(0, () => store.saveDraft('qa_erp_draft', declaredConnector('qa_erp_draft')));
+        expect(store.warnings()).toEqual([]);
     });
 });
