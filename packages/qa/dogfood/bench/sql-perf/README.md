@@ -58,3 +58,15 @@ lookup `bench_product` (200)). The member owns every tenth account, so it reads
 
 The machine is shared and the numbers are wall-clock: compare runs on the same
 box, read the statement counts as exact and the milliseconds as indicative.
+
+## SQL pairs (`micro.mjs`)
+
+On a database `bench.mjs` has seeded, `micro.mjs` times the statement the engine
+runs today beside the one it could run (same flags: `--dialect`, `--scale`,
+`--pg-url`, `--work-dir`). Its "today" SQL is hand-copied from the statements
+`bench.mjs` captured, so each report carries the commit it was taken at. The
+index pairs create a temporary index, drop any left-over copy before the
+"before" reading, and print the planner's plan beside the time: a gain that
+comes with an unchanged plan is noise, not the index. The default-order pair is
+timed twice on the admin page: chained, as the engine emits it today, and with
+the vacuous controlled-by-parent chain dropped.
