@@ -443,16 +443,52 @@ describe('the environment-access gate judges every client an /oauth2/authorize r
     });
   }
 
-  it('a body naming two clients, one of them refused, is refused', async () => {
-    const { rig, refused, admitted } = await arrangeClients();
+  for (const order of ['admitted first', 'refused first'] as const) {
+    it(`a query naming client_id twice, one of them refused, is refused, each client judged by itself (${order})`, async () => {
+      const { rig, refused, admitted } = await arrangeClients();
+      const url = new URL(`${ISSUER}/oauth2/authorize`);
+      const { client_id: _omit, ...params } = codeRequest(refused, ENV_CALLBACK);
+      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+      for (const one of order === 'admitted first' ? [admitted, refused] : [refused, admitted]) url.searchParams.append('client_id', one);
 
-    const res = await rig.authorizeForm(
-      {},
-      { ...codeRequest(refused, ENV_CALLBACK), client_id: [admitted, refused] },
-      CONSOLE_FETCH,
-    );
+      const res = await rig.manager.handleRequest(
+        new Request(url.toString(), { headers: { ...CONSOLE_FETCH, cookie: rig.cookie } }),
+      );
 
-    expect(rig.gate.calls).toContainEqual({ userId: rig.userId, clientId: refused });
+      expect(rig.gate.calls).toContainEqual({ userId: rig.userId, clientId: refused });
+      await expectRefusalEnvelope(res);
+    });
+
+    it(`a form body naming client_id twice is handed no code unless the gate judged and admitted the client (${order})`, async () => {
+      const { rig, refused, admitted } = await arrangeClients();
+
+      const res = await rig.authorizeForm(
+        {},
+        { ...codeRequest(refused, ENV_CALLBACK), client_id: order === 'admitted first' ? [admitted, refused] : [refused, admitted] },
+        CONSOLE_FETCH,
+      );
+
+      expect(rig.gate.calls.length, 'the gate judged no client').toBeGreaterThan(0);
+      if (await codeIn(res)) {
+        expect(rig.gate.calls.every((c) => c.clientId === admitted), JSON.stringify(rig.gate.calls)).toBe(true);
+      } else {
+        await expectRefusalEnvelope(res);
+      }
+    });
+  }
+
+  it('a resume pass whose body names a client_id that is not a string is judged on that value, and refused when it is refused', async () => {
+    const { rig, admitted } = await arrangeClients();
+    const first = await rig.authorize(codeRequest(admitted, ENV_CALLBACK), NAVIGATION, 'anonymous');
+    const location = first.headers.get('location') ?? '';
+    rig.gate.calls.length = 0;
+
+    const res = await rig.call('/sign-in/email', {
+      body: { email: EMAIL, password: PASSWORD, oauth_query: location.slice(location.indexOf('?')), client_id: 12345 },
+      headers: CONSOLE_FETCH,
+    });
+
+    expect(rig.gate.calls).toContainEqual({ userId: rig.userId, clientId: '12345' });
     await expectRefusalEnvelope(res);
   });
 
