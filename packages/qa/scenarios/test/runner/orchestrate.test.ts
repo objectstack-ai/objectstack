@@ -2142,9 +2142,25 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
 
   it('⛔ the Run half’s grades on the same build and the same turns equal scratch mode’s first Run half, a wrong answer and a leak included', async () => {
     const wrong = new Set(['account_count/sdr', 'tech_accounts/-', 'move_eli/sdr']);
-    const { scenario, ops, driver: scripted } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' } });
-    const run = await runCard(scenario, new SameWrongAnswers(scripted, wrong), ops, { modes: ['scratch', 'ask'], admin: ADMIN });
+    const { scenario, ops, driver: scripted, apps } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' } });
+    /**
+     * remove_ben confirmed by the agent itself through the build's confirm-gated delete action: met only where the
+     * build the grader reads declares that gate (`actionGatesOf`), so the parity holds only if ask mode hands the
+     * Run half the very build it installed.
+     */
+    const confirmsItself: AgentDriver = {
+      info: () => scripted.info(),
+      author: (task) => scripted.author(task),
+      ask: async (task) => {
+        if (task.step !== 'remove_ben') return new SameWrongAnswers(scripted, wrong).ask(task);
+        const app = apps[apps.length - 1]!;
+        app.rows.democrm_contact = app.rows.democrm_contact!.filter((r) => r.id !== 'ct2');
+        return turn('Ben Ode is deleted.', [{ name: 'run_action', rawName: 'mcp__app__run_action', input: { actionName: 'democrm_contact-democrm_delete_contact', recordId: 'ct2', confirm: true }, output: JSON.stringify({ ok: true, action: 'democrm_delete_contact', objectName: 'democrm_contact', recordId: 'ct2', result: { id: 'ct2', deleted: true } }) }]);
+      },
+    };
+    const run = await runCard(scenario, confirmsItself, ops, { modes: ['scratch', 'ask'], admin: ADMIN });
     const [scratch, ask] = run.modes;
+    expect(ask!.run!.operations.find((o) => o.operation === 'remove_ben')!.grade).toMatchObject({ pass: true, confirmation: 'confirmed by the agent' });
     expect(graded(ask!.run!)).toEqual(graded(scratch!.run!));
     expect(ask!.run!.seed).toEqual(scratch!.run!.seed);
     expect(ask!.run!.guardrails).toEqual(scratch!.run!.guardrails);
