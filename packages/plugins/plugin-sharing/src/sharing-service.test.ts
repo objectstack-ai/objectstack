@@ -1392,6 +1392,20 @@ describe('[ADR-0111 D7] no inert grants', () => {
     expect(b.id).toBe(a.id);
     expect(b.access_level).toBe('edit');
   });
+
+  it('a direct (non-system) grant keeps one row per recipient whatever non-manual `source` and `sourceId` it sends', async () => {
+    const a = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', source: 'rule', sourceId: 'srule_x' } as any,
+      { userId: 'alice' },
+    );
+    const b = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit', source: 'rule', sourceId: 'srule_y' } as any,
+      { userId: 'alice' },
+    );
+    expect(engine._tables.sys_record_share.length).toBe(1);
+    expect(b.id).toBe(a.id);
+    expect(b.access_level).toBe('edit');
+  });
 });
 
 describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {
