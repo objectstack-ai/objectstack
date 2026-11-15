@@ -798,8 +798,10 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // Their doors are platform-admin gated, so the standing leads.
     // The three also read the row's state after the standing (the
     // evaluated truth tables are `identity/action-state-visibility.test.ts`).
-    ['SysUser', SysUser, 'ban_user', `(${STANDING} && has(record.banned) && record.banned != true) && features.admin == true`],
-    ['SysUser', SysUser, 'unban_user', `(${STANDING} && has(record.banned) && record.banned == true) && features.admin == true`],
+    // Ban / Unban carry no `admin` gate: their doors work without the plugin,
+    // so nothing is lowered onto the hand-written predicate.
+    ['SysUser', SysUser, 'ban_user', `${STANDING} && has(record.banned) && record.banned != true`],
+    ['SysUser', SysUser, 'unban_user', `${STANDING} && has(record.banned) && record.banned == true`],
     ['SysUser', SysUser, 'unlock_user', `(${STANDING} && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))) && features.admin == true`],
     ['SysUser', SysUser, 'set_user_password', `(${STANDING} && ${MANAGED}) && features.admin == true`],
     ['SysUser', SysUser, 'impersonate_user', `(${STANDING}) && features.admin == true`],
