@@ -1254,8 +1254,13 @@ function ModelPicker({
   // The asked-about model left the list while the question was open: drop the pick.
   if (confirmingId !== null && confirming === undefined) setConfirmingId(null);
   const at = models.findIndex((m) => m.id === value);
-  // The drawn value is already rounded (drawnMultiplierOf); this only spells it.
-  const multiplierText = (n: number) => formatNumber(n, { locale: language, maximumSignificantDigits: 15 });
+  // The drawn value is already rounded (drawnMultiplierOf); this only spells it,
+  // with as many decimals as that rounding kept.
+  const multiplierText = (n: number) =>
+    formatNumber(n, {
+      locale: language,
+      maximumFractionDigits: n >= 1 ? 2 : Math.min(20, 1 - Math.floor(Math.log10(n))),
+    });
   // The share of the allowance left, as the console's usage ring reads it; only
   // with usage served and a multiplier to set it against (rule D5: a fraction, never a count).
   const allowanceLeft =
