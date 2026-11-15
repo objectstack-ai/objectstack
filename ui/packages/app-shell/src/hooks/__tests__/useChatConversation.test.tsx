@@ -1389,12 +1389,38 @@ describe('useChatConversation — the conversation is created on the first send 
     });
     expect(first).toBeUndefined();
     expect(result.current.conversationId).toBeUndefined();
+    // objectstack#33420 — reported to the host, tagged like a send that never
+    // left the client, so the composer's not-sent rollback answers it.
+    expect(result.current.createError).toMatchObject({ notSent: true, status: 500 });
 
     await act(async () => {
       await result.current.ensureConversation();
     });
     expect(result.current.conversationId).toBe('conv-1');
     expect(createCount()).toBe(2);
+    expect(result.current.createError).toBeUndefined();
+  });
+
+  it('a create recorded during the resolve that then fails is reported too (objectstack#33420)', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1:ask`, 'conv-dead');
+    let answerGet: (r: Response) => void = () => {};
+    fetchMock
+      .mockReturnValueOnce(new Promise<Response>((r) => { answerGet = r; }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.createError).toBeUndefined();
+
+    await act(async () => {
+      answerGet(new Response('gone', { status: 404 }));
+    });
+    await waitFor(() => expect(createCount()).toBe(1));
+    await waitFor(() => expect(result.current.createError).toMatchObject({ notSent: true }));
+    expect(result.current.conversationId).toBeUndefined();
   });
 });
 
