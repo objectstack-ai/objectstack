@@ -43,7 +43,7 @@ import { readDispatchedBody } from '../deferred-request-body.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
-import { RUNTIME_OWNED_FIELD_TYPES, isVirtualSearchField } from '@objectstack/spec/data';
+import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -676,6 +676,13 @@ async function warnIfSkillListIncomplete(
  * ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
  *
+ * ⛔ Never the hidden search companion (`SEARCH_COMPANION_FIELD`), which the
+ * registry serves beside the display field where pinyin search is on: no
+ * caller may read, write or name it (a record never echoes it, a
+ * `$searchFields` override naming it is refused, `validate_expression`
+ * answers `unknown-field`), so the door that offers an agent a field to use
+ * does not list it. The stdio twin skips it by the same constant.
+ *
  * `declared` is the object `def` was projected from (the caller's mask
  * applied to it gives `def`): `readonly` is judged on it,
  * {@link writeNeverSetsField}. Nothing else is read from it.
@@ -690,7 +697,7 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
     return {
         name: def.name,
         label: def.label ?? def.name,
-        fields: Object.entries(def.fields ?? {}).map(([k, f]: [string, any]) => ({
+        fields: Object.entries(def.fields ?? {}).filter(([k]) => k !== SEARCH_COMPANION_FIELD).map(([k, f]: [string, any]) => ({
             name: k,
             type: f?.type,
             label: f?.label ?? k,

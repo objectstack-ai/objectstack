@@ -2227,19 +2227,31 @@ function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown
  *    number of rows, never an amount, so a currency on it is wrong whichever
  *    reader sees it (the analytics layer relays both a `fixed` code and a
  *    `record` pointer for any field type);
- *  - `dynamic` is refused on every summary. No reader consumes it there (the
- *    Console's roll-up faces read no `currencyConfig`, and the analytics layer
- *    relays only `fixed` and `record`), so it declares a currency nothing
- *    draws. An absent `currencyMode` parses as `dynamic`, so `{}` meets it too;
+ *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of a
+ *    stored home amount only (#33659): a child field some
+ *    `homeAmount.field` on the child object names. Such a field is "a
+ *    `dynamic`-mode currency field" (ADR-0144 D8 rule 5), every row of it is
+ *    in the organization's home currency (`localization.currency`), so its
+ *    total is too, and the Console's roll-up faces draw a `dynamic` summary in
+ *    that currency, as a metric tile over the same home field does. Whether the
+ *    child field is a home field needs the child object, so this door lets a
+ *    `dynamic` roll-up through only when its `summaryOperations` names a child
+ *    object and field, and `defineStack`'s cross-reference pass judges the
+ *    rest (`collectRecordCurrencyPathErrors`, stack.zod.ts). A `dynamic`
+ *    summary that names no child amount, or carries a `defaultCurrency` (which
+ *    `dynamic` never reads, and which would name the home currency in
+ *    metadata), is refused here. An absent `currencyMode` parses as
+ *    `dynamic`, so `{}` meets the same rule;
  *  - `record` on a roll-up that reads no child amount (no `summaryOperations`)
  *    is refused: it is not the admitted roll-up, whatever it names.
  *
  * `fixed` stays accepted on a `sum` / `min` / `max` / `avg` roll-up: the
  * analytics layer reads its code (`assertMeasureCurrenciesCoherent` refuses a
  * measure labelling it another currency), and a fixed roll-up over amounts in
- * that one currency is honest. Whether a `record` roll-up is the admitted one
- * needs the child object, so `defineStack`'s cross-reference pass judges it
- * (`collectRecordCurrencyPathErrors`, stack.zod.ts).
+ * that one currency is honest. Whether a `record` or a `dynamic` roll-up is
+ * the admitted one needs the child object, so `defineStack`'s
+ * cross-reference pass judges it (`collectRecordCurrencyPathErrors`,
+ * stack.zod.ts).
  *
  * Judged on the authored object only, as the other currency doors are: a
  * standalone `FieldSchema`, `CurrencyConfigSchema` and an extension's fields
@@ -2261,10 +2273,12 @@ function refuseUnadmittedSummaryCurrency(
     const at = `\`${name}\` is a \`summary\` field of object \`${objectName}\``;
     const path = ['fields', name, 'currencyConfig'];
     const admitted =
-      'A roll-up carries a currency in two cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
-      + 'one currency, and `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
+      'A roll-up carries a currency in three cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
+      + 'one currency; `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
       + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
-      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`).';
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up a '
+      + 'stored home amount, a child field that a `homeAmount.field` on the child object names, which is in the '
+      + 'organization\'s home currency.';
     if (ops?.function === 'count') {
       ctx.addIssue({
         code: 'custom',
@@ -2276,12 +2290,22 @@ function refuseUnadmittedSummaryCurrency(
       continue;
     }
     if (mode === 'dynamic') {
+      const namesChild = ops !== undefined && typeof ops.object === 'string' && typeof ops.field === 'string';
+      const named = (config as { defaultCurrency?: unknown }).defaultCurrency;
+      // [#33659] The admitted `dynamic` roll-up reads a stored home amount; the
+      // child object says whether it does, so the stack pass judges that half.
+      if (namesChild && named === undefined) continue;
       ctx.addIssue({
         code: 'custom',
         path,
-        message: `${at} declaring \`currencyMode: 'dynamic'\` (an absent \`currencyMode\` is \`dynamic\`). No reader `
-          + 'draws a roll-up in the tenant default currency, so the declaration changes nothing: delete `currencyConfig`, '
-          + 'or declare the currency the amounts are in. ' + admitted,
+        message: `${at} declaring \`currencyMode: 'dynamic'\` (an absent \`currencyMode\` is \`dynamic\`)`
+          + (named !== undefined
+            ? ` with \`defaultCurrency: '${String(named)}'\`. \`dynamic\` reads no \`defaultCurrency\`, and metadata never `
+              + 'names the home currency: delete `defaultCurrency`, or declare `currencyMode: \'fixed\'` if every amount '
+              + 'it reads is in that one currency. '
+            : ' with no `summaryOperations` naming a child field, so it rolls up no stored home amount that would put it '
+              + 'in the organization\'s home currency: delete `currencyConfig`, or declare the roll-up. ')
+          + admitted,
       });
       continue;
     }
