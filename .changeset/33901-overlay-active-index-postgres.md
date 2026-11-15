@@ -1,5 +1,6 @@
 ---
 '@objectstack/metadata-protocol': patch
+'@objectstack/rest': patch
 ---
 
 fix(metadata-protocol): on PostgreSQL the `sys_metadata` ACTIVE overlay key becomes the partial NULL-safe unique index, as on SQLite, instead of the declared NULL-distinct constraint
