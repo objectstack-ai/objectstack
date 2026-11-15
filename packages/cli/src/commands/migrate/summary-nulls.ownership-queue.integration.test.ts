@@ -9,9 +9,9 @@
  * `ownership-queue` service registered. `os serve` registers it (`sharing` is
  * on its always-on slate); every one-shot `bootSchemaStack` boot whose plugin
  * set carried no sharing provider refused instead, so a queue-using app could
- * run no data migration at all. `bootSchemaStack` now composes the provider
- * `os serve` mounts, for its declarations only, whenever the boot lacks it
- * (`../../utils/migrate-ownership-queue.ts`).
+ * run no data migration at all. `bootSchemaStack` now registers the service
+ * `os serve`'s provider registers, and nothing else of it, whenever the boot
+ * lacks that provider (`../../utils/migrate-ownership-queue.ts`).
  *
  * ## The fixture
  *
@@ -31,13 +31,12 @@
  *     (`buildDataMigrationPlugins`, the rest of the data family), the host
  *     composition (`packageless-overlays`, `security-catalog-overlays`) and
  *     the served-platform composition (`plan`, `apply`, `unmapped-columns`,
- *     `organization-ownership`), which already mounts the provider. That the
- *     helper adds none to a composition holding one is pinned beside it
- *     (`../../utils/migrate-ownership-queue.test.ts`): the kernel keeps the
- *     LAST plugin of a name, so a second one would displace a host's own
- *     configured instance while the boot still registers the service.
- *  3. No sharing runtime is armed: no `sharing` service (registered only by
- *     the provider's `start()`), while the `ownership-queue` service is.
+ *     `organization-ownership`), which already mounts the provider and is
+ *     given no second registration (the kernel refuses one under the same
+ *     name, so that boot would throw).
+ *  3. Nothing else of sharing comes with it: no `sharing` service, and no
+ *     sharing object in the registry, so the one-shot boot examines the
+ *     tables it always did.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -47,6 +46,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
+import { OwnershipQueueService } from '@objectstack/plugin-sharing';
 import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -56,7 +56,6 @@ import MigrateSummaryNulls from './summary-nulls.js';
 // clocked case (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/runtime';
 import '@objectstack/objectql';
-import '@objectstack/plugin-sharing';
 import '@objectstack/plugin-audit';
 import '@objectstack/platform-objects/plugin';
 
@@ -226,7 +225,7 @@ describe('os migrate summary-nulls on a stack declaring queues and assignmentRul
 });
 
 describe('every composition an os migrate subcommand boots with registers the ownership-queue service', () => {
-  const COMPOSITIONS: Array<{ label: string; options: () => Promise<Record<string, unknown>> }> = [
+  const COMPOSITIONS: Array<{ label: string; servedPlatform?: true; options: () => Promise<Record<string, unknown>> }> = [
     { label: 'the plain data stack (account-issuer, duplicates, multi-value-columns)', options: async () => ({}) },
     {
       label: 'a data-migration plugin set (buildDataMigrationPlugins, the rest of the data family)',
@@ -235,6 +234,7 @@ describe('every composition an os migrate subcommand boots with registers the ow
     { label: 'the host composition (packageless-overlays, security-catalog-overlays)', options: async () => ({ composeHostStack: true }) },
     {
       label: 'the served-platform composition (plan, apply, unmapped-columns, organization-ownership)',
+      servedPlatform: true,
       options: async () => ({ composeHostStack: true, composeServedPlatform: true }),
     },
   ];
@@ -250,9 +250,11 @@ describe('every composition an os migrate subcommand boots with registers the ow
         ...(await composition.options()),
       });
       try {
-        expect(stack.kernel.getService(OWNERSHIP_QUEUE_SERVICE)).toBeTruthy();
-        // The provider's runtime is not armed: `sharing` is registered by its `start()` only.
-        expect(() => stack.kernel.getService('sharing')).toThrow();
+        expect(stack.kernel.getService(OWNERSHIP_QUEUE_SERVICE)).toBeInstanceOf(OwnershipQueueService);
+        expect(() => stack.kernel.getService('sharing')).toThrow(/not found/);
+        const engine = stack.kernel.getService<{ getConfigs(): Record<string, unknown> }>('objectql');
+        // The served platform's composition declares the sharing objects itself; no other one does.
+        expect('sys_queue' in engine.getConfigs()).toBe(composition.servedPlatform === true);
       } finally {
         await stack.shutdown();
       }

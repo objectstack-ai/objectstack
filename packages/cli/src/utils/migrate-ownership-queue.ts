@@ -1,39 +1,44 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { composeProviderForDeclarations } from './schema-migration-plugins.js';
-
 /**
  * [ADR-0142 D1] The ownership-queue service on a one-shot `bootSchemaStack`
  * boot, which every `os migrate` subcommand that boots the stack takes.
  *
- * The engine refuses a stack that declares `queues` or `assignmentRules` when
- * no `ownership-queue` service is registered (`ObjectQLPlugin`, at
- * `kernel:ready`). `os serve` passes because `sharing` is on its always-on
- * slate, so `SharingServicePlugin` registers that service in its `init()`. A
- * data migration's plugin set (`buildDataMigrationPlugins`) and a host-only
- * composition carry no such provider, so on a queue-using app every one of
- * those subcommands refused to boot.
+ * The engine refuses, at `kernel:ready`, a stack that declares `queues` or
+ * `assignmentRules` when no `ownership-queue` service is registered
+ * (`ObjectQLPlugin`). `os serve` passes because `sharing` is on its always-on
+ * slate and `SharingServicePlugin.init()` registers that service. A data
+ * migration's plugin set (`buildDataMigrationPlugins`), the plain data stack
+ * and a host-only composition carry no such provider, so on a queue-using app
+ * every one of those subcommands refused to boot.
  *
- * The provider is the one `os serve` mounts — the `sharing` row of
- * `CAPABILITY_PROVIDERS`, the same rule `os migrate plan` / `apply` compose it
- * by — composed for its declarations only
- * ({@link composeProviderForDeclarations}): `init()` runs, which registers
- * the ownership-queue service and the sharing objects (`sys_queue`,
- * `sys_queue_member`, …) the service reads; `start()` and every lifecycle hook
- * do not. Nothing of the sharing runtime is armed: no read filter, no
- * sharing-rule or record-share write hooks, no queue guards, and none of the
- * boot backfills (rule grants, primary business unit) that write rows. A
- * migration process must not become a second server.
+ * ## The service, not the provider plugin
  *
- * What stays live is the engine's own assignment step, which reads the service
- * at use: an INSERT the migration makes into an object with assignment rules
- * is routed as `os serve` would route it. An update never evaluates a rule.
+ * This registers the same service `SharingServicePlugin.init()` registers —
+ * an `OwnershipQueueService` (`@objectstack/plugin-sharing`), under
+ * `OWNERSHIP_QUEUE_SERVICE`, reaching the engine at use — and nothing else.
+ * Composing the whole provider, even for its declarations only, also
+ * registers the sharing objects (`sys_record_share`, `sys_queue`, …): every
+ * one-shot boot would then examine more tables than the data stack it pins,
+ * and an `--apply` boot would create any that are missing — DDL the operator
+ * never saw in the preview. Nothing of the sharing runtime is armed: no read
+ * filter, no rule or share write hook, no queue guard, no boot backfill.
+ *
+ * What the service answers here: a DECLARED queue resolves as it does under
+ * `os serve`. The authored rows it also reads (`sys_queue`,
+ * `sys_queue_member`) are not registered objects on this boot, so those reads
+ * fail and the service says so once (`[queue] … read failed`) and answers
+ * from the declarations alone. Only the engine's assignment step reaches it,
+ * on an INSERT into an object with assignment rules; an update never
+ * evaluates a rule, so a backfill that rewrites existing rows
+ * (`summary-nulls`) routes nothing.
  *
  * `null` when the composition already holds the provider (judged by
- * `providesCapability`'s exact identity match, on the plugin list, before the
- * boot starts). The kernel keeps the LAST plugin of a name, so a second one
- * here would displace the instance `plan` / `apply` compose, or the one a host
- * config brings with its own options.
+ * `providesCapability`'s exact identity match on the `sharing` row of
+ * `CAPABILITY_PROVIDERS`, on the plugin list, before the boot starts): `plan`
+ * / `apply`'s served-platform composition and a host config that brings its
+ * own register the service themselves, and the kernel refuses a second
+ * registration under the same name.
  */
 export async function composeOwnershipQueueProvider(composed: readonly unknown[]): Promise<object | null> {
   const { CAPABILITY_PROVIDERS, providesCapability } = await import('@objectstack/core');
@@ -41,10 +46,29 @@ export async function composeOwnershipQueueProvider(composed: readonly unknown[]
   if (!spec) {
     throw new Error(
       "No 'sharing' capability provider is declared in CAPABILITY_PROVIDERS (@objectstack/core), so this boot " +
-        "cannot compose the 'ownership-queue' service a stack declaring queues or assignmentRules needs.",
+        "cannot tell whether it composes the 'ownership-queue' service a stack declaring queues or assignmentRules needs.",
     );
   }
   if (providesCapability(composed, spec.identities)) return null;
-  const { SharingServicePlugin } = await import('@objectstack/plugin-sharing');
-  return composeProviderForDeclarations(new SharingServicePlugin());
+  const { OwnershipQueueService, OWNERSHIP_QUEUE_SERVICE } = await import('@objectstack/plugin-sharing');
+  return {
+    name: 'com.objectstack.cli.migration-ownership-queue',
+    version: '1.0.0',
+    type: 'standard',
+    dependencies: ['com.objectstack.engine.objectql'],
+    async init(ctx: {
+      getService<T>(name: string): T;
+      registerService(name: string, service: unknown): void;
+      logger?: unknown;
+    }): Promise<void> {
+      // The construction `SharingServicePlugin.init()` performs: the engine is
+      // resolved at use, never here.
+      ctx.registerService(OWNERSHIP_QUEUE_SERVICE, new OwnershipQueueService({
+        engine: () => {
+          try { return ctx.getService('objectql'); } catch { return null; }
+        },
+        logger: ctx.logger as any,
+      }));
+    },
+  };
 }

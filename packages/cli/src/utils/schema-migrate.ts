@@ -1451,10 +1451,10 @@ export async function bootSchemaStack(
     await kernel.use(plugin as any);
   }
   // [ADR-0142 D1] The ownership-queue service `os serve` registers, so a stack
-  // declaring `queues` / `assignmentRules` boots here as it serves — composed
-  // for its declarations only, and only when nothing above already brought it
-  // (`./migrate-ownership-queue.ts`). Released like the composition above when
-  // it throws.
+  // declaring `queues` / `assignmentRules` boots here as it serves — the
+  // service alone (no sharing object, no armed sharing runtime), and only when
+  // nothing above already brought its provider (`./migrate-ownership-queue.ts`).
+  // Released like the composition above when it throws.
   const ownershipQueueProvider = await composeOwnershipQueueProvider(
     [...stack.plugins, ...composition.plugins, ...(opts.extraPlugins ?? [])],
   ).catch((error: unknown) => {
