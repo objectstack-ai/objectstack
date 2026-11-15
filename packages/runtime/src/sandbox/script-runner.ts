@@ -288,7 +288,15 @@ export interface ScriptContext {
    * middleware reads it, and neither does anything a body writes back.
    * Absent on the action face.
    */
-  provenance?: { flowRunId?: string; attributedUserId?: string; performedByClientId?: string; impersonatedBy?: string };
+  provenance?: {
+    flowRunId?: string;
+    attributedUserId?: string;
+    performedByClientId?: string;
+    performedByAgentId?: string;
+    performedByConversationId?: string;
+    performedByConfirmationId?: string;
+    impersonatedBy?: string;
+  };
   /**
    * The caller's options bag, PROJECTED to the two members ADR-0058's D2
    * declares visible to the `before*` phase — `multi` and `where` — for the

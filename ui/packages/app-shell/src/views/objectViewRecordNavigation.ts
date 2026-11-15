@@ -195,6 +195,11 @@ export function useObjectViewRecordNavigation({
             // answers `page` whatever the view or the object declares.
             if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) };
             const authored = activeView?.navigation ?? objectDef.navigation;
+            // `preventNavigation: true` ("Disable standard navigation
+            // entirely") outranks every mode: the row resolves to `none`, so
+            // no click opens it, a modifier click included, and the list
+            // draws no link face for it (`rowOpensRecord`, objectstack#33549).
+            if (authored?.preventNavigation) return { mode: 'none' };
             if (authored) {
                 // Authored config wins. For an overlay, resolve the `size`
                 // bucket to a viewport-clamped width when no explicit width was
