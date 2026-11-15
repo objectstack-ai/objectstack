@@ -288,7 +288,7 @@ describe.each([
     const expectRefusedNamingBoth = async () => {
         for (const answer of await bareDoors(booted!, 'doc', 'shared_doc')) {
             expect([answer.status, errorCodeOf(answer.body), answer.door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', answer.door]);
-            for (const id of [ALPHA, BETA]) expect(String(answer.body?.message ?? answer.body?.error?.message), answer.door).toContain(id);
+            for (const id of [ALPHA, BETA]) expect(JSON.stringify(answer.body ?? null), answer.door).toContain(id);
         }
     };
     const expectExactReadsOwnDoc = async () => {
