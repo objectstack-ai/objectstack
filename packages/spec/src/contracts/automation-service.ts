@@ -1478,15 +1478,20 @@ export interface FlowDryRunOptions extends Pick<AutomationContext, 'record' | 'p
  *    carries the condition in {@link FlowDryRunResult.startCondition}.
  *  - `'stopped'`: the run reached a node it does not go past (see
  *    {@link FlowDryRunStopStep}); that node is the last step.
- *  - `'failed'`: the dry run could not continue past a step. A node failed, or
- *    met a refusal, that no `fault` edge or `try_catch` region contains; that
- *    node is the last step. It is the dry run's own answer, not a prediction:
+ *  - `'failed'`: the dry run could not continue past a step, or could not
+ *    evaluate the start condition. A node failed, or met a refusal, that no
+ *    `fault` edge or `try_catch` region contains; that node is the last step. It is the dry run's own answer, not a prediction:
  *    a dry run can fail where the live run would not (a later node reads an
  *    outbound node's output, which a dry run leaves unset; a `runAs: 'system'`
  *    draft, which a dry run never elevates, meets a refusal; a filtered read
  *    misses a simulated write), and pass where the live run would fail (a
  *    validation rule, a uniqueness constraint, a required field, or any refusal
  *    a dry run does not judge).
+ *    A start node whose `condition` throws when it is evaluated against the
+ *    supplied `record` / `previous` fails before any node runs: there are no
+ *    steps, and {@link FlowDryRunResult.startCondition} carries the condition
+ *    and the fault. This one follows the live run, whose `execute` answers the
+ *    same throw `status: 'failed'`.
  *  - `'refused'`: the run never started (see {@link FlowDryRunResult.refusal}).
  *    ⛔ Not {@link AutomationResult.status}'s `'refused'`, which is an `end`
  *    node's outcome; here that case is `'completed'`.
@@ -1663,7 +1668,8 @@ export interface FlowDryRunResult {
     status: FlowDryRunStatus;
     /**
      * One entry per node execution: a node inside a loop appears once per
-     * pass. Empty when `status` is `'refused'` or `'condition_not_met'`.
+     * pass. Empty when `status` is `'refused'` or `'condition_not_met'`, and
+     * when it is `'failed'` because the start condition could not be evaluated.
      * Branches that run side by side (a `parallel` node's branches, a node's
      * several unconditional out-edges) are listed one branch after another, in
      * declaration order (`config.branches`, then out-edges), each branch's
@@ -1676,12 +1682,21 @@ export interface FlowDryRunResult {
     /** Set exactly when `status` is `'refused'`: why the run never started. */
     refusal?: { code: FlowDryRunRefusalCode; message: string };
     /**
-     * Set exactly when `status` is `'condition_not_met'`: the start node's
-     * `condition` as authored (its `source`, for an expression envelope) and
-     * what it evaluated to against the supplied `record` / `previous`.
+     * The start node's `condition` as authored (its `source`, for an expression
+     * envelope), set exactly when the dry run ended on it:
+     *  - with `result: false` when `status` is `'condition_not_met'`: it did not
+     *    hold against the supplied `record` / `previous`;
+     *  - with `fault` when `status` is `'failed'` and there are no steps: its
+     *    evaluation threw. `fault` is the thrown message, the text `execute`
+     *    answers as `error` for that throw, and `error` carries the same text.
      */
-    startCondition?: { expression: string; result: false };
-    /** Set exactly when `status` is `'failed'`: the run's failure text. */
+    startCondition?:
+        | { expression: string; result: false; fault?: never }
+        | { expression: string; fault: string; result?: never };
+    /**
+     * Set exactly when `status` is `'failed'`: the run's failure text (for a
+     * start condition that could not be evaluated, the thrown message).
+     */
     error?: string;
 }
 
@@ -1788,6 +1803,15 @@ export interface IAutomationService {
      *    `engine.ts` in `@objectstack/service-automation`), in the live run's
      *    order: `execute` evaluates the start condition before its node
      *    input-schema check, so a condition that does not hold answers first.
+     *    A `condition` whose evaluation throws (a CEL error against the
+     *    supplied `record` / `previous`, for instance) answers
+     *    `status: 'failed'` and no steps, the condition and the thrown message
+     *    in `startCondition` (`fault`) and the same message in `error`, also
+     *    before the input-schema check: `execute`'s catch answers that throw
+     *    `status: 'failed'` with the message as `error`, before any node runs.
+     *  - `execute`'s re-entrancy guard (`reentrancy_loop_guard`), which sits
+     *    between the two checks, cannot fire for a dry run: a dry run holds no
+     *    active-run key and writes nothing.
      *  - Then the node input-schema check {@link execute} runs before dispatch:
      *    `status: 'refused'`, `FLOW_INPUT_SCHEMA_INVALID` in `refusal`, and no
      *    steps.
