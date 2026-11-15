@@ -27,6 +27,8 @@
  * `Request` into the real `HttpDispatcher.dispatch()`.
  */
 
+// Pays the metadata service's first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
