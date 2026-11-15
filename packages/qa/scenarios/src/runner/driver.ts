@@ -67,7 +67,7 @@ export interface StepRef {
 }
 
 /** The key segment an ask after the first adds ({@link stepKey}): `…/account_count/sdr/repeat-2`. */
-export const REPEAT_KEY_PREFIX = 'repeat-';
+const REPEAT_KEY_PREFIX = 'repeat-';
 
 /**
  * The replay key of a step: `card/mode/phase/step/persona`, `-` for no

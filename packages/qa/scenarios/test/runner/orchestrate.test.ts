@@ -1816,7 +1816,8 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
   const key = (phase: 'run' | 'iterate-run', step: string, persona: string | undefined, repeat?: number, mode: 'scratch' | 'template' = 'scratch') =>
     stepKey({ card: CARD, mode, phase, step, ...(persona ? { persona } : {}), ...(repeat !== undefined ? { repeat } : {}) });
   /** Each (question, persona) turn of the crm card, in the order a half asks them: 8 questions, `account_count` as two personas. */
-  const TURNS = load().card.run.questions.flatMap((q) => (q.personas?.length ? q.personas.map((p) => [q.id, p] as const) : [[q.id, undefined] as const]));
+  type Turn = readonly [question: string, persona: string | undefined];
+  const TURNS = load().card.run.questions.flatMap((q): Turn[] => (q.personas?.length ? q.personas.map((p): Turn => [q.id, p]) : [[q.id, undefined]]));
   const meta = (driver: AgentDriver) => ({ run: 'r', date: '2026-11-15', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' });
   const WRONG = 'I could not find that.';
 
