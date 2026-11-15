@@ -6,7 +6,7 @@
 
 fix(console): four Console surfaces name things by their label, not their machine name
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Anything shown to a person uses the label; the machine name appears at most as secondary text.
