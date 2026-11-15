@@ -1108,14 +1108,18 @@ function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Reco
   return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
 }
 
-/** What the action posts for this row: the record id under `recordIdParam`, then the collected params. */
+/**
+ * What the action posts for this row: its constant `bodyExtra`, the record id
+ * under `recordIdParam`, then the collected params.
+ */
 function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
   const action = declaredAction(name);
   const target = String(action.target);
   expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
   const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
   for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
-  return { path: target.slice(BASE.length), body: { [String(action.recordIdParam)]: userId, ...collected } };
+  const extra = ((action as { bodyExtra?: Record<string, unknown> }).bodyExtra ?? {});
+  return { path: target.slice(BASE.length), body: { ...extra, [String(action.recordIdParam)]: userId, ...collected } };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1234,5 +1238,61 @@ describe('[#34010] Unlock is offered and works without the admin plugin', () => 
     expect(res.status, await res.clone().text()).toBe(200);
     expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
     expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Set Password is offered and works without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.set_user_password` posts to `admin/set-user-password`, plugin-auth's
+// wrapper registered ahead of the catch-all: it runs the platform-admin gate,
+// then hashes through better-auth's core `internalAdapter`, which every kernel
+// carries, with or without the vendor admin plugin. Each case judges the
+// DECLARED action under the features the kernel serves, drives what it posts
+// (its `bodyExtra`, `recordIdParam` and collected params), and signs in with
+// the new password. The action's other rule is kept: it is hidden on a
+// cloud-managed environment, whose door refuses every target.
+
+describe('[#34130] Set Password is offered and works without the admin plugin', () => {
+  const COLLECTED = { newPassword: NEW_PASSWORD, mustChangePassword: false, revokeSessionsAndKeys: false };
+
+  it('unmanaged kernel: Set Password is offered, the door sets the password, and the member signs in with it', async () => {
+    const s = await stage();
+    const features = (s.manager.getPublicConfig() as any).features;
+    expect(features.admin, 'this kernel serves features.admin off').toBe(false);
+    expect(features.cloudManaged ?? false).toBe(false);
+
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(true);
+    const call = actionCall('set_user_password', s.ids.member, COLLECTED);
+    // The door's platform-admin gate holds without the plugin: a caller without
+    // the standing is refused and the old password still signs in.
+    const denied = await verdict(await s.fire(call.path, call.body, s.bearers.idp));
+    expect(denied.status, denied.text).toBe(403);
+    expect(denied.code).toBe('PERMISSION_DENIED');
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(401);
+
+    const res = await s.fire(call.path, call.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+    expect((await s.signIn(EMAILS.member)).status).toBe(401);
+  });
+
+  it('managed kernel: Set Password stays hidden, the rule kept beside the dropped gate', async () => {
+    const s = await managedStage();
+    const features = (s.manager.getPublicConfig() as any).features;
+    expect(features.admin).toBe(false);
+    expect(features.cloudManaged).toBe(true);
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(false);
+  });
+
+  it('CONTROL: with the plugin on, Set Password is offered and sets the password as before', async () => {
+    const s = await stage({ adminPlugin: true });
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(true);
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(true);
+    const call = actionCall('set_user_password', s.ids.member, COLLECTED);
+    const res = await s.fire(call.path, call.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
   });
 });
