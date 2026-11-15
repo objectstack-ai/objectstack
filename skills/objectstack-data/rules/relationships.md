@@ -113,11 +113,9 @@ chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
 
-**Import names a detail within its master.** A data import's lookup cell naming a
-detail (`"Advance 30%"`) is resolved within the master the same row names
-(exactly one reference column to that master), or by the lookup's own `dependsOn`
-sibling; a tie there is `reference_ambiguous`, another master's detail
-`reference_not_found`. A row with no master cell searches the whole object.
+**Import resolves a detail's name within its master** when the row sets that
+master (one reference column to it) or the lookup's `dependsOn` sibling: a tie
+there is `reference_ambiguous`, another master's detail `reference_not_found`.
 
 ### Many-to-Many: Junction Object
 
@@ -287,8 +285,7 @@ inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL fo
   editable fields, else `grid`. Set the string to override.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors purely from how you model the child + parent (no UI config — details
-in the objectstack-ui skill → Master-Detail Forms):
+behaviors purely from how you model the child + parent (no UI config):
 
 ```typescript
 // Parent
@@ -367,8 +364,7 @@ otherwise columns auto-derive from the child object's
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
 `partner_account`) yields **one related list per FK**; a self-referential FK
-(a hierarchy) surfaces a "children" list. See the objectstack-ui skill for the
-rendering side.
+(a hierarchy) surfaces a "children" list.
 
 ## Incorrect vs Correct
 
@@ -379,27 +375,19 @@ export default ObjectSchema.create({
   name: 'invoice_line_item',
   fields: {
     invoice_id: {
-      type: 'lookup',  // ❌ Child can exist without parent — wrong!
+      type: 'lookup',  // ❌ Child can exist without parent — use the master_detail pattern above
       reference: 'invoice',
     },
   }
 });
 ```
 
-### ✅ Correct — Using master_detail for Owned Children
-
-The [master_detail](#one-to-many-master_detail) pattern above.
-
 ### ❌ Incorrect — Native Many-to-Many
 
 ```typescript
-// ObjectStack does not have native many-to-many type
 {
-  type: 'many_to_many',  // ❌ Not a valid field type
+  type: 'many_to_many',  // ❌ Not a valid field type — use a junction object
   reference: 'tag',
 }
 ```
 
-### ✅ Correct — Junction Object Pattern
-
-The [junction object](#many-to-many-junction-object) pattern above.
