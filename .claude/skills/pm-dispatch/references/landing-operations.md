@@ -34,7 +34,11 @@
 - (a) 它带着正把**他人** PR 踢出队列的签名之修复;(b) 它是他车道 PR/卡具名前置
   (`Blocked-by`/串行行),该线经维护者或账户主人定为最高优先;(c) 账户主人点名要它插队。
 - 送出前先在 PR 贴审计评论点名字母与依据;一笔一 PR,同仓同时至多一个插队者在队。
-- 中继另拒 draft、head 已移与 AGENTS.md §7 三类;读回非队首即 FAILED,⛔ 不重发,报维护者。
+- 中继另拒 draft、head 已移、受管面与发版 PR;读回非队首即 FAILED,⛔ 不重发,报维护者。
+- 逾 3,000 行须授权批准在现 head,或维护者评论点名现 head 承接旧批准(带 `approval_comment`)。
+- 出队(中继 `pr_dequeue`)限三因:(a) 与基座冲突;(b) 自身改动致队列构建红,三事实判非 flake;
+  (c) 落地席自请(中继认其在该 PR 的签名评论)。先贴审计评论再出队,回读不在队才落地。
+- 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
