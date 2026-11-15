@@ -18,7 +18,7 @@ import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { Loader2, Building2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveOrgRoleLabel } from '../orgRoleLabel.js';
-import { resolveOrgErrorMessage } from '../orgErrorMessage.js';
+import { resolveInvitationLookupMessage, resolveOrgErrorMessage } from '../orgErrorMessage.js';
 import { resolveRootUrl } from '../resolveHomeUrl.js';
 
 type InvitationWithOrg = AuthInvitation & {
@@ -80,12 +80,9 @@ export function AcceptInvitationPage() {
       })
       .catch((err) => {
         if (!cancelled)
-          setError(
-            resolveOrgErrorMessage(err, t, {
-              key: 'organization.errors.invitationNotFound',
-              defaultValue: 'This invitation no longer exists or has expired',
-            }),
-          );
+          // objectstack#33650 — the lookup's own not-found answer carries no
+          // code; read by route, status and the missing code, never the text.
+          setError(resolveInvitationLookupMessage(err, t));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

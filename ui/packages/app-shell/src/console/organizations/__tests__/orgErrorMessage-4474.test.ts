@@ -243,6 +243,8 @@ describe('#4474 — the mapping table itself', () => {
         'ORGANIZATION_ALREADY_EXISTS',
         'ORGANIZATION_CREATION_DISABLED',
         'ORGANIZATION_SLUG_ALREADY_TAKEN',
+        // objectstack#33650: better-auth 1.7.12 `create-invitation` refuses an address that already holds a membership.
+        'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION',
         'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION',
         'YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION',
         'YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS',

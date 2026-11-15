@@ -33,7 +33,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../../packages/data-objectstack/src/sharedDiscovery';
 import { probeRecordReadability, readabilityKey } from './recordReadability';
 
 /** The server's refusal body, as measured on the probe's list read. */

@@ -1,0 +1,114 @@
+{
+  "driver": {
+    "driver": "claude-code-cli",
+    "authMethod": "oauth_token",
+    "apiBilled": false
+  },
+  "turns": {
+    "invoice_with_line_items/scratch/run/remove_line/sales_rep": {
+      "replyText": "I'll find the INV-003 invoice and its Gadget line item, then delete that line.\n\nThe Gadget line is the only line on INV-003, which is already in \"sent\" status. Your instruction named this exact line, so I'll run the delete action with that as the confirmation.\n\nDone. The Gadget line on INV-003 is deleted and the invoice total was recomputed.\n\n- **Removed line:** Gadget, quantity 3, amount 75. It was the only line on the invoice.\n- **Invoice INV-003 now:** no line items, total 0. Its status is still \"sent\", so the customer-facing invoice now shows a zero total. If that was not intended, the invoice itself may need attention next.",
+      "toolCalls": [
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "demoinvoice_invoice",
+            "where": {
+              "name": "INV-003"
+            }
+          },
+          "output": "{\n  \"object\": \"demoinvoice_invoice\",\n  \"records\": [\n    {\n      \"id\": \"i3\",\n      \"created_at\": \"2026-11-14T22:38:23.299Z\",\n      \"updated_at\": \"2026-11-14T22:45:19.634Z\",\n      \"organization_id\": \"org_mwgzlntgwsnjjxbh\",\n      \"created_by\": \"OoDGhhcTGYIRjWdb2dS7Ym2Hc7adAKMT\",\n      \"updated_by\": \"Aa4ZjsOqGeBLI5Stk4wGBCHTY1VKNKY1\",\n      \"owner_id\": \"Aa4ZjsOqGeBLI5Stk4wGBCHTY1VKNKY1\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"name\": \"INV-003\",\n      \"account\": \"a2\",\n      \"status\": \"sent\",\n      \"owner\": \"Aa4ZjsOqGeBLI5Stk4wGBCHTY1VKNKY1\",\n      \"issued_on\": \"2026-10-28\",\n      \"total\": 75\n    }\n  ],\n  \"total\": 1,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "demoinvoice_invoice_line",
+            "where": {
+              "invoice": "i3"
+            }
+          },
+          "output": "{\n  \"object\": \"demoinvoice_invoice_line\",\n  \"records\": [\n    {\n      \"id\": \"l5\",\n      \"created_at\": \"2026-11-14T22:38:23.418Z\",\n      \"updated_at\": \"2026-11-14T22:38:23.418Z\",\n      \"organization_id\": \"org_mwgzlntgwsnjjxbh\",\n      \"created_by\": \"OoDGhhcTGYIRjWdb2dS7Ym2Hc7adAKMT\",\n      \"updated_by\": \"OoDGhhcTGYIRjWdb2dS7Ym2Hc7adAKMT\",\n      \"owner_id\": \"OoDGhhcTGYIRjWdb2dS7Ym2Hc7adAKMT\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"invoice\": \"i3\",\n      \"product\": \"Gadget\",\n      \"quantity\": 3,\n      \"amount\": 75\n    }\n  ],\n  \"total\": 1,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "run_action",
+          "rawName": "mcp__app__run_action",
+          "input": {
+            "actionName": "demoinvoice_invoice_line-demoinvoice_delete_invoice_line",
+            "recordId": "l5",
+            "confirm": true
+          },
+          "output": "{\n  \"ok\": true,\n  \"action\": \"demoinvoice_delete_invoice_line\",\n  \"objectName\": \"demoinvoice_invoice_line\",\n  \"recordId\": \"l5\",\n  \"result\": {\n    \"id\": \"l5\",\n    \"deleted\": true\n  }\n}"
+        },
+        {
+          "name": "get_record",
+          "rawName": "mcp__app__get_record",
+          "input": {
+            "objectName": "demoinvoice_invoice",
+            "recordId": "i3"
+          },
+          "output": "{\n  \"id\": \"i3\",\n  \"created_at\": \"2026-11-14T22:38:23.299Z\",\n  \"updated_at\": \"2026-11-14T22:46:02.283Z\",\n  \"organization_id\": \"org_mwgzlntgwsnjjxbh\",\n  \"created_by\": \"OoDGhhcTGYIRjWdb2dS7Ym2Hc7adAKMT\",\n  \"updated_by\": \"Aa4ZjsOqGeBLI5Stk4wGBCHTY1VKNKY1\",\n  \"owner_id\": \"Aa4ZjsOqGeBLI5Stk4wGBCHTY1VKNKY1\",\n  \"owning_business_unit_id\": null,\n  \"queue\": null,\n  \"name\": \"INV-003\",\n  \"account\": \"a2\",\n  \"status\": \"sent\",\n  \"owner\": \"Aa4ZjsOqGeBLI5Stk4wGBCHTY1VKNKY1\",\n  \"issued_on\": \"2026-10-28\",\n  \"total\": 0\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "demoinvoice_invoice_line",
+            "where": {
+              "invoice": "i3"
+            }
+          },
+          "output": "{\n  \"object\": \"demoinvoice_invoice_line\",\n  \"records\": [],\n  \"total\": 0,\n  \"hasMore\": false\n}"
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 10
+      }
+    },
+    "crm_account_with_contacts/scratch/run/remove_ben/sdr": {
+      "replyText": "I'll look up the contact Ben Ode in the app, confirm there is exactly one match, then delete it.\n\nExactly one contact named Ben Ode exists (id ct2, under account ac1). Deleting it as requested.\n\nThe contact Ben Ode has been deleted.\n\nThere was exactly one contact with that name in the Contact object. It was linked to account ac1 and is now removed. The app placed it in the recycle bin, so it can still be restored from there if the deletion turns out to be a mistake.",
+      "toolCalls": [
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "where": {
+              "last_name": "Ode"
+            },
+            "limit": 50
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"INVALID_FIELD\",\n    \"message\": \"Query parameter 'where' filters on 'last_name', which is not a field on object 'democrm_contact'. A filter on a field that does not exist can only match zero records, so the query was refused instead of answered with an empty list.\",\n    \"status\": 400\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "democrm_contact",
+            "limit": 50
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"records\": [\n    {\n      \"id\": \"ct1\",\n      \"created_at\": \"2026-11-14T22:07:41.251Z\",\n      \"updated_at\": \"2026-11-14T22:07:41.251Z\",\n      \"organization_id\": \"org_mwgyi6f35s1mkegn\",\n      \"created_by\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"updated_by\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"owner_id\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Ana Ruiz\",\n      \"account\": \"ac1\"\n    },\n    {\n      \"id\": \"ct2\",\n      \"created_at\": \"2026-11-14T22:07:41.269Z\",\n      \"updated_at\": \"2026-11-14T22:07:41.269Z\",\n      \"organization_id\": \"org_mwgyi6f35s1mkegn\",\n      \"created_by\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"updated_by\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"owner_id\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Ben Ode\",\n      \"account\": \"ac1\"\n    },\n    {\n      \"id\": \"ct5\",\n      \"created_at\": \"2026-11-14T22:07:41.321Z\",\n      \"updated_at\": \"2026-11-14T22:15:01.822Z\",\n      \"organization_id\": \"org_mwgyi6f35s1mkegn\",\n      \"created_by\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"updated_by\": \"G9Z38GZIxuOQtxyhI8cEsviNzzgqSqoE\",\n      \"owner_id\": \"fAyZwtjTyNcfDitvFAohK7mu2BIbqHcc\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Eli Moss\",\n      \"account\": \"ac1\"\n    },\n    {\n      \"id\": \"uOH9pFi4p6Xm6Hiv\",\n      \"created_at\": \"2026-11-14T22:14:26.775Z\",\n      \"updated_at\": \"2026-11-14T22:14:26.775Z\",\n      \"organization_id\": \"org_mwgyi6f35s1mkegn\",\n      \"created_by\": \"G9Z38GZIxuOQtxyhI8cEsviNzzgqSqoE\",\n      \"updated_by\": \"G9Z38GZIxuOQtxyhI8cEsviNzzgqSqoE\",\n      \"owner_id\": \"G9Z38GZIxuOQtxyhI8cEsviNzzgqSqoE\",\n      \"owning_business_unit_id\": null,\n      \"queue\": null,\n      \"full_name\": \"Fay Wu\",\n      \"account\": \"ac3\"\n    }\n  ],\n  \"total\": 4,\n  \"hasMore\": false\n}"
+        },
+        {
+          "name": "delete_record",
+          "rawName": "mcp__app__delete_record",
+          "input": {
+            "objectName": "democrm_contact",
+            "recordId": "ct2",
+            "confirm": true
+          },
+          "output": "{\n  \"object\": \"democrm_contact\",\n  \"id\": \"ct2\",\n  \"success\": true,\n  \"recycleBinEntryId\": \"clN3JzQyepci8_ob\"\n}"
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 6
+      }
+    }
+  },
+  "files": {}
+}

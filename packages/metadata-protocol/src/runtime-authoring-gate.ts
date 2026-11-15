@@ -52,6 +52,7 @@ import {
     type AuthoringFinding,
     type RuntimePackageScope,
     type RuntimeStackContext,
+    type StoredObjectExtension,
 } from '@objectstack/lint/runtime';
 // The ONE declaration of "which `config` key on which container node type holds
 // a nested region" (#4401, `spec/src/automation/region-slots.ts`). Four passes
@@ -1423,6 +1424,17 @@ export function evaluateRuntimeAuthoringGate(args: {
      * language and nothing else: no verdict depends on it.
      */
     userTextLocales?: readonly (string | undefined)[];
+    /**
+     * [#33494] On an `object_extension` write: the target's OTHER packages'
+     * published extensions, as the registry holds them (package, priority,
+     * fields; a disabled package's left out). A fact only the host holds, of
+     * the #6285 kind: gathered by the impure caller and handed to the shared
+     * rules, whose extension walk folds the written entry among them by
+     * priority, as `os build` folds every package's entry. Absent, the written
+     * entry is folded over the target as served, every other package's field
+     * carried there with no priority.
+     */
+    storedObjectExtensions?: readonly StoredObjectExtension[];
 }): RuntimeAuthoringVerdict {
     const toIssue = issueOf(args.userTextLocales ?? []);
     // [#26188] The one finding a draft hears: a hierarchy scope this runtime
@@ -1495,6 +1507,9 @@ export function evaluateRuntimeAuthoringGate(args: {
             : {}),
         ...(args.rlsMembershipResolverKeys !== undefined
             ? { rlsMembershipResolverKeys: args.rlsMembershipResolverKeys }
+            : {}),
+        ...(args.storedObjectExtensions !== undefined
+            ? { storedObjectExtensions: args.storedObjectExtensions }
             : {}),
     });
 

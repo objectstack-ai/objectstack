@@ -52,10 +52,10 @@ import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
-import { ObjectView } from '../views/ObjectView.js';
-// objectui#13052 — on its own line: the line above is the eager-walk control
-// `scripts/__tests__/vite-declared-lazy-views.test.ts` reads verbatim.
-import { ObjectNotFoundState } from '../views/ObjectView.js';
+// `ObjectNotFoundState` from its own module, not through `ObjectView`: the
+// object list is a lazy route element below, and a by-value import of its
+// module here would hold the whole list (and the grid it draws) eager.
+import { ObjectNotFoundState } from '../views/objectViewChrome.js';
 import { KeyboardShortcutsDialog } from '../chrome/KeyboardShortcutsDialog.js';
 import { OnboardingWalkthrough } from '../chrome/OnboardingWalkthrough.js';
 import { RouteFader } from '../chrome/RouteFader.js';
@@ -138,6 +138,10 @@ const SearchResultsPage = routeChunk.lazy(() => import('../views/SearchResultsPa
 const RecordFormPage = routeChunk.lazy(() => import('../views/RecordFormPage.js').then(m => m.RecordFormPage));
 const ComponentNavView = routeChunk.lazy(() => import('../views/ComponentNavView.js').then(m => m.ComponentNavView));
 const ObjectDataPage = routeChunk.lazy(() => import('../views/ObjectDataPage.js').then(m => m.ObjectDataPage));
+// The object list (the default list and a saved list view): a route element
+// like the rest, so a first load that opens a dashboard or a page does not
+// download the list, its record pane and the grid they draw.
+const ObjectView = routeChunk.lazy(() => import('../views/ObjectView.js').then(m => m.ObjectView));
 
 // Metadata admin — mounted under /apps/:app/metadata for the datasource
 // alone (objectstack ADR-0146 D1): every other type's URL there opens Studio's
@@ -165,6 +169,8 @@ const MarketplacePackagePage = routeChunk.lazy(() => import('./marketplace/Marke
  * them). A path not listed renders an eagerly bundled element.
  */
 const APP_ROUTE_CHUNKS: ReadonlyArray<{ path: string; chunk: { preload: () => Promise<unknown> } }> = [
+  { path: ':objectName', chunk: ObjectView },
+  { path: ':objectName/view/:viewId', chunk: ObjectView },
   { path: ':objectName/new', chunk: RecordFormPage },
   { path: ':objectName/data', chunk: ObjectDataPage },
   { path: ':objectName/record/:recordId', chunk: RecordDetailView },

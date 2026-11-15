@@ -10,7 +10,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isActionSwitchedOff } from '@object-ui/core';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 const TASK = {
   name: 'showcase_task',

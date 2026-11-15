@@ -55,6 +55,7 @@ import {
   DataEmptyState, EmptyStateLink, resolveIcon,
   HorizontalOverflowBox,
   toast,
+  cn,
 } from '@object-ui/components';
 import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -315,9 +316,11 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * that owns the row click knows it. `false` ⇒ the row's record-link cells
    * (the primary field, and columns authored `link: true`) draw their value as
    * plain text, with no anchor and no `role="link"`, and the row's right-click
-   * menu offers no Open / Open in new tab; its actions stay. The row click
-   * itself still reaches `onRowClick`, so whatever else the host routes through
-   * it is untouched. Absent (or `true`) ⇒ every row is drawn as before.
+   * menu offers no Open / Open in new tab; its actions stay. On a phone the
+   * row's card draws no pointer and no hover wash (objectstack#33548), and its
+   * "⋮" stays. The row click itself still reaches `onRowClick`, so whatever
+   * else the host routes through it is untouched. Absent (or `true`) ⇒ every
+   * row is drawn as before.
    *
    * The grid cannot read this off `onRowClick`: a host passes that handler for
    * every row and decides inside it, as the console's object list does for a
@@ -3352,7 +3355,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div
           key={row.id || row._id || idx}
           data-testid="grid-mobile-card"
-          className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors hover:bg-accent/50 touch-manipulation"
+          // A row the host says opens nothing (`rowOpensRecord: false`) draws
+          // no pointer and no hover wash on its card either (objectstack#33548).
+          className={cn(
+            'flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors touch-manipulation',
+            rowOpensRecord !== false && 'cursor-pointer hover:bg-accent/50',
+          )}
           onClick={() => navigation.handleClick(row)}
         >
           <div className="min-w-0 flex-1">

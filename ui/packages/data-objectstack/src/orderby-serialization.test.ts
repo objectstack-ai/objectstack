@@ -28,7 +28,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache, serializeOrderBy } from './index';
+import { ObjectStackAdapter, serializeOrderBy } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 function makeAdapter() {
   const calls: string[] = [];

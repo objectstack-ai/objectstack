@@ -98,12 +98,19 @@ export function formulaCycleIssues(
  * elsewhere. The build passes the names the authored target declares (the
  * object walk locates those at the object, so a cycle closing through a
  * declared formula keeps that location); the `object_extension` door passes
- * none, since it judges the written entry's own definition of every name the
- * entry adds, over everything the target served before the write.
+ * none, since its target is served before the write and the object walk does
+ * not run there.
+ *
+ * [#33494] A `stored` entry (another package's published extension, which the
+ * door folds in among the written one by priority) locates nothing: a name it
+ * adds later in fold order than the written entry is the stored entry's
+ * definition, served over the written one, so no locus is left for it, and a
+ * cycle it closes through another field of the written entry is named on
+ * that field alone.
  */
 export function extensionFormulaLoci(
   target: string,
-  entries: ReadonlyArray<{ path: string; fields: readonly AnyRec[] }>,
+  entries: ReadonlyArray<{ path: string; fields: readonly AnyRec[]; stored?: true }>,
   left: ReadonlySet<string>,
 ): Map<string, string> {
   const loci = new Map<string, string>();
@@ -111,7 +118,8 @@ export function extensionFormulaLoci(
     for (const field of entry.fields) {
       const name = field.name;
       if (typeof name !== 'string' || left.has(name)) continue;
-      loci.set(name, `object '${target}' · ${entry.path} · field '${name}' expression`);
+      if (entry.stored) loci.delete(name);
+      else loci.set(name, `object '${target}' · ${entry.path} · field '${name}' expression`);
     }
   }
   return loci;

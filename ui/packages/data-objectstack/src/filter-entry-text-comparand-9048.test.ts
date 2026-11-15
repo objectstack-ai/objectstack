@@ -49,9 +49,9 @@ import {
   ObjectStackAdapter,
   FILTER_OPERATOR_ALIASES,
   MalformedFilterError,
-  clearSharedDiscoveryCache,
   isMalformedFilterError,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 type Route = 'plain' | 'expand';
 const ROUTES: readonly Route[] = ['plain', 'expand'];
