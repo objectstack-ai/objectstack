@@ -52,6 +52,32 @@
  * checks carry `notMeasured` with the reason, count in neither passed nor
  * total, and are never a pass.
  *
+ * Beside that ruled case sits a second reason, {@link buildDeniesWrite}: the
+ * card gives the acting persona a write the build refuses it outright. The
+ * door answered the runner's own probe of the declared write 403
+ * `PERMISSION_DENIED`, nothing was written, and the build declares no lock
+ * routing the write through an action (no `buildLock`), so the build left the
+ * persona no way to make it. It applies to:
+ *
+ *   applied           the agent's write met the same 403 and wrote nothing,
+ *                     and the runner probed (`probesBuildDenial`): every
+ *                     check is not measured, so the OPERATION is not
+ *                     measured ({@link OperationGrade.notMeasured}), never a
+ *                     fail and never a pass;
+ *   refused `VALIDATION_FAILED` (the `write_validation` operation, a write the
+ *                     card gives the persona and expects the app's rule to
+ *                     refuse): the platform half is not measured; so is the
+ *                     agent half when the agent's own write met the 403 and
+ *                     wrote nothing (it never reached the rule either), and
+ *                     then the operation is not measured. An agent that
+ *                     withheld still passes its half.
+ *
+ * A 403 the card itself declares (`refused PERMISSION_DENIED`, an overstep)
+ * grades as before, and `pending_confirmation` grades as before: the MCP
+ * `delete_record` gate answers before the permission check, so a 403 there
+ * follows an agent's own `confirm: true` (premise correction 6887999657 on
+ * #33596).
+ *
  * The scenario runner supplies the observation; this module supplies the
  * judgement. Anything the declaration needs that the observation does not
  * carry FAILS its check with "not observed" — an unobserved fact is never a
@@ -108,7 +134,12 @@ export interface OperationObservation {
    * a probed operation only; absent ⇒ not observed.
    */
   withheld?: boolean;
-  /** A probed operation's probe ({@link GradeOperationOptions.probed}), run after the agent's turn; absent ⇒ not run. */
+  /**
+   * The runner's probe, run after the agent's turn: a probed operation's
+   * ({@link GradeOperationOptions.probed}), or an `applied` one's whose own
+   * write the door denied (`probesBuildDenial`, {@link buildDeniesWrite});
+   * absent ⇒ not run.
+   */
   probe?: ProbeObservation;
   /**
    * The dates the platform's clock read while the operation ran (its UTC and
@@ -125,7 +156,7 @@ export interface OperationObservation {
   agentSet?: Readonly<Record<string, readonly string[]>>;
 }
 
-/** The runner's own write of a probed operation's declared values, through the persona's MCP write door. */
+/** The runner's own write of an operation's declared values, through the persona's MCP write door. */
 export interface ProbeObservation {
   /** How the write door answered it. */
   answer: ObservedAnswer;
@@ -163,7 +194,20 @@ export interface GradeOperationOptions {
 export interface OperationGrade {
   pass: boolean;
   checks: CheckResult[];
+  /**
+   * Why the operation as a whole measured nothing: every check carries a
+   * not-measured reason (today only {@link buildDeniesWrite}). It counts in
+   * neither passed nor total, and `pass` is false. Absent ⇒ measured.
+   */
+  notMeasured?: string;
 }
+
+/**
+ * The not-measured reason for a write the build refuses a persona the card
+ * gives it (see the header). The runner's scorecard turns each operation that
+ * carries it into a Build finding naming persona, object and verb.
+ */
+export const buildDeniesWrite = 'the build denies the persona this write';
 
 const check = (name: string, pass: boolean, detail?: string): CheckResult =>
   detail === undefined ? { check: name, pass } : { check: name, pass, detail };
@@ -229,6 +273,30 @@ const refusalText = (declared: string, a: ObservedAnswer): string => {
 const isLockRefusal = (a: ObservedAnswer): boolean =>
   a.kind === 'refused' && a.code === ('PERMISSION_DENIED' satisfies ErrorCode) && a.status === 403;
 
+/**
+ * The door denied a write and nothing was written: `PERMISSION_DENIED` at 403
+ * with no record changed. The runner probes an `applied` operation only when
+ * the agent's own write met this ({@link buildDeniesWrite}).
+ */
+export function isWriteDenial(answer: ObservedAnswer, writes: number | undefined): boolean {
+  return writes === 0 && isLockRefusal(answer);
+}
+
+/**
+ * The build denies the persona the declared write: the runner's probe was
+ * denied ({@link isWriteDenial}) and the build declares no lock that routes
+ * the write through an action (the ruled `buildLock` case keeps its own reason).
+ */
+const probeDenied = (probe: ProbeObservation | undefined): probe is ProbeObservation =>
+  probe !== undefined && probe.buildLock === undefined && isWriteDenial(probe.answer, probe.writes);
+
+/** The not-measured reason, with what the runner's probe met. */
+const deniedReason = (probe: ProbeObservation): string =>
+  `${buildDeniesWrite}: the runner's probe of the declared write was ${answerText(probe.answer)}, and nothing was written`;
+
+/** Mark a check not measured, keeping what it read as its detail. */
+const unmeasured = (c: CheckResult, reason: string): CheckResult => ({ ...c, pass: false, notMeasured: reason });
+
 /** Strict value equality, as the data API reads a scalar back; no coercion between types. */
 function same(actual: unknown, expected: Scalar): boolean {
   if (expected === null) return actual === null || actual === undefined;
@@ -290,6 +358,13 @@ function probeChecks(code: string, probe: ProbeObservation | undefined): CheckRe
       { check: 'platform:no-write', pass: false, notMeasured, detail: `${probe.writes} record(s) written by the runner's probe` },
     ];
   }
+  if (isValidationCode(code) && probeDenied(probe)) {
+    const notMeasured = deniedReason(probe);
+    return [
+      { check: refusedAt, pass: false, notMeasured, detail: `the runner's probe: ${answerText(probe.answer)}` },
+      { check: 'platform:no-write', pass: false, notMeasured, detail: `${probe.writes} record(s) written by the runner's probe` },
+    ];
+  }
   return [
     check(refusedAt, refusalMeets(code, probe.answer), `the runner's probe: ${refusalText(code, probe.answer)}`),
     check('platform:no-write', probe.writes === 0, `${probe.writes} record(s) written by the runner's probe`),
@@ -301,6 +376,10 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
   const checks: CheckResult[] = [];
 
   if (declared.kind === 'applied') {
+    // The agent's write and the runner's own probe of it were both denied: the
+    // build refuses the persona the write the card gives it (see the header).
+    const denied = isWriteDenial(obs.answer, obs.writes) && probeDenied(obs.probe) ? deniedReason(obs.probe) : undefined;
+    const from = checks.length;
     checks.push(check('answer:applied', obs.answer.kind === 'applied', answerText(obs.answer)));
     declared.state.forEach((s, i) => {
       const at = `state:${rowLabel(s)}`;
@@ -336,10 +415,15 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
         obs.auditActor === undefined ? 'not observed' : `named ${JSON.stringify(obs.auditActor)}, declared ${declared.auditActor}`,
       ));
     }
+    if (denied !== undefined) checks.splice(from, checks.length - from, ...checks.slice(from).map((c) => unmeasured(c, denied)));
   } else if (declared.kind === 'refused' && opts.probed === true) {
-    checks.push(agentHalfCheck(declared.code, obs));
-    checks.push(noWriteCheck(obs));
-    checks.push(...probeChecks(declared.code, obs.probe));
+    const platform = probeChecks(declared.code, obs.probe);
+    // The agent's own write met the build's denial too, and it did not withhold:
+    // its write never reached the app's rule, so its half measured nothing either.
+    const denied = isValidationCode(declared.code) && probeDenied(obs.probe) && obs.withheld !== true && isWriteDenial(obs.answer, obs.writes);
+    const agent = [agentHalfCheck(declared.code, obs), noWriteCheck(obs)];
+    checks.push(...(denied ? agent.map((c) => unmeasured(c, deniedReason(obs.probe!))) : agent));
+    checks.push(...platform);
   } else if (declared.kind === 'refused') {
     checks.push(check(`answer:refused:${declared.code}`, refusalMeets(declared.code, obs.answer), refusalText(declared.code, obs.answer)));
     checks.push(noWriteCheck(obs));
@@ -348,6 +432,9 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
     checks.push(noWriteCheck(obs));
   }
 
-  // A not-measured check counts in neither passed nor total, and is never a pass.
+  // A not-measured check counts in neither passed nor total, and is never a
+  // pass; an operation none of whose checks measured anything is not measured.
+  const unmeasuredAll = checks.length > 0 && checks.every((c) => c.notMeasured !== undefined);
+  if (unmeasuredAll) return { pass: false, checks, notMeasured: checks[0]!.notMeasured! };
   return { pass: checks.every((c) => c.notMeasured !== undefined || c.pass), checks };
 }
