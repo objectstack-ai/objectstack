@@ -55,6 +55,7 @@ import { errorCodeIs } from '@object-ui/types';
 import { useMetadata } from '@object-ui/react';
 import type { I18nLabel } from '@objectstack/spec/ui';
 import { findByName } from '../../hooks/useNavTargetLabel.js';
+import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { navItemLabelText } from '../metadata-admin/previews/navItemLabel.js';
 import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
@@ -257,11 +258,17 @@ export function PackageOwdOverviewPanel({
   // The master a `controlled_by_parent` row derives under is named by its
   // label (`ux-conventions.labels-over-machine-names`): this package's own
   // object as this table reads it (its pending draft included), else the
-  // served object's label, else its machine name.
+  // served object's label, else its machine name. A master outside this
+  // package is read by name (`readObjectsByName`), so the panel asks for the
+  // few masters it names, never the whole object registry.
   const shellMetadata = useMetadata();
+  const servedMasters = readObjectsByName(
+    shellMetadata,
+    rows.flatMap((r) => (r.master && !rows.some((o) => o.name === r.master) ? [r.master] : [])),
+  );
   const masterLabelOf = (master: string): string =>
     rows.find((r) => r.name === master)?.label ||
-    navItemLabelText(findByName(shellMetadata.objects, master)?.label as I18nLabel | undefined, locale).trim() ||
+    navItemLabelText(findByName(servedMasters, master)?.label as I18nLabel | undefined, locale).trim() ||
     master;
 
   const load = React.useCallback(async () => {
