@@ -210,6 +210,31 @@ describe('ADR-0150 D4 — the owner gate judges the handler the package call run
     });
 });
 
+describe('removeActionsByPackage hands an emptied key back — the door reaches that entry and its owner gates (Clause-② narrowing)', () => {
+    it('reaches host code\'s handed-back entry, where the rotation fell through to `global`, and that entry\'s owner refuses 403', async () => {
+        install(A);
+        install(B);
+        ship(A);
+        // B's `approve_all` dispatches to `approve` (target) and asks a capability the caller lacks.
+        engine.registry.registerItem('action', {
+            name: 'approve_all', type: 'script', objectName: OBJECT, target: 'approve', requiredPermissions: ['approve_everything'],
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, B);
+        engine.registerAction(OBJECT, 'approve', () => 'host');
+        bind(A);
+        engine.registerAction(OBJECT, 'approve_all', () => 'all', `app:${B}`);
+        engine.registerAction('global', 'approve', () => 'global');
+        engine.removeActionsByPackage(`app:${A}`);
+        // Before the hand-back the key was empty: this ran `global:approve`, which `approve_all` never reaches.
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe('host');
+        const declaration = await resolve();
+        expect(await actionHandlerOwnerRefusal(deps, { request: {} } as any, {
+            ql: engine, action: declaration.action, objectName: OBJECT, candidates: ['approve'],
+            ec: { isSystem: false, permissions: [], positions: [] },
+        })).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    });
+});
+
 describe('[#31697] a caller that names no package', () => {
     it('is refused naming both packages when two hold the name on the object — at the declaration (D5) and at the dispatch (409), never the last registered', async () => {
         install(A);
