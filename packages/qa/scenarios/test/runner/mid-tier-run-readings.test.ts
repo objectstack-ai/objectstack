@@ -38,11 +38,6 @@
  *     recorded turn (`fixtures/asset-lifecycle-withheld-loan.recording.json`)
  *     replays "I didn't lend out AST-0041" as the operation's pass.
  *
- * R4. A written date in an unanswerable decline states no figure: a recorded
- *     turn (`fixtures/asset-lifecycle-warranty-unanswerable.recording.json`)
- *     replays "… whose 36-month depreciation life ends by 31 Dec" as the
- *     question's pass.
- *
  * R4. An irreversible operation the agent applied through its action's
  *     confirmation gate, on an ask that names the target, meets
  *     `pending_confirmation` until objectstack-ai/cloud#3826 item 6
@@ -52,6 +47,11 @@
  *     (`fixtures/eval-r1-confirm-gate.recording.json`, trimmed to the calls
  *     the grade reads) are replayed: `remove_line` through the confirm-gated
  *     delete action (met) and `remove_ben` through `delete_record` (not met).
+ *
+ * R5. A written date in an unanswerable decline states no figure: a recorded
+ *     turn (`fixtures/asset-lifecycle-warranty-unanswerable.recording.json`)
+ *     replays "… whose 36-month depreciation life ends by 31 Dec" as the
+ *     question's pass.
  */
 
 import { dirname, resolve } from 'node:path';
@@ -952,7 +952,7 @@ describe('R4 an irreversible operation applied through its confirmation gate on 
   });
 });
 
-describe('R4 a written date in an unanswerable decline states no figure (asset_lifecycle laptop_warranty_expiring)', () => {
+describe('R5 a written date in an unanswerable decline states no figure (asset_lifecycle laptop_warranty_expiring)', () => {
   it('the recorded turn replays and grades correct; the same decline inventing a count still fails', async () => {
     const run = namespacedScenario(asset);
     expect(run.card.run.questions.find((q) => q.id === 'laptop_warranty_expiring')!.truth).toMatchObject({ kind: 'unanswerable' });
