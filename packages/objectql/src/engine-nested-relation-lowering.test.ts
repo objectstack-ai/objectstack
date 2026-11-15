@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { isComposedReadableIds } from '@objectstack/spec/data';
+import { isComposedReadableIds, ReadableIds } from '@objectstack/spec/data';
 import type { EngineAggregateOptions, EngineQueryOptions, FilterCondition } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
@@ -578,6 +578,21 @@ describe('[#33626] the semi-join falls back to the id read wherever it is not pr
     const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
     expectIdRead(r, ['u1'], 'differing options');
     expect(seen).toEqual([{ object: OWNER, tenantId: 'org_b' }, { object: OBJECT, tenantId: undefined }]);
+  });
+
+  it('a read whose leaves are all planned does not report, nor spend, the once-only "no usable security service" warning', async () => {
+    const { engine, rec } = await makeEngine();
+    const warned: string[] = [];
+    const logger = (engine as any).logger;
+    const warn = logger.warn.bind(logger);
+    logger.warn = (msg: unknown, ...rest: unknown[]) => { warned.push(String(msg)); return warn(msg, ...rest); };
+    const noService = (w: string[]) => w.filter((m) => m.includes('no usable "security" service'));
+    await readsOf(engine, rec);
+    expect(noService(warned)).toEqual([]);
+    // CONTROL an ordinary ADR-0139 leaf asks the service, and so reports its absence — once.
+    await engine.find(OBJECT, { where: { owner: { $in: ReadableIds.of(OWNER) } } } as any);
+    await engine.find(OBJECT, { where: { owner: { $in: ReadableIds.of(OWNER) } } } as any);
+    expect(noService(warned)).toHaveLength(1);
   });
 
   it('CONTROL the same wall on both objects: the options are the related read\'s own, and the leaf is composed', async () => {
