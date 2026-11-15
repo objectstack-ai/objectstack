@@ -1753,6 +1753,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private runAuthoringGate(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown;
+        userTextLocales?: readonly (string | undefined)[];
     }): Promise<void> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const readAuthoringGates = () => this.authoringGates;
