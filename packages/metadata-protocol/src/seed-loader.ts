@@ -532,6 +532,29 @@ function carriesOrganizationColumn(definition: unknown): boolean {
 }
 
 /**
+ * Is `objectName` a global object: one no organization walls, so a
+ * per-organization load reads its rows unscoped? An author's object (no
+ * `managedBy`) with no organization column, declared or injected, that
+ * resolves no tenant field (`resolveTenantFieldName`, the reading the wall
+ * scopes by), e.g. `tenancy: { enabled: false }`. The one reading both the
+ * reference probe ({@link SeedLoaderService.probeScopeOf}) and the replay's
+ * existing-row match (`organizationColumnOf`) take. `sys_user` and
+ * `sys_organization` carry no organization column either and are scoped by
+ * their own rules, never as global. A definition the registry cannot describe
+ * is not global.
+ *
+ * Such an object's seed rows carry no organization: {@link seedRowTenantColumn}
+ * answers `null` for it, so a row is neither stamped nor refused for a column
+ * it does not have.
+ */
+function isGlobalSeedObject(objectName: string, definition: unknown): boolean {
+  if (!definition || typeof definition !== 'object') return false;
+  if (objectName === SystemObjectName.USER || objectName === SystemObjectName.ORGANIZATION) return false;
+  if (carriesOrganizationColumn(definition)) return false;
+  return !(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null;
+}
+
+/**
  * [#33207] How an organization-scoped load probes one reference target
  * (`SeedLoaderService.probeScopeOf`). The `organization` scope names the
  * column the probe filters on: the target's resolved tenant column, the one
@@ -3005,10 +3028,11 @@ export class SeedLoaderService implements ISeedLoaderService {
    *   only through membership in the load's organization.
    * - `own-organization` — `sys_organization`, the tenant table itself: the load
    *   may name its own organization and no other.
-   * - `global` — an author's object (no `managedBy`) with no organization
-   *   column that resolves no tenant field at all (`resolveTenantFieldName`,
-   *   the same reading the wall scopes by; e.g. `tenancy: { enabled: false }`):
-   *   no organization walls its rows, so the probe is unscoped.
+   * - `global` — {@link isGlobalSeedObject}: an author's object (no
+   *   `managedBy`) with no organization column that resolves no tenant field
+   *   at all (`resolveTenantFieldName`, the same reading the wall scopes by;
+   *   e.g. `tenancy: { enabled: false }`): no organization walls its rows, so
+   *   the probe is unscoped.
    * - any other target with no organization column keeps the `organization`
    *   probe, and its refusal is reported, not swallowed: a platform-managed
    *   table is not a seed target, and an object that resolves another tenant
@@ -3033,7 +3057,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     if (definition && typeof definition === 'object' && !carriesOrganizationColumn(definition)) {
       if (targetObject === SystemObjectName.USER) scope = { kind: 'members' };
       else if (targetObject === SystemObjectName.ORGANIZATION) scope = { kind: 'own-organization' };
-      else if (!(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null) scope = { kind: 'global' };
+      else if (isGlobalSeedObject(targetObject, definition)) scope = { kind: 'global' };
     }
     this.probeScopeCache.set(targetObject, scope);
     return scope;
@@ -4340,6 +4364,25 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
+   * The column `objectName`'s rows are walled per organization by:
+   * `resolveTenantFieldName` on its definition, `organization_id` when that
+   * resolves none or the definition cannot be read — the one reading
+   * {@link probeScopeOf} scopes a reference target by. `null` for a global
+   * object ({@link isGlobalSeedObject}, the probe's `global` scope): no
+   * organization walls its rows and it has no such column to filter on.
+   */
+  private async organizationColumnOf(objectName: string): Promise<string | null> {
+    let definition: unknown;
+    try {
+      definition = await this.resolveObjectDefinition(objectName);
+    } catch {
+      // The registry could not answer: keep the organization filter.
+    }
+    if (isGlobalSeedObject(objectName, definition)) return null;
+    return resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;
+  }
+
+  /**
    * Natural key → the existing row, for the write decision (see the #8896
    * note in the catch). Scoped to `organizationId`'s own rows when one is set.
    *
@@ -4350,22 +4393,6 @@ export class SeedLoaderService implements ISeedLoaderService {
    * is certified (D10), and a new write without an organization is stamped or
    * refused (D9).
    */
-  /**
-   * The column `objectName`'s rows are walled per organization by:
-   * `resolveTenantFieldName` on its definition, `organization_id` when that
-   * resolves none or the definition cannot be read — the one reading
-   * {@link probeScopeOf} scopes a reference target by.
-   */
-  private async organizationColumnOf(objectName: string): Promise<string> {
-    let definition: unknown;
-    try {
-      definition = await this.resolveObjectDefinition(objectName);
-    } catch {
-      // The registry could not answer: keep the organization filter.
-    }
-    return resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;
-  }
-
   private async loadExistingRecords(
     objectName: string,
     externalId: string | string[],
@@ -4387,8 +4414,13 @@ export class SeedLoaderService implements ISeedLoaderService {
       // `tenancy.tenantField`, else `organization_id` — the same reading the
       // reference probe scopes a target by (`probeScopeOf`). An object walled
       // by another column may carry no `organization_id` at all, and a filter
-      // on it is refused by the driver.
-      if (organizationId) findArgs.where = { [await this.organizationColumnOf(objectName)]: organizationId };
+      // on it is refused by the driver. A global object (no organization
+      // column, no tenant field) is matched unscoped, as the probe reads it:
+      // every organization's replay upserts the one shared row.
+      if (organizationId) {
+        const organizationColumn = await this.organizationColumnOf(objectName);
+        if (organizationColumn !== null) findArgs.where = { [organizationColumn]: organizationId };
+      }
       const records = await this.engine.find(objectName, findArgs as any);
       for (const record of records || []) {
         const key = this.externalIdKey(record, externalId);
