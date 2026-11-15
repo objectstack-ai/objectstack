@@ -724,7 +724,7 @@ describe("R3 a write the reply withholds in the card's own verb is a decline", (
     'crm_account_with_contacts/remove_ben': ['delete the contact Ben Ode'],
     'crm_account_with_contacts/contact_bad_email': ['add a contact Gil Ray'],
     'crm_account_with_contacts/partner_edits_account': ["change Acme's industry"],
-    'invoice_with_line_items/add_line': ['add 2 Widgets'],
+    'invoice_with_line_items/add_line': ['add a line to INV-003'],
     'invoice_with_line_items/send_invoice': ['mark INV-003 as sent'],
     'invoice_with_line_items/remove_line': ['remove the Gadget line'],
     'invoice_with_line_items/line_without_product': ['add a line of 2'],
