@@ -55,15 +55,29 @@ const read = async (path: string, query?: Record<string, unknown>, context: any 
 };
 const labelOf = (answer: { body?: any }) => answer.body?.data?.item?.label ?? answer.body?.item?.label;
 
+/** [#33385] The stored `sys_metadata` rows the engine double answers; empty unless a pin stores one. */
+let storedRows: Array<Record<string, unknown>> = [];
+const storedRowsMatching = (where: Record<string, unknown> | undefined) => storedRows.filter((row) =>
+    Object.entries(where ?? {}).every(([key, value]) => {
+        if (value !== null && typeof value === 'object') {
+            const inList = (value as { $in?: unknown }).$in;
+            if (!Array.isArray(inList)) throw new Error(`engine double: operator ${Object.keys(value).join(', ')} is not implemented`);
+            return inList.includes(row[key]);
+        }
+        return (row[key] ?? null) === value;
+    }));
+
 beforeEach(() => {
+    storedRows = [];
     registry = new SchemaRegistry({ multiTenant: false });
     for (const id of [A, B, C]) {
         registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
     }
     const engine = {
         registry,
-        find: vi.fn().mockResolvedValue([]),
-        findOne: vi.fn().mockResolvedValue(null),
+        // [#33385] Stored `sys_metadata` rows: equality on each `where` key, nothing else.
+        find: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => storedRowsMatching(opts?.where)),
+        findOne: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => storedRowsMatching(opts?.where)[0] ?? null),
         insert: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
@@ -440,6 +454,25 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             }
             registry.enablePackage(B);
             refusedNaming(await read(`/${type}/_env/solo`), [B], [A]);
+        });
+
+        // [#33385] CONTROL — an enabled package holding the name only through a
+        // stored row the registry has not read: `_env` keeps `main`'s 409, as
+        // its refusal stands whenever the read naming no package serves an item.
+        it(`${type}: only a disabled holder in the registry, and an enabled package's unhydrated stored row — \`_env\` refuses 409, as on main, never that row`, async () => {
+            ship(type, 'solo', B);
+            storedRows.push({ id: 'row_gamma', type, name: 'solo', state: 'active', package_id: C,
+                metadata: JSON.stringify({ name: 'solo', label: `gamma row ${type}` }) });
+            registry.disablePackage(B);
+            const bare = await read(`/${type}/solo`);
+            const env = await read(`/${type}/_env/solo`);
+            expect(JSON.stringify(env.body ?? null)).not.toContain(`gamma row ${type}`);
+            if (labelOf(bare) === `gamma row ${type}`) {
+                expect([env.status, env.body?.error?.code], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            } else {
+                expect([bare.status, env.status], JSON.stringify([bare.body, env.body])).toEqual([404, 404]);
+            }
+            console.info(`#33385-row-holder ${type} bare=${bare.status} env=${env.status}`);
         });
 
         it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {

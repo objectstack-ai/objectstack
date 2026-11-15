@@ -1243,10 +1243,12 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
  * its own package); `_env` kept `main`'s 409 (R4-B2: with no served holder,
  * its admission judged every holder).
  *
- * [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] `_env` moves FROM that
- * 409 naming X TO 404, the withheld answer of a name no package holds: the
- * read naming no package withholds the pair's row with its disabled holder
- * (#32814), so `_env` no longer needs the refusal to keep the row unserved.
+ * [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] At each door `_env`
+ * moves FROM that 409 naming X TO 404: the protocol's refusal is marked as a
+ * name only disabled packages hold, and the doors admit it when the read
+ * naming no package withholds the name, which it does here (the pair's row is
+ * withheld with its disabled holder, #32814). The REST and runtime pins of
+ * the 404 live with those doors.
  */
 describe('[#32183] a name only a disabled package holds, at an address that neither holds it nor pairs a holder', () => {
   const APP = 'com.acme.suite';
@@ -1298,12 +1300,19 @@ describe('[#32183] a name only a disabled package holds, at an address that neit
     expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
   });
 
-  it('[#33385, row 17 / R4-B2: FROM 409 naming X TO 404] X disabled: `_env` at that member answers the withheld item (404), never the pair\'s row and never a refusal', async () => {
+  it('[#33385, row 17 / R4-B2] X disabled: `_env` at that member refuses naming X, MARKED as a name only disabled packages hold, and the read naming no package withholds it, so each door answers 404', async () => {
     registry.disablePackage(X);
-    const answer = await atEnvironment();
-    expect(answer?.item).toBeUndefined();
-    expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
-    expect(JSON.stringify(answer ?? null)).not.toContain(Y);
+    const err = await refusalOf(() => served.admitEnvironmentQualifier({ type: 'email_template', name: 'welcome', member: 'fr-FR' }));
+    expect([err.status, err.refusal.reason, err.refusal.candidates]).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: X }]]);
+    expect((err as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal')]).toBe(true);
+    const bare = await served.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+    expect(bare?.item).toBeUndefined();
+    expect(JSON.stringify(bare ?? null)).not.toContain('pair fr-FR');
+  });
+
+  it('CONTROL — X enabled: `_env` refuses naming X, unmarked', async () => {
+    const err = await refusalOf(() => served.admitEnvironmentQualifier({ type: 'email_template', name: 'welcome', member: 'fr-FR' }));
+    expect((err as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal')]).toBeUndefined();
   });
 
   it('CONTROL — X disabled: a row stored under Y\'s own package is served at Y', async () => {

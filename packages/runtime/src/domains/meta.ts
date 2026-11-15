@@ -1125,6 +1125,43 @@ function queryRefusalAnswer(
 }
 
 /**
+ * [#33385, #32183 row 17] The `Symbol.for` key of the mark
+ * `admitEnvironmentQualifier` sets on its refusal of a name only disabled
+ * packages hold (`DISABLED_HOLDERS_ONLY_REFUSAL` in
+ * `@objectstack/metadata-protocol`). `RestServer`'s qualified route reads the
+ * same key.
+ */
+const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal');
+
+/**
+ * [#33385] Admit `/meta/:type/_env/:name` for `request`, or throw the
+ * protocol's refusal, as `RestServer`'s qualified route admits it. A refusal
+ * marked {@link DISABLED_HOLDERS_ONLY_REFUSAL} is admitted when the read naming
+ * no package withholds the name: a disabled package holds no name, so `_env`
+ * answers the read's own 404, naming no package. When that read serves an
+ * item or refuses, a package holds the name through a stored row the
+ * registry has not read, and the refusal stands.
+ */
+async function admitEnvironmentAddress(
+    protocol: MetaDomainProtocol | undefined,
+    request: { type: string; name: string; member?: string },
+): Promise<void> {
+    try {
+        protocol?.admitEnvironmentQualifier?.(request);
+    } catch (refusal) {
+        if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
+            || typeof protocol?.getMetaItem !== 'function') throw refusal;
+        let withheld: boolean;
+        try {
+            withheld = ((await protocol.getMetaItem(request as never)) as { item?: unknown } | undefined)?.item == null;
+        } catch {
+            throw refusal;
+        }
+        if (!withheld) throw refusal;
+    }
+}
+
+/**
  * Handles Metadata requests
  * Standard: /metadata/:type/:name
  * Fallback for backward compat: /metadata (all objects), /metadata/:objectName (get object)
@@ -2149,7 +2186,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // a name only disabled packages hold answers its 404, #33385).
             if (environmentQualified) {
                 const qualifierProtocol = await resolveProtocol(deps, _context);
-                qualifierProtocol?.admitEnvironmentQualifier?.({ type: singularType, name, ...memberSelector });
+                await admitEnvironmentAddress(qualifierProtocol, { type: singularType, name, ...memberSelector });
             }
 
             // [#5882 · #20478] The DEPRECATED spelling of the layered view,

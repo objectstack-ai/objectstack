@@ -55,6 +55,43 @@ type MetaItemAddress =
 interface QualifiedAddressProtocol {
     resolveMetaItemAddress?(request: { type: string; segment: string; name: string }): MetaItemAddress | undefined;
     admitEnvironmentQualifier?(request: { type: string; name: string; member?: string }): void;
+    getMetaItem?(request: { type: string; name: string; member?: string }): Promise<{ item?: unknown } | undefined>;
+}
+
+/**
+ * [#33385, #32183 row 17] The `Symbol.for` key of the mark
+ * `admitEnvironmentQualifier` sets on its refusal of a name only disabled
+ * packages hold (`DISABLED_HOLDERS_ONLY_REFUSAL` in
+ * `@objectstack/metadata-protocol`; this package reaches the protocol as a
+ * service, never as an import). The runtime dispatcher reads the same key.
+ */
+const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal');
+
+/**
+ * Admit `_env` for `request`, or throw the protocol's refusal. A refusal
+ * marked {@link DISABLED_HOLDERS_ONLY_REFUSAL} is admitted when the read
+ * naming no package withholds the name: a disabled package holds no name,
+ * so `_env` answers the read's own 404, naming no package. When that read
+ * serves an item or refuses, a package holds the name through a stored row
+ * the registry has not read, and the refusal stands.
+ */
+async function admitEnvironmentAddress(
+    p: QualifiedAddressProtocol,
+    request: { type: string; name: string; member?: string },
+): Promise<void> {
+    try {
+        p.admitEnvironmentQualifier?.(request);
+    } catch (refusal) {
+        if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
+            || typeof p.getMetaItem !== 'function') throw refusal;
+        let withheld: boolean;
+        try {
+            withheld = (await p.getMetaItem(request))?.item == null;
+        } catch {
+            throw refusal;
+        }
+        if (!withheld) throw refusal;
+    }
 }
 
 /** What the host answered this path before the route existed: its unmatched 404. */
@@ -112,7 +149,7 @@ export function registerMetaQualifiedItemRoute(
                     query.package = address.packageId;
                 } else {
                     const member = typeof query.member === 'string' && query.member !== '' ? query.member : undefined;
-                    p.admitEnvironmentQualifier?.({ type: params.type, name: params.name, ...(member ? { member } : {}) });
+                    await admitEnvironmentAddress(p, { type: params.type, name: params.name, ...(member ? { member } : {}) });
                 }
                 await readItem(asItemRead(req, params, query), res);
             } catch (error: any) {
