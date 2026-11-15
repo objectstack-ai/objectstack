@@ -684,6 +684,81 @@ function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
 }
 
 /**
+ * [#33435] The injected system columns the platform injects on this object
+ * that the object AS READ does not carry as a field. `os build` reads the
+ * objects as authored, so there every injected column the author did not
+ * declare is here; a runtime door reads them as the registry SERVES them,
+ * where each one is already a declared field and nothing is here. A column the
+ * author declared keeps the author's keys and the author's verdict, at both.
+ */
+function injectedColumnsNotCarried(obj: AnyRec): string[] {
+  const carried = new Set(fieldEntries(obj).map(([fname]) => fname));
+  return Object.keys(injectedSystemColumnDefs(obj)).filter((fname) => !carried.has(fname));
+}
+
+/**
+ * [#33435] object name → the injected columns a stored row can hold `null` in
+ * ({@link PLATFORM_STAMPED_COLUMNS} says which ones it cannot), for the
+ * objects as read that do not carry them ({@link injectedColumnsNotCarried}).
+ * Read by the flow and hook condition sites only, beside
+ * {@link buildNullableFieldIndex}: a runtime door judges those two sites over
+ * the served objects, whose injected columns are `required: false` fields
+ * with no default, so this is what makes `os build` give the door's verdict
+ * there. Every other null-guard site (a validation rule, `requiredWhen`) is
+ * judged over the authored object at the door too, and keeps its declared
+ * fields only.
+ */
+function buildInjectedNullableIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const nullable = injectedColumnsNotCarried(obj).filter((fname) => !PLATFORM_STAMPED_COLUMNS.has(fname));
+    if (nullable.length > 0) idx.set(name, new Set(nullable));
+  }
+  return idx;
+}
+
+/**
+ * [#33435] object name → the platform-stamped columns
+ * ({@link PLATFORM_STAMPED_COLUMNS}) the object as read does not carry. Read
+ * only for a hook that can run before the stamp ({@link hookRunsBeforeStamp}):
+ * there `created_at` / `updated_at` are `null`, and the door judges them so
+ * over the served objects.
+ */
+function buildPreStampIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const stamped = injectedColumnsNotCarried(obj).filter((fname) => PLATFORM_STAMPED_COLUMNS.has(fname));
+    if (stamped.length > 0) idx.set(name, new Set(stamped));
+  }
+  return idx;
+}
+
+/**
+ * [#33435] Can this hook run before `sys_stamp_audit_insert` writes
+ * `created_at` / `updated_at`? A `beforeInsert` hook can, at any priority
+ * below the stamp's, and its condition then reads both as `null`.
+ */
+function hookRunsBeforeStamp(hookEvents: unknown): boolean {
+  return Array.isArray(hookEvents) && hookEvents.includes('beforeInsert');
+}
+
+/** Each object's set from both indexes, joined. */
+function joinNullableIndexes(a: Map<string, Set<string>>, b: Map<string, Set<string>>): Map<string, Set<string>> {
+  const joined = new Map<string, Set<string>>();
+  for (const [name, fields] of a) joined.set(name, new Set(fields));
+  for (const [name, fields] of b) {
+    const into = joined.get(name) ?? new Set<string>();
+    for (const fname of fields) into.add(fname);
+    joined.set(name, into);
+  }
+  return joined;
+}
+
+/**
  * [#4889] Does this CEL source read the `parent` root — the master-detail
  * header the write path binds for a detail object's field predicates?
  *
@@ -2516,6 +2591,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
+  // [#33435] The flow and hook condition sites also judge the injected
+  // columns a stored row can hold `null` in, and a `beforeInsert` hook the two
+  // stamped timestamps, wherever the objects as read do not carry them as
+  // fields: at `os build` (and the extension door, which reads the objects as
+  // authored), so it gives the verdict a runtime door gives over the served
+  // objects. Read off the objects as served, a tied field included: a column
+  // two packages tie on is carried, so it gets no verdict, as above.
+  const flowHookNullableIndex = joinNullableIndexes(nullableIndex, buildInjectedNullableIndex(servedObjects));
+  const preStampIndex = buildPreStampIndex(servedObjects);
   // [#33246] Read at a runtime publish door only: the build passes no write
   // type, so its null-guard verdicts are what they were.
   const platformStampedIndex = options.runtimeWriteType !== undefined
@@ -2734,11 +2818,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // [#33246] At a runtime door, leave out an ordering comparison over a
     // platform-stamped column ({@link isStampedComparisonFinding}). A caller
     // whose predicate can run before the stamp passes `false`.
-    { stampedComparisons = true }: { stampedComparisons?: boolean } = {},
+    // [#33435] `nullable`: the index the site judges against; a flow or hook
+    // condition passes `flowHookNullableIndex`. `beforeStamp`: a hook that can
+    // run before the stamp also judges the stamped columns the objects as read
+    // do not carry ({@link buildPreStampIndex}).
+    {
+      stampedComparisons = true,
+      nullable = nullableIndex,
+      beforeStamp = false,
+    }: { stampedComparisons?: boolean; nullable?: Map<string, Set<string>>; beforeStamp?: boolean } = {},
   ): void => {
     if (!objectName) return;
-    const nullableFields = nullableIndex.get(objectName);
-    if (!nullableFields || nullableFields.size === 0) return;
+    const nullableFields = new Set([
+      ...(nullable.get(objectName) ?? []),
+      ...(beforeStamp ? preStampIndex.get(objectName) ?? [] : []),
+    ]);
+    if (nullableFields.size === 0) return;
     const source = celSourceOf(raw);
     if (!source) return;
     const stamped = stampedComparisons ? platformStampedIndex.get(objectName) : undefined;
@@ -3201,7 +3296,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     };
     const nullGuardBare = new Set<string>();
     if (nullGuardObject && rootScope.provable) {
-      for (const name of nullableIndex.get(nullGuardObject) ?? []) {
+      for (const name of flowHookNullableIndex.get(nullGuardObject) ?? []) {
         if (!declaredVariables.has(name) && !screenFields.has(name) && !FLOW_ENGINE_BOUND_NAMES.has(name)) {
           nullGuardBare.add(name);
         }
@@ -3216,7 +3311,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       checkNullGuards(where, where, raw, nullGuardObject, flowFaultOutcome, {
         bareFields: nullGuardBare,
         ...(afterStart ? { presumed: nullGuardPresumed } : {}),
-      });
+      }, { nullable: flowHookNullableIndex });
     };
 
     /**
@@ -4472,6 +4567,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // ({@link hookReadsStampedRow}): not on `beforeInsert`, `beforeFind` or
     // `afterFind`.
     const stampedComparisons = hookReadsStampedRow(hook.events);
+    // [#33435] …and every hook judges the injected columns a stored row can
+    // hold `null` in, and a `beforeInsert` one the stamped timestamps too.
+    const hookNullGuards = {
+      stampedComparisons,
+      nullable: flowHookNullableIndex,
+      beforeStamp: hookRunsBeforeStamp(hook.events),
+    };
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
@@ -4482,7 +4584,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         hook.object,
         undefined,
         undefined,
-        { stampedComparisons },
+        hookNullGuards,
       );
       continue;
     }
@@ -4517,7 +4619,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         target,
         undefined,
         undefined,
-        { stampedComparisons },
+        hookNullGuards,
       );
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];
