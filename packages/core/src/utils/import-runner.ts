@@ -1100,7 +1100,8 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       let data: Record<string, unknown>;
       try {
         // The whole row is the scope source: a key column naming a detail is
-        // resolved within the row's master exactly as the row's own pass does.
+        // resolved within the row's master as the row's own pass does, one
+        // level deep (a master column outside the keys resolves unscoped).
         const coerced = await coerceRow(cells, metaMap, coerceCtx, rows[i]);
         if (coerced.errors.length > 0) continue;
         data = coerced.data;

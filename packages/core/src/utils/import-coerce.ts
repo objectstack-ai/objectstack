@@ -911,15 +911,16 @@ export async function coerceFieldValue(
  * [#33523] The equalities a reference column's lookup is scoped by on this
  * row, or none. A detail's name is unique only inside its master, so a cell
  * naming one is resolved within the master the same row sets, and a tie or a
- * miss is judged there too, as the record picker narrows its candidates:
+ * miss is judged there too:
  *
  * 1. The field's own `dependsOn`: each sibling the row sets scopes the target
- *    field it names (`param`), the filter the picker applies.
+ *    field it names (`param`), the filter the record picker applies.
  * 2. A `master_detail` field the TARGET declares
  *    ({@link CoerceContext.referenceMasters}), when exactly one other
  *    single-value reference column of the row points at that master and the
  *    row sets it. Two such columns (a bill-to and a ship-to account) do not say
- *    which one is the master, so neither scopes; `dependsOn` says it.
+ *    which one is the master, so neither scopes; `dependsOn` says it. The
+ *    picker has no counterpart for this inference.
  *
  * A row that sets no such column has no scope, and its cell is resolved across
  * the whole target as before. Nothing here widens a lookup: a scope only adds
@@ -977,10 +978,12 @@ function scopeValueOf(res: CoerceOutcome): unknown {
  * [#33523] A reference column scoped by other columns of the row
  * ({@link referenceScopeSources}) is coerced after them, with their coerced
  * values as its scope. A source column that fails or coerces to no single
- * value scopes nothing, and columns scoped by each other in a cycle resolve
- * unscoped. `sourceRow` is the whole row the scope is read from when `rawRow`
- * holds only some of its columns (the match-key pass); a source column outside
- * `rawRow` is coerced for its value only, never written or reported.
+ * value scopes nothing. When no pending column is ready (a cycle, or a column
+ * whose source waits behind one), every pending column resolves unscoped.
+ * `sourceRow` is the whole row the scope is read from when `rawRow` holds only
+ * some of its columns (the match-key pass); a source column outside `rawRow` is
+ * coerced unscoped, for its value only, never written or reported, so a chain
+ * of masters is scoped one level deep there.
  */
 export async function coerceRow(
   rawRow: Record<string, unknown>,
