@@ -257,12 +257,12 @@ that column. A `count` column never carries `currencyField`. See the
 - **A `summary` declaring `currencyMode: 'dynamic'`** (or a `currencyConfig` with no
   `currencyMode`) is admitted only for a `sum`, `avg`, `min` or `max` of a stored home
   amount, a child field that a `homeAmount.field` on the child object names (see
-  [Totals in the home currency](#totals-in-the-home-currency)), and with no
-  `defaultCurrency`. `defineStack` (`os validate` and the build) refuses one over any other
+  [Totals in the home currency](#totals-in-the-home-currency)), and naming no currency
+  code. `defineStack` (`os validate` and the build) refuses one over any other
   child field, naming the child's home amounts. A single-object save or publish through the
   metadata API on a running server does not judge the child field yet: it parses the one
   object, so it refuses only what that object shows (#33713). The object itself refuses
-  one that names no child field, one that carries a `defaultCurrency`, and a `count` in
+  one that names no child field, one that names a currency code, and a `count` in
   every mode, at every door.
 - **A dataset measure that declares `currency` over a record-mode amount** is refused at
   compile with **`DATASET_INVALID` / 400**, and so is a `currency` on a derived measure that
