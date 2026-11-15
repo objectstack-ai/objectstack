@@ -99,6 +99,9 @@ vi.mock('@object-ui/plugin-grid', async (importOriginal) => ({
   ImportWizard: ({ open }: { open: boolean }) => (open ? <div data-testid="import-wizard" /> : null),
 }));
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView, declaredPrimaryToolbarAction } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
@@ -279,6 +282,47 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
     // The header is folded by now, and the action ran once, on arrival.
     expect(cluster.getAttribute('data-folded')).toBe('true');
     expect(open).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * objectstack#33988 — a list that declares no primary (no New, no toolbar
+ * action authored `variant: 'primary'`) is offered no folded face: that face
+ * would keep no labelled action, so a long description alone sent the page's
+ * one action into the `⋯` at desktop width (hotclm's 「Launch Contract」). The
+ * header keeps `actions` at every width and the description truncates instead.
+ */
+describe('a list with no declared primary keeps its actions labelled (objectstack#33988)', () => {
+  const LAUNCH = { name: 'launch_contract', label: 'Launch Contract', type: 'script', locations: ['list_toolbar'] };
+  /** The card's object: no New for the reader, one undeclared toolbar action, its English description. */
+  const CONTRACTS = {
+    name: 'demo_contract',
+    label: 'Contract',
+    pluralLabel: 'Contracts',
+    description:
+      'A contract from intake to archive: parties, commercial and legal terms, lifecycle status and the stamps each stage leaves.',
+    fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } },
+    actions: [LAUNCH],
+  };
+
+  // A 1366 px laptop and a 1440 px desktop, each less the 256 px sidebar, and
+  // a tablet-wide header between the phone header and the desktop.
+  it.each([1110, 1184, 700])('at a %i px header the action stays a button and the header does not fold', (width) => {
+    headerWidth = width;
+    principal = { create: false };
+    const { cluster, labelled, openMenu } = renderList(CONTRACTS);
+    expect(labelled()).toEqual(['Launch Contract']);
+    expect(openMenu()).toEqual(['Add to favorites']);
+    expect(cluster.hasAttribute('data-folded')).toBe(false);
+  });
+
+  it('CONTROL: authored `variant: primary`, the same list still folds at a 600 px header, keeping it labelled', () => {
+    headerWidth = 600;
+    principal = { create: false };
+    const { cluster, labelled, openMenu } = renderList({ ...CONTRACTS, actions: [{ ...LAUNCH, variant: 'primary' }] });
+    expect(cluster.getAttribute('data-folded')).toBe('true');
+    expect(labelled()).toEqual(['Launch Contract']);
+    expect(openMenu()).toEqual(['Add to favorites']);
   });
 });
 
