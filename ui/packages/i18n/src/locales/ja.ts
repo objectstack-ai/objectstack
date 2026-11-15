@@ -4009,6 +4009,9 @@ const ja = {
       aggregations: '集計',
       records: 'レコード',
       visibleToYou: 'あなたが閲覧できるレコードのみ',
+      dataset: 'データセット',
+      metrics: '指標',
+      noAddedFilter: 'データセットの定義に追加されたフィルターなし',
     },
     tool: {
       aggregate_data: "関連データを集計する",

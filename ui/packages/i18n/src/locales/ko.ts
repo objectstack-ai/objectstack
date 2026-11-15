@@ -4006,6 +4006,9 @@ const ko = {
       aggregations: '집계',
       records: '레코드',
       visibleToYou: '내가 볼 수 있는 레코드만',
+      dataset: '데이터셋',
+      metrics: '지표',
+      noAddedFilter: '데이터셋 정의에 추가된 필터 없음',
     },
     tool: {
       aggregate_data: "관련 데이터 집계하기",

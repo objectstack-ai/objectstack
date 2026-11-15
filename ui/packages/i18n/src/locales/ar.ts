@@ -4344,6 +4344,9 @@ const ar = {
       aggregations: 'التجميعات',
       records: 'السجلات',
       visibleToYou: 'فقط السجلات التي يمكنك رؤيتها',
+      dataset: 'مجموعة البيانات',
+      metrics: 'المقاييس',
+      noAddedFilter: 'لا يوجد عامل تصفية مضاف إلى تعريف مجموعة البيانات',
     },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",

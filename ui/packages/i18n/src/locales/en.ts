@@ -4933,6 +4933,9 @@ const en = {
       aggregations: 'Aggregations',
       records: 'Records',
       visibleToYou: 'Only records visible to you',
+      dataset: 'Dataset',
+      metrics: 'Metrics',
+      noAddedFilter: 'No filter added to the dataset definition',
     },
     tool: {
       aggregate_data: 'Aggregate the data',
