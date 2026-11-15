@@ -34,9 +34,6 @@ const CALLER = { userId: 'usr_fhf', positions: ['qa_fhf_pos'], permissions: [SET
 
 const cel = (source: string) => ({ dialect: 'cel', source });
 
-/** Every computed field the rig declares, by what it reads. */
-const COMPUTED = ['load', 'load_pct', 'headroom', 'gated_double', 'open_cases_stored', 'phone_copy'] as const;
-
 interface BootOptions {
   /** Field-level entries of the caller's permission set. */
   fields?: Record<string, { readable: boolean; editable: boolean }>;
@@ -251,7 +248,7 @@ describe('controls: what the rule leaves unchanged', () => {
 
   it('a system context reads every field and every computed field', async () => {
     const engine = await boot({ fields: HIDE_OPEN_CASES });
-    const one = await engine.findOne(OBJ, { where: { id: 'a1' }, ...SYS } as never);
+    const one = await engine.findOne(OBJ, { where: { id: 'a1' }, context: { isSystem: true } } as never);
     expect(one).toMatchObject({
       open_cases: 6, gated: 21, phone: '13812345678',
       load: 0.5, load_pct: 50, headroom: 11, gated_double: 42, open_cases_stored: 6, phone_copy: '13812345678',
