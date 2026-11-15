@@ -329,7 +329,8 @@
  * `.claude/**` — may land on a REVIEW OF RECORD in place of the authorized
  * approval: the `## Contract review` comment — on the
  * PULL REQUEST'S THREAD **or on its CARD'S** — that names the pull request's
- * CURRENT head, carries a `Reviewed-by:` line, and declares a `Served-tier:`
+ * CURRENT head, carries a `Reviewed-by:` line and one `VERDICT:` line reading
+ * PASS, is posted by the relay or an authorized approver (#33541), and declares a `Served-tier:`
  * reading that STANDS -- its token being the NAME `CONTRACT_REVIEW_TIER`,
  * ⛔ never a model identifier, which `AGENTS.md` lets land in no comment and a
  * record IS one (#18060). Every governed path outside Tier S is Tier H, the
@@ -353,10 +354,20 @@
  * (`catalogFilesOf`, `diff-tree --raw --no-renames`) — through the register's
  * `governedTierFor`. An unread pull,
  * timeline or changeset stays Tier H. An entry the arm puts at Tier S clears on
- * a same-head record that READS PASS (`lowRiskRecordVerdict`, the fleet's
- * `contractReviewVerdictOf`), and a record carried from an older head stands for it
- * only when the hops moved no changeset and no catalog path; the other Tier S
- * legs still read no verdict.
+ * a same-head record that READS PASS (`lowRiskRecordVerdict`), and a record
+ * carried from an older head stands for it only when the hops moved no
+ * changeset and no catalog path.
+ *
+ * ⚖️ EVERY Tier S entry reads the record's VERDICT and its AUTHOR (card #33541;
+ * AGENTS.md Prime Directive 14 lands Tier S on "a PASS verdict"): the record
+ * clears only when it carries exactly ONE `VERDICT:` line and that line reads
+ * PASS (`recordPassVerdict`, the fleet reader's counting form
+ * `contractReviewVerdictLines`); FAIL, none or two refuse, naming the comment.
+ * And only a comment posted by the relay's identity or an account in
+ * `GOVERNED_APPROVERS` is read at all (`recordAuthorTrusted`): any other
+ * author's comment is dropped before the locator sees the thread — ignored,
+ * never refused loudly — because on a public repository anyone can post a
+ * body shaped like a record.
  *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
@@ -898,7 +909,40 @@ export { governedTierFor };
 /** Where each imported recogniser lives. Named, so a failure can say which file. */
 export const RECOGNISER_SOURCES = Object.freeze({
   tier: './record-recognisers.mjs',
+  // The relay's one identity (`FLEET_BOT_LOGIN`), which the record leg trusts as a record's author
+  // (#33541). Loaded LAZILY for the same reason as the recognisers: that file imports this one at
+  // module scope, and `check-half-states.mjs`, whose top-level await imports this one, besides.
+  author: './check-handover.mjs',
 });
+
+/**
+ * Is this comment row's author one the record leg trusts (card #33541, item D of the low-risk
+ * delegation review)? Its `user.login` is in `trusted`: the relay's identity plus
+ * `GOVERNED_APPROVERS`, assembled by `loadRecordRecognisers` from the two places the repository
+ * declares them. ⛔ No login is typed here, and none may be: the relay keeps no sender list of its
+ * own (`fleet-write.yml` gates a stroke on the sender's write permission on the target), so those
+ * two declarations are the whole set the repository names. An unreadable author is untrusted.
+ *
+ * Until #33541 the record leg read the comment BODY only, so on a public repository any commenter
+ * could post a body it accepted. An untrusted row is IGNORED — dropped from the thread before the
+ * locator reads it, so it can neither be the record nor shadow one nor name a `Regen-provenance:`
+ * hop — and never refused loudly: the leg then reads whatever trusted rows remain. Pure.
+ */
+export function recordAuthorTrusted(row, trusted) {
+  const login = row?.user?.login;
+  return typeof login === 'string' && login !== '' && Array.isArray(trusted) && trusted.includes(login);
+}
+
+/** The informational line naming the comments the author binding dropped from a record's threads, or none. Pure. */
+export function ignoredAuthorLines(record) {
+  const logins = Array.isArray(record?.ignoredAuthors) ? record.ignoredAuthors : [];
+  if (logins.length === 0) return [];
+  const distinct = [...new Set(logins)];
+  return [
+    `           ℹ️  ${logins.length} comment(s) by author(s) outside the relay and GOVERNED_APPROVERS were not read: ` +
+      `${distinct.slice(0, 3).join(', ')}${distinct.length > 3 ? ` (+${distinct.length - 3} more)` : ''} (#33541).`,
+  ];
+}
 
 /**
  * The recognisers the references tier reads a record with — IMPORTED, and
@@ -927,6 +971,8 @@ export const RECOGNISER_SOURCES = Object.freeze({
 export async function loadRecordRecognisers(load = (specifier) => import(specifier)) {
   try {
     const tier = await load(RECOGNISER_SOURCES.tier);
+    const author = await load(RECOGNISER_SOURCES.author);
+    const bot = author?.FLEET_BOT_LOGIN;
     const found = {
       locate: tier?.locateReviewOfRecord,
       deliveredCard: tier?.deliveredCardNumber,
@@ -935,11 +981,14 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       reviewFace: tier?.reviewFace,
       threads: tier?.REVIEW_OF_RECORD_THREADS,
       location: tier?.REVIEW_OF_RECORD_LOCATION,
-      // Read by the low-risk skills arm alone (#33501); absent, that arm refuses and nothing else changes.
-      verdictOf: tier?.contractReviewVerdictOf,
+      // Every `VERDICT:` line of a record (#33541): a Tier S entry lands on exactly one, reading PASS.
+      verdictLines: tier?.contractReviewVerdictLines,
+      // Who may post a record (#33541): the relay's identity and the authorized approvers, nobody else.
+      trustedAuthors: typeof bot === 'string' && bot !== '' ? Object.freeze([bot, ...GOVERNED_APPROVERS]) : null,
     };
     const missing = [
-      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace'].filter((key) => typeof found[key] !== 'function'),
+      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'verdictLines'].filter((key) => typeof found[key] !== 'function'),
+      ...(found.trustedAuthors === null ? [`trustedAuthors (FLEET_BOT_LOGIN from ${RECOGNISER_SOURCES.author})`] : []),
       ...(Array.isArray(found.threads) && found.threads.length > 0 ? [] : ['threads']),
       ...(typeof found.location === 'string' && found.location.length > 0 ? [] : ['location']),
     ];
@@ -1648,12 +1697,10 @@ export function renderGuardVerdict(verdict) {
               '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20; prose arm: 6159870311).',
             ]
           : []),
-        ...(entry.record.verdict === 'PASS'
-          ? ['           ⚖️ the low-risk skills arm lands on a record that READS PASS, and this one does (#33501).']
-          : [
-              '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
-              '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
-            ]),
+        landsOnLowRiskArm(entry)
+          ? '           ⚖️ the low-risk skills arm lands on a record that READS PASS, and this one does (#33501).'
+          : '           ⚖️ a Tier S entry lands on a record whose one `VERDICT:` line READS PASS, and this one does (#33541).',
+        `           Posted by \`${entry.record.author ?? 'a trusted author'}\`: comments by any author outside the relay and GOVERNED_APPROVERS are not read.`,
       );
     } else if (entry.approval.state === 'unreadable') {
       lines.push(`        ⛔ the review list could NOT be read — ${entry.approval.reason}`);
@@ -1686,6 +1733,7 @@ export function renderGuardVerdict(verdict) {
               `        ⛔ NO review of record on this head either — comment(s) read: ${entry.record.readSummary}`,
               `           (${entry.record.cardNote}); none of them is a \`## Contract review\` comment naming this head`,
               '           and carrying a `Reviewed-by:` line.',
+              ...ignoredAuthorLines(entry.record),
             ]
           : entry.record.state === 'unreadable'
             ? [`        ⛔ the review of record could NOT be read — ${entry.record.reason}`]
@@ -1693,7 +1741,9 @@ export function renderGuardVerdict(verdict) {
               ? [
                   `        ⛔ the \`## Contract review\` comment on this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
                     `${entry.record.at ?? 'undated'}) does not read PASS: ${entry.record.verdictReason}.`,
-                  '           The low-risk skills arm lands on a PASS record only (#33501); a FAIL owes a patch and a new review.',
+                  landsOnLowRiskArm(entry)
+                    ? '           The low-risk skills arm lands on a PASS record only (#33501); a FAIL owes a patch and a new review.'
+                    : '           A Tier S entry lands on a PASS record only (AGENTS.md Prime Directive 14, #33541); a FAIL owes a patch and a new review.',
                 ]
             : entry.record.state === 'unsigned'
               ? [
@@ -1903,10 +1953,11 @@ export function renderGuardVerdict(verdict) {
       `        3. Or — ONLY for a pull request whose governed paths all lie under a Tier S surface (${tierSGlobs()}),`,
       '           which the tier line on each entry above says outright — the owning seat posts its review of record',
       `           on the CURRENT head and re-queues: a \`## Contract review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming`,
-      '           this head, carrying a `Reviewed-by:` line and a `Served-tier:` line whose token is the NAME',
+      '           this head, carrying a `Reviewed-by:` line, one `**VERDICT: PASS**` line and a `Served-tier:` line whose token is the NAME',
       '           `CONTRACT_REVIEW_TIER` — ⛔ never its value and never any model identifier, because `AGENTS.md`',
       '           lets none land in a comment — on a stamp control that holds. The tier READING behind it is the',
-      '           seat\'s own transcript grep, which leaves no repository artifact at all.',
+      '           seat\'s own transcript grep, which leaves no repository artifact at all. It is posted through the relay',
+      '           (or by an account in GOVERNED_APPROVERS): a comment by any other author is not read (#33541).',
       '           ⛔ A record on an OLDER head does not carry forward — unlike an approval,',
       '           which since 2026-09-04 does — because a record names the head it judged. ⛔ And it widens to nothing:',
       '           one Tier H path in the diff and option 1 or 2 is the only way through.',
@@ -2014,13 +2065,38 @@ export function landsOnLowRiskArm(entry) {
 }
 
 /**
- * The record leg's verdict for an entry the low-risk arm put at Tier S: a
- * record that STANDS must also READ PASS, read off the same comment the locator
- * chose, with the fleet's verdict reader (`contractReviewVerdictOf`, re-exported
- * by the recognisers). Anything else —
- * FAIL, no verdict word, the comment not among the rows, no reader loaded — is
- * `not-pass`, a refusal. Every other entry's record is returned as it was (the
- * other Tier S legs read no verdict; card #33541).
+ * The record leg's VERDICT, on every Tier S entry (card #33541; AGENTS.md
+ * Prime Directive 14 lands Tier S on "a PASS verdict"): a record that STANDS
+ * must also READ PASS. Read off the SAME comment the locator chose, with the
+ * fleet's verdict reader in its counting form (`contractReviewVerdictLines`,
+ * `check-half-states.mjs`, re-exported by the recognisers — one regex with
+ * `contractReviewVerdictOf`, ⛔ never a second parser): the record carries
+ * exactly ONE `VERDICT:` line and it reads PASS. FAIL, no `VERDICT:` line (a
+ * heading-inline or bare word alone included), two such lines (a quoted
+ * earlier verdict, a FAIL appended under a PASS), the comment not among the
+ * rows, or no reader loaded — each is `not-pass`, a refusal naming the
+ * comment id. Several same-head records: the locator's newest one is the one
+ * read, so a later FAIL withdraws an earlier PASS and a later PASS supersedes
+ * an earlier FAIL. Pure.
+ */
+export function recordPassVerdict(record, pair, recognisers) {
+  if (record?.state !== 'stands') return record;
+  const refuse = (verdict, why) => ({ ...record, state: 'not-pass', verdict, verdictReason: why });
+  if (typeof recognisers?.verdictLines !== 'function') return refuse(null, 'the contract-review verdict reader was not loaded');
+  const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
+  const comment = record.id === null || record.id === undefined ? null : rows.find((r) => r?.id === record.id) ?? null;
+  if (comment === null) return refuse(null, 'the record comment was not among the rows read, so its verdict is unknown');
+  // The author the binding admitted, carried for the words (the rows reached here are trusted ones only).
+  const author = typeof comment.user?.login === 'string' ? comment.user.login : null;
+  const words = recognisers.verdictLines(comment.body);
+  if (words.length === 0) return { ...refuse(null, 'it states no verdict (no `VERDICT:` line under its heading)'), author };
+  if (words.length > 1) return { ...refuse(null, `it states ${words.length} \`VERDICT:\` lines (${words.join(', ')}), and a record states exactly one`), author };
+  return words[0] === 'PASS' ? { ...record, verdict: 'PASS', author } : { ...refuse(words[0], `it reads ${words[0]}`), author };
+}
+
+/**
+ * The record leg's verdict for an entry the low-risk arm put at Tier S: the
+ * carry rule below, then `recordPassVerdict` like every other Tier S entry.
  *
  * ⛔ A record CARRIED from an older head (the regeneration and prose-only hops)
  * stands for this arm only when nothing it reads moved after the PASS: the hops
@@ -2047,12 +2123,7 @@ export function lowRiskRecordVerdict(record, pair, recognisers) {
     const touched = moved.filter((p) => p.startsWith('.changeset/') || catalog.some((prefix) => p.startsWith(prefix)));
     if (touched.length > 0) return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` over hops that moved ${touched.slice(0, 3).join(', ')}${touched.length > 3 ? ` (+${touched.length - 3} more)` : ''}, which the arm reads, after the review`);
   }
-  if (typeof recognisers?.verdictOf !== 'function') return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the contract-review verdict reader was not loaded' };
-  const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
-  const comment = record.id === null || record.id === undefined ? null : rows.find((r) => r?.id === record.id) ?? null;
-  if (comment === null) return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the record comment was not among the rows read, so its verdict is unknown' };
-  const verdict = recognisers.verdictOf(comment.body);
-  return verdict === 'PASS' ? { ...record, verdict } : { ...record, state: 'not-pass', verdict, verdictReason: verdict === null ? 'it states no verdict' : `it reads ${verdict}` };
+  return recordPassVerdict(record, pair, recognisers);
 }
 
 /**
@@ -2199,6 +2270,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
       // ⭐ `paths` and `repo` are what the record's tier is read from: the face the governed paths of
       // this entry put the review on (B′ with C) — the same committed-tree list this leg classified.
       const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit, baseRef, paths: entry.paths, repo };
+      const ignoredAuthors = [];
       let unreadable = null;
       for (const thread of recognisers.threads) {
         const number = numbers[thread.number];
@@ -2210,7 +2282,16 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
         }
         try {
           apiCalls += 1;
-          pair[thread.rows] = await fetchComments(number);
+          const read = await fetchComments(number);
+          // ⭐ The AUTHOR binding (#33541): a row its author does not earn is dropped HERE, before any
+          // reader sees the thread — ignored, never refused loudly; the count rides to the words.
+          if (Array.isArray(read)) {
+            const kept = read.filter((row) => recordAuthorTrusted(row, recognisers.trustedAuthors));
+            for (const row of read) if (!kept.includes(row)) ignoredAuthors.push(String(row?.user?.login ?? '(unreadable author)'));
+            pair[thread.rows] = kept;
+          } else {
+            pair[thread.rows] = read;
+          }
         } catch (error) {
           unreadable = `${thread.where} #${number}'s comment thread could not be read (${String(error?.message ?? error).split('\n')[0]})`;
           break;
@@ -2221,8 +2302,10 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
         continue;
       }
       const record = recordVerdict({ pair, recognisers, cardNote });
-      // ⭐ The low-risk arm lands on a record that READS PASS, never on one that merely exists.
-      records.set(entry.pr, landsOnLowRiskArm(entry) ? lowRiskRecordVerdict(record, pair, recognisers) : record);
+      // ⭐ Every Tier S entry lands on a record that READS PASS, never on one that merely exists (#33541);
+      // the low-risk arm adds its carry rule first (#33501).
+      const verdicted = landsOnLowRiskArm(entry) ? lowRiskRecordVerdict(record, pair, recognisers) : recordPassVerdict(record, pair, recognisers);
+      records.set(entry.pr, ignoredAuthors.length > 0 ? { ...verdicted, ignoredAuthors } : verdicted);
     }
   }
   return guardVerdict({ event, repo, governed, unattributed, approvals, enqueues, records, apiCalls, headNotes, lifted });
@@ -4953,9 +5036,14 @@ export async function selfTest() {
   const REF_OLD = '9999888777'.padEnd(40, '0');
   // The head sits on the `Head-sha:` line — the ONE line the recognisers read it from (#27979); the
   // `Head:` first-body-line spelling this fixture once wrote is a retired dialect, pinned refused below.
-  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = 'PASS', prose = [] } = {}) => ({
+  // ⭐ Every fixture comment is posted by the relay unless a case says otherwise (#33541): the login is
+  // the one the live loader assembled from `check-handover.mjs`, ⛔ never typed here.
+  const RELAY = live.trustedAuthors?.[0];
+  assert('the-live-loader-trusts-the-relay-identity-first-then-GOVERNED_APPROVERS-and-nothing-else', typeof RELAY === 'string' && RELAY.endsWith('[bot]') && JSON.stringify(live.trustedAuthors) === JSON.stringify([RELAY, ...GOVERNED_APPROVERS]), JSON.stringify(live.trustedAuthors));
+  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = '**VERDICT: PASS**', prose = [], by = RELAY } = {}) => ({
     id,
     created_at: at,
+    ...(by === null ? {} : { user: { login: by } }),
     body: [
       '## Contract review',
       '',
@@ -5130,7 +5218,7 @@ export async function selfTest() {
     '⛔ a-record-with-no-Reviewed-by-line-names-no-reviewer-and-is-REFUSED',
     tierUnsigned.exitCode === EXIT_REFUSED_UNAPPROVED && tierUnsigned.entries[0].record.state === 'unsigned',
   );
-  const tierAbsent = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'looks good to me' }] });
+  const tierAbsent = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'looks good to me', user: { login: RELAY } }] });
   assert(
     '⛔ a-thread-with-NO-record-in-it-is-REFUSED-and-says-how-many-comments-it-read-ON-EACH-CARRIER',
     tierAbsent.exitCode === EXIT_REFUSED_UNAPPROVED && tierAbsent.entries[0].record.state === 'absent' &&
@@ -5211,7 +5299,7 @@ export async function selfTest() {
   // record sits ONLY on the card thread. Refused before this case existed
   // (「0 comment(s) read on the PR thread」, PR #18689, `CI_FAILURE`), and the
   // rule it was refused against says 「一条评论落 PR 或卡」.
-  const tierOnCard = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'os-dev-report' }], cardComments: [recordComment({ id: 901 })] });
+  const tierOnCard = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'os-dev-report', user: { login: RELAY } }], cardComments: [recordComment({ id: 901 })] });
   assert(
     '⭐ a-record-on-the-CARD-thread-alone-PASSES-the-two-carriers-are-one-delivery',
     tierOnCard.exitCode === EXIT_CLEAR && tierOnCard.entries[0].record.state === 'stands' && tierOnCard.entries[0].record.where === 'card',
@@ -5414,11 +5502,45 @@ export async function selfTest() {
   assert('⛔ and-a-RULES-layer-refusal-is-offered-no-such-remedy-the-control-for-the-line-above', !/3\. Or — ONLY for a pull request/.test(renderGuardVerdict(rulesDismissed)));
   assert('the-below-tier-refusal-names-the-reading-it-actually-got', /does not stand/.test(renderGuardVerdict(tierBelow)) && /a-lesser-tier/.test(renderGuardVerdict(tierBelow)));
   assert('⛔ and-it-never-prints-the-tier-VALUE-it-names-the-constant', /`CONTRACT_REVIEW_TIER`/.test(renderGuardVerdict(tierBelow)) && !renderGuardVerdict(tierBelow).includes(TIER));
-  assert('the-passing-rendering-states-the-boundary-existence-and-provenance-never-the-verdict', /EXISTENCE and PROVENANCE, never the verdict/.test(renderGuardVerdict(tierPass)));
-  // ⛔ Verdict-agnostic, like every other reader in this family: what the record
-  // CONCLUDED stays human, so a record that reads FAIL still STANDS here.
-  const tierFailWord = await tierRun({ comments: [recordComment({ verdictWord: 'FAIL — patch round' })] });
-  assert('⛔ the-leg-reads-no-PASS-or-FAIL-token-a-FAIL-record-still-stands-as-a-RECORD', tierFailWord.entries[0].record.state === 'stands');
+  assert('#33541-the-passing-rendering-says-the-record-READS-PASS-and-who-posted-it', /one `VERDICT:` line READS PASS, and this one does \(#33541\)/.test(renderGuardVerdict(tierPass)) && renderGuardVerdict(tierPass).includes(`Posted by \`${RELAY}\``) && !/EXISTENCE and PROVENANCE, never the verdict/.test(renderGuardVerdict(tierPass)), renderGuardVerdict(tierPass));
+  // ⛔ #33541 FLIPPED this row: AGENTS.md Prime Directive 14 lands Tier S on "a PASS verdict", so a
+  // same-head FAIL record no longer clears `.claude/**` — it is refused, naming the comment.
+  const tierFailWord = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
+  assert('⛔ #33541-a-same-head-FAIL-record-is-REFUSED-on-every-Tier-S-leg-naming-the-comment-id', tierFailWord.exitCode === EXIT_REFUSED_UNAPPROVED && tierFailWord.entries[0].record.state === 'not-pass' && tierFailWord.entries[0].record.verdict === 'FAIL' && /comment 900, .*does not read PASS: it reads FAIL/.test(renderGuardVerdict(tierFailWord)) && /Prime Directive 14, #33541/.test(renderGuardVerdict(tierFailWord)), renderGuardVerdict(tierFailWord));
+  // ⭐ #33541, the verdict: exactly ONE `VERDICT:` line under the heading, reading PASS; the newest same-head record decides.
+  const wordOnly = await tierRun({ comments: [recordComment({ verdictWord: 'PASS' })] });
+  assert('⛔ #33541-a-record-with-NO-VERDICT-line-is-REFUSED-a-bare-PASS-word-alone-is-not-the-line', wordOnly.exitCode === EXIT_REFUSED_UNAPPROVED && wordOnly.entries[0].record.state === 'not-pass' && wordOnly.entries[0].record.verdict === null && /states no verdict \(no `VERDICT:` line/.test(renderGuardVerdict(wordOnly)), renderGuardVerdict(wordOnly));
+  const twoLines = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: PASS**\n\n> **VERDICT: FAIL**' })] });
+  assert('⛔ #33541-a-record-with-TWO-VERDICT-lines-is-REFUSED-whatever-their-order-or-quoting', twoLines.exitCode === EXIT_REFUSED_UNAPPROVED && twoLines.entries[0].record.state === 'not-pass' && /comment 900, .*states 2 `VERDICT:` lines \(PASS, FAIL\)/.test(renderGuardVerdict(twoLines)), renderGuardVerdict(twoLines));
+  const twoPass = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: PASS**\n**VERDICT: PASS**' })] });
+  assert('⛔ #33541-…even-two-PASS-lines-a-record-states-exactly-one', twoPass.exitCode === EXIT_REFUSED_UNAPPROVED && twoPass.entries[0].record.state === 'not-pass');
+  const inlineBeside = await tierRun({ comments: [{ ...recordComment(), body: recordComment().body.replace('## Contract review', '## Contract review (delta) — **PASS**') }] });
+  assert('#33541-a-heading-inline-PASS-beside-ONE-VERDICT-line-is-not-a-second-line-it-CLEARS', inlineBeside.exitCode === EXIT_CLEAR && inlineBeside.entries[0].record.verdict === 'PASS', JSON.stringify(inlineBeside.entries[0].record));
+  const failAfterPass = await tierRun({ comments: [recordComment({ id: 921, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 922, at: '2026-09-13T14:00:00Z', verdictWord: '**VERDICT: FAIL**' })] });
+  assert('⛔ #33541-a-FAIL-AFTER-a-PASS-on-the-same-head-is-REFUSED-the-latest-record-decides', failAfterPass.exitCode === EXIT_REFUSED_UNAPPROVED && failAfterPass.entries[0].record.id === 922 && failAfterPass.entries[0].record.state === 'not-pass', JSON.stringify(failAfterPass.entries[0].record));
+  const passAfterFail = await tierRun({ comments: [recordComment({ id: 923, at: '2026-09-13T12:00:00Z', verdictWord: '**VERDICT: FAIL**' })], cardComments: [recordComment({ id: 924, at: '2026-09-13T14:00:00Z' })] });
+  assert('#33541-a-PASS-AFTER-a-FAIL-on-the-same-head-CLEARS-across-the-two-threads-the-latest-record-decides', passAfterFail.exitCode === EXIT_CLEAR && passAfterFail.entries[0].record.id === 924 && passAfterFail.entries[0].record.verdict === 'PASS', JSON.stringify(passAfterFail.entries[0].record));
+  // ⭐ #33541, the author: the relay and GOVERNED_APPROVERS post records; any other author is IGNORED, never refused loudly.
+  const PM_DIRECT = 'os-project-manager';
+  assert('#33541-the-account-a-seat-would-post-from-directly-is-outside-the-trusted-set-the-relay-carries-its-records', !live.trustedAuthors.includes(PM_DIRECT));
+  const direct = await tierRun({ comments: [recordComment({ by: PM_DIRECT })] });
+  assert('⛔ #33541-a-record-posted-DIRECTLY-by-a-seat-account-is-IGNORED-the-entry-reads-NO-record-and-is-refused', direct.exitCode === EXIT_REFUSED_UNAPPROVED && direct.entries[0].record.state === 'absent' && direct.entries[0].record.ignoredAuthors?.join() === PM_DIRECT, JSON.stringify(direct.entries[0].record));
+  assert('…and-the-words-name-the-ignored-author-as-information-never-as-a-refusal-of-their-record', /1 comment\(s\) by author\(s\) outside the relay and GOVERNED_APPROVERS were not read: os-project-manager/.test(renderGuardVerdict(direct)) && !/does not read PASS/.test(renderGuardVerdict(direct)), renderGuardVerdict(direct));
+  const stranger = await tierRun({ comments: [recordComment({ by: 'drive-by-commenter' })] });
+  assert('⛔ #33541-a-stranger-on-a-public-repository-posting-a-perfect-PASS-record-clears-NOTHING', stranger.exitCode === EXIT_REFUSED_UNAPPROVED && stranger.entries[0].record.state === 'absent');
+  const authorless = await tierRun({ comments: [recordComment({ by: null })] });
+  assert('⛔ #33541-a-record-whose-author-is-UNREADABLE-is-ignored-fail-closed', authorless.exitCode === EXIT_REFUSED_UNAPPROVED && authorless.entries[0].record.state === 'absent' && authorless.entries[0].record.ignoredAuthors?.join() === '(unreadable author)');
+  const shadowFail = await tierRun({ comments: [recordComment({ id: 931, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 932, at: '2026-09-13T14:00:00Z', verdictWord: '**VERDICT: FAIL**', by: 'drive-by-commenter' })] });
+  assert('#33541-an-untrusted-NEWER-FAIL-cannot-shadow-the-trusted-PASS-it-is-not-read-at-all', shadowFail.exitCode === EXIT_CLEAR && shadowFail.entries[0].record.id === 931, JSON.stringify(shadowFail.entries[0].record));
+  const shadowPass = await tierRun({ comments: [recordComment({ id: 933, at: '2026-09-13T12:00:00Z', verdictWord: '**VERDICT: FAIL**' }), recordComment({ id: 934, at: '2026-09-13T14:00:00Z', by: 'drive-by-commenter' })] });
+  assert('⛔ #33541-…and-an-untrusted-NEWER-PASS-cannot-lift-the-trusted-FAIL', shadowPass.exitCode === EXIT_REFUSED_UNAPPROVED && shadowPass.entries[0].record.id === 933 && shadowPass.entries[0].record.state === 'not-pass');
+  const byApprover = await tierRun({ cardComments: [recordComment({ by: GOVERNED_APPROVERS[0] })] });
+  assert('#33541-a-record-posted-by-an-account-in-GOVERNED_APPROVERS-is-read', byApprover.exitCode === EXIT_CLEAR && byApprover.entries[0].record.author === GOVERNED_APPROVERS[0], JSON.stringify(byApprover.entries[0].record));
+  assert('#33541-recordAuthorTrusted-is-exact-on-the-login-and-fails-closed-on-no-list', recordAuthorTrusted({ user: { login: RELAY } }, live.trustedAuthors) && !recordAuthorTrusted({ user: { login: RELAY.toUpperCase() } }, live.trustedAuthors) && !recordAuthorTrusted({ user: { login: RELAY } }, null) && !recordAuthorTrusted({ user: { login: '' } }, ['']) && !recordAuthorTrusted({}, live.trustedAuthors));
+  const noBot = await loadRecordRecognisers(async (specifier) => (specifier === RECOGNISER_SOURCES.author ? {} : await import(specifier)));
+  assert('⛔ #33541-a-loader-that-cannot-read-the-relay-identity-is-unavailable-exit-4-never-a-trust-everyone', noBot.available === false && /trustedAuthors \(FLEET_BOT_LOGIN from \.\/check-handover\.mjs\)/.test(noBot.reason), noBot.reason);
+  const unloadedTrust = await tierRun({ comments: [recordComment()], recognisers: { ...live, trustedAuthors: undefined } });
+  assert('⛔ #33541-a-recogniser-set-with-no-trusted-list-reads-every-author-as-untrusted', unloadedTrust.exitCode === EXIT_REFUSED_UNAPPROVED && unloadedTrust.entries[0].record.state === 'absent');
 
   // The reader: the route, and the refusal it throws.
   let seenCommentUrl = '';
@@ -5456,8 +5578,8 @@ export async function selfTest() {
     'a top-level await here deadlocks the recogniser import — see loadRecordRecognisers',
   );
   assert(
-    'and-the-recogniser-source-is-the-ONE-file-that-COMPOSES-these-parsers',
-    RECOGNISER_SOURCES.tier === './record-recognisers.mjs' && Object.keys(RECOGNISER_SOURCES).length === 1,
+    'and-the-recogniser-source-is-the-ONE-file-that-COMPOSES-these-parsers-beside-the-ONE-file-that-declares-the-relay-identity',
+    RECOGNISER_SOURCES.tier === './record-recognisers.mjs' && RECOGNISER_SOURCES.author === './check-handover.mjs' && Object.keys(RECOGNISER_SOURCES).length === 2,
     Object.keys(RECOGNISER_SOURCES).join(', '),
   );
   assert(
@@ -5475,7 +5597,7 @@ export async function selfTest() {
   // and this leg supplies only the git it reads two COMMITTED trees with. ⛔ Its
   // absence REFUSES — a `Regen-provenance:` line certifies nothing by existing.
   battery('⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head');
-  const REGEN_PROV = { id: 901, created_at: '2026-09-13T13:30:00Z', body: `Regen-provenance: 900 · \`${REF_OLD}\` → \`${REF_HEAD}\` · \`git diff --name-only\` → (empty)` };
+  const REGEN_PROV = { id: 901, created_at: '2026-09-13T13:30:00Z', user: { login: RELAY }, body: `Regen-provenance: 900 · \`${REF_OLD}\` → \`${REF_HEAD}\` · \`git diff --name-only\` → (empty)` };
   const onOldHead = [recordComment({ sha: REF_OLD.slice(0, 12) }), REGEN_PROV];
   const QBASE = 'b'.repeat(40); // the merge group's base sha, which is what main brought
   const qgit = (spec) => (args) => {
@@ -5494,6 +5616,8 @@ export async function selfTest() {
   const gitPure = qgit(qRegen);
   const gitHand = qgit(qSlipped);
   const carried = await tierRun({ comments: onOldHead, runGit: gitPure, baseRef: QBASE });
+  const strangerHop = await tierRun({ comments: [onOldHead[0], { ...REGEN_PROV, user: { login: 'drive-by-commenter' } }], runGit: gitPure, baseRef: QBASE });
+  assert('⛔ #33541-a-Regen-provenance-hop-posted-by-an-untrusted-author-carries-NOTHING-the-binding-covers-the-carry-chain', strangerHop.exitCode === EXIT_REFUSED_UNAPPROVED && strangerHop.entries[0].record.state === 'absent', JSON.stringify(strangerHop.entries[0].record));
   assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-move-is-a-certified-pure-regeneration', carried.exitCode === EXIT_CLEAR && carried.entries[0].record.state === 'stands' && carried.entries[0].record.carriedHops === 1, JSON.stringify(carried.entries[0].record));
   assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION or PROSE-ONLY hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
   const handMoved = await tierRun({ comments: onOldHead, runGit: gitHand, baseRef: QBASE });
@@ -5820,9 +5944,9 @@ export async function selfTest() {
     assert('the-template-VERDICT-PASS-line-clears-the-arm', explicitPass.exitCode === EXIT_CLEAR && explicitPass.entries[0].record.verdict === 'PASS');
     const newestFail = await tierRun({ ...arm, comments: [recordComment({ id: 901, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 902, at: '2026-09-13T14:00:00Z', verdictWord: '**VERDICT: FAIL**' })] });
     assert('⛔ the-NEWEST-same-head-record-is-the-one-whose-verdict-is-read-an-older-PASS-does-not-clear-a-newer-FAIL', newestFail.exitCode === EXIT_REFUSED_UNAPPROVED && newestFail.entries[0].record.id === 902 && newestFail.entries[0].record.state === 'not-pass');
-    const noReader = await tierRun({ ...arm, recognisers: { ...live, verdictOf: undefined } });
+    const noReader = await tierRun({ ...arm, recognisers: { ...live, verdictLines: undefined } });
     assert('⛔ a-recogniser-set-without-the-verdict-reader-REFUSES-the-arm-fail-closed', noReader.exitCode === EXIT_REFUSED_UNAPPROVED && noReader.entries[0].record.state === 'not-pass' && /verdict reader was not loaded/.test(renderGuardVerdict(noReader)));
-    assert('the-live-loader-reaches-the-fleet-verdict-reader', typeof live.verdictOf === 'function' && live.verdictOf('## Contract review\n\n**VERDICT: FAIL**') === 'FAIL');
+    assert('the-live-loader-reaches-the-fleet-verdict-reader-in-its-counting-form', typeof live.verdictLines === 'function' && live.verdictLines('## Contract review\n\n**VERDICT: FAIL**').join() === 'FAIL');
     assert('lowRiskRecordVerdict-passes-a-non-standing-record-through-and-reads-the-chosen-comment', (() => {
       const absent = { state: 'absent' };
       const pair = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [] };
@@ -5897,7 +6021,7 @@ export async function selfTest() {
       }
     })());
     const nonArmFail = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
-    assert('the-other-Tier-S-legs-are-unchanged-here-a-FAIL-record-still-stands-for-them-follow-up-33541', nonArmFail.entries[0].record.state === 'stands' && nonArmFail.entries[0].record.verdict === undefined);
+    assert('⛔ #33541-the-other-Tier-S-legs-read-the-verdict-too-a-FAIL-record-is-refused-for-them-with-their-own-words', nonArmFail.exitCode === EXIT_REFUSED_UNAPPROVED && nonArmFail.entries[0].record.state === 'not-pass' && nonArmFail.entries[0].record.verdict === 'FAIL' && !/low-risk skills arm lands on a PASS record only/.test(renderGuardVerdict(nonArmFail)), renderGuardVerdict(nonArmFail));
 
     // ⛔ Each H case, each WITH a valid PASS record: the record leg is never consulted, the entry needs the maintainer.
     const hCase = async (over) => { const v = await tierRun({ ...arm, ...over }); return [v.exitCode, v.entries[0].tier, v.entries[0].record === undefined]; };
