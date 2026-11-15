@@ -443,7 +443,7 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'names the related object in refusal text',
   },
-  'registry-top-level.ts#<module> :: organization_id': {
+  'registry.ts#<module> :: organization_id': {
     disposition: 'not-a-read',
     why: 'the tenant index the registry declares on a provisioned tenant column',
   },
