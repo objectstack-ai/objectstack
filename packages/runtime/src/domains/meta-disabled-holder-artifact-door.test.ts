@@ -248,3 +248,86 @@ describe('[#34040] CONTROL — one body ships the doc: its exact address answers
         }
     });
 });
+
+// [#34040 acceptance item 4, review-c N2/N6 on PR #34036] The bare doc read's
+// refusal on the same composed rig, and the two package-less registry entries
+// beside two enabled holders. A hydrated row is laid as the hydrator lays it:
+// the stored `sys_metadata` row, and its package-less copy in the registry's
+// bare slot (stamped with the `sys_metadata` sentinel).
+//
+// Measured on this rig (origin/main 86350e12, PR #34036 merged): with either
+// entry the bare doors do not answer the environment's item; they answer the
+// holder the metadata service registered last (a registration-order pick),
+// and `/layers` reports the row as the overlay over that holder's effective
+// item. Pinned as measured, unresolved: a follow-up decides that answer.
+const layEnvironmentDocRow = (engine: ObjectQL) => engine.insert('sys_metadata', {
+    type: 'doc', name: 'shared_doc', namespace: 'default', package_id: null, scope: 'platform', strategy: 'merge', state: 'active', version: 1,
+    metadata: JSON.stringify({ name: 'shared_doc', label: 'environment doc', content: '# env' }),
+}, { context: { isSystem: true } } as any);
+const docRegistryOf = (booted: Booted) => (booted.engine.registry as unknown as { metadata: Map<string, Map<string, unknown>> }).metadata.get('doc')!;
+const labelAt = (door: string, body: any) => (door.endsWith('/layers') ? [body?.overlay?.label, body?.effective?.label] : [body?.item?.label ?? body?.label]);
+
+describe.each([
+    { order: 'alpha registered first', packages: [ALPHA, BETA] },
+    { order: 'beta registered first', packages: [BETA, ALPHA] },
+])('[#34040 item 4] the bare doc doors beside two enabled holders of one doc name, $order', ({ packages }) => {
+    let booted: Booted | undefined;
+    const last = packages[packages.length - 1]!;
+    const lastDoc = `${last.split('.').pop()} doc`;
+
+    beforeAll(async () => {
+        booted = await bootArtifactKernel(packages, docBodyOf([ALPHA, BETA]));
+    }, 120_000);
+
+    afterAll(async () => {
+        if (!booted) return;
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        rmSync(booted.root, { recursive: true, force: true });
+    });
+
+    const expectRefusedNamingBoth = async () => {
+        for (const answer of await bareDoors(booted!, 'doc', 'shared_doc')) {
+            expect([answer.status, errorCodeOf(answer.body), answer.door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', answer.door]);
+            for (const id of [ALPHA, BETA]) expect(String(answer.body?.message ?? answer.body?.error?.message), answer.door).toContain(id);
+        }
+    };
+    const expectExactReadsOwnDoc = async () => {
+        for (const [packageId, label] of [[ALPHA, 'alpha doc'], [BETA, 'beta doc']] as const) {
+            for (const answer of await exactDocDoors(booted!, packageId)) {
+                const item = answer.body?.item ?? answer.body;
+                expect([answer.status, item?.label, item?._packageId, answer.door], JSON.stringify(answer.body)).toEqual([200, label, packageId, answer.door]);
+            }
+        }
+    };
+
+    it('no package-less entry: the plain read, /layers and /published refuse 409 naming both, on both transports; each exact address reads its own doc', async () => {
+        await expectRefusedNamingBoth();
+        await expectExactReadsOwnDoc();
+    });
+
+    it('(measured, unresolved) a stamp-less bare entry with the service\'s copy: the bare doors serve the holder registered last; each exact address reads its own doc', async () => {
+        booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'bare entry', content: '# bare' } as never, 'name' as never);
+        try {
+            for (const answer of await bareDoors(booted!, 'doc', 'shared_doc')) {
+                expect([answer.status, ...labelAt(answer.door, answer.body), answer.door], JSON.stringify(answer.body))
+                    .toEqual([200, ...(answer.door.endsWith('/layers') ? [undefined, lastDoc] : [lastDoc]), answer.door]);
+            }
+            await expectExactReadsOwnDoc();
+        } finally {
+            docRegistryOf(booted!).delete('shared_doc');
+        }
+    });
+
+    it('(measured, unresolved) a hydrated package-less row: the bare doors serve the holder registered last, /layers that holder under the row; each exact address reads its own doc', async () => {
+        await layEnvironmentDocRow(booted!.engine);
+        booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'environment doc', content: '# env', _packageId: 'sys_metadata' } as never, 'name' as never);
+        for (const answer of await bareDoors(booted!, 'doc', 'shared_doc')) {
+            expect([answer.status, ...labelAt(answer.door, answer.body), answer.door], JSON.stringify(answer.body))
+                .toEqual([200, ...(answer.door.endsWith('/layers') ? ['environment doc', lastDoc] : [lastDoc]), answer.door]);
+        }
+        await expectExactReadsOwnDoc();
+        // The row alone, its registry copy gone: no exemption, refused again.
+        docRegistryOf(booted!).delete('shared_doc');
+        await expectRefusedNamingBoth();
+    });
+});
