@@ -50,7 +50,7 @@ const P = 'com.acme.caller';
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
 /** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162), `flow` (#31696) and `webhook` (#31699 PR 2). */
-const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'flow', 'webhook'] as const;
+const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'flow', 'webhook', 'connector'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
@@ -387,10 +387,31 @@ describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/N
   });
 });
 
-describe('the types E8 does not wire keep the legacy read', () => {
-  it('a view (bucket 1) and a connector (not wired; the flow and the webhook are, #31696 and #31699 PR 2) are read by getItem, untouched', async () => {
+describe('connector joins the readers (ADR-0150 D9, #31699 PR 3): `/meta/connector/NAME`', () => {
+  it('[FROM first-registered TO 409] a caller with no package is refused a name two packages ship, naming both; each package\'s address serves its own', async () => {
+    ship('connector', 'crm', A);
+    ship('connector', 'crm', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'connector', name: 'crm' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('connector', 'crm'), 'ambiguous-in-environment', [A, B]);
+    expect(labelOf((await protocol.getMetaItem({ type: 'connector', name: 'crm', packageId: A }))?.item)).toBe('alpha connector');
+    expect(labelOf((await protocol.getMetaItem({ type: 'connector', name: 'crm', packageId: B }))?.item)).toBe('beta connector');
+  });
+
+  it('CONTROL — one holder is served to a caller with no package, as before', async () => {
     ship('connector', 'onboard', A);
-    expect(labelOf(await facade.get('connector', 'onboard', P))).toBe('alpha connector');
+    expect(labelOf((await protocol.getMetaItem({ type: 'connector', name: 'onboard' }))?.item)).toBe('alpha connector');
+    expect(labelOf(await facade.get('connector', 'onboard'))).toBe('alpha connector');
+  });
+
+  it('one enabled and one disabled holder: a caller with no package reads the enabled one\'s; re-enabled, 409 naming both', async () => {
+    for (const order of [[A, B], [B, A]] as const) {
+      const name = `twin_${order[0].split('.').pop()}`;
+      for (const id of order) ship('connector', name, id);
+      registry.disablePackage(B);
+      expect(labelOf((await protocol.getMetaItem({ type: 'connector', name }))?.item), order.join(',')).toBe('alpha connector');
+      registry.enablePackage(B);
+      await expectRefusal(() => protocol.getMetaItem({ type: 'connector', name }), 'ambiguous-in-environment', [A, B]);
+    }
   });
 });
 

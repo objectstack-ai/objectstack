@@ -99,6 +99,7 @@ export function useObjectViewListRenderer({
     handleListRowsChange,
     recordOpen,
     openAsPage,
+    rowOpensRecord,
     phoneTitle,
     handleListPersonalizationChange,
     urlFilters,
@@ -139,6 +140,8 @@ export function useObjectViewListRenderer({
     recordOpen: ListViewProps['recordOpen'];
     /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
     openAsPage: { objectName: string; label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
+    rowOpensRecord: boolean;
     /**
      * objectstack#27058 — on a phone, the title's view switcher, drawn at the
      * start of the list's toolbar row (`ListView`'s `toolbarLeading`) or above
@@ -1075,6 +1078,10 @@ export function useObjectViewListRenderer({
                             : null;
                     }
                     : undefined}
+                // objectstack#33317 — a row that opens nothing (the view
+                // authored `navigation.mode: 'none'`, or a list-only object)
+                // draws no record link and no Open in its context menu.
+                rowOpensRecord={rowOpensRecord}
                 // objectstack#26681 — the Display menu's Open records section.
                 recordOpen={recordOpen}
                 // objectstack#27058 — on a phone the toolbar row is the title
@@ -1083,7 +1090,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

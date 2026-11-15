@@ -399,3 +399,109 @@ describe('[#20887] a read scope carrying the nested-relation form', () => {
     }
   }, 60_000);
 });
+
+/**
+ * [#33335] The DOTTED cross-object member (`'owner.region'`) on the
+ * engine-aggregate path. `engine.aggregate` cannot join, so `ObjectQLStrategy`
+ * refused every such `where` leaf (`400 INVALID_FIELD`, "cannot join in an
+ * aggregate"), and a dashboard over detail rows could not leave out the rows of
+ * a cancelled parent. It now hands a one-hop leaf to the engine as the
+ * nested-relation condition above (`cross-object-where.ts`), so its answer is
+ * the engine's for that condition, computed here as the reference: the related
+ * object read as the caller, its row scope and field permissions applied, an
+ * empty match selecting no row, a match past the cap refused.
+ *
+ * Measured on the base (`ba35dfd7`), this composition, every row below:
+ * `400 INVALID_FIELD`, "cannot evaluate a cross-object filter".
+ *
+ * Two readings are pinned beyond the reference, because they are the card's
+ * questions: what a child with NO parent gets under a negative operator (it is
+ * not selected — a cross-object leaf requires a related record the caller can
+ * read; OR in `{ owner: { $null: true } }` to keep such rows), and that the
+ * shapes this path cannot serve exactly (under `$not`, two hops) stay refused
+ * rather than answered differently.
+ */
+describe('[#33335] a dotted cross-object where on the engine-aggregate path answers the engine\'s nested-relation condition', () => {
+  let h: Harness;
+  /** A ledger row with no owner at all — the orphan the negative operators are pinned on. */
+  const ORPHAN = { id: 'd5', title: 'e', owner: null, owners: [] };
+  const TITLES = new Map([...TITLE_OF, [ORPHAN.id, ORPHAN.title]]);
+
+  beforeAll(async () => {
+    h = await boot({ caps: 'objectql' });
+    await h.engine.insert(OBJECT, [{ ...ORPHAN }], { context: SYS_CTX } as never);
+  }, 60_000);
+
+  afterAll(async () => {
+    try { await h?.engine.destroy(); } catch { /* noop */ }
+  });
+
+  const reference = (where: FilterCondition) =>
+    h.engine.find(OBJECT, { where, context: MEMBER_CTX } as never).then(
+      (rows: any[]) => ({ titles: rows.map((r) => TITLES.get(r.id) as string).sort() }),
+      (e: Thrown) => ({ refused: envelopeOf(e) }),
+    );
+  const cubeRead = (where: FilterCondition) =>
+    h.analytics.query(cubeQuery(where), MEMBER_CTX as never).then(
+      (r) => ({ titles: titlesOf(r.rows, 'title') }),
+      (e: Thrown) => ({ refused: envelopeOf(e) }),
+    );
+
+  /** One owner id list keeps the `$ne` read under the cap: the 1001 `CAP` owners are not in it. */
+  const LISTED = { $in: ['u1', 'u2', 'u3'] };
+  const SERVED: ReadonlyArray<readonly [string, FilterCondition, FilterCondition, string[]]> = [
+    ['equality', { 'owner.region': 'NA' }, { owner: { region: 'NA' } }, ['a', 'c']],
+    // u2 is the one readable owner outside NA: u3 is hidden by the owner row
+    // scope, and d5 has no owner — neither is selected by a `$ne`.
+    ['$ne, beside a second leaf on the same relation',
+      { 'owner.region': { $ne: 'NA' }, 'owner.id': LISTED }, { owner: { region: { $ne: 'NA' }, id: LISTED } }, ['b']],
+    ['$ne, with the orphan kept by its own branch',
+      { $or: [{ 'owner.region': { $ne: 'NA' }, 'owner.id': LISTED }, { owner: { $null: true } }] },
+      { $or: [{ owner: { region: { $ne: 'NA' }, id: LISTED } }, { owner: { $null: true } }] }, ['b', 'e']],
+    ['inside $or', { $or: [{ 'owner.region': 'NA' }, { title: 'b' }] }, { $or: [{ owner: { region: 'NA' } }, { title: 'b' }] }, ['a', 'b', 'c']],
+    ['a related record the caller cannot read', { 'owner.region': 'HIDDEN' }, { owner: { region: 'HIDDEN' } }, []],
+    ['no related record matches', { 'owner.region': 'NOWHERE' }, { owner: { region: 'NOWHERE' } }, []],
+    ['a multi-valued relation', { 'owners.region': 'NA' }, { owners: { region: 'NA' } }, ['a', 'c']],
+  ];
+
+  it('the cube read answers the engine\'s rows for the nested-relation condition the leaf stands for', async () => {
+    for (const [label, dotted, nested, titles] of SERVED) {
+      const expected = await reference(nested);
+      expect(expected, `${label}: the engine's own answer`).toEqual({ titles });
+      expect(await cubeRead(dotted), `${label}: the cube read`).toEqual(expected);
+    }
+    // The empty answers above are the scope and the condition, not an empty
+    // table: a system caller reads the hidden owner's row.
+    const system = await h.analytics.query(cubeQuery({ 'owner.region': 'HIDDEN' }), SYS_CTX as never);
+    expect(titlesOf(system.rows, 'title')).toEqual(['d']);
+  });
+
+  it('the dataset door answers the same rows for the leaf in selection.runtimeFilter', async () => {
+    for (const [label, dotted, , titles] of SERVED.filter(([, d]) => !JSON.stringify(d).includes('owners'))) {
+      const ds = await h.dataset({ measures: ['row_count'], dimensions: ['title_dim'], runtimeFilter: dotted });
+      expect(ds.status, `${label}: ${JSON.stringify(ds.body)}`).toBe(200);
+      expect(titlesOf(ds.body.rows, 'title_dim'), label).toEqual(titles);
+    }
+  });
+
+  it('a related field the caller cannot read, and a match past the cap, are refused as the engine refuses them', async () => {
+    const cases: ReadonlyArray<readonly [FilterCondition, FilterCondition, { code: string; status: number }]> = [
+      [{ 'owner.secret': 's1' }, { owner: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
+      [{ 'owner.region': 'CAP' }, { owner: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
+    ];
+    for (const [dotted, nested, expected] of cases) {
+      expect(await reference(nested), JSON.stringify(nested)).toEqual({ refused: expected });
+      expect(await cubeRead(dotted), JSON.stringify(dotted)).toEqual({ refused: expected });
+    }
+  });
+
+  it('a leaf under $not stays refused, never answered from a negated match that admits the hidden owner\'s row', async () => {
+    // The engine answers the AUTHORED nested form under `$not` with d4 and d5
+    // among its rows (the NULL-safe negation of a relation match); the dotted
+    // leaf is refused instead. The two-hop refusal is pinned at the strategy
+    // (`service-analytics`'s `crossobject-conjunct-refusal.test.ts`, ⑨).
+    expect(await reference({ $not: { owner: { region: 'NA' } } })).toEqual({ titles: ['b', 'd', 'e'] });
+    expect(await cubeRead({ $not: { 'owner.region': 'NA' } } as FilterCondition))
+      .toEqual({ refused: { code: 'INVALID_FIELD', status: 400 } });
+  });
+});

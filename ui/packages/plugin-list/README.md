@@ -238,6 +238,17 @@ Without it every row is unchanged. The console uses it on Setup → Users on a
 cloud-managed environment, to mark a user who holds no permission set beyond
 the baseline.
 
+### Host prop: `rowOpensRecord`
+
+A host whose `onRowClick` opens nothing for these rows passes
+`rowOpensRecord={false}`. The list hands it to the grid as the grid's own
+`rowOpensRecord` (see `@object-ui/plugin-grid`): the grid draws its record-link
+cells as plain text and its row context menu offers no Open, while the row
+click still reaches `onRowClick`. Only the grid is handed it. This is a React
+prop for the host app, not a schema key: list metadata cannot set it. Without
+it every row is unchanged. The console passes `false` for a view authored
+`navigation: { mode: 'none' }` and for a list-only object.
+
 ### Host prop: `viewDefaults`
 
 A host that stores the user's own hidden fields or density and lays that

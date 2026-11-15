@@ -110,7 +110,11 @@ export function usePublishAllDrafts(t: TranslateFn) {
         // refusal answers both, and only `failed[]` says which item and why.
         const failed = Array.isArray(payload.failed) ? payload.failed : [];
         if (failed.length > 0) throw new Error(refusedItemsText(failed));
-        if ((payload as { success?: boolean }).success === false) {
+        // objectstack#33277 — `published_unregistered` answers `success: false`
+        // over drafts that DID land (the registry refused an object, whose
+        // warning the client has already reported): not a failure here, as it
+        // was not while the server answered `published` for it.
+        if ((payload as { success?: boolean }).success === false && payload.outcome !== 'published_unregistered') {
           const error = (payload as { error?: { message?: string } }).error;
           throw new Error(error?.message || 'publish-drafts did not publish this package');
         }

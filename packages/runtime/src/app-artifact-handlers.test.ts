@@ -656,9 +656,12 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
     // or by beta and a package of another namespace too, as two namespaces may
     // hold one function name since #31700: a bare read of that name is refused
     // (409), so the teardown reads beta's own entry and never aborts on it.
+    // [#32907] …or by beta and the platform (an owner-less registration): that
+    // bare read is refused too since #32907, and the teardown still runs whole.
     it.each([
         ['beta alone holds the name it keeps (CONTROL: the bare slot answers as before)', false],
-        ['another namespace\'s package holds the name beta keeps too', true],
+        ['another namespace\'s package holds the name beta keeps too', 'package'],
+        ['the platform holds the name beta keeps too (#32907: its bare read is refused, and the teardown never asks it)', 'platform'],
     ] as const)('a re-bind that moves a function to another owner takes it off the owner the previous bind gave it, which keeps its other functions — %s', async (_case, sharedKept) => {
         const GAMMA = 'com.qa.bodies.gamma';
         const body = (ns: Ns, hooks: unknown[]) => ({
@@ -680,19 +683,26 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         const ql = engineFor(first, logger);
         bind(ql, first, logger);
         expect(ql.functionHoldersOf('qa_moving').packageHolders, 'precondition: only beta\'s hook names it').toEqual([BETA]);
-        if (sharedKept) ql.registerFunction('qa_kept', stamp('gamma'), { packageId: appArtifactHandlerOwner(GAMMA) });
+        if (sharedKept === 'package') ql.registerFunction('qa_kept', stamp('gamma'), { packageId: appArtifactHandlerOwner(GAMMA) });
+        if (sharedKept === 'platform') ql.registerFunction('qa_kept', stamp('platform'));
 
         // Now the top level names it too: one function two owners' hooks name, under the artifact's id.
         bind(ql, artifactWith([hookOn('alpha', 'qa_res_moving', 'qa_moving')]), logger);
 
         expect(errors.map((e) => e.message), 'the teardown ran whole').toEqual([]);
         expect(ql.functionHoldersOf('qa_moving').packageHolders, 'held once, by the artifact\'s id').toEqual([ALPHA]);
-        expect([...ql.functionHoldersOf('qa_kept').packageHolders].sort(), 'beta keeps the function only its hook names').toEqual(sharedKept ? [BETA, GAMMA] : [BETA]);
+        expect([...ql.functionHoldersOf('qa_kept').packageHolders].sort(), 'beta keeps the function only its hook names').toEqual(sharedKept === 'package' ? [BETA, GAMMA] : [BETA]);
         expect(String(await insertInto(ql, 'beta')).split(';').filter(Boolean).sort()).toEqual(['kept', 'moving']);
         expect(await insertInto(ql, 'alpha')).toBe('moving;');
-        if (sharedKept) {
+        if (sharedKept === 'package') {
             expect(ql.functionHoldersOf('qa_kept').packageItem(GAMMA)?.packageId, 'the other holder keeps its own').toBe(appArtifactHandlerOwner(GAMMA));
             expect(() => ql.resolveFunctionEntry('qa_kept'), 'the bare read of a name two packages hold stays refused').toThrow(/com\.qa\.bodies\.beta[\s\S]*com\.qa\.bodies\.gamma|com\.qa\.bodies\.gamma[\s\S]*com\.qa\.bodies\.beta/);
+        } else if (sharedKept === 'platform') {
+            expect(ql.functionHoldersOf('qa_kept').platformItem?.(), 'the platform keeps its own').toBeDefined();
+            let refused: any;
+            try { ql.resolveFunctionEntry('qa_kept'); } catch (e) { refused = e; }
+            expect([refused?.code, refused?.status], 'the bare read of a name the platform and beta hold is refused').toEqual(['RESOURCE_CONFLICT', 409]);
+            expect(refused.refusal.candidates).toEqual([{ kind: 'package', packageId: BETA }, { kind: 'platform' }]);
         } else {
             expect(ql.resolveFunctionEntry('qa_kept')?.packageId).toBe(appArtifactHandlerOwner(BETA));
         }
@@ -872,6 +882,126 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
             const kept = gammaBinds(ql, 'qa_kept');
             expect(kept?.code, 'CONTROL: beta still holds what it keeps').toBe('NAMESPACE_CONFLICT');
             expect(holdersNamed(kept)).toEqual([BETA]);
+        });
+
+        // [#32910] The release's three runtime rows the registry-method pins did
+        // not reach: a re-bind before the seal, the ordering of the move path,
+        // and the owner-spelling order where the bare-id registration comes first.
+        describe('[#32910] the release through a runtime re-bind: before the seal, the move path\'s ordering, and the other owner-spelling order', () => {
+            const betaMovingHooks = [hookOn('beta', 'qa_beta_moving', 'qa_moving'), hookOn('beta', 'qa_beta_kept', 'qa_kept')];
+            const fns = { qa_moving: stamp('moving'), qa_kept: stamp('kept') };
+
+            // N4: the release runs on a re-bind made before the cold-boot seal too,
+            // so the seal finds no clash the re-bind left behind. Gamma (a
+            // co-owner of beta's namespace) binds the name before the seal, so a
+            // claim beta kept would be a clash for the seal to report.
+            it.each([
+                ['a function moved to the artifact\'s own package', 'moved'],
+                ['a dropped body\'s function', 'dropped'],
+            ] as const)('a re-bind before the seal releases the old owner\'s claim on %s: the seal reports no clash', (_case, shape) => {
+                const first = shape === 'moved'
+                    ? movingArtifact(betaMovingHooks, [], fns)
+                    : movingArtifact([hookOn('beta', 'qa_beta_only', 'qa_moving')], [], { qa_moving: stamp('moving') });
+                const { errors, logger } = recordingErrors();
+                const ql = engineFor(first, logger);
+                installGamma(ql);
+                bind(ql, first, logger);
+                bind(ql, shape === 'moved'
+                    ? movingArtifact(betaMovingHooks, [hookOn('alpha', 'qa_res_moving', 'qa_moving')], fns)
+                    : { ...first, packages: [first.packages[0]], functions: { qa_alpha_own: stamp('alpha_own') } }, logger);
+                if (shape === 'dropped') expect(gammaBinds(ql, 'qa_moving'), 'before the seal nothing is refused').toBeUndefined();
+
+                expect(errors.map((e) => e.message), 'every group bound').toEqual([]);
+                expect(ql.functionHoldersOf('qa_moving').packageHolders).toEqual(shape === 'moved' ? [ALPHA] : [GAMMA]);
+                expect(ql.registry.sealBareNameHolders(), 'beta holds no claim on it any more').toEqual([]);
+            });
+
+            // D2-N1: what the old owner keeps is registered again BEFORE the
+            // release asks the engine what it still holds. A function the previous
+            // bind gave beta that the new bind neither moves nor gives back to it
+            // is held again only by that registration, and nothing re-claims it:
+            // the ordering alone keeps its claim.
+            it('CONTROL — the move path releases after the old owner\'s kept functions are registered again: a function the new bind neither moves nor gives back keeps its claim', () => {
+                const first = movingArtifact(
+                    [...betaMovingHooks, hookOn('beta', 'qa_beta_prev_hook', 'qa_prev')],
+                    [],
+                    { ...fns, qa_prev: stamp('prev') },
+                );
+                const { errors, logger } = recordingErrors();
+                const ql = engineFor(first, logger);
+                installGamma(ql);
+                bind(ql, first, logger);
+                expect(ql.registry.sealBareNameHolders()).toEqual([]);
+
+                bind(ql, movingArtifact(betaMovingHooks, [hookOn('alpha', 'qa_res_moving', 'qa_moving')], fns), logger);
+
+                expect(errors.map((e) => e.message), 'every group bound').toEqual([]);
+                expect(ql.functionHoldersOf('qa_moving').packageHolders).toEqual([ALPHA]);
+                expect(ql.functionHoldersOf('qa_prev').packageHolders, 'beta keeps the function the new bind does not name').toEqual([BETA]);
+                const prev = gammaBinds(ql, 'qa_prev');
+                expect(prev?.code, 'beta keeps its claim on it').toBe('NAMESPACE_CONFLICT');
+                expect(holdersNamed(prev)).toEqual([BETA]);
+            });
+
+            // D2-N2: the bare-id registration FIRST, then the bind under
+            // `app:<id>`: the engine's one holder entry for beta is the bind's, so
+            // the removal by `app:<id>` takes the name off beta and the release
+            // frees its claim. (The bare-id-last order is the two CONTROLs above.)
+            it.each([
+                ['moved: the gaining owner\'s group binds', 'moved'],
+                ['dropped: a co-owner binds the name', 'dropped'],
+            ] as const)('the package\'s bare-id registration before the bind: the removal takes the holder entry the bind replaced it with, and the claim is released — %s', (_case, shape) => {
+                const first = shape === 'moved'
+                    ? movingArtifact([hookOn('beta', 'qa_beta_moving', 'qa_moving')], [], { qa_moving: stamp('moving') })
+                    : movingArtifact([hookOn('beta', 'qa_beta_only', 'qa_moving')], [], { qa_moving: stamp('moving') });
+                const { errors, logger } = recordingErrors();
+                const ql = engineFor(first, logger);
+                installGamma(ql);
+                // A host's own registration for beta, under the bare id, BEFORE the bind.
+                ql.registerFunction('qa_moving', stamp('host'), { packageId: BETA });
+                bind(ql, first, logger);
+                expect(ql.functionHoldersOf('qa_moving').packageItem(BETA)?.packageId, 'precondition: the bind replaced beta\'s entry').toBe(appArtifactHandlerOwner(BETA));
+                expect(ql.registry.sealBareNameHolders()).toEqual([]);
+
+                bind(ql, shape === 'moved'
+                    ? movingArtifact([hookOn('beta', 'qa_beta_moving', 'qa_moving')], [hookOn('alpha', 'qa_res_moving', 'qa_moving')], { qa_moving: stamp('moving') })
+                    : { ...first, packages: [first.packages[0]], functions: { qa_alpha_own: stamp('alpha_own') } }, logger);
+
+                expect(errors.map((e) => e.message), 'every group bound').toEqual([]);
+                if (shape === 'moved') {
+                    expect(ql.functionHoldersOf('qa_moving').packageHolders, 'held by the gaining owner alone').toEqual([ALPHA]);
+                    expect(holdersNamed(gammaBinds(ql, 'qa_moving'))).toEqual([ALPHA]);
+                } else {
+                    expect(ql.functionHoldersOf('qa_moving').packageHolders, 'no holder is left').toEqual([]);
+                    expect(gammaBinds(ql, 'qa_moving'), 'no claim is left to refuse it').toBeUndefined();
+                }
+            });
+
+            // [#32933] The move path reads the bare slot of a kept name off the
+            // holder set, never through the bare read, which answers nothing for
+            // a disabled package: a disabled old owner keeps what it keeps under
+            // the owner spelling it held it by, and its claim.
+            it('CONTROL — a disabled old owner keeps a kept function under the spelling it held it by, and its claim', () => {
+                const first = movingArtifact(
+                    [...betaMovingHooks, hookOn('beta', 'qa_beta_prev_hook', 'qa_prev')],
+                    [],
+                    { ...fns, qa_prev: stamp('prev') },
+                );
+                const { errors, logger } = recordingErrors();
+                const ql = engineFor(first, logger);
+                installGamma(ql);
+                bind(ql, first, logger);
+                // A host's own registration for beta, under the bare id, after the bind: the slot it holds.
+                ql.registerFunction('qa_prev', stamp('host'), { packageId: BETA });
+                expect(ql.registry.sealBareNameHolders()).toEqual([]);
+                ql.registry.disablePackage(BETA);
+
+                bind(ql, movingArtifact(betaMovingHooks, [hookOn('alpha', 'qa_res_moving', 'qa_moving')], fns), logger);
+
+                expect(errors.map((e) => e.message), 'every group bound').toEqual([]);
+                expect(ql.functionHoldersOf('qa_prev').packageItem(BETA)?.packageId, 'the bare-id spelling it held').toBe(BETA);
+                expect(holdersNamed(gammaBinds(ql, 'qa_prev')), 'its claim stays').toEqual([BETA]);
+            });
         });
     });
 

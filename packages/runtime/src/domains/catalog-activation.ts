@@ -113,6 +113,11 @@
  * A row naming no package becomes the holder's own when the name has that one
  * holder (`adoptPackageless`, ADR-0150 D8), as the name-addressed store wrote
  * it before; under two holders it is neither's and is never written for one.
+ * A name the reader refuses WHOLE — no declaration of it served, the
+ * environment's listed beside a package's on a host whose registry holds no
+ * webhook — has no switch at any address: the bare, the exact and the
+ * namespace address all answer `409` naming every holder, nothing written
+ * ({@link wholeWebhookNameRefusal}, #33263).
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, GUEST_POSITION } from '@objectstack/spec/identity';
@@ -281,7 +286,10 @@ async function resolveQualifiedWebhook(
     const slots = (await reader.list!()).filter((d) => d.webhook.name === name);
     const holding = slots.flatMap((d) => (d.packageId !== undefined && owners.includes(d.packageId) ? [d.packageId] : []));
     if (holding.length === 1) return { entry: { name, packageId: holding[0] }, holders: slots.length };
-    if (holding.length === 0 && slots.length === 0) return { missing: `nothing declares it in namespace '${namespace}'` };
+    if (holding.length === 0 && slots.length === 0) {
+        const refusal = await wholeWebhookNameRefusal(reader, name);
+        return refusal ? { refusal } : { missing: `nothing declares it in namespace '${namespace}'` };
+    }
     const candidates: PackageScopedHolder[] = (holding.length > 1 ? holding : slots.map((d) => d.packageId))
         .map((packageId) => (packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId }));
     const base = {
@@ -302,9 +310,10 @@ async function resolveQualifiedWebhook(
  * that switches one holder wherever the namespace address cannot: two
  * co-owners of one namespace, or a package that declares no namespace beside
  * another holder. A PKG that does not hold the name is refused naming the
- * holders (`not-held-by-qualifier`); `404` when nothing serves the name. As
- * in {@link resolveQualifiedWebhook}, a DISABLED package's declaration is no
- * slot, so a disabled PKG holds nothing here.
+ * holders (`not-held-by-qualifier`); `404` when nothing serves the name, unless
+ * the reader refuses the name WHOLE ({@link wholeWebhookNameRefusal}): `409`
+ * naming every holder. As in {@link resolveQualifiedWebhook}, a DISABLED
+ * package's declaration is no slot, so a disabled PKG holds nothing here.
  */
 async function resolveExactWebhook(
     reader: DeclaredWebhookReader,
@@ -317,7 +326,10 @@ async function resolveExactWebhook(
 > {
     const slots = (await reader.list!()).filter((d) => d.webhook.name === name);
     if (slots.some((d) => d.packageId === packageId)) return { entry: { name, packageId }, holders: slots.length };
-    if (slots.length === 0) return { missing: 'no enabled package declares the name' };
+    if (slots.length === 0) {
+        const refusal = await wholeWebhookNameRefusal(reader, name);
+        return refusal ? { refusal } : { missing: 'no enabled package declares the name' };
+    }
     const candidates: PackageScopedHolder[] = slots.map((d) => (d.packageId === undefined
         ? { kind: 'environment' as const }
         : { kind: 'package' as const, packageId: d.packageId }));
@@ -330,6 +342,29 @@ async function resolveExactWebhook(
         candidates,
     };
     return { refusal: { ...base, message: packageScopedRefusalMessage(base) } };
+}
+
+/**
+ * [ADR-0150 D3, #33263] The refusal of a declared webhook name the reader
+ * serves no slot of and yet refuses for a caller with no package: a name
+ * refused WHOLE (plugin-webhooks' `wholeNameRefusal` — the metadata service
+ * listing the environment's declaration beside a package's). Every address
+ * then answers that refusal, `409` naming every holder: the exact and the
+ * namespace address used to answer `404` "no enabled package declares the
+ * name" for a package that does declare it. `undefined` when the bare read
+ * answers (nothing declares the name, or its only holder is disabled: the
+ * `404` stays). Called only once the served slots are known to be none; a read
+ * that fails any other way throws, and the caller answers `503`.
+ */
+async function wholeWebhookNameRefusal(reader: DeclaredWebhookReader, name: string): Promise<PackageScopedRefusal | undefined> {
+    try {
+        await reader.declaredWebhookNamed(name);
+        return undefined;
+    } catch (err) {
+        const refusal = packageScopedRefusalOf(err);
+        if (refusal) return refusal;
+        throw err;
+    }
 }
 
 function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | undefined {

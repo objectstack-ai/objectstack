@@ -25,6 +25,7 @@ import {
   stripIdpInitiatedFromOidcConfigOnWrite,
 } from './sso-sign-in-options.js';
 import { applyStandardSamlClaimsOnRead } from './sso-saml-standard-claims.js';
+import { samlAccountKeyOnCreate, samlAccountKeyWhere } from './sso-saml-account-key.js';
 import {
   reattachInternalFieldsOnRead,
   type InternalFieldResolvingEngine,
@@ -932,7 +933,10 @@ export function createObjectQLAdapterFactory(
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
         const payload = normaliseIdentifierWrite(model, data);
-        const row = bridged ? remapKeys(payload, camelToSnake) : payload;
+        // At a SAML ACS only: an account of a provider that keys on a stable
+        // attribute is made with that key, not the NameID
+        // (`sso-saml-account-key.ts`).
+        const row = samlAccountKeyOnCreate(objectName, bridged ? remapKeys(payload, camelToSnake) : payload);
         // [#8009] Registration write door #1. Lift the OIDC `clientSecret` out
         // of the cleartext JSON blob into the `secret`-typed column so the
         // ENGINE encrypts it; `oidc_config` keeps everything else.
@@ -963,10 +967,13 @@ export function createObjectQLAdapterFactory(
       },
 
       findOne: async <T>(
-        { model, where, select, join: _join }: { model: string; where: CleanedWhere[]; select?: string[]; join?: any },
+        { model, where: asked, select, join: _join }: { model: string; where: CleanedWhere[]; select?: string[]; join?: any },
       ): Promise<T | null> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
+        // At a SAML ACS only: the account lookup asks for the provider's
+        // stable account key, not the NameID (`sso-saml-account-key.ts`).
+        const where = samlAccountKeyWhere(objectName, asked);
         const filter = convertWhere(model, bridged ? remapWhere(where) : where);
         let fields = bridged && select ? select.map(camelToSnake) : select;
         // [#7732] A projection that omits `revoked_at` would make every row look
@@ -1033,13 +1040,15 @@ export function createObjectQLAdapterFactory(
       },
 
       findMany: async <T>(
-        { model, where, limit, offset, sortBy, join: _join }: {
+        { model, where: asked, limit, offset, sortBy, join: _join }: {
           model: string; where?: CleanedWhere[]; limit: number;
           offset?: number; sortBy?: { field: string; direction: 'asc' | 'desc' }; join?: any;
         },
       ): Promise<T[]> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
+        // Same as `findOne`: the vendor's `findAccountOwnerByKey` reads here.
+        const where = asked ? samlAccountKeyWhere(objectName, asked) : asked;
         const filter = where ? convertWhere(model, bridged ? remapWhere(where) : where) : {};
 
         const orderBy = sortBy
@@ -1083,10 +1092,11 @@ export function createObjectQLAdapterFactory(
       },
 
       count: async (
-        { model, where }: { model: string; where?: CleanedWhere[] },
+        { model, where: asked }: { model: string; where?: CleanedWhere[] },
       ): Promise<number> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
+        const where = asked ? samlAccountKeyWhere(objectName, asked) : asked;
         const filter = where ? convertWhere(model, bridged ? remapWhere(where) : where) : {};
         return await dataEngine.count(objectName, { where: filter });
       },

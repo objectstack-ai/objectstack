@@ -2265,6 +2265,11 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             label: "Сопоставление: атрибут групп",
             helpText: "Необязательно. Атрибут утверждения SAML, содержащий группы пользователя. При каждом входе выдаются наборы разрешений, сопоставленные этим группам. Оставьте пустым, чтобы не сопоставлять группы.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },
