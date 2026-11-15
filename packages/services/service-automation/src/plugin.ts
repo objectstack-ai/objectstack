@@ -1477,11 +1477,26 @@ export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNa
             return undefined;
         }
         if (!registry) return undefined;
-        return resolvePackageScopedName(registry, {
+        const resolution = resolvePackageScopedName(registry, {
             type: 'flow', name, callerPackageId,
             ...(options?.includeDisabledPackages === true ? { includeDisabledPackages: true } : {}),
         });
+        // [ADR-0150 D3, #33386] The run's question (`servedCaller`): a caller
+        // whose own holding answers, inside a disabled package, gets no flow,
+        // never a closure holder's (seat ruling 6884403301, amendment 4).
+        if (options?.servedCaller === true && options.includeDisabledPackages !== true
+            && callerPackageId !== null && resolution.status === 'resolved' && resolution.via === 'own'
+            && isRegistryPackageDisabled(registry, callerPackageId)) {
+            return { status: 'not-found' };
+        }
+        return resolution;
     };
+}
+
+/** [#33386] The registry's `isPackageDisabled`, `false` for a registry that has none (it disables nothing). */
+function isRegistryPackageDisabled(registry: unknown, packageId: string): boolean {
+    const probe = (registry as { isPackageDisabled?: (id: string) => boolean } | null | undefined)?.isPackageDisabled;
+    return typeof probe === 'function' && probe.call(registry, packageId) === true;
 }
 
 /**

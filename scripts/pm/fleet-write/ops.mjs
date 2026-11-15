@@ -195,8 +195,9 @@
  * `advisory_state`, below) are `repository-advisories: write`, and the two
  * that read (`advisory_read` and `advisory_list`, below) spend the same grant
  * at `read` alone (each row's `grant`), the seven rows spending it; the
- * front-of-queue enqueue (`pr_enqueue_front`, below) is `merge-queues: write`,
- * the one row spending it — GitHub's GraphQL mutations are outside that ledger,
+ * front-of-queue enqueue (`pr_enqueue_front`, below) and the dequeue
+ * (`pr_dequeue`, below) are `merge-queues: write`, the two rows spending it —
+ * GitHub's GraphQL mutations are outside that ledger,
  * so this one is the App-permission vocabulary's (`permission-merge-queues` on
  * `actions/create-github-app-token`), NOT MEASURED until its first stroke; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
@@ -301,7 +302,7 @@
  * own documentation of the option), and it is an ADDITIONAL repository
  * permission above write ("Jump to the front of the queue", a custom-role
  * permission an admin holds by default), so the row is fenced like
- * `run_rerun_failed` and spends a grant no other row spends:
+ * `run_rerun_failed` and spends a grant only it and `pr_dequeue` spend:
  *
  *   - the GRANT: `merge-queues: write`, minted for that stroke alone through
  *     `STROKE_SCOPED_PERMISSIONS`, as `actions` is; `contents` and
@@ -323,7 +324,9 @@
  *     head or a `chore: version packages` title, AGENTS.md Prime Directive
  *     #15), no governed path in its whole file list (`governedPathsIn`: a
  *     governed pull's place in the queue stays a human's), and at most
- *     `HUMAN_MERGE_LINE_THRESHOLD` changed lines (AGENTS.md §7's third class);
+ *     `HUMAN_MERGE_LINE_THRESHOLD` changed lines (AGENTS.md §7's third class)
+ *     unless an authorised approval lifts that line (`enqueueFrontSizeLift`,
+ *     below);
  *   - the QUEUE (`MERGE_QUEUE_READ_QUERY`, the pull's base): the base has a
  *     queue, the entry list is read whole, and no entry is already jumped — one
  *     jumped pull per repository at a time, a second refused while the first is
@@ -339,6 +342,99 @@
  * are a FAILED action with nothing changed. The queue read is a GraphQL
  * query, a read: unpaced, like every GET. WHEN a seat may send the stroke is
  * pm-dispatch's rule (`references/landing-operations.md`), never this table's.
+ *
+ * The SIZE lift (`enqueueFrontSizeLift`; the queue card's item 2): a pull
+ * over the line may be jumped only when the approval that lets it land at all
+ * already stands, read by the executor immediately before the mutation from
+ * the pull's own reviews (`GET /repos/{repo}/pulls/{n}/reviews`, one page at
+ * the endpoint's maximum — a full page is a truncated SUBSET and lifts
+ * nothing) through the queue guard's `authorizedApprovalVerdict` (latest
+ * decisive review per reviewer, an account in `GOVERNED_APPROVERS`, not
+ * dismissed). Two ways and no third:
+ *
+ *   - ON THE HEAD: one such APPROVED review's `commit_id` is the pull's
+ *     current head;
+ *   - CARRIED: such an approval stands on an EARLIER commit, and the action
+ *     names `approval_comment`, a comment on THIS pull whose author is in
+ *     `GOVERNED_APPROVERS` and whose text carries the current head (seven or
+ *     more leading hex characters of it) — the maintainer's confirmation that
+ *     the approval carries to this head. The comment is read by its own GET
+ *     (`/repos/{repo}/issues/comments/{id}`); a comment on another pull, by
+ *     another author, or naming another head lifts nothing. Nor does one whose
+ *     first non-empty line is a seat signature (`LANE#N · ACCOUNT · SESSION`):
+ *     an authorised account is agent-operated too (AGENTS.md Prime Directive
+ *     #14), and a seat's knock or record quoting the head is no confirmation
+ *     by the maintainer's own hand.
+ *
+ * The approval stays the maintainer's: the relay reads it and never gives
+ * one. The governed fence, the one-jump fence and the jump reasons are
+ * untouched by the lift.
+ *
+ * ## The one row that takes a pull OUT of the merge queue — `pr_dequeue`
+ *
+ * `dequeuePullRequest(input: { id })` removes a pull's entry from its base's
+ * merge queue; every group behind it rebuilds. `automerge_disable` does not
+ * do this (its own section above), so before this row only the maintainer's
+ * hand could. The queue card (item 1) fences it to three CAUSES, named by the
+ * action's `cause` and judged by the executor on its own reads immediately
+ * before anything is written (`DEQUEUE_FENCES`):
+ *
+ *   - `conflict`: the pull's own GET reads `mergeable_state` `dirty` — the
+ *     entry conflicts with its base (`unknown` or a null `mergeable` is not
+ *     judged: re-read the pull and send again);
+ *   - `own-failure`: the entry's queue build failed — its entry reads
+ *     `UNMERGEABLE`, or its merge-group commit's check rollup reads `FAILURE`
+ *     or `ERROR` (`DEQUEUE_QUEUE_READ_QUERY` reads both); a rollup the token
+ *     cannot read is null, and null is refused, never a pass. WHOSE change
+ *     failed is the three-fact test of `landing-operations.md`, which no read
+ *     here can run: the seat states it in `reason`, and the audit comment
+ *     carries it;
+ *   - `seat-asks`: the pull's LANDING seat asks. The landing seat is the one
+ *     the pull's own body names in its signed trailer (`<!-- signed: LANE#N ·
+ *     ACCOUNT · SESSION -->` on its last non-empty line, `readPrBodyTrailer`);
+ *     a body whose trailer names no seat is refused. The proof is a fleet
+ *     comment on the pull whose first non-empty line is a seat signature
+ *     naming `payload.session` AND that same seat and account. Another seat's
+ *     signed comment — a review record, a triage knock, the queue seat's own
+ *     jump or ejection comment — answers nothing, and the relay's own audit
+ *     comments open with no signature. `payload.session` is still the
+ *     sender's own word: the fence binds it to the seat the pull names, it
+ *     does not prove who typed it.
+ *
+ * Beside the cause, the pull is open, its head is `expected_head_sha` (a push
+ * after the seat's reading may have fixed what it read), it is not the
+ * Version Packages pull, its base has a queue read whole, and the queue lists
+ * it. A fence that fails is refused with nothing written, exit 5.
+ *
+ * ONE audit comment per use, and before the mutation: once the fences hold,
+ * the executor posts `dequeueAuditBody` on the pull — the session, the cause,
+ * what the relay read for it and the seat's `reason` — and sends the mutation
+ * only when that comment answered 201. A use with no audit comment never
+ * leaves; a comment whose mutation then fails says so on the run's row.
+ *
+ * The grant: `merge-queues: write`, minted for this stroke alone through
+ * `STROKE_SCOPED_PERMISSIONS`, as for the jump; `contents` and `issues` (the
+ * audit comment) are its literal `alsoSpends`. Whether `dequeuePullRequest`
+ * needs the merge-queue grant at all, or what an App token without it
+ * answers, is NOT MEASURED until the first live stroke — nor is the reading
+ * that an entry's `headCommit { statusCheckRollup }` is its merge-group
+ * commit's rollup (the `own-failure` cause's second half; the audit comment
+ * prints the rollup it read, so the first such stroke measures it): the row mints it so
+ * that the door works once the maintainer grants it, an installation without
+ * it fails the mint with zero writes, and GraphQL errors on the mutation are
+ * a FAILED action naming the grant. Travels alone.
+ *
+ * The 200 is an acceptance, not a landing: the executor re-reads the queue
+ * every `DEQUEUE_POLL_MS` for up to `DEQUEUE_WINDOW_MS` and lands only when
+ * the pull is no longer listed (`dequeueReadBack`) AND its own GET reads it
+ * still open with `merged` false (`dequeuePullAfter`) on two reads one poll
+ * apart — out of the queue and not landed, the two readings
+ * `platform-readings.md` asks for, whose removal and `merged` arrive seconds
+ * apart in either order. A pull that
+ * left by MERGING inside the window is a FAILED action naming the merge; one
+ * closed unmerged is FAILED too. A read-back that still lists it after the
+ * window is a FAILED action, UNCONFIRMED — ⛔ a 200 is never trusted alone. WHEN a seat may send it is pm-dispatch's rule
+ * (`landing-operations.md`), never this table's.
  *
  * ## A workflow's inputs are CLOSED per file — `WORKFLOW_DISPATCH_INPUTS`
  *
@@ -1220,7 +1316,14 @@ export function mergeQueueOf(json) {
   if (!queue) return { present: false, complete: true, entries: [] };
   const nodes = Array.isArray(queue.entries?.nodes) ? queue.entries.nodes : null;
   const complete = nodes !== null && queue.entries?.pageInfo?.hasNextPage === false;
-  const entries = (nodes ?? []).filter((e) => e && typeof e === 'object').map((e) => ({ number: e.pullRequest?.number ?? null, jump: e.jump === true, position: Number.isInteger(e.position) ? e.position : null, state: e.state ?? null }));
+  // `rollup` only when the query selected the entry's merge-group commit (`DEQUEUE_QUEUE_READ_QUERY`): null is unread, never a pass.
+  const entries = (nodes ?? []).filter((e) => e && typeof e === 'object').map((e) => ({
+    number: e.pullRequest?.number ?? null,
+    jump: e.jump === true,
+    position: Number.isInteger(e.position) ? e.position : null,
+    state: e.state ?? null,
+    ...('headCommit' in e ? { rollup: typeof e.headCommit?.statusCheckRollup?.state === 'string' ? e.headCommit.statusCheckRollup.state : null } : {}),
+  }));
   return { present: true, complete, entries };
 }
 
@@ -1254,9 +1357,9 @@ export const ENQUEUE_FRONT_FENCES = Object.freeze([
   }),
   Object.freeze({
     fence: 'size',
-    wants: `at most ${HUMAN_MERGE_LINE_THRESHOLD} changed lines (additions + deletions) — a larger pull lands the way a Tier H one does`,
-    reads: (c) => `${(c.pull?.additions ?? 0) + (c.pull?.deletions ?? 0)} changed line(s)`,
-    holds: (c) => Number.isInteger(c.pull?.additions) && Number.isInteger(c.pull?.deletions) && c.pull.additions + c.pull.deletions <= HUMAN_MERGE_LINE_THRESHOLD,
+    wants: `at most ${HUMAN_MERGE_LINE_THRESHOLD} changed lines (additions + deletions), or a larger pull whose authorised approval stands on its current head or is carried to it by an authorised comment (\`approval_comment\`) — a larger pull lands the way a Tier H one does`,
+    reads: (c) => `${(c.pull?.additions ?? 0) + (c.pull?.deletions ?? 0)} changed line(s)${c.approval ? `, ${c.approval.reading}` : ''}`,
+    holds: (c) => Number.isInteger(c.pull?.additions) && Number.isInteger(c.pull?.deletions) && (c.pull.additions + c.pull.deletions <= HUMAN_MERGE_LINE_THRESHOLD || c.approval?.lifts === true),
   }),
   Object.freeze({
     fence: 'queue',
@@ -1305,6 +1408,209 @@ export function enqueueFrontReadBack({ pull, queue } = {}) {
 /** The read-back line a landing prints. Pure. */
 export function enqueueFrontLandedText(v, total) {
   return `#${v.entry.number} at the front of the merge queue · position ${v.entry.position} · jump true · ${v.entry.state ?? 'state unread'} · ${total} entr(ies) queued`;
+}
+
+/** The jump's SIZE lift (header: "The SIZE lift"): one page of reviews at this size; a full page is a truncated SUBSET. */
+export const ENQUEUE_FRONT_REVIEWS_PAGE_SIZE = 100;
+/** The fewest leading hex characters of the head a carrying comment must spell (git's own default abbreviation). */
+export const CARRIED_HEAD_MIN_CHARS = 7;
+
+/**
+ * The jump's SIZE lift (header: "The SIZE lift"), judged on reads the executor took. `verdict` is the queue guard's
+ * `authorizedApprovalVerdict` over the pull's reviews (null: not read whole), `headSha` the pull's current head,
+ * `comment` the `approval_comment`'s own GET answer `{ status, json }` (null: the action names none), `pull` the
+ * pull's number, `approvers` the authorised logins (`GOVERNED_APPROVERS`) and `signatureOf` the seat-signature
+ * reader (`readSignatureLine`) — both passed in so this file imports no guard; a reader missing carries nothing.
+ * Answers `{ lifts, way, reading }`: `way` is `head`, `carried` or null; `reading` is what the size fence's
+ * sentence quotes. Pure.
+ */
+export function enqueueFrontSizeLift({ verdict = null, headSha = null, comment = null, pull = null, approvers = [], signatureOf = null } = {}) {
+  if (!verdict || verdict.state === 'unreadable' || !Array.isArray(verdict.approvals)) return { lifts: false, way: null, reading: `the reviews unread${verdict?.reason ? ` (${verdict.reason})` : ''}` };
+  const head = typeof headSha === 'string' ? headSha.toLowerCase() : '';
+  const approvals = verdict.approvals.filter((a) => typeof a?.login === 'string' && a.login !== '');
+  if (approvals.length === 0) return { lifts: false, way: null, reading: 'no authorised APPROVED review' };
+  const onHead = approvals.filter((a) => head !== '' && a.commitId === head);
+  if (onHead.length) return { lifts: true, way: 'head', reading: `authorised approval by ${onHead.map((a) => a.login).join(', ')} on the current head` };
+  const earlier = `authorised approval by ${approvals.map((a) => `${a.login} on ${shortHead(a.commitId) || 'an unread commit'}`).join(', ')}, not on the current head ${shortHead(head)}`;
+  if (comment === null) return { lifts: false, way: null, reading: `${earlier}, and no \`approval_comment\` carries it` };
+  const c = comment.json;
+  if (comment.status !== 200 || !isObject(c)) return { lifts: false, way: null, reading: `${earlier}; the approval_comment could not be read (HTTP ${comment.status ?? 'none'})` };
+  const author = c.user?.login ?? null;
+  if (!approvers.includes(author)) return { lifts: false, way: null, reading: `${earlier}; the approval_comment's author ${author ?? 'unread'} is not an authorised approver` };
+  if (!new RegExp(`/issues/${pull}$`).test(String(c.issue_url ?? ''))) return { lifts: false, way: null, reading: `${earlier}; the approval_comment is not on #${pull}` };
+  if (typeof signatureOf !== 'function') return { lifts: false, way: null, reading: `${earlier}; the approval_comment's opening line was not judged` };
+  const seat = signatureOf(c.body);
+  if (seat) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} opens with the seat signature ${seat.lane}#${seat.seat} · ${seat.account} — a seat's comment is no carried approval` };
+  const tokens = String(c.body ?? '').match(/\b[0-9a-f]{7,40}\b/giu) ?? [];
+  const carries = head !== '' && tokens.some((tok) => tok.length >= CARRIED_HEAD_MIN_CHARS && head.startsWith(tok.toLowerCase()));
+  if (!carries) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} names no prefix of the current head` };
+  return { lifts: true, way: 'carried', reading: `authorised approval by ${approvals.map((a) => a.login).join(', ')} carried to the current head by ${author}'s comment ${c.id ?? ''}`.trimEnd() };
+}
+
+/**
+ * The dequeue (header: "The one row that takes a pull OUT of the merge queue"). The mutation sends the pull's node
+ * id; the queue read is the jump's plus each entry's merge-group commit rollup, the `own-failure` cause's reading.
+ */
+export const DEQUEUE_MUTATION = 'mutation($id: ID!) { dequeuePullRequest(input: { id: $id }) { mergeQueueEntry { position state pullRequest { number } } } }';
+export const DEQUEUE_QUEUE_READ_QUERY = `query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { entries(first: ${MERGE_QUEUE_PAGE_SIZE}) { totalCount pageInfo { hasNextPage } nodes { position jump state pullRequest { number } headCommit { statusCheckRollup { state } } } } } } }`;
+/**
+ * The relay's own comment author — the only author whose signed comment answers the `seat-asks` cause, since any
+ * account may comment on a public pull. `check-handover.mjs`'s `FLEET_BOT_LOGIN`, spelled here so the relay imports
+ * no seat tool; `execute.mjs --self-test` holds the two equal.
+ */
+export const RELAY_COMMENT_AUTHOR = 'objectstack-fleet[bot]';
+/** The three causes the queue card fences the dequeue to (header) — `cause`, a closed enum. */
+export const DEQUEUE_CAUSES = Object.freeze(['conflict', 'own-failure', 'seat-asks']);
+/** The `own-failure` readings: the entry's own state, or its merge-group commit's rollup. */
+export const DEQUEUE_FAILED_ENTRY_STATES = Object.freeze(['UNMERGEABLE']);
+export const DEQUEUE_FAILED_ROLLUPS = Object.freeze(['FAILURE', 'ERROR']);
+/** The seat's `reason`, carried into the audit comment — bounded: it is the cause's evidence, not a report. */
+export const MAX_DEQUEUE_REASON_BYTES = 1000;
+
+const entryOf = (c) => (c.queue?.entries ?? []).find((e) => e.number === c.number) ?? null;
+const seatOf = (sig) => `${sig.lane}#${sig.seat} · ${sig.account}`;
+
+/**
+ * Is `signature` (a `readSignatureLine` reading) the pull's landing seat — the same lane, seat number and account
+ * as `landing`, the reading of the pull body's signed trailer — under `session`? The `seat-asks` proof (header). Pure.
+ */
+export function signedByLandingSeat(signature, landing, session) {
+  return Boolean(signature && landing) && signature.session === session && signature.lane === landing.lane && signature.seat === landing.seat && signature.account === landing.account;
+}
+
+/** What each cause reads and whether it holds — the `cause` fence's two halves, keyed by cause. Pure. */
+const DEQUEUE_CAUSE_JUDGES = Object.freeze({
+  conflict: Object.freeze({
+    wants: 'a pull whose mergeable_state reads dirty — its entry conflicts with its base',
+    reads: (c) => `mergeable_state ${c.pull?.mergeable_state ?? null}, mergeable ${c.pull?.mergeable ?? null}`,
+    holds: (c) => c.pull?.mergeable_state === 'dirty',
+  }),
+  'own-failure': Object.freeze({
+    wants: `an entry whose queue build failed — its state ${DEQUEUE_FAILED_ENTRY_STATES.join('/')} or its merge-group rollup ${DEQUEUE_FAILED_ROLLUPS.join('/')}`,
+    reads: (c) => {
+      const e = entryOf(c);
+      return e ? `entry state ${e.state ?? null}, merge-group rollup ${e.rollup ?? null}` : 'no entry read';
+    },
+    holds: (c) => {
+      const e = entryOf(c);
+      return Boolean(e) && (DEQUEUE_FAILED_ENTRY_STATES.includes(e.state) || DEQUEUE_FAILED_ROLLUPS.includes(e.rollup));
+    },
+  }),
+  'seat-asks': Object.freeze({
+    wants: "a pull whose body's signed trailer names its landing seat, carrying a fleet comment signed by that seat and account under the dispatching session — its landing seat asks",
+    reads: (c) => {
+      if (!c.landing) return "the pull body's signed trailer names no seat";
+      const seat = seatOf(c.landing);
+      return c.signed === true ? `landing seat ${seat}, signed by ${seat} · ${c.session}` : c.signed === false ? `landing seat ${seat}, no fleet comment on it signed by ${seat} · ${c.session}` : `landing seat ${seat}, its comments unread`;
+    },
+    holds: (c) => Boolean(c.landing) && c.signed === true,
+  }),
+});
+
+/**
+ * The fences on the PULL, its QUEUE and the CAUSE (header). Each takes one context
+ * `{ number, pull, expectedHeadSha, queue, cause, session, landing, signed }`: `pull` the pull's own GET, `queue`
+ * `mergeQueueOf`'s reading of `DEQUEUE_QUEUE_READ_QUERY`, `landing` the seat the pull body's signed trailer names
+ * (a `readSignatureLine` reading, or null), `signed` whether that seat signed a fleet comment on it under the
+ * dispatching session (null: not read — read only for `seat-asks`, and only when `landing` is read). Alone in its stroke and the grant are the validator's.
+ */
+export const DEQUEUE_FENCES = Object.freeze([
+  Object.freeze({ fence: 'open', wants: 'an open pull', reads: (c) => `state ${c.pull?.state ?? null}`, holds: (c) => c.pull?.state === 'open' }),
+  Object.freeze({
+    fence: 'head',
+    wants: 'a pull whose current head is expected_head_sha, the head the seat read its cause on',
+    reads: (c) => `head ${shortHead(c.pull?.head?.sha)}, expected ${shortHead(c.expectedHeadSha)}`,
+    holds: (c) => typeof c.pull?.head?.sha === 'string' && c.pull.head.sha === c.expectedHeadSha,
+  }),
+  Object.freeze({
+    fence: 'release',
+    wants: `a pull that is not the Version Packages pull (head ${VERSION_PACKAGES_HEAD_PREFIX}*, or a "chore: version packages" title) — its queue place is the maintainer's`,
+    reads: (c) => `head ref ${c.pull?.head?.ref ?? null}, title ${JSON.stringify(c.pull?.title ?? null)}`,
+    holds: (c) => typeof c.pull?.head?.ref === 'string' && !c.pull.head.ref.startsWith(VERSION_PACKAGES_HEAD_PREFIX) && !VERSION_PACKAGES_TITLE.test(c.pull?.title ?? ''),
+  }),
+  Object.freeze({
+    fence: 'queue',
+    wants: 'a base with a merge queue whose entry list was read whole',
+    reads: (c) => (!c.queue ? 'the queue unread' : !c.queue.present ? 'no merge queue on the base' : `${c.queue.entries.length} entr(ies), ${c.queue.complete ? 'read whole' : 'a truncated list'}`),
+    holds: (c) => Boolean(c.queue?.present && c.queue.complete),
+  }),
+  Object.freeze({
+    fence: 'queued',
+    wants: 'a pull the queue lists',
+    reads: (c) => (entryOf(c) ? `listed at position ${entryOf(c).position}` : `#${c.number} not listed`),
+    holds: (c) => entryOf(c) !== null,
+  }),
+  Object.freeze({
+    fence: 'cause',
+    wants: `one of ${DEQUEUE_CAUSES.join(', ')}, holding on what the relay reads`,
+    reads: (c) => (DEQUEUE_CAUSE_JUDGES[c.cause] ? `cause ${c.cause}: ${DEQUEUE_CAUSE_JUDGES[c.cause].reads(c)}` : `cause ${JSON.stringify(c.cause ?? null)}`),
+    holds: (c) => Boolean(DEQUEUE_CAUSE_JUDGES[c.cause]?.holds(c)),
+  }),
+]);
+
+/** The fences a context fails: `[{ fence, wants, got }]`, in `DEQUEUE_FENCES` order; `[]` when all hold. Pure. */
+export function dequeueFenceFailures(ctx) {
+  return DEQUEUE_FENCES.filter((f) => !f.holds(ctx)).map((f) => ({ fence: f.fence, wants: f.fence === 'cause' && DEQUEUE_CAUSE_JUDGES[ctx.cause] ? DEQUEUE_CAUSE_JUDGES[ctx.cause].wants : f.wants, got: f.reads(ctx) ?? null }));
+}
+
+/** The sentence a fence refusal prints. Pure. */
+export function dequeueFenceText(failures) {
+  return failures.map((f) => `fence \`${f.fence}\`: the relay read ${JSON.stringify(f.got)}, and it dequeues only ${f.wants}`).join('; ');
+}
+
+/** What the relay read for the cause, as the audit comment and the landed row quote it. Pure. */
+export function dequeueCauseReading(ctx) {
+  return DEQUEUE_CAUSE_JUDGES[ctx.cause]?.reads(ctx) ?? 'unread';
+}
+
+/**
+ * The ONE audit comment a dequeue leaves on the pull, before the mutation (header). It opens with the dispatching
+ * session and the request, names the cause, what the relay read for it and the seat's reason. Pure.
+ */
+export function dequeueAuditBody({ session, requestId, number, cause, reading, reason }) {
+  return [
+    `Relay \`pr_dequeue\` · ${session} · request \`${requestId}\``,
+    '',
+    `**Merge-queue dequeue of #${number} — cause \`${cause}\`.**`,
+    '',
+    `- Relay read: ${reading}.`,
+    `- Seat's reason: ${String(reason ?? '').trim()}`,
+    '',
+    'The relay sends `dequeuePullRequest` after this comment and confirms the removal by reading the queue back; the run row of this request carries the outcome. Re-queue once the cause is fixed (`landing-operations.md`, the landing seat\'s queue duty).',
+  ].join('\n');
+}
+
+/**
+ * What LANDED means for a `pr_dequeue` (header): the queue read back no longer lists the pull. Answers
+ * `{ ok, pending, why }`: `pending` the entry still listed, or the list not read whole (the executor re-reads inside
+ * its window). A base that reads no merge queue lists nothing — the pull is out of it. Pure.
+ */
+export function dequeueReadBack({ pull, queue } = {}) {
+  if (!queue) return { ok: false, pending: true, why: 'the queue was not read back' };
+  if (!queue.present) return { ok: true, pending: false, why: '' };
+  if (!queue.complete) return { ok: false, pending: true, why: 'the queue read back is a truncated list, which cannot show the entry gone' };
+  const entry = queue.entries.find((e) => e.number === pull) ?? null;
+  if (entry) return { ok: false, pending: true, why: `the queue read back still lists #${pull} at position ${entry.position}` };
+  return { ok: true, pending: false, why: '' };
+}
+
+/**
+ * The second half of a dequeue's landing (header): the pull's own GET once the queue no longer lists it — still open
+ * and `merged` false, so it left the queue without landing. `{ ok, pending, why }`: a read that is not a 200 object
+ * is `pending` (read again inside the window); a merged pull, or one closed unmerged, is a terminal failure. Pure.
+ */
+export function dequeuePullAfter(answer) {
+  const p = answer?.json;
+  if (answer?.status !== 200 || !isObject(p)) return { ok: false, pending: true, why: `the pull's own read answered HTTP ${answer?.status ?? 'none'}, so "not landed" was not read` };
+  if (p.merged === true || p.merged_at) return { ok: false, pending: false, why: `the pull MERGED${p.merged_at ? ` at ${p.merged_at}` : ''} — it left the queue by landing, not by this dequeue` };
+  if (p.state !== 'open') return { ok: false, pending: false, why: `the pull reads state ${p.state ?? null}, not open — it left the queue closed, not by this dequeue alone` };
+  if (p.merged !== false) return { ok: false, pending: true, why: `the pull's merged reads ${p.merged ?? null}, not false` };
+  return { ok: true, pending: false, why: '' };
+}
+
+/** The read-back line a landing prints. Pure. */
+export function dequeueLandedText({ pull, total, auditId }) {
+  return `#${pull} out of the merge queue and still open, unmerged · read back ${total} entr(ies), none is #${pull} · audit comment ${auditId}`;
 }
 
 /** The two modes of the hierarchy rows (header: "The two rows that write an issue's hierarchy") — the descriptor's `subIssue.mode`. */
@@ -2672,6 +2978,11 @@ export const FIELDS = Object.freeze({
   public_key: Object.freeze({ kind: 'x25519' }),
   // A note sealed to the relay's committed key (header: "The one row that APPENDS to an advisory") — its own kind, ciphertext alone.
   sealed_note: Object.freeze({ kind: 'sealed' }),
+  // The dequeue's cause and the seat's evidence for it (header: "The one row that takes a pull OUT of the merge queue").
+  cause: Object.freeze({ kind: 'enum', values: DEQUEUE_CAUSES }),
+  reason: Object.freeze({ kind: 'str', max: MAX_DEQUEUE_REASON_BYTES }),
+  // The comment that carries an earlier authorised approval to the head (header: "The SIZE lift"), by its id.
+  approval_comment: Object.freeze({ kind: 'int' }),
 });
 
 /**
@@ -2690,9 +3001,10 @@ export const FIELDS = Object.freeze({
  * write alone, and minted only for a stroke carrying one of them, the same
  * way; `advisory_read` and `advisory_list` spend that grant at `read` (each
  * row's `grant`), so a read's stroke is minted the lower level and never write.
- * `merge-queues: write` is spent by the `pr_enqueue_front` row alone, and
- * minted only for its stroke, the same way (header: "The one row that
- * reorders the merge queue").
+ * `merge-queues: write` is spent by the `pr_enqueue_front` and `pr_dequeue`
+ * rows alone, and minted only for a stroke carrying one of them, the same way
+ * (header: "The one row that reorders the merge queue", "The one row that
+ * takes a pull OUT of the merge queue").
  */
 export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write', 'merge-queues': 'write' });
 
@@ -2700,7 +3012,7 @@ export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'wr
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
  * alone, `repository-advisories`, the eight advisory rows' alone, and
- * `merge-queues`, the `pr_enqueue_front` row's alone — at
+ * `merge-queues`, the `pr_enqueue_front` and `pr_dequeue` rows' alone — at
  * write, or at the row's `grant` (`advisory_read`'s and `advisory_list`'s `read`); each of those
  * rows travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
@@ -2822,8 +3134,8 @@ export function transferRemedy(source, target) {
  *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
  *                 the two rows spending `actions: write`, and
  *                 the eight advisory rows', the ones spending
- *                 `repository-advisories`, and `pr_enqueue_front`'s, the one
- *                 spending `merge-queues` (header above);
+ *                 `repository-advisories`, and `pr_enqueue_front`'s and
+ *                 `pr_dequeue`'s, the two spending `merge-queues` (header above);
  *   `closedInputs` (optional) the per-repository, per-workflow closed inputs —
  *                 `WORKFLOW_DISPATCH_BY_REPO`, `workflow_dispatch`'s alone: the
  *                 stroke's repository must list the action's `workflow`, and the
@@ -2897,7 +3209,11 @@ export function transferRemedy(source, target) {
  *                 judges the queue read back against
  *                 (`enqueueFrontPreflight` / `confirmEnqueueFront`,
  *                 execute.mjs) — its graphql descriptor carries no `landed`,
- *                 since the answer is a queue entry, not a pull.
+ *                 since the answer is a queue entry, not a pull; a `dequeue`
+ *                 descriptor carries the pull, the expected head, the cause and
+ *                 the reason the executor fences, writes into the ONE audit
+ *                 comment before the mutation, and judges the queue read back
+ *                 against (`dequeueAction`, execute.mjs) — no `landed` either.
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -3042,8 +3358,19 @@ export const OPS = Object.freeze({
     alsoSpends: Object.freeze(['contents', 'workflows']),
     alone: true,
     required: Object.freeze(['pull', 'expected_head_sha']),
+    optional: Object.freeze(['approval_comment']),
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enqueuePullRequest', query: ENQUEUE_FRONT_MUTATION, pull: a.pull }, enqueueFront: { pull: a.pull, expectedHeadSha: a.expected_head_sha, approvalComment: a.approval_comment ?? null } }],
+  }),
+  // The one row that takes a pull out of the merge queue — see the header. `merge-queues` is minted for its stroke
+  // alone; `contents` as the two auto-merge rows spend it, `issues` for the ONE audit comment. The fences on the pull,
+  // its queue and the cause are the executor's, on its own reads before the comment; the queue is read back.
+  pr_dequeue: Object.freeze({
+    permission: 'merge-queues',
+    alsoSpends: Object.freeze(['contents', 'issues']),
+    alone: true,
+    required: Object.freeze(['pull', 'expected_head_sha', 'cause', 'reason']),
     optional: Object.freeze([]),
-    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enqueuePullRequest', query: ENQUEUE_FRONT_MUTATION, pull: a.pull }, enqueueFront: { pull: a.pull, expectedHeadSha: a.expected_head_sha } }],
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'dequeuePullRequest', query: DEQUEUE_MUTATION, pull: a.pull }, dequeue: { pull: a.pull, expectedHeadSha: a.expected_head_sha, cause: a.cause, reason: a.reason } }],
   }),
   // The one row that deletes a ref — see the header. `branch` is held to `MAILBOX_BRANCH_SHAPE` before the dispatch;
   // the pull's fences are the executor's, on its own answers immediately before the DELETE; the ref is read back absent.
@@ -3292,4 +3619,4 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
 ]);
 
 /** The GraphQL mutations the table may name — anything else in a `graphql` descriptor is a bug this pins. */
-export const ALLOWED_MUTATIONS = Object.freeze(['markPullRequestReadyForReview', 'convertPullRequestToDraft', 'enablePullRequestAutoMerge', 'disablePullRequestAutoMerge', 'enqueuePullRequest', 'transferIssue']);
+export const ALLOWED_MUTATIONS = Object.freeze(['markPullRequestReadyForReview', 'convertPullRequestToDraft', 'enablePullRequestAutoMerge', 'disablePullRequestAutoMerge', 'enqueuePullRequest', 'dequeuePullRequest', 'transferIssue']);

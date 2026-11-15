@@ -479,3 +479,124 @@ describe('migrateStoredMetadata: a rewrite the registry refuses is reported fail
         expect(after.fields.source_ref.reference).toBeUndefined();
     });
 });
+
+// ── [#33593 ruling A, amended] An `extend` layer on single save and in the batch writer ──
+//
+// The two other askers of the follow door judge an extension as the run's end
+// does: as its object is served with the extension in place (R1), in both
+// registration orders (R3).
+describe('[#33593] an extension\'s record-mode amount on a single save and in the batch writer', () => {
+    const P = 'com.qa.ledger';
+    const X = 'com.qa.extender';
+    const follows = (pointer: string) => ({ name: 'ext_amount', type: 'currency', label: 'Extra', currencyConfig: { currencyMode: 'record', currencyField: pointer } });
+    /** The child, with no amount of its own. */
+    const plainLine = (ns: string) => ({
+        name: `${ns}_line`, label: 'Line', sharingModel: 'private',
+        fields: {
+            title: { name: 'title', type: 'text', label: 'Title' },
+            invoice: { name: 'invoice', type: 'master_detail', reference: `${ns}_invoice`, label: 'Invoice' },
+        },
+    });
+    const saveObject = (h: Harness, item: { name: string }) =>
+        h.protocol.saveMetaItem({ type: 'object', name: item.name, packageId: P, item, writeFace: 'external-import' });
+    const caught = async (run: () => Promise<unknown>): Promise<any> => {
+        try {
+            await run();
+        } catch (e) {
+            return e;
+        }
+        return undefined;
+    };
+
+    it('single save: an object_extension whose amount follows a parent field holding no code is refused 422, and stores nothing', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Ledger', type: 'app' } });
+        await saveObject(h, invoice('ledger'));
+        await saveObject(h, plainLine('ledger'));
+
+        const err = await caught(() => h.protocol.saveMetaItem({
+            type: 'object_extension', name: 'ledger_line', packageId: P, mode: 'publish', writeFace: 'meta-envelope',
+            item: { extend: 'ledger_line', fields: { ext_amount: follows('invoice.title') } },
+        }));
+
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA' });
+        expect(registered(h, 'ledger_line')?.fields?.ext_amount).toBeUndefined();
+        expect(activeRow(h, 'object_extension', 'ledger_line', P)).toBeUndefined();
+    });
+
+    it('single save: an object_extension adding a `sum` roll-up of an amount in its rows\' own currency is refused 422 by D6\'s roll-up door, and stores nothing', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Ledger', type: 'app' } });
+        await saveObject(h, invoice('ledger'));
+        await saveObject(h, ownCurrencyLine('ledger'));
+
+        const err = await caught(() => h.protocol.saveMetaItem({
+            type: 'object_extension', name: 'ledger_invoice', packageId: P, mode: 'publish', writeFace: 'meta-envelope',
+            item: { extend: 'ledger_invoice', fields: {
+                own_total: { name: 'own_total', type: 'summary', label: 'Own total', summaryOperations: { object: 'ledger_own_line', field: 'amount', function: 'sum' } },
+            } },
+        }));
+
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA' });
+        expect(registered(h, 'ledger_invoice')?.fields?.own_total).toBeUndefined();
+        expect(activeRow(h, 'object_extension', 'ledger_invoice', P)).toBeUndefined();
+    });
+
+    it('single save CONTROL: the same extension following the parent\'s code is saved and served', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Ledger', type: 'app' } });
+        await saveObject(h, invoice('ledger'));
+        await saveObject(h, plainLine('ledger'));
+
+        await h.protocol.saveMetaItem({
+            type: 'object_extension', name: 'ledger_line', packageId: P, mode: 'publish', writeFace: 'meta-envelope',
+            item: { extend: 'ledger_line', fields: { ext_amount: follows('invoice.currency_code') } },
+        });
+
+        expect(registered(h, 'ledger_line')?.fields?.ext_amount?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+    });
+
+    it('single save, the other order: the owner saved under an extension registered first is refused over the extension\'s amount (R3)', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Ledger', type: 'app' } });
+        await saveObject(h, invoice('ledger'));
+        // The extension registers while nothing serves `led_line`: no verdict (R2).
+        h.engine.registry.registerObject({ name: 'ledger_line', fields: { ext_amount: follows('invoice.title') } } as never, X, undefined, 'extend');
+
+        const refusal = h.engine.registry.objectRegistrationRefusal(plainLine('ledger') as never, P, 'own', { againstRegistry: true });
+
+        expect(refusal).toMatchObject({ name: 'RecordCurrencyFollowRefusedError', status: 422, code: 'INVALID_METADATA', objectName: 'ledger_line', fieldName: 'ext_amount' });
+    });
+
+    it('batch writer: both registered rows of a bad pair are refused, whichever end is asked (R1, R3)', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const registry = h.engine.registry;
+        registry.registerObject(invoice('ledger') as never, P, undefined, 'own');
+        registry.registerObject(plainLine('ledger') as never, P, undefined, 'own');
+        registry.registerObject({ name: 'ledger_line', fields: { ext_amount: follows('invoice.title') } } as never, X, undefined, 'extend');
+
+        // Asked as `batch-object-registration.ts` asks a registered row: the extension row, then the child row.
+        const asExtension = registry.objectRegistrationRefusal({ name: 'ledger_line', fields: { ext_amount: follows('invoice.title') } } as never, X, 'extend', { againstRegistry: true });
+        const asOwner = registry.objectRegistrationRefusal(plainLine('ledger') as never, P, 'own', { againstRegistry: true });
+
+        for (const refusal of [asExtension, asOwner]) {
+            expect(refusal).toMatchObject({ name: 'RecordCurrencyFollowRefusedError', status: 422, code: 'INVALID_METADATA', objectName: 'ledger_line', fieldName: 'ext_amount' });
+        }
+    });
+
+    it('batch writer CONTROL: a pair the extension completes against the parent\'s code is admitted from either end', async () => {
+        const h = await boot();
+        const registry = h.engine.registry;
+        registry.registerObject(invoice('ledger') as never, P, undefined, 'own');
+        registry.registerObject(plainLine('ledger') as never, P, undefined, 'own');
+        registry.registerObject({ name: 'ledger_line', fields: { ext_amount: follows('invoice.currency_code') } } as never, X, undefined, 'extend');
+
+        expect(registry.objectRegistrationRefusal({ name: 'ledger_line', fields: { ext_amount: follows('invoice.currency_code') } } as never, X, 'extend', { againstRegistry: true })).toBeNull();
+        expect(registry.objectRegistrationRefusal(plainLine('ledger') as never, P, 'own', { againstRegistry: true })).toBeNull();
+    });
+});
