@@ -582,7 +582,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -667,7 +668,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 42,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 44,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1174,8 +1175,8 @@ export function decomposeGovernedWork(rows, repo) {
   // governed filter below drops a row, so an ungoverned commit of the same PR
   // (a `packages/**` edit in a commit of its own) still counts against the arm.
   const allByPull = new Map();
-  // ⭐ And every changeset each commit of the PR touches, with the commit it is read at: the arm reads each
-  // one's committed text, so a changeset in an ungoverned commit counts too.
+  // ⭐ And every changeset each commit of the PR touches, with the commit it is read at: the arm reads
+  // each one's committed text, so a changeset in an ungoverned commit counts too.
   const changesetsByPull = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     if (typeof row?.pr !== 'number' || !Number.isInteger(row.pr) || row.pr <= 0) continue;
@@ -1920,9 +1921,10 @@ export function renderGuardVerdict(verdict) {
  * (#33501): `paths` = every path of the PR's commits (`allPaths`); the body,
  * labels and fork predicate off the pull object the queue leg read; the timeline
  * the enqueue leg read (`timeline`: `{ measured, reason, events }`); and each
- * changeset at the commit that touched it, read with `runGit`. An entry with no catalog row is left untouched; `pull` null (its
- * read failed) is an UNMEASURED reading, so the entry stays Tier H with the
- * reason printed, and so is a missing timeline, fork reading or git reader.
+ * changeset at the commit that touched it, read with `runGit`. An entry with no
+ * catalog row is left untouched; `pull` null (its read failed) is an UNMEASURED
+ * reading, so the entry stays Tier H with the reason printed, and so is a
+ * missing timeline, fork reading or git reader.
  * ⛔ The tier comes from the register's own `governedTierFor` and
  * `applyLowRiskArm` — no second predicate here. Mutates `entry` (its `surfaces`
  * and `tier`); returns it.
@@ -1968,16 +1970,17 @@ export function landsOnLowRiskArm(entry) {
 
 /**
  * The record leg's verdict for an entry the low-risk arm put at Tier S: a
- * record that STANDS must also READ PASS, read off
- * the same comment the locator chose, with the fleet's verdict reader
- * (`contractReviewVerdictOf`, re-exported by the recognisers). Anything else —
+ * record that STANDS must also READ PASS, read off the same comment the locator
+ * chose, with the fleet's verdict reader (`contractReviewVerdictOf`, re-exported
+ * by the recognisers). Anything else —
  * FAIL, no verdict word, the comment not among the rows, no reader loaded — is
  * `not-pass`, a refusal. Every other entry's record is returned as it was (the
  * other Tier S legs read no verdict; card #33541).
  *
  * ⛔ A record CARRIED from an older head (the regeneration and prose-only hops)
  * stands for this arm only when nothing it reads moved after the PASS: the hops
- * (`git diff -z --name-only <reviewed head> <this head>`, through `pair.runGit`)
+ * (`git diff -z --name-only --no-renames <reviewed head> <this head>`, through
+ * `pair.runGit`: a rename lists BOTH paths, so a skill moved out of the catalog counts)
  * may touch no `.changeset/` path and no path under a catalog row. A changeset,
  * the body's partner, and catalog text such as a skill's `CHANGELOG.md` are
  * prose faces the carry admits, yet they are exactly what the arm's tier was
@@ -1990,7 +1993,7 @@ export function lowRiskRecordVerdict(record, pair, recognisers) {
     if (typeof pair?.runGit !== 'function' || !pair?.headSha) return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` and this leg could not diff the hops`);
     let moved;
     try {
-      moved = String(pair.runGit(['diff', '-z', '--name-only', record.carriedFrom, pair.headSha])).split('\0').filter(Boolean);
+      moved = String(pair.runGit(['diff', '-z', '--name-only', '--no-renames', record.carriedFrom, pair.headSha])).split('\0').filter(Boolean);
     } catch (error) {
       return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` and the hops could not be diffed (${String(error?.message ?? error).split('\n')[0]})`);
     }
@@ -5775,8 +5778,13 @@ export async function selfTest() {
     // ⛔ A record CARRIED over prose-only hops stands for the arm only when the hops moved no changeset and no catalog path.
     const armCarry = (moved) => {
       const tree = qgit({ moved, attrs: '', own: { [REF_HEAD]: moved } });
-      return (args) => (args[0] === 'show' ? CS_TEXT : tree(args));
+      return (args) => {
+        if (args[0] === 'show') return CS_TEXT;
+        if (args.includes('--no-renames')) armDiffArgs.push(args.join(' '));
+        return tree(args.filter((a) => a !== '--no-renames'));
+      };
     };
+    const armDiffArgs = [];
     const carriedDocs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry('content/docs/guides/x.mdx\0'), baseRef: QBASE });
     assert('SF1-CONTROL-a-PASS-record-carried-over-a-docs-only-hop-still-clears-the-arm', carriedDocs.exitCode === EXIT_CLEAR && carriedDocs.entries[0].record.carriedHops === 1 && carriedDocs.entries[0].record.verdict === 'PASS', JSON.stringify(carriedDocs.entries[0].record));
     const carriedCs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry(`${CS}\0`), baseRef: QBASE });
@@ -5789,6 +5797,33 @@ export async function selfTest() {
       return lowRiskRecordVerdict(carriedRec, { ...rows, runGit: () => { throw new Error('fatal: bad object'); } }, live).state === 'not-pass' &&
         lowRiskRecordVerdict(carriedRec, rows, live).state === 'not-pass' &&
         lowRiskRecordVerdict(carriedRec, { ...rows, runGit: () => 'docs/x.md\0' }, live).verdict === 'PASS';
+    })());
+    assert('⛔ SF2-the-carry-check-diffs-with-no-renames-so-a-rename-lists-both-paths', armDiffArgs.length > 0 && armDiffArgs.every((a) => a === `diff -z --name-only --no-renames ${REF_OLD} ${REF_HEAD}`), JSON.stringify(armDiffArgs));
+    assert('⛔ SF2-on-REAL-git-a-skill-renamed-out-of-the-catalog-into-docs-refuses-the-carried-record', (() => {
+      const dir = mkdtempSync(join(tmpdir(), 'lowrisk-rename-'));
+      try {
+        const g = (args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+        g(['init', '-q']);
+        g(['config', 'user.email', 'selftest@example.invalid']);
+        g(['config', 'user.name', 'selftest']);
+        mkdirSync(join(dir, 'skills/a/rules'), { recursive: true });
+        writeFileSync(join(dir, 'skills/a/rules/security.md'), 'Never echo a token back.\n'.repeat(20));
+        g(['add', '-A']);
+        g(['commit', '-q', '-m', 'a']);
+        const from = g(['rev-parse', 'HEAD']).trim();
+        mkdirSync(join(dir, 'content/docs'), { recursive: true });
+        g(['mv', 'skills/a/rules/security.md', 'content/docs/security.md']);
+        g(['commit', '-q', '-m', 'b']);
+        const to = g(['rev-parse', 'HEAD']).trim();
+        const renamesOn = g(['-c', 'diff.renames=true', 'diff', '-z', '--name-only', from, to]).split('\0').filter(Boolean);
+        const rec = { state: 'stands', id: 5, carriedFrom: from, carriedHops: 1 };
+        const rows = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [], headSha: to, runGit: g };
+        const v = lowRiskRecordVerdict(rec, rows, live);
+        // The plain diff names the destination alone (the blind spot); the check names the catalog path.
+        return renamesOn.join() === 'content/docs/security.md' && v.state === 'not-pass' && /skills\/a\/rules\/security\.md/.test(v.verdictReason);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     })());
     const nonArmFail = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
     assert('the-other-Tier-S-legs-are-unchanged-here-a-FAIL-record-still-stands-for-them-follow-up-33541', nonArmFail.entries[0].record.state === 'stands' && nonArmFail.entries[0].record.verdict === undefined);
