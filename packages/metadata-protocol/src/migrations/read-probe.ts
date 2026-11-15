@@ -352,3 +352,61 @@ export async function readTablePresence(
     };
   }
 }
+
+/**
+ * The catalog statement that answers "does this table have this column?"
+ * WITHOUT raising when the answer is no, or `undefined` when none can be
+ * compiled (the same dialect families as {@link buildTablePresenceSql}, and the
+ * same identifier rule for both names).
+ *
+ * Each arm returns one row when the column exists and ZERO rows when it does
+ * not, or when the table itself is not there. Exported for the pins.
+ */
+export function buildColumnPresenceSql(table: string, column: string, client?: string): string | undefined {
+  if (!isProbeableTableName(table) || !isProbeableTableName(column)) return undefined;
+  switch (catalogFamilyOf(client)) {
+    case 'sqlite':
+      // The table-valued `pragma_table_info` answers zero rows for a table
+      // that is not there, never an error.
+      return `SELECT 1 FROM pragma_table_info('${table}') WHERE name = '${column}'`;
+    case 'postgres':
+      // The relation resolved as the table-presence arm resolves it, so the
+      // two arms never disagree about WHICH table is meant.
+      return (
+        `SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('"${table}"') ` +
+        `AND attname = '${column}' AND attnum > 0 AND NOT attisdropped`
+      );
+    case 'mysql':
+      return (
+        `SELECT 1 FROM information_schema.columns ` +
+        `WHERE table_schema = DATABASE() AND table_name = '${table}' AND column_name = '${column}'`
+      );
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Ask whether a column is there, without raising when it is not.
+ *
+ * - `'present'` / `'absent'`: the catalog ANSWERED.
+ * - `'unknown'`: no catalog statement for this client, a refused read, or no
+ *   result set. ⛔ Never read as absent (the fence in this module's header):
+ *   the caller then runs its own statement exactly as it did before it asked,
+ *   so the read can only spare a refusal, never invent an answer.
+ */
+export async function readColumnPresence(
+  exec: ReadProbeExec,
+  probe: { table: string; column: string; client?: string },
+): Promise<'present' | 'absent' | 'unknown'> {
+  const sql = buildColumnPresenceSql(probe.table, probe.column, probe.client);
+  if (sql === undefined) return 'unknown';
+  let result: unknown;
+  try {
+    result = await exec(sql);
+  } catch {
+    return 'unknown';
+  }
+  if (!isResultSet(result)) return 'unknown';
+  return normalizeRows(result).length > 0 ? 'present' : 'absent';
+}

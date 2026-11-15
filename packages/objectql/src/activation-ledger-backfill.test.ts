@@ -361,6 +361,47 @@ describe('backfillActivationLedgerAtBoot — on a one-shot boot', () => {
     expect(log.error).not.toHaveBeenCalled();
   });
 
+  it('counts every row that names no package, not only the ones it binds, and says why the rest stay', async () => {
+    // An upgraded ledger: one row the next boot binds, beside rows it leaves
+    // as they are for every reason the backfill has.
+    install(A);
+    install(B);
+    ship('flow', 'nightly_sync', A);
+    ship('flow', 'shared_name', A);
+    ship('flow', 'shared_name', B);
+    author('flow', 'env_flow');
+    const { engine } = makeLedger([
+      { id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: null, active: false },
+      { id: 'r2', metadata_type: 'position', name: 'auditor', package_id: null, active: false },
+      { id: 'r3', metadata_type: 'flow', name: 'env_flow', package_id: null, active: false },
+      { id: 'r4', metadata_type: 'flow', name: 'gone_flow', package_id: null, active: false },
+      { id: 'r5', metadata_type: 'flow', name: 'shared_name', package_id: null, active: false },
+      { id: 'r6', metadata_type: 'flow', name: 'bound_flow', package_id: B, active: false },
+    ]);
+    registry.sealBareNameHolders();
+    const log = logger();
+
+    await backfillActivationLedgerAtBoot(engine, bootRegistry(), log, { runPlatformMigrations: false });
+
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledTimes(1);
+    const line = String(log.info.mock.calls[0]?.[0]);
+    // Five rows name no package (the one naming B is not one of them); one is bound.
+    expect(line).toContain('5 row(s) name no package');
+    expect(line).toContain('gives 1 of them the package');
+    expect(line).toContain(`flow 'nightly_sync' → ${A}`);
+    expect(line).toContain('The other 4 keep naming none');
+    // One row per reason: the environment's flow, the vanished name, the position, the name two packages hold.
+    for (const reason of [
+      '1 for an item the environment authored',
+      '1 for a name no package or environment item holds',
+      '1 for a type not addressed by package',
+      '1 for a name more than one package holds',
+    ]) {
+      expect(line).toContain(reason);
+    }
+  });
+
   it('a ledger it cannot read is not an upgrade that failed: debug only, no warning', async () => {
     registry.sealBareNameHolders();
     const engine = { find: vi.fn(async () => { throw new Error('no such table'); }), update: vi.fn() };

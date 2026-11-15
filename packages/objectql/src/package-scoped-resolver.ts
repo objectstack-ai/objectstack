@@ -178,6 +178,40 @@ export interface PackageScopedFunctionQuery {
 export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionHoldersOf'>;
 
 /**
+ * [ADR-0150 D3, #32933; ruling A 6824698376, #32497] A function read that
+ * names no package — the engine's bare read (`ObjectQL#resolveFunction` /
+ * `resolveFunctionEntry`) and {@link resolvePackageScopedFunction} with no
+ * caller package — COUNTS every holder of the name and never RESOLVES TO a
+ * disabled one.
+ *
+ * Counted: `resolution` is the rule's answer over every holder, a disabled
+ * package's included, so a name a disabled package makes ambiguous stays
+ * refused, naming it (ruling A: a disabled package is still a holder; a
+ * disable never turns a refusal into an answer). Never resolved to: when the
+ * one holder the rule picked for a caller with no package (`unique-holder`,
+ * the step only such a caller reaches) is a disabled package, nothing answers
+ * — the served holders (#32497's default) are none. Every other answer passes
+ * through unchanged: a refusal, the platform's item, and a caller package's
+ * own item or its closure's holder (`own` / `closure`, a reader that names
+ * its package).
+ *
+ * Relies on the core rule (`resolvePackageScopedHolders` in
+ * `@objectstack/core`): a caller package stops at its steps 1–3 (`own`,
+ * `closure`, `platform`, or a refusal) and only the environment-wide branch
+ * for a caller with no package answers `unique-holder`. An edit of the rule
+ * that lets a caller package reach `unique-holder` must revisit this wrapper.
+ */
+export function callerlessFunctionResolution<T>(
+  resolution: PackageScopedResolution<T>,
+  isPackageDisabled: (packageId: string) => boolean,
+): PackageScopedResolution<T> {
+  if (resolution.status !== 'resolved' || resolution.via !== 'unique-holder' || resolution.holder.kind !== 'package') {
+    return resolution;
+  }
+  return isPackageDisabled(resolution.holder.packageId) ? { status: 'not-found' } : resolution;
+}
+
+/**
  * Resolve the function a flow's `script` node names, in the package of that
  * flow (ADR-0150 D4's last row): the rule (`resolvePackageScopedHolders`)
  * with the engine's per-package function holders (`ObjectQL#functionHoldersOf`)
@@ -194,17 +228,23 @@ export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionH
  * reader: it names a handler key in the action registry, which E2 resolves
  * by package, never a registered function. `resolveFunction` /
  * `resolveFunctionEntry` answer the one last-registered function per name for
- * any other caller, and refuse a name two packages hold (#31700, epic seat
- * ruling R2-C).
+ * any other caller, and refuse a name two holders hold (#31700, epic seat
+ * ruling R2-C; the platform beside a package, #32907).
+ *
+ * [#32933] A caller with no package counts a disabled package as a holder and
+ * is never answered with its function ({@link callerlessFunctionResolution}).
  */
 export function resolvePackageScopedFunction(
   engine: PackageScopedFunctionEngine,
   query: PackageScopedFunctionQuery,
 ): PackageScopedResolution<Readonly<FunctionEntry>> {
   const registry = engine.registry;
-  return resolvePackageScopedHolders(
-    { type: ENGINE_FUNCTION_TYPE, name: query.name, callerPackageId: query.callerPackageId },
-    engine.functionHoldersOf(query.name),
-    (callerPackageId) => packageResolutionClosure(registry, callerPackageId),
+  return callerlessFunctionResolution(
+    resolvePackageScopedHolders(
+      { type: ENGINE_FUNCTION_TYPE, name: query.name, callerPackageId: query.callerPackageId },
+      engine.functionHoldersOf(query.name),
+      (callerPackageId) => packageResolutionClosure(registry, callerPackageId),
+    ),
+    (packageId) => registry.isPackageDisabled(packageId),
   );
 }

@@ -2226,10 +2226,13 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
   });
 
   describe('location 4: one answer in every hydration state (both registration orders)', () => {
-    const STATES = ['stored, not hydrated', 'after the read-side hydrator', "bare-slot copy stamped ''", "bare-slot copy stamped 'sys_metadata'"] as const;
+    // [#32716 N3] The boot load (`loadMetaFromDb`) is the other hydration the
+    // card names beside the list read: the same answers before and after it.
+    const STATES = ['stored, not hydrated', 'after the read-side hydrator', 'after the boot load', "bare-slot copy stamped ''", "bare-slot copy stamped 'sys_metadata'"] as const;
     const enter = async (type: string, state: (typeof STATES)[number]) => {
       storeRow(type, 'active', 'stored');
       if (state === 'after the read-side hydrator') await protocol.getMetaItems({ type } as never);
+      if (state === 'after the boot load') expect(await protocol.loadMetaFromDb(), 'the boot load read the row').toMatchObject({ loaded: 1, errors: 0 });
       if (state.startsWith('bare-slot')) {
         registry.registerItem(type, { ...sealedBody(type, 'stored'), _provenance: 'org', _packageId: state.endsWith("''") ? '' : 'sys_metadata' }, 'name' as never);
       }
@@ -2258,11 +2261,12 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
         }
       }
 
-      it(`${type}, one holder: the stored row is declined before and after the read-side hydrator, on the exact and the bare read (BASE: after it, both served the row)`, async () => {
+      it(`${type}, one holder: the stored row is declined before and after the boot load and the read-side hydrator, on the exact and the bare read (BASE: after the hydrator, both served the row)`, async () => {
         shipSealed(type, A);
         storeRow(type, 'active', 'stored');
-        for (const when of ['before', 'after']) {
-          if (when === 'after') await protocol.getMetaItems({ type } as never);
+        for (const when of ['before', 'after the boot load', 'after the read-side hydrator']) {
+          if (when === 'after the boot load') await protocol.loadMetaFromDb();
+          if (when === 'after the read-side hydrator') await protocol.getMetaItems({ type } as never);
           expect(labelOf(await read(type, 'approve', A)), `${when} exact`).toBe(`alpha ${type}`);
           expect(labelOf(await protocol.getMetaItem({ type, name: 'approve' } as never)), `${when} bare`).toBe(`alpha ${type}`);
         }

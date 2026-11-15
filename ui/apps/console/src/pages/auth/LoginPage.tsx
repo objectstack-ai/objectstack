@@ -101,6 +101,7 @@ import { decideDirectSignIn, directSignInStartUrl } from './directSignIn';
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase } from '../../utils/consoleBase';
+import { holdLinkRefusalForLanding } from '../../components/LinkRefusalNotice';
 
 /** The auth API base the direct sign-in door lives under (`main.tsx`'s `AUTH_URL`). */
 const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
@@ -361,6 +362,13 @@ export function LoginPage() {
       return;
     }
 
+    // Every exit below lands in the console. A signed-in person who came back
+    // from linking another sign-in with a refusal (`?error=`) is never shown
+    // this page's form, so the reason goes with them to where they land
+    // (`../../components/LinkRefusalNotice`); a code without a sentence of its
+    // own is not carried.
+    holdLinkRefusalForLanding(callbackError?.code);
+
     // 3. Auto-select a single org so post-login redirect doesn't bounce
     //    off `RequireOrganization`.
     if (!activeOrganization) {
@@ -397,6 +405,7 @@ export function LoginPage() {
     handoff.target,
     handoff.holdForSignIn,
     signInPickSaved,
+    callbackError,
   ]);
 
   if ((isLoading && !hasBootstrapped) || !signInNeeded || directSignIn === 'start') {
