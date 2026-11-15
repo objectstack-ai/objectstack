@@ -462,3 +462,126 @@ for (const cell of CELLS) {
     },
   );
 }
+
+// ── [#33626] two tenants: related-object read restrictions are carried into the subquery, or the hop reads its ids ──
+
+const TEN_CASE = 'rest_ten_case_33626';
+const TEN_CONTACT = 'rest_ten_contact_33626';
+const TEN_ACCOUNT = 'rest_ten_account_33626';
+const TEN_REGION = 'rest_ten_region_33626';
+const ORG_A = 'org_ten_a';
+const ORG_B = 'org_ten_b';
+
+/**
+ * The region is tenant-scoped; the case, contact and account are no tenant's
+ * (`tenancy.enabled: false`). Each tenant holds one NA region; each case
+ * reaches its own tenant's region in one hop (`region`) and in three
+ * (`contact` → `account` → `region`).
+ */
+const TEN_OBJECTS = [
+  { name: TEN_REGION, label: 'Region T 33626', fields: { name: { name: 'name', type: 'text' as const } } },
+  {
+    name: TEN_ACCOUNT, label: 'Account T 33626', tenancy: { enabled: false },
+    fields: { region: { name: 'region', type: 'lookup' as const, reference: TEN_REGION } },
+  },
+  {
+    name: TEN_CONTACT, label: 'Contact T 33626', tenancy: { enabled: false },
+    fields: { account: { name: 'account', type: 'lookup' as const, reference: TEN_ACCOUNT } },
+  },
+  {
+    name: TEN_CASE, label: 'Case T 33626', tenancy: { enabled: false },
+    fields: {
+      contact: { name: 'contact', type: 'lookup' as const, reference: TEN_CONTACT },
+      region: { name: 'region', type: 'lookup' as const, reference: TEN_REGION },
+    },
+  },
+];
+
+const TEN_SEED: ReadonlyArray<readonly [string, ReadonlyArray<Record<string, unknown>>]> = [
+  [TEN_REGION, [{ id: 'tr_a', name: 'NA', organization_id: ORG_A }, { id: 'tr_b', name: 'NA', organization_id: ORG_B }]],
+  [TEN_ACCOUNT, [{ id: 'ta_a', region: 'tr_a' }, { id: 'ta_b', region: 'tr_b' }]],
+  [TEN_CONTACT, [{ id: 'tc_a', account: 'ta_a' }, { id: 'tc_b', account: 'ta_b' }]],
+  [TEN_CASE, [{ id: 'tk_a', contact: 'tc_a', region: 'tr_a' }, { id: 'tk_b', contact: 'tc_b', region: 'tr_b' }]],
+];
+
+/** name · the `where` on the case — both mean "my tenant's NA region". */
+const TEN_HOPS: ReadonlyArray<readonly [string, FilterCondition]> = [
+  ['one hop', { region: { name: 'NA' } }],
+  ['three hops', { contact: { account: { region: { name: 'NA' } } } }],
+];
+
+for (const cell of CELLS) {
+  const config = cell.config();
+  describe.skipIf(!config)(
+    `[#33626] two tenants — a condition on tenant A's related rows never matches for a tenant B caller — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    () => {
+      let engine: ObjectQL;
+      let driver: any;
+      const CALLER_B = { userId: 'u_ten_b', tenantId: ORG_B };
+
+      const dropTables = async () => {
+        if (cell.id === 'sqlite') return;
+        for (const o of TEN_OBJECTS.map((x) => x.name).reverse()) await driver?.execute(`drop table if exists ${o}`).catch(() => {});
+      };
+
+      beforeAll(async () => {
+        driver = new SqlDriver(config as any);
+        await dropTables();
+        engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        for (const o of TEN_OBJECTS) engine.registry.registerObject(o as any);
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        // Seeded through the driver: each tenant's row carries its own organization.
+        for (const [object, rows] of TEN_SEED) for (const row of rows) await driver.create(object, { ...row });
+        // The organization wall: the related read of the region is walled to the caller's tenant.
+        engine.setTenancyPostureProvider(() => 'isolated');
+      });
+
+      afterAll(async () => {
+        await dropTables();
+        try { await engine?.destroy(); } catch { /* noop */ }
+      });
+
+      /** The two-step route as the caller, hop by hop — what the id read answers. */
+      const twoStep = async (hops: number): Promise<string[]> => {
+        const ids = async (object: string, where: FilterCondition) =>
+          (await engine.find(object, { where, fields: ['id'], context: CALLER_B } as any)).map((r: any) => r.id);
+        const regions = await ids(TEN_REGION, { name: 'NA' });
+        if (hops === 1) return (await ids(TEN_CASE, { region: { $in: regions } })).sort();
+        const accounts = await ids(TEN_ACCOUNT, { region: { $in: regions } });
+        const contacts = await ids(TEN_CONTACT, { account: { $in: accounts } });
+        return (await ids(TEN_CASE, { contact: { $in: contacts } })).sort();
+      };
+
+      it('CONTROL the region read is walled: tenant B reads its own NA region only', async () => {
+        const regions = await engine.find(TEN_REGION, { where: { name: 'NA' }, context: CALLER_B } as any);
+        expect(regions.map((r: any) => r.id)).toEqual(['tr_b']);
+      });
+
+      it('through one hop and through three: only tenant B\'s case, exactly the two-step route\'s answer — on find and count', async () => {
+        for (const [name, where] of TEN_HOPS) {
+          const got = (await engine.find(TEN_CASE, { where, context: CALLER_B } as any)).map((r: any) => r.id).sort();
+          expect(got, name).toEqual(['tk_b']);
+          expect(got, `two-step parity, ${name}`).toEqual(await twoStep(name === 'one hop' ? 1 : 3));
+          expect(await engine.count(TEN_CASE, { where, context: CALLER_B } as any), `count, ${name}`).toBe(1);
+        }
+      });
+
+      it('a read rule the region applies after its driver call gives the two-step route\'s answer', async () => {
+        const hook = async (ctx: any) => { ctx.result = (ctx.result as any[]).filter((row) => row.id !== 'tr_b'); };
+        engine.registerHook('afterFind', hook, { object: TEN_REGION, packageId: 'test.ten-region-rule' });
+        try {
+          for (const [name, where] of TEN_HOPS) {
+            const got = (await engine.find(TEN_CASE, { where, context: CALLER_B } as any)).map((r: any) => r.id).sort();
+            expect(got, name).toEqual([]);
+            expect(got, `two-step parity, ${name}`).toEqual(await twoStep(name === 'one hop' ? 1 : 3));
+          }
+        } finally {
+          engine.unregisterHooksByPackage('test.ten-region-rule');
+        }
+      });
+    },
+  );
+}

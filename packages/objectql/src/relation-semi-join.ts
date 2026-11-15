@@ -43,9 +43,9 @@
  *   object-scoped middleware or an `afterFind` hook on the related object
  *   (both act after its driver call), another datasource than the read's
  *   object, or a driver outside {@link SEMI_JOIN_COMPILING_DRIVERS}.
- * - **After planning** — the related read did not end at exactly one driver
- *   call with nothing changing its answer afterwards (a middleware answered
- *   without the driver, or replaced or filled the answer).
+ * - **After planning** — the related read did not reach exactly one driver
+ *   call, or came back with rows the driver never returned (a middleware
+ *   answered without the driver, or added rows after it).
  * - **At the executor boundary** — the outer read's driver options differ
  *   from the ones the related read's own driver call was given
  *   ({@link sameReadDriverOptions}): the subquery is compiled with the outer
@@ -96,7 +96,7 @@ export const RELATION_SCOPE_PLAN: unique symbol = Symbol('objectql.relationScope
 export interface RelationScopePlan {
   /** Called at the driver call with exactly what the driver would have been handed. */
   capture(where: FilterCondition | undefined, driverOptions: unknown): void;
-  /** The answer the planned read gives in place of the driver's: empty, and only this plan's. */
+  /** The answer the planned read gives in place of the driver's: an empty array of this plan's own. */
   readonly rows: unknown[];
 }
 
@@ -152,11 +152,14 @@ const plannedScopes = new WeakMap<object, PlannedRelationScope>();
  * it as the {@link RELATION_SCOPE_PLAN} option; a refusal from it propagates,
  * as the id read's would. `readIds` is the id read itself.
  *
- * Answers `null` — read the ids instead — unless the read ended at exactly one
- * driver call and its answer came back untouched: the plan's own `rows`
- * object, still empty. A middleware that answered without the driver, or
- * that replaced or filled the answer after it, is a read the planned `where`
- * does not describe.
+ * Answers `null` — read the ids instead — unless the read reached exactly one
+ * driver call and its answer came back with no row in it. A middleware that
+ * answered without the driver, or that added rows after it, is a read the
+ * planned `where` does not describe. A middleware that reshapes the rows
+ * (the field mask maps each row to a masked copy) changes no id and is not
+ * one; a middleware that removes rows after the driver call is an
+ * object-scoped read middleware, and ADR-0139 D5.2 knows one by the object it
+ * is registered for ({@link relationSemiJoinServes} keeps the id read for it).
  */
 export async function planRelationSemiJoinLeaf(
   target: string,
@@ -166,7 +169,7 @@ export async function planRelationSemiJoinLeaf(
   const captured: Array<{ where: FilterCondition | undefined; driverOptions: unknown }> = [];
   const rows: unknown[] = [];
   const answer = await plan({ rows, capture: (where, driverOptions) => { captured.push({ where, driverOptions }); } });
-  if (captured.length !== 1 || answer !== rows || rows.length !== 0) return null;
+  if (captured.length !== 1 || !Array.isArray(answer) || answer.length !== 0 || rows.length !== 0) return null;
   const leaf = ReadableIds.of(target);
   plannedScopes.set(leaf, { ...captured[0], readIds });
   return leaf;

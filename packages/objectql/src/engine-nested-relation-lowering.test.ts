@@ -72,15 +72,17 @@ interface SeenRead { object: string; ast: any }
 /**
  * A recording driver. A read of the object named in `answers` returns those
  * rows (the related read's matches); every other read returns none. Writes
- * are recorded, never applied.
+ * are recorded, never applied. It answers to `name` — by default the SQL
+ * driver's, one of the drivers the engine plans a semi-join for
+ * (`SEMI_JOIN_COMPILING_DRIVERS`); any other name keeps the id read.
  */
-function makeRecordingDriver() {
+function makeRecordingDriver(name = 'com.objectstack.driver.sql') {
   const reads: SeenRead[] = [];
   const writes: SeenRead[] = [];
   const answers = new Map<string, Array<Record<string, unknown>>>();
   const rowsOf = (o: string) => answers.get(o) ?? [];
   const driver: any = {
-    name: 'recording', version: '0.0.0', supports: {},
+    name, version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(o: string, ast: any) { reads.push({ object: o, ast }); return rowsOf(o); },
     async findOne(o: string, ast: any) { reads.push({ object: o, ast }); return rowsOf(o)[0] ?? null; },
@@ -437,5 +439,153 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       expect(rec.reads[0].object).toBe(OBJECT);
       expect(rec.reads[0].ast.where, JSON.stringify(where)).toEqual(where);
     }
+  });
+});
+
+/**
+ * The semi-join is taken ONLY where it is provably the same read as the id
+ * read (`relation-semi-join.ts`); every other case keeps that id read — the
+ * related object read as the caller, `id` only, one row past the cap, then
+ * `$in` — exactly as before the semi-join existed. Each case below asserts
+ * the related read RAN (it is in the driver's reads) and the outer read
+ * carries the id list, never a composed leaf, and is served, never refused.
+ */
+describe('[#33626] the semi-join falls back to the id read wherever it is not provably that read', () => {
+  const OUTER_REF = { owner: { $in: ['u1'] } };
+
+  async function makeEngine(driverName?: string) {
+    const rec = makeRecordingDriver(driverName);
+    const engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    engine.registry.registerObject(OWNER_OBJECT as any, 'test');
+    engine.registry.registerObject(LEDGER as any, 'test');
+    return { engine, rec };
+  }
+
+  /** The related read and the outer read the driver saw for `{ owner: { region: 'NA' } }`. */
+  async function readsOf(engine: ObjectQL, rec: ReturnType<typeof makeRecordingDriver>, context?: any) {
+    rec.reads.length = 0;
+    await engine.find(OBJECT, { where: { owner: { region: 'NA' } }, ...(context ? { context } : {}) } as EngineQueryOptions);
+    const related = rec.reads.filter((r) => r.object === OWNER);
+    const outer = rec.reads.filter((r) => r.object === OBJECT);
+    return { related, outerWhere: outer[outer.length - 1]?.ast?.where };
+  }
+
+  function expectIdRead(r: { related: SeenRead[]; outerWhere: unknown }, ids: unknown[], name: string) {
+    expect(r.related, name).toHaveLength(1);
+    expect(r.related[0].ast.where, name).toEqual({ region: 'NA' });
+    expect(r.related[0].ast.limit, name).toBe(RELATION_FILTER_ID_CAP + 1);
+    expect(normalized(r.outerWhere), name).toEqual({ owner: { $in: ids } });
+  }
+
+  it('a driver that compiles no subquery (MongoDB, OData, any unnamed driver) keeps the capped id read', async () => {
+    for (const name of ['com.objectstack.driver.mongodb', 'com.objectstack.driver.odata', 'recording']) {
+      const { engine, rec } = await makeEngine(name);
+      rec.answers.set(OWNER, idRows('u1'));
+      expectIdRead(await readsOf(engine, rec), ['u1'], name);
+      // …and past the cap it is refused as it always was, never run over a cut-off list.
+      rec.answers.set(OWNER, Array.from({ length: RELATION_FILTER_ID_CAP + 1 }, (_, i) => ({ id: `u${i}` })));
+      expect(envelopeOf(await refusalOf(engine.find(OBJECT, { where: { owner: { region: 'NA' } } }))), name).toEqual(INVALID_FILTER);
+    }
+  });
+
+  it('CONTROL a compiling driver plans the read: no id read, one composed leaf', async () => {
+    const { engine, rec } = await makeEngine();
+    rec.answers.set(OWNER, idRows('u1'));
+    const r = await readsOf(engine, rec);
+    expect(r.related).toHaveLength(0);
+    expect(normalized(r.outerWhere)).toEqual({ owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } } });
+  });
+
+  it('a related object an object-keyed middleware narrows keeps the id read — that middleware runs on it, and the read is served', async () => {
+    const { engine, rec } = await makeEngine();
+    rec.answers.set(OWNER, idRows('u1', 'u2'));
+    // Narrows AFTER the driver call: no planned `where` could carry it.
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      await next();
+      if (Array.isArray(opCtx.result)) opCtx.result = opCtx.result.filter((row: any) => row.id === 'u1');
+    }, { object: OWNER });
+    expectIdRead(await readsOf(engine, rec), ['u1'], 'object-keyed middleware');
+  });
+
+  it('a read rule the related object applies after its driver call (an afterFind hook) gives the id read\'s answer', async () => {
+    const { engine, rec } = await makeEngine();
+    rec.answers.set(OWNER, idRows('u1', 'u2'));
+    engine.registerHook('afterFind', async (ctx: any) => {
+      ctx.result = (ctx.result as any[]).filter((row) => row.id === 'u1');
+    }, { object: OWNER });
+    expectIdRead(await readsOf(engine, rec), ['u1'], 'afterFind');
+    // The same answer as the hand-written two-step route over those ids.
+    expect(normalized((await readsOf(engine, rec)).outerWhere)).toEqual(OUTER_REF);
+  });
+
+  it('a global middleware that answers the related read without its driver, or adds rows after it, keeps the id read; one that reshapes the rows does not', async () => {
+    {
+      // CONTROL the field mask's shape: every row mapped to a copy — no id changes, the read is still planned.
+      const { engine, rec } = await makeEngine();
+      engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+        await next();
+        if (Array.isArray(opCtx.result)) opCtx.result = opCtx.result.map((row: any) => ({ ...row }));
+      });
+      const r = await readsOf(engine, rec);
+      expect(r.related).toHaveLength(0);
+      expect(normalized(r.outerWhere)).toEqual({ owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } } });
+    }
+    for (const mode of ['short-circuit', 'replace'] as const) {
+      const { engine, rec } = await makeEngine();
+      rec.answers.set(OWNER, idRows('u2'));
+      engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+        if (opCtx.object !== OWNER) return next();
+        if (mode === 'short-circuit') { opCtx.result = [{ id: 'u9' }]; return; }
+        await next();
+        opCtx.result = [...(opCtx.result as any[]), { id: 'u9' }];
+      });
+      const r = await readsOf(engine, rec);
+      const related = rec.reads.filter((x) => x.object === OWNER);
+      expect(related, mode).toHaveLength(mode === 'short-circuit' ? 0 : 1);
+      expect(normalized(r.outerWhere), mode).toEqual({ owner: { $in: mode === 'short-circuit' ? ['u9'] : ['u2', 'u9'] } });
+    }
+  });
+
+  it('a related object on another datasource keeps the id read on its own driver — served, no 400', async () => {
+    const rec = makeRecordingDriver();
+    const far = makeRecordingDriver('far');
+    const engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    engine.registerDriver(far.driver);
+    await engine.init();
+    engine.registry.registerObject({ ...OWNER_OBJECT, datasource: 'far' } as any, 'test');
+    engine.registry.registerObject(LEDGER as any, 'test');
+    far.answers.set(OWNER, idRows('u1'));
+    rec.reads.length = 0;
+    await engine.find(OBJECT, { where: { owner: { region: 'NA' } } });
+    expect(far.reads.map((r) => [r.object, r.ast.where, r.ast.limit])).toEqual([[OWNER, { region: 'NA' }, RELATION_FILTER_ID_CAP + 1]]);
+    expect(normalized(rec.reads[rec.reads.length - 1].ast.where)).toEqual(OUTER_REF);
+  });
+
+  it('the outer read\'s driver options differ from the related read\'s own (its tenant wall): the ids are read at the boundary, under the related read\'s own wall', async () => {
+    const { engine, rec } = await makeEngine();
+    // The ledger is no tenant's; the owner is tenant-scoped. Under a wall the
+    // owner's read carries `tenantId`, the ledger's does not — so a subquery
+    // compiled with the ledger's options would lack the owner's wall.
+    engine.registry.registerObject({ ...LEDGER, tenancy: { enabled: false } } as any, 'test');
+    engine.setTenancyPostureProvider(() => 'isolated');
+    const seen: Array<{ object: string; tenantId: unknown }> = [];
+    const find = rec.driver.find;
+    rec.driver.find = async (o: string, ast: any, options: any) => { seen.push({ object: o, tenantId: options?.tenantId }); return find.call(rec.driver, o, ast); };
+    rec.answers.set(OWNER, idRows('u1'));
+    const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
+    expectIdRead(r, ['u1'], 'differing options');
+    expect(seen).toEqual([{ object: OWNER, tenantId: 'org_b' }, { object: OBJECT, tenantId: undefined }]);
+  });
+
+  it('CONTROL the same wall on both objects: the options are the related read\'s own, and the leaf is composed', async () => {
+    const { engine, rec } = await makeEngine();
+    engine.setTenancyPostureProvider(() => 'isolated');
+    rec.answers.set(OWNER, idRows('u1'));
+    const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
+    expect(r.related).toHaveLength(0);
+    expect(JSON.stringify(normalized(r.outerWhere))).toContain(`"SEMI_JOIN":"${OWNER}"`);
   });
 });
