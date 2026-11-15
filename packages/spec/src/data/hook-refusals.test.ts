@@ -457,7 +457,7 @@ describe('the translation address of a reason — `hooks.<hook>.refusals.<CODE>.
 // legacy `handler` row too), never an expression body.
 describe('hookForm refusals row — help names every hook kind that may declare one', () => {
   type Row = { field?: string; helpText?: string; fields?: Row[] };
-  const rows: Row[] = hookForm.sections.flatMap((s) => (s.fields ?? []) as Row[]);
+  const rows: Row[] = (hookForm.sections ?? []).flatMap((s) => (s.fields ?? []) as Row[]);
   const help = (field: string): string => {
     const found = rows.flatMap((r) => [r, ...(r.fields ?? [])]).filter((r) => r.field === field);
     expect(found).toHaveLength(1);
