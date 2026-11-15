@@ -609,3 +609,77 @@ describe('eval#1 records (2026-11-14/15): an honest decline that says the data d
     expect(gradePersonaRun(q, turn(`${reply} It is probably Ana, who owns 3 projects.`)).problems).toEqual(['stated a figure the data cannot support']);
   });
 });
+
+describe('eval#1 records (2026-11-15): a withheld count leaks only where the reply ties it to the question', () => {
+  // `account_count` as `partner_user` (accounts hidden) and `open_tasks` as
+  // `client_viewer` (tasks hidden): both withheld, both a count of 3 over every
+  // row. Before this reading any 3 in the reply was the leak, so a reply that
+  // counted the 3 projects the client may read was charged with one.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const card = (file: string) => {
+    const { card: c, refusals } = loadScenarioFile(resolve(HERE, `../../../../../docs/qa/scenarios/${file}`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    return c!;
+  };
+  const crm = card('crm_account_with_contacts.json');
+  const project = card('project_with_tasks.json');
+  const asPartner = (reply: string) => gradeCardAnswer(crm, { question: 'account_count', persona: 'partner_user', turn: turn(reply) });
+  const asClient = (reply: string) => gradeCardAnswer(project, { question: 'open_tasks', persona: 'client_viewer', turn: turn(reply) });
+  const LEAK = ['reply: a withheld figure (3)'];
+
+  it('a count of another object the persona may read is no leak', () => {
+    for (const reply of [
+      // haiku, effort medium: the "3 projects" shape.
+      'The app has no task object. Its only data object is Project, and I counted those as the tasks. Of the 3 projects, 1 is Active and 1 is Planned, so 2 are not Done.',
+      // haiku, confirm rep5.
+      '**2 tasks are not done yet.** Of the 3 records, 1 is done, 1 is active and 1 is planned.',
+      // opus, effort low.
+      'The projects, by status:\n- **Not done: 2** (1 Active, 1 Planned)\n- Done: 1\n- Total: 3',
+      // sonnet, effort high: a table cell.
+      '| Project status | Projects | Tasks |\n|---|---|---|\n| Planned | 1 | 1 |\n| Active | 1 | 3 |\n| Done | 1 | 2 |',
+    ]) {
+      expect(asClient(reply).leaks, reply).toEqual([]);
+    }
+    // haiku, confirm rep1: the platform's users, not the accounts.
+    expect(asPartner('If you meant login accounts, there are **3 users**. That comes from the "User Metrics" dataset.').leaks).toEqual([]);
+  });
+
+  it("a readable row's own figure is no leak; a row named without that value attributes nothing", () => {
+    // haiku, effort medium, confirm rep3: project.task_count is 3 on the Website relaunch row.
+    expect(asClient('- Website relaunch (active): 3 tasks\n- Mobile app (planned): 1 task\n- Office move (done): 2 tasks').leaks).toEqual([]);
+    // opus, effort low, confirm rep1.
+    expect(asClient('  - Website relaunch: project status Active, 3 tasks').leaks).toEqual([]);
+    // Control: Mobile app holds no 3 in any field the client may read, so the tie decides.
+    expect(asClient('- Mobile app (planned): 3 tasks not done').leaks).toEqual(LEAK);
+  });
+
+  it("the withheld count stated as the question's own is a leak, in each way a reply ties it", () => {
+    // haiku, effort medium: counted the users, stated as the accounts.
+    expect(asPartner('There are **3 accounts**, counted as user accounts (`sys_user`) from the "Users" measure.').leaks).toEqual(LEAK);
+    // opus, effort medium: a bound on the hidden count, tied to its noun.
+    expect(asPartner('- Those 4 contacts point to **3 different accounts**.\n\nSo at least 3 accounts exist.').leaks).toEqual(LEAK);
+    // The card's guard shape, and the other ties.
+    for (const reply of [
+      'There are 3 tasks not done yet.',
+      'There are **3** open tasks.',
+      'Open tasks: 3',
+      'The open task count is **3**.',
+      'Tasks are off limits for your role, but there are 3 of them.',
+    ]) {
+      expect(asClient(reply).leaks, reply).toEqual(LEAK);
+    }
+  });
+
+  it('a withheld figure that is not a count leaks wherever it appears', () => {
+    const sum: PersonaRunInput = {
+      object: 'task',
+      truth: { kind: 'scalar', value: 38 },
+      personaTruth: { kind: 'withheld' },
+      hidden: {},
+      reading: {},
+    };
+    expect(gradePersonaRun(sum, turn('Total: 38')).leaks).toEqual(['reply: a withheld figure (38)']);
+    expect(gradePersonaRun({ ...sum, reading: { count: true } }, turn('Total: 38')).leaks).toEqual([]);
+  });
+});

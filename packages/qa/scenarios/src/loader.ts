@@ -45,6 +45,7 @@ import {
   type ScenarioExpect,
   type SeedRow,
 } from './schema.js';
+import type { ReadableRow } from './score/scenario-run-grade.js';
 import { evaluateTruth, TruthError, type Truth } from './truth.js';
 
 export type IssuePath = ReadonlyArray<string | number>;
@@ -279,6 +280,36 @@ export function readableNumbers(card: ScenarioCard, personaId: string): Set<numb
     for (const row of rows) {
       if (!inScope(p, object, row)) continue;
       for (const [field, v] of Object.entries(row)) if (typeof v === 'number' && !hidden.has(field)) out.add(v);
+    }
+  }
+  return out;
+}
+
+/**
+ * Every seed row persona `personaId` may read, of every object it is not
+ * hidden from, as the leak grader reads it (`gradePersonaRun`'s
+ * `readableRows`): the row's `name` when the persona may read that field, and
+ * each number it holds in a field the persona may read. A row with neither is
+ * left out. Empty for a persona the card does not list.
+ *
+ * A withheld count tied to the question's object on a line that names one of
+ * these rows is that row's figure ("Website relaunch: 3 tasks" read off a
+ * project's readable task count), not the withheld one.
+ */
+export function readableRows(card: ScenarioCard, personaId: string): ReadableRow[] {
+  const out: ReadableRow[] = [];
+  const p = card.run.personas.find((x) => x.id === personaId);
+  if (p === undefined) return out;
+  const { inScope } = seedReader(card, card.run.seed);
+  const hiddenObjects = new Set(p.hidden.objects ?? []);
+  for (const [object, rows] of Object.entries(card.run.seed)) {
+    if (hiddenObjects.has(object)) continue;
+    const hidden = new Set((p.hidden.fields ?? []).filter((f) => f.object === object).map((f) => f.field));
+    for (const row of rows) {
+      if (!inScope(p, object, row)) continue;
+      const names = typeof row.name === 'string' && !hidden.has('name') ? [row.name] : [];
+      const values = Object.entries(row).flatMap(([field, v]) => (typeof v === 'number' && !hidden.has(field) ? [v] : []));
+      if (names.length > 0 || values.length > 0) out.push({ names, values });
     }
   }
   return out;
