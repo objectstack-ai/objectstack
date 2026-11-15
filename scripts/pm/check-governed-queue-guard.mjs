@@ -5942,16 +5942,17 @@ export async function selfTest() {
     const live = codeownersMirrorVerdict({ text: onDisk });
     assert('⭐ the-file-on-disk-mirrors-the-register-and-the-approver-list', live.ok, live.problems.join(' | '));
     assert('every-Tier-H-row-that-governs-this-repository-is-a-pattern-the-file-carries-or-an-arm-row-it-leaves-out', live.tierHPatterns.length + live.armPatterns.length === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H).length && live.tierHPatterns.every((p) => live.rows.some((r) => r.pattern === p)) && live.armPatterns.every((p) => !live.rows.some((r) => r.pattern === p)), JSON.stringify([live.tierHPatterns, live.armPatterns]));
-    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/docs/adr/,/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
+    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
     // Ruling record 6891850019: the rows carrying the low-risk arm leave the file — read off the register's `lowRisk`, never a list here.
-    assert('⭐ the-arm-patterns-are-the-register-rows-carrying-the-low-risk-arm-here', live.armPatterns.join() === '/skills/,/ui/skills/' && live.armPatterns.join() === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H && s.lowRisk?.repos?.includes(REPO)).map((s) => `/${s.prefix ?? s.exact}`).join(), live.armPatterns.join());
+    assert('⭐ the-arm-patterns-are-the-register-rows-carrying-the-low-risk-arm-here', live.armPatterns.join() === '/docs/adr/,/skills/,/ui/skills/' && live.armPatterns.join() === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H && s.lowRisk?.repos?.includes(REPO)).map((s) => `/${s.prefix ?? s.exact}`).join(), live.armPatterns.join());
     assert('every-line-on-disk-names-every-approver-spelled-as-a-login', live.rows.every((r) => GOVERNED_APPROVERS.every((a) => r.owners.includes(`@${a}`))) && live.rows.length >= live.tierHPatterns.length, JSON.stringify(live.rows));
     assert('the-parser-strips-comments-and-blank-lines-and-splits-owners', JSON.stringify(codeownersRows('# c\n\n/docs/adr/ @a @b # trailing\n  /x.md   @c\n')) === JSON.stringify([{ pattern: '/docs/adr/', owners: ['@a', '@b'], line: 3 }, { pattern: '/x.md', owners: ['@c'], line: 4 }]));
     const owners = GOVERNED_APPROVERS.map((a) => `@${a}`).join(' ');
     const full = (extra = '') => `# mirrors GOVERNED_APPROVERS\n${live.tierHPatterns.map((p) => `${p} ${owners}`).join('\n')}\n${extra}`;
     assert('a-fixture-carrying-exactly-the-Tier-H-rows-with-every-owner-passes', codeownersMirrorVerdict({ text: full() }).ok);
-    const one = codeownersMirrorVerdict({ text: full().replace(`/docs/adr/ ${owners}`, `/docs/adr/ @${GOVERNED_APPROVERS[1]}`) });
-    assert('⛔ one-approver-on-the-adr-row-is-a-problem-naming-the-row-and-the-missing-account', !one.ok && one.problems.length === 1 && one.problems[0].includes('`/docs/adr/`') && one.problems[0].includes(`@${GOVERNED_APPROVERS[0]}`), one.problems.join(' | '));
+    // The root ADR row carries the low-risk arm since #33539 and has no line; the ui/ ADR row is the Tier H ADR row here.
+    const one = codeownersMirrorVerdict({ text: full().replace(`/ui/docs/adr/ ${owners}`, `/ui/docs/adr/ @${GOVERNED_APPROVERS[1]}`) });
+    assert('⛔ one-approver-on-the-adr-row-is-a-problem-naming-the-row-and-the-missing-account', !one.ok && one.problems.length === 1 && one.problems[0].includes('`/ui/docs/adr/`') && one.problems[0].includes(`@${GOVERNED_APPROVERS[0]}`), one.problems.join(' | '));
     const missing = codeownersMirrorVerdict({ text: full().split('\n').filter((l) => !l.startsWith('/AGENTS.md')).join('\n') });
     assert('⛔ a-Tier-H-row-with-no-arm-and-no-line-is-a-problem-naming-the-row', !missing.ok && missing.problems.length === 1 && missing.problems[0].includes('`agents-md`'), missing.problems.join(' | '));
     assert('⭐ a-per-pull-arm-row-with-no-line-passes', !/^\/(ui\/)?skills\//m.test(full()) && codeownersMirrorVerdict({ text: full() }).ok);
