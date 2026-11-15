@@ -177,10 +177,15 @@ export async function resolveWhereTokens(
  * doors judge the condition's comparands against its own declarations. A
  * refusal from any of them is the answer, loudly; nothing is swallowed.
  *
- * **Bounded.** The read asks for one id more than
- * {@link RELATION_FILTER_ID_CAP}; receiving it, the filter is refused
- * (`INVALID_FILTER` / 400, the two-step route in the words), never run over
- * a cut-off list.
+ * **A subquery where it can be, bounded where it cannot.** On a read verb a
+ * single-valued relation's related read is PLANNED, not run, and its final
+ * `where` becomes the scope of a `ReadableIds` leaf the driver compiles into
+ * one nested subquery — no id list, no cap (`relation-semi-join.ts`; a
+ * related object on another datasource is refused by name). A multi-valued
+ * relation, or a write verb's `where`, reads the ids: the read asks for one
+ * id more than {@link RELATION_FILTER_ID_CAP}; receiving it, the filter is
+ * refused (`INVALID_FILTER` / 400, the two-step route in the words), never
+ * run over a cut-off list.
  *
  * Returns `where` by reference when it holds no condition — the common path
  * reads nothing and allocates nothing beyond one walk.

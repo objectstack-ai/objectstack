@@ -27,7 +27,12 @@
  *   one field-predicate check that refuses it on a direct read (the security
  *   layer's filter-oracle guard, a loud `PERMISSION_DENIED`), never answered
  *   with an empty result. There is no second copy of that rule here.
- * - **Bounded, loudly.** At most {@link RELATION_FILTER_ID_CAP} related ids
+ * - **A subquery on a read verb.** On `find`, `findOne`, `count` and
+ *   `aggregate` a single-valued relation is matched by one in-database
+ *   subquery scoped by the related object's own planned read
+ *   (`relation-semi-join.ts`): no id list, so none of the bound below.
+ * - **Bounded, loudly, where ids are read** (a multi-valued relation, a write
+ *   verb). At most {@link RELATION_FILTER_ID_CAP} related ids
  *   feed one condition. The read asks for one more than the cap; when it gets
  *   it, the filter is refused `INVALID_FILTER` / 400 with the two-step route in
  *   the words — ⛔ never a truncated match.

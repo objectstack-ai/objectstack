@@ -1,0 +1,9 @@
+---
+'@objectstack/objectql': patch
+---
+
+feat(objectql): on a read verb, a single-valued nested-relation condition is one in-database subquery, read-scoped on the related object, with no id cap
+
+Clause-②: yes (widening; narrowing on a related object another datasource holds, and on a driver that compiles no subquery) — widening: `{ account: { status: { $ne: 'cancelled' } } }` on `find`, `findOne`, `count` and `aggregate` (and so every analytics face that hands the engine the nested form) is served whatever the number of matching related records, where more than 1,000 answered `INVALID_FILTER` / 400. The related read is planned through its whole pipeline as the caller (CRUD gate, read middlewares including row scope and the filter-oracle guard on the condition's fields, `beforeFind` hooks, comparand doors) and its final `where` becomes the scope of a `ReadableIds` leaf the driver compiles into `field IN (SELECT id …)` with its tenant wall; a related record the caller cannot read is in no subquery, so it never matches, `$ne` included. Narrowing: a single-valued condition on a related object bound to another datasource than the read's object now answers `INVALID_FILTER` / 400 naming both datasources, where the id read served it; on a driver that compiles no `ReadableIds` leaf (MongoDB, OData) the read is refused with that driver's ADR-0139 refusal, where the id read served it. A multi-valued relation and the `update` / `delete` verbs keep the id read and its cap.
+Metadata-protocol: none
+Skills-docs: `content/docs/protocol/objectql/query-syntax.mdx` and `content/docs/kernel/contracts/data-engine.mdx` describe the subquery, where the cap still applies and which drivers compile it. `skills/objectstack-query` still says "up to 1000 related ids" for every relation; that holds for a multi-valued one and is now stricter than the engine for a single-valued one on a read verb (left for a skills-only change).
