@@ -110,17 +110,43 @@ doors whenever the plugin is bound to settings (the default):
 
 | Setting | Default | Applies to |
 |:---|:---|:---|
-| `max_upload_mb` | 100 (MB, counted as MiB) | Every upload door: the presigned upload's declared `size`, the chunked upload's declared `totalSize`, the local raw PUT body and each chunk's running total. Over it ⇒ `413` with code `PAYLOAD_TOO_LARGE`, before anything is stored. |
+| `max_upload_mb` | 100 (MB, counted as MiB) | Every upload door: the presigned upload's declared `size`, the chunked upload's declared `totalSize`, the local raw PUT body, each chunk's running total, the upload-link PUT (and each file of its several-file form), and the server-side file verbs. Over it ⇒ `413` with code `PAYLOAD_TOO_LARGE`, before anything is stored. |
 | `presigned_ttl` | 3600 s | Presigned upload URLs and non-gated download URLs issued from then on. |
 | `session_ttl` | 86400 s | Chunked upload sessions started from then on. |
 
-Per key, a saved value (an admin save or an env override) wins over the
-constructor's `presignedTtl` / `sessionTtl`, and those win over the namespace's
-declared default. A save reaches the doors without a restart; URLs and sessions
-already issued keep their lifetime. With no settings namespace bound
-(`bindToSettings: false`, or no settings service) the constructor TTLs apply and
-no upload size limit is enforced. On the S3 adapter a presigned upload is judged
-by its declared size — the bytes go straight to the bucket.
+All three keys resolve by one precedence, highest first: a saved value (an
+admin save or an env override), then the host's option on the plugin's
+constructor (or on `mountStorageRoutes`) — `presignedTtl`, `sessionTtl`,
+`maxUploadMb` — then the namespace's declared default, then the built-in
+default (3600 s, 86400 s, 100 MB). A save reaches the doors without a restart;
+URLs and sessions already issued keep their lifetime.
+
+**The upload bound is never unset.** With no settings namespace bound
+(`bindToSettings: false`, no settings service, a settings read that failed,
+or `mountStorageRoutes` over a bare adapter) and no host option, every upload
+door enforces the built-in 100 MB — the number the manifest declares. No limit
+is an explicit host choice:
+
+```typescript
+new StorageServicePlugin({ maxUploadMb: 500 });          // the host's bound, in MB
+new StorageServicePlugin({ maxUploadMb: 'unlimited' });  // no bound, announced at warn on boot
+```
+
+Anything else (`0`, a negative or non-finite number, a number too small to
+bound one byte, a numeric string, any other string) refuses construction. Each
+host door — the plugin, `mountStorageRoutes`, `registerStorageRoutes` — says once
+the bound in force and the layer it came from; an explicit `'unlimited'` is said
+at `warn`, on `console.warn` when the door was given no logger.
+
+Who moved from no bound to 100 MB, and the remedy:
+
+| Host | Remedy |
+|:---|:---|
+| Constructs the plugin with no settings bound (`bindToSettings: false`, `--preset minimal`), or its settings read fails | `maxUploadMb: 500` or `'unlimited'` on the plugin |
+| `mountStorageRoutes` / `registerStorageRoutes` over a bare adapter or an unbound plugin | the same option on that call |
+| DevPlugin-composed server (DevPlugin builds the plugin with no options) | `new DevPlugin({ services: { storage: false }, extraPlugins: [new StorageServicePlugin({ maxUploadMb: 500 })] })`, or list the instance in the stack's `plugins` |
+| A saved or env-sourced `max_upload_mb` that is not a positive number | correct the saved value; the saved layer cannot spell "no bound", so to accept any size remove it and pass `maxUploadMb: 'unlimited'` | On the S3 adapter a presigned upload is judged by
+its declared size — the bytes go straight to the bucket.
 
 ## REST API Endpoints
 

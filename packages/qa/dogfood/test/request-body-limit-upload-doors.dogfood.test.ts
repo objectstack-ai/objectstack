@@ -43,9 +43,10 @@ describe('the request-body limit leaves each upload door its own bound, over a r
     const rootDir = mkdtempSync(join(tmpdir(), 'body-limit-upload-doors-'));
     stack = await bootStack(attachmentsFixtureStack as never, {
       security: attachmentsFixtureSecurity(),
-      // `bindToSettings:false` keeps the constructor rootDir and leaves
-      // `max_upload_mb` unset, so each door's own bound is none at all: what
-      // is measured here is that the transport limit does not stand in for it.
+      // `bindToSettings:false` keeps the constructor rootDir and reads no
+      // `max_upload_mb`, so each door's own bound is the built-in 100 MB, far
+      // above the transport's 10 MiB: what is measured here is that the
+      // transport limit does not stand in for it.
       extraPlugins: [
         new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false }),
         new MCPServerPlugin(),
