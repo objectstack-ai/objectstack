@@ -693,9 +693,11 @@ related object with it **as the caller**. On a read verb (`find`, `findOne`,
 where that is provably the same read: the related read is planned, not run,
 and the driver receives one statement with a subquery,
 `account IN (SELECT id FROM account WHERE <its read scope> AND <condition>)` —
-no id list, no cap. The related object's read restrictions are carried into
-the subquery, or the hop falls back to reading the related ids as the caller
-and matching them with `$in`, under the cap below. Otherwise (a multi-valued
+no id list, no cap. The related object's read restrictions the planned read
+observes are carried into the subquery, or the hop falls back to reading the
+related ids as the caller and matching them with `$in`, under the cap below; a
+global middleware that filters rows after `next()` is not visible before the
+driver call; same boundary as ADR-0139 D5.2. Otherwise (a multi-valued
 relation, or `update` / `delete`) the field is matched against the ids the
 related read returns (`$in`; any member when `multiple: true`).
 
@@ -708,17 +710,33 @@ where ids are read, at most 1000 of them, refused past that,
 `INVALID_FILTER` / 400, never truncated; the subquery form is taken only on
 the related object's own datasource and on a driver that compiles it — the SQL
 drivers (every `driver-sql` dialect, Turso) compile it and the in-memory driver
-evaluates it in process; a related object on another datasource, a driver that
-compiles no subquery (MongoDB, OData), and a related object whose reads an
-object-scoped middleware or an `afterFind` hook shapes keep the id read; as the caller: the related object's row scope and field permissions
+evaluates it in process; as the caller: the related object's row scope and field permissions
 apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
 never an empty result.
+
+A single-valued relation on a read verb keeps the id read, and its 1000-id cap, in each
+of these cases:
+
+- a related object on another datasource;
+- a federated related object;
+- a driver that compiles no subquery (MongoDB, OData);
+- a related object whose reads an object-scoped middleware or an `afterFind` hook shapes;
+- a related object read under different driver options than the outer object (its tenant
+  scope, most commonly) — decided before the related read is planned where the registry
+  answers it (the two objects' tenancy class under a walled posture), at the executor
+  boundary otherwise;
+- a related read that a middleware answers itself (or adds rows to after the driver call).
+
+A hop that falls back after planning (a middleware answering the related read, or driver
+options only the request decides) dispatches the related read twice: its middleware chain
+and `beforeFind` hooks run for the planned read and again for the id read.
 
 - **Every verb that takes a `where`** serves it — `find`, `findOne`, `count`,
   `aggregate`, `update` and `delete` — and so do the REST `GET /data/:object` and
   `POST /data/:object/query` doors, which read through the same engine calls. A
-  single-valued relation matches with a subquery on a read verb and with `$in` on the
-  related ids on `update` / `delete`; a multi-valued one
+  single-valued relation matches with a subquery on a read verb (or with `$in` on the
+  related ids in the cases listed above) and with `$in` on the related ids on
+  `update` / `delete`; a multi-valued one
   (`multiple: true`) matches a record when **any** member qualifies, written as one
   `$contains` per id under an `$or`.
 - **A related record the caller cannot read never matches**, whatever the operator:

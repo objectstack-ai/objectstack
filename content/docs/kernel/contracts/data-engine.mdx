@@ -197,7 +197,9 @@ relation field against what that read selects: on a read verb, a single-valued r
 one subquery inside the read's own statement where that is provably the same read (the
 related read is planned, not run: its read scope and the condition become the subquery's
 `WHERE`, so no id list is read and none is capped — the related object's read restrictions
-are carried into the subquery, or the hop falls back to the id read); otherwise `$in` on the
+the planned read observes are carried into the subquery, or the hop falls back to the id read;
+a global middleware that filters rows after `next()` is not visible before the driver call;
+same boundary as ADR-0139 D5.2); otherwise `$in` on the
 ids that read returns, any member on a multi-valued one (`multiple: true`). No related record matching selects no
 rows; under `$not`, a record whose relation is empty satisfies the negation.
 
@@ -207,11 +209,24 @@ the related object declares, and a relation key may carry a condition of its own
 scope; a fourth relationship and the dotted `{ account: { 'owner.region': 'NA' } }` are
 refused. Where ids are read (a multi-valued relation, `update`, `delete`) a
 condition matching more than 1,000 related records is refused with `INVALID_FILTER` / 400
-rather than run over a cut-off list, and the id read is also what serves a related object on
-another datasource, a driver that compiles no subquery (MongoDB, OData — the SQL drivers
-compile it, the in-memory driver evaluates it in process), and a related object whose reads
-an object-scoped middleware or an `afterFind` hook shapes. Past the cap, run the two steps
-yourself — filter the related object, then match its ids:
+rather than run over a cut-off list. The id read, with that cap, is also what serves a
+single-valued relation on a read verb in each of these cases:
+
+- a related object on another datasource;
+- a federated related object;
+- a driver that compiles no subquery (MongoDB, OData — the SQL drivers compile it, the
+  in-memory driver evaluates it in process);
+- a related object whose reads an object-scoped middleware or an `afterFind` hook shapes;
+- a related object read under different driver options than the outer object (its tenant
+  scope, most commonly) — decided before the related read is planned where the registry
+  answers it (the two objects' tenancy class under a walled posture), at the executor
+  boundary otherwise;
+- a related read that a middleware answers itself (or adds rows to after the driver call).
+
+A hop that falls back after planning (a middleware answering the related read, or driver
+options only the request decides) dispatches the related read twice: its middleware chain and `beforeFind` hooks run for the
+planned read and again for the id read. Past the cap, run the two steps yourself — filter
+the related object, then match its ids:
 
 ```typescript
 const tech = await engine.find('account', { where: { industry: 'tech' }, fields: ['id'] });
