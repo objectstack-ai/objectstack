@@ -68,14 +68,15 @@ interface GateCall {
 
 const arrange = async () => {
   const engine = createMemoryEngine();
-  const gate = { allow: false, calls: [] as GateCall[] };
+  // `allow` admits every client; `admitted` admits the clients it names.
+  const gate = { allow: false, admitted: new Set<string>(), calls: [] as GateCall[] };
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: ORIGIN,
     dataEngine: engine,
     oidcAuthorizeGate: (params: GateCall) => {
       gate.calls.push({ userId: params.userId, clientId: params.clientId });
-      return gate.allow;
+      return gate.allow || gate.admitted.has(params.clientId);
     },
   } as any);
 
@@ -135,7 +136,26 @@ const arrange = async () => {
     );
   };
 
-  return { manager, gate, userId, register, clientRow, authorize, call, cookie };
+  /** A form-encoded `POST /oauth2/authorize`; `body` may repeat a key by giving it an array. */
+  const authorizeForm = (
+    query: Record<string, string>,
+    body: Record<string, string | readonly string[]>,
+    headers: Record<string, string>,
+  ) => {
+    const url = new URL(`${ISSUER}/oauth2/authorize`);
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+    const form = new URLSearchParams();
+    for (const [k, v] of Object.entries(body)) for (const one of typeof v === 'string' ? [v] : v) form.append(k, one);
+    return manager.handleRequest(
+      new Request(url.toString(), {
+        method: 'POST',
+        headers: { origin: ORIGIN, ...headers, cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      }),
+    );
+  };
+
+  return { manager, gate, userId, register, clientRow, authorize, authorizeForm, call, cookie };
 };
 
 const codeRequest = (clientId: string, redirectUri: string): Record<string, string> => ({
@@ -321,4 +341,226 @@ describe('a /oauth2/authorize with no signed-in subject is not judged', () => {
     expect(location.startsWith(`${ORIGIN}/_console/login?`), location).toBe(true);
     expect(new URL(location).searchParams.has('error')).toBe(false);
   });
+});
+
+/** The URL an authorize answer sends the caller to: a `302`'s `Location`, or a fetch caller's `{ redirect, url }`. */
+async function nextUrl(res: Response): Promise<string> {
+  const location = res.headers.get('location');
+  if (location) return location;
+  const body: any = await res.clone().json().catch(() => null);
+  return typeof body?.url === 'string' ? body.url : '';
+}
+
+/** The authorization code an answer hands the client, or `null`. */
+async function codeIn(res: Response): Promise<string | null> {
+  const url = await nextUrl(res);
+  return url.startsWith(ENV_CALLBACK) ? new URL(url).searchParams.get('code') : null;
+}
+
+/** The refusal's `403` envelope: code and status (ADR-0112), and no code handed out. */
+async function expectRefusalEnvelope(res: Response): Promise<void> {
+  const text = await res.clone().text();
+  expect(res.status, text).toBe(403);
+  const body: any = JSON.parse(text);
+  expect(body.code ?? body.error?.code).toBe(ENV_ACCESS_DENIED_CODE);
+  expect(res.headers.get('location')).toBeNull();
+  expect(text).not.toContain('code=');
+}
+
+describe('the environment-access gate judges every client an /oauth2/authorize request names, from the query and the body', () => {
+  /** A signed-in subject, a refused client that would skip consent, and (when asked) an admitted one. */
+  const arrangeClients = async () => {
+    const rig = await arrange();
+    const refused = await rig.register(ENV_CALLBACK, 'web');
+    const admitted = await rig.register(ENV_CALLBACK, 'web');
+    rig.clientRow(refused).skip_consent = true;
+    rig.clientRow(admitted).skip_consent = true;
+    rig.gate.admitted.add(admitted);
+    return { rig, refused, admitted };
+  };
+
+  it('a GET naming a refused client is refused', async () => {
+    const { rig, refused } = await arrangeClients();
+
+    const res = await rig.authorize(codeRequest(refused, ENV_CALLBACK), CONSOLE_FETCH);
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId: refused }]);
+    await expectRefusalEnvelope(res);
+  });
+
+  it('a form-encoded POST naming a refused client in the body is refused', async () => {
+    const { rig, refused } = await arrangeClients();
+
+    const res = await rig.authorizeForm({}, codeRequest(refused, ENV_CALLBACK), CONSOLE_FETCH);
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId: refused }]);
+    await expectRefusalEnvelope(res);
+  });
+
+  it('a form-encoded POST from a browser navigation is refused with the readable page, as a refused POST is answered today', async () => {
+    const { rig, refused } = await arrangeClients();
+
+    const res = await rig.authorizeForm({}, codeRequest(refused, ENV_CALLBACK), NAVIGATION);
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId: refused }]);
+    expect(res.status).toBe(403);
+    expect(res.headers.get('location')).toBeNull();
+    expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    const page = await readPage(res);
+    expect(page.html).toContain(`data-refusal-code="${ENV_ACCESS_DENIED_CODE}"`);
+    expect(page.html).not.toContain(ENV_CALLBACK);
+  });
+
+  it('a JSON POST is answered with the provider\'s own 415, and no code is handed out', async () => {
+    const { rig, refused } = await arrangeClients();
+
+    const res = await rig.manager.handleRequest(
+      new Request(`${ISSUER}/oauth2/authorize`, {
+        method: 'POST',
+        headers: { origin: ORIGIN, cookie: rig.cookie, ...CONSOLE_FETCH, 'content-type': 'application/json' },
+        body: JSON.stringify(codeRequest(refused, ENV_CALLBACK)),
+      }),
+    );
+
+    expect(res.status, await res.clone().text()).toBe(415);
+    expect(await codeIn(res)).toBeNull();
+  });
+
+  const pairs: ReadonlyArray<[string, 'query' | 'body']> = [
+    ['an admitted client in the query and a refused client in the body', 'body'],
+    ['a refused client in the query and an admitted client in the body', 'query'],
+  ];
+  for (const [name, refusedIn] of pairs) {
+    it(`a form-encoded POST naming ${name} is refused`, async () => {
+      const { rig, refused, admitted } = await arrangeClients();
+      const inQuery = refusedIn === 'query' ? refused : admitted;
+      const inBody = refusedIn === 'body' ? refused : admitted;
+
+      const res = await rig.authorizeForm({ client_id: inQuery }, codeRequest(inBody, ENV_CALLBACK), CONSOLE_FETCH);
+
+      expect(rig.gate.calls).toContainEqual({ userId: rig.userId, clientId: refused });
+      await expectRefusalEnvelope(res);
+    });
+  }
+
+  it('a body naming two clients, one of them refused, is refused', async () => {
+    const { rig, refused, admitted } = await arrangeClients();
+
+    const res = await rig.authorizeForm(
+      {},
+      { ...codeRequest(refused, ENV_CALLBACK), client_id: [admitted, refused] },
+      CONSOLE_FETCH,
+    );
+
+    expect(rig.gate.calls).toContainEqual({ userId: rig.userId, clientId: refused });
+    await expectRefusalEnvelope(res);
+  });
+
+  it('a client named in both the query and the body is judged once', async () => {
+    const { rig, refused } = await arrangeClients();
+
+    const res = await rig.authorizeForm({ client_id: refused }, codeRequest(refused, ENV_CALLBACK), CONSOLE_FETCH);
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId: refused }]);
+    await expectRefusalEnvelope(res);
+  });
+
+  it('control: an admitted subject\'s form-encoded POST is handed a code, every named client judged', async () => {
+    const { rig, admitted } = await arrangeClients();
+
+    const res = await rig.authorizeForm({ client_id: admitted }, codeRequest(admitted, ENV_CALLBACK), CONSOLE_FETCH);
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId: admitted }]);
+    expect(await codeIn(res), await res.clone().text()).toBeTruthy();
+  });
+
+  it('control: a request that names no client anywhere is not judged', async () => {
+    const { rig } = await arrangeClients();
+    const { client_id: _omit, ...params } = codeRequest('unused', ENV_CALLBACK);
+
+    const getRes = await rig.authorize(params, CONSOLE_FETCH);
+    const postRes = await rig.authorizeForm({}, params, CONSOLE_FETCH);
+
+    expect(rig.gate.calls).toHaveLength(0);
+    expect(getRes.status).not.toBe(403);
+    expect(postRes.status).not.toBe(403);
+    expect(await codeIn(getRes)).toBeNull();
+    expect(await codeIn(postRes)).toBeNull();
+  });
+});
+
+describe('the environment-access gate judges every pass that resumes an authorization', () => {
+  /** The signed authorization request a provider redirect carries, as the Console posts it back. */
+  const oauthQueryOf = (location: string): string => {
+    expect(location.includes('?'), `expected a redirect carrying the signed request, got ${location}`).toBe(true);
+    return location.slice(location.indexOf('?'));
+  };
+
+  /**
+   * One resume pass: `prepare` runs with the gate admitting the client and
+   * hands back the signed request; `resume` then runs with the gate as the
+   * leg sets it.
+   */
+  interface ResumePass {
+    readonly name: string;
+    readonly skipConsent: boolean;
+    readonly session: 'signed-in' | 'anonymous';
+    resume(rig: Awaited<ReturnType<typeof arrange>>, oauthQuery: string): Promise<Response>;
+  }
+
+  const passes: readonly ResumePass[] = [
+    {
+      name: 'the sign-in that resumes an authorization',
+      skipConsent: true,
+      session: 'anonymous',
+      resume: (rig, oauthQuery) =>
+        rig.call('/sign-in/email', { body: { email: EMAIL, password: PASSWORD, oauth_query: oauthQuery }, headers: CONSOLE_FETCH }),
+    },
+    {
+      name: 'POST /oauth2/consent',
+      skipConsent: false,
+      session: 'signed-in',
+      resume: (rig, oauthQuery) =>
+        rig.call('/oauth2/consent', { body: { accept: true, oauth_query: oauthQuery }, headers: { ...CONSOLE_FETCH, cookie: rig.cookie } }),
+    },
+    {
+      name: 'POST /oauth2/continue',
+      skipConsent: true,
+      session: 'anonymous',
+      resume: (rig, oauthQuery) =>
+        rig.call('/oauth2/continue', { body: { postLogin: true, oauth_query: oauthQuery }, headers: { ...CONSOLE_FETCH, cookie: rig.cookie } }),
+    },
+  ];
+
+  const prepare = async (pass: ResumePass) => {
+    const rig = await arrange();
+    const clientId = await rig.register(ENV_CALLBACK, 'web');
+    rig.clientRow(clientId).skip_consent = pass.skipConsent;
+    rig.gate.allow = true;
+    const first = await rig.authorize(codeRequest(clientId, ENV_CALLBACK), NAVIGATION, pass.session);
+    const oauthQuery = oauthQueryOf(first.headers.get('location') ?? '');
+    rig.gate.calls.length = 0;
+    return { rig, clientId, oauthQuery };
+  };
+
+  for (const pass of passes) {
+    it(`${pass.name}: a denying gate refuses it`, async () => {
+      const { rig, clientId, oauthQuery } = await prepare(pass);
+      rig.gate.allow = false;
+
+      const res = await pass.resume(rig, oauthQuery);
+
+      expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId }]);
+      await expectRefusalEnvelope(res);
+    });
+
+    it(`${pass.name}: control — an admitting gate is judged on it and the pass hands out a code`, async () => {
+      const { rig, clientId, oauthQuery } = await prepare(pass);
+
+      const res = await pass.resume(rig, oauthQuery);
+
+      expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId }]);
+      expect(await codeIn(res), await res.clone().text()).toBeTruthy();
+    });
+  }
 });
