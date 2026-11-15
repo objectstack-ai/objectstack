@@ -253,6 +253,8 @@ describe('signed bodies (D4, D7, D8)', () => {
     tenant_id: 'org_1',
     sequence: 3,
     kind: 'window',
+    part_index: 0,
+    final_part: true,
     window_start: '2026-11-10T04:00:00.000Z',
     window_end: '2026-11-10T05:00:00.000Z',
     sealed_through: '2026-11-10T05:00:00.000Z',
@@ -279,6 +281,8 @@ describe('signed bodies (D4, D7, D8)', () => {
       window_end: '2026-11-10 05:00:00',
       sealed_at: Date.parse(body.sealed_at),
       fencing_token: 17,
+      part_index: '0',
+      final_part: 1, // a driver with no boolean column hands back 1 / 0
     };
     const back = checkpointBodyFromRow(driverRow);
     expect(back).toEqual(body);
@@ -304,6 +308,8 @@ describe('signed bodies (D4, D7, D8)', () => {
       { ...body, tenant_id: 'org_2' },
       { ...body, sealed_through: '2026-11-10T06:00:00.000Z' },
       { ...body, seed_handle: 'sec_other' },
+      { ...body, part_index: 1 },
+      { ...body, final_part: false },
     ]) {
       expect(checkpointDigest(checkpointBodyFromRow(changed))).not.toBe(digest);
     }
@@ -323,6 +329,10 @@ describe('signed bodies (D4, D7, D8)', () => {
       { ...body, columns: { clear: ['id', 'created_at'], committed: [] } },
       { ...body, columns: { clear: ['id'], committed: ['id'] } },
       { ...body, fencing_token: '-1' },
+      { ...body, part_index: -1 },
+      { ...body, part_index: undefined },
+      { ...body, final_part: undefined },
+      { ...body, final_part: 'yes' },
     ]) {
       expect(() => checkpointBodyFromRow(bad as unknown as Record<string, unknown>), JSON.stringify(bad).slice(0, 80)).toThrow(SignedBodyError);
     }
@@ -400,6 +410,8 @@ describe('the deployment chain signs a NULL organization (D5)', () => {
       tenant_id: null,
       sequence: 0,
       kind: 'window',
+      part_index: 0,
+      final_part: true,
       window_start: '2026-11-10T04:00:00.000Z',
       window_end: '2026-11-10T05:00:00.000Z',
       sealed_through: '2026-11-10T05:00:00.000Z',
@@ -467,7 +479,7 @@ describe('a redaction names its checkpoint by the signed sequence (D7)', () => {
 
   it('declares one checkpoint column per stored field, the sequence a redaction refers to among them', () => {
     const body: CheckpointSignedBody = {
-      sealed_object: 'sys_audit_log', tenant_id: null, sequence: 0, kind: 'window',
+      sealed_object: 'sys_audit_log', tenant_id: null, sequence: 0, kind: 'window', part_index: 0, final_part: true,
       window_start: '2026-11-10T04:00:00.000Z', window_end: '2026-11-10T05:00:00.000Z',
       sealed_through: '2026-11-10T05:00:00.000Z', leaf_count: 1, row_ids: ['r1'], root: 'a'.repeat(64),
       previous_digest: null, columns: { clear: ['created_at', 'id'], committed: [] },
@@ -482,7 +494,7 @@ describe('a redaction names its checkpoint by the signed sequence (D7)', () => {
 
 describe('NULL names the deployment chain only when it is stated (D5)', () => {
   const checkpoint: CheckpointSignedBody = {
-    sealed_object: 'sys_audit_log', tenant_id: null, sequence: 0, kind: 'window',
+    sealed_object: 'sys_audit_log', tenant_id: null, sequence: 0, kind: 'window', part_index: 0, final_part: true,
     window_start: '2026-11-10T04:00:00.000Z', window_end: '2026-11-10T05:00:00.000Z',
     sealed_through: '2026-11-10T05:00:00.000Z', leaf_count: 1, row_ids: ['r1'], root: 'a'.repeat(64),
     previous_digest: null, columns: { clear: ['created_at', 'id'], committed: [] },
@@ -530,6 +542,8 @@ describe('the leaf hashes beside a checkpoint are trusted only through its signe
     tenant_id: 'org_1',
     sequence: 0,
     kind: 'window',
+    part_index: 0,
+    final_part: true,
     window_start: '2026-11-10T04:00:00.000Z',
     window_end: '2026-11-10T05:00:00.000Z',
     sealed_through: '2026-11-10T05:00:00.000Z',
