@@ -34,6 +34,7 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { SysUser } from '@objectstack/platform-objects/identity';
+import { celEngine } from '@objectstack/formula';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-33181';
@@ -1070,5 +1071,87 @@ describe('[#33186] the Setup → Users add actions reach the pending-person door
     }
     expect(s.users()).toHaveLength(before);
     expect(s.row(ADD_DIALOG.email)).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Deactivate / Reactivate are offered without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.ban_user` / `unban_user` are the deactivate / reactivate doors'
+// first-party callers. On a kernel without the better-auth admin plugin the
+// doors work (above), so the console must offer them there too. Each case
+// judges the DECLARED action's `visible` against the features THIS kernel
+// serves (`getPublicConfig().features`, what `/auth/config` hands the console)
+// through the engine the console delegates to, then posts what the action
+// submits — its `recordIdParam` naming the row, its params collected — to its
+// `target`. CONTROL: an action whose door needs the plugin stays hidden there.
+
+describe('[#33759] Ban / Unban are offered and work without the admin plugin', () => {
+  /** The session payload's principal for the staged admin: the platform-admin rung the doors' gate judges. */
+  const ADMIN_PRINCIPAL = { id: 'staged-admin', email: EMAILS.admin, positions: [] as string[], isPlatformAdmin: true };
+
+  function declaredAction(name: string) {
+    const action = (SysUser.actions ?? []).find((a) => a.name === name);
+    if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+    return action;
+  }
+
+  /** The console's verdict on the declared action for this row, under the features this kernel serves. */
+  function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Record<string, unknown>): boolean | string {
+    const raw = declaredAction(name).visible as unknown;
+    const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
+    if (typeof source !== 'string') return `NO CEL SOURCE on ${name}`;
+    const features = (s.manager.getPublicConfig() as any).features;
+    const user = { ...ADMIN_PRINCIPAL, id: s.ids.admin };
+    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, extra: { current_user: user, user, ctx: { user }, features } });
+    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0]!.trim()}`;
+    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+  }
+
+  /** What the action posts for this row: the record id under `recordIdParam`, then the collected params. */
+  function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
+    const action = declaredAction(name);
+    const target = String(action.target);
+    expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
+    const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
+    for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
+    return { path: target.slice(BASE.length), body: { [String(action.recordIdParam)]: userId, ...collected } };
+  }
+
+  it.each([
+    ['unmanaged', false],
+    ['managed', true],
+  ] as const)('%s kernel: Ban is offered and refuses the next session, then Unban is offered and restores it', async (_kind, managed) => {
+    const s = managed ? await managedStage() : await stage();
+    expect((s.manager.getPublicConfig() as any).features.admin, 'this kernel serves features.admin off').toBe(false);
+
+    expect(offeredOn(s, 'ban_user', s.row(EMAILS.member)!)).toBe(true);
+    expect(offeredOn(s, 'unban_user', s.row(EMAILS.member)!)).toBe(false);
+    const ban = actionCall('ban_user', s.ids.member, { banReason: 'left the company' });
+    const banned = await s.fire(ban.path, ban.body, s.bearers.admin);
+    expect(banned.status, await banned.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.banned).toBe(true);
+
+    const refused = await verdict(await s.signIn(EMAILS.member));
+    expect(refused.status, refused.text).toBe(403);
+    expect(refused.code).toBe(BANNED_USER_SESSION_REFUSAL.code);
+    expect(s.rowsOf('sys_session', s.ids.member)).toHaveLength(0);
+
+    expect(offeredOn(s, 'unban_user', s.row(EMAILS.member)!)).toBe(true);
+    expect(offeredOn(s, 'ban_user', s.row(EMAILS.member)!)).toBe(false);
+    const unban = actionCall('unban_user', s.ids.member);
+    const unbanned = await s.fire(unban.path, unban.body, s.bearers.admin);
+    expect(unbanned.status, await unbanned.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.banned).toBe(false);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+
+  it('CONTROL: an admin-plugin-only action stays hidden on that kernel and is offered once the plugin is on', async () => {
+    const off = await stage();
+    expect(offeredOn(off, 'impersonate_user', off.row(EMAILS.member)!)).toBe(false);
+    const on = await stage({ adminPlugin: true });
+    expect((on.manager.getPublicConfig() as any).features.admin).toBe(true);
+    expect(offeredOn(on, 'impersonate_user', on.row(EMAILS.member)!)).toBe(true);
   });
 });
