@@ -574,13 +574,6 @@ describe('RecentItemsProvider — a deleted record leaves the recents (objectsta
     expect(ids(result.current.recent.recentItems)).toEqual(before);
   });
 
-  it('the object name is matched as the record page matches it, without regard to case', async () => {
-    const { result, source } = await mount();
-    act(() => source.emit({ type: 'delete', resource: 'CRM_Account', id: 'a1' }));
-
-    expect(ids(result.current.recent.recentItems)).not.toContain('record:crm_account:a1');
-  });
-
   it('after an undo, the visit to the restored record lists it again', async () => {
     const { result, source } = await mount();
     act(() => source.emit({ type: 'delete', resource: 'crm_account', id: 'a1' }));

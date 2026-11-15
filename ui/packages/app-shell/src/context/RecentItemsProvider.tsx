@@ -134,14 +134,6 @@ interface RecentItemsContextValue {
    * An id the list does not hold changes nothing and writes nothing.
    */
   removeRecentItem: (id: string) => void;
-  /**
-   * Drops the entry of record `recordId` of `objectName` — for a record this
-   * tab KNOWS is gone, such as one it just deleted. The object name is matched
-   * without regard to case, as the record page matches a delete event; the
-   * record id exactly. A record the list does not hold changes nothing and
-   * writes nothing.
-   */
-  removeRecordItem: (objectName: string, recordId: string) => void;
   clearRecentItems: () => void;
 }
 
@@ -224,22 +216,6 @@ function contentOf(item: RecentItem): string {
     default:
       return JSON.stringify([item.id, item.type, item.href, item.name]);
   }
-}
-
-/**
- * Whether `item` is the entry of record `recordId` of `objectName`. A record
- * entry's id is `record:OBJECT:RECORD_ID`, the one the record page writes; an
- * object's machine name holds no colon, so the first colon after the object
- * ends it.
- */
-function isRecordEntryOf(item: RecentItem, objectName: string, recordId: string): boolean {
-  if (item.type !== 'record') return false;
-  const prefix = 'record:';
-  if (!item.id.startsWith(prefix)) return false;
-  const rest = item.id.slice(prefix.length);
-  const colon = rest.indexOf(':');
-  if (colon < 0) return false;
-  return rest.slice(0, colon).toLowerCase() === objectName.toLowerCase() && rest.slice(colon + 1) === recordId;
 }
 
 function loadRecent(userId?: string | null): RecentItem[] {
@@ -366,23 +342,13 @@ export function RecentItemsProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
-  const removeRecordItem = useCallback(
-    (objectName: string, recordId: string) => {
-      const prev = itemsRef.current;
-      const next = prev.filter(r => !isRecordEntryOf(r, objectName, recordId));
-      if (next.length === prev.length) return;
-      commit(next);
-    },
-    [commit],
-  );
-
   const clearRecentItems = useCallback(() => {
     commit([]);
   }, [commit]);
 
   const value = useMemo<RecentItemsContextValue>(
-    () => ({ recentItems, addRecentItem, removeRecentItem, removeRecordItem, clearRecentItems }),
-    [recentItems, addRecentItem, removeRecentItem, removeRecordItem, clearRecentItems],
+    () => ({ recentItems, addRecentItem, removeRecentItem, clearRecentItems }),
+    [recentItems, addRecentItem, removeRecentItem, clearRecentItems],
   );
 
   return (
@@ -410,11 +376,18 @@ export function useRecentItems(): RecentItemsContextValue {
       recentItems: [],
       addRecentItem: () => {},
       removeRecentItem: () => {},
-      removeRecordItem: () => {},
       clearRecentItems: () => {},
     };
   }
   return ctx;
+}
+
+/**
+ * The id a record's recent entry is kept under — the one the record page
+ * writes: `record:OBJECT:RECORD_ID`, by the object's machine name.
+ */
+function recordRecentItemId(objectName: string, recordId: string): string {
+  return `record:${objectName}:${recordId}`;
 }
 
 /** The part of a data source this module reads: its mutation events. */
@@ -434,12 +407,12 @@ type MutationSource = Pick<DataSource, 'onMutation'>;
  * Mount it once, under the data source and inside a {@link RecentItemsProvider}.
  */
 export function useDropDeletedRecordsFromRecents(dataSource: MutationSource | null | undefined): void {
-  const { removeRecordItem } = useRecentItems();
+  const { removeRecentItem } = useRecentItems();
   useEffect(() => {
     if (typeof dataSource?.onMutation !== 'function') return;
     return dataSource.onMutation(event => {
       if (event.type !== 'delete' || event.id == null || !event.resource) return;
-      removeRecordItem(event.resource, event.id);
+      removeRecentItem(recordRecentItemId(event.resource, event.id));
     });
-  }, [dataSource, removeRecordItem]);
+  }, [dataSource, removeRecentItem]);
 }
