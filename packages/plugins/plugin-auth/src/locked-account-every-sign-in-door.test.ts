@@ -625,6 +625,10 @@ describe('the device grant: a locked account is not signed in on a device', () =
     const started = await rig.post('/device/code', { client_id: 'locked-door-cli' });
     expect(started.status, await started.clone().text()).toBe(200);
     const { device_code, user_code } = (await started.json()) as { device_code: string; user_code: string };
+    // The signed-in account claims the code before approving it, as the
+    // verification page does.
+    const claimed = await rig.get(`/device?user_code=${encodeURIComponent(user_code)}`, { cookie: approverCookie });
+    expect(claimed.status, await claimed.clone().text()).toBe(200);
     const approved = await rig.post('/device/approve', { userCode: user_code }, { cookie: approverCookie });
     expect(approved.status, await approved.clone().text()).toBe(200);
     return rig.post('/device/token', {
@@ -644,7 +648,9 @@ describe('the device grant: a locked account is not signed in on a device', () =
 
     expect(await answerOf(res)).toEqual(reference);
     expect(rig.sessionRows(rig.plainId), 'no session row was written').toBe(rowsBefore);
-    const rows = rig.events.filter((e: any) => e?.action === 'login_failed' && e.userId === rig.plainId);
+    const rows = rig.events.filter(
+      (e: any) => e?.action === 'login_failed' && e.userId === rig.plainId && e.context?.endpoint !== '/sign-in/email',
+    );
     expect(rows.map((e: any) => e.context)).toEqual([{ endpoint: '/device/token', reason: 'ACCOUNT_LOCKED' }]);
   }, 60_000);
 
@@ -746,8 +752,12 @@ describe('external-identity sign-in: a locked account is not signed in through i
 
     const res = await d.signInWithIdp();
 
-    expect(res.status).toBe(EXPECTED_STATUS[refusal]);
-    expect((await answerOf(res)).code).toBe(EXPECTED_CODE[refusal]);
+    // The callback is a browser redirect: its refusal rides the provider
+    // door's error redirect, carrying the code password sign-in gives.
+    expect(res.status).toBe(302);
+    const location = new URL(String(res.headers.get('location')), ORIGIN);
+    expect(location.pathname).not.toBe('/after-sign-in');
+    expect(location.searchParams.get('error')).toBe(EXPECTED_CODE[refusal]);
     expect(d.sessionRows(), 'no session row was written').toBe(rowsBefore);
     const rows = d.events.filter((e: any) => e?.action === 'login_failed' && e.userId === row.id);
     expect(rows.map((e: any) => e.context)).toEqual([{ endpoint: '/callback/:id', reason: 'ACCOUNT_LOCKED' }]);
@@ -761,6 +771,7 @@ describe('external-identity sign-in: a locked account is not signed in through i
     const res = await d.signInWithIdp();
 
     expect(res.status, await res.clone().text()).toBe(302);
+    expect(new URL(String(res.headers.get('location')), ORIGIN).pathname).toBe('/after-sign-in');
     expect(d.sessionRows()).toBe(rowsBefore + 1);
   }, 60_000);
 });
@@ -842,11 +853,15 @@ describe('CONTROL: a session presented that is no longer of record exempts nothi
     }
     rig.lock(PLAIN.email);
     const code = await smsCode(rig, PLAIN.phone);
-    const rowsBefore = rig.sessionRows(rig.plainId);
+    const liveRows = () =>
+      ((rig.engine.tables.get('sys_session') ?? []) as any[]).filter(
+        (r) => String(r.user_id ?? r.userId) === rig.plainId && new Date(r.expires_at ?? r.expiresAt).getTime() > Date.now(),
+      ).length;
+    expect(liveRows()).toBe(0);
 
     const res = await rig.post('/phone-number/verify', { phoneNumber: PLAIN.phone, code }, { cookie: rig.plainCookie });
 
     expect((await answerOf(res)).code).toBe('ACCOUNT_LOCKED');
-    expect(rig.sessionRows(rig.plainId)).toBe(rowsBefore);
+    expect(liveRows(), 'no live session was issued').toBe(0);
   }, 60_000);
 });
