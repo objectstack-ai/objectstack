@@ -2941,7 +2941,8 @@ export class AutomationEngine implements IAutomationService {
     // a shared name back to one bare entry (`main`'s answer). [#33893;
     // amendment 7] `coHeldByDisabled`: so is the key of a holder whose
     // co-holders are disabled, which the boot pull files alone and a disabled
-    // co-holder's withdrawal leaves alone; it keeps its qualified key.
+    // co-holder's withdrawal leaves alone; it keeps its qualified key until the
+    // registry no longer holds the name twice ({@link placeFlowSlot} folds it).
     private readonly flowSlots = new FlowSlotTable(
         (name) => this.durableFlowHolder(name)?.status === 'refused',
         (name) => this.durableFlowHolder(name)?.status === 'refused' && this.flowHolder(name)?.status !== 'refused',
@@ -5075,7 +5076,14 @@ export class AutomationEngine implements IAutomationService {
             return keys[0] ?? this.flowSlots.add({ packageId: null, name }).key;
         }
         const own = this.flowSlots.keyOf(name, packageId);
-        if (own !== undefined) return own;
+        if (own !== undefined) {
+            // [#33893] A lone slot kept under its qualified key beside a
+            // disabled co-holder folds back once that holder is gone (the
+            // uninstall's re-sync re-registers this one).
+            const folded = this.flowSlots.settle(name);
+            this.moveFlowRecords(folded);
+            return folded[0]?.to ?? own;
+        }
         const packageless = this.flowSlots.keyOf(name, null);
         if (packageless !== undefined) {
             this.flowSlots.adopt(packageless, packageId);

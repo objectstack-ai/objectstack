@@ -20,8 +20,10 @@
  * and the others are disabled (`coHeldByDisabled`), a package's lone slot of
  * the name is filed, and stays, under its qualified key: the first holder
  * the boot pull registers beside a disabled one, and the holder a disabled
- * one's withdrawal leaves behind. Such a slot reads as shared
- * ({@link FlowSlotTable.isShared}) for as long as it holds that key.
+ * one's withdrawal leaves behind. Once the registry no longer holds the name
+ * twice (the disabled holder uninstalled), the slot's next placement folds it
+ * back to the bare name ({@link FlowSlotTable.settle}): one keying rule, so a
+ * name one package holds is never read as shared.
  *
  * Invariant (D4): a package-less slot never sits beside a package slot. A
  * package arriving for a name a package-less slot holds takes it over
@@ -106,15 +108,25 @@ export class FlowSlotTable {
         return this.byName.get(name)?.get(packageId ?? '');
     }
 
-    /**
-     * [M1] Is `name` shared: two or more slots hold it, or one does while the registry holds it twice, or [#33893]
-     * under its qualified key. Every reader asks this.
-     */
+    /** [M1] Is `name` shared: two or more slots hold it, or one does while the registry holds it twice. Every reader asks this. */
     isShared(name: string): boolean {
+        const size = this.byName.get(name)?.size ?? 0;
+        return size > 1 || (size === 1 && this.heldByMany?.(name) === true);
+    }
+
+    /**
+     * [#33893] The name's lone slot, filed under its qualified key beside a
+     * disabled co-holder, goes back to the bare name once the registry no
+     * longer holds the name twice: the move answered, or none.
+     */
+    settle(name: string): FlowKeyMove[] {
         const packages = this.byName.get(name);
-        const size = packages?.size ?? 0;
-        if (size !== 1) return size > 1;
-        return this.heldByMany?.(name) === true || [...packages!.values()][0] !== name;
+        if (packages?.size !== 1 || this.heldByMany?.(name) === true) return [];
+        const [[onlyPackage, onlyKey]] = [...packages];
+        if (onlyKey === name) return [];
+        this.rekey(onlyKey, name);
+        packages.set(onlyPackage, name);
+        return [{ from: onlyKey, to: name }];
     }
 
     /** Every key, in arrival order. */

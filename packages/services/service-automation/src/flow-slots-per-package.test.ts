@@ -1345,6 +1345,17 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
         slots.add({ packageId: P2, name: 'f' });
         coHeldByDisabled = false;
         expect(slots.remove(`${P2}/f`)).toEqual([{ from: `${P1}/f`, to: 'f' }]);
+
+        // The disabled co-holder uninstalled: the lone qualified slot is no longer shared, and settles back to the bare name.
+        let many = true;
+        const kept = new FlowSlotTable(() => many, () => many);
+        kept.add({ packageId: P1, name: 'g' });
+        expect(kept.settle('g')).toEqual([]);
+        many = false;
+        expect(kept.isShared('g')).toBe(false);
+        expect(kept.settle('g')).toEqual([{ from: `${P1}/g`, to: 'g' }]);
+        expect(kept.keyOf('g', P1)).toBe('g');
+        expect(kept.settle('g')).toEqual([]);
     });
 
     describe.each([[P1, P2], [P2, P1]].map((order) => [order.map(tagOf).join(' then '), order] as const))('registry holds %s', (_o, order) => {
@@ -1396,18 +1407,40 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
         });
     });
 
-    it('the disabled holder then uninstalled: the served holder keeps its key, and the bare name and its trigger still reach it', async () => {
-        ship(P1, triggered('t', 'alpha'));
-        ship(P2, triggered('t', 'beta'));
-        registry.disablePackage(P2);
-        engine.withdrawFlowSlot(P2, 't');
-        registry.unregisterItemsByPackage(P2);
+    it.each([
+        ['runtime disable, then the re-sync withdraws its slot', 'runtime'],
+        ['boot disable (the pull hands the engine the served holder only)', 'boot'],
+    ] as const)('%s, then the disabled holder is uninstalled: its re-sync folds the served holder back to the bare name, and every bare entry serves it (FROM: stuck under PACKAGE/NAME, the bare entries refused a name one package holds)', async (_label, path) => {
+        if (path === 'runtime') {
+            ship(P1, triggered('t', 'alpha'));
+            ship(P2, triggered('t', 'beta'));
+            registry.disablePackage(P2);
+            engine.withdrawFlowSlot(P2, 't');
+        } else {
+            heldOnly(P1, triggered('t', 'alpha'));
+            heldOnly(P2, triggered('t', 'beta'));
+            registry.disablePackage(P2);
+            pull(P1, triggered('t', 'alpha'));
+        }
         expect(engine.flowSlotKey(P1, 't')).toBe(`${P1}/t`);
+
+        // The uninstall: the registry and the loader set drop P2, and the
+        // uninstall's re-sync re-registers the name's one holder.
+        registry.unregisterItemsByPackage(P2);
+        loaderSets.t = [P1];
+        engine.registerFlow('t', triggered('t', 'alpha'), { source: 'package', packageId: P1 });
+
+        expect(engine.flowSlotKey(P1, 't')).toBe('t');
+        expect([...armed.keys()]).toEqual(['t']);
         expect(await fireAll()).toEqual(['alpha']);
+        expect(engine.inboundHookSlot('t')).toBeUndefined();
+        expect(engine.getFlowVersionHistory('t')).toHaveLength(2);
         ran = [];
         expect((await engine.execute('t')).success).toBe(true);
-        expect(await engine.getFlow('t')).toMatchObject({ name: 't' });
         expect(ran).toEqual(['alpha']);
+        expect(() => engine.unregisterFlow('t')).not.toThrow();
+        expect(await engine.getFlow('t')).toBeNull();
+        expect([...armed.keys()]).toEqual([]);
     });
 
     it('CONTROL — the other holder uninstalled before its slot is withdrawn: the name folds back to its bare key, as before', async () => {
