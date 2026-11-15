@@ -78,7 +78,8 @@ import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './ru
 import { isVisitorResendInEndpointContext } from './visitor-verification-resend.js';
 import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
 import { withSystemReadContext } from './objectql-adapter.js';
-import { refuseSsoAccountOutsideProvenDomain } from './sso-account-at-proven-domain.js';
+import { refuseSsoAccountOutsideProvenDomain, refuseSsoAccountWithoutAddress } from './sso-account-at-proven-domain.js';
+import { refuseSamlAccountKeyContradiction } from './sso-saml-account-key.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
@@ -358,9 +359,18 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // posture, invitation or JIT toggle relaxes it, and the audience gate
       // must admit as well. The same rule holds when an SSO sign-in links
       // implicitly to an existing account, or would change a linked account's
-      // stored address (`implicit-account-linking.ts`, rule 4).
+      // stored address (`implicit-account-linking.ts`, rule 4). Then,
+      // verification on or off, an SSO provider creates an account only for a
+      // value that is an email address.
+      //
+      // Before all of them, on every action (create, link, sign-in): a SAML
+      // sign-in keyed on a stable attribute read from the posted assertion
+      // goes on only when the vendor's verified attributes carry that value
+      // (`sso-saml-account-key.ts`).
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
+        const contradicted = refuseSamlAccountKeyContradiction(data, this.config.logger);
+        if (contradicted) return contradicted;
         const provenDomain = {
           verificationEnabled: () => this.isSsoDomainVerificationEnabled(),
           reader: this.config.dataEngine ? (withSystemReadContext(this.config.dataEngine) as never) : undefined,
@@ -368,6 +378,10 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         };
         const outsideProvenDomain = await refuseSsoAccountOutsideProvenDomain(data, provenDomain);
         if (outsideProvenDomain) return outsideProvenDomain;
+        // Verification on or off, an SSO provider creates an account only for
+        // an email address (same module): an opaque NameID is no account key.
+        const notAnAddress = refuseSsoAccountWithoutAddress(data, this.config.logger);
+        if (notAnAddress) return notAnAddress;
         return (await refuseImplicitAccountLink(data, ctx, {
           requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
           provenDomain,
@@ -837,6 +851,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertSsoSignOutOfIdpSupported: (...a) => this.assertSsoSignOutOfIdpSupported(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
+          getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
           getDataEngine: (...a) => this.getDataEngine(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
           isAuthGateActive: (...a) => this.isAuthGateActive(...a),

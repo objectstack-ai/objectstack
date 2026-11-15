@@ -37,6 +37,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Pay @objectstack/lint's first transform at collection, not inside a clocked case.
+import '@objectstack/lint';
 
 interface Row {
     id: string;
@@ -342,6 +344,40 @@ describe('publishPackageDrafts carries per-draft advisories on published[] eleme
     });
 });
 
+describe('[#32656] publishPackageDrafts states the caller\'s user-text locales to the authoring gate', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    // Ruling C on #32440: a finding's user sentence is composed in the request
+    // locale, else the workspace default, else `en`. The batch door's `/meta`
+    // twin (the runtime `packages` domain) states the two locales; the batch
+    // promotes each draft through the same gate the single-item doors judge
+    // with, so the locales must reach it for every element — and an
+    // unstated request must reach it unstated (the gate then composes `en`).
+    it('every promoted draft is judged with the stated locales; an unstated request states none', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageFlowDraft(protocol, 'nightly_purge', advisoryFlow('nightly_purge'));
+        await stageFlowDraft(protocol, 'purge_clean', cleanFlow('purge_clean'));
+        const gate = vi.spyOn(protocol as any, 'assertRuntimeAuthoringRules');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG, userTextLocales: ['zh-CN', 'en'] });
+        expect(res).toMatchObject({ success: true, publishedCount: 2 });
+        const stated = gate.mock.calls.map(([evt]: any[]) => [evt.name, evt.userTextLocales]);
+        expect(stated).toEqual(expect.arrayContaining([
+            ['nightly_purge', ['zh-CN', 'en']],
+            ['purge_clean', ['zh-CN', 'en']],
+        ]));
+
+        gate.mockClear();
+        await stageFlowDraft(protocol, 'nightly_purge', advisoryFlow('nightly_purge'));
+        await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(gate.mock.calls.length).toBeGreaterThan(0);
+        for (const [evt] of gate.mock.calls as any[]) expect(evt.userTextLocales).toBeUndefined();
+    });
+});
+
 // ---------------------------------------------------------------------------
 // [#30693] A refused object-storage sync rides the object's element too.
 // ---------------------------------------------------------------------------
@@ -464,5 +500,173 @@ describe('[#30693] publishPackageDrafts reports a refused object-storage sync on
             expect(Object.keys(el).sort()).toEqual(['name', 'type', 'version']);
         }
         expect(JSON.stringify(res.published)).not.toContain('advisories');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#33005] A registry that refused a promoted object rides that object's element.
+// ---------------------------------------------------------------------------
+// The registry write-through runs after the metadata commit (ADR-0067 D2) and
+// used to keep a refused `registerObject` to a `warn` line: the batch answered
+// `published` with nothing naming the object, and a seed load right after it
+// answered OBJECT_NOT_FOUND. The ruled interim answer (option D): one `error`
+// line for the operator, and one warning under the stable rule
+// `object-registry-refused` on the refused object's element. Its follow-up
+// (#33277, below) moves the batch's outcome off `published`.
+
+const REGISTRY_REFUSED_RULE = 'object-registry-refused';
+
+/** The registry refusing exactly the named objects, with an undeclared (no 4xx `status`) failure. */
+function refuseRegistration(engine: any, refused: ReadonlySet<string>): void {
+    engine.registry.registerObject = (obj: { name?: string }) => {
+        if (obj?.name !== undefined && refused.has(obj.name)) {
+            throw new Error(`object ${obj.name} collides with a registered field index`);
+        }
+    };
+}
+
+/** The operator lines the refusal logged at `error`, by the object they name. */
+const registryRefusedLines = (error: { mock: { calls: unknown[][] } }, name: string) =>
+    error.mock.calls.filter((args) => String(args[0]).includes(`object '${name}' was published but the runtime registry REFUSED it`));
+
+describe('[#33005] publishPackageDrafts reports a registry-refused object on that object\'s element', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('exactly the refused element carries the rule, logged at error once', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set(['ticket']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'invoice');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        // Nothing is refused or rolled back: both drafts landed.
+        expect(res.failed).toEqual([]);
+        expect(res).toMatchObject({ publishedCount: 2, failedCount: 0 });
+
+        const byName = new Map(res.published.map((p) => [p.name, p]));
+        const refused = byName.get('ticket')!;
+        expect(refused.advisories).toHaveLength(1);
+        expect(refused.advisories![0]).toMatchObject({
+            rule: REGISTRY_REFUSED_RULE, severity: 'warning', path: '', where: 'object "ticket"',
+        });
+        expect(refused.advisories![0]!.message).toContain("'ticket'");
+        expect(Object.keys(refused.advisories![0]!).sort())
+            .toEqual(['hint', 'message', 'path', 'rule', 'severity', 'where']);
+        // An undeclared registry failure is withheld from the 2xx body…
+        expect(refused.advisories![0]!.message).not.toContain('collides with a registered field index');
+
+        // …and reaches the operator once, at error, with the reason whole.
+        const lines = registryRefusedLines(error, 'ticket');
+        expect(lines).toHaveLength(1);
+        expect(lines[0]![1]).toBe('object ticket collides with a registered field index');
+        expect(registryRefusedLines(error, 'invoice')).toEqual([]);
+
+        const sibling = byName.get('invoice')!;
+        expect('advisories' in sibling).toBe(false);
+        expect(Object.keys(sibling).sort()).toEqual(['name', 'type', 'version']);
+    });
+
+    it('publishMetaItem and a publish-mode save answer the same rule on their advisories', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set(['ticket', 'invoice']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+
+        const published: any = await protocol.publishMetaItem({ type: 'object', name: 'ticket', packageId: PKG });
+        const saved: any = await (protocol as any).saveMetaItem({
+            type: 'object', name: 'invoice', item: objectBody('invoice'), packageId: PKG, mode: 'publish',
+        });
+
+        expect(published.success).toBe(true);
+        expect(saved.success).toBe(true);
+        expect((published.advisories ?? []).map((a: any) => [a.rule, a.where]))
+            .toEqual([[REGISTRY_REFUSED_RULE, 'object "ticket"']]);
+        expect((saved.advisories ?? []).map((a: any) => [a.rule, a.where]))
+            .toEqual([[REGISTRY_REFUSED_RULE, 'object "invoice"']]);
+        expect(registryRefusedLines(error, 'ticket')).toHaveLength(1);
+        expect(registryRefusedLines(error, 'invoice')).toHaveLength(1);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#33277] A batch whose registry refused an object answers a distinct outcome.
+// ---------------------------------------------------------------------------
+// The follow-up the #33005 ruling named (option A): the drafts landed and stay
+// live, so the object stays in `published[]` with its warning, but the batch
+// no longer answers `published`. It answers `published_unregistered`,
+// `success: false`, and names each refused object in `unregistered[]` under
+// the same rule id, in publish order.
+
+describe('[#33277] publishPackageDrafts answers published_unregistered naming each object the registry refused', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    // Publish order follows the staging order here, so both orders put the
+    // refused object on either side of a sibling the registry accepts.
+    for (const order of [['ticket', 'invoice'], ['invoice', 'ticket']] as const) {
+        it(`names the refused object and does not answer published (publish order ${order.join(', ')})`, async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.spyOn(console, 'error').mockImplementation(() => {});
+            const { engine } = makeStubEngine();
+            refuseRegistration(engine, new Set(['ticket']));
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            for (const name of order) await stageObjectDraft(protocol, name);
+
+            const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+            expect(res.outcome).toBe('published_unregistered');
+            expect(res.success).toBe(false);
+            expect(res.unregistered).toEqual([{ type: 'object', name: 'ticket', rule: REGISTRY_REFUSED_RULE }]);
+            // The drafts landed: nothing failed, both are published, and the
+            // refused object's element still carries the warning it names.
+            expect(res.failed).toEqual([]);
+            expect(res).toMatchObject({ publishedCount: 2, failedCount: 0 });
+            expect(res.published.map((p) => p.name)).toEqual([...order]);
+            const refused = res.published.find((p) => p.name === 'ticket')!;
+            expect((refused.advisories ?? []).map((a) => a.rule)).toEqual([REGISTRY_REFUSED_RULE]);
+        });
+    }
+
+    it('names every refused object, in publish order', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set(['ticket', 'invoice']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const name of ['invoice', 'account', 'ticket']) await stageObjectDraft(protocol, name);
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).toBe('published_unregistered');
+        expect(res.success).toBe(false);
+        expect(res.unregistered).toEqual([
+            { type: 'object', name: 'invoice', rule: REGISTRY_REFUSED_RULE },
+            { type: 'object', name: 'ticket', rule: REGISTRY_REFUSED_RULE },
+        ]);
+        expect(res.publishedCount).toBe(3);
+    });
+
+    it('CONTROL: a batch the registry takes whole still answers published, with no unregistered key', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set());
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'invoice');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2, failedCount: 0 });
+        expect('unregistered' in res).toBe(false);
     });
 });

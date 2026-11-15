@@ -404,7 +404,7 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -427,7 +427,7 @@
         {
           "clause": "the read-only badge renders AND the controls are actually disabled — checkboxes/Save inert, edit affordances absent",
           "oracle": "dom",
-          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock)",
+          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock). The object designer's Form tab is the designed exception: on a read-only base it stays editable and saves the form view as a declared override in the base's .custom pair, not into the base (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx formViewReadOnly; ADR-0146 D2), so editable Form-tab controls are not a FAIL; they are inert only when the pair is walled or no form view is chosen",
           "evidence": "screenshot + disabled-state DOM read"
         },
         {
@@ -493,6 +493,12 @@
           "date": "2026-10-16",
           "change": "step 5 names the two shapes the writable contrast needs (#23878 checklist-accuracy finding, re-measured on main c91af8ed6): POST /api/v1/packages answers 400 VALIDATION_ERROR ('manifest.type: Invalid option …') without a manifest `type` and 201 with type 'app' (scope project; the install echoes a derived namespace), and an object authored into the scratch base answers 422 INVALID_METADATA, rule security-owd-unset, without a sharingModel and 200 with one. The forged write on the packaged object still answers 403 (NOT_OVERRIDABLE bare, ITEM_LOCKED with ?package=com.example.showcase) and leaves its document byte-identical",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "acceptance[0].verify re-pointed (card #33332; QA run #33094 comment 6852480973): the run found the Form tab editable on a read-only base. That is by design: StudioDesignSurface.tsx makes the Form tab read-only only when no form view is chosen or the pair is walled, because its save lands as a declared override in the base's .custom pair (ADR-0146 D2), never in the base. The verify now names that exception so it is not scored as the lock failing. The clause is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -1785,7 +1791,7 @@
       "title": "A public form's withdrawal holds across the layers of the environment's definition: an administrator's save is environment-wide whatever organization is active and its withdrawal closes the form, a withdrawal in any package's body of the view name closes it in every package, only an explicit false withdraws, a package's shipped false withdraws, and the package-less environment-wide copy may open a form a package ships closed",
       "since": "v17.7",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1807,9 +1813,9 @@
       "steps": [
         "boot showcase on a fresh DB you own, on the stock posture; sign in as the admin. Read GET /api/v1/auth/get-session and record session.activeOrganizationId as ORG (the Default Organization); if it is null, read the one sys_organization row as the admin and set it active. Keep ORG active for every save below: the item asserts that the save is environment-wide all the same",
         "the probe, anonymous, from a client with no cookie jar and no Authorization header: GET /api/v1/forms/contact-us, then POST /api/v1/forms/contact-us/submit with name set to a fresh unique marker, plus email and message; capture each status and body code. Then, as the admin, count the showcase_inquiry rows carrying that marker (GET /api/v1/data/showcase_inquiry?name=MARKER). Baseline: run the probe once on the stock form (open: 200, 201, one row)",
-        "as the admin, GET /api/v1/meta/view/showcase_inquiry.contact and keep the item with every key that starts with '_' removed. Every save below PUTs this body back to the same path and changes only config.sharing",
-        "withdrawal from an organization-active session: with ORG active, PUT the body with config.sharing.allowAnonymous false, publicLink kept; capture the status and the save response's message, which names the scope the row landed in; run the probe. Then set-active null, GET the item and record its config.sharing (the withdrawal is the environment's, so it is served here too), and set-active ORG again",
-        "control, open: with ORG active, PUT the body with allowAnonymous true (the stock sharing); run the probe, and as the admin read the landed row's organization_id",
+        "as the admin, GET /api/v1/meta/view/showcase_inquiry.contact and keep the item with every key that starts with '_' removed. Every save below goes into the showcase's customization pair, per RUNNER.md's standing fact 'Customizing a view … goes into its pair': POST /api/v1/packages/com.example.showcase/ensure-customization once (201, then 200), then each save PUTs this body plus overrides: { package: 'com.example.showcase', basedOn: '0.1.0' } to the same path with ?package=com.example.showcase.custom, changing only config.sharing (the dogfood pin saves the same way, customization-pair.js). A PUT naming no package onto this shipped view answers 403 NOT_OVERRIDABLE naming the pair (ADR-0146 D11, packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#packagelessOverlayWriteRefusal): the save never reached a layer, so it proves nothing here. Teardown on a shared boot: DELETE the same path with ?package=com.example.showcase.custom",
+        "withdrawal from an organization-active session: with ORG active, save the body into the pair (step 3) with config.sharing.allowAnonymous false, publicLink kept; capture the status and the save response's message, which names the scope the row landed in; run the probe. Then set-active null, GET the item and record its config.sharing (the withdrawal is the environment's, so it is served here too), and set-active ORG again",
+        "control, open: with ORG active, save the body into the pair (step 3) with allowAnonymous true (the stock sharing); run the probe, and as the admin read the landed row's organization_id",
         "run the pins named in automated.ref; acceptance[2] to acceptance[5] are scored from the rest, metadata-protocol and metadata-core files"
       ],
       "acceptance": [
@@ -1853,7 +1859,7 @@
       "negative": [
         "a 200 or 201, or a landed row, at either door after step 4's withdrawal is a FAIL: the environment-wide withdrawal did not hold (the #21835 class, a layer re-opening a withdrawn form)",
         "a step 4 save that answers 200 but names org=ORG, or a no-organization read that still serves allowAnonymous true, is a FAIL of ADR-0131 D6: an administrator's save lands environment-wide whatever organization is active",
-        "a 403 to the save in step 4 or step 5 on the stock boot is a FAIL (the dogfood pin saves the same body with 200); read its message before attributing it: one naming an organization means the save reached the protocol organization-scoped, which no /meta door may hand it",
+        "a 403 to the save in step 4 or step 5 on the stock boot is a FAIL (the dogfood pin saves the same body with 200); read its message before attributing it: one naming the pair com.example.showcase.custom (403 NOT_OVERRIDABLE, ADR-0146 D11) means the save named no package, a runner slip, so re-save into the pair per step 3; one naming an organization means the save reached the protocol organization-scoped, which no /meta door may hand it",
         "a door probed with the admin's cookie or bearer token scores the admin, not the public: re-run it anonymously (auth-state-leak)",
         "acceptance[2] to acceptance[5] scored from the stock boot prove nothing: the showcase ships the form from one package, so no second body of the name exists to compose. Score them from their pins",
         "an organization-scoped metadata row met on the boot is an environment fault (knownGaps, first entry), not a FAIL of this item"
@@ -1905,6 +1911,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 2 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP) in showcase-public-form-withdrawal-layers: step 4's no-organization read (set-active null, the /meta view read serves allowAnonymous false with the link kept, then the organization is made active again), which closes acceptance[0]'s live leg; and negative[1]'s save message, asserted to name no organization id. acceptance[2] to acceptance[5] stay test-scored (no stock fixture). No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[2]–[4] and negative[2] re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588): the steps PUT the shipped view showcase_inquiry.contact with no ?package=, which since ADR-0146 D11 answers 403 NOT_OVERRIDABLE naming the pair (protocol-packaged-base-refusal.ts packagelessOverlayWriteRefusal); the dogfood pin saves into the .custom pair (customization-pair.js). The steps now follow RUNNER.md's customization-pair recipe (ensure-customization, PUT ?package=com.example.showcase.custom with overrides, DELETE to revert), and negative[2] tells that refusal apart from a FAIL. No clause changed: the save still lands environment-wide and its withdrawal still closes both doors. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -1913,7 +1925,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1925,7 +1937,7 @@
         "app": "showcase",
         "requires": [
           "an object declaring publicSharing { enabled:true, allowedAudiences, allowedPermissions, redactFields } with at least one visible record — REQUIRED to mint any link",
-          "showcase_client_brief is that object since #9308 fixture 2: publicSharing { enabled:true, allowedAudiences ['link_only','signed_in','email'], allowedPermissions ['view'], maxExpiryDays 30, redactFields ['internal_notes','deal_value'], eligibility \"record.status == 'published'\" }. The minter persona is a member holding showcase_client_liaison (bound to the showcase_client_liaison position); the seed carries a PUBLISHED brief ('Northwind — Website Relaunch brief', mint-eligible) and a DRAFT one ('Fabrikam — Compliance Audit brief', which the eligibility predicate refuses 422 RECORD_NOT_ELIGIBLE)"
+          "showcase_client_brief is that object since #9308 fixture 2: publicSharing { enabled:true, allowedAudiences ['link_only','signed_in','email'], allowedPermissions ['view'], maxExpiryDays 30, redactFields ['internal_notes','deal_value'], eligibility \"record.status == 'published'\" }. The minter persona is a member holding showcase_client_liaison (bound to the showcase_client_liaison position). No stock user holds that position, so mint the persona: as the admin, POST /api/v1/data/sys_user_position {user_id: 'usr_showcase_phone_demo', position: 'showcase_client_liaison'} (examples/app-showcase/src/security/demo-personas.ts PHONE_DEMO_USER, positions.ts), then sign in as phone.demo@example.com with the demo persona password (DEMO_PERSONA_PASSWORD); the seed carries a PUBLISHED brief ('Northwind — Website Relaunch brief', mint-eligible) and a DRAFT one ('Fabrikam — Compliance Audit brief', which the eligibility predicate refuses 422 RECORD_NOT_ELIGIBLE)"
         ],
         "knownGaps": [
           "[CLOSED by #9308 fixture 2 — the gap text stays because it carries the reason] NO stock showcase object set publicSharing.enabled (verified across examples/app-showcase/src), so createLink answered 422 SHARING_NOT_ENABLED for every showcase object and only the SHARING_NOT_ENABLED clause was runnable; the resolve/redact/password/revoke clauses were BLOCKED. showcase_client_brief now opts in (see requires). NOTE the negative control did NOT move: every OTHER showcase object still declines the opt-in, so clause 1's 422 is still runnable — probe it against showcase_private_note, not against the new object",
@@ -1934,7 +1946,7 @@
         ]
       },
       "steps": [
-        "STOCK-RUNNABLE probe: as a member, POST /api/v1/share-links {\"object\": \"showcase_private_note\", \"recordId\": \"<a visible note id>\"} — capture the 422 SHARING_NOT_ENABLED that proves the block (no showcase object opts in)",
+        "STOCK-RUNNABLE probe: as a member, POST /api/v1/share-links {\"object\": \"showcase_private_note\", \"recordId\": \"<a visible note id>\"} — capture the 422 SHARING_NOT_ENABLED that proves the block (no showcase object but showcase_client_brief opts in). The member needs a note first: POST /api/v1/data/showcase_private_note as that member, and use its id",
         "with a publicSharing-enabled fixture object F (redactFields declared): as a member who can see a record r of F, POST /api/v1/share-links {object:F, recordId:r, redactFields?, audience?, password?, expiresAt?} — capture the 201 {token}",
         "anon GET /api/v1/share-links/<token>/resolve — capture the 200 {record, link, redactFields}; confirm every field in F.publicSharing.redactFields ∪ link.redact_fields is absent from record",
         "mint a password-gated link; anon resolve WITHOUT ?password / x-share-password header → 401; with a WRONG password → 401; with the correct password → 200",
@@ -2082,6 +2094,12 @@
           "date": "2026-10-16",
           "change": "two clauses re-pointed to the measured answers on main c91af8ed6 (#23878 checklist-accuracy finding; #23879 out_of_scope_findings). (1) clause 9 demanded EXACTLY 'Vary: X-Share-Password, X-Share-Password-Encoding'; every public outcome (200, 401 x2, 404, 410, the /messages 400 UNSUPPORTED) answers 'X-Share-Password, X-Share-Password-Encoding, Origin' with no-store, because the CORS middleware appends Origin, and the authenticated create, list and revoke answer Vary: Origin only — the clause now asserts the two share-password members are INCLUDED and no-store present, which still fails if either is dropped. (2) the email-audience leg (step 5, clause 4) now states the v18 answer: a caller off the allowlist, anonymous or signed in, gets 404 INVALID_OR_EXPIRED byte-identical to an unknown token, and the mint needs emailAllowlist; combined audience + password links are pointed at access-security.share-link-combined-gates",
           "ref": "#24036"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] and steps[0] re-pointed (fixture text, card #33332; QA run #33081 comment 6850173588). No stock user holds showcase_client_liaison, so the requires line now carries the run's minter recipe: the admin binds usr_showcase_phone_demo to the position (demo-personas.ts, positions.ts) and the run signs in as phone.demo@example.com. steps[0]'s control needs a visible private note, which a fresh boot does not seed for the member, so the step creates one first; its 'no showcase object opts in' is narrowed to every object but showcase_client_brief, as knownGaps[0] already says. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -2090,7 +2108,7 @@
       "title": "Suggested audience bindings reconcile; a manage_metadata holder's accept takes effect for every member and a revoke undoes it; bad states 404/409/400, tenant admins and non-admins are refused",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2107,7 +2125,7 @@
           "a boot with a VANILLA SecurityPlugin, so showcase_member_default is a package suggestion and not the configured baseline (packages/qa/dogfood/test/suggested-binding-acceptance.dogfood.test.ts boots it so)"
         ],
         "knownGaps": [
-          "on a stock CLI boot the served app's own isDefault set IS the baseline: the everyone definition names showcase_member_default from boot, so the list shows it 'confirmed' with no resolver (observed) and offers no pending row. The pending loop needs the vanilla-plugin boot above, or an installed package declaring an isDefault set"
+          "on a stock CLI boot the served app's own isDefault set IS the baseline: the everyone definition names showcase_member_default from boot, so the list shows it 'confirmed' with no resolver (observed) and offers no pending row. The pending loop needs the vanilla-plugin boot above, or an installed package declaring an isDefault set: e.g. a one-object scratch package (com.qa.decl) with an isDefault set, built with objectstack build and installed into a SCRATCH COPY of the showcase only (QA run #33081), never the shared tree"
         ]
       },
       "steps": [
@@ -2166,8 +2184,8 @@
         }
       ],
       "negative": [
-        "an accept of a set carrying a bit the everyone anchor forbids (ADR-0090 D7) must be refused 403 PERMISSION_DENIED and leave the row pending — never silently accepted",
-        "a tenant administrator's accept must never widen everyone; under a walled posture only the platform operator may accept",
+        "an accept of a set carrying a bit the everyone anchor forbids (ADR-0090 D7) must be refused 403 PERMISSION_DENIED and leave the row pending — never silently accepted. No package a run can build reaches it: os build refuses an isDefault set carrying such a bit (security-anchor-high-privilege, packages/lint/src/validate-security-posture.ts), so it is scored from the registry-seam pin packages/plugins/plugin-security/src/suggested-audience-bindings.test.ts ('refuses a set carrying anchor-forbidden bits — 403, nothing recorded (ADR-0090 D7)')",
+        "a tenant administrator's accept must never widen everyone; under a walled posture only the platform operator may accept (that half needs a walled boot, provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; without one record it blocked(fixture))",
         "do not tick the pending loop on a stock CLI boot — the served app's set is the baseline there and no row is pending; use the vanilla-plugin boot, or record blocked"
       ],
       "traps": [
@@ -2200,6 +2218,12 @@
           "date": "2026-10-11",
           "change": "rewritten for the deployment-level acceptance (#22801 → A): a manage_metadata holder's accept re-derives the everyone definition and takes effect (member read 403 → 200), a dismiss on an accepted row revokes it, a tenant administrator is refused; the reconcile reads the everyone definition, not a binding row; the knownGap is now the stock CLI boot, where the served app's set is the baseline",
           "ref": "#15204"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps[0], negative[0] and negative[1] re-pointed (fixture text, card #33332; QA run #33081 comment 6850173588). knownGaps[0] names the scratch-package recipe the run used for a pending row (com.qa.decl with an isDefault set, installed into a scratch copy). negative[0] is unreachable from a buildable package, because os build refuses an isDefault set with an everyone-forbidden bit (validate-security-posture.ts security-anchor-high-privilege), so it is scored from suggested-audience-bindings.test.ts. negative[1]'s walled half names the walled-boot fixture. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -2448,7 +2472,7 @@
       "title": "A package-declared capability is served by the registry (no sys_capability row — the object is retired, ADR-0131 D3) and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2460,7 +2484,7 @@
         "app": "showcase",
         "requires": [
           "the shipped capability declaration examples/app-showcase/src/security/capabilities.ts (showcase.export_data, org-scoped, defineCapability) — the DEFINE side of ADR-0066",
-          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side. showcase_ops is a packaged set and SEALED: PUT /api/v1/meta/permission/showcase_ops answers 403 NOT_OVERRIDABLE (ADR-0126), so the REGRANT leg edits a CLONE of it — POST /api/v1/security/permission-sets/showcase_ops/clone {\"name\": \"<scratch name>\", \"label\": \"<scratch label>\"} (label is mandatory: a clone without one answers 400 VALIDATION_FAILED) carries showcase.export_data, no package, and is runtime-editable",
+          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side. showcase_ops is a packaged set and SEALED: PUT /api/v1/meta/permission/showcase_ops answers 403 NOT_OVERRIDABLE (ADR-0126), so the REGRANT leg edits a CLONE of it — POST /api/v1/security/permission-sets/showcase_ops/clone {\"name\": \"<scratch name>\", \"label\": \"<scratch label>\"} (label is mandatory: a clone without one answers 400 VALIDATION_FAILED) carries showcase.export_data, lands in the showcase's paired customization package com.example.showcase.custom (the clone door's package rule: a source shipped by a read-only package X lands in X.custom, packages/runtime/src/domains/permission-set-clone.ts; GET /api/v1/meta/permission/NAME reads _packageId com.example.showcase.custom), and is runtime-editable",
           "the shipped REQUIRE-side specimens examples/app-showcase/src/ui/actions/predicate-matrix.action.ts: showcase_zoo_perm_held (requires showcase.export_data — the GRANTED capability), showcase_zoo_perm_missing (requires showcase.restricted_ops — DEFINED but granted to nobody), showcase_zoo_perm_and (requires BOTH — the gate is an AND), showcase_zoo_perm_empty (requiredPermissions:[] — always passes). All four are type:'script' on the **showcase_field_zoo** object (predicate-matrix.action.ts binds objectName to a local const zoo = 'showcase_field_zoo' — `zoo` is the TS variable, never the object name), so the platform action path can invoke them"
         ],
         "knownGaps": [
@@ -2564,6 +2588,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of manual-set record #25817, re-read on main b4199c96: steps[7] expected `capabilities.0.scope`, but the located path carries the raw entry's index, `.2` when the scratch entry is appended after the showcase's two capabilities. The step now says so. The record's second line (surface `mixed` yet no browser oracle) is not applied: in this ledger `mixed` names an item driven on more than one execution surface, browser or not (31 other active mixed items carry no screenshot or dom oracle), and this item is driven over the API and the build / CLI. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] re-pointed (stale spec, card #33332; QA runs #33048 comment 6846028996 and #33094 comment 6852480973): the clone of showcase_ops was said to carry no package, but the clone door lands a copy of a read-only package's set in that package's .custom pair (permission-set-clone.ts, ADR-0146 D6), so it reads _packageId com.example.showcase.custom. It stays runtime-editable, which is all the regrant leg needs. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -2572,11 +2602,11 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 12,
       "priority": "P0",
       "surface": "api",
       "personas": [
-        "a user holding NO membership (producer (1) of fixtures.knownGaps[0]) — since #25626 no measured HTTP door mints one on a walled boot (knownGaps[0]); the operator's POST /api/v1/auth/admin/create-user now yields a MEMBER of the operator's active organization, which serves the persona below",
+        "a user holding NO membership (producer (1) of fixtures.knownGaps[0]): the operator's POST /api/v1/auth/admin/create-user yields a MEMBER of the operator's active organization, the operator removes that membership, and the user signs in afresh; `node scripts/qa/qa-fixture.mjs walled-boot --member-less` mints one on the walled boot (knownGaps[0])",
         "an organization member whose session has cleared its active organization (producer (2) of fixtures.knownGaps[0]): POST /api/v1/auth/organization/set-active {\"organizationId\": null}. Minted by the operator with POST /api/v1/auth/admin/create-user after the operator has created an organization and set it active — the new user joins it as member",
         "seeded admin (control — has an active organization)"
       ],
@@ -2584,10 +2614,10 @@
         "app": "showcase",
         "requires": [
           "a tenancy-walled deployment (ADR-0095 Layer 0 active on at least one tenant-scoped object) — confirm the posture before scoring, since on an unwalled deployment every clause here is vacuous",
-          "the durable producer fixtures.knownGaps[0] still names a door for, on that walled boot: producer (2), a member who sends POST /api/v1/auth/organization/set-active {\"organizationId\": null}, minted by the operator's POST /api/v1/auth/admin/create-user once the operator has created an organization and set it active (since #25626 the new user joins the operator's active organization as member, invite-only included; with no active organization the call answers 400 NO_ACTIVE_ORGANIZATION and creates nothing). A member-less user (producer (1)) has no measured walled producer since #25626, so the legs scored on it record blocked(fixture)"
+          "the durable producer fixtures.knownGaps[0] still names a door for, on that walled boot: producer (2), a member who sends POST /api/v1/auth/organization/set-active {\"organizationId\": null}, minted by the operator's POST /api/v1/auth/admin/create-user once the operator has created an organization and set it active (since #25626 the new user joins the operator's active organization as member, invite-only included; with no active organization the call answers 400 NO_ACTIVE_ORGANIZATION and creates nothing). A member-less user (producer (1)) is minted by removing such a member's membership: `node scripts/qa/qa-fixture.mjs walled-boot --member-less` mints one on the walled boot (knownGaps[0])"
         ],
         "knownGaps": [
-          "The state needs a producer. QA run #24783 measured two durable, non-racy ones on the walled boot (knownGaps[2]), on `isolated` and `group`; since #25626 only (2) has a door. (1) NO membership: at #24783 a user minted by POST /api/v1/auth/admin/create-user under OS_AUTH_MEMBERSHIP_POLICY=invite-only answered membershipCreated:false and held no sys_member row. #25626 retired that recipe: in multi-org mode create-user joins the new user to the operator's ACTIVE organization as member, invite-only included, and with no active organization answers 400 NO_ACTIVE_ORGANIZATION and creates no user (packages/plugins/plugin-auth/src/admin-user-endpoints.ts, the ADR-0093 D3 amendment; packages/qa/dogfood/test/create-user-organization-join.dogfood.test.ts, J1 and J2). The reconciler still answers `policy-skip` under invite-only for automatic binding (packages/plugins/plugin-auth/src/reconcile-membership.ts#reconcileMembership), but no HTTP door that mints a member-less user on a walled boot has been measured since, so a clause or leg scored on producer (1) records blocked(fixture) naming this line until a run measures one. (An explicitly declared `auto` binds nobody under a wall either, ADR-0093 D1 `no-target-org`; no run has measured that boot.) (2) A member who CLEARS its active organization: POST /api/v1/auth/organization/set-active {\"organizationId\": null}, after which GET /api/v1/auth/get-session reads null. The two differ under `group`, where the scope is the membership set (acceptance[0]), so record WHICH producer each clause was scored on. Two former producers no longer yield the state. The signup race is gone: the session seam settles a newly created user's membership before its first session resolves an organization (ADR-0123 D3; packages/plugins/plugin-auth/src/auth-manager.ts#composeDatabaseHooks, its defaultActiveOrg hook), so only a policy that binds nobody leaves that session without one. The removed-member path ends the session's claim instead: removing a user's last membership revokes each live session that named that organization, and a user still holding another membership has such a session re-pointed to it (packages/plugins/plugin-auth/src/membership-ended-session.ts#endSessionClaimsForEndedMembership); QA run #24783 measured the removed member's token answering 401 UNAUTHENTICATED",
+          "The state needs a producer. QA run #24783 measured two durable, non-racy ones on the walled boot (knownGaps[2]), on `isolated` and `group`; since #25626 only (2) has a door. (1) NO membership: at #24783 a user minted by POST /api/v1/auth/admin/create-user under OS_AUTH_MEMBERSHIP_POLICY=invite-only answered membershipCreated:false and held no sys_member row. #25626 retired that recipe: in multi-org mode create-user joins the new user to the operator's ACTIVE organization as member, invite-only included, and with no active organization answers 400 NO_ACTIVE_ORGANIZATION and creates no user (packages/plugins/plugin-auth/src/admin-user-endpoints.ts, the ADR-0093 D3 amendment; packages/qa/dogfood/test/create-user-organization-join.dogfood.test.ts, J1 and J2). The reconciler still answers `policy-skip` under invite-only for automatic binding (packages/plugins/plugin-auth/src/reconcile-membership.ts#reconcileMembership), and a removed member is never bound again by signing in (ADR-0093 D7; packages/qa/dogfood/test/membership-decided-at-creation.dogfood.test.ts), which is producer (1)'s door since #25626: the operator mints the user with create-user, removes its membership with POST /api/v1/auth/organization/remove-member, and the user clears the forced password change create-user stamps (POST /api/v1/auth/change-password; until then every data read answers 403 PASSWORD_RESET_REQUIRED) and signs in afresh. `node scripts/qa/qa-fixture.mjs walled-boot --member-less` replays those calls and proves the state: GET /api/v1/auth/get-session reads activeOrganizationId null and GET /api/v1/auth/organization/list answers an empty list. Measured on #33351 round 2 on isolated and group invite-only boots, where that user's first GET /api/v1/data/showcase_task answered 200 with zero rows. (An explicitly declared `auto` binds nobody under a wall either, ADR-0093 D1 `no-target-org`; no run has measured that boot.) (2) A member who CLEARS its active organization: POST /api/v1/auth/organization/set-active {\"organizationId\": null}, after which GET /api/v1/auth/get-session reads null. The two differ under `group`, where the scope is the membership set (acceptance[0]), so record WHICH producer each clause was scored on. Two former producers no longer yield the state. The signup race is gone: the session seam settles a newly created user's membership before its first session resolves an organization (ADR-0123 D3; packages/plugins/plugin-auth/src/auth-manager.ts#composeDatabaseHooks, its defaultActiveOrg hook), so only a policy that binds nobody leaves that session without one. The removed-member path ends the session's claim instead: removing a user's last membership revokes each live session that named that organization, and a user still holding another membership has such a session re-pointed to it (packages/plugins/plugin-auth/src/membership-ended-session.ts#endSessionClaimsForEndedMembership); QA run #24783 measured the removed member's token answering 401 UNAUTHENTICATED",
           "`invite-only` is no longer a fixture gap: the walled boot must declare a membership policy anyway (RUNNER.md 'A walled boot is a fixture of its own', prerequisite 3), and declaring `invite-only` gives knownGaps[0]'s producer (1). SSO-JIT-pending still has no stock fixture: that producer is blocked(fixture) unless the run configures SSO.",
           "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (examples/app-showcase declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). Every clause is a walled leg, and the walled boot runs from the tree with the three variables exported: QA run #32102 (ff04ad81) booted the stock showcase under group and isolated that way and served every leg, so the item carries no blocked marker (#9334, lifted by #32111). A run that does not provision the walled boot records each walled leg blocked(fixture) naming that entry; its pin (automated.ref) boots the posture in-process.",
           "acceptance[4] carries an open question: may a login/logout row produced by a session with no organization scope carry a NULL organization attribution, and must it? Two producers give such rows. (1) A user who holds NO membership at all (producer (1) of knownGaps[0]): its login/logout rows in sys_audit_log carry tenant_id null, because no organization exists to stamp and ADR-0123 D3's ordering fix 'must not manufacture a membership that policy says must not exist'. QA run #24783 read those rows only as the platform operator (GET /api/v1/data/sys_audit_log filtered by user_id answered 200), while the user itself gets 403 on sys_audit_log, on both postures. (2) A member who CLEARED its active organization (producer (2) of knownGaps[0]): QA run #32102 (ff04ad81, repro rule R-1), on walled group and isolated boots, read the member's rows as login A, login A, a logout with tenant_id NULL (sent while the session had no active organization), login A; the operator reads that logout row (200) and the member gets 403 (object permission). The mechanism: packages/plugins/plugin-auth/src/auth-session-audit.ts#logoutEventFor takes the session's activeOrganizationId, and packages/plugins/plugin-audit/src/auth-event-audit.ts writes tenant_id from the event's organizationId, null when it has none. ADR-0131 D7 settles the read path, and acceptance[4] and acceptance[6] read the ledger that way since revision 10: sys_audit_log is a deployment-level ledger with no organization column, its tenant_id is an attribution field the tenant-field resolver does not claim, 'never the tenancy anchor', such objects are 'governed by object permission, not by the wall', and D7's 2026-10-22 note keeps tenant_id's NULL arm by design; ADR-0131 D9 scopes the no-NULL rule to tenant-column objects ('column ⇒ in scope'). The clause's former 'invisible to RLS readers' premise was written for #8245, when the ledger was walled. Neither ADR states whether a row from either producer must carry an organization attribution. ADR-0123 D3 pays the ledger by ordering, which binds nobody under invite-only (producer (1)) and does not reach a session that cleared its organization (producer (2)). If the answer is 'must be attributed', producer (2)'s logout row is a product defect in logoutEventFor. The implementation: packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, whose tenant_id docblock says NULL means a deployment-level action and whose defaultRowScope sys_audit_log_org reads tenant_id == current_user.organization_id, which a NULL row matches for no organization reader. Until the question is ruled (QA run #24783's finding F3 for wave anchor #24579 raised it for producer (1); #32111 carries it to the maintainer for both producers), score acceptance[4] from what is measured (the raw rows, their tenant_id and the readers that see them) and name this question and the producer beside the verdict"
@@ -2606,7 +2636,7 @@
         "repeat the read and the write against a NON-tenant-scoped object to bound the blast radius",
         "sign in and out with the state in force, then inspect the audit ledger rows the session produced (plugin-audit auth-session-audit login/logout)",
         "run the same read+write as the control admin persona to show the refusal is state-derived, not a blanket denial",
-        "walled `group` leg (acceptance[7]), on a walled boot with OS_TENANCY_POSTURE=group provisioned per RUNNER.md's 'A walled boot is a fixture of its own': a member of organization A (non-empty membership set) sets A active with POST /api/v1/auth/organization/set-active, creates a showcase_account and a showcase_project in A, then clears it with POST /api/v1/auth/organization/set-active {organizationId: null} and proves the state (GET /api/v1/auth/get-session reads session.activeOrganizationId null). As that member, POST /api/v1/data/showcase_task {title, project: the project in A}; take the admin-side count of showcase_task rows whose organization_id is NULL or empty before and after, and read back any row the create produced"
+        "walled `group` leg (acceptance[7]), on a walled boot with OS_TENANCY_POSTURE=group provisioned per RUNNER.md's 'A walled boot is a fixture of its own': a member of organization A (non-empty membership set) sets A active with POST /api/v1/auth/organization/set-active; the operator creates a showcase_project in A (the member's baseline set, showcase_member_default, grants no create on showcase_project or showcase_account, so a member create there is the generic 403 PERMISSION_DENIED, mistakable for the org refusal); the member then clears it with POST /api/v1/auth/organization/set-active {organizationId: null} and proves the state (GET /api/v1/auth/get-session reads session.activeOrganizationId null). Clear it in the session the leg then uses: a fresh sign-in starts with an active organization again (QA run #33087). As that member, POST /api/v1/data/showcase_task {title, project: the project in A} (project is required, a master-detail field) — or showcase_private_note, which the member may create with no parent; take the admin-side count of showcase_task rows whose organization_id is NULL or empty before and after, and read back any row the create produced"
       ],
       "acceptance": [
         {
@@ -2636,7 +2666,7 @@
         {
           "clause": "the audit ledger is read through object permission, not through the wall (ADR-0131 D7): the login/logout rows the session produced exist in sys_audit_log, a deployment-level ledger (systemFields: { tenant: false }) whose tenant_id is a plain attribution field that keeps its NULL arm by design (D7's 2026-10-22 note) and that ADR-0131 D9's no-NULL rule does not reach ('column ⇒ in scope'). The platform operator, who holds object permission on the ledger, reads every such row, a NULL-attributed one included; the session's own user, who holds none, is refused 403 by object permission. Whether a row from this state must carry an organization attribution is open (fixtures.knownGaps[3]) and is not scored here",
           "oracle": "api",
-          "verify": "as the platform operator, read sys_audit_log filtered by the user's user_id (GET /api/v1/data/sys_audit_log): 200, returning every login/logout row the session produced, each row's tenant_id quoted (NULL or an organization id). A row present in the raw table that the operator's read does not return is a FAIL even though nothing errored. As the session's own user, the same read answers 403 by object permission: a 5xx, or rows of another user, is a FAIL. A NULL tenant_id on such a row is not by itself a FAIL: record it beside the verdict with the producer it came from and knownGaps[3]'s question",
+          "verify": "as the platform operator, read sys_audit_log filtered by the user's user_id (GET /api/v1/data/sys_audit_log): 200, returning every login/logout row the session produced, each row's tenant_id quoted (NULL or an organization id). The raw table is in the telemetry datasource, not the main file DB: os dev provisions a dedicated telemetry datasource (a sibling TELEMETRY_DB file beside the main DB) and the audit writers route sys_audit_log there (packages/plugins/plugin-audit/src/audit-writers.ts), so read the raw rows from that file. A row present in the raw table that the operator's read does not return is a FAIL even though nothing errored. As the session's own user, the same read answers 403 by object permission: a 5xx, or rows of another user, is a FAIL. A NULL tenant_id on such a row is not by itself a FAIL: record it beside the verdict with the producer it came from and knownGaps[3]'s question",
           "evidence": "raw rows with tenant_id + the operator's read of the same rows + the user's 403 envelope"
         },
         {
@@ -2736,7 +2766,14 @@
           "date": "2026-11-10",
           "change": "Stale-spec re-point of acceptance[4] and acceptance[6] to ADR-0131 D7/D9, from QA run #32102 (ff04ad81, repro rule R-1), which scored both FAIL on walled group and isolated boots: a member that cleared its active organization signs out and its logout row carries tenant_id NULL, which the operator reads (200) and the member is refused (403, object permission). acceptance[4]'s clause read 'no audit row is NULL-tenanted and therefore permanently invisible to RLS readers (#8245)', written when the ledger was walled; D7 makes sys_audit_log a deployment-level ledger governed by object permission, not by the wall, its 2026-10-22 note keeps tenant_id's NULL arm by design, and D9 scopes the no-NULL rule to tenant-column objects. The clause, verify and evidence now name who must read the row (the operator, 200) and who is refused (the user, 403 by object permission), and a NULL attribution is recorded with the open question rather than scored. acceptance[6] states that the ledger's NULL attribution is not a subsystem disagreement under D7. fixtures.knownGaps[3] extends the open question (may such a row carry a NULL attribution, and must it?) to producer (2), with R-1's rows and mechanism; the question is carried to the maintainer by #32111 and is not answered here. The blocked marker (#9334) is dropped: #32102 booted the stock showcase walled from the tree with the three variables exported and served every leg (RUNNER.md 'A walled boot is a fixture of its own'), and knownGaps[2] no longer says the item stays blocked or that no example app declares the multi-org runtime (examples/app-showcase declares it). knownGaps[4] and knownGaps[5] are dropped: #24784 closed (PR #24819) and #32102 measured it holding live on a walled group boot (acceptance[7] pass, the acceptance[1] 403 instead of the 500), the re-run both lines asked for. No other knownGaps index moved, and no cross-reference elsewhere named either line",
           "ref": "#32111"
-        }
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-14",
+          "change": "steps[8] and acceptance[4].verify re-pointed (card #33332; QA runs #32953 comment 6840054712, #33025 comment 6844741021, #33087 comment 6850382730, #33092 comment 6850793622). steps[8] had the member create a showcase_account and a showcase_project, but showcase_member_default grants neither create (examples/app-showcase/src/security/permission-sets.ts), so the member met the generic 403 PERMISSION_DENIED first, mistakable for the org refusal; the operator now creates the parent project, and the member's create is the showcase_task (project required, task.object.ts) or a showcase_private_note. The step adds that a fresh sign-in restores an active organization, so the clear is per session. acceptance[4]'s raw-row read now names the telemetry datasource sys_audit_log lives in (audit-writers.ts). No clause sentence changed. Read from source at base fca5f89c",
+          "ref": "#33332"
+        },
+        { "revision": 12, "date": "2026-11-14", "change": "producer (1) has a door again (ledger row 208 of #32908): personas[0], fixtures.requires[1] and knownGaps[0] mint the member-less user by removing a create-user member's membership and signing it in afresh (ADR-0093 D7), replayed by the new `walled-boot --member-less` flag of scripts/qa/qa-fixture.mjs and measured live on isolated and group invite-only boots. Those legs no longer record blocked(fixture)", "ref": "#33351" }
       ]
     },
     {
@@ -2744,7 +2781,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2771,7 +2808,7 @@
         "as the plain member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — capture status, code and the EXACT message string",
         "as the plain member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — capture status, code and the exact message",
         "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts; activation-gate.ts)",
-        "GET /api/v1/data/sys_metadata_activation (reads are open — sys-metadata-activation.object.ts) and confirm no row for either artifact was written by the refusals",
+        "as the admin, GET /api/v1/data/sys_metadata_activation (the object admits get and list on the data API, apiMethods ['get','list'] in packages/platform-objects/src/system/sys-metadata-activation.object.ts, but that is the verb gate, not a grant: a plain member holds no read permission on the ledger and is answered 403) and confirm no row for either artifact was written by the refusals",
         "author the scratch manage_metadata permission set, grant it to a fresh member, and prove server-side that the member's positions do NOT include platform_admin (session row / GET /auth/get-session — never the grant gesture)",
         "as that member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — expect 200; read the ledger row back (metadata_type 'flow', active false, and NO organization_id key on the row — the ledger carries no tenant column at all, #15024 / ADR-0131 D7); then re-enable ({\"enabled\": true}) to restore the fixture",
         "as the same member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — expect 200 + the metadata_type 'action' row; re-enable to restore",
@@ -2915,6 +2952,12 @@
           "date": "2026-10-27",
           "change": "automated.kind unit -> dogfood (#26571 slice 3; the slice-2 ACCEPT noted it): revision 11's ref already leads with a dogfood pin over the in-process HTTP stack, with the unit pins beneath. No ref, clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-14",
+          "change": "steps[4] re-pointed (stale spec, card #33332; QA run #33025 comment 6844741021): it said ledger reads are open, citing sys-metadata-activation.object.ts, and a plain member's read answered 403. The object's apiMethods ['get','list'] only opens the verbs on the data API; object permission still decides who reads, and no stock member set grants it, so the no-row check is now the admin's read. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -3438,7 +3481,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3502,7 +3545,7 @@
         }
       ],
       "negative": [
-        "an audit write must never break the read: reads answer 200 even when the ledger write fails — the failure is reported once per CAUSE with the durability text (read-audit.ts; #18247): a second, different cause reports again at error, and a repeat of a cause already reported degrades to debug. Rows are LOST, not retried. Observing that needs a broken ledger and is out of scope for a stock run; do not fabricate it",
+        "an audit write must never break the read: reads answer 200 even when the ledger write fails — the failure is reported once per CAUSE with the durability text (read-audit.ts; #18247): a second, different cause reports again at error, and a repeat of a cause already reported degrades to debug. Rows are LOST, not retried. Observing that needs a broken ledger and is out of scope for a stock run; do not fabricate it. It is scored from its unit pins, packages/plugins/plugin-audit/src/read-audit.test.ts ('a ledger write failure never reaches the read, and reports once at `error`' and the 'read-audit failure reporting — once per CAUSE' block), as negative[1] is; a live run that leaves it undriven cites them and does not hold the item back from a PASS on that account",
         "a read with no principal (no userId and no actor) lands no row — noise in the WHO ledger is refused by design (read-audit.ts)"
       ],
       "variants": [
@@ -3520,7 +3563,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/record-view-read-audit.dogfood.test.ts (#26571) boots the showcase twice with the AuditPlugin serve would end up running (bootStack constructs none), reads rows through GET /data/sys_audit_log as the admin and keeps the 2 s flush. Stock (new AuditPlugin()): acceptance[0] — the boot log carries INFO lines and AuditPlugin lines (the positive control) and no 'record-view auditing installed' line; a member's GET /data/showcase_account/:id answers 200 and past the flush window the ledger holds no action 'read' row. Configured (readAudit.objects ['showcase_account', 'sys_job'], the docs' opt-in): acceptance[1] and [4] — one install line, 'on 1 object(s) — showcase_account', without sys_job, and the exclusion warning naming sys_job; acceptance[1] and [2] — one detail read lands exactly one row with action 'read', user_id = M, object_name, record_id, old_value and new_value null, and created_at inside the read's wall-clock window (before the flush could have run); acceptance[3] — a filtered LIST read that serves the record leaves the ledger count unchanged; acceptance[1] — an un-opted showcase_project detail read (200) lands no row. Unit pins beneath: packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. acceptance[5] stays test-scored; negative[0] needs a broken ledger and is out of scope for a stock run; negative[1] is the unit pin's no-principal skip; the cross-reference that was negative[2] is source[4]"
+        "ref": "packages/qa/dogfood/test/record-view-read-audit.dogfood.test.ts (#26571) boots the showcase twice with the AuditPlugin serve would end up running (bootStack constructs none), reads rows through GET /data/sys_audit_log as the admin and keeps the 2 s flush. Stock (new AuditPlugin(), which the pin constructs itself: that os serve / os dev auto-registers the plugin with no options is not in the pin and is the live leg's to show): acceptance[0] — the boot log carries INFO lines and AuditPlugin lines (the positive control) and no 'record-view auditing installed' line; a member's GET /data/showcase_account/:id answers 200 and past the flush window the ledger holds no action 'read' row. Configured (readAudit.objects ['showcase_account', 'sys_job'], the docs' opt-in): acceptance[1] and [4] — one install line, 'on 1 object(s) — showcase_account', without sys_job, and the exclusion warning naming sys_job; acceptance[1] and [2] — one detail read lands exactly one row with action 'read', user_id = M, object_name, record_id, old_value and new_value null, and created_at inside the read's wall-clock window (before the flush could have run); acceptance[3] — a filtered LIST read that serves the record leaves the ledger count unchanged; acceptance[1] — an un-opted showcase_project detail read (200) lands no row. Unit pins beneath: packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. acceptance[5] stays test-scored; negative[0] is scored from read-audit.test.ts (the write-failure and once-per-cause cases); negative[1] is the unit pin's no-principal skip; the cross-reference that was negative[2] is source[4]"
       },
       "source": [
         "packages/plugins/plugin-audit/src/read-audit.ts#READ_AUDIT_ACTION (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
@@ -3571,6 +3614,12 @@
           "date": "2026-11-01",
           "change": "negative[2] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged, and automated.ref's closing note, which called negative[2] a cross-reference, now points at source[4]. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "negative[0] and automated.ref re-pointed (card #33332; QA run #33081 comment 6850173588): negative[0] was out of scope for a stock run by the item's own word yet stood as a clause, so the item could never PASS. Its behaviour is pinned in packages/plugins/plugin-audit/src/read-audit.test.ts (write failure never reaches the read; once per cause), so it is now scored from those pins, as negative[1] already was. automated.ref now says the dogfood pin constructs new AuditPlugin() itself, so the CLI's option-less auto-registration stays a live leg. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -3579,7 +3628,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3601,11 +3650,11 @@
       },
       "steps": [
         "boot showcase with the console; as the liaison member mint the four tokens over the API (plain, password, audience:'signed_in', short-expiry); revoke a fifth after minting it",
-        "in a FRESH anonymous browser context open /s/<plain token>: screenshot; then read the DOM — the page renders OUTSIDE the authenticated shell (App.tsx): 'Shared showcase_client_brief' header, the record body, and the hidden-fields notice naming the redaction set",
+        "in a FRESH anonymous browser context open /_console/s/<plain token> (the console, and so its /s/:token route in ui/apps/console/src/App.tsx, is served under /_console on a CLI-served boot, packages/cli/src/utils/console.ts CONSOLE_PATH; a bare /s/<token> is not a console path and answers the server's 404 JSON ENDPOINT_NOT_FOUND): screenshot; then read the DOM — the page renders OUTSIDE the authenticated shell (App.tsx): 'Shared showcase_client_brief' header, the record body, and the hidden-fields notice naming the redaction set",
         "capture the resolve network response for the same load and diff its record keys against the object's publicSharing.redactFields",
-        "open /s/<password token>: submit a wrong password, then the correct one; capture each round-trip",
-        "open /s/<revoked token> and /s/<garbage-token>; after the short-expiry link lapses, open it too; screenshot each terminal state",
-        "open /s/<signed_in token> anonymously (fresh context), then again as a member signed in through the console form (cookie + bearer both present)"
+        "open /_console/s/<password token>: submit a wrong password, then the correct one; capture each round-trip",
+        "open /_console/s/<revoked token> and /_console/s/<garbage-token>; after the short-expiry link lapses, open it too; screenshot each terminal state",
+        "open /_console/s/<signed_in token> anonymously (fresh context), then again as a member signed in through the console form (cookie + bearer both present)"
       ],
       "acceptance": [
         {
@@ -3706,6 +3755,12 @@
           "date": "2026-10-27",
           "change": "fixtures.knownGaps[0], knownGaps[2] and automated.ref re-pointed off the retired objectui-repo wording: the three pins they name live in this checkout under ui/apps/console/src/pages/ and run from this tree at the run's framework sha, so knownGaps[0] no longer tells a runner they are unrunnable here (#26626, maintainer-directed). Measured revisions and historical objectui issue numbers kept. No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "steps[1]–[5] re-pointed (stale spec, card #33332; QA run #33048 comment 6846028996): the page was written as /s/:token, but on a CLI-served boot the console is mounted at /_console (packages/cli/src/utils/console.ts CONSOLE_PATH), so the page is /_console/s/:token and a bare /s/ path answers 404 ENDPOINT_NOT_FOUND. The Sign-in link's basename-relative redirect round-trips correctly and acceptance[3] is unchanged. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -3826,11 +3881,11 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
-        "org owner holding manage_metadata who is NOT platform admin — walled-posture legs only",
+        "org owner holding manage_metadata who is NOT platform admin — walled-posture legs only. The owner also holds organization_admin in its own organization from the moment it owns it (a sys_user_permission_set row whose reason reads 'auto-org-admin-grant: granted from membership grade owner', auto-org-admin-grant.ts); that is expected and still not platform admin, so record both grants",
         "platform operator (holds the platform_admin position) — only for the walled-posture legs",
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
       ],
@@ -3839,10 +3894,10 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed). That default `os dev` first compiles objectstack.config.ts into the app's own dist/objectstack.json (packages/cli/src/commands/dev.ts, the `compile` flag, default on), so when several runners boot from one shared checkout, boot with `pnpm -C examples/app-showcase exec objectstack dev --fresh --no-compile -p PORT` instead: --no-compile serves the existing artifact as built (it still compiles when the artifact is missing, and warns when the artifact is older than the sources), so one compile boot beforehand keeps it current and no concurrent boot rewrites it (QA run #27481)",
           "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
-          "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position. No HTTP door places that grant on a walled boot (QA run #24783): the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, 403 '… organization_id is outside the caller's organization scope' (packages/plugins/plugin-security/src/security-plugin-write-tenant-wall.ts#denyTenantPlacement), and the owner's own insert is refused by ADR-0090 D12 condition (c), because manage_metadata is declared scope 'platform' (packages/spec/src/security/capabilities.ts; packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure). The recipe is the dogfood harness's: the operator saves a permission set carrying systemPermissions ['manage_metadata'], and the grant row {user_id, permission_set, organization_id} is a system-context engine insert stamped with that organization, as packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts#boot places it, or a direct row on the run's own scratch DB, as QA run #24783 placed it. Record it in the run record as a fixture write made outside HTTP"
+          "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position. No HTTP door places that grant on a walled boot (QA run #24783): the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, 403 '… organization_id is outside the caller's organization scope' (packages/plugins/plugin-security/src/security-plugin-write-tenant-wall.ts#denyTenantPlacement), and the owner's own insert is refused by ADR-0090 D12 condition (c), because manage_metadata is declared scope 'platform' (packages/spec/src/security/capabilities.ts; packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure). The recipe is the dogfood harness's: the operator saves a permission set carrying systemPermissions ['manage_metadata'], and the grant row {user_id, permission_set, organization_id} is a system-context engine insert stamped with that organization, as packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts#boot places it, or a direct row on the run's own scratch DB, as QA run #24783 placed it. Record it in the run record as a fixture write made outside HTTP. If the operator first creates a scratch package to hold that set (POST /api/v1/packages), its id must be reverse-domain (e.g. com.qa.catalog, packages/spec/src/kernel/manifest.zod.ts): a bare id such as qa_catalog answers 400, the permission-set save that follows then answers 422, and the grant row is left naming no set"
         ],
         "knownGaps": [
-          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence. The three wall-* dogfood pins boot the CRM example (@objectstack/example-crm: crm_lead and its package), not the showcase the steps name, so their door answers are the same doors on another app's objects; a live run drives the steps' showcase objects and does not match object names against the pins. Their single-posture CONTROL drives a manage_metadata holder below the operator, a stronger control than acceptance[2]'s seeded admin, which no pin drives on single: that admin leg is hand-driven",
+          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (the showcase declares it: @objectstack/organizations in examples/app-showcase/package.json, so a walled run boots the showcase from the tree), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence. The three wall-* dogfood pins boot the CRM example (@objectstack/example-crm: crm_lead and its package), not the showcase the steps name, so their door answers are the same doors on another app's objects; a live run drives the steps' showcase objects and does not match object names against the pins. Their single-posture CONTROL drives a manage_metadata holder below the operator, a stronger control than acceptance[2]'s seeded admin, which no pin drives on single: that admin leg is hand-driven",
           "install-local of a catalog-carrying package, named in the title, has no step here: it is scored from acceptance[0]'s pins (packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts drives install-local install, upgrade and uninstall). A live leg must boot from a SCRATCH COPY of the app, never the shared tree, because the operator's admitted control install caches its manifest under the server's working directory, .objectstack/installed-packages (RUNNER.md, the environment fact 'A per-boot OS_HOME and OS_STORAGE_LOCAL_ROOT do NOT isolate a package install'). QA run #27481 left the leg undriven for that reason and scored it from the pins"
         ]
       },
@@ -3936,6 +3991,12 @@
           "date": "2026-11-01",
           "change": "Two QA run #28545 (W3-C1R) findings. acceptance[0].verify prescribed --maxWorkers=2 against RUNNER's memory fact (the Tier 1 vitest pins hold under the container's limit only at --maxWorkers=1); it now says --maxWorkers=1, one package at a time, as cli.organization-ownership-ceremony acceptance[0] does. The title names _migrate-stored and POST /automation, but no step drove them: steps[1] adds both doors as the org owner, and acceptance[1] names their codes, 403 FORBIDDEN (the /meta door, pinned by meta-migrate-stored-walled-refusal.test.ts) and 403 PERMISSION_DENIED (the dispatcher, pinned by automation-walled-definition-write.test.ts), the codes #28545 read live. acceptance[1] gains two calls; no clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "Three fixture-text findings re-pointed (card #33332; QA run #32953 R1 comment 6840054712 and #33087 comment 6850382730). knownGaps[0] said no example app declares the multi-org runtime; examples/app-showcase/package.json declares @objectstack/organizations (workspace:*), as RUNNER.md's walled-boot entry already says. personas[0] now names the organization_admin grant the owner holds automatically (auto-org-admin-grant.ts), so a runner does not read it as a stray grant. fixtures.requires[2] notes that a scratch package the operator creates must carry a reverse-domain id (manifest.zod.ts), since a bare id fails quietly downstream. knownGaps[1] (install-local scored from the pins) was already right and is unchanged. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -4032,7 +4093,7 @@
       "title": "Security-catalog doors new on v18: POST /security/_activation/:type/:name switches a position or permission set off and on (holders lose and regain its grants), and POST /security/permission-sets/:name/clone copies a set with its refusal arms; both take ?package= for a permission set and refuse any other query",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4080,9 +4141,9 @@
           "evidence": "one line per arm + the clone body"
         },
         {
-          "clause": "the query is closed: `?package=` naming the set's holder answers as the same write without it; a package that does not hold the set → 409 RESOURCE_CONFLICT (`not-held-by-qualifier`, the holder named in details.candidates) with nothing written or saved; any other query parameter, at either door and for every activation type, or a blank or repeated `package` → 400 VALIDATION_ERROR before any lookup",
+          "clause": "the query is closed: `?package=` naming the set's holder answers as the same write without it; a package that does not hold the set → 409 RESOURCE_CONFLICT (the sentence naming the holder, and the holder in details.candidates) with nothing written or saved; any other query parameter, at either door and for every activation type, or a blank or repeated `package` → 400 VALIDATION_ERROR before any lookup",
           "oracle": "api",
-          "verify": "status + code per arm, and the ledger / the clone target read after each refusal",
+          "verify": "status + code per arm (the 409 body is the code, the sentence and details.candidates, packages/rest/src/error-response.ts packageScopedCandidatesMember; not-held-by-qualifier is the resolver's internal reason, packages/core/src/package-scoped-resolution.ts, and is not on the wire, so its absence is not a FAIL), and the ledger / the clone target read after each refusal",
           "evidence": "one line per arm"
         },
         {
@@ -4131,6 +4192,12 @@
           "date": "2026-11-12",
           "change": "#32164 (ADR-0150 D3/D4/D5/D8): both doors take `?package=` for a permission set and refuse any other query parameter. Added the steps and acceptance[4] (the closed query and a non-holder, reachable on one holder) and acceptance[5] (two holders, pin only until #31698 PR-2). Earlier clauses unchanged",
           "ref": "#32164"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "acceptance[4] (clause, verify) re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588): it named the 409's refusal `not-held-by-qualifier` as if on the wire. That is the resolver's internal reason (package-scoped-resolution.ts); the wire body carries RESOURCE_CONFLICT, the sentence naming the holder and details.candidates only (error-response.ts packageScopedCandidatesMember), which is what QA read. The arm's substance is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -4139,7 +4206,7 @@
       "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4157,7 +4224,7 @@
         "POST /api/v1/marketplace/install-local with the conflicting package; GET /api/v1/packages afterwards",
         "PUT /api/v1/meta/permission/SET?package=com.example.showcase with a body whose packageId names another package",
         "in the scratch app run `os migrate security-catalog-overlays` (preview), then `--apply --yes --json`",
-        "plant a sys_user_permission_set row naming an undefined set (scratch DB), reboot, read the [security] boot line"
+        "plant a sys_user_permission_set row naming an undefined set as a SQL write into the scratch DB file of a STOPPED server (the data API refuses the plant: POST /api/v1/data/sys_user_permission_set {permission_set: an undefined name} answers 400 VALIDATION_FAILED reference_not_found), reboot, read the [security] boot line. Boot with --log-level info for acceptance[4]'s clean-boot leg: that line is logged at info (catalog-reference-report.ts), below a default os dev boot's console threshold"
       ],
       "acceptance": [
         {
@@ -4185,9 +4252,9 @@
           "evidence": "both CLI outputs"
         },
         {
-          "clause": "a grant naming an undefined set is listed in the [security] error line at boot (per org, ≤50 names); a clean boot logs one info line",
+          "clause": "a grant naming an undefined set is listed in the [security] error line at boot (per organization: every undefined set name with its count, and at most 50 grant ids, the rest counted); a clean boot logs one info line",
           "oracle": "log",
-          "verify": "boot log grep for [security]",
+          "verify": "boot log grep for [security] (packages/plugins/plugin-security/src/catalog-reference-report.ts: the per-organization set-name counts are uncapped, the grant-id list is capped at LOGGED_LIMIT 50; the clean-boot line is an info line, so the boot runs at --log-level info)",
           "evidence": "the log lines"
         }
       ],
@@ -4229,6 +4296,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 3 (#26571; Tier 1 record #26468 scored the item PARTIAL). New dogfood pin security-catalog-one-holder-http: acceptance[1]'s install-local refusal and acceptance[2]'s owner-binding refusal over HTTP on a booted showcase, and acceptance[4]'s live boot log (the clean INFO line, the ERROR line over planted grants, and the 50-entry cap no case asserted). automated.kind set to dogfood: the ref now leads with dogfood pins (the slice-2 ACCEPT's kind correction, applied here too). No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "steps[3] and acceptance[4] re-pointed (card #33332; QA runs #33048 comment 6846028996 and #33094 comment 6852480973). The data API refuses the grant step[3] plants (400 VALIDATION_FAILED reference_not_found), so the step now names the SQL write into a stopped server's scratch DB it always needed. acceptance[4]'s '≤50 names' was the grant-id list: catalog-reference-report.ts caps grant ids at LOGGED_LIMIT 50 per organization and counts set names uncapped (QA run #33094 saw all 51 names printed). The clean-boot line is logged at info, so the step boots with --log-level info. The clause's substance is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -4734,7 +4807,7 @@
       "title": "A package's position resolves its permission sets from that package and its declared dependencies: a set only the environment or an unrelated package holds is refused and grants nothing, the boot report names the candidates, and a grant row records the package that holds its set",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4744,14 +4817,14 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a holds the permission set qa_a_reader (read on one showcase object that no stock member set grants, e.g. showcase_contact: showcase_member_default, the everyone-anchor set every member holds, already reads showcase_task, showcase_project and most showcase objects, so a grant on one of those is invisible on the member's reads); qa_b holds the position qa_b_desk binding qa_a_reader and qa_env_reader, and declares no dependency on qa_a",
           "an environment permission set qa_env_reader saved with PUT /api/v1/meta/permission/qa_env_reader and no ?package=; a member assigned qa_b_desk; the server restarted after the installs so the boot report runs"
         ]
       },
       "steps": [
         "read the boot log for the catalog reference report",
         "as the member, read the effective permissions (GET /api/v1/auth/me/permissions); record whether either set's grants are present",
-        "rebuild qa_b declaring a dependency on qa_a, reinstall, restart, and repeat the two reads",
+        "rebuild qa_b declaring a dependency on qa_a, reinstall, restart, and repeat the two reads. If the run's qa_b also carries items under qa_a's names (a qa_a/qa_b pair shared with another item's fixture), the dependency makes the reinstall refuse them 403 NOT_OVERRIDABLE (ADR-0146 D2: a dependent package cannot override its dependency's items): rename them in qa_b before this step; that refusal is the shared fixture colliding, not this item's answer",
         "as admin, insert a sys_user_permission_set row granting qa_a_reader to the member with no package column; read the row back"
       ],
       "acceptance": [
@@ -4813,6 +4886,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] and steps[2] re-pointed (fixture text, card #33332; QA run #32940 checklist-accuracy notes and #33094 comment 6852480973). qa_a_reader's object must be one no stock member set grants, because showcase_member_default (examples/app-showcase/src/security/permission-sets.ts, isDefault) already reads most showcase objects and hides the grant; showcase_contact is named as one it does not. steps[2] warns that a qa_b shared with another item's fixture and carrying qa_a's item names is refused 403 NOT_OVERRIDABLE once it depends on qa_a (ADR-0146 D2), so those items are renamed first. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -4984,27 +5063,27 @@
       "title": "An AI service account acts under the agent ceiling: its key never carries View All, Modify All, the destructive class, a system permission or admin standing; assigning it a set or a position above the ceiling, by insert or update, is refused 400 naming what breaches; and a set edited above it after assignment still grants nothing more",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["organization administrator: the assignments", "the AI service account, through its key: every effective read"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an account with a key, registered as identity-auth.ai-service-account-register-and-key does; a scratch permission set qa_agent_reader (read on one showcase object, no system permissions) and a second set qa_view_all with viewAllRecords on the same object",
+          "an account with a key, registered as identity-auth.ai-service-account-register-and-key does; a scratch permission set qa_agent_reader (read on one OWNER-PRIVATE showcase object such as showcase_private_note, no system permissions: a public-read object such as showcase_task, sharingModel public_read_write, returns every row under any set and hides the clamp acceptance[3] reads) and a second set qa_view_all with viewAllRecords on the same object",
           "a position qa_view_all_pos whose permissionSets is [\"qa_view_all\"], saved as admin with PUT /api/v1/meta/position/qa_view_all_pos"
         ]
       },
       "steps": [
-        "with the key: GET /api/v1/auth/me/permissions; record system permissions, admin standing and any View All / Modify All",
+        "as the administrator: POST /api/v1/security/explain {userId: the account's user id}; record principalKind, system permissions, admin standing, the sets resolved and any View All / Modify All. ⛔ Not GET /api/v1/auth/me/permissions with the key: that face is session-only by design (credentials 'session-only', packages/plugins/plugin-hono-server/src/current-user-endpoints.ts) and answers any osk_ key {authenticated: false}, so it can never show the agent's grants",
         "as the administrator: POST /api/v1/data/sys_user_permission_set granting qa_view_all to the account, then qa_agent_reader; POST /api/v1/data/sys_user_position assigning qa_view_all_pos to the account; PATCH the accepted qa_agent_reader row's permission_set to qa_view_all; then grant mcp_agent_data_read to the account; record each answer and read the account's grant and position rows",
-        "with the key: read the object; then as the administrator edit qa_agent_reader to add viewAllRecords (PUT /api/v1/meta/permission/qa_agent_reader) and repeat the effective-permissions read and the object read with the key"
+        "with the key: read the object; then as the administrator edit qa_agent_reader to add viewAllRecords (PUT /api/v1/meta/permission/qa_agent_reader) and repeat the administrator's POST /api/v1/security/explain {userId} read and the object read with the key"
       ],
       "acceptance": [
         {
           "clause": "the account resolves as an agent: no system permissions, no admin standing, and no everyone-anchor sets",
           "oracle": "api",
-          "verify": "the effective-permissions body lists no system permission and no admin scope (packages/core/src/security/resolve-authz-context.ts#isAgentAccountRow, #resolveUserAuthzGrants)",
+          "verify": "the administrator's POST /api/v1/security/explain {userId} body for the account reads principalKind 'agent', lists no system permission, no admin scope (hasPlatformAdminGrant false) and no everyone-anchor set (packages/core/src/security/resolve-authz-context.ts#isAgentAccountRow, #resolveUserAuthzGrants)",
           "evidence": "the body"
         },
         {
@@ -5022,8 +5101,8 @@
         {
           "clause": "a set edited above the ceiling after assignment is still read under it",
           "oracle": "api",
-          "verify": "after the edit the key's effective permissions still carry no View All, and the object read returns only what qa_agent_reader allowed before the edit (packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#clampPermissionSetToAgentCeiling)",
-          "evidence": "the effective-permissions body and both object reads"
+          "verify": "after the edit the administrator's explain read of the account still carries no View All, and the object read returns only what qa_agent_reader allowed before the edit (packages/plugins/plugin-security/src/agent-ceiling-clamp.ts#clampPermissionSetToAgentCeiling)",
+          "evidence": "the explain body and both object reads"
         }
       ],
       "negative": [
@@ -5049,6 +5128,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0151 D3, the agent ceiling (#31867): the set and position refusals, insert and update, and the clamp; with the sibling MCP ceiling-set rule's answer to the account (#32056 widened that rule's doors). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "steps[0], steps[2], acceptance[0] and [3] (verify, evidence) and fixtures.requires[0] re-pointed (stale spec, card #33332, QA run #32940 PARTIAL clause 1 and #33025 comment 6844741021). The effective-permissions read was GET /api/v1/auth/me/permissions with the account's key, but that face is session-only by design (current-user-endpoints.ts, credentials 'session-only') and answers any osk_ key {authenticated: false}, so clause 1 could never be consulted there. The read is now the administrator's POST /api/v1/security/explain {userId} (rest-route-ledger.ts security-explain family), whose body carries principalKind (explain-engine.ts, ADR-0151 D3). The scratch set now reads an owner-private object, since showcase_task is public_read_write and returns every row whatever the clamp does. No clause sentence changed. Read from source at base fca5f89c, not driven live",
+          "ref": "#33332"
         }
       ]
     },
@@ -5057,7 +5142,7 @@
       "title": "Each API key or OAuth access token use writes one credential_use audit row per use window, naming the credential, its owner and the client's address, and never the key, its hash or its prefix",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["a member holding an osk_ API key: the requests", "admin (the seeded admin): the audit read"],
@@ -5080,7 +5165,7 @@
         {
           "clause": "the row names the key owner as actor, the key row as its record, and carries credential_kind api_key, credential_id, used_at and the client address and user agent, or ip_address_absent",
           "oracle": "api",
-          "verify": "the row's metadata holds those keys (packages/plugins/plugin-audit/src/credential-use-audit.ts#buildCredentialUseAuditRow; packages/core/src/security/credential-use-client.ts#credentialUseClientOf)",
+          "verify": "the row's columns and metadata hold them: actor, record, ip_address and user_agent are columns of the sys_audit_log row, while credential_kind, credential_id, used_at and (when the address is null) ip_address_absent are keys of its metadata (packages/plugins/plugin-audit/src/credential-use-audit.ts#buildCredentialUseAuditRow; packages/core/src/security/credential-use-client.ts#credentialUseClientOf)",
           "evidence": "the row"
         },
         {
@@ -5110,6 +5195,12 @@
           "date": "2026-11-10",
           "change": "initial — the credential_use ledger row (#31862, #31897, #31967). Scoped sweep #32019 (epic #32022 M1, theme 3: AI service accounts and identity), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "acceptance[1].verify re-pointed (card #33332; QA run #32940 checklist-accuracy notes): it said the row's metadata holds every named key, but buildCredentialUseAuditRow (packages/plugins/plugin-audit/src/credential-use-audit.ts) writes the client address and user agent as the row's own ip_address and user_agent columns; only credential_kind, credential_id, used_at and ip_address_absent are metadata keys. The clause is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -5118,7 +5209,7 @@
       "title": "The MCP agent ceiling sets (mcp_agent_data_read, mcp_agent_data_write, mcp_agent_restricted) reach no person through any door: a direct grant, a position definition saved at the metadata door (active or draft), a position assignment, a seed and the deployment baseline are each refused 400 VALIDATION_FAILED at the field that named the set, and an ordinary set passes every one of them",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5134,7 +5225,7 @@
           "the showcase person sets showcase_contributor, showcase_auditor and showcase_ops, used as the ordinary-set controls"
         ],
         "knownGaps": [
-          "if installing qa_decl is itself refused, record that answer: the assignment leg then has no position to assign, so score it blocked(fixture), never a pass. The dogfood pin registers such a definition straight into the registry, which a live run cannot do",
+          "installing qa_decl is admitted: os build accepts a position whose permissionSets is ['mcp_agent_data_read'] (no build rule judges a position's sets against the MCP ceiling; the refusal this item scores is at assignment) and the install goes through (QA run #33081). Should a later build or install refuse it, record that answer: the assignment leg then has no position to assign, so score it blocked(fixture), never a pass. The dogfood pin registers such a definition straight into the registry, which a live run cannot do",
           "the baseline leg needs a host whose SecurityPlugin options name a ceiling set, which the showcase boot does not take; it is scored from the unit pin"
         ]
       },
@@ -5208,6 +5299,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0090 D10, the MCP agent ceiling sets reach no person: the direct grant rule, and the four doors #32056 added (the metadata door's position definition, every sys_user_position write, a seed, the baseline options), with the identity-provider mapping pins. Scoped sweep #32019 (epic #32022 M1, theme 3), read from source at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps[0] re-pointed (card #33332; QA run #33081 comment 6850173588): the gap worried that installing qa_decl might itself be refused, leaving the assignment leg no position. The run built and installed it without a refusal, and source agrees: no lint or build rule judges a position's permissionSets against the MCP agent ceiling (mcp_agent_data_read is only named in packages/spec/src/ai/mcp.zod.ts and judged at grant time). The gap now states the measured admit and keeps the blocked(fixture) fallback for a future refusal. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     }

@@ -178,6 +178,18 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   locale: z.string().optional(),
 
   /**
+   * The workspace default locale alone (BCP-47), resolved from the
+   * `localization` settings: the value `locale` falls back to when the request
+   * names none. `locale` is the fold of the two, so once a request names a
+   * locale the workspace default is gone from it; a producer of user-facing
+   * text needs it as the second rung of its ladder (the request's locale, else
+   * the workspace default, else `en`: `ApiErrorSchema.userMessage`,
+   * "Language"), and reads it here. Unset for an anonymous caller, and when no
+   * workspace default is configured.
+   */
+  workspaceLocale: z.string().optional(),
+
+  /**
    * Active default currency (ISO 4217, e.g. `USD`, `CNY`), resolved from the
    * `localization` settings alongside `timezone`/`locale`. The tenant-level
    * fallback applied when a currency field/measure omits its own (the

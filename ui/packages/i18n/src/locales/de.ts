@@ -125,6 +125,7 @@ const de = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Erste {{shown}} von {{total}} Datensätzen. Filter eingrenzen.",
     rowCeilingNoteUnknownTotal: "Erste {{shown}} Datensätze. Filter eingrenzen.",
+    ungroupedSection: "Sonstiges",
   },
   actions: {
     decisionOutput: {
@@ -2698,6 +2699,10 @@ const de = {
     },
     login: {
       signingIn: "Sie werden angemeldet…",
+      directSignIn: {
+        description: "Melden Sie sich mit dem Single Sign-on Ihrer Organisation an.",
+        retry: "Mit Single Sign-on fortfahren",
+      },
       ssoHandoff: "Weiter zu {{target}}",
       devAdminHint: {
         title: "Lokale Entwicklungsinstanz",
@@ -2719,8 +2724,20 @@ const de = {
         ssoAccountNotInvited: "Ihr Konto ist für dieses System noch nicht eingerichtet. Bitten Sie Ihren Administrator um eine Einladung.",
         ssoAccountNotLinked: "Für Ihre E-Mail-Adresse gibt es hier bereits ein Konto, das aber nicht mit Single Sign-on verbunden ist. Melden Sie sich auf andere Weise an oder bitten Sie Ihren Administrator, es zu verbinden.",
         ssoResponseRejected: "Der Anmeldedienst Ihrer Organisation hat eine Antwort gesendet, die dieses System nicht annehmen konnte. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
+        ssoEmailDomainNotAllowed: "Es wurde kein Konto angelegt: Ihre E-Mail-Adresse gehört zu keiner Domain, für die dieses System neue Konten annimmt. Verwenden Sie Ihre E-Mail-Adresse der Organisation, oder wenden Sie sich an Ihren Administrator.",
+        ssoEmailNotAnAddress: "Es wurde kein Konto angelegt: Der Anmeldedienst Ihrer Organisation hat keine verwendbare E-Mail-Adresse für Sie gesendet. Bitten Sie Ihren Administrator, die Single-Sign-on-Einrichtung zu prüfen.",
         ssoStartFromLoginPage: "Die Anmeldung muss auf der Anmeldeseite dieses Systems beginnen. Geben Sie hier Ihre geschäftliche E-Mail-Adresse ein und wählen Sie „Mit SSO anmelden“.",
         ssoTechnicalDetails: "Technische Details",
+        directSignInIncomplete: "Die Anmeldung wurde nicht abgeschlossen: Sie sind vom Single Sign-on zurückgekehrt, ohne angemeldet zu sein. Prüfen Sie, ob dieser Browser Cookies für diese Website zulässt, und versuchen Sie es erneut.",
+        directSignInUnavailable: "Das Single Sign-on für dieses System konnte nicht gestartet werden. Bitten Sie Ihren Administrator, den verwendeten Anmeldedienst zu prüfen.",
+        directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
+        ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
+        ssoSwitchAccount: "Konto wechseln",
+        ssoBackToConsole: "Zurück zur Konsole",
+        ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
+        linkEmailMismatch: "Das Konto wurde nicht verknüpft: Seine E-Mail-Adresse stimmt nicht mit der des Kontos überein, mit dem Sie angemeldet sind. Verknüpfen Sie ein Konto mit derselben E-Mail-Adresse.",
+        linkAlreadyLinkedToOtherUser: "Das Konto wurde nicht verknüpft: Es ist bereits mit einem anderen Benutzer dieses Systems verknüpft. Verknüpfen Sie ein anderes Konto, oder melden Sie sich als der Benutzer an, mit dem es verknüpft ist, und heben Sie die Verknüpfung dort zuerst auf.",
+        linkUnableToLink: "Das Konto konnte nicht verknüpft werden. Prüfen Sie, ob seine E-Mail-Adresse bei diesem Anmeldedienst bestätigt ist, und versuchen Sie es erneut. Wenn es weiterhin fehlschlägt, wenden Sie sich an Ihren Administrator.",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
@@ -3960,6 +3977,11 @@ const de = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Nachricht senden',
     scrollToBottom: 'Zur neuesten Nachricht scrollen',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Wird gesendet, sobald die aktuelle Antwort fertig ist",
+      queuedCancel: "Abbrechen",
+    },
     answer: {
       showFull: 'Ganze Antwort anzeigen',
       collapse: 'Einklappen',
@@ -4053,6 +4075,9 @@ const de = {
       countSeedData: "Beispieldaten",
       extendTarget: "Wird zur bestehenden App hinzugefügt: {{app}}",
       awaitingConfirm: "Wartet auf Bestätigung",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Bestätigt",
+      buildFailed: "Nicht erstellt — es wurde nichts angelegt",
       iterateOrNew: {
         question: "Das überschneidet sich mit „{{app}}“, einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
         questionUnnamed: "Das überschneidet sich mit einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
@@ -4063,6 +4088,7 @@ const de = {
       objectsAndFields: "Objekte und Felder",
       views: "Ansichten",
       suggestedField: "ergänzt",
+      suggestedFieldLegend: "Mit „{{mark}}“ markierte Felder hat die KI hinzugefügt; Sie haben sie nicht angefordert.",
       nameField: "Bezeichnung: {{field}}",
     },
     build: {
@@ -4085,6 +4111,15 @@ const de = {
       verifying: "Änderung wird geprüft…",
       verifyStep: "Schritt {{n}}",
       verified: "Änderung geprüft",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} zu beheben",
+      issuesSummary: "Einige Teile dieses Builds müssen noch korrigiert werden. Bitte den Assistenten, die Probleme zu beheben, dann repariert er sie.",
+      warningsSummary: "Der Build ist fertig, einige Punkte sind aber prüfenswert. Frag den Assistenten, welche das sind, wenn du sie verbessern möchtest.",
+      issuesDetails: "Technische Details",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} erfordern Prüfung",
+      needsAttention_one: "{{count}} erfordert Prüfung",
+      needsAttention_other: "{{count}} erfordern Prüfung",
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",
       nextStepQuote: "„{{step}}“",
@@ -4425,6 +4460,11 @@ const de = {
     daysAgo_other: 'vor {{count}} Tagen',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Datensätze erscheinen hier nach dem Veröffentlichen",
+      message: "Du siehst die Vorschau eines Objekts, das noch nicht veröffentlicht ist, daher hat es keine Datensätze. Veröffentliche es, um Datensätze anzulegen oder seine Beispieldaten zu laden.",
+    },
     empty: {
       loadFailedTitle: 'Entwurfsvorschau konnte nicht geladen werden',
       loadFailedDescription: 'Das Entwurfs-Overlay konnte nicht gelesen werden. Erneut versuchen oder Verbindung prüfen.',
@@ -4757,6 +4797,7 @@ const de = {
     disableAppNamed: "{{name}} deaktivieren",
     setDefault: "Als Standard festlegen",
     setDefaultNamed: "{{name}} als Standard festlegen",
+    alreadyDefault: "Bereits die Standard-App",
     deleteApp: "App löschen",
     deleteAppNamed: "{{name}} löschen",
     confirmDelete: "Zum Bestätigen erneut klicken",

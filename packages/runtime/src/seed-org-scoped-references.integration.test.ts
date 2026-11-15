@@ -287,6 +287,26 @@ describe('#33207 an organization-scoped load resolves a person through membershi
     expect(north.errors).toHaveLength(1);
   });
 
+  it('an object walled by another tenant column resolves within the load organization, on that column', async () => {
+    const { engine, replayer, dealsOf, logger } = await boot({ posture: 'isolated', data: [deals([{ name: 'Deal 1', tag: 'Gold' }])] });
+    const sys = { context: { isSystem: true } } as any;
+    // South's Gold exists FIRST, so a probe that ignored the tenant column
+    // would hand North the South row.
+    await engine.insert('crm_workspace_tag', { id: 'tag_gold_s', name: 'Gold', workspace_id: ORG_SOUTH }, sys);
+    await engine.insert('crm_workspace_tag', { id: 'tag_gold_n', name: 'Gold', workspace_id: ORG_NORTH }, sys);
+
+    const north = await replayer!(ORG_NORTH);
+    const south = await replayer!(ORG_SOUTH);
+
+    expect(north.errors).toEqual([]);
+    expect(south.errors).toEqual([]);
+    expect((await dealsOf(ORG_NORTH))[0].tag).toBe('tag_gold_n');
+    expect((await dealsOf(ORG_SOUTH))[0].tag).toBe('tag_gold_s');
+    // The probe ran: no refusal was said for the tag table.
+    const refused = logger.warn.mock.calls.filter((c) => (c[1] as { object?: string } | undefined)?.object === 'crm_workspace_tag');
+    expect(refused).toEqual([]);
+  });
+
   it('the organization table answers only for the load organization', async () => {
     const { replayer, dealsOf } = await boot({ posture: 'isolated', data: [deals([{ name: 'Mine', home_org: 'North' }, { name: 'Theirs', home_org: 'South' }])] });
     await replayer!(ORG_NORTH);
@@ -415,5 +435,73 @@ describe('#33206 a seed write carries the organization its rows are stamped with
     await replayer!(ORG_NORTH);
 
     expect(reads).toEqual([['Seeded']]);
+  });
+});
+
+describe('a dataset OF an object walled by a declared tenant column replays per organization on that column', () => {
+  const tags = (records: Array<Record<string, unknown>>) => ({ object: 'crm_workspace_tag', mode: 'upsert', externalId: 'name', records });
+  const accounts = (records: Array<Record<string, unknown>>) => ({ object: 'crm_account', mode: 'upsert', externalId: 'name', records });
+  const sys = { context: { isSystem: true } } as any;
+  const rowsOf = async (engine: ObjectQL, object: string): Promise<Row[]> =>
+    ((await engine.find(object, { where: {}, context: { isSystem: true } } satisfies EngineQueryOptions)) as Row[])
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+  it('each organization gets its own row, stamped on the tenant column; neither sees nor overwrites the other; a second replay matches', async () => {
+    const { engine, replayer } = await boot({ posture: 'isolated', data: [tags([{ name: 'Silver' }])] });
+    // South already holds a Silver of its own: an upsert that matched across
+    // organizations would take it for North's.
+    await engine.insert('crm_workspace_tag', { id: 'tag_silver_s', name: 'Silver', workspace_id: ORG_SOUTH }, sys);
+
+    const north = await replayer!(ORG_NORTH);
+    const south = await replayer!(ORG_SOUTH);
+
+    expect(north.errors).toEqual([]);
+    expect(south.errors).toEqual([]);
+    expect(north.inserted).toBe(1);
+    expect(south.inserted).toBe(0);
+    const landed = await rowsOf(engine, 'crm_workspace_tag');
+    expect(landed.map((r) => [r.name, r.workspace_id])).toEqual(
+      expect.arrayContaining([['Silver', ORG_NORTH], ['Silver', ORG_SOUTH]]),
+    );
+    expect(landed).toHaveLength(2);
+    expect(landed.find((r) => r.workspace_id === ORG_SOUTH)?.id).toBe('tag_silver_s');
+
+    // A second replay matches each organization's own row: nothing is added.
+    const again = [await replayer!(ORG_NORTH), await replayer!(ORG_SOUTH)];
+    for (const r of again) {
+      expect(r.errors).toEqual([]);
+      expect(r.inserted).toBe(0);
+    }
+    expect(await rowsOf(engine, 'crm_workspace_tag')).toEqual(landed);
+  });
+
+  it('a load with no organization, pinned or derivable, refuses the row by name on the tenant column', async () => {
+    // Two organizations and no pin: there is no owner to stamp.
+    const { engine, metadata, logger } = await boot({ posture: 'isolated', data: [] });
+    const loader = new SeedLoaderService(engine as any, metadata as any, logger as any);
+
+    const result = await loader.load({ seeds: [tags([{ name: 'Bronze' }])], config: { multiPass: true } } as any);
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({ sourceObject: 'crm_workspace_tag', field: 'workspace_id', targetObject: 'sys_organization' });
+    expect(await rowsOf(engine, 'crm_workspace_tag')).toEqual([]);
+  });
+
+  it('CONTROL — a dataset of an ordinary organization_id object replays per organization, stamped and idempotent', async () => {
+    const { engine, replayer } = await boot({ posture: 'isolated', data: [accounts([{ name: 'Initech' }])] });
+
+    const first = [await replayer!(ORG_NORTH), await replayer!(ORG_SOUTH)];
+    const again = [await replayer!(ORG_NORTH), await replayer!(ORG_SOUTH)];
+
+    for (const r of first) {
+      expect(r.errors).toEqual([]);
+      expect(r.inserted).toBe(1);
+    }
+    for (const r of again) {
+      expect(r.errors).toEqual([]);
+      expect(r.inserted).toBe(0);
+    }
+    const initech = (await rowsOf(engine, 'crm_account')).filter((r) => r.name === 'Initech');
+    expect(initech.map((r) => r.organization_id).sort()).toEqual([ORG_NORTH, ORG_SOUTH].sort());
   });
 });

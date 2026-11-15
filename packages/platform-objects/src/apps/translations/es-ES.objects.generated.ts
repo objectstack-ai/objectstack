@@ -2167,6 +2167,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "URL de descubrimiento",
             helpText: "Opcional. URL del documento de descubrimiento OIDC (https). Déjelo en blanco para derivar `<issuer>/.well-known/openid-configuration`. Un endpoint indicado aquí se considera de confianza para este proveedor."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "URL de userinfo",
             helpText: "Opcional. URL del endpoint userinfo de OIDC (https), que se usa en lugar del que indica el documento de descubrimiento. Un endpoint indicado aquí se considera de confianza para este proveedor: indíquelo cuando el registro se rechace porque el documento de descubrimiento nombra un host de userinfo en el que el servidor no confía."
@@ -2253,6 +2265,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Mapeo: atributo de grupos",
             helpText: "Opcional. Atributo de la aserción que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

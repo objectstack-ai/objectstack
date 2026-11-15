@@ -36,6 +36,13 @@ export interface MetadataAuthoringGateContext {
     isArtifactBacked: boolean;
     /** The packaged (code-layer) baseline body when {@link isArtifactBacked}; the declaration an overlay customizes. */
     declaredBody?: unknown;
+    /**
+     * [#32656] The locales a gate's refusal `userMessage` is composed in, in
+     * ladder order (the request's, then the workspace default), as the write
+     * door stated them (`SaveMetaItemRequestSchema.userTextLocales`). Absent
+     * when the door stated none: the gate composes `en`.
+     */
+    userTextLocales?: readonly string[];
 }
 
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;

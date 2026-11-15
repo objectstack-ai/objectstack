@@ -852,10 +852,10 @@
     },
     {
       "id": "api-backend.route-ledger-live-parity",
-      "title": "Every route family across all ELEVEN route ledgers — REST, dispatcher, auth, storage/i18n/settings/datasource services, metadata HMR, trigger-api, cloud-connection, console static — is actually mounted on the live server — no route that exists only in unit tests",
+      "title": "Every route family across all SIXTEEN route ledgers — REST, dispatcher, auth, personal views, storage/i18n/settings/datasource/messaging/print services, sharing, comment reactions, metadata HMR, trigger-api, cloud-connection, console static — is actually mounted on the live server — no route that exists only in unit tests",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -865,14 +865,14 @@
         "app": "showcase",
         "requires": [
           "packages/rest/src/rest-route-ledger.ts — the audited route inventory (route-manager + direct-mount rows, full wire paths at /api/v1)",
-          "the other ten ledgers named in the steps — the ledger universe is ELEVEN files at head (grep the repo for '*route-ledger.ts' at run time rather than trusting this list to stay complete: a twelfth ledger landing is exactly the drift this item exists to catch)"
+          "the other fifteen ledgers named in the steps — the ledger universe is SIXTEEN files at 87330e89 (the five added since this item was written: packages/plugins/plugin-audit/src/comment-reaction-route-ledger.ts, packages/plugins/plugin-auth/src/personal-view-route-ledger.ts, packages/plugins/plugin-sharing/src/sharing-route-ledger.ts, packages/services/service-messaging/src/messaging-route-ledger.ts, packages/services/service-print/src/print-route-ledger.ts) (grep the repo for '*route-ledger.ts' at run time rather than trusting this list to stay complete: a seventeenth ledger landing is exactly the drift this item exists to catch)"
         ]
       },
       "steps": [
-        "boot the real HTTP stack (os dev); read REST_ROUTE_LEDGER and pick at least one representative route per family (discovery, openapi, metadata, ui, crud, batch, data-actions, forms, search, security, security-explain, record-shares, sharing-rules, approvals, email, analytics, packages, external-datasource)",
+        "boot the real HTTP stack (os dev); read REST_ROUTE_LEDGER and pick at least one representative route per family (the 20 families at 87330e89: discovery, openapi, metadata, ui, crud, batch, data-actions, forms, search, security, security-explain, record-shares, sharing-rules, approvals, email, analytics, packages, external-datasource, recycle-bin, user-work — read the family set from the ledger, it grows). Sample ledger ROWS only: POST /api/v1/data/:object/actions/:name is no ledger row and answers the routing 404 by design, so it is not a data-actions sample",
         "fire each sampled route as admin with a minimal-valid shape (GETs verbatim; parameterized routes filled with real seeded names, e.g. GET /api/v1/data/showcase_task, GET /api/v1/meta/object/showcase_task, GET /api/v1/security/explain)",
         "capture status + code per route",
-        "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers",
+        "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers, and the five ledgers added since this item was written, one representative row each (e.g. GET /api/v1/sharing/shareable-objects, GET /api/v1/messaging/preference-options, POST /api/v1/print/records, and the personal-view and comment-reaction doors under /api/v1/personal-views and /api/v1/comments/reactions)",
         "fire the two service families that were UNLEDGERED when this item was first written and are ledgered at head — the run must NOT file the old unledgered finding: as admin GET /api/settings (settings-route-ledger.ts, #7526 — note the /api/settings base, NOT /api/v1) and GET /api/v1/datasources (datasource-route-ledger.ts, #7744). For the datasource family probe BOTH sides of the #9391/#9593 floor: anonymous GET /api/v1/datasources/drivers → 401 UNAUTHENTICATED (the 401 proves the route is mounted AND the floor holds — it is NOT the routing 404, and NOT the pre-#9391 'always-available static catalog'), then the same GET as admin (manage_platform_settings via admin_full_access) → 200 driver catalog; GET /api/v1/datasources as admin → 200 (or 503 naming the unwired service, which still proves the mount)",
         "fire the RAW-APP-mounted families — these registrars mount via getRawApp() and are structurally invisible to IHttpServer.getMountedRoutes(), so the #7526 parity dogfood gate CANNOT observe them and this item's live probes are their only live-HTTP observation (each ledger header says so): metadata HMR GET /api/v1/dev/metadata-events (metadata-route-ledger.ts — an SSE stream: read only the status line + headers with a short timeout, never wait for the stream to end; mounted ONLY under a literal NODE_ENV=development, which os dev sets — #12140/#5673) and POST /api/v1/dev/metadata-events; trigger-api POST /api/v1/automation/hooks/no_such_flow/bogus (trigger-api-route-ledger.ts — the handler answers a structured JSON refusal, distinguishable from the routing 404); cloud-connection GET /api/v1/runtime/config (anonymous 200 by design) and GET /api/v1/cloud-connection/status (cloud-connection-route-ledger.ts — 16 rows across four registrar families; sample only for MOUNT parity here, platform-core owns the marketplace lifecycle depth); console static GET /_console (console-route-ledger.ts — disposition static-asset)",
         "fire the dispatcher meta state route: GET /api/v1/meta/object/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/object/not_a_real_object/state/status as the 404 control",
@@ -899,7 +899,7 @@
           "evidence": "trace"
         },
         {
-          "clause": "discovery capability bits agree with live behavior for the sampled capabilities (a bit true ⇒ the family answers; a bit false ⇒ the family refuses coherently)",
+          "clause": "discovery capability bits agree with live behavior for the sampled capabilities (a bit true ⇒ the family answers, possibly with a permission refusal such as 403 EXPORT_NOT_PERMITTED for an admin no set grants export — the route is mounted and judged, not missing; a bit false ⇒ the family refuses coherently)",
           "oracle": "api",
           "verify": "cross-check the discovery body against the sampled families' answers",
           "evidence": "discovery body + table"
@@ -1032,6 +1032,12 @@
           "date": "2026-10-16",
           "change": "the REST ledger carries 18 families, not 19: 'reports' was RETIRED (#20102 — packages/rest/src/rest-route-ledger.ts keeps only a RETIRED comment where its rows were), so the variant is dropped, the family list in step 1 no longer names it, and clause 6 and source[0] say 18 (#23878 checklist-accuracy finding). Re-run on main c91af8ed6: one route per remaining REST family answered non-routing-404 (eighteen of eighteen), GET /api/v1/reports answered the same 404 ENDPOINT_NOT_FOUND as the GET /api/v1/definitely-not-a-route control, and the tree still holds eleven *route-ledger.ts files",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "title, fixtures.requires[1], steps[0], steps[3] and acceptance[3].clause re-pointed (stale spec, card #33332; QA runs #33058 comment 6846283471, #33081 comment 6850173588, #33092 comment 6850793622). The tree holds SIXTEEN *route-ledger.ts files at 87330e89, not eleven: comment-reaction (plugin-audit), personal-view (plugin-auth), sharing (plugin-sharing), messaging (service-messaging) and print (service-print) were added, and each answered live; steps[3] now samples them. REST_ROUTE_LEDGER has 20 families (recycle-bin and user-work added), and steps[0] warns that POST /data/:object/actions/:name is no ledger row and answers a routing 404 by design. acceptance[3]'s 'a bit true ⇒ the family answers' now admits a permission refusal (the run's admin met 403 EXPORT_NOT_PERMITTED with the export bit true, coherent with the admin-export-wildcard removal). The parity rule itself is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -1153,7 +1159,7 @@
       "title": "Package REST lifecycle: POST /packages creates (201), a duplicate name is refused 409 (no silent manifest clobber), PATCH partial-patches the manifest, and an explicit overwrite re-install replaces in place without duplicating",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1176,11 +1182,12 @@
         "PATCH three malformed bodies: { name: '' }, { version: 'not-semver' }, and {} (nothing to update); capture each rejection",
         "re-install with the explicit opt-in: POST /api/v1/packages?overwrite=true (or body { overwrite: true }) carrying the same id and a changed manifest (version 2.0.0); capture status",
         "GET /api/v1/packages and count rows whose id == com.example.qa-pkg-lifecycle-probe — must be exactly one",
-        "confirm the LIVE routing seam: POST /api/v1/packages resolves to the dispatcher install route (REST moved marketplace publish OFF the bare path to POST /api/v1/packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 though it is absent from packages/rest/src/rest-route-ledger.ts (dispatcher-only)"
+        "confirm the LIVE routing seam: POST /api/v1/packages resolves to the dispatcher install route (REST moved marketplace publish OFF the bare path to POST /api/v1/packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 though it is absent from packages/rest/src/rest-route-ledger.ts (dispatcher-only)",
+        "restart: after steps[6], stop the server and boot it again on the SAME database (the same file DB, never --fresh); then GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe and GET /api/v1/packages, and set both beside the same reads taken just before the stop"
       ],
       "acceptance": [
         {
-          "clause": "a scratch package installs → 201: POST /api/v1/packages returns 201 with the created package, and a follow-up GET reads it back (the install lands in the in-memory registry AND durable sys_packages, per packages.ts routing through protocol.installPackage)",
+          "clause": "a scratch package installs → 201: POST /api/v1/packages returns 201 with the created package, and a follow-up GET reads it back (the install lands in the in-memory registry AND durable sys_packages, per packages.ts routing through protocol.installPackage; sys_packages is keyed by (id, version) by design, so several versions of one package sit side by side there, and every one-row count in this item is read from the list door GET /api/v1/packages, which lists the registry's one entry per id, never from the table)",
           "oracle": "api",
           "verify": "POST status 201; GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe returns the package",
           "evidence": "the POST + GET responses"
@@ -1214,12 +1221,19 @@
           "oracle": "api",
           "verify": "POST /api/v1/packages installs (not a 400 publish-shape rejection); PATCH /api/v1/packages/:id answers non-routing-404",
           "evidence": "the two traces"
+        },
+        {
+          "clause": "the manifest served after a restart equals the last one written: once the server restarts on the same database, GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe answers the manifest of the steps[5] overwrite (version 2.0.0 and the fields it changed), never the PATCHed 1.1.0 manifest or the 1.0.0 install, and GET /api/v1/packages still lists exactly one row for the id",
+          "oracle": "api",
+          "verify": "compare the post-restart GET with the pre-restart GET of the same id: name, description, version and dependencies equal. The registry is rebuilt at boot from sys_packages: installPackage and updatePackage each persist the merged manifest through the package service's publish (packages/metadata-protocol/src/protocol-package-install.ts#updatePackage; a failed persist fails the write, #21243), publish stamps updated_at to the millisecond (packages/services/service-package/src/package-table.ts#packageWriteStamp), and the boot hydrates each id from its row written last (packages/services/service-package/src/index.ts, list() and the hydration loop that calls registry.installPackage). A pre-restart read that matches while the post-restart read shows an earlier version or name is the FAIL this clause exists for",
+          "evidence": "the pre- and post-restart GET bodies + the post-restart list count"
         }
       ],
       "negative": [
         "a second POST of the same id answering 2xx and silently replacing the manifest is the #2995 data-loss FAIL (the whole reason the 409 guard exists)",
         "a PATCH that resets enabled/status/installedAt (a full replace masquerading as a partial patch) is a FAIL",
-        "an overwrite re-install that leaves two rows for one id in GET /api/v1/packages is a FAIL (duplication, not replacement)"
+        "an overwrite re-install that leaves two rows for one id in GET /api/v1/packages is a FAIL (duplication, not replacement). Two sys_packages rows for one id at two versions are not this FAIL: the table is (id, version)-keyed by design (packages/services/service-package/src/package-table.ts)",
+        "a restart that serves an earlier manifest than the last write (the PATCH or the overwrite lost, or an older version's row winning the boot hydration) is a FAIL: the edit was answered as stored and is gone"
       ],
       "traps": [
         "dispatcher-vs-hono-route"
@@ -1255,6 +1269,18 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "acceptance[0].clause and negative[2] re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588). sys_packages is keyed by (id, version) by design (service-package package-table.ts, PRIMARY KEY (id, version)), so after the 2.0.0 overwrite the table can hold two rows for the id. The item now names the list door GET /api/v1/packages, which reads the registry (one entry per id), as the oracle for every one-row count, and says two version rows in the table are not the duplication FAIL. The run's other note, a clause that the manifest served after a restart equals the last one written, is a new clause and is left for a coverage pass. Read from source at base fca5f89c",
+          "ref": "#33332"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[8], acceptance[6] and negative[3] added (coverage, card #33353 row 196; card-B-api-4 of QA run #33081, comment 6850173588, ledger row 196 of #32908). No clause said the manifest served after a restart equals the last one written, and the in-memory registry would pass every other clause while the durable copy was wrong. The new clause reads the detail door after a restart on the same database against the read before it. Source on main: updatePackage and installPackage persist through the package service's publish and fail the write when the persist fails (protocol-package-install.ts), publish stamps updated_at to the millisecond (package-table.ts packageWriteStamp), and the boot hydrates each id from its latest row (service-package index.ts list() and its hydration loop). The existing clauses are unchanged. Read from source at base bd439f17, not driven live",
+          "ref": "#33353"
         }
       ]
     },
@@ -1592,7 +1618,7 @@
       "title": "A retired metadata DEFINITION (whole schema type withdrawn) refuses at every authoring door — distinct from a retired key, and the door that must not fall through to 'unknown type, ignored'",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "build",
       "personas": [
@@ -1609,11 +1635,11 @@
         ]
       },
       "steps": [
-        "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (the registry carries entries at the previous major and the current one: prefixes 17 and 18, against PROTOCOL_VERSION '18.0.0' in packages/spec/src/kernel/protocol-version.ts. Read each prefix against PROTOCOL_VERSION; no prefix is staged for a later major)",
+        "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (249 entry files at 87330e89, 53 at 17 and 196 at 18; the count grows with retirements, so record the one you read) (the registry carries entries at the previous major and the current one: prefixes 17 and 18, against PROTOCOL_VERSION '18.0.0' in packages/spec/src/kernel/protocol-version.ts. Read each prefix against PROTOCOL_VERSION; no prefix is staged for a later major)",
         "sample at least four entries spanning BOTH version prefixes and at least three different domains (e.g. data/, system/, identity/, ui/)",
-        "for each sampled def, read its entry file and record which ADR-0087 route retired it, whether a prescription was authored, and its CARRIER: the authored key that embedded it, retired as a retiredKey() tombstone (e.g. manifest.loading for kernel/PluginLoadingConfig and its closure; agent.lifecycle for automation/StateMachine and its family), or none — most entries are schema-export definitions with zero consumers: no metadata-type binding, no stack collection, no embedding (e.g. data/ExternalDataSource, automation/ScheduleState). Sample at least one def of each kind",
-        "build door, per sampled def, each in its own scratch stack run through os build: for a def WITH a carrier, author the carrier key (e.g. manifest.loading: { strategy: 'lazy' }; an agent carrying lifecycle) — the refusal is the carrier's tombstone. For a def WITHOUT one there is no metadata of that type to author ('a stack that declares metadata of the retired type' could only be an invented key, which is the control below), so drive the door it actually had: import its Zod export from its @objectstack/spec subpath in the config (e.g. ExternalDataSourceSchema from '@objectstack/spec/data') and confirm json-schema/DOMAIN/NAME.json is absent from packages/spec/json-schema",
-        "runtime door against a live boot: PUT /api/v1/meta/TYPE/NAME carrying the carrier key where its type is runtime-writable, and record a code-only type's up-front refusal where it is not (agent is code-only); manifest.loading's carrier has no runtime metadata-write door at all — `manifest` (like package and plugin) is not a registered metadata type, so PUT /api/v1/meta/manifest/… answers the control's own 400 'is not a metadata type': record it as that, like the code-only agent; for a zero-consumer def, PUT a type name spelled after it (e.g. external_data_source) — no type was ever bound, so the expected answer is the same refusal as the control",
+        "for each sampled def, read its entry file and record which ADR-0087 route retired it, whether a prescription was authored, and its CARRIER: the authored key that embedded it, retired as a retiredKey() tombstone (e.g. agent.lifecycle for automation/StateMachine and its family, packages/spec/src/ai/agent.zod.ts. manifest.loading, the carrier of 17 kernel/PluginLoadingConfig, is no longer a tombstone: it was removed under the ADR-0087 2026-10-26 addendum (#25767 D2=A), so the closed manifest answers it with the generic unknown-key refusal plus the upgrade-guide sentence, and that def now samples as a def without a live carrier), or none — most entries are schema-export definitions with zero consumers: no metadata-type binding, no stack collection, no embedding (e.g. data/ExternalDataSource, automation/ScheduleState). Sample at least one def of each kind",
+        "build door, per sampled def, each in its own scratch stack run through os build: for a def WITH a carrier, author the carrier key (e.g. an agent carrying lifecycle) — the refusal is the carrier's tombstone. For a def WITHOUT one there is no metadata of that type to author ('a stack that declares metadata of the retired type' could only be an invented key, which is the control below), so drive the door it actually had: import its Zod export from its @objectstack/spec subpath in the config (e.g. ExternalDataSourceSchema from '@objectstack/spec/data') and confirm json-schema/DOMAIN/NAME.json is absent from packages/spec/json-schema",
+        "runtime door against a live boot: PUT /api/v1/meta/TYPE/NAME carrying the carrier key where its type is runtime-writable, and record a code-only type's up-front refusal where it is not (agent is code-only); `manifest` (like package and plugin) is not a registered metadata type, so PUT /api/v1/meta/manifest/… answers the control's own 400 'is not a metadata type' whatever key it carries: record it as that, like the code-only agent; for a zero-consumer def, PUT a type name spelled after it (e.g. external_data_source) — no type was ever bound, so the expected answer is the same refusal as the control",
         "as a control, author an invented top-level stack key (e.g. qaInventedFamily) at the build door and PUT an invented type name at the runtime door, and compare their refusals to the retired-def refusals"
       ],
       "acceptance": [
@@ -1680,6 +1706,12 @@
           "date": "2026-10-20",
           "change": "steps[0] and acceptance[3]'s clause name the registry's prefixes for what they are — checklist-accuracy finding B1 of QA run #24787 (wave anchor #24579 round 12): the prefixes are 17 and 18 and the runtime implements protocol 18, so they are the previous and the current major, and 'staged for the NEXT major' no longer describes prefix 18. Re-measured at base 307ce4c4b4: 224 retired-defs entries (53 at 17, 171 at 18), PROTOCOL_VERSION '18.0.0'. The clause still requires both prefixes",
           "ref": "#24824"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "steps[0], [2], [3] and [4] re-pointed (stale spec, card #33332; QA runs #33025 comment 6844741021 and #33081 comment 6850173588). The steps named manifest.loading as a live retiredKey() tombstone, but it was removed under the ADR-0087 2026-10-26 addendum (#25767 D2=A): ManifestSchema (packages/spec/src/kernel/manifest.zod.ts) is closed and carries no loading key, so a 17-prefix carrier now gets the generic unknown-key refusal with the upgrade-guide sentence. agent.lifecycle (agent.zod.ts) stays the carrier example. steps[0] records the registry at 249 entries (53 at 17, 196 at 18) on 87330e89, not the 224 the revision-4 row read. No clause changed: acceptance[1] already scores an identical generic refusal as correct where no prescription is authored. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -1879,7 +1911,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1917,9 +1949,9 @@
           "evidence": "both traces"
         },
         {
-          "clause": "the shape arm names the shape: the 2-segment path answers this door's own 400 'Path must be /actions/_activation/:object/:action (use `global` for an object-less action)' — while the 4-segment path 404s at the ROUTER, because no /actions mount pattern matches four segments (the door never sees it; route-ledger.ts records the reconstruction)",
+          "clause": "the shape arm names the shape: the 2-segment path answers this door's own 400 'Path must be /actions/_activation/:object/:action (use `global` for an object-less action)' — while the 4-segment path answers the dispatcher's no-route 404 ROUTE_NOT_FOUND: since ADR-0150 D5 the addressed /actions/:ns/:object/:action/:recordId mount matches four segments, so the path reaches this door, which declines it (handled: false) after its two authority gates (packages/runtime/src/domains/actions.ts; route-ledger.ts: an addressed `_activation` path has no form and answers 404)",
           "oracle": "api",
-          "verify": "step-3: 2-segment → 400 with the shape sentence; 4-segment → the routing-404 shape (compare against a known unmounted path, per api-backend.route-ledger-live-parity's control discipline)",
+          "verify": "step-3: 2-segment → 400 with the shape sentence; 4-segment → 404 with code ROUTE_NOT_FOUND, the dispatcher's no-route answer (set beside a known unmounted path's routing 404, per api-backend.route-ledger-live-parity's control discipline; an answer with the door's shape 400 means the deeper path was not declined)",
           "evidence": "both traces + the routing-404 control"
         },
         {
@@ -2027,6 +2059,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0]–[6] and negative[0]–[2] are pinned over HTTP (the release-18.2.0 Tier 1 sweep #26468 scored a0, a1, a2, a4, a5 and a6 half-asserted, a3, n0 and n2 below the HTTP layer, and n1 unpinned). The new action-activation-door-live.dogfood.test.ts drives every arm on its own showcase boot, and the ambiguity arm on the new activation-ambiguity-fixture.ts scratch app, which fixtures.knownGaps[0] now names. automated.kind is dogfood; automated.ref and the verify texts of acceptance[2], [5] and [6] name what the pins assert. The metadata-plane 503 and the 501/503 arms are unchanged. Measured at base c8583f80. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "acceptance[1] (clause, verify) re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588, repeating the prior round's note). The clause said the 4-segment path 404s at the router because no /actions mount matches four segments. Since ADR-0150 D5 the dispatcher mounts the addressed /actions/:ns/:object/:action/:recordId pattern (dispatcher-plugin.ts), so the path reaches the activation door, which declines a path longer than three segments after its two gates (domains/actions.ts), and the dispatcher answers 404 ROUTE_NOT_FOUND. The 2-segment shape 400 is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -2035,7 +2073,7 @@
       "title": "Server-side aggregation contract: every AggregationFunction × DateGranularity gives known answers — ruled empty-set values, ISO-Monday week buckets, retired array_agg/string_agg refuse with prescriptions, and aggregate stays secured (engine-only, never raw driver)",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2063,7 +2101,7 @@
         "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. count_distinct over annual_revenue does not discriminate on the seeded rows (QA run #26476 measured every value distinct, so it equals count of the field): run count_distinct over `status` as well, where the distinct count is smaller than the row count. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
         "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string). The TIMEZONE lever is not on this door: POST /api/v1/data/showcase_account/query refuses a `timezone` key 400 INVALID_FIELD (the protocol does not forward one; engine.aggregate reads only query.timezone). The one wire lever is POST /api/v1/analytics/query with `timezone` — on the stock cube showcase_delivery, a count measure over its time dimension due_date at granularity day, once at UTC and once in a negative-offset zone such as America/Los_Angeles (QA run #24595: the answer's data.sql is present on the driver path and absent on the in-memory one, and the SQL echo refuses a non-UTC bucket)",
         "empty-set semantics: (a) a query whose where matches nothing, UNgrouped, where the identities come back as the one result row. Grouped, an empty where answers NO groups at all, because there is no bucket to carry a value, so the per-group identities are read on path (b); (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
-        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message says there is no replacement in the query vocabulary and ends with the shared retirement tail, AGG_RETIRED_TAIL in query.zod.ts: 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.'; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → on this door the REQUEST SCHEMA answers first: 400 VALIDATION_FAILED with a fields[] entry located at query.aggregations ('expected array'). The protocol's worked-example refusal (assertAggregationFieldsExist: 'must be an array of { function, field?, alias } entries') is not reached through POST /query — the #20116 door posture api-backend.filter-comparand-conformance records",
+        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 whose message is the one-line refusal head ('`array_agg` was removed from `AggregationFunction` in @objectstack/spec 17: delete the aggregation; there is no replacement function.', and its string_agg twin) and whose fields[] entry carries the RETIREMENT prescription as its hint (since #32279, query.zod.ts withRefusalHead: the data doors answer the head as the message and the prescription beside it as the hint, while os compile and the save doors print the prescription whole; each prescription says there is no replacement in the query vocabulary and ends with the shared retirement tail, AGG_RETIRED_TAIL in query.zod.ts: 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.'; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → on this door the REQUEST SCHEMA answers first: 400 VALIDATION_FAILED with a fields[] entry located at query.aggregations ('expected array'). The protocol's worked-example refusal (assertAggregationFieldsExist: 'must be an array of { function, field?, alias } entries') is not reached through POST /query — the #20116 door posture api-backend.filter-comparand-conformance records",
         "secured-aggregate leg: run one grouped count (count by status on showcase_invoice) as the provisioned contributor-bound member, whose visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
       ],
       "acceptance": [
@@ -2086,9 +2124,9 @@
           "evidence": "both responses + the expected-value table"
         },
         {
-          "clause": "retired functions refuse with their PRESCRIPTIONS and unknown functions with the enum listing: array_agg/string_agg answer 400 carrying their registered retirement messages (query.zod.ts — no replacement exists; the message says to reshape, and its AGG_RETIRED_TAIL says `os migrate meta` no longer carries the protocol-16.x conversion and names the protocol upgrade guide, https://objectstack.ai/docs/protocol-upgrade), while an invented function gets zod's own enum error listing the six legal members — the two error classes must not blur (the enum error map returns the retirement text ONLY for the two spellings that used to be legal)",
+          "clause": "retired functions refuse with their PRESCRIPTIONS and unknown functions with the enum listing: array_agg/string_agg answer 400 carrying their registered retirement prescriptions in fields[].hint, under the one-line refusal head as the message (query.zod.ts withRefusalHead, #32279 — no replacement exists; the message says to reshape, and its AGG_RETIRED_TAIL says `os migrate meta` no longer carries the protocol-16.x conversion and names the protocol upgrade guide, https://objectstack.ai/docs/protocol-upgrade), while an invented function gets zod's own enum error listing the six legal members — the two error classes must not blur (the enum error map returns the retirement text ONLY for the two spellings that used to be legal)",
           "oracle": "api",
-          "verify": "the three rejection bodies: two carry the retirement prescriptions, the third lists count/sum/avg/min/max/count_distinct; all are 400, never 500",
+          "verify": "the three rejection bodies: two carry the retirement prescriptions in fields[].hint (the message is the one-line head), the third lists count/sum/avg/min/max/count_distinct; all are 400, never 500",
           "evidence": "the three rejections"
         },
         {
@@ -2180,7 +2218,8 @@
           "ref": "#25807"
         },
         { "revision": 7, "date": "2026-10-31", "change": "knownGaps[0], steps[4], steps[5], acceptance[2] and acceptance[3] corrected from QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377). (1) The retirement message no longer names 'os migrate meta --from 16': both refusals end with AGG_RETIRED_TAIL, which names `os migrate meta` and the protocol upgrade guide URL, and steps[5] and acceptance[3] now say so. (2) A grouped query whose where matches nothing answers no groups, so the empty-where identities are read ungrouped and the per-group ones on the #10576 filter path; steps[4](a) and acceptance[2] said 'grouped and ungrouped'. (3) knownGaps[0] names the seeded rows that made the count and week legs discriminating. Re-read at base 488b3ed0: packages/spec/src/data/query.zod.ts AGG_RETIRED_TAIL, examples/app-showcase/src/data/seed/index.ts (14 accounts, all with annual_revenue). No clause's assertion was weakened", "ref": "#27392" },
-        { "revision": 8, "date": "2026-11-10", "change": "steps[1] plants the discriminating rows; knownGaps[0] and acceptance[0].verify point at it. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): the seed carries no null annual_revenue, so count('*') and count(annual_revenue) answered alike and the count leg could not discriminate — the plant lived only in knownGaps[0] as what QA run #27392 had done. The plant is the step's now, not a seed change: one row with no annual_revenue and three dated rows for the ISO-week and ISO-year legs, deleted after the run. Re-read at base 8523ef9a: examples/app-showcase/src/data/seed/index.ts (14 accounts, every one with an annual_revenue) and examples/app-showcase/src/data/objects/account.object.ts (name and status required, no validation rule names annual_revenue or signed_on). No clause's assertion was weakened", "ref": "#32168" }
+        { "revision": 8, "date": "2026-11-10", "change": "steps[1] plants the discriminating rows; knownGaps[0] and acceptance[0].verify point at it. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): the seed carries no null annual_revenue, so count('*') and count(annual_revenue) answered alike and the count leg could not discriminate — the plant lived only in knownGaps[0] as what QA run #27392 had done. The plant is the step's now, not a seed change: one row with no annual_revenue and three dated rows for the ISO-week and ISO-year legs, deleted after the run. Re-read at base 8523ef9a: examples/app-showcase/src/data/seed/index.ts (14 accounts, every one with an annual_revenue) and examples/app-showcase/src/data/objects/account.object.ts (name and status required, no validation rule names annual_revenue or signed_on). No clause's assertion was weakened", "ref": "#32168" },
+        { "revision": 9, "date": "2026-11-14", "change": "steps[5] and acceptance[3] (clause, verify) re-pointed (stale spec, card #33332; QA runs #33025 comment 6844741021 and #33081 comment 6850173588): since #32279 each retired-aggregate prescription carries a one-line head (withRefusalHead, packages/spec/src/data/query.zod.ts), and the data doors answer the head as the message and the prescription, AGG_RETIRED_TAIL included, as the fields[] entry's hint. The item read the prescription in the message. The enum-error half and the never-500 half are unchanged. Read from source at base fca5f89c", "ref": "#33332" }
       ]
     },
     {
@@ -2313,7 +2352,7 @@
       "title": "enable.apiMethods three-state whitelist on the REST boundary: 404 hides apiEnabled:false, 405 OBJECT_API_METHOD_NOT_ALLOWED carries the EFFECTIVE derived set, bulk∧child + writeMode-precise import, legacy 8-value strip-and-WARN (deny-all cliff), the object gate answers ahead of the caller's 403, batch gated per-op before the txn",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2349,7 +2388,7 @@
           "evidence": "the captured bodies"
         },
         {
-          "clause": "the 405 body's allowed[] is the EFFECTIVE derived operation set in API_OPERATION_ORDER — never the raw whitelist: granted primitives plus their derived closure (aggregate/search from list, export from list, import from create/update, history only with trackHistory), with restore/purge absent even for an unrestricted object (permanently-off trash flags)",
+          "clause": "the 405 body's allowed[] is the EFFECTIVE derived operation set in API_OPERATION_ORDER — never the raw whitelist: granted primitives plus their derived closure (aggregate/search from list, export from list, import from create/update, restore and purge from delete since ADR-0148 / #30237, history only with trackHistory); so ['get','delete'] answers allowed ['get','delete','restore','purge'], and restore/purge are absent exactly when delete is",
           "oracle": "api",
           "verify": "the scratch object's 405 allowed[] equals effectiveOperationsArray(resolveEffectiveApiMethods({apiMethods:['get','list','create']})) computed locally from the spec table — element-for-element, order included",
           "evidence": "the allowed[] vs the locally-computed closure"
@@ -2387,7 +2426,7 @@
       ],
       "negative": [
         "a whitelist-refused operation that lands data-side effects (row created/updated before the 405) is a write-then-refuse FAIL",
-        "allowed[] echoing the RAW whitelist (or containing restore/purge) means the wire is leaking the authored form instead of the effective contract the frontend consumes",
+        "allowed[] echoing the RAW whitelist (or containing restore/purge for an object whose effective set lacks delete, or lacking them for one that has it) means the wire is leaking the authored form instead of the effective contract the frontend consumes",
         "the gate is the EXTERNAL REST boundary only — internal callers (hooks, flows, raw objectql) are deliberately unaffected ('apiEnabled controls automatic API exposure, not data access'); a run must not file an internal write on a narrowed object as a bypass",
         "a legacy apiMethods value HARD-REJECTED at parse is a FAIL in the opposite direction — the strip-and-warn tolerance is the contract (#3543: canonicalize-and-warn, never reject)"
       ],
@@ -2438,7 +2477,8 @@
           "change": "steps[3] names the searchable flag on the derived search verb and the createMany body shape. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the closure carries search only when searchable is not false, and the createMany door takes a bare array. Re-read at base e4ba846f (packages/spec/src/data/api-derivation.ts: the search row's flag; packages/rest/src/batch-routes.ts: 'the body must be a JSON array of record objects'). No clause changed",
           "ref": "#25807"
         },
-        { "revision": 4, "date": "2026-10-31", "change": "steps[4] spells the import body and steps[5] names the warn-once dedupe. Checklist-accuracy findings of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377). (1) The import leg gave no body: the door parses {format:'json', rows:[…], writeMode} (plus matchFields[] for update and upsert) before its precise gate, and a malformed body answers 400 INVALID_REQUEST, which reads like the gate. (2) The [Registry] stripped-legacy warning fires once per object name per process, and the parse warning once per legacy combination, so a second legacy leg on the same name shows no warning. Re-read at base 488b3ed0: packages/rest/src/import-prepare.ts prepareImportRequest, packages/rest/src/data-action-routes.ts (the import route's stage-2 gate), packages/objectql/src/registry.ts warnStrippedLegacyApiMethods, packages/spec/src/data/object.zod.ts stripLegacyApiMethods. No clause changed", "ref": "#27392" }
+        { "revision": 4, "date": "2026-10-31", "change": "steps[4] spells the import body and steps[5] names the warn-once dedupe. Checklist-accuracy findings of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377). (1) The import leg gave no body: the door parses {format:'json', rows:[…], writeMode} (plus matchFields[] for update and upsert) before its precise gate, and a malformed body answers 400 INVALID_REQUEST, which reads like the gate. (2) The [Registry] stripped-legacy warning fires once per object name per process, and the parse warning once per legacy combination, so a second legacy leg on the same name shows no warning. Re-read at base 488b3ed0: packages/rest/src/import-prepare.ts prepareImportRequest, packages/rest/src/data-action-routes.ts (the import route's stage-2 gate), packages/objectql/src/registry.ts warnStrippedLegacyApiMethods, packages/spec/src/data/object.zod.ts stripLegacyApiMethods. No clause changed", "ref": "#27392" },
+        { "revision": 5, "date": "2026-11-14", "change": "acceptance[1].clause and negative[1] re-pointed (stale spec, card #33332; QA runs #33025 comment 6844741021, #33081 comment 6850173588, #33092 comment 6850793622). They said restore/purge never appear in allowed[]; since ADR-0148 / #30237 restore and purge derive from delete (packages/spec/src/data/api-derivation.ts: restore {all: ['delete']}, purge {all: ['delete']}), so ['get','delete'] answers allowed get, delete, restore, purge. The clause's real check, allowed[] equal to the locally computed closure, is unchanged and passed. Read from source at base fca5f89c", "ref": "#33332" }
       ]
     },
     {
@@ -2446,7 +2486,7 @@
       "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2490,7 +2530,7 @@
         {
           "clause": "an unmounted route is NOT the object-level 404: `enable.apiEnabled: false` answers a handler envelope with OBJECT_API_DISABLED, while a switched-off operation leaves no RestServer handler at all — the two absences must stay distinguishable. Scored in the harness: no stock boot carries a non-default crud block (knownGaps[0]), so a switched-off route's wire answer is unobservable, and on a composed server the dispatcher's own data domain (packages/runtime/src/domains/data.ts) serves /data routes too, so a RestServer route table cannot speak for what the composed server answers there",
           "oracle": "test",
-          "verify": "the switched-off operation is absent from getRoutes() (acceptance[1]'s harness and the mount pin), set beside a live OBJECT_API_DISABLED body from api-backend.api-methods-verb-gate and the step-2 routing-404 control; a coded envelope from a route the switch should have removed means the switch did not gate the mount. ⛔ Never record the harness absence as the composed server's wire answer (the dispatcher-vs-hono-route trap)",
+          "verify": "the switched-off operation is absent from getRoutes() (acceptance[1]'s harness and the mount pin), set beside an OBJECT_API_DISABLED body over HTTP and the step-2 routing-404 control. The stock showcase declares no `apiEnabled: false` object, so that body is the HTTP pin's fixture (packages/qa/dogfood/test/rest-config-contract-live.dogfood.test.ts, the sox_hidden object), not a stock-boot read; a coded envelope from a route the switch should have removed means the switch did not gate the mount. ⛔ Never record the harness absence as the composed server's wire answer (the dispatcher-vs-hono-route trap)",
           "evidence": "the harness route-table diff + the two live bodies side by side"
         },
         {
@@ -2578,6 +2618,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0], [2], [3] and [4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0 unpinned and a2, a3, a4 half-asserted). The new rest-config-contract-live.dogfood.test.ts fires the default mounts and the OBJECT_API_DISABLED body against the routing-404 control on booted stacks, and rest-config-contract-harness.test.ts reads the re-based route table and both refusal texts off a real RestServer. automated.kind is dogfood; automated.ref and acceptance[4].verify name what they assert. Measured at base c8583f80. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "acceptance[2].verify re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588). It asked for a live OBJECT_API_DISABLED body from api-backend.api-methods-verb-gate, but the stock showcase declares no `apiEnabled: false` object, so no stock boot answers it. The body now comes from the HTTP pin rest-config-contract-live.dogfood.test.ts, whose sox_hidden fixture answers OBJECT_API_DISABLED and is set against the routing-404 control. The clause is unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -3638,7 +3684,7 @@
       "title": "The automation, legacy trigger, connector connection and inbound hook doors take the namespace and _env segments: /automation/:ns/:name[/trigger|/toggle|/clone|/runs…], /automation/trigger/:ns/:name, /automation/connectors/:ns/:name/connection and /automation/hooks/:ns/:flowName/:hookId serve the name's one holder exactly as the bare path does, and refuse any other qualifier with 404, 409 RESOURCE_CONFLICT or, for the hook, the door's own 401",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3660,7 +3706,7 @@
       "steps": [
         "as admin: GET /api/v1/automation/showcase_batch_reminders (bare), GET /api/v1/automation/showcase/showcase_batch_reminders, GET /api/v1/automation/qa_b/showcase_batch_reminders, GET /api/v1/automation/_env/showcase_batch_reminders and GET /api/v1/automation/qa_b/qa_nothing; record status and body of each",
         "GET /api/v1/automation/_env/qa_env_flow, GET /api/v1/automation/qa_env_flow (bare) and GET /api/v1/automation/showcase/qa_env_flow; then GET /api/v1/automation/qa_nowhere/showcase_batch_reminders (a first segment that is no installed namespace)",
-        "run by address: POST /api/v1/automation/showcase/showcase_batch_reminders/trigger, then POST /api/v1/automation/trigger/showcase/showcase_batch_reminders (body {} for both); then GET /api/v1/automation/showcase/showcase_batch_reminders/runs and the bare GET /api/v1/automation/showcase_batch_reminders/runs; read one run as GET /api/v1/automation/showcase/showcase_batch_reminders/runs/RUN_ID",
+        "run by address: POST /api/v1/automation/showcase/showcase_batch_reminders/trigger, then POST /api/v1/automation/trigger/showcase/showcase_batch_reminders (body {\"params\": {\"tasks\": []}} for both: showcase_batch_reminders declares the input variable tasks, examples/app-showcase/src/automation/flows/index.ts, and its loop reads it, so a {} body answers 400 FLOW_FAILED 'Unknown variable: tasks'); then GET /api/v1/automation/showcase/showcase_batch_reminders/runs and the bare GET /api/v1/automation/showcase_batch_reminders/runs; read one run as GET /api/v1/automation/showcase/showcase_batch_reminders/runs/RUN_ID",
         "POST /api/v1/automation/trigger/qa_nowhere/showcase_batch_reminders (body {}); re-read the bare runs list",
         "connector connection: GET /api/v1/automation/connectors/showcase_status_api/connection (bare), then the same under showcase, qa_b and _env (GET /api/v1/automation/connectors/NS/showcase_status_api/connection)",
         "inbound hook. As admin read the run count of showcase_inbound_task_webhook (GET /api/v1/automation/showcase_inbound_task_webhook/runs). Without a session, POST /api/v1/automation/hooks/showcase/showcase_inbound_task_webhook/intake with the body {\"title\":\"qa addressed hook\"}, signed t=,v1= with SHOWCASE_WEBHOOK_SECRET as automation.inbound-hook-timestamped-signature signs. Then make the same correctly signed post to /hooks/qa_b/showcase_inbound_task_webhook/intake and to /hooks/_env/showcase_inbound_task_webhook/intake. Then post to the bare /hooks/showcase_inbound_task_webhook/intake with a wrong signature. Record status, headers and raw body of each, then re-read the run count once the queue drains",
@@ -3695,7 +3741,7 @@
         {
           "clause": "the run doors and the legacy trigger take the address, and a three-segment legacy trigger with no address runs nothing",
           "oracle": "api",
-          "verify": "both addressed runs answer as the bare POST /automation/showcase_batch_reminders/trigger does and each adds one run; the addressed and bare run lists name the same runs, and the addressed run read returns RUN_ID. trigger/qa_nowhere/showcase_batch_reminders answers 404 ROUTE_NOT_FOUND and the run count is unchanged (#32001 BREAKING 2: before, that path ran the flow qa_nowhere)",
+          "verify": "both addressed runs answer as the bare POST /automation/showcase_batch_reminders/trigger with the same body does and each adds one run; the addressed and bare run lists name the same runs, and the addressed run read returns RUN_ID. trigger/qa_nowhere/showcase_batch_reminders answers 404 ROUTE_NOT_FOUND and the run count is unchanged (#32001 BREAKING 2: before, that path ran the flow qa_nowhere)",
           "evidence": "the run answers and the run lists before and after"
         },
         {
@@ -3719,7 +3765,7 @@
         {
           "clause": "a served shape under a verb it is not served by answers 405 with the verbs it is served under",
           "oracle": "api",
-          "verify": "DELETE on the addressed runs list answers 405 with Allow: GET (packages/runtime/src/domains/automation-address.ts#automationRouteAllow)",
+          "verify": "DELETE on the addressed runs list answers 405 with Allow: GET, HEAD (packages/runtime/src/domains/automation-address.ts#automationRouteAllow names GET; the Hono adapter adds HEAD wherever GET is allowed, packages/plugins/plugin-hono-server/src/adapter.ts)",
           "evidence": "the status and the Allow header"
         }
       ],
@@ -3769,6 +3815,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespace qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "steps[2] and acceptance[4] and [8] (verify) re-pointed (card #33332; QA runs #32940 checklist-accuracy notes and #33081 comment 6850173588; ledger row 85's api-backend half, routed from batch E #33331). steps[2] triggered showcase_batch_reminders with {}, which answers 400 FLOW_FAILED 'Unknown variable: tasks' because the flow declares and loops over the input tasks (flows/index.ts), so the body is now {\"params\": {\"tasks\": []}}. acceptance[8]'s Allow was GET; the adapter adds HEAD beside GET (plugin-hono-server adapter.ts), so the wire reads 'GET, HEAD'. No clause changed. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },
@@ -3777,7 +3829,7 @@
       "title": "The client SDK names an item's package: automation.*, actions.invoke / invokeGlobal and meta.getItem take an optional namespace, send the qualified path the server reads, send the bare path unchanged without one, refuse before sending any path the router would read as another request, and hand a 409's candidates to the caller",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3859,7 +3911,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/client/src/package-addressing.test.ts (79 tests: 24 calls bare and qualified, each matched to a route ledger row; the refusals with zero requests; §4 through the real dispatcher for /automation, /actions and /meta); the live leg is this item"
+        "ref": "packages/client/src/package-addressing.test.ts (its vitest summary is the count, which moves with the file: 83 tests at 5fb79bc0, QA run #32940, several generated per call by each-loops; 24 calls bare and qualified, each matched to a route ledger row; the refusals with zero requests; §4 through the real dispatcher for /automation, /actions and /meta); the live leg is this item"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D5 (the client SDK) and child G3",
@@ -3890,6 +3942,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the fixture's aside on the package-id rule no longer spells the refused underscore id literally; it now says the manifest id grammar refuses an underscore in a package id at build. The ids the item uses were already hyphenated in revision 2, and the namespaces qa_a and qa_b are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "automated.ref re-pointed (card #33332; QA run #32940 checklist-accuracy notes): it pinned the file at 79 tests and the run read 83. A count written into the item goes stale with every added case, so the ref now names the vitest summary as the count and records 83 at 5fb79bc0 as the last reading. The pin and the clauses are unchanged. Read from source at base fca5f89c",
+          "ref": "#33332"
         }
       ]
     },

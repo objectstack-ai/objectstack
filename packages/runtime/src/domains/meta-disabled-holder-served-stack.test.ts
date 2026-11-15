@@ -526,12 +526,13 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
                 await down(booted);
             }
         }
-        // Each save order answers the same before and after a reboot. Which
-        // row it serves still follows the save order (the row saved first),
-        // exactly as on `main` 89d7bef033: that is the plain read's own pick
-        // between a base's row and its pair's undeclared row, not this
-        // judgment's, and it is carried separately.
+        // Each save order answers the same before and after a reboot.
+        // [#32662 scope note (b)] …and the same row in both save orders: the
+        // base's own row, on the plain read, `/published` and the execution
+        // face. FROM (`main` d4fbb4dbb6): the plain read served the row saved
+        // first, so with the pair's saved first it served the pair's row.
         expect([answers[0] === answers[1], answers[2] === answers[3]], answers.join(' | ')).toEqual([true, true]);
+        expect(answers, answers.join(' | ')).toEqual(Array(4).fill(JSON.stringify(['base row', 'base row', 'base row'])));
     }, 240_000);
 
     // M2 (n1: a bundled type at a member other than the canonical one): base A stores `en-US`, dependent D stores `fr-FR`.
@@ -572,4 +573,126 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
             await down(booted);
         }
     }, 240_000);
+});
+
+// ---------------------------------------------------------------------------
+// [#33127, #32662, ADR-0150 D3/D4] Each exact address serves its own stored
+// row, in every save order, before and after a reboot. The registry kept ONE
+// bare slot per name for a stored row bound to a package, so the row hydrated
+// last took it. Measured on `main` d4fbb4dbb6 through these doors:
+// - #33127, both packages ship a `tool` and each stores its own row: after a
+//   reboot `?package=` answered its own row only for the holder whose row
+//   hydrated last; the other answered its shipped item.
+// - #32662, two packages hold a name only as stored rows: `?package=<id>.custom`
+//   (each one's customization pair address) answered 404 for both before a
+//   reboot; after it, 200 for the row hydrated last and 409 naming one side
+//   for the other.
+// - #32662 scope note (b), a package's row beside its own pair's undeclared
+//   row: the plain read served the pair's row when it was saved first, while
+//   `/published` served the package's own row.
+// Throughout, the read naming no package of a two-holder name refuses 409
+// naming both (#32607): unchanged.
+// ---------------------------------------------------------------------------
+describe('[#33127, #32662] each exact address serves its own stored row, before and after a reboot', () => {
+    const roots: string[] = [];
+    afterAll(() => { for (const dir of roots) rmSync(dir, { recursive: true, force: true }); });
+    const freshFile = () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-meta-own-slot-db-'));
+        roots.push(dir);
+        return join(dir, 'meta.sqlite');
+    };
+    const down = async (booted: Booted) => {
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        roots.push(booted.root);
+    };
+    const short = (id: string) => id.split('.').pop()!;
+    const P = 'com.qa.ownslotalpha';
+    const Q = 'com.qa.ownslotbeta';
+    const bodyOf = (type: string, label: string): Record<string, unknown> =>
+        type === 'tool' ? { label, description: label, parameters: { type: 'object', properties: {} } } : { label, widgets: [] };
+    const manifestOf = (id: string, ships: readonly string[] = []) => ({
+        id, name: short(id), namespace: short(id), version: '1.0.0', type: 'app', objects: [],
+        ...(ships.includes('tool') ? { tools: [{ name: 'shared_tool', ...bodyOf('tool', `shipped-${short(id)}`) }] } : {}),
+    });
+    /** `200 <label>`, or `<status> <code> [<candidates>]`. */
+    async function answer(kernel: ObjectKernel, type: string, name: string, query: Record<string, string> = {}, door = '') {
+        const r = await get(kernel, `/meta/${type}/${name}${door}`, query);
+        const body = unwrap(r.body);
+        if (r.status === 200) return `200 ${body?.item?.label ?? body?.label}`;
+        const candidates = r.body?.error?.details?.candidates?.map((c: any) => short(String(c.packageId ?? c.kind)));
+        return `${r.status} ${codeOf(r.body)}${candidates ? ` [${candidates.join(',')}]` : ''}`;
+    }
+    /** Boot `manifests` over a fresh file, lay `rows`, observe; reboot over the same file, observe again. */
+    async function bothLegs(manifests: readonly Record<string, unknown>[], lay: (engine: ObjectQL) => Promise<void>, observe: (kernel: ObjectKernel) => Promise<unknown>) {
+        const file = freshFile();
+        let booted = await bootManifests(manifests, file);
+        let before: unknown;
+        try {
+            await lay(booted.engine);
+            before = await observe(booted.kernel);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            return { before, after: await observe(booted.kernel) };
+        } finally {
+            await down(booted);
+        }
+    }
+
+    for (const rowOrder of [[P, Q], [Q, P]] as const) {
+        it(`#33127 tool, both packages ship it, ${short(rowOrder[0])}'s row stored first: after a reboot each \`?package=\` serves its own row, and the bare read refuses naming both`, async () => {
+            const { after } = await bothLegs([manifestOf(P, ['tool']), manifestOf(Q, ['tool'])],
+                async (engine) => { for (const id of rowOrder) await layRow(engine, 'tool', 'shared_tool', id, bodyOf('tool', `row-${short(id)}`)); },
+                async (kernel) => [
+                    await answer(kernel, 'tool', 'shared_tool', { package: P }),
+                    await answer(kernel, 'tool', 'shared_tool', { package: Q }),
+                    await answer(kernel, 'tool', 'shared_tool'),
+                ]);
+            // FROM (main): the holder whose row hydrated first answered `shipped-<it>`.
+            expect(after).toEqual(['200 row-ownslotalpha', '200 row-ownslotbeta', `409 RESOURCE_CONFLICT [${short(P)},${short(Q)}]`]);
+        }, 120_000);
+    }
+
+    it('CONTROL — #33127 tool, one package ships it and stores its row: `?package=` and the bare read serve the row after a reboot, as before', async () => {
+        const { after } = await bothLegs([manifestOf(P, ['tool']), manifestOf(Q)],
+            async (engine) => { await layRow(engine, 'tool', 'shared_tool', P, bodyOf('tool', 'row-ownslotalpha')); },
+            async (kernel) => [await answer(kernel, 'tool', 'shared_tool', { package: P }), await answer(kernel, 'tool', 'shared_tool')]);
+        expect(after).toEqual(['200 row-ownslotalpha', '200 row-ownslotalpha']);
+    }, 120_000);
+
+    for (const type of ['dashboard', 'tool']) {
+        for (const saved of [[P, Q], [Q, P]] as const) {
+            it(`#32662 ${type}, two packages hold the name only as stored rows, ${short(saved[0])} saved first: each pair address serves its base's row before and after a reboot; the bare read refuses naming both`, async () => {
+                const legs = await bothLegs([manifestOf(P), manifestOf(Q)],
+                    async (engine) => { for (const id of saved) await layRow(engine, type, 'pair_addr', id, bodyOf(type, `row-${short(id)}`)); },
+                    async (kernel) => [
+                        await answer(kernel, type, 'pair_addr', { package: `${P}.custom` }),
+                        await answer(kernel, type, 'pair_addr', { package: `${Q}.custom` }),
+                        await answer(kernel, type, 'pair_addr', { package: P }),
+                        await answer(kernel, type, 'pair_addr', { package: Q }),
+                        await answer(kernel, type, 'pair_addr'),
+                    ]);
+                // FROM (main): before a reboot both pair addresses 404; after
+                // it, 200 for the row hydrated last and 409 for the other.
+                const own = ['200 row-ownslotalpha', '200 row-ownslotbeta', '200 row-ownslotalpha', '200 row-ownslotbeta', `409 RESOURCE_CONFLICT [${short(P)},${short(Q)}]`];
+                expect(legs).toEqual({ before: own, after: own });
+            }, 120_000);
+        }
+
+        for (const saved of [[P, `${P}.custom`], [`${P}.custom`, P]] as const) {
+            it(`#32662 (b) ${type}, a package's row and its pair's undeclared row, ${saved[0] === P ? 'the package' : 'the pair'} saved first: the plain read and /published serve the package's own row, before and after a reboot`, async () => {
+                const legs = await bothLegs([manifestOf(P), manifestOf(Q)],
+                    async (engine) => { for (const id of saved) await layRow(engine, type, 'own_pair', id, bodyOf(type, id === P ? 'row-own' : 'row-pair')); },
+                    async (kernel) => [
+                        await answer(kernel, type, 'own_pair'),
+                        await answer(kernel, type, 'own_pair', {}, '/published'),
+                        await answer(kernel, type, 'own_pair', { package: P }),
+                    ]);
+                // FROM (main): with the pair saved first, the plain read served `row-pair`.
+                expect(legs).toEqual({ before: ['200 row-own', '200 row-own', '200 row-own'], after: ['200 row-own', '200 row-own', '200 row-own'] });
+            }, 120_000);
+        }
+    }
 });

@@ -759,7 +759,15 @@ export function PackageDetailSheet({
         // where its items and reasons are. Asked in the other order, every
         // refusal reached the author as "Action failed".
         const failedList = Array.isArray(r.failed) ? r.failed : [];
-        if (failedList.length === 0 && (r as { success?: boolean }).success === false) {
+        // objectstack#33277 — except `published_unregistered`: its drafts DID
+        // land (the registry refused an object, whose warning the client has
+        // already reported), so it keeps the success row it had while the
+        // server answered `published` for it.
+        if (
+          failedList.length === 0 &&
+          (r as { success?: boolean }).success === false &&
+          r.outcome !== 'published_unregistered'
+        ) {
           // Preserves what `apiJson` did for this call: a batch that did not
           // publish is an error on this surface, read through the same
           // envelope ladder. The status is no longer in hand — a non-2xx

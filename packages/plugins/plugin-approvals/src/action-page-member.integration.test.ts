@@ -37,6 +37,14 @@ import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import type { ApprovalService } from './approval-service.js';
 import { renderResultPage } from './action-link-pages.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+// Clocked windows measure behaviour, never loading. On an `ObjectKernel` the
+// core `i18n` fallback is present, so the plugin's `kernel:ready` hook imports
+// `./translations/index.js`, which loads `@objectstack/platform-objects/apps`
+// from `dist/` cold. Paid inside whichever case boots first, that load took
+// ~0.7 s of a 1.0 s case on an idle 4-vCPU box and pushed the case to
+// 5.7-6.2 s on loaded Test Core shards, past the 5000 ms `testTimeout`.
+// Loaded here, it is paid during collection, which no timeout clocks.
+import './translations/index.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const SUBMITTER = { userId: 'u_submitter', positions: [], permissions: [] } as any;
@@ -247,6 +255,52 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
     // The consumed token's request was decided once, and the expired one never.
     expect(consumedRow.status).toBe('rejected');
     expect(await statusOf(expiredOn)).toBe('pending');
+  });
+
+  it('a link whose slot moved on — decided, or handed to someone else — is told WITH the request summary, and moves nothing', async () => {
+    const { svc, objectql, openRequest, statusOf, decisionsOf } = await bootStack({ rawApp: false });
+    // The reassign target must be a user of the request's organization; once a
+    // user table exists, the slate resolves its approver against it too.
+    objectql.registry.registerObject(
+      { name: 'sys_user', label: 'User', fields: { name: { name: 'name', label: 'Name', type: 'text' } } } as any,
+      'approvals-test', 'approvals-test',
+    );
+    await (objectql as any).syncSchemas();
+    for (const id of [APPROVER, 'u_delegate']) {
+      await objectql.insert('sys_user', { id, name: id }, { context: SYSTEM } as any);
+    }
+
+    // not_pending: the approve link decided the request; its reject twin is still unconsumed.
+    const decidedOn = await openRequest();
+    const decided = await svc.issueActionTokens(decidedOn, APPROVER);
+    await svc.handleActionPage(postRequest(tokenForm(decided.approve)));
+    // not_approver: the bound approver's slot was handed to someone else.
+    const movedOn = await openRequest();
+    const moved = await svc.issueActionTokens(movedOn, APPROVER);
+    await svc.reassign(movedOn, { actorId: APPROVER, from: APPROVER, to: 'u_delegate' }, SYSTEM);
+    // The mint is approver-bound too: an approver whose slot moved on is no
+    // longer pending, so no fresh link is minted for them; the new holder gets one.
+    await expect(svc.issueActionTokens(movedOn, APPROVER)).rejects.toThrow(/^FORBIDDEN: 'u_approver' is not a pending approver/);
+    await expect(svc.issueActionTokens(movedOn, 'u_delegate')).resolves.toMatchObject({ approve: expect.any(String) });
+
+    const cases: Array<[string, string, 'not_pending' | 'not_approver', string]> = [
+      ['not_pending', decided.reject, 'not_pending', decidedOn],
+      ['not_approver', moved.approve, 'not_approver', movedOn],
+    ];
+    for (const [label, token, kind, requestId] of cases) {
+      const row = (await svc.getRequest(requestId, SYSTEM))!;
+      for (const request of [getRequest(token), postRequest(tokenForm(token))]) {
+        const page = await snapshot(await svc.handleActionPage(request));
+        expect(page.status, `${label} ${request.method}`).toBe(200);
+        // The bearer once legitimately held this link, so the summary rows render.
+        expect(text(page), `${label} ${request.method}`).toBe(renderResultPage(kind, row));
+        expect(text(page)).not.toBe(renderResultPage(kind));
+      }
+    }
+    expect(await statusOf(decidedOn)).toBe('approved');
+    expect(await decisionsOf(decidedOn)).toHaveLength(1);
+    expect(await statusOf(movedOn)).toBe('pending');
+    expect(await decisionsOf(movedOn)).toEqual([]);
   });
 
   it('a POST body that is not a form carries no token, and any other method is 405 with Allow', async () => {

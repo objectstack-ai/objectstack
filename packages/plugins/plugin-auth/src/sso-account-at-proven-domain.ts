@@ -61,6 +61,15 @@
  * refusal is `EMAIL_DOMAIN_NOT_ALLOWED` (ADR-0112 ledger, shared with the
  * `email_domain` audience posture) with a rule-level description that names
  * no domain.
+ *
+ * ## And, verification on or off: an email address
+ *
+ * A second, narrower rule lives at the end of this module
+ * ({@link refuseSsoAccountWithoutAddress}): whether verification is on or off,
+ * an SSO provider creates an account only for a value that is an email
+ * address, refused `INVALID_EMAIL` otherwise. It is judged after the rule
+ * above, so with verification on a value that is not an address is still
+ * answered `EMAIL_DOMAIN_NOT_ALLOWED`.
  */
 
 import { domainToUnicode } from 'node:url';
@@ -178,22 +187,37 @@ export interface SsoDomainEntryNotBareRefusal {
  * so an entry named here is at most a host name long.
  */
 export function ssoDomainEntryNotBare(domain: unknown): SsoDomainEntryNotBareRefusal | undefined {
-  if (typeof domain !== 'string') return undefined;
+  const [trimmed] = ssoDomainEntriesNotBare(domain);
+  if (trimmed === undefined) return undefined;
+  const message =
+    `The SSO provider domain entry '${trimmed}' is not a bare host name. Write each email domain as a host name `
+    + "alone, such as 'acme.com': no scheme, port, path or user part, separated by commas. Nothing was saved.";
+  return {
+    status: 'BAD_REQUEST',
+    code: 'VALIDATION_FAILED',
+    message,
+    field: 'domain',
+    fields: [{ field: 'domain', code: 'invalid_value', message }],
+  };
+}
+
+/**
+ * Every entry of a comma-separated `domain` value that is not written as a
+ * bare host name ({@link ssoDomainEntryHost} accepts none), trimmed, in list
+ * order; blank entries skipped. The one predicate behind the register / edit
+ * refusal ({@link ssoDomainEntryNotBare}, which names the first) and the boot
+ * report of stored providers saved before that refusal existed
+ * (`sso-stored-domain-entries.ts`).
+ */
+export function ssoDomainEntriesNotBare(domain: unknown): string[] {
+  if (typeof domain !== 'string') return [];
+  const entries: string[] = [];
   for (const entry of domain.split(',')) {
     const trimmed = entry.trim();
     if (!trimmed || ssoDomainEntryHost(trimmed) !== null) continue;
-    const message =
-      `The SSO provider domain entry '${trimmed}' is not a bare host name. Write each email domain as a host name `
-      + "alone, such as 'acme.com': no scheme, port, path or user part, separated by commas. Nothing was saved.";
-    return {
-      status: 'BAD_REQUEST',
-      code: 'VALIDATION_FAILED',
-      message,
-      field: 'domain',
-      fields: [{ field: 'domain', code: 'invalid_value', message }],
-    };
+    entries.push(trimmed);
   }
-  return undefined;
+  return entries;
 }
 
 /**
@@ -288,4 +312,67 @@ export async function refuseSsoAccountOutsideProvenDomain(
     method,
   });
   return refusal();
+}
+
+// ── Every SSO-created account is keyed on an email address ─────────────────
+
+/**
+ * The refusal code of {@link refuseSsoAccountWithoutAddress}: the ledger's
+ * `INVALID_EMAIL` (ADR-0112), the code the platform already answers for a
+ * value that is not an email address.
+ */
+export const SSO_ACCOUNT_NOT_AN_ADDRESS = 'INVALID_EMAIL';
+
+/** The refusal's description: the rule and the remedy, never the value. */
+export const SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION =
+  'An identity provider creates an account only for an email address, and this sign-in resolved to a value that '
+  + "is not one. Map the provider's email attribute or claim to the one that carries the user's address. "
+  + 'Nothing was created.';
+
+/**
+ * Whether `email` is an email address as the SSO account rules read one: a
+ * non-empty local part with no whitespace, an `@`, and a domain part already
+ * written as a bare host in its one spelling ({@link ssoAddressDomain}, the
+ * reading the proven-domain rule above compares).
+ */
+export function ssoValueIsAddress(email: unknown): boolean {
+  if (typeof email !== 'string') return false;
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return false;
+  if (/\s/u.test(email.slice(0, at))) return false;
+  return ssoAddressDomain(email) !== null;
+}
+
+/**
+ * A NEW account created by a sign-in through an `@better-auth/sso` provider
+ * (SAML or OIDC) is admitted only when the email the sign-in resolved to is an
+ * email address ({@link ssoValueIsAddress}), whether SSO domain verification
+ * is on or off. With it on, the proven-domain rule above already refuses a
+ * value that is not an address, and is judged first, so its answer there is
+ * unchanged.
+ *
+ * What it closes: a SAML provider with no `email` attribute mapped falls back
+ * to the NameID, and a persistent or transient NameID is an opaque id, not an
+ * address; an account keyed on it is a second identity for a person who
+ * already has one, and carries no address any mail can reach. The refusal is
+ * `INVALID_EMAIL` (403 at the gate, `error=INVALID_EMAIL` on the sign-in's
+ * error redirect) with a description naming the remedy and not the value.
+ *
+ * Unchanged: an account that already exists (signing in to it is not a
+ * creation), linking, and every creation that is not from an SSO provider.
+ * Answers `undefined` to admit. Never throws.
+ */
+export function refuseSsoAccountWithoutAddress(
+  data: { user?: Record<string, unknown>; source?: unknown } | undefined,
+  logger?: SsoAccountDomainRuleDeps['logger'],
+): SsoAccountDomainRefusal {
+  const source = data?.source as { action?: unknown; method?: unknown } | undefined;
+  if (source?.action !== 'create-user' || !isSsoProviderSource(source)) return undefined;
+  if (ssoValueIsAddress(data?.user?.email)) return undefined;
+  logger?.info?.('[sso] account creation refused: the identity provider did not resolve the user to an email address', {
+    code: SSO_ACCOUNT_NOT_AN_ADDRESS,
+    providerId: ssoProviderIdOfSource(source),
+    method: source.method,
+  });
+  return { error: SSO_ACCOUNT_NOT_AN_ADDRESS, errorDescription: SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION };
 }

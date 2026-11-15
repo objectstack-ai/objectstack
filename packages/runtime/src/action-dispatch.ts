@@ -74,7 +74,7 @@ import { actorUserFromExecutionContext, resolveActorDisplayName } from './securi
 import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { objectValueFailure } from './object-value-shape.js';
 import { apiErrorResponse } from './error-envelope.js';
-import { HttpDispatcher, type HttpProtocolContext, type HttpDispatcherResult } from './http-dispatcher.js';
+import { HttpDispatcher, resolverPlacedEnvironmentOf, type HttpProtocolContext, type HttpDispatcherResult } from './http-dispatcher.js';
 import type { DomainHandlerDeps } from './domain-handler-registry.js';
 // [ADR-0106 D1] The run doors' visibility question: the `/meta` projection's.
 import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from './action-run-visibility.js';
@@ -529,10 +529,17 @@ async function dispatchAdmittedAction(
                 recordId, record: actionExec.apiForwardSubjectRecord(recordId, subject), params, ec,
             });
             if ('message' in built) return { kind: 'refused', refusal: { message: built.message, status: built.status } };
+            // [#32658, #32887] On a multi-kernel host the forward is placed in
+            // the environment the host's resolver placed THIS request in,
+            // whichever door asked and whatever signal placed it (a bound
+            // hostname, the environment header, a scoped URL, the host door's
+            // named environment): the forward targets the action's own path,
+            // so a scoped URL's environment does not cross with it.
+            const placedEnvironment = resolverPlacedEnvironmentOf(requestContext);
             const forward = await actionExec.forwardApiAction(inject, requestContext, built, {
                 objectName, actionName, target: actionDef?.target,
                 ...(recordId ? { recordId: String(recordId) } : {}),
-            });
+            }, placedEnvironment !== undefined ? { environmentId: placedEnvironment } : undefined);
             if (forward.status >= 200 && forward.status < 300) {
                 return { kind: 'answered', result: actionExec.apiActionResultOf(forward), headers: forward.headers };
             }
@@ -911,14 +918,6 @@ function actionRoutePath(namespace: string | undefined, objectName: string, acti
 }
 
 /**
- * The declared environment header (`X-Environment-Id`, lower-case as the
- * forward's header bag spells it), which a host's `kernel-resolver` reads to
- * place a request in its environment and which the api forward carries across
- * from its request (`action-execution.ts`'s forward allow-list).
- */
-const FORWARD_ENVIRONMENT_HEADER = 'x-environment-id';
-
-/**
  * The host door over a dispatcher's deps: the REST door's sequence for a
  * call that arrived as values, not as a path. Writes the invocation row with
  * no `surface` (a host's call came through neither REST nor MCP).
@@ -979,24 +978,16 @@ export async function dispatchActionRequest(
     } catch (err) {
         return deps.errorFromThrown(err, 500);
     }
-    // [#32658] THE FORWARD'S ROUTING IDENTITY. A same-origin `type: 'api'`
-    // action forwards into the host's raw app, which places the forwarded
-    // request as it places any request it receives. A REST request placed by
-    // its hostname or its `X-Environment-Id` carries that signal into its
-    // forward, so the forward lands in the environment the call ran in. This
-    // door's request carries neither: on a multi-kernel host its forward
-    // reached the raw app as `Host: localhost`, which places it in no
-    // environment, and the target answered the caller 401. The environment the
-    // host's resolver placed the call in is written as the declared
-    // environment header, so the forward is placed where the call ran. It is
-    // the resolver's answer, never the caller's: it replaces any spelling the
-    // credential headers carried. Read before the no-resolver fallbacks below
-    // write an environment, so a host that placed nothing (a single kernel)
-    // routes nothing; `platform` is the control plane, not an environment.
-    const placedEnvironment = context.environmentId;
-    if (typeof placedEnvironment === 'string' && placedEnvironment !== '' && placedEnvironment !== 'platform') {
-        headers[FORWARD_ENVIRONMENT_HEADER] = placedEnvironment;
-    }
+    // [#32658] THE FORWARD'S ROUTING IDENTITY. This door's request carries no
+    // hostname and no environment header, so on a multi-kernel host its api
+    // forward reached the raw app as `Host: localhost`, placed in no
+    // environment. The placement step above records the environment the
+    // host's resolver placed the call in, and the api arm writes it onto the
+    // forward as it does at the REST and MCP doors
+    // (`resolverPlacedEnvironmentOf`), replacing any spelling the credential
+    // headers carried. Recorded before the no-resolver fallbacks below write
+    // an environment, so a host that placed nothing (a single kernel) routes
+    // nothing; `platform` is the control plane, not an environment.
     // On a host with NO resolver nothing places the call, so the environment
     // the host named is carried as it always was — never silently dropped for
     // the default one. Written after placement, so the scope touch, which this

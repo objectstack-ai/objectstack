@@ -316,10 +316,12 @@ const screenSpecShape = () => z.object({
 // ==========================================
 
 /**
- * The refusal a flow node's write met INSIDE the run — the structured answer
- * the data layer gave the node, carried to the caller beside the run's own
- * failure instead of being flattened into it (ruling B′ on #24914, the
- * maintainer's 「同意」, decision batch #379 item 5; filed as #24996).
+ * The refusal a flow node met INSIDE the run (a data node's read or write, or
+ * a `script` node's function resolution) — the structured answer the data
+ * layer (or the function resolver) gave the node, carried to the caller beside
+ * the run's own failure instead of being flattened into it (ruling B′ on
+ * #24914, the maintainer's 「同意」, decision batch #379 item 5; filed as
+ * #24996).
  *
  * ## The problem it solves
  *
@@ -461,7 +463,8 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + '(`ApiErrorSchema.userMessage` semantics). Never replaces `error`',
     ),
     innerRefusal: FlowInnerRefusalSchema.optional().describe(
-      'The refusal a node\'s write met inside the run, structured: `{ code, message }`, `code` '
+      'The refusal a node met inside the run (a data node\'s read or write, or a `script` '
+      + 'node\'s function resolution), structured: `{ code, message }`, `code` '
       + 'in its wire spelling. Set on a failed run only when a refusal was met; `code` above '
       + 'and `error` are unchanged by it',
     ),
@@ -602,8 +605,9 @@ export type ResumeFailureDetailsParsed = z.infer<typeof ResumeFailureDetailsSche
  * #9585 ruling (2026-08-19, Option B) brought `/actions` level with it under a
  * ceiling: that door carries EXACTLY those two keys into `error.details`, and
  * no new schema key. Ruling B′ relaxes that ceiling by one key and names it:
- * {@link FlowInnerRefusalSchema}, the refusal a node's write met inside the
- * run, as `innerRefusal`. The ceiling is therefore these three keys, at every
+ * {@link FlowInnerRefusalSchema}, the refusal a node met inside the run (a
+ * data node's read or write, or a `script` node's function resolution), as
+ * `innerRefusal`. The ceiling is therefore these three keys, at every
  * door; a fourth is a contract widening neither ruling covers.
  *
  * The resume door's verdict (`runId` / `status` / `repairable`,
@@ -638,7 +642,8 @@ export const FlowFailureDetailsSchema = lazySchema(() => z.object({
     + 'absent when the engine measured none',
   ),
   innerRefusal: FlowInnerRefusalSchema.optional().describe(
-    'The refusal a node\'s write met inside the run (`AutomationResult.innerRefusal`): '
+    'The refusal a node met inside the run (a data node\'s read or write, or a `script` '
+    + 'node\'s function resolution; `AutomationResult.innerRefusal`): '
     + '`{ code, message }`, `code` in its wire spelling (e.g. `UNIQUE_VIOLATION`). Absent '
     + 'when the failure met no refusal',
   ),

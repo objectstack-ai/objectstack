@@ -19,6 +19,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   FILTER_COMPARAND_TYPE_CASES,
   FILTER_COMPARAND_TYPE_ROWS,
+  FILTER_STRING_STORED_COMPARAND_CASES,
+  FILTER_STRING_STORED_COMPARAND_ROWS,
   parseFilterAST,
   type FilterCondition,
 } from '@objectstack/spec/data';
@@ -87,4 +89,47 @@ describe('[#7872] TursoDriver — comparand-type conformance (local mode, behind
   it('the fixture really is both rows', async () => {
     expect(await ids(undefined)).toEqual(['1', '2']);
   });
+});
+
+/**
+ * [#29486] `FILTER_STRING_STORED_COMPARAND_CASES`, the driver's half: a number
+ * or boolean comparand on a text- or option-family field reaches this driver
+ * already narrowed to the string the write door stored (the engine's
+ * declared-type door, pinned in `@objectstack/objectql`), so each case's
+ * `stored()` filter must select exactly its rows here.
+ */
+describe('[#29486] TursoDriver — a number or boolean comparand on a string-stored field, as the door hands it', () => {
+  const STRING_TABLE = 'string_stored_conformance';
+  let driver: TursoDriver;
+
+  beforeAll(async () => {
+    driver = new TursoDriver({ url: ':memory:' });
+    await driver.initObjects([
+      { name: STRING_TABLE, fields: { code: { type: 'string' }, stage: { type: 'string' } } },
+    ]);
+    for (const row of FILTER_STRING_STORED_COMPARAND_ROWS) {
+      await driver.create(STRING_TABLE, { ...row }, { bypassTenantAudit: true });
+    }
+  });
+
+  afterAll(async () => {
+    await driver.disconnect();
+  });
+
+  const ids = async (where: FilterCondition | undefined): Promise<string[]> => {
+    const rows = await driver.find(STRING_TABLE, { fields: ['id'], where });
+    return (rows as Array<Record<string, unknown>>)
+      .map((r) => String(r.id))
+      .sort((x, y) => x.localeCompare(y));
+  };
+
+  it('the fixture really is every row', async () => {
+    expect(await ids(undefined)).toEqual(FILTER_STRING_STORED_COMPARAND_ROWS.map((r) => r.id));
+  });
+
+  for (const c of FILTER_STRING_STORED_COMPARAND_CASES) {
+    it(c.name, async () => {
+      expect(await ids(parseFilterAST(c.stored())), c.note).toEqual([...c.expected]);
+    });
+  }
 });

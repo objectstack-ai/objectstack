@@ -17,6 +17,13 @@ export default defineConfig({
         find: /^@objectstack\/driver-sql$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts'),
       },
+      // [ADR-0150 D3, #32670] `template-loader.test.ts` sends over the
+      // protocol's real execution list (stored customization-pair rows), so
+      // the protocol is this checkout's source too.
+      {
+        find: /^@objectstack\/metadata-protocol$/,
+        replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
+      },
     ],
   },
   test: {

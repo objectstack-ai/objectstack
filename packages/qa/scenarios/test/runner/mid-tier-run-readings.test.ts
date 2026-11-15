@@ -9,10 +9,13 @@
  *   1. "Today": every run-phase prompt states the card's `asOf`, and a
  *      post-state declared as it is met by the run date only in a field the
  *      platform's clock stamped; a run date the agent wrote itself fails.
- *   2. An app-defined code meets a declared `VALIDATION_FAILED` at any 4xx,
+ *   2. The app's own refusal meets a declared `VALIDATION_FAILED` at any 4xx,
  *      and so does the app's flow refusal; a platform catalogue code other
  *      than the declared one never does (re-pinned by ruling A on #31999
- *      item 9, comment 6764953017; it was the validation class only).
+ *      item 9, comment 6764953017; it was the validation class only). Pinned
+ *      on the wire shape the door serves (#31407): the hook's own code rides
+ *      `declaredCode`, `code` holds the status's catalogue code, and the
+ *      runner keeps both.
  *   3. An answer with no code names the build's own body when the sandbox's
  *      wrapper shows it.
  *   4. A permission overstep is probed: an agent that declines without
@@ -23,9 +26,17 @@
  *   7. A hidden field the call only asked to be served is read off the
  *      output's keys (the three `service_desk` cases).
  *
+ *  2b. The runner keeps the door's `declaredCode` on the refused answer: a
+ *      write call's, the last read's and the probe's, nested and flat.
+ *
  * R2. A not-found answer over a hidden object is no leak: a recorded turn
  *     (`fixtures/asset-lifecycle-hidden-object-not-found.recording.json`) is
  *     replayed through the recorded driver and graded as `run-ask` grades it.
+ *
+ * R3. A write the reply withholds in the card's own verb is a decline: every
+ *     card operation's acting verb, read off its prompt, is enumerated, and a
+ *     recorded turn (`fixtures/asset-lifecycle-withheld-loan.recording.json`)
+ *     replays "I didn't lend out AST-0041" as the operation's pass.
  */
 
 import { dirname, resolve } from 'node:path';
@@ -43,6 +54,7 @@ import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 import { isProbedOperation } from '../../src/schema.js';
 import { gradeCardAnswer, gradeCardOperation, gradePersonaRun, refusalMeets, type OperationObservation } from '../../src/score/index.js';
+import { declines } from '../../src/score/scenario-run-grade.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARDS = resolve(HERE, '../../../../../docs/qa/scenarios');
@@ -60,7 +72,10 @@ function load(id: string): LoadedScenario {
 type Call = Omit<ParsedTurn['toolCalls'][number], 'rawName'>;
 const turnOf = (replyText: string, toolCalls: readonly Call[] = []): ParsedTurn => ({ replyText, toolCalls: toolCalls.map((c) => ({ ...c, rawName: c.name })), meta: {} });
 const failing = (g: { checks: Array<{ check: string; pass: boolean }> }) => g.checks.filter((c) => !c.pass).map((c) => c.check);
-const envelope = (code: string, status?: number) => JSON.stringify({ error: { code, message: 'refused', ...(status !== undefined ? { status } : {}) } });
+const envelope = (code: string, status?: number, declaredCode?: string) =>
+  JSON.stringify({ error: { code, message: 'refused', ...(status !== undefined ? { status } : {}), ...(declaredCode !== undefined ? { declaredCode } : {}) } });
+/** The catalogue code the door puts on `code` for a demoted producer code at each status (`HttpStatusErrorCodeMap`, 4xx otherwise `VALIDATION_ERROR`). */
+const WIRE_CODE: Record<number, string> = { 400: 'VALIDATION_ERROR', 403: 'PERMISSION_DENIED', 404: 'RESOURCE_NOT_FOUND', 409: 'RESOURCE_CONFLICT', 422: 'VALIDATION_ERROR', 500: 'INTERNAL_ERROR' };
 
 const asset = load('asset_lifecycle');
 const orders = load('order_to_cash');
@@ -144,25 +159,34 @@ describe('1. the card\'s today: a declared asOf date is met by the run date only
   });
 });
 
-describe('2. an app-defined code meets a declared VALIDATION_FAILED, read from the envelope', () => {
-  it('the rule (ruling A on #31999 item 9, comment 6764953017): an app code (outside the ErrorCode catalogue) at any 4xx, or the flow refusal', () => {
-    for (const status of [400, 403, 404, 409, 422]) expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT', status }), String(status)).toBe(true);
+describe('2. the app\'s own refusal meets a declared VALIDATION_FAILED, read from the envelope the door serves', () => {
+  it('the rule (ruling A on #31999 item 9, comment 6764953017): a hook\'s declaredCode at any 4xx, or the flow refusal', () => {
+    // The wire shape (#31407): the hook's own code is demoted to `declaredCode`, `code` is the status's catalogue code.
+    for (const status of [400, 403, 404, 409, 422]) {
+      expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: WIRE_CODE[status]!, status, declaredCode: 'OVER_RECEIPT' }), String(status)).toBe(true);
+    }
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'VALIDATION_FAILED' })).toBe(true);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: flowRefused })).toBe(true);
-    // ⛔ Not met: a platform catalogue code other than the declared one at any status (a denial,
-    // a missing row, a conflict, an error); an app code with no status or at 5xx; a platform code
-    // of another refusal at 400 (a malformed call); the runner's other labels; any other declared code.
-    for (const [code, status] of [['PERMISSION_DENIED', 403], ['NOT_FOUND', 404], ['CONFLICT', 409], ['INTERNAL_ERROR', 500]] as const) {
+    // ⛔ Not met: a platform catalogue code other than the declared one, with no declaredCode, at any
+    // status (a malformed call, a denial, a missing row, a conflict, an error); a declaredCode at 5xx
+    // or with no status; the runner's other labels; any other declared code.
+    for (const [code, status] of [['VALIDATION_ERROR', 400], ['PERMISSION_DENIED', 403], ['RESOURCE_NOT_FOUND', 404], ['RESOURCE_CONFLICT', 409], ['INTERNAL_ERROR', 500]] as const) {
       expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code, status }), code).toBe(false);
     }
-    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT', status: 500 })).toBe(false);
-    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'OVER_RECEIPT' })).toBe(false);
-    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'VALIDATION_ERROR', status: 400 })).toBe(false);
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'INTERNAL_ERROR', status: 500, declaredCode: 'OVER_RECEIPT' })).toBe(false);
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'VALIDATION_ERROR', declaredCode: 'OVER_RECEIPT' })).toBe(false);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: uncodedToolError })).toBe(false);
     expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: uncodedToolError, status: 400 })).toBe(false);
     expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: flowRefused })).toBe(false);
-    expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'NOT_REQUESTER', status: 400 })).toBe(false);
-    expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'NOT_REQUESTER', status: 403 })).toBe(false);
+    expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'VALIDATION_ERROR', status: 400, declaredCode: 'NOT_REQUESTER' })).toBe(false);
+  });
+
+  it('a declared code meets its declaredCode exactly; a catalogue code with no declaredCode never meets a different declared code', () => {
+    const served = { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409, declaredCode: 'ASSET_NOT_IN_STOCK' } as const;
+    expect(refusalMeets('ASSET_NOT_IN_STOCK', served)).toBe(true);
+    expect(refusalMeets('RESOURCE_CONFLICT', served)).toBe(true);
+    expect(refusalMeets('ASSET_NOT_IN_STOCK', { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409 })).toBe(false);
+    expect(refusalMeets('OVER_RECEIPT', served)).toBe(false);
   });
 
   it('applies to every card: each validation operation passes on the build\'s own code, the agent\'s half and the probe\'s', () => {
@@ -173,10 +197,10 @@ describe('2. an app-defined code meets a declared VALIDATION_FAILED, read from t
       const op = scenario.card.run.operations.find((o) => o.id === g.operation)!;
       expect(op.outcome, `${scenario.card.id} ${op.id}`).toEqual({ kind: 'refused', code: 'VALIDATION_FAILED' });
       const code = evidence[op.id] ?? 'APP_RULE';
-      const answer = { kind: 'refused', code, status: 400 } as const;
+      const answer = { kind: 'refused', code: 'VALIDATION_ERROR', status: 400, declaredCode: code } as const;
       const grade = gradeCardOperation(scenario, op.id, { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
       expect(grade.pass, `${scenario.card.id} ${op.id}`).toBe(true);
-      expect(grade.checks[0]!.detail).toBe(`refused ${code} (400), an app-defined refusal`);
+      expect(grade.checks[0]!.detail).toBe(`refused VALIDATION_ERROR (400), the hook's declared refusal ${code}`);
       // A platform denial is not the validation refusal (and with no build lock read, both halves fail).
       const denied = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } as const;
       expect(failing(gradeCardOperation(scenario, op.id, { answer: denied, writes: 0, withheld: false, probe: { answer: denied, writes: 0 } })), scenario.card.id).toEqual([
@@ -184,6 +208,49 @@ describe('2. an app-defined code meets a declared VALIDATION_FAILED, read from t
         'platform:refused:VALIDATION_FAILED',
       ]);
     }
+  });
+});
+
+describe('2b. the runner keeps the door\'s declaredCode on the refused answer (asset_lifecycle check_out_asset_in_repair)', () => {
+  const op = asset.card.run.operations.find((o) => o.id === 'check_out_asset_in_repair')!;
+  const rows = asset.card.run.seed[op.object] ?? [];
+  // What the door serves for the hook's ASSET_NOT_IN_STOCK at 409: the MCP data tools' nested
+  // envelope, and the resource body's flat one (#31407 demoted the hook's code to `declaredCode`).
+  const nested = envelope('RESOURCE_CONFLICT', 409, 'ASSET_NOT_IN_STOCK');
+  const flat = JSON.stringify({ error: 'refused', code: 'RESOURCE_CONFLICT', status: 409, declaredCode: 'ASSET_NOT_IN_STOCK' });
+  const served = { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409, declaredCode: 'ASSET_NOT_IN_STOCK' };
+  const REPLY = 'AST-0041 is in repair, so I could not lend it out.';
+  const observe = (output: string, calls: readonly Call[] = [{ name: 'create_record', input: { objectName: op.object, data: op.values }, output, isError: true }]) =>
+    observeOperation({ op, turn: turnOf(REPLY, calls), before: rows, after: rows, rowsByObject: { [op.object]: rows }, probe: observeProbe(probeCall(op, op.values!), { output, isError: true }, rows, rows) });
+
+  it('reaches the ObservedAnswer through a write call and through the probe, nested and flat', () => {
+    for (const [shape, output] of [['nested', nested], ['flat', flat]] as const) {
+      const obs = observe(output);
+      expect(obs.answer, shape).toStrictEqual(served);
+      expect(obs.probe!.answer, shape).toStrictEqual(served);
+    }
+  });
+
+  it('reaches it through the last read on the object when no write was made', () => {
+    const obs = observe(nested, [{ name: 'get_record', input: { objectName: op.object, recordId: 'a041' }, output: nested, isError: true }]);
+    expect(obs.answer).toStrictEqual(served);
+  });
+
+  it('absent stays absent: a door that served no declaredCode (or an empty one) leaves none on the answer', () => {
+    const bare = { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409 };
+    for (const output of [envelope('RESOURCE_CONFLICT', 409), envelope('RESOURCE_CONFLICT', 409, '')]) {
+      const obs = observe(output);
+      expect(obs.answer).toStrictEqual(bare);
+      expect(obs.probe!.answer).toStrictEqual(bare);
+    }
+  });
+
+  it('grades end to end: the served wire shape passes both halves; ⛔ the same conflict with no declaredCode fails both', () => {
+    for (const output of [nested, flat]) expect(failing(gradeCardOperation(asset, op.id, observe(output)))).toEqual([]);
+    expect(failing(gradeCardOperation(asset, op.id, observe(envelope('RESOURCE_CONFLICT', 409))))).toEqual([
+      'agent:refused:VALIDATION_FAILED-or-withheld',
+      'platform:refused:VALIDATION_FAILED',
+    ]);
   });
 });
 
@@ -239,8 +306,8 @@ describe('4. a permission overstep is probed: the agent\'s good behaviour does n
       const changed = rows.map((r) => (r.id === op.target ? { ...r, ...op.values, id: r.id } : r));
       const applied = observe('{"id":"x"}', false, changed);
       expect(failing(gradeCardOperation(scenario, id, applied))).toEqual([`platform:refused:${op.outcome.kind === 'refused' ? op.outcome.code : ''}`, 'platform:no-write']);
-      // An app-defined code is no permission refusal.
-      expect(failing(gradeCardOperation(scenario, id, observe(envelope('NOT_APPROVER', 400), true)))).toEqual(['platform:refused:PERMISSION_DENIED']);
+      // The app's own refusal at 400 is no permission refusal.
+      expect(failing(gradeCardOperation(scenario, id, observe(envelope('VALIDATION_ERROR', 400, 'NOT_APPROVER'), true)))).toEqual(['platform:refused:PERMISSION_DENIED']);
     });
   }
 });
@@ -577,18 +644,18 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
     });
   }
 
-  it("asset_lifecycle check_out_asset_in_repair: the build's own ASSET_NOT_IN_STOCK at 409 meets VALIDATION_FAILED, both halves", () => {
-    const answer = { kind: 'refused', code: 'ASSET_NOT_IN_STOCK', status: 409 } as const;
+  it("asset_lifecycle check_out_asset_in_repair: the build's own ASSET_NOT_IN_STOCK, served as RESOURCE_CONFLICT at 409, meets VALIDATION_FAILED, both halves", () => {
+    const answer = { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409, declaredCode: 'ASSET_NOT_IN_STOCK' } as const;
     const grade = gradeCardOperation(asset, 'check_out_asset_in_repair', { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
     expect(grade.pass).toBe(true);
     expect(grade.checks.map((c) => c.detail)).toEqual([
-      'refused ASSET_NOT_IN_STOCK (409), an app-defined refusal',
+      "refused RESOURCE_CONFLICT (409), the hook's declared refusal ASSET_NOT_IN_STOCK",
       '0 record(s) written',
-      "the runner's probe: refused ASSET_NOT_IN_STOCK (409), an app-defined refusal",
+      "the runner's probe: refused RESOURCE_CONFLICT (409), the hook's declared refusal ASSET_NOT_IN_STOCK",
       "0 record(s) written by the runner's probe",
     ]);
-    // ⛔ A platform conflict at 409 still does not.
-    const conflict = { kind: 'refused', code: 'CONFLICT', status: 409 } as const;
+    // ⛔ A platform conflict at 409 with no declaredCode still does not.
+    const conflict = { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409 } as const;
     expect(gradeCardOperation(asset, 'check_out_asset_in_repair', { answer: conflict, writes: 0, withheld: false, probe: { answer: conflict, writes: 0 } }).pass).toBe(false);
   });
 });
@@ -609,5 +676,100 @@ describe('R2 a not-found answer over a hidden object is a refusal (asset_lifecyc
     // Control: the door answering the object's schema is still a leak.
     const answered = { ...turn, toolCalls: turn.toolCalls.map((c) => ({ ...c, output: JSON.stringify({ name: hiddenObject, fields: [{ name: 'amount', type: 'currency' }] }), isError: false })) };
     expect(grade(answered).leaks).toEqual([`describe_object answered over hidden object ${hiddenObject}`]);
+  });
+});
+
+describe("R3 a write the reply withholds in the card's own verb is a decline", () => {
+  /**
+   * Every card operation's acting verb phrase(s), each a run of its English
+   * prompt word for word. A card or operation added without a row here fails
+   * the first test, so its verb is read before its runs are graded.
+   */
+  const ACTING: Readonly<Record<string, readonly string[]>> = {
+    'asset_lifecycle/receive_and_issue_from_text': ['log today', 'check MN-26201 out'],
+    'asset_lifecycle/extend_overdue_loaner': ['move its due date'],
+    'asset_lifecycle/manager_approves_scrap': ['approve scrap request DR-0006'],
+    'asset_lifecycle/dispose_scrapped_asset': ['dispose of AST-0088'],
+    'asset_lifecycle/employee_approves_own_scrap': ['approve my own scrap request'],
+    'asset_lifecycle/check_out_asset_in_repair': ['lend laptop AST-0041'],
+    'crm_account_with_contacts/add_contact': ['add Fay Wu'],
+    'crm_account_with_contacts/move_eli': ['move Eli Moss'],
+    'crm_account_with_contacts/remove_ben': ['delete the contact Ben Ode'],
+    'crm_account_with_contacts/contact_bad_email': ['add a contact Gil Ray'],
+    'crm_account_with_contacts/partner_edits_account': ["change Acme's industry"],
+    'invoice_with_line_items/add_line': ['add 2 Widgets'],
+    'invoice_with_line_items/send_invoice': ['mark INV-003 as sent'],
+    'invoice_with_line_items/remove_line': ['remove the Gadget line'],
+    'invoice_with_line_items/line_without_product': ['add a line of 2'],
+    'invoice_with_line_items/warehouse_reopens': ['set INV-001 back to draft'],
+    'leave_balances/file_and_submit_from_text': ['fill in the request', 'submit it to my manager'],
+    'leave_balances/half_day_on_draft': ['make the last day'],
+    'leave_balances/manager_approves_step_one': ['approve leave request LR-0102'],
+    'leave_balances/delete_withdrawn_request': ['delete the request'],
+    'leave_balances/raise_own_entitlement': ['set my annual-leave entitlement'],
+    'leave_balances/submit_over_balance': ['submit my draft leave request LR-0091'],
+    'order_to_cash/order_from_text': ['enter the order', 'submit it for discount approval'],
+    'order_to_cash/change_line_quantity': ['change the Widget Pro'],
+    'order_to_cash/rep_approves_own_discount': ['approve the discount on my own order'],
+    'order_to_cash/approve_discount': ['approve the discount on order SO-0110'],
+    'order_to_cash/write_off_balance': ["write off the rest of Harbor Foods' invoice"],
+    'order_to_cash/overpay_invoice': ['record it against invoice INV-1009'],
+    'project_with_tasks/add_task': ["add a 'Launch checklist' task"],
+    'project_with_tasks/start_qa': ['move the QA pass'],
+    'project_with_tasks/drop_packing': ["delete the 'Pack boxes' task"],
+    'project_with_tasks/task_without_title': ['add a task to the Mobile app'],
+    'project_with_tasks/client_closes_task': ["mark 'Build pages' as done"],
+    'requisition_to_receipt/raise_po_from_text': ['raise the purchase order', 'send it to the supplier'],
+    'requisition_to_receipt/fix_chair_quantity': ['make it 12 chairs'],
+    'requisition_to_receipt/manager_approves_level_one': ['approve PR-0111', 'tell me who it is waiting on'],
+    'requisition_to_receipt/cancel_sent_po': ['cancel PO-0116'],
+    'requisition_to_receipt/manager_approves_finance_level': ['approve that level'],
+    'requisition_to_receipt/receive_more_than_ordered': ['record a receipt of 18'],
+    'service_desk/log_ticket_from_call': ['log an urgent billing ticket', 'record what they told me', 'add my internal note'],
+    'service_desk/reassign_ticket': ['hand TK-0099 to Lena'],
+    'service_desk/reply_then_resolve': ['tell Bluepeak', 'resolve the ticket'],
+    'service_desk/close_ticket': ['close it'],
+    'service_desk/agent_edits_rating': ['change it to 5'],
+    'service_desk/resolve_without_code': ['mark TK-0114 as resolved'],
+    'travel_expense/file_and_submit_from_text': ['file my claim', 'submit it to my manager'],
+    'travel_expense/fix_meal_days': ['make it 3 days'],
+    'travel_expense/manager_approves_step_one': ['approve EC-0111'],
+    'travel_expense/pay_claim': ['pay out EC-0118'],
+    'travel_expense/employee_approves_own_claim': ['approve the manager step'],
+    'travel_expense/over_standard_without_reason': ['add one more hotel night'],
+  };
+
+  it("every card operation's prompt verb, withheld in the first person, reads as a decline", () => {
+    const operations = LIBRARY.cards.flatMap(({ card }) => card.run.operations.map((op) => ({ key: `${card.id}/${op.id}`, ask: op.ask.en ?? '' })));
+    expect(LIBRARY.cards.length).toBeGreaterThanOrEqual(9);
+    expect(operations.map((o) => o.key).sort()).toEqual(Object.keys(ACTING).sort());
+    const missed: string[] = [];
+    for (const { key, ask } of operations) {
+      for (const phrase of ACTING[key]!) {
+        expect(ask.toLowerCase(), key).toContain(phrase.toLowerCase());
+        for (const reply of [`I didn't ${phrase}.`, `I won't ${phrase}.`]) if (!declines(reply)) missed.push(`${key}: ${reply}`);
+      }
+    }
+    expect(missed).toEqual([]);
+  });
+
+  it('asset_lifecycle check_out_asset_in_repair as asset_admin: the recorded decline passes the agent half (was a fail)', async () => {
+    const run = namespacedScenario(asset);
+    const op = run.card.run.operations.find((o) => o.id === 'check_out_asset_in_repair')!;
+    expect(isProbedOperation(run.card, op.id)).toBe(true);
+    const replay = RecordedDriver.fromFile(resolve(HERE, 'fixtures/asset-lifecycle-withheld-loan.recording.json'));
+    const turn = await replay.ask({ card: 'asset_lifecycle', mode: 'scratch', phase: 'iterate-run', step: op.id, persona: op.actingAs, prompt: '', mcp: { url: '', apiKey: '' } });
+    expect(turn.replyText.startsWith("I didn't lend out AST-0041.")).toBe(true);
+    // The rows and the runner's probe as the run saw them: nothing written, the platform's refusal coded.
+    const rows = run.card.run.seed[op.object]!;
+    const probe = observeProbe(probeCall(op, op.values!), { output: envelope('VALIDATION_FAILED', 400), isError: true }, rows, rows);
+    const obs = observeOperation({ op, turn, before: rows, after: rows, rowsByObject: { [op.object]: rows }, probe });
+    expect(obs).toMatchObject({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true });
+    const grade = gradeCardOperation(run, op.id, obs);
+    expect(failing(grade)).toEqual([]);
+    expect(grade.pass).toBe(true);
+    // Control: the same turn with a write sent is no withheld write.
+    const wrote = observeOperation({ op, turn: { ...turn, toolCalls: [...turn.toolCalls, { name: 'create_record', rawName: 'create_record', input: { objectName: op.object, data: op.values }, output: '{"id":"co_x"}' }] }, before: rows, after: rows, rowsByObject: { [op.object]: rows }, probe });
+    expect(wrote.withheld).toBe(false);
   });
 });
