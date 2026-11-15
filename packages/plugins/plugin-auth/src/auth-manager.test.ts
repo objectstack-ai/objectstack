@@ -1847,28 +1847,32 @@ describe('AuthManager', () => {
       });
     });
 
-    // The SSO branch returns `trustedOrigins` as a per-request FUNCTION built
-    // from a copy of the same `origins` array, so gating the push at the source
-    // covers this shape too. That is true today and is exactly the kind of
-    // coupling a future refactor breaks silently — pin it.
-    describe('SSO per-request function shape', () => {
-      it('production: the resolved list contains no localhost wildcard', async () => {
+    // With the SSO relying party wired, the origin check reads the same
+    // configured list as without it: no per-request function a request body
+    // could add to (`sso-discovery-companion-origins.ts` carries the origins a
+    // registration names, to its discovery validation only).
+    describe('SSO wired: the same configured list, never a per-request function', () => {
+      it('production: the configured list, with no localhost wildcard', async () => {
+        process.env.NODE_ENV = 'production';
+        const cfg = await captureConfig({ plugins: { sso: true }, trustedOrigins: ['https://app.example.com'] });
+
+        expect(cfg.trustedOrigins).toEqual(['https://app.example.com']);
+        expect(cfg.trustedOrigins.some((o: string) => o.includes('localhost'))).toBe(false);
+      });
+
+      it('production with nothing configured: the key is omitted, as without SSO', async () => {
         process.env.NODE_ENV = 'production';
         const cfg = await captureConfig({ plugins: { sso: true } });
 
-        expect(typeof cfg.trustedOrigins).toBe('function');
-        const resolved: string[] = await cfg.trustedOrigins(undefined);
-        for (const entry of TRIO) expect(resolved).not.toContain(entry);
-        expect(resolved.some(o => o.includes('localhost'))).toBe(false);
+        expect(cfg.trustedOrigins).toBeUndefined();
       });
 
-      it('non-production: the resolved list still contains the trio', async () => {
+      it('non-production: the list still contains the trio', async () => {
         process.env.NODE_ENV = 'development';
         const cfg = await captureConfig({ plugins: { sso: true } });
 
-        expect(typeof cfg.trustedOrigins).toBe('function');
-        const resolved: string[] = await cfg.trustedOrigins(undefined);
-        for (const entry of TRIO) expect(resolved).toContain(entry);
+        expect(Array.isArray(cfg.trustedOrigins)).toBe(true);
+        for (const entry of TRIO) expect(cfg.trustedOrigins).toContain(entry);
       });
     });
   });

@@ -151,3 +151,80 @@ describe('lookup popover search inside a modal dialog (integration)', () => {
     expect(document.activeElement).toBe(input);
   });
 });
+
+/**
+ * A trapped scope watches its container for removed nodes and, when focus
+ * sits on `body`, reads any removal as "the focused element was removed" and
+ * focuses the container. Between the blur and the focus of a native Tab, focus
+ * does sit on `body`, so a node a blur unmounts (an inline tooltip closing
+ * under its trigger) pulled focus back to the container and Tab could never
+ * leave that trigger. `patches/@radix-ui__react-focus-scope.patch` refocuses
+ * the container only when the last focused element is no longer inside it.
+ */
+describe('focus-scope mutation handler: a removal under the trap is focus loss only when the focused element went', () => {
+  /** A trigger that drops a sibling node on blur, the way an inline tooltip does. */
+  function BlurUnmountHarness() {
+    const [tipOpen, setTipOpen] = React.useState(false);
+    return (
+      <FocusScope trapped loop asChild>
+        <div data-testid="scope" tabIndex={-1}>
+          <button type="button" onFocus={() => setTipOpen(true)} onBlur={() => setTipOpen(false)}>
+            trigger
+          </button>
+          {tipOpen && <span>reason</span>}
+          <button type="button">next</button>
+        </div>
+      </FocusScope>
+    );
+  }
+
+  it('a node a blur unmounts does not pull focus to the container', async () => {
+    render(<BlurUnmountHarness />);
+    await flushEvictionTimers();
+    const trigger = screen.getByRole('button', { name: 'trigger' });
+    act(() => {
+      trigger.focus();
+    });
+    expect(screen.getByText('reason')).toBeTruthy();
+
+    // The blur half of a Tab: focus is on body while the tip unmounts, and
+    // the observer's callback runs before anything else takes focus.
+    act(() => {
+      trigger.blur();
+    });
+    await flushEvictionTimers();
+
+    expect(screen.queryByText('reason')).toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByTestId('scope'));
+  });
+
+  it('CONTROL — removing the focused element itself still focuses the container', async () => {
+    function RemoveFocused() {
+      const [shown, setShown] = React.useState(true);
+      return (
+        <FocusScope trapped loop asChild>
+          <div data-testid="scope" tabIndex={-1}>
+            {shown && (
+              <button type="button" onClick={() => setShown(false)}>
+                goes away
+              </button>
+            )}
+            <button type="button">stays</button>
+          </div>
+        </FocusScope>
+      );
+    }
+    render(<RemoveFocused />);
+    await flushEvictionTimers();
+    const doomed = screen.getByRole('button', { name: 'goes away' });
+    act(() => {
+      doomed.focus();
+    });
+    act(() => {
+      doomed.click();
+    });
+    await flushEvictionTimers();
+
+    expect(document.activeElement).toBe(screen.getByTestId('scope'));
+  });
+});
