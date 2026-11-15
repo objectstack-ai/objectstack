@@ -191,7 +191,7 @@ describe('every dated card, rebased onto each run date', () => {
   });
 
   for (const runDate of RUN_DATES) {
-    it(`run on ${runDate}: today is the run date, every date moves by one delta, and every truth matches the unmoved seed read the same way`, () => {
+    it(`run on ${runDate}: today is the run date, every date moves as the card's rebase says, and every truth matches the unmoved seed read the same way`, () => {
       for (const s of dated) {
         const move = expectedMove(s, runDate);
         const r = rebaseScenario(s, runDate);
