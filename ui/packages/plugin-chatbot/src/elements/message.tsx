@@ -38,6 +38,7 @@ import {
 import { useSafeTranslate } from "@object-ui/i18n";
 import { Streamdown } from "streamdown";
 import { ListLinkContext, RecordLinkContext, withRecordLinks } from "../recordLink";
+import { CHAT_MARKDOWN_PLUGINS } from "./markdown-plugins";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -407,6 +408,7 @@ const MessageResponseImpl = ({
   translations,
   isAnimating,
   linkSafety,
+  plugins,
   ...props
 }: MessageResponseProps) => {
   const tt = useSafeTranslate();
@@ -514,6 +516,7 @@ const MessageResponseImpl = ({
           components={{ ...ANSWER_COMPONENTS, ...components }}
           isAnimating={isAnimating}
           linkSafety={answerLinkSafety}
+          plugins={{ ...CHAT_MARKDOWN_PLUGINS, ...plugins }}
           translations={{
             ...translations,
             viewFullscreen: expandTableLabel,
