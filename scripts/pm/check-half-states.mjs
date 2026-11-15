@@ -1262,7 +1262,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 //
 //   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
 //            name (`domain:engine-core` carries a hyphen, measured on the label set),
-//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `review`, `qa`, `eval` or `queue`
+//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `l2-review` (old spelling `review`), `qa`, `eval` or `queue`
 //   N        the seat number, from 1
 //   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
 //   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,

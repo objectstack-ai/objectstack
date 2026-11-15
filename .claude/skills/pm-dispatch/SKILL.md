@@ -25,7 +25,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 该例外的 PR 授权原话引在正文。
 - ⛔ 永不以任一账号对受管面 PR 提交批准 review,永不合并受管面 PR。
 - ⛔ 受管面 PR 无授权批准时永不翻 ready、入队或挂 auto-merge;批准在案后席位落地。
-- ⛔ 永不合自己的 PR,永不合红的或未过 L1 审核的 PR,永不绕过合并队列。
+- ⛔ 永不合自己的 PR,永不合红的或未过 L1/L2 审核的 PR,永不绕过合并队列。
 - ⛔ 永不派发 assignee 是别人的卡;⛔ 永不派发带 `needs-user-decision` 或 `pm:retriage` 的卡。
 - ⛔ 永不代维护者答产品或架构问题,⛔ 无代裁通道:席位只分析与推荐,裁决恒出自人工。
 - ⛔ GitHub 之外永不维护跟踪状态;看板(org Project)只是视图,权威层是 issue 正文 + REST。
@@ -49,7 +49,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - L2 契约审核:PR 碰 `references/contract-review.md` 契约四面才欠,加在 L1 之上,⛔ 永不替代 L1。
 - L2 档:schema、governed 规则文本、收窄 ⇒ `CONTRACT_REVIEW_TIER`;仅 `Clause-②: yes` ⇒ `TIER_DEFAULT`。
 - ⛔ L1 规则不及 L2,L2 规则不及 L1;L2 席的账号、独立性、信箱与只写记录诸规只管 L2 席。
-- GitHub PR review 与 CI check 名不属两级;旧词「复核」「复审」与旧路径、旧席名只读不写。
+- GitHub PR review 与 CI check 名不属两级;旧词与旧路径只读不写,唯在座 `review#N` 席仍写原名。
 
 ## 入口与角色
 
@@ -78,7 +78,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 席位两形:Routine 席与项目席(会话是车队项目的线程);细则见 `references/seat-lifecycle.md`。
 - 项目席唤醒 = PR 订阅 + 自建自绑巡查 routine(总监席与按需席除外);⛔ 无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
-- 队列空(逐卡表见 `references/seat-lifecycle.md`)+ 无在飞 + 无待 L1 + 决策箱无新答复 ⇒ 自退。
+- 队列空(逐卡表见 `references/seat-lifecycle.md`)+ 无在飞 + 无待 L1/L2 + 决策箱无新答复 ⇒ 自退。
 - 分诊席与车道席常驻(按需席除外),断粮换号重开席与信箱;分诊默认判断档;裁决归总监。
 - 子代理裁决逐份过转录核验采信。
 

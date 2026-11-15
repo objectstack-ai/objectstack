@@ -1865,7 +1865,8 @@ export const CEILINGS = new Map([
   // Renamed from `lanes/review.md` and raised 21 → 22 by the two review levels (ruling
   // record 6897685514, whose 「座位也可以改」 orders the seat's new name): the seat is
   // `l2-review#N`, and ONE added line says the old spellings (`review#N`, the seat words
-  // `review` and 复核) stay read while new seats and new writes use the new one. Measured
+  // `review` and 复核) stay read, a seated seat keeps writing its own name, and only new
+  // seats take the new one. Measured
   // delta +1; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 22],
   // The old path's stub: one pointer line, which also keeps `review` a lane file name and

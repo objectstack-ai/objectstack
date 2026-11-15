@@ -50,7 +50,7 @@
  *                    seat's repo; a `repo:x` lane is every card of repo x plus
  *                    the post's own repo's cards labelled `repo:x`. An account
  *                    on two seats of one lane shows them on its lowest seat
- *                    only; the other reads `= seat N`. A `review` seat
+ *                    only; the other reads `= seat N`. An `l2-review` seat (old spelling `review`)
  *                    (`lanes/l2-review.md`) holds no card: its in-flight is the
  *                    open pulls whose CURRENT head a live
  *                    `Contract-review-claim:` signed `l2-review#N` (or `review#N`) holds, read

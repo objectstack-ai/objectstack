@@ -1880,7 +1880,7 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
  * paraphrased because it IS the operative criterion, and untranslated because
  * rewriting a quoted ruling rewrites the ruling:
  *
- *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *   > L2 记录 = 一条评论落 PR 或卡,席内与各子代理同形
  *
  * — `references/contract-review.md` 〈L2 归属与资格〉, with SKILL.md
  * 〈入队与落地〉 saying the same in the same words

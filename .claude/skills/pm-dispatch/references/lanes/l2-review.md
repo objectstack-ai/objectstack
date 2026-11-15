@@ -4,7 +4,7 @@
 ## 座位
 
 - 席位 `l2-review#N`,一席一座位贴;坐席者 = 能达 `CONTRACT_REVIEW_TIER` 的账号的会话。
-- 旧拼 `review#N`、席位词 `review` 与「复核」照读:在座席留原名,新席与新写只用 `l2-review`。
+- 旧拼 `review#N`、`review`、「复核」照读;在座席签名、致它的行仍写原名,新席用 `l2-review`。
 - 会话 effort `high`;L2 子代理恒契约审核档;仅申报面 `TIER_DEFAULT`,档随面定照 contract-review.md
 - 每席开一个 `pm:mailbox` PR(`mailbox-open.mjs --seat l2-review#N`);签名、坐席与收班同他席。
 

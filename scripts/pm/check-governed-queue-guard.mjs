@@ -378,7 +378,7 @@
  *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
- * criterion: 「复核记录 = 一条评论落 PR 或卡」
+ * criterion: 「L2 记录 = 一条评论落 PR 或卡」
  * (`references/contract-review.md`), 「记录 = 同形评论落 PR 或卡」 (`SKILL.md`
  * 〈入队与落地〉). Until #18701 this leg read the PR thread ALONE while the
  * sibling's `--pair`, its `--template` and the rule itself all said either, and

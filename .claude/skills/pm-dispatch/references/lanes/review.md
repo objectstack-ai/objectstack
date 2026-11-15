@@ -1,1 +1,1 @@
-已更名:L2 席章程住 `l2-review.md`;席位词 `review` 与席位 `review#N` 照读,新写用 `l2-review#N`。
+已更名:章程住 `l2-review.md`;在座 `review#N` 席签名与致它的行仍写原名,只新席用 `l2-review#N`。
