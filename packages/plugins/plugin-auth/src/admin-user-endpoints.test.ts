@@ -451,21 +451,35 @@ describe('runAdminCreateUser', () => {
     expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(false);
   });
 
-  it('is idempotent when a membership already exists', async () => {
-    const m = makeDepsWithOrgs({
-      orgs: [{ id: 'org_only' }],
-      members: [{ organization_id: 'org_only', user_id: 'user-9' }],
+  // The `user.create.after` reconciler (the bootstrap join) binds the new user
+  // DURING `createUser`, so the endpoint's own reconcile finds the row and
+  // yields. The account did not exist before this call, so that row is this
+  // creation's membership: the answer and the audit row both say `true`. It
+  // used to answer `false` here while `sys_member` held the row, which read as
+  // "a member-less account was created".
+  it('the bootstrap join already bound the new user: no second insert, membershipCreated true in the answer and the audit row', async () => {
+    const members: Array<{ organization_id: string; user_id: string }> = [];
+    const m = makeDepsWithOrgs({ orgs: [{ id: 'org_only' }], members });
+    const createUser = vi.fn(async ({ body }: any) => {
+      members.push({ organization_id: 'org_only', user_id: 'user-9' }); // the hook's bind
+      return { user: { id: 'user-9', email: body.email, name: body.name } };
     });
+    m.deps.getAuthApi = async () => ({ createUser }) as any;
     const res = await runAdminCreateUser(
       m.deps,
       makeRequest({ email: 'a@b.co', generatePassword: true }),
       ACTOR,
     );
     expect(res.status).toBe(200);
+    expect(createUser).toHaveBeenCalledTimes(1);
     const data = res.body.data as any;
     expect(data.organizationId).toBe('org_only');
-    expect(data.membershipCreated).toBe(false);
-    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(false);
+    expect(data.membershipCreated).toBe(true);
+    // The endpoint wrote no second row: one membership, the hook's.
+    expect(callsOf(m.engineInsert).some((c) => c[0] === 'sys_member')).toBe(false);
+    const auditRow = callsOf(m.engineInsert).find((c) => c[0] === 'sys_audit_log')?.[1];
+    expect(auditRow).toBeTruthy();
+    expect(JSON.parse(auditRow.metadata)).toMatchObject({ organizationId: 'org_only', membershipCreated: true });
   });
 
   it('does not fail account creation when the membership bind throws', async () => {
@@ -1521,7 +1535,10 @@ describe('create-user in multi-org mode: the new user joins the administrator\'s
     expect(j.addMember).not.toHaveBeenCalled();
   });
 
-  it('a membership already there is respected: no second addMember, membershipCreated false', async () => {
+  // The account is brand-new, so a row in the current organization was written
+  // during this creation (a host's `user.create.after` hook): it is reported as
+  // this creation's membership, the same rule the single-org bind answers by.
+  it('a membership written during the creation is respected: no second addMember, membershipCreated true in the answer and the audit row', async () => {
     const j = makeJoinDeps({
       callerActiveOrg: 'org_current',
       members: [{ organization_id: 'org_current', user_id: 'user-9' }],
@@ -1529,7 +1546,9 @@ describe('create-user in multi-org mode: the new user joins the administrator\'s
     const res = await runAdminCreateUser(j.deps, makeRequest({ email: 'e@b.co', password: 'Explicit1!' }), ACTOR);
     expect(res.status).toBe(200);
     expect(j.addMember).not.toHaveBeenCalled();
-    expect(res.body.data).toMatchObject({ organizationId: 'org_current', membershipCreated: false });
+    expect(res.body.data).toMatchObject({ organizationId: 'org_current', membershipCreated: true });
+    const audit = callsOf(j.engineInsert).find(([object]) => object === 'sys_audit_log')![1];
+    expect(JSON.parse(audit.metadata)).toMatchObject({ organizationId: 'org_current', membershipCreated: true });
   });
 
   it('refused by the vendor: its status and code, the account rolls back, nothing is audited', async () => {
