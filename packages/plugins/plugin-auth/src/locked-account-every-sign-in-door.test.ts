@@ -165,7 +165,7 @@ const arrange = async (lockoutRefusal: Refusal = 'uniform', options: { lockoutTh
   // The ENROLLED account: TOTP enabled and confirmed.
   const enabled = await post('/two-factor/enable', { password: PASSWORD }, { cookie: enrolled.cookie });
   expect(enabled.status, `two-factor/enable: ${await enabled.clone().text()}`).toBe(200);
-  const totpURI = ((await enabled.json()) as { totpURI: string }).totpURI;
+  const { totpURI, backupCodes } = (await enabled.json()) as { totpURI: string; backupCodes: string[] };
   const secret = base32Decode(String(new URL(totpURI.replace('otpauth://', 'https://')).searchParams.get('secret')));
   const confirmed = await post('/two-factor/verify-totp', { code: totp(secret) }, { cookie: enrolled.cookie });
   expect(confirmed.status, `verify-totp (enrolment): ${await confirmed.clone().text()}`).toBe(200);
@@ -192,6 +192,7 @@ const arrange = async (lockoutRefusal: Refusal = 'uniform', options: { lockoutTh
     sessionRows,
     lock,
     secret,
+    backupCodes,
     plainId: plain.userId,
     plainCookie: plain.cookie,
     enrolledId: enrolled.userId,
@@ -336,6 +337,20 @@ describe.each(['explicit', 'uniform'] as const)(
       const rowsBefore = rig.sessionRows(rig.enrolledId);
 
       const res = await rig.post('/two-factor/verify-totp', { code: totp(rig.secret) }, { cookie: cookieHeader(challenged) });
+
+      expect(await answerOf(res)).toEqual(reference);
+      expect(rig.sessionRows(rig.enrolledId), 'no session row was written').toBe(rowsBefore);
+    }, 60_000);
+
+    it('/two-factor/verify-backup-code: an enrolled account locked after its challenge gets no session', async () => {
+      const rig = await arrange(refusal);
+      const challenged = await rig.post('/sign-in/email', { email: ENROLLED.email, password: PASSWORD });
+      expect(((await challenged.clone().json()) as any).twoFactorRedirect).toBe(true);
+      rig.lock(ENROLLED.email);
+      const reference = await passwordSignInAnswer(rig, ENROLLED.email);
+      const rowsBefore = rig.sessionRows(rig.enrolledId);
+
+      const res = await rig.post('/two-factor/verify-backup-code', { code: rig.backupCodes[0] }, { cookie: cookieHeader(challenged) });
 
       expect(await answerOf(res)).toEqual(reference);
       expect(rig.sessionRows(rig.enrolledId), 'no session row was written').toBe(rowsBefore);
