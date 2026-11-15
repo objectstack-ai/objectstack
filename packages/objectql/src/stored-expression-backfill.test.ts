@@ -960,7 +960,11 @@ describe('[#32700] a rollback or revert that makes a changed stored computed fie
 
     const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
 
-    expect(res.reverted).toEqual([{ type: 'object', name: OBJ, action: 'restored' }]);
+    // [#33563] The row is restored, but the storage did not follow it, so the
+    // process has not acted on the revert: the item is failed, its row named.
+    expect(res.reverted).toEqual([]);
+    expect(res.failed[0]).toMatchObject({ type: 'object', name: OBJ });
+    expect(res.failed[0].error).toContain('its row was restored to the body of version');
     expect(rig.updates).toEqual([]);
     expect(notices(res, 'object-storage-sync-refused')).toHaveLength(1);
     expect(notices(res, 'stored-expression-fill-incomplete')[0].message).toContain('were NOT filled');

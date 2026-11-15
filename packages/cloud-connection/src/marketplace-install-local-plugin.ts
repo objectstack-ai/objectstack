@@ -321,6 +321,7 @@ import {
     SCHEMA_UPGRADE_CONFIRMATION_STATUS,
     type SchemaUpgradeVerdict,
 } from '@objectstack/metadata-core';
+import { declaredNullableColumns, relaxInstallDeclaredNotNull, type InstallRelaxEngine } from './marketplace-install-declared-relaxations.js';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -3227,6 +3228,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] syncSchemas failed for ${manifestId}: ${err?.message ?? err}`);
         }
 
+        // 4b″. [#33724] The NOT NULL relax this package's own declarations
+        //     owe (`storage: { notNull: false }` in words), after the additive
+        //     sync above: a package object is sealed, so no publish of it can
+        //     ask, and this install is the deliberate act (ADR-0113 D5). Only
+        //     when the running kernel serves the new version — on the lenient
+        //     path nothing of it is registered, and the restart's rehydrate is
+        //     a boot, which never relaxes a column.
+        if (hotLoadError === undefined) {
+            await this.relaxDeclaredNotNull(ctx, manifestId, converted);
+        }
+
         // 4b′. [#28039] Register, record and connect the package's declared
         //     datasources through the runtime's ONE path — the call
         //     `AppPlugin.start` makes for a boot artifact — after the schema
@@ -4324,6 +4336,41 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         };
     };
 
+
+    /**
+     * [#33724] Step 4b″ of {@link handleInstall}: relax the NOT NULL columns
+     * the installing package's own body declares nullable
+     * ({@link relaxInstallDeclaredNotNull}). Reports what it did in the log:
+     * each relax applied (the driver's own line), each object whose driver has
+     * no relax door, each one the database could not take, and any failure — never the install's answer, which the
+     * schema sync above does not fail either.
+     */
+    private relaxDeclaredNotNull = async (ctx: PluginContext, manifestId: string, converted: unknown): Promise<void> => {
+        let engine: InstallRelaxEngine | undefined;
+        try { engine = ctx.getService('objectql') as InstallRelaxEngine | undefined; } catch { /* no data engine */ }
+        try {
+            const report = await relaxInstallDeclaredNotNull({ manifestId, incoming: converted, engine });
+            const declared = declaredNullableColumns(converted);
+            for (const object of report.unsupported) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] ${manifestId}: ${object} declares \`storage: { notNull: false }\` on `
+                    + `${(declared.get(object) ?? []).join(', ')}, and its driver has no NOT NULL relax, so the column stays `
+                    + `as the database has it; relax it with "os migrate apply" if it is NOT NULL`,
+                );
+            }
+            for (const d of report.skipped) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] ${manifestId}: ${d.object}.${d.column ?? ''} declares \`storage: { notNull: false }\`, `
+                    + `and its column stays NOT NULL: ${d.message ?? 'the database did not apply the relax'}`,
+                );
+            }
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: relaxing the NOT NULL columns its declaration makes nullable failed, `
+                + `so they stay NOT NULL; relax them with "os migrate apply": ${err?.message ?? err}`,
+            );
+        }
+    };
 
     /**
      * [epic cloud#3652 Q3, #30884] Step 2c′ of {@link handleInstall}: the

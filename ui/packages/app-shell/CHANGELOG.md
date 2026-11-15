@@ -1,5 +1,387 @@
 # @object-ui/app-shell — Changelog
 
+## 18.4.1
+
+### Patch Changes
+
+- 588596a: fix(app-shell): an open Studio shows drafts and publishes made outside its tab without a reload
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A draft an agent stages over MCP, a REST publish, or a change made in another tab used to stay invisible in an open Studio (no number on the Changes button, no draft line on the item header, no draft marks) until the browser was reloaded, so a change that worked looked like one that failed. The pending-drafts ledger is now read again when the tab becomes visible or the window gains focus, and every 30 seconds while the tab stays visible. When the answer differs from what the tab last read, the tab sends its own metadata-refresh signal, so the Changes count, the item header line, the pillars' draft marks and the console's metadata all catch up together; an unchanged answer costs that one read. A hidden tab sends no request at all, so a background Studio does not keep a scale-to-zero backend awake. The home banner, the chat bar and the draft preview bar read the same ledger and catch up the same way.
+- d95ddeb: fix(console): a metadata save's advisories and refusals show the server's sentence in the user's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Advisory toast.** After a save or publish, each advisory finding that carries a `userMessage` (the sentence the server composes for the person who saved, in the request's language, else the workspace default, else English) shows that sentence after its rule id and location, in place of the developer-facing English `message` and `hint`. A finding the server wrote no sentence for keeps the `message` and `hint`.
+  
+  **Refused save.** The issues of a `422` refusal from the runtime authoring gate carry the same `userMessage`. `formatMetadataIssue` (and so `formatMetadataError` and the Studio publish-failure list) shows it after the issue's path in place of the English `message`, and Studio's refusal sentence carries it verbatim instead of reading the English `message` through the console's own validation-message table. A spec-validation issue carries no `userMessage` and is shown as before.
+  
+  **Type.** `MetadataValidationIssue` on `@object-ui/data-objectstack` gains the optional `userMessage`, typed from `RuntimeAuthoringIssue['userMessage']` in `@objectstack/spec/api`.
+- 9499dcc: fix(console, data-objectstack): a report drill that rebuilds its filter reads the dataset as the report's reader (ADR-0150 D3)
+  
+  Clause-②: yes (widening) — `MetadataGetOptions` (`@object-ui/data-objectstack`) gains an optional `callerPackage`, which `MetadataClient.get` sends as `?callerPackage=`; omitted, every read is sent exactly as before.
+  Metadata-protocol: none
+  
+  **The drill.** A report row drills straight to its records when the dataset answer carries the drill metadata. When it does not, the Console reads the dataset definition to rebuild the filter from the clicked group. That is not only an older server's answer: the server names the dataset's object on every answer but sends no drill metadata for a `type: 'date'` dimension with no `dateGranularity`, so a click on a report grouped by one takes this read. The read named no package, so for a report shipped in a package it read the bare name: another package's dataset of that name, or a `409` when two packages hold the name, where the report's own queries read the dataset its package resolves. The read now names the report's package as the reader (`?callerPackage=`), the dataset the report's queries resolve. A report authored in the environment reads the name bare, as before. A refusal opens no drill and is not retried with the bare name.
+  
+  **The client.** `MetadataClient.get(type, name, { callerPackage })` reads an item as the package that reads it: that package's own item, else the one holder among its declared dependencies plus `sys`, else `409 RESOURCE_CONFLICT` naming the candidates. It is distinct from `packageId` (`?package=`), which names the holder exactly. The server serves the caller arm on the `dataset` read only, and refuses it beside `packageId`.
+- 2797f81: fix(app-shell): Assigned users shows the position note beside a direct grant read with no id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A direct grant with no id, beside a position.** A person who holds a permission set through a position, and also has a direct grant read with no `id` (a field-trimmed read, a host's fake), was listed with neither a Remove nor the "Held via a position" note. The row now shows the note whenever a position holds the set and the row has no removable grant, whatever the direct grant's shape. FROM: no Remove, no note. TO: no Remove, the note. A position-only row, an id-less direct-only row, and a removable direct grant are unchanged.
+  
+  **The environment's button on the Add pick.** No change in behaviour; the section's documentation now says what the server answers on each catalog path. Where the registry serves the name, the environment's own set answers the name alone and the re-sent grant is stored. Where the registry holds the name nowhere and the catalog falls back to the metadata service, a name two packages hold is refused by the name alone even beside the environment's own row, naming the packages only, and that refusal is shown as the next pick with the users still to grant. Both paths are pinned.
+- b462444: fix(metadata-protocol)!: the history and rollback doors of a by-package name refuse the bare name two holders hold, and `?package=` addresses one holder's versions (ADR-0150 D3/D4, #32905)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/history` and `POST /meta/:type/:name/rollback` naming no package are refused `409 RESOURCE_CONFLICT` before any row is read or written wherever the bare plain read refuses the name: its active rows held by two or more row slots (two packages', or a package's beside the package-less row; `ambiguous-in-environment`, `details.candidates` naming every holder), one row held while a second package ships the name in code, or a name two packages ship with no stored row (the read's own refusal) — where the history answered every holder's versions as one log and the rollback wrote the chosen version into whichever row the bare read served. An addressed rollback (`?package=`) to a version of another holder's row, or to a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is; a `?package=` naming a package that neither holds a row of the name nor ships it is refused `409` (`not-held-by-qualifier`) while another slot holds one, and `422 WRITABLE_PACKAGE_REQUIRED` while no row is stored and no such package is installed; nothing is restored. Widened: both doors accept `?package=` on a by-package type (the `/layers?package=` spelling), which reads or restores that holder's versions only; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds answers bare exactly as on `main`: its whole log, and its bare rollback restores any of its versions into its row, including a version saved package-less before a package took the name over.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the history or rollback door, and the docs that do (`content/docs/api/metadata-api.mdx`, `content/docs/kernel/contracts/metadata-service.mdx`, `content/docs/plugins/adding-a-metadata-type.mdx`, `content/docs/permissions/system-context.mdx`) list the routes without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `packageId` field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (one optional request key, `HistoryMetaItemRequest.packageId`, is added, and `RollbackMetaItemRequestSchema` is a new schema declaring a request the door already took, so nothing written before needs rewriting), and no stored row changes shape: `sys_metadata_history.package_id` already existed and is now also written by the `/meta` doors. What moves is which versions a door answers and which row a rollback may write, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare history or rollback request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/history` TO `GET /meta/TYPE/NAME/history?package=PKG`, once per holder the `409` names.
+  - FROM `POST /meta/TYPE/NAME/rollback` TO `POST /meta/TYPE/NAME/rollback?package=PKG`, with `toVersion` one of that holder's versions (its `?package=` history lists them).
+  
+  An `action` name is judged here by its row slots and the registry's package-scoped resolver only: the bare read's own action judges (an object-less name two packages ship, two packages binding the name to their own objects) are not asked by these doors yet, so such a name with no stored row still answers its (empty) history bare.
+  
+  `?package=` names a holder the way the item read does: the row a read naming that package serves — the package's own row, its `.custom` pair's declared override of it (so a base package addresses its customization pair), or the package-less row that read falls back to — else the package's own slot when it ships the name and holds no row yet. A package that neither holds nor ships the name, while another slot holds it, is refused `409` (`not-held-by-qualifier`); with no row stored, a package that is not installed is refused `422` as a save naming it is. `all` and the empty string name no package. For a type not stored per package, `?package=` is refused `400`, as it was before this release.
+  
+  The `/meta` doors' history rows now record whose row they snapshot (`sys_metadata_history.package_id`, the rule `DatabaseLoader` already applies; the package-less row is marked `sys_metadata`). A version recorded before this release carries no attribution, and an environment-attributed version stays with a package that took the package-less row over: each is listed and restorable while the name has one holder, and never guessed once two hold it. `@objectstack/metadata` exports that rule as `historyRowAttribution` and `ENVIRONMENT_HISTORY_MARK`.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (`HistoryMetaItemRequestSchema.packageId`, the authorable-surface entry `api/HistoryMetaItemRequest:packageId`, the new `RollbackMetaItemRequestSchema` that declares the rollback door's request with its `packageId` and a `toVersion` of at least 1, and `PACKAGE_SLOTTED_METADATA_TYPES` / `isPackageSlottedMetaType`, the one list of types stored per package that the doors and the console both read), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`historyMetaItem` and `RollbackMetaItemRequest` take `packageId`), `@objectstack/rest` (both doors accept `?package=`; the rollback door reads `toVersion` through its declaration), `@objectstack/metadata` (new exports `historyRowAttribution`, `ENVIRONMENT_HISTORY_MARK`; `PACKAGE_SLOTTED_STORE_TYPES` is now built from the spec list, same members), `@object-ui/data-objectstack` (`history()` / `rollback()` take `packageId`), `@objectstack/metadata-core` (a field description only) and `@object-ui/app-shell` (no exported signature changes: `HistoryPanel` and `StudioItemTools` are not exported, and `MetadataResourceHistoryPage` keeps its props).
+  
+  The console follows: `MetadataClient.history()` and `rollback()` take `packageId` (sent as `?package=`), and the History item tool (routed page, the edit page's sheet and Studio's item tools) names the package its item page reads, for a type stored per package only (`isPackageSlottedMetaType`): an object, view or page opened under a package reads and restores its history bare, as before, since the doors refuse `?package=` on those types.
+- ba32e79: fix(plugin-chatbot, app-shell, i18n): the AI build chat says what really happened — the plan card follows the build, a message typed during a reply waits instead of being lost, the draft preview of an unpublished object is an empty list, build issues read in the customer's words, and the change card names objects and fields by label
+  
+  Clause-②: yes (widening) — `ChatbotEnhancedProps` (published by `@object-ui/plugin-chatbot`) gains three optional props, `resolveObjectLabel`, `resolveFieldLabel` and `resolveFieldTypeLabel`; the `@object-ui/i18n` packs gain the keys `chatbot.plan.confirmed`, `chatbot.plan.buildFailed`, `chatbot.build.issuesCount`, `chatbot.build.issuesSummary`, `chatbot.build.warningsSummary`, `chatbot.build.issuesDetails`, the count family `chatbot.build.needsAttention` (each locale's plural slots), `chatbot.composer.queued`, `chatbot.composer.queuedCancel`, `preview.unpublishedList.title` and `preview.unpublishedList.message` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **The plan card follows the build.** It read 「已搭建」 (Built) as soon as any `apply_blueprint` call appeared after it, before anything was built. It now reads Confirmed once "Build it" is clicked, Building while that build call runs, Built only when the call's result says `drafted` or `published`, and "Not built — nothing was created" (with Build it and Adjust offered again) when the call was refused, errored, or ended with the turn and no result. An `awaiting_confirmation` answer still leaves the card pending (objectui#8343), and a build that ran is still never offered a second Build it (#432).
+  - **A message typed while a reply runs is kept.** The composer used to be disabled while the assistant answered. It stays usable: a message sent during a reply waits in a strip above the box ("Sends when the current reply finishes") and is sent, oldest first, as soon as the reply ends. Each waiting message can be cancelled, which puts its text back in the box. On a new conversation, a second message sent while the first send is still creating the conversation used to be dropped without a word; it now joins that first message, which has not left the browser yet, so both reach the agent in the first turn.
+  - **The draft preview of an unpublished object is an empty list.** In `?preview=draft`, the list read of an object that was only drafted answered `404 OBJECT_NOT_FOUND` and the list printed it. In the draft preview, a list read that the engine answers that way, for any object it has not registered (a lookup into another drafted object included), now answers an empty page, and the listed object's own empty state says records appear after publish. Any other failure, and every read outside the preview, is shown as before.
+  - **Build issues read in the customer's words.** The build card's chip reads "N to fix", and the issues block leads with one sentence saying what to do; the verification messages written for the agent sit in a closed "Technical details" section. The published badge's failed-item count ("· 2 need attention") was English in every locale; it now comes from the pack and agrees with its number.
+  - **The edit confirmation card names objects and fields by label.** The Console passes resolvers from its metadata; the card shows `Customer · Phone` and the field type's localized name, keeping the machine name in the tooltip. A name not yet in the metadata (a field the change adds) keeps its machine name.
+- 9e23534: fix(app-shell): a flow copy made by New similar shows its runtime status as soon as it opens
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **New similar in Studio Automations.** A copy that opens in the same Automations pillar, the open writable package or a read-only base's paired `.custom` package, now reads its runtime state at once. The server stores the copy live and switched off, so its header Status reads "Switched off" with no reload. Before, the pillar kept the runtime status snapshot it had read before the copy existed, found no row for the copy, and read it as "Unpublished draft" until the page was reloaded. The pillar now reads the automation status once more after each copy lands. A flow the engine really holds no row for still reads "Unpublished draft". A copy that lands in another package opens that package's pillar, which reads the status itself, as before.
+- 760b338: fix(app-shell): a ⌘K built-in command is found by the words of its own label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The palette's built-in commands.** "Open Full Search Page" and the three theme commands were matched on hidden English values (`search all results full page`, `theme light`, …), so the full-search row was not found by `open` or `full search`, and under a non-English locale no command was found by any word of its label ("浅色主题" answered `light`, never `浅色`). Each command is now also matched by the label it shows, in the member's language. FROM: value words only. TO: the label's words or the value's words. The words that found a command before still find it.
+- 1169d64: fix(console): Set as Default over a view a package ships leaves one default view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Set as Default.** When the previous default list view was one a read-only package ships (the showcase's All Tasks, an installed app's view), Set as Default on another view left the object with two default views. Clearing the shipped view's default was refused by the server, since a write naming no package is closed on an item a read-only package ships, but the new default was written beside it in the same click. The clear now lands, and Manage views writes one view at a time, clearing the previous defaults first and setting the new one last: a refused clear stops the click, says the server's reason, and leaves the new view not made the default.
+  
+  **Editing a shipped view's row state.** `updateView` on `@object-ui/data-objectstack` now writes a view a read-only package ships into that package's customization pair (`BASE.custom`, `?package=`), declaring `overrides: { package, basedOn }`, as the server's refusal prescribes. The pair is the one `POST /packages/BASE/ensure-customization` answers, which creates it on first use, and `basedOn` is the version the view's customization already declares, else the package's own version. This covers every row-state write the console sends through `updateView`: the default flag, a pin and a rename. A view no package ships, and a view a writable package ships, are written exactly as before. When the pair cannot be had (the ensure door refuses the caller, or the package records no version), nothing is written and the refusal reaches the caller.
+- f054a0b: fix(app-shell): a record drawer level's Edit opens the form of the level's object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Edit in a drawer level.** A record opened one level down in a record drawer, from a related list or a lookup, is a record of its own object, which is not always the route's. Its header Edit now opens that object's form for that record, as the console's child task over the route (`?form=ID&formObject=OBJECT`, the same URL the related list's row Edit writes), on the object list's drawer and on the drawer over a record page. Before, the form was the route object's, with the child's id: "Edit Sales Order" and "Record not found". The route object's own Edit, and a level of the route's object, are unchanged: a top-level task with no `formObject`. A level whose object declares `editMode: 'page'` opens that object's edit page.
+  
+  **Related tabs in a drawer over a record page.** A record opened in the drawer over a record page now shows its own related lists, the objects that point at it included, as it does in the object list's drawer and on its own page. A record page reads only the objects around its own record, so a level showed Overview and Activity and none of the child's own related lists. While the page's drawer is open, the console reads the whole object list beside the page's objects, once, as it already did for the object list's drawer (`?recordId=`); a record page with no drawer open reads no more than before.
+- a526790: fix(app-shell): a marketplace-installed app's pending default permission set can be accepted from Studio and from its marketplace page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A package permission set shipped with `isDefault: true` suggests granting the set to everyone, and an administrator holding `manage_metadata` accepts or dismisses that suggestion once for the deployment. Two surfaces draw that decision, and neither reached an app installed from the marketplace:
+  
+  - Studio's Access pillar drew the suggestion strip only on a writable package. A marketplace-installed package is read-only in Studio, and it is exactly the package that ships an `isDefault` set. The strip is now drawn whatever the package's read-only state, because accepting or dismissing a suggestion is a deployment decision about the package, not an edit of it. Everything on the pillar that edits the package stays read-only.
+  - The marketplace package page drew the panel only in an install's own result in this session. It now draws it on every visit for a package installed here (a local install this runtime loaded, or a cloud install into the environment this console renders), whenever the package has a pending, dismissed or accepted suggestion.
+  
+  A caller without `manage_metadata` still sees nothing: the server refuses the list, and the panel stays silent on that answer.
+- 9ec528c: fix(app-shell): a list-only object's rows no longer open a record page that always fails
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Objects whose data API serves no single-record read.** An object can declare `enable.apiMethods` without `get`, such as `['list']` for the SCIM connection credentials in Setup. The Console still opened a record drawer or page when one of its rows was clicked. That page reads the record with `get`, so it always showed "This record could not be loaded" (`OBJECT_API_METHOD_NOT_ALLOWED`), with a Retry that could never succeed. The Console now reads the object's served operations from `/me/permissions` (`apiOperations`, the set the server already hands down) and opens no record surface for an object whose set leaves `get` out. A row click and a Cmd/Ctrl-click open nothing, the name cell carries no record URL and draws no "Open as full page" arrow, and a `?recordId=` link opens no drawer. This holds on the object list, the object data page and interface list pages. A related-list row of such an object opens nothing, and a lookup value or a record link that points at one renders as plain text. The row menu is unchanged, so its `list_item` actions, such as Revoke on a SCIM credential, stay where they were. An object that serves `get`, or whose served set the Console does not have, opens its records as before.
+- de476f1: fix(console): the fields no declared field group claims render under their own "Other" heading after the declared groups, on the record page, the record drawer and the form arms (#33229)
+  
+  Clause-②: yes (widening) — `@object-ui/i18n` adds the pack key `common.ungroupedSection` in every shipped locale ("Other" / 「其他」). Nothing is removed or renamed. `@object-ui/plugin-form` changes what its form arms draw, not its exports: the adapter that gains the heading argument (`deriveFieldGroupSections`) is internal to the package.
+  Metadata-protocol: none
+  
+  `deriveFieldGroupLayout` (`@objectstack/spec/data`, ADR-0085 §5) ends an object's grouped layout with a keyless bucket holding every visible field no declared group claims. It exists only after at least one declared group. The Console drew it with no heading, so its fields read as members of the group above it, and when that group was collapsed they looked like its hidden contents.
+  
+  - **Record page and record drawer** (`RecordDetailView`, the same view embedded in the drawer and the split pane): the bucket's primary section is a titled card headed with the translated `common.ungroupedSection`; long-form fields still drop into "More details" after it.
+  - **Forms** (`ObjectForm`, `ModalForm`, `DrawerForm`, on the no-sections field-group fallback): the bucket gets a divider row headed the same way, so the one row rule draws it as its own section.
+  - **Unchanged:** an object that declares no field groups (no grouping applies, the layout is flat, no heading is added); a page or form view that authors its own sections; the spec, which keeps the bucket keyless. The heading is a presentation default the Console owns, not an authorable key.
+- df9fe94: feat(spec, plugin-security): `sharing.controlledByParent.writeRequiresMasterRead` lets a `controlled_by_parent` detail ask read access on its master, not edit, for every write (ADR-0055 §3 as amended)
+  
+  Clause-②: yes (widening) — `ObjectSchema` accepts one new optional boolean, `sharing.controlledByParent.writeRequiresMasterRead`, that it refused as an unknown key before. An object that declares it as `true` moves runtime answers, all toward admit: a write by a principal who can read the master but not edit it was refused `403 PERMISSION_DENIED` and is now judged by the detail's own permissions, row-level security and field-level security. Two new parse refusals ship with the key, both on declarations that did not parse before (the key itself was unknown): the key set `true` on an object whose `sharingModel` is not `controlled_by_parent`, and the key set `true` beside `ownerMayEdit: true`. An object that leaves the key out, or sets it `false`, answers byte-for-byte as before.
+  Metadata-protocol: added
+  
+  **What the opt-in does.** A `controlled_by_parent` detail derives its access from its master. Reads already follow read access on the master; every write asked edit access on it (ADR-0055 §3). With `sharing.controlledByParent.writeRequiresMasterRead: true` on the detail, the master question for a write is read instead of edit, for every write path:
+  
+  - insert (single and batch), by-id update and delete, predicate (multi-row) update and delete;
+  - every hop of a master chain: a hop whose detail opted in asks read on its master and ends the walk there; a hop that did not opt in asks edit, as before;
+  - re-pointing a row to another master asks read on the new master and on the one it leaves; emptying an optional master asks read on the master it leaves;
+  - a write on behalf of another user (ADR-0090 D10) asks read on the master under each pass's own context, so the agent and the delegator must both read it.
+  
+  After the master question the detail's own object permissions, row-level security and field-level security decide, as they decide every write. A principal who cannot read the master still cannot write: an insert or re-point answers `403 PERMISSION_DENIED` ("requires read access to its master record"), and a by-id update or delete meets the read door first, `404 RECORD_NOT_FOUND`, because the detail row's own visibility derives from the master. Unchanged: the platform ownership floor on predicate writes, the required-master `422 MISSING_REQUIRED_FIELD`, and the optional-master owner rule for a row with no master.
+  
+  **Parse refusals (`ObjectSchema`).**
+  
+  - `writeRequiresMasterRead: true` on an object whose `sharingModel` is not `controlled_by_parent` is refused at `sharing.controlledByParent.writeRequiresMasterRead`, as `ownerMayEdit` is.
+  - `writeRequiresMasterRead: true` together with `ownerMayEdit: true` is refused at `sharing.controlledByParent.ownerMayEdit`: delete `ownerMayEdit`; `writeRequiresMasterRead` already admits the owner.
+  
+  **`@objectstack/spec`.** The new key, its `.describe()` text, the exported reader `controlledByParentWriteRequiresMasterRead(schema)` (`@objectstack/spec/data`), the object form's toggle ("Read on master is enough to write"), the liveness ledger entry (`live`), and prose on `ISecurityService.checkControlledByParentWrite`, `ControlledByParentWriteOutcome` and `ControlledByParentWriteDenialLeg`: under the opt-in, `allow` means the caller can read every master the write reaches, and a denial reuses the existing legs (`object_permission` when the master object is not readable, `row_level_security` when the master row is hidden). No type or union changes.
+  
+  **`@objectstack/plugin-security`.** The write gate, `checkControlledByParentWrite` and `os explain` (`explain-engine`) all ask the read question for an opted-in detail and agree with each other.
+  
+  **`@objectstack/lint`.** `security-controlled-by-parent-owner-policy-without-opt-in` stays silent on a detail that declares `writeRequiresMasterRead: true`: its own write policies decide there, so an `owner_id` policy is no longer dead under the master gate. No new rule.
+  
+  **`@objectstack/platform-objects`, `@object-ui/app-shell`.** The toggle's label and help text in every shipped metadata-form locale, and the Studio's zh-CN label.
+- 8f9eb3d: feat(metadata-protocol, spec): a package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published`
+  
+  Clause-②: yes (widening) — `PublishPackageDraftsResponseSchema.outcome` gains the value `published_unregistered`, and the response gains the optional member `unregistered[]`. Every other answer is byte-identical: a publish the registry takes whole still answers `published` with `success: true` and no `unregistered` key.
+  Metadata-protocol: semantic
+  
+  The authorable-surface shard gains `api/PublishPackageDraftsResponse:unregistered`, and the same server event answers `outcome` / `success` differently; ADR-0087 entry `18.publish-drafts-outcome-published-unregistered`.
+  
+  **What answers differently.** `POST /api/v1/packages/:id/publish-drafts` (and the protocol's `publishPackageDrafts`, and `client.packages.publishDrafts()`) used to answer `outcome: 'published'` and `success: true` when the runtime registry refused one of the objects it had just made live. The object carried the `object-registry-refused` warning on its `published[]` element, but a caller that read `success` or `outcome` saw a clean publish, and a seed load or data read right after it answered `OBJECT_NOT_FOUND`. The same publish now answers:
+  
+  - `outcome: 'published_unregistered'` and `success: false` (`success` is still exactly `outcome === 'published'`);
+  - `unregistered: [{ type: 'object', name, rule: 'object-registry-refused' }]`, one entry per refused object, in publish order;
+  - everything else as before: the drafts landed and stay live, so every object is still in `published[]` (the refused one still carries its warning), `failed[]` is empty, and the commit, seeds, probes and receipts are as they were.
+  
+  **What to do.** Handle the new value wherever you branch on the batch publish answer. Do not treat it as "nothing landed": the metadata is live. Do not seed or read an object `unregistered[]` names until it is registered: publish it again, which re-runs the registration, or restart, which registers every stored object.
+  
+  **The console.** Studio's publish, the package sheet, Home's *Publish all* and the AI chat card read `published_unregistered` as they read the `published` answer the server gave for this before: the refused object's warning reaches the author through the client, and none of them reports the publish as failed.
+  
+  **Unchanged on purpose.** The REST door's app visibility flip (ADR-0045 §3) still runs after this outcome, as it ran after the `published` answer this used to be. The single-item doors (`publishMetaItem`, a publish-mode save) still answer success with the warning on their `advisories`.
+- beff1fb: fix(plugin-grid, plugin-list, app-shell): a list row whose click opens nothing no longer looks clickable
+  
+  Clause-②: yes (widening) — `ObjectGridComponentProps` (published by `@object-ui/plugin-grid`) and `ListViewProps` (published by `@object-ui/plugin-list`) each gain one optional prop, `rowOpensRecord?: boolean`. Absent, every row renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Rows that open nothing.** A list row opens nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object, such as the SCIM connection credentials in Setup). The grid still drew such a row's first column as a link, and its right-click menu still offered Open and Open in new tab, so a click that did nothing looked like a broken page. The Console's object list, object data page and interface list pages now tell the grid that these rows open nothing (`rowOpensRecord={false}`, handed through `ListView`): the first column, and any column authored `link: true`, show the value as plain text, and the right-click menu offers no Open items. The row's actions (`list_item`) stay in the row menu and the right-click menu. The row click itself still reaches the host, so a Cmd/Ctrl-click on a row of a view authored `none` still opens the record in a new tab, as before. Rows that open a drawer or a page are unchanged.
+- 549bb2f: fix(app-shell): a member's record page asks no object definition the metadata door would answer as absent
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A member (a caller with no administrator grant) opening a record page logged two `404`s, `GET /api/v1/meta/object/sys_business_unit` and `GET /api/v1/meta/object/sys_comment_reaction`. The metadata door serves an object's definition only to a caller its read check admits, and answers any other caller as if the object did not exist; the stock member grants hold no read on either object, so both answers are correct, and the page should not have asked.
+  
+  - The record and list routes ask the definitions of their object's lookup targets, for the cells that link and name them. They no longer ask the target of a field declared `hidden: true`, which no cell draws. That includes the system scope fields the platform adds to an object (`organization_id` and `owning_business_unit_id`), which point at `sys_organization` and `sys_business_unit`; those two reads are gone for every caller.
+  - The record page asks whether the deployment has `sys_comment_reaction` to choose where reactions are stored. A caller whose loaded grants hold no read on that object is no longer asked: it takes the reactions path the absent answer took before. With no permission provider mounted, the page asks as before.
+  
+  Nothing a member or an administrator sees on the page changes, and no server answer changes.
+- 159dbe3: fix(console, plugin-detail, app-shell): a connector action switch resets its inputs, a multi-field save conflict lists each field, the share page lists fields by the record page's rule, the Studio error box wraps
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` exports the new `ConcurrentUpdateFieldConflict` type, and `ConcurrentUpdateConflict` gains the optional `fields` list. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **Flow designer (Studio).** Changing a `connector_action` node's connector or action keeps the inputs the new action declares, with their values or bindings, and drops the rest. When the new action's inputs are not known (no connector catalog, or an action name still being typed), the Input map is empty. Before, every previous input key stayed in the map: undeclared ones showed as extra Input rows, were saved with the flow, and were handed to the new action at run time. Inputs set aside by a switch come back if you return to the same connector and action while the inspector is open; they are never saved meanwhile.
+  - **Inline edit conflict.** When a save that changed several fields meets a newer version (409 `CONCURRENT_UPDATE`), the dialog lists each field with its label, your edit and the current value, instead of printing both as raw JSON. A one-field conflict looks as before.
+  - **Share-link page.** The landing page lists the record's fields the way the record page does: the framework's system columns and the audit columns (`created_at`, `created_by`, `updated_at`, `updated_by`) are not listed, and only fields the object declares are shown when the server sends the field labels.
+  - **Studio editor error box.** A refusal that is one unbroken token (a field-type enum list such as `"text"|"textarea"|…`) now wraps inside the box instead of running past the right edge of the window, so the whole message stays readable.
+- b3a8fc0: fix(studio): a full record page Studio seeds for an object with field groups heads its ungrouped fields with the translated "Other" heading, in the saved page and in the preview
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The ungrouped bucket on a Studio-seeded page.** Since the running record page draws the fields no declared field group claims under their own translated "Other" heading, a page Studio seeded for a grouped object still wrote that bucket as an untitled section, so after saving it the fields read as members of the group above them again. FROM: the seeded and converted page (Create page with kind full, and Convert to full page) wrote `{ columns, fields }` with no heading, and the slotted page preview drew it the same way. TO: the bucket is written `{ label, columns, fields }`, where `label` is the inline locale map of `common.ungroupedSection` from every catalogue `@object-ui/i18n` ships (`en` "Other", `zh-Hans` 「其他」, and so on). `record:details` resolves that map for each viewer's language, so the saved page stays translated; the slotted preview heads the bucket with the translated text the running page draws. The group references (`{ group, columns }`) are unchanged.
+  
+  **Unchanged:** an object with no field groups (the seed's primary section stays flat, with no heading); the running record page; `@object-ui/plugin-detail`'s `buildDefaultPageSchema`, which still writes the bucket untitled for a caller with no heading to give. No spec change: the inline locale map is a form `record:details` `sections[].label` already accepts. Pages saved before this change are not migrated and keep their untitled bucket; an author can add a heading to that section in the page designer.
+- b654135: fix(console): the first message of a new AI chat conversation shows at once, and a failed conversation create gives the text back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Drawn at once.** On a new conversation the first send is what creates the conversation, and the message waits in the browser until `POST /conversations` answers. The thread used to stay empty for that whole wait. The message now shows straight away as the user's bubble, with the assistant's thinking dots under it, and is drawn exactly once when the conversation opens and the message goes out. A second message sent during the wait joins the first one (as before) and shows with it. This holds on the full-page AI chat, in the console's chat dock and in the Studio copilot.
+  - **A failed create gives the text back.** When `POST /conversations` fails, the waiting message is taken off the thread, its text goes back in the message box and the "Couldn't send your message" notice shows, the same way a chat send that never left the browser is handled. The message is no longer kept out of sight to be sent with the next one. Sending again retries the create.
+- df70524: fix(studio): a full record page Studio seeds for an object with no field groups heads its "More details" section with the translated heading, not the English text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The "More details" section on a Studio-seeded page.** The running record page draws an object's long-text fields under a collapsible "More details" section whose heading it translates (`detail.sectionMoreDetails`). A page Studio seeded for the same object wrote that heading as the plain English string, so every viewer of the saved page read "More details" unless the object's own bundle carried `_sections.details.label`. FROM: the seeded and converted page (Create page with kind full, and Convert to full page) wrote `{ name: 'details', label: 'More details', … }`. TO: `label` is the inline locale map of `detail.sectionMoreDetails` from every catalogue `@object-ui/i18n` ships (`en` "More details", `zh-Hans` 「更多详情」, and so on). `record:details` resolves that map for each viewer's language, and the section keeps its `name: 'details'`, so the object's own `objects.OBJECT._sections.details.label` still wins over the map, as it does on the running page.
+  
+  **Unchanged:** the running record page and the slotted page preview (both draw the translated text already); objects with field groups; `@object-ui/plugin-detail`. No spec change: the inline locale map is a form `record:details` `sections[].label` already accepts. Pages saved before this change are not migrated: they keep the English string, which the object's `_sections.details.label` still overrides, and an author can change the heading in the page designer.
+- 7f0e38a: fix(app-shell): a record page offers the reactions column write only where `sys_comment` still declares the column
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A caller refused `sys_comment_reaction` (a permission set with no read on it, or an external user) was offered the reaction control on a record page's discussion, and every click answered `400 INVALID_FIELD`: the page fell back to writing the retired `sys_comment.reactions` column with `PATCH /api/v1/data/sys_comment/ID`, which the server refuses because the column left `sys_comment` in the release that added `sys_comment_reaction`.
+  
+  The page took that fallback whenever it could not read `sys_comment_reaction`, and a refusal reads the same as an object the deployment does not have: the metadata door answers both as absent. It now tells them apart by `sys_comment`'s own definition, which the caller can read. Where `sys_comment` still declares `reactions` (a framework that predates `sys_comment_reaction`), the column path is used exactly as before. Anywhere else the caller is refused the reaction object: the page offers no reaction control, reads no reactions and sends no reaction request.
+  
+  - A caller who holds read on `sys_comment_reaction` is unchanged: reactions are that object's records.
+  - `useObjectPresence` also returns the object's served `definition` when the object is present, so a reader can choose by what the object declares without a second registry read.
+- bea3328: fix(plugin-grid, plugin-list, plugin-kanban, app-shell): cards whose click opens nothing no longer look clickable, and a view authored `navigation: { mode: 'none' }` opens no record on a Cmd/Ctrl or middle click
+  
+  Clause-②: yes (widening) — `ObjectGalleryProps` (published by `@object-ui/plugin-list`) and `ObjectKanbanComponentProps` (published by `@object-ui/plugin-kanban`) each gain one optional prop, `rowOpensRecord?: boolean`, the name `ObjectGridComponentProps` and `ListViewProps` already carry. Absent, every card renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Cards that open nothing.** A list's rows open nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object). The grid already drew such rows plain on a desktop; its phone cards, the gallery's cards and the board's cards still drew a pointer and a hover lift, so a tap that did nothing looked like a broken page. `ListView` now hands its `rowOpensRecord` to the gallery and the board as well as the grid, and none of these faces draws a pointer or a hover lift for a card that opens nothing. A board card the reader may not drag is no control at all: no `button` role, no tab stop, no Enter/Space activation and no title hover. A board card the reader may drag keeps its grab cursor and its drag semantics. Card actions (the phone card's "⋮") stay, and the click still reaches the host.
+  
+  **No new tab on an authored `none`.** On the Console's object list a Cmd/Ctrl-click or a middle click on a row of a view authored `navigation: { mode: 'none' }` opened the record in a new tab, though the view declares no navigation. It now opens nothing, like a plain click. This supersedes the sentence in the `33317-row-opens-nothing-plain` note that says such a click "still opens the record in a new tab, as before". Rows that open a drawer or a page still open a new tab on a Cmd/Ctrl or middle click.
+- 030ce02: fix(plugin-chatbot, console): a failed AI chat conversation create gives back every message sent while it waited, not only the last one
+  
+  Clause-②: yes (widening) — `ChatbotEnhanced` (`@object-ui/plugin-chatbot`) takes a new optional prop, `unsentText`: the text a not-sent `error` gives back to the composer when the host holds what was not sent. Nothing is removed or narrowed; a host that passes nothing keeps today's restore.
+  Metadata-protocol: none
+  
+  - **Two messages, then a failed create.** On a new AI chat conversation the first message waits for `POST /conversations`, and a second message sent during that wait joins it. When the create then failed, the message box got back only the second message, and the first was lost. The box now gets both, first part first, with the "Couldn't send your message" notice as before, and sending again sends the joined text once. This holds on the full-page AI chat, in the console's chat dock and in the Studio copilot.
+  - **`ChatbotEnhanced`.** The not-sent restore puts the host's `unsentText` back in an empty box when the host passes one, and the text the composer last submitted when it does not (unchanged).
+- baf9f3b: fix(console): text typed into the AI chat box is no longer lost when the chat learns its conversation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A draft survives the conversation loading or being created.** In the AI chat (the full-page chat, the console's chat dock and the Studio copilot), text typed into the message box but not yet sent was wiped when the conversation became known: on a link to an existing conversation, text typed while it was still loading; on a new conversation, a second message typed while the first one was creating the conversation. The box now keeps that text, with the cursor at its end and the focus where it was. Nothing is sent until you send it, and a message you already sent is still sent exactly once.
+  - **Opening another conversation does not carry a draft across.** Text typed in one conversation, or in a new chat, stays behind when you open a different conversation, as before.
+- baf9f3b: fix(console): a message sent while a linked AI chat conversation loads is given back when the load fails
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **No more endless thinking dots.** In the AI chat (the full-page chat, the console's chat dock and the Studio copilot), a message sent while the conversation was still loading waited for it. When loading then failed (a server error or no network), the message stayed on screen with the thinking dots forever: nothing was sent, nothing was shown and the message box was empty. Now the message is taken back into the box with the "Couldn't send your message" notice, two messages sent during the wait included (first part first), and nothing is sent. Sending again loads the conversation again and sends the message once into it.
+  - **Unchanged:** a load that answers sends the waiting message once into the conversation, and a conversation that no longer exists (404) still starts a new one for it.
+- Updated dependencies [854d383]
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [df67557]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [d95ddeb]
+- Updated dependencies [103eb7b]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9499dcc]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [82838e8]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [68972cd]
+- Updated dependencies [1b878e7]
+- Updated dependencies [1169d64]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [8835532]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [9f736f2]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [f068cde]
+- Updated dependencies [0be91f0]
+- Updated dependencies [a674877]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [beff1fb]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [159dbe3]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [bea3328]
+- Updated dependencies [89defde]
+- Updated dependencies [f06f064]
+- Updated dependencies [030ce02]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @object-ui/data-objectstack@18.5.0
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @objectstack/lint@18.5.0
+  - @object-ui/fields@18.5.0
+  - @objectstack/formula@18.5.0
+  - @object-ui/plugin-chatbot@18.5.0
+  - @object-ui/plugin-dashboard@18.5.0
+  - @object-ui/auth@18.5.0
+  - @object-ui/plugin-grid@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/plugin-form@18.5.0
+  - @object-ui/plugin-list@18.5.0
+  - @object-ui/plugin-detail@18.5.0
+  - @object-ui/plugin-kanban@18.5.0
+  - @object-ui/plugin-calendar@18.5.0
+  - @object-ui/plugin-designer@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/collaboration@18.5.0
+  - @object-ui/plugin-charts@18.5.0
+  - @object-ui/plugin-report@18.5.0
+  - @object-ui/plugin-view@18.5.0
+  - @object-ui/layout@18.5.0
+  - @object-ui/plugin-editor@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

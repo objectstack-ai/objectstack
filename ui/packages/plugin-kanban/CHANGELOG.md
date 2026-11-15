@@ -1,5 +1,43 @@
 # @object-ui/plugin-kanban
 
+## 18.5.0
+
+### Patch Changes
+
+- bea3328: fix(plugin-grid, plugin-list, plugin-kanban, app-shell): cards whose click opens nothing no longer look clickable, and a view authored `navigation: { mode: 'none' }` opens no record on a Cmd/Ctrl or middle click
+  
+  Clause-②: yes (widening) — `ObjectGalleryProps` (published by `@object-ui/plugin-list`) and `ObjectKanbanComponentProps` (published by `@object-ui/plugin-kanban`) each gain one optional prop, `rowOpensRecord?: boolean`, the name `ObjectGridComponentProps` and `ListViewProps` already carry. Absent, every card renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Cards that open nothing.** A list's rows open nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object). The grid already drew such rows plain on a desktop; its phone cards, the gallery's cards and the board's cards still drew a pointer and a hover lift, so a tap that did nothing looked like a broken page. `ListView` now hands its `rowOpensRecord` to the gallery and the board as well as the grid, and none of these faces draws a pointer or a hover lift for a card that opens nothing. A board card the reader may not drag is no control at all: no `button` role, no tab stop, no Enter/Space activation and no title hover. A board card the reader may drag keeps its grab cursor and its drag semantics. Card actions (the phone card's "⋮") stay, and the click still reaches the host.
+  
+  **No new tab on an authored `none`.** On the Console's object list a Cmd/Ctrl-click or a middle click on a row of a view authored `navigation: { mode: 'none' }` opened the record in a new tab, though the view declares no navigation. It now opens nothing, like a plain click. This supersedes the sentence in the `33317-row-opens-nothing-plain` note that says such a click "still opens the record in a new tab, as before". Rows that open a drawer or a page still open a new tab on a Cmd/Ctrl or middle click.
+- Updated dependencies [f530d25]
+- Updated dependencies [f5121e8]
+- Updated dependencies [82838e8]
+- Updated dependencies [ba32e79]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [a9da547]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [d574341]
+- Updated dependencies [de476f1]
+- Updated dependencies [159dbe3]
+- Updated dependencies [020ce3d]
+- Updated dependencies [6446935]
+- Updated dependencies [f06f064]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/plugin-detail@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

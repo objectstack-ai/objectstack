@@ -8,6 +8,7 @@
 - **Leaves unchanged**: the 2026-09-16 note (a person's API key is that person's credential, never an agent); rule 5 and its credential-kind × target-door table; ADR-0118 D1, D2, D5 and D6; the meaning of `ExecutionContext.performedBy` (the OAuth client that acted for a person) and the room it reserves; the OAuth agent path end to end; ADR-0073's automation principal, which stays a separate identity.
 - **Consumers**: `@objectstack/platform-objects` (two `sys_user` columns), `@objectstack/plugin-auth` (the registration, key and lifecycle doors; the session and credential refusal), `@objectstack/core` (key admission carries the kind; the shared assembler stamps the principal), `@objectstack/plugin-security` (the agent ceiling at evaluation and at assignment), `@objectstack/plugin-audit` and `@objectstack/spec` (the hook surface, O4), and in `objectstack-ai/cloud` the licence layer and the console (cloud ADR-0116 D7, cloud#3886, cloud#3820).
 - **Amended** (2026-11-10, [#32060](https://github.com/objectstack-ai/objectstack/issues/32060)): a dated note under [What builds on this](#what-builds-on-this) records what O3 and O4 shipped. The status line above is left as it is.
+- **Amended** (2026-11-15, [#33689](https://github.com/objectstack-ai/objectstack/issues/33689)): a dated note under [D3](#d3--its-authority-its-own-grants-under-the-agent-ceiling) records that rule 3 holds unchanged under the amended action-confirmation contract. The status line above is left as it is.
 
 ---
 
@@ -74,6 +75,28 @@ ADR-0118 refused a seeded "system" pseudo-user for two reasons: seeding writes t
 - **Rule 3: no human is in the loop, so the account never completes alone what needs one.** The destructive class is already closed by the ceiling. An action that asks for a person's confirmation before it runs (ADR-0011's `ai.requiresConfirmation`, rule 3's co-sign) is refused for an account, and never confirmed by the account itself, until a hold door exists that hands the run to a person: the account's owner or an administrator (O6, through the approvals engine).
 - **Rule 5 needs nothing new.** An account's `api` action forward carries the account's own key, and that key already *is* the agent, so no forward credential is minted. Its cells in the table are the `api_key` row as it stands: the identity door refuses by name, the MCP and platform doors accept.
 - **MCP.** On the HTTP endpoint and over stdio (ADR-0101, `OS_MCP_STDIO_API_KEY`), an account's key admits the account through the same shared chain. The OAuth tool families are a person's consent and do not apply; the account's grants bound what its tools reach.
+
+> **Amendment note (2026-11-15, [#33689](https://github.com/objectstack-ai/objectstack/issues/33689) — PR #33725, `1e65a389`): rule 3 under the amended confirmation contract.**
+> [ADR-0011](./0011-actions-as-ai-tools.md)'s note of the same date records the new contract
+> (`packages/spec/src/contracts/ai-service.ts#AI_ACTION_CONFIRMATION_CAPABILITY`): a person confirms a declared-gated
+> action on an AI door, elicited in the MCP client or handed off to the host's pending-confirmation service, and the
+> caller's own `confirm: true` never counts. Rule 3 is unchanged by it:
+>
+> - **An account acting for itself is refused whatever it sends.** It is neither elicited, since no person stands
+>   behind the account and its own client could answer, nor handed off. From the change that implements the
+>   contract, the refusal carries `details.reason: 'service_account'`
+>   (`packages/spec/src/contracts/ai-service.ts#ACTION_CONFIRMATION_REFUSAL_REASONS`) on every door that runs an
+>   action, REST `/actions` and host doors included, because the one admitted sequence asks this rule at each of them.
+> - **The pending-confirmation service is not the hold door rule 3 waits on.** It hands a person's own call back to
+>   that same person (`packages/spec/src/contracts/ai-service.ts#IActionConfirmationService`), and an account has no
+>   person behind it. Its approve and reject doors take a person's signed-in session and refuse an agent principal,
+>   with or without `onBehalfOf`. A hold that routes an account's run to its owner or an administrator remains O6's,
+>   through the approvals engine, and is a separate decision.
+> - **An agent acting for a person** (`principalKind: 'agent'` with `onBehalfOf`, the OAuth path) is not an account:
+>   the contract asks the person it acts for.
+> - **Until the implementing change ships**, the gate is `packages/runtime/src/action-execution.ts#actionConfirmationRefusal`
+>   as before, and it refuses an account through
+>   `packages/runtime/src/action-execution.ts#isAiServiceAccountCaller` whatever the call sends.
 
 ### D4 — Its credentials: dedicated API keys, minted by a person
 

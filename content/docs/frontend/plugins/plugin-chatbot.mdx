@@ -164,6 +164,11 @@ const schema: ChatbotSchema = {
 - **Conversation States**: Empty streaming messages render as an assistant
   responding indicator, the submit control becomes Stop while streaming, and
   backend errors collapse into a retryable notice with optional details
+- **Model Picker**: with two or more models offered (`GET /api/v1/ai/models`),
+  the composer shows a model picker. A model whose entry carries a
+  `costMultiplier` shows it as `×N` beside its label; with the allowance usage
+  served (`GET /api/v1/ai/usage`) the list notes the share left; a pick at
+  `×20` or above asks once before it applies
 - **Lightweight**: Pure React components with minimal dependencies
 
 ## Schema API

@@ -65,6 +65,32 @@ export interface CheckpointSignedBody {
   readonly tenant_id: string | null;
   readonly sequence: number;
   readonly kind: AuditCheckpointKind;
+  /**
+   * ADR-0154 D4 amended (S7): a chain's window seals into consecutive
+   * checkpoints of at most N leaves. This one's place among them, from 0 — for
+   * a `window` part, its place in the window's `window` parts (a pass that
+   * resumes a window it left mid-way continues the count); for a `late` part,
+   * its place in the one late sealing of the window that wrote it.
+   *
+   * The count may skip a number: a part whose rows were all deleted or moved
+   * between the sealer's two reads of the window is not written and takes no
+   * index (parts 0 and 2, say). Nothing reads continuity, and nothing requires
+   * a final part, since a window whose last part emptied has none. A removed
+   * interior part still shows in the chain links (`gap`, `link`); a removed
+   * newest part does not, and its rows read unsealed.
+   *
+   * Absent, with `final_part`, from a checkpoint written before the amendment:
+   * such a body signed neither key, so it is read back without them and reads
+   * as one part, final. A body holding one of the two and not the other is
+   * refused.
+   */
+  readonly part_index?: number;
+  /**
+   * Whether this is the last part of its sealing: a window, or one late
+   * sealing of it. Absent with `part_index`. A window whose last part emptied
+   * between the two reads has no final part (see `part_index`).
+   */
+  readonly final_part?: boolean;
   readonly window_start: string;
   readonly window_end: string;
   /** The sealed-through watermark (D3). */
@@ -191,6 +217,30 @@ function fencingToken(raw: unknown): string {
   return value;
 }
 
+/**
+ * A flag in its one meaning: `true` or `false`, or the `1` / `0` (number or
+ * text) a driver with no boolean column hands back. Absent is refused, never
+ * read as either.
+ */
+function flag(row: Readonly<Record<string, unknown>>, field: string): boolean {
+  const value = row[field];
+  if (value === true || value === 1 || value === '1' || value === 'true') return true;
+  if (value === false || value === 0 || value === '0' || value === 'false') return false;
+  throw new SignedBodyError(`${field}: true or false is required`);
+}
+
+/**
+ * A stored checkpoint's place among its window's parts (S7), read alone — the
+ * sealer's resume reads it without judging the whole body. `null` for a
+ * checkpoint written before the amendment, which carries neither key (NULL
+ * columns, or a body without them): one part, final.
+ */
+export function checkpointPartOf(row: Readonly<Record<string, unknown>>): { readonly part_index: number; readonly final_part: boolean } | null {
+  const absent = (field: string) => row[field] === undefined || row[field] === null;
+  if (absent('part_index') && absent('final_part')) return null;
+  return { part_index: count(row, 'part_index'), final_part: flag(row, 'final_part') };
+}
+
 /** A JSON column: stored as JCS text, or handed back already parsed by a driver with JSON columns. */
 function json(row: Readonly<Record<string, unknown>>, field: string): unknown {
   const value = row[field];
@@ -240,6 +290,7 @@ export function checkpointBodyFromRow(row: Readonly<Record<string, unknown>>): C
     tenant_id: nullableText(row, 'tenant_id'),
     sequence: count(row, 'sequence'),
     kind: oneOf(row, 'kind', AUDIT_CHECKPOINT_KINDS),
+    ...checkpointPartOf(row), // absent from a body written before the amendment, so its signed bytes stand
     window_start: instant(row, 'window_start'),
     window_end: instant(row, 'window_end'),
     sealed_through: instant(row, 'sealed_through'),
