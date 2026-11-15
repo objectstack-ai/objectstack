@@ -137,9 +137,6 @@ body: {
 }
 ```
 
-The deprecated `handler` takes an inline function or a registered function's
-name ([Registration Methods](#registration-methods)).
-
 #### `condition` — Declarative Filtering
 
 Skip the hook if the condition is false. Author it as a **CEL
@@ -212,9 +209,6 @@ in neither). So:
 (`record.stauts`), a column read off `previous` on an insert, or a comparison
 CEL has no overload for does **not** degrade to "the hook did not fire" — it
 **fails the write**.
-
-So spell keys against the object's **declared** fields, and on an insert event
-read `previous` only against `null`: the mistake fails every write the hook is on.
 
 ---
 
@@ -387,10 +381,6 @@ const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result
 // full.position_id is present even though this PATCH only set `stage`.
 ```
 
-(A declarative `condition` does **not** hit this wall — it is
-evaluated against the stored record overlaid with the payload, so
-`record.position_id` is readable there even when the PATCH never wrote it.)
-
 ### ⚠️ Gotcha 2 — cross-object writes obey the *target's* sharing model
 
 A hook's `ctx.api.object('other').update(…)` goes through the engine's normal
@@ -439,9 +429,6 @@ const fillPositionOnHire = defineHook({
 
 export default fillPositionOnHire;
 ```
-
-Register it like any hook — add it to `defineStack({ hooks: [fillPositionOnHire] })`
-(the `AppPlugin` binds `body` hooks onto the engine automatically).
 
 ### Troubleshooting (`[BodyRunner]` log lines)
 
@@ -846,7 +833,7 @@ A throw aborts the operation and rolls back its transaction; `onError: 'log'`
 ### Declared refusals (`refusals`)
 
 A hook that enforces a business rule declares a `refusals` catalogue, one
-SCREAMING_SNAKE code per rule, and its body throws the code. Without one, a `body`'s
+SCREAMING_SNAKE code per rule, and the hook throws the code. Without one, a `body`'s
 throw is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
 plan, not for a rule the user can act on. A cross-object guard a validation rule
 cannot read:
@@ -859,26 +846,40 @@ export default defineHook({
   name: 'checkout_requires_stock',
   object: 'asset_checkout',
   events: ['beforeInsert'],
-  refusals: { ASSET_NOT_IN_STOCK: { message: 'Only an in-stock asset can be checked out.', status: 409 } },
+  refusals: {
+    ASSET_NOT_IN_STOCK: {
+      message: 'Only an in-stock asset can be checked out.',
+      status: 409,
+      params: ['due'],
+      reasons: { on_loan: { message: 'This asset is on loan until {{ due }}.' } },
+    },
+  },
   body: {
     language: 'js',
     capabilities: ['api.read'],
     source: `
       const id = ctx.input.asset_id;
       const asset = id && await ctx.api.object('asset').findOne({ where: { id } });
+      if (asset?.status === 'on_loan') throw Object.assign(new Error(),
+        { code: 'ASSET_NOT_IN_STOCK', reason: 'on_loan', params: { due: asset.due_date } });
       if (asset?.status !== 'in_stock') throw Object.assign(new Error(), { code: 'ASSET_NOT_IN_STOCK' });
     `,
   },
 });
 ```
 
-- Only a `js` `body` can declare one: a `handler` hook, inline TS included, is
-  refused at save.
+- A `js` `body` or a `handler` (inline or named) can declare one; an
+  `expression` body, or neither, is refused at save.
 - The wire `code` is the status's (default 400), with the hook's as `declaredCode`.
-- The message is plain text (a `{{ }}` hole is refused), translated via
-  `hooks.<hook>.refusals.<CODE>.message`; the body's own text and `status` are unused.
-- An undeclared code, or none, is refused: at save if thrown literally, else as
-  a `500`. Unchanged `ctx.api` errors and crashes pass through.
+- `reasons` (snake_case, thrown as `reason`) add sentences that keep the code's wire
+  `code` and status.
+- `params` names what a `{{ name }}` hole may fill (thrown as `params`); a hole
+  over any other name, or any hole with no `params`, is refused.
+- Translated via `hooks.<hook>.refusals.<CODE>.message` (or
+  `….<CODE>.reasons.<REASON>.message`); the thrown text and `status` are unused.
+- An undeclared code (or none), or a reason missing from a code's `reasons`, is
+  refused: at save if thrown literally, else as a `500`. Unchanged `ctx.api`
+  errors and crashes pass through.
 
 ---
 

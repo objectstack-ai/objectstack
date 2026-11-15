@@ -48,7 +48,10 @@
  * ⛔ What the page cannot name stays its reader's own read: a list declared by
  * a list view (`listView`), a list whose declared filter carries a context
  * token (the reader resolves it against the session first), a list whose
- * filter cannot be lowered, and the lists past the fiftieth.
+ * filter cannot be lowered, a list the route does not key by this record's id
+ * (`relationshipValueField` other than `id`, or a `dataSource` /
+ * `parentDataSource` binding; objectstack#33609), and the lists past the
+ * fiftieth.
  */
 
 import { RelatedCountStore } from '@object-ui/components';
@@ -56,6 +59,7 @@ import { isApiAccessDeniedError, toFilterNode } from '@object-ui/core';
 import {
   COMPACT_RELATED_ROWS,
   normalizeRelatedListSort,
+  relatedCountTargetsIn,
   seedQueueClaimDecision,
   seedRecordFieldAccess,
   seedRecordVerdict,
@@ -122,6 +126,30 @@ const propsOf = (node: Record<string, any>): Record<string, any> =>
   node.properties && typeof node.properties === 'object' ? { ...node, ...node.properties } : node;
 
 /**
+ * Whether the one-request door can answer a `record:related_list` (its merged
+ * props `p`), objectstack#33609. The route names a list by `{ object, field }`
+ * and answers "the child records whose field holds this record's id"
+ * (`RecordPageRelatedRequestSchema`, strict); a list keyed by another parent
+ * field (`relationshipValueField`, e.g. a parent lookup) or bound to a data
+ * source of its own is not that question, and the route refuses the WHOLE
+ * request for it (400 `invalid_relationship`), which drew the page as
+ * 「无法加载此记录」.
+ *
+ * ⛔ Not a second copy of the rule: it is the count prefetch's
+ * (`relatedCountTargetOf`, plugin-detail), reached through the walker the
+ * package exports, handed this one node as a bare `{ type, properties }`
+ * with its child slots left out, so the walk answers for this node alone
+ * (`[target]` or `[]`) and the walker's `visibleWhen` skip, which reads the
+ * outer node only, keeps a gated list in the request as before. A list the
+ * rule leaves out reads for itself through its block, as it did before the
+ * payload.
+ */
+function pageAnswersRelatedList(p: Record<string, any>): boolean {
+  const { children: _children, items: _items, ...own } = p;
+  return relatedCountTargetsIn({ type: 'record:related_list', properties: own }).length === 1;
+}
+
+/**
  * The related lists a record page draws: the `record:related_list` nodes and
  * `record:reference_rail` entries of its schema, plus the lists the console
  * derives for a synthesized page. One entry per store key, in first-seen order.
@@ -165,7 +193,7 @@ export function recordPageRelatedLists(
     if (!node || typeof node !== 'object') return;
     const p = propsOf(node as Record<string, any>);
     if (p.type === 'record:related_list' && typeof p.objectName === 'string' && typeof p.relationshipField === 'string') {
-      if (typeof p.listView !== 'string' || p.listView === '') {
+      if ((typeof p.listView !== 'string' || p.listView === '') && pageAnswersRelatedList(p)) {
         const sort = normalizeRelatedListSort(p.sort);
         add({
           object: p.objectName,

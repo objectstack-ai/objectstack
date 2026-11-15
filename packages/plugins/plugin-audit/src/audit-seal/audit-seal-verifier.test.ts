@@ -11,6 +11,7 @@ import {
   canonicalValue,
   checkpointBodyFromRow,
   checkpointDigest,
+  checkpointRow,
   checkpointSeedContext,
   columnSaltsOf,
   commitValue,
@@ -27,7 +28,7 @@ import {
 } from './index.js';
 import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
 import { AuditSealer } from './sealer.js';
-import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
+import { LocalCheckpointSigner, readAuditSealSecret, writeAuditSealSecret } from './signer.js';
 
 /**
  * ADR-0154 D9 — the live check over an in-memory engine double: per-row
@@ -250,6 +251,24 @@ describe('trust: only keys the anchor vouches for (D6)', () => {
     const report = await s.verifyNow();
     expect(faultKinds(report)).toEqual(['org:org_b#0:duplicate']);
     expect(verdicts(report)).toEqual({ r5: 'late!' });
+  });
+
+  it('faults a row id two checkpoints list, though each is signed and linked: the second listing holds nothing (S7)', async () => {
+    const s = await sealedLedger();
+    // A second, validly signed and linked checkpoint of org_b re-listing r5, under its own sealed seed.
+    const first = checkpointBodyFromRow(s.checkpoint('org:org_b', 0));
+    const handle = await readAuditSealSecret(s.engine, first.seed_handle);
+    const seed = await s.crypto.decrypt(handle!, checkpointSeedContext('ledger_probe', 'org_b', 0));
+    const context = checkpointSeedContext('ledger_probe', 'org_b', 1);
+    const resealed = await s.crypto.encrypt(seed, context);
+    await writeAuditSealSecret(s.engine, resealed, context);
+    const body: CheckpointSignedBody = { ...first, sequence: 1, previous_digest: checkpointDigest(first), seed_handle: resealed.id };
+    const { signature } = await s.signer.sign(signedBodyBytes(body));
+    s.checkpoints().push(checkpointRow(body, { id: 'again', signature, leafHashes: JSON.parse(String(s.checkpoint('org:org_b', 0).leaf_hashes)) }));
+    const report = await s.verifyNow();
+    expect(faultKinds(report)).toEqual(['org:org_b#1:listed_twice']);
+    expect(report.ok).toBe(false);
+    expect(report.totals).toMatchObject({ unmodified: 5 });
   });
 
   it('reports a checkpoint row that is not a signed body as malformed: the run fails', async () => {

@@ -739,6 +739,8 @@ describe('feature-gate lowering matrix (#2874)', () => {
   // through `requiresFeature`, so this gate is authored in `visible` and both
   // lowerings compose after it.
   const MANAGED = 'features.cloudManaged != true';
+  // ...and offers the two doors that add a pending person, there only.
+  const MANAGED_ON = 'has(features.cloudManaged) && features.cloudManaged == true';
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
     ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
@@ -753,6 +755,11 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
     ['SysUser', SysUser, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysUser', SysUser, 'create_user', `(${STANDING} && ${MANAGED}) && features.admin == true`],
+    // Their managed counterparts carry no feature gate (their doors mount
+    // without the admin plugin), so the authored predicate is served as
+    // written: the standing, then the managed flag ON, guarded by `has()`.
+    ['SysUser', SysUser, 'add_sso_user', `${STANDING} && ${MANAGED_ON}`],
+    ['SysUser', SysUser, 'import_sso_users', `${STANDING} && ${MANAGED_ON}`],
     // [#11544] Third mirror of `invite_user` — the Members tab's own copy of
     // the email-invite entry. Same gate as the sys_user / sys_invitation rows.
     ['SysMember', SysMember, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
