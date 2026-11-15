@@ -115,7 +115,9 @@ export interface ClusterMetadataMutationPayload {
  * holder carry — listens only to `metadata:reloaded`. Every other type's active
  * save emits nothing here (its live consumers hear the mutation event). The
  * per-item publish and the batch door never pass through that save, so neither
- * emits twice; a restore or revert that saves a position through it emits too.
+ * emits twice. Nor do the two bulk package doors that save every copied item
+ * through it (`duplicatePackage`, the unmanaged import): one signal per position
+ * would be one kernel-wide re-sync per position inside one operation.
  */
 export interface MetaItemPublishedEvent {
     /** Canonical singular metadata type of the promoted item. */

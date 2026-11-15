@@ -367,6 +367,20 @@ describe('an active save of a position notifies the host the way the per-item pu
         expect(seen).toEqual([]);
     });
 
+    it('the two bulk package doors that save every copied item through the save door emit nothing per position', async () => {
+        for (const writeFace of ['package-duplicate', 'package-unmanaged-import'] as const) {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            const seen: MetaItemPublishedEvent[] = [];
+            protocol.onMetaItemPublished((evt) => { seen.push(evt); });
+
+            const res = await protocol.saveMetaItem({ type: 'position', name: 'sales_rep', item: position('sales_rep'), packageId: PKG, writeFace } as any);
+
+            expect(res.success, writeFace).toBe(true);
+            expect(seen, writeFace).toEqual([]);
+        }
+    });
+
     it('CONTROL — an active save of another type emits nothing: position only', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);

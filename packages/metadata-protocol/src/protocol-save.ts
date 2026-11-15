@@ -2237,11 +2237,22 @@ export class ProtocolSaveFacet {
             // internal caller of this door; the types with a live consumer of a
             // direct active save (flow, connector, permission, translation)
             // already hear the mutation event above. The per-item publish and
-            // publish-drafts never reach this line, so neither announces twice;
-            // a restore or revert that saves a position through this door
-            // announces too, which is the same carry for it. The signal never
-            // rides the cluster channel, so only the origin node announces.
-            if (mode === 'publish' && singularTypeForRepo === 'position') {
+            // publish-drafts never reach this line, so neither announces twice.
+            //
+            // Nor do the two BULK package doors that save every item of a
+            // package through this door (`duplicatePackage`, the unmanaged
+            // import): a signal per copied position would be one kernel-wide
+            // re-sync per position, inside one operation. What those doors
+            // carry stays as it was (the next boot); one announcement for the
+            // whole package is the door's to make, never this per-item save's.
+            // Their write face is server-stated, never a caller's. The signal
+            // never rides the cluster channel, so only the origin node announces.
+            if (
+                mode === 'publish'
+                && singularTypeForRepo === 'position'
+                && request.writeFace !== 'package-duplicate'
+                && request.writeFace !== 'package-unmanaged-import'
+            ) {
                 await host.emitMetaItemPublished({
                     type: singularTypeForRepo,
                     name: request.name,
