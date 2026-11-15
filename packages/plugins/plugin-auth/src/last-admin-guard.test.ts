@@ -1749,6 +1749,11 @@ describe('[#5978] reverse verification: without the guard, the third path locks 
 // so the grant anchor is the whole population here and the refusals below are
 // the live price.
 //
+// [#33082] Nor does an organization owner or admin permit it any more. They can
+// sign in, but switching the set back on needs `manage_metadata`, which they do
+// not hold, so the ledger half also judges the platform-admin population and
+// refuses a switch-off that leaves no unbanned platform administrator.
+//
 // The block pins the same five things each earlier path did, plus the one this
 // path adds: the guard must NOT go quiet on every other path afterwards.
 // ---------------------------------------------------------------------------
@@ -1845,12 +1850,16 @@ describe('[#6084, ADR-0131 D3] path 4 — switching admin_full_access off in the
 
   // ── not over-tightened ────────────────────────────────────────────────────
 
-  it('an org admin elsewhere keeps the switch-off legal — the invariant is the ENVIRONMENT\'s', async () => {
+  // [#33082] An organization owner can sign in but cannot switch the set back
+  // on (that needs `manage_metadata`), so it no longer makes the switch-off
+  // legal: the ledger half also judges the platform-admin population.
+  it('#33082 — an org owner elsewhere does NOT keep the switch-off legal: no platform admin would remain', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
     await seedUser(engine, 'usr_owner', { role: 'owner' });
 
-    await expect(switchOff(engine)).resolves.toBeDefined();
-    expect(await ledgerActive(engine, `act_${ADMIN_FULL_ACCESS}`)).toBeFalsy();
+    await expect(switchOff(engine)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    await expect(switchOff(engine)).rejects.toThrow(/last platform administrator/);
+    expect(await ledgerActive(engine, `act_${ADMIN_FULL_ACCESS}`)).toBeUndefined();
   });
 
   it('a payload touching no standing key costs no reads at all', async () => {

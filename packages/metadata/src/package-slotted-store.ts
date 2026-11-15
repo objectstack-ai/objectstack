@@ -525,10 +525,25 @@ export function bundleEntryKey(type: string, name: string, data: unknown, packag
  *    `MemoryLoader` and on `DatabaseLoader` (whose rows are one per binding
  *    since #32651, its unscoped reads one per name); `list` and the loaders'
  *    `loadManySlots` serve every binding.
+ *
+ * [#32681, ADR-0150 D4] For a type whose identity carries its owner
+ * (`action`), an entry that carries no package is the name's one holder's
+ * only when that holder binds the name to the entry's own object (or holds
+ * the object-less name, for an object-less entry) — the holders of its
+ * `(object, name)` ({@link entryIdentitiesOf}), as the store's write rule
+ * counts them ({@link storeWriteKey}). Bound to an object no package binds
+ * the name to, it is the environment's own item and keeps a key of its own.
+ * FROM the name's one holder whatever object it was bound to: beside ALPHA's
+ * `approve` on `account`, a package-less `approve` on `contact` was folded
+ * into ALPHA's entry, so the unscoped read kept one of the two rows (the one
+ * saved last), and the boot priming pass registered the `contact` row alone
+ * (in the bare slot, a read naming ALPHA then answered it) or ALPHA's alone.
+ * Under a name two or more packages hold the entry keeps a key of its own as
+ * before ({@link pluralEntryCustomizedHolders} names the holder it customizes).
  */
 export function pluralEntryKeys(
   type: string,
-  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly packageId?: string }>,
+  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly packageId?: string; readonly member?: string | null }>,
 ): Array<string | undefined> {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) {
     return entries.map(({ name, data, packageId }) => (typeof name !== 'string'
@@ -544,12 +559,41 @@ export function pluralEntryKeys(
     if (!held) holders.set(name, (held = new Set()));
     held.add(holder);
   });
+  const identities = OWNER_KEYED_SLOT_TYPES.has(type) ? entryIdentitiesOf(type, entries, packageOf) : undefined;
   return entries.map(({ name }, at) => {
     if (typeof name !== 'string') return undefined;
     const held = holders.get(name);
-    const holder = packageOf[at] ?? (held?.size === 1 ? [...held][0] : undefined);
+    const sole = held?.size === 1 ? [...held][0] : undefined;
+    const customizes = sole !== undefined && (identities === undefined || identities.holders.get(identities.of[at]!)?.has(sole) === true);
+    const holder = packageOf[at] ?? (customizes ? sole : undefined);
     return JSON.stringify([holder ?? null, name]);
   });
+}
+
+/**
+ * [#32681] Each plural-read entry's identity for a type whose identity
+ * carries its owner — the row's member (`storedRowMemberOf`, its column
+ * first), else its body's object — and the packages holding each identity
+ * among the entries (`packageOf`: each entry's package, `undefined` for none).
+ */
+function entryIdentitiesOf(
+  type: string,
+  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly member?: string | null }>,
+  packageOf: ReadonlyArray<string | undefined>,
+): { of: Array<string | undefined>; holders: Map<string, Set<string>> } {
+  const of = entries.map(({ name, data, member }) => (typeof name !== 'string'
+    ? undefined
+    : ownedIdentityOf(type, name, member !== undefined ? member : storedRowMemberOf(type, data))));
+  const holders = new Map<string, Set<string>>();
+  entries.forEach((_, at) => {
+    const holder = packageOf[at];
+    const identity = of[at];
+    if (identity === undefined || holder === undefined) return;
+    let held = holders.get(identity);
+    if (!held) holders.set(identity, (held = new Set()));
+    held.add(holder);
+  });
+  return { of, holders };
 }
 
 /**
@@ -563,7 +607,8 @@ export function pluralEntryKeys(
  * store's write rule ({@link storeWriteKey}, by `(object, name)`) files it
  * into that holder's slot: a read naming the holder answers it. `undefined`
  * for every other entry — one with a package, one the plural read already
- * folded into its holder's entry, one no package or two packages hold the
+ * folded into its holder's entry (a name one package holds, bound to that
+ * package's object), one no package or two packages hold the
  * `(object, name)` of, and every entry of a type whose identity is its name
  * (a name two packages hold has two holders of that identity too).
  */
@@ -574,22 +619,10 @@ export function pluralEntryCustomizedHolders(
 ): Array<string | undefined> {
   if (!OWNER_KEYED_SLOT_TYPES.has(type)) return entries.map(() => undefined);
   const packageOf = entries.map(({ data, packageId }) => (isPackageCaller(packageId) ? packageId : storedItemPackageId(data)));
-  // An entry's identity: its row's member (`storedRowMemberOf`, column first), else its body's object.
-  const identityOf = entries.map(({ name, data, member }) => (typeof name !== 'string'
-    ? undefined
-    : ownedIdentityOf(type, name, member !== undefined ? member : storedRowMemberOf(type, data))));
-  const holders = new Map<string, Set<string>>();
-  entries.forEach((_, at) => {
-    const holder = packageOf[at];
-    const identity = identityOf[at];
-    if (identity === undefined || holder === undefined) return;
-    let held = holders.get(identity);
-    if (!held) holders.set(identity, (held = new Set()));
-    held.add(holder);
-  });
+  const identities = entryIdentitiesOf(type, entries, packageOf);
   return entries.map(({ name }, at) => {
     if (typeof name !== 'string' || packageOf[at] !== undefined || keys[at] !== JSON.stringify([null, name])) return undefined;
-    const held = holders.get(identityOf[at]!);
+    const held = identities.holders.get(identities.of[at]!);
     return held?.size === 1 ? [...held][0] : undefined;
   });
 }

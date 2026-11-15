@@ -70,6 +70,16 @@ import type { StepLogEntry } from './engine.js';
  * It is folded from the per-node array rather than accumulated alongside it,
  * so the run-level count can never disagree with the breakdown it summarizes;
  * `unmeasured` above is a genuinely independent tally and stays one.
+ *
+ * Each node's row also carries the advisory `warnings` its executions put on
+ * their steps, distinct texts in first-seen order. A step that succeeded with
+ * a warning used to fold into a row that read as a clean `success`: a `notify`
+ * whose only channel was refused said `acted: 0` and nothing else, so a caller
+ * reading the trigger response's summary could not tell "nothing to send"
+ * from "nobody could be reached". The list is bounded per node
+ * ({@link MAX_NODE_SUMMARY_WARNINGS}), like the rest of the detail. A
+ * `subflow` child's warnings stay on the child's own run row, as its `skipped`
+ * gates do.
  */
 export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
     // Mutable accumulators; `status` is decided once the counts are final.
@@ -85,6 +95,10 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
     // different questions: `FlowRunNodeSummary.status` is judged on this
     // node's OWN executions, while its `failures` publishes own + rolled-up.
     const rolledUp = new Map<string, number>();
+    // The distinct advisory warnings each node's executions raised, in
+    // first-seen order (a `Set` keeps insertion order). Published per node by
+    // `nodeWarnings` once the fold is done.
+    const warningsSeen = new Map<string, Set<string>>();
 
     for (const step of steps) {
         let node = nodes.get(step.nodeId);
@@ -130,6 +144,15 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
 
         node.runs += 1;
         if (step.status === 'failure') node.failures += 1;
+
+        if (step.warnings?.length) {
+            let seen = warningsSeen.get(step.nodeId);
+            if (!seen) {
+                seen = new Set<string>();
+                warningsSeen.set(step.nodeId, seen);
+            }
+            for (const warning of step.warnings) seen.add(warning);
+        }
 
         const metrics = step.metrics;
         if (metrics?.selected !== undefined) {
@@ -177,6 +200,8 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
         // declares: it is no longer only this node's own failed executions.
         node.failures += rolledUp.get(node.nodeId) ?? 0;
         failed += node.failures;
+        const warnings = nodeWarnings(warningsSeen.get(node.nodeId));
+        if (warnings) node.warnings = warnings;
     }
 
     return {
@@ -192,6 +217,39 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
         nodes: [...nodes.values()],
         gates: [...gates.values()].sort((a, b) => b.skipped - a.skipped),
     };
+}
+
+/**
+ * How many distinct warning texts one node's summary row carries before the
+ * rest are counted instead of listed.
+ *
+ * The summary's detail is bounded by the flow's STATIC shape, never by how
+ * often a node ran — that is what keeps a 5000-row sweep's persisted
+ * `summary_json` under its byte cap (`serializeSummaryBounded`). A warning
+ * text can embed a per-execution count (a `notify` names how many deliveries
+ * failed), so a long loop could raise many distinct texts; the row lists the
+ * first few and says how many it left out.
+ */
+export const MAX_NODE_SUMMARY_WARNINGS = 5;
+
+/**
+ * The `warnings` a node's summary row publishes: the distinct texts its
+ * executions raised, in first-seen order, or `undefined` when none did —
+ * absent, never `[]`, so "no warning" and "not tracked" read the same way the
+ * step log's own member does. Past {@link MAX_NODE_SUMMARY_WARNINGS} the list
+ * is cut and a final entry states how many distinct texts were left out, so
+ * the cut is visible rather than silent; the run's step log keeps each
+ * execution's own warnings.
+ */
+function nodeWarnings(seen: ReadonlySet<string> | undefined): string[] | undefined {
+    if (!seen || seen.size === 0) return undefined;
+    const all = [...seen];
+    if (all.length <= MAX_NODE_SUMMARY_WARNINGS) return all;
+    const omitted = all.length - MAX_NODE_SUMMARY_WARNINGS;
+    return [
+        ...all.slice(0, MAX_NODE_SUMMARY_WARNINGS),
+        `${omitted} more distinct ${omitted === 1 ? 'warning was' : 'warnings were'} raised by this node and left out of the summary; the run's step log holds each execution's own.`,
+    ];
 }
 
 /**

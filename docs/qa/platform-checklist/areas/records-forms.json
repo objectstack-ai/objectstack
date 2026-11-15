@@ -2441,7 +2441,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2450,24 +2450,24 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
+          "the task gantt view (task.view.ts 'Schedule (Gantt)', listViews.gantt: startDateField/endDateField/titleField/progressField, and lockField 'done'). Two seeded tasks are done ('Audit current IA', 'App wireframes'), so a locked bar sits beside draggable ones on every stock boot"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It is reachable live on a view overlay, run-proven by QA run #27438 (G4a, at c4c515ad): PUT /api/v1/meta/view/showcase_task.gantt with the stock view plus lockField: 'done' in its gantt config (view is org-overridable, ADR-0005); drag a done bar → no PATCH, and the row re-reads unchanged; the control, a drag of a not-done bar on the same overlay → PATCH 200; then DELETE /api/v1/meta/view/showcase_task.gantt restores the stock view. So the sub-leg is scored live on that overlay, and acceptance[2] stays blocked(fixture) only on its auto-schedule half, which, like acceptance[1], needs a dependenciesField. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares lockField: 'done' but NO dependenciesField / parentField. So the locked-task drag is live on the stock boot with no overlay, while auto-schedule and the subtree drag stay unreachable: acceptance[1] and the auto-schedule half of acceptance[2] score blocked(fixture) BY DESIGN (maintainer ruling 2026-11-14 on #33351: no dependency field is added to the showcase; a run states the gap, it is not a failure). The default task list's visualization switcher binds its own gantt block without lockField; this item drives the named Schedule (Gantt) view only. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The direct drag on a locked LEAF bar has no pin: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned, and GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar') proves a locked leaf loses its grips and link dot, NOT that dragging its body writes nothing. So the sub-leg is scored live: drag a done bar → no PATCH, and the row re-reads unchanged (updated_at identical); the control, a drag of a not-done bar on the same view → PATCH 200. QA run #27438 (G4a, at c4c515ad) proved that leg on a view overlay carrying the same key; the stock view now carries it, so no overlay is needed",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
       "variants": [
         "bar drag → server PATCH (runnable on stock fixture)",
         "auto-schedule confirms first: 'Shift N task(s)… (M locked skipped)' and writes NOTHING before confirm (fixture-gated)",
-        "locked task refuses drag and survives auto-schedule byte-identical (fixture-gated)",
+        "locked task refuses drag (stock: lockField 'done') and survives auto-schedule byte-identical (the auto-schedule half is fixture-gated: no dependenciesField)",
         "host onBeforeTaskUpdate veto restores the bar with no write (fixture-gated)"
       ],
       "steps": [
         "open the task Schedule (Gantt) view; wait for bars to render (screenshot first)",
         "drag one task bar to new dates; capture the PATCH and re-read the record over the API",
         "reload and confirm the bar re-renders from the persisted dates",
-        "on an extended fixture (per knownGaps): configure dependencies + a locked row (the direct drag on a locked leaf needs only knownGaps[0]'s lockField overlay); run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
+        "drag a done task's bar (locked by the view's lockField 'done'): capture that no PATCH is sent and re-read the row (dates and updated_at unchanged); drag a not-done bar as the control (PATCH 200). The auto-schedule leg (toolbar auto-schedule, confirm dialog, cancel once with zero writes, then apply) needs a dependenciesField no stock view declares: record acceptance[1] and the auto-schedule half of acceptance[2] blocked(fixture) per knownGaps[0]",
         "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `showcase_contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
       ],
       "acceptance": [
@@ -2561,6 +2561,12 @@
           "date": "2026-10-31",
           "change": "fixtures.knownGaps[0] and steps[3]: the direct drag on a locked leaf is run-proven. From QA run #27438 (W3-C2b, G4a, at c4c515ad; the finding line is truncated in the record, and its tail is in the run's own per-clause table; wave anchor #27377, wave-3 accuracy slice S1). The run overlaid showcase_task.gantt with lockField 'done', dragged a done bar (no PATCH, row unchanged, updated_at identical), dragged an unlocked bar on the same overlay as the control (PATCH 200), and reverted with DELETE. So the sub-leg is scored live on that overlay instead of blocked(fixture). acceptance[2] stays blocked(fixture) only on its auto-schedule half, which still needs a dependenciesField no stock view declares. Read at base a0f865491d: view.zod.ts (GanttConfigSchema lockField), task.view.ts (the gantt view). No clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0], knownGaps[0], variants[2] and steps[3]: the stock Schedule (Gantt) view now declares lockField 'done' (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt), so the locked-leaf drag is driven on the stock boot with no overlay; the auto-schedule half stays blocked(fixture) by design. Maintainer ruling 2026-11-14 on #33351 (row 263, option C: add lockField now, narrow the dependency half). Read at base ba35dfd78: GanttConfigSchema lockField (view.zod.ts), ObjectGantt.tsx (locked = record[lockField]), task.object.ts (done is a boolean). No clause changed",
+          "ref": "#33351"
         }
       ]
     },
@@ -6367,7 +6373,7 @@
       "title": "A multi-currency invoice stores its home-currency amount at the rate in force on its document date, refuses a date no rate covers, and keeps a currency-less amount blank",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6378,7 +6384,7 @@
         "requires": [
           "a showcase boot whose home currency is USD. `os dev` / `os serve` / `os start` read examples/app-showcase/.env, which pins OS_LOCALIZATION_CURRENCY=USD; an in-process harness must set that variable itself (packages/qa/dogfood/test/showcase-boot.ts#bootShowcase does). Read the value back first with GET /api/settings/localization and confirm currency is USD before any clause",
           "the stock seed's exchange rates (examples/app-showcase/src/data/seed/index.ts#exchangeRates): EUR 0.92 from 2025-01-01 and 0.9 from 30 days before the boot, JPY 151.5 from 2025-01-01 and 149.25 from 30 days before the boot, all source manual. No JPY or EUR rate exists before 2025-01-01, which is what the steps[3] refusal probe relies on",
-          "the stock seed's invoices carry a currency_code: INV-1004 / INV-1009 / INV-1010 are EUR, INV-1007 / INV-1008 are JPY (INV-1008 has two yen-priced lines), the rest USD",
+          "the stock seed's invoices carry a currency_code: INV-1004 / INV-1009 / INV-1010 are EUR, INV-1007 / INV-1008 are JPY, the rest USD. Every foreign invoice carries at least one line, so each has a non-zero amount and acceptance[0]'s hand computation divides a real amount on all five: INV-1004 (draft, dated the boot day) and INV-1008 (5 days ago, two yen-priced lines) convert at the newer rate row, INV-1007 (60 days ago), INV-1009 (100 days ago) and INV-1010 (75 days ago) at the older one, so both rows of each currency govern at least one invoice",
           "the console bundle for the browser legs (pnpm console:build)"
         ],
         "knownGaps": [
@@ -6457,6 +6463,12 @@
           "date": "2026-11-10",
           "change": "since corrected from v18 to v18.4: the invoice became the multi-currency example in #31757, and the converted-at hint (#31638) and the form preview (#31724) that acceptance[5] reads landed after 18.3.0 (83d7e4ae). fixtures.knownGaps[0] no longer says a child amount cannot take its parent's currency: the spec admits it since #31956 and the engine half is #31911 (open), now the planned item records-forms.master-detail-child-follows-parent-currency; the preview's other states are records-forms.home-amount-preview-states. No clause changed. Scoped sweep #32020 (epic #32022 M2, theme 5), read at 43a51b55; no live run made",
           "ref": "#32020"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[2] (the seed line): every foreign invoice now carries a non-zero total, not only INV-1004 and INV-1008. PR #33376 seeded one line each under INV-1007, INV-1009 and INV-1010, so the per-invoice recomputation of acceptance[0] no longer passes on 0 ÷ rate for three of the five. Measured on a stock boot of PR #33376's head (2b2bca197): INV-1007 JPY 95400 → 629.7 at 151.5, INV-1009 EUR 2016 → 2191.3 at 0.92, INV-1010 EUR 276 → 300 at 0.92. No clause changed",
+          "ref": "#33351"
         }
       ]
     },

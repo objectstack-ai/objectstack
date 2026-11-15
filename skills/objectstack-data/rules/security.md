@@ -49,12 +49,12 @@ the grant is refused `409 RESOURCE_CONFLICT`, naming each holder.
 
 Assignment is one `POST /api/v1/data/sys_user_permission_set`. Only a tenant admin —
 or a delegated `adminScope` carrying `manageAssignments` for that set and user
-(ADR-0090 D12) — may write it; plain CRUD bits on the table are not enough.
+— may write it; plain CRUD bits on the table are not enough.
 
 **Grant looks inert?** Check in order: the set is switched off; the validity
 window has passed; `organization_id` mismatch.
 `GET /api/v1/security/explain?object=&operation=&userId=` answers from the
-enforcing code path (explaining another user needs `manage_users`).
+enforcing code path.
 
 ## Row-Level Security (RLS)
 
@@ -155,8 +155,8 @@ rowLevelSecurity: [
 - One name per stack: a key on two objects, a kernel name (`id`,
   `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
   `email`, `queues`) and a key on an object extension are refused.
-- Read once per request as a system read in the caller's organization (no
-  read on the roster needed), at most 1,000 values; more, a failed read or a
+- Read once per request as a system read in the caller's organization, at
+  most 1,000 values; more, a failed read or a
   `filter` that does not compile matches **no rows**. Whoever writes roster
   rows grants the key.
 - **Choose by what the rows are keyed on:** the user → owner scoping; a
@@ -184,11 +184,10 @@ rowLevelSecurity: [
   in its declared `dependencies` closure plus `sys`; else it is refused. It
   still loads; the boot's catalog reference report logs each refusal with every
   candidate, and the position grants nothing through that name (its other sets
-  still do). `outside-closure`: only a non-dependency holds it (`com.acme.crm`
-  naming `com.acme.helpdesk`'s `hd_agent`, undeclared) or only the environment
-  (a set authored in Setup). `ambiguous-in-closure`: two holders it reaches
-  (dependencies `hr` and `ops` both hold `auditor`; a second package shipping a
-  name is refused at install first). Fix: declare the dependency. Stored grants,
+  still do). `outside-closure`: only a non-dependency holds it or only the
+  environment (a set authored in Setup). `ambiguous-in-closure`: two holders
+  it reaches (a second package shipping a name is refused at install). Fix:
+  declare the dependency. Stored grants,
   environment-authored positions, admin overlays of a package position and the
   `everyone`/`guest` anchors resolve environment-wide.
 - A portal or partner user is an organization member on the `external`
@@ -232,11 +231,8 @@ fields: {
 
 `maskingRule` is **live** (FieldMasker). Two more channels:
 
-**`type: 'secret'` (ADR-0100).** Ciphertext lives in
-`sys_secret`, only an opaque ref on the row.
-
-**Query a credential only for presence.** A `secret` / `password` column is
-never a filter, sort, group-by or import `matchFields` key (`400 INVALID_FIELD`;
+**`type: 'secret'` (ADR-0100): query a credential only for presence.** A
+`secret` / `password` column is never a filter, sort, group-by or import `matchFields` key (`400 INVALID_FIELD`;
 an import row naming it fails). Search never scans it: keep it out of
 `searchableFields`.
 
@@ -285,13 +281,12 @@ tenancy: {
 ## Platform-global / admin-only objects (visibility posture)
 
 Some system objects are **env-global** — **platform admin** sees all, members
-none — e.g. identity tables a plugin writes via its own adapter
-(`sys_sso_provider`, OAuth clients):
+none:
 
 - Reads of a tenant object pass the **Layer 0 tenant wall** (ADR-0095 D1):
   `organization_id == <caller's organization>`, AND-composed ahead of all
   business RLS. A row with **null or absent** `organization_id`
-  (adapter-written rows often lack it) is **denied** — the list renders empty.
+  is **denied**.
   Under `single` the wall is inert.
 - The `viewAllRecords` superuser bit is **posture-gated and wall-blind**: it
   short-circuits **business RLS only**, on objects whose posture allows it
@@ -310,9 +305,8 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 
 > ⚠️ **Both keys are load-bearing.** `tenancy: { enabled:
 > false }` alone switches the wall off for **every** caller, so any set with a
-> wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
-> default profile, a customer-authored set; not `member_default`, which is
-> explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
+> wildcard (`'*'`) read grant — the shipped `viewer_readonly`; not
+> `member_default`, which is explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
 > tenant object whose untagged rows the wall denies to everyone (above). Posture model: ADR-0066.
 
 ## Renaming or removing a shipped access item
@@ -325,3 +319,11 @@ a **rename** stops the old switch-off matching and the item arrives switched
 naming nothing; a **field deny added** to a shipped set is missing from every
 clone. Keep shipped names stable; when a change is needed, the release notes say
 what changed and what an administrator re-checks after upgrading.
+
+**Renaming a position:** declare `renamedFrom: ['old_name']` on the renamed
+position, never delete and re-add (holders lose its sets). At boot its
+holders (`sys_user_position`) move to the new name in every organization,
+idempotently. Only holders: the boot log lists other references (sharing,
+queue and share recipients, pending approvers, invitations) for an admin. Not
+carried (warned): an old name still a position anywhere, claimed twice,
+recorded under another package, switched off, or a disabled claimant.

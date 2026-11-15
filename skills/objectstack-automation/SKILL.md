@@ -265,10 +265,10 @@ Most are caught by `objectstack build`:
 
    **The name resolves from the flow's package, as `subflow`'s `flowName`
    does**, the platform's function (registered under no package) in every
-   flow's reach; a `.custom` override reads as a package-less flow. `acme.crm`
-   and `acme.sales` both shipping `normalize_phone` each run their own (the boot
-   warns `Bare-name conflict at boot`). If the flow's package holds none, two
-   holders in reach (the platform's counts) or one only outside its
+   flow's reach; a `.custom` override reads as a package-less flow. Packages of
+   two `namespace`s each run their own `normalize_phone` (one namespace, or
+   none: refused at install; a boot warns `Bare-name conflict at boot`). If the
+   flow's package holds none, two holders in reach or one only outside its
    `dependencies` closure fail the step as a guard (no `fault` edge;
    `$error.code: 'RESOURCE_CONFLICT'` in a `try_catch`); a flow door answers
    `400 FLOW_FAILED`, `error.details.innerRefusal` naming each holder. Fix:
