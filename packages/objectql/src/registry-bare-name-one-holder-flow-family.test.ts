@@ -799,3 +799,64 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
     }
   });
 });
+
+/**
+ * [ADR-0150 D9] The item seam judges a bundled name's members on the holding
+ * as it stands, so a dependent's member order matters only when the members
+ * are undeclared. Shape: alpha ships `welcome` en-US; beta, in another
+ * namespace, depends on alpha and ships de-DE and en-US. Declared in beta's
+ * manifest, the package door judges the two as one set (beta's own template)
+ * and the claim it records exempts the item seam, so either order installs.
+ * Registered one by one with no declaration, each arrival is judged alone:
+ * de-DE first is an addition to alpha's en-US and is refused, en-US first
+ * makes beta a holder of its own and de-DE then joins it. The order-dependent
+ * door is the ruled answer (option A on the card), pinned here exactly.
+ *
+ * Ablation: the package door's claim dropped (`recordBareNameClaims` not
+ * called) turns the declared de-DE-first arm red; the readings are in the PR body.
+ */
+describe('a dependent\'s members of another package\'s bundle: declared, any order installs; undeclared, the order decides', () => {
+  const type = 'email_template' as const;
+  const name = 'welcome';
+  const ALPHA = 'com.acme.alpha';
+  const BETA = 'com.acme.beta';
+  const member = (tag: string, locale: string) => body('email_template', name, tag, { locale });
+  const base = () => pkg(ALPHA, {}, { emailTemplates: [member('alpha', 'en-US')] });
+  const dependent = (decl: Record<string, unknown> = {}) => pkg(BETA, {}, { dependencies: { [ALPHA]: '^1.0.0' }, ...decl });
+  const betaLocales = (registry: SchemaRegistry) => registry.listItems<{ _packageId?: string; name?: string; locale?: string }>(type)
+    .filter((item) => item.name === name && item._packageId === BETA)
+    .map((item) => item.locale)
+    .sort();
+  const ORDERS = [['de-DE', 'en-US'], ['en-US', 'de-DE']] as const;
+
+  for (const order of ORDERS) {
+    it(`declared in the manifest, ${order.join(' then ')}: installs, and beta holds both members`, async () => {
+      const { registry, register } = await boot();
+      expect(await register(base())).toBeUndefined();
+      expect(await register(dependent({ emailTemplates: order.map((l) => member('beta', l)) }))).toBeUndefined();
+      expect(registry.getPackage(BETA)).toBeDefined();
+      expect(betaLocales(registry)).toEqual(['de-DE', 'en-US']);
+    });
+  }
+
+  it('undeclared, de-DE then en-US: de-DE is refused as an addition to alpha\'s template, naming alpha; en-US is then admitted', async () => {
+    const { registry, register } = await boot();
+    expect(await register(base())).toBeUndefined();
+    expect(await register(dependent())).toBeUndefined();
+    expectRefusal(
+      await caught(() => registry.registerItem(type, member('beta', 'de-DE'), 'name', BETA)),
+      BETA, { kind: 'package', packageId: ALPHA },
+    );
+    expect(await caught(() => registry.registerItem(type, member('beta', 'en-US'), 'name', BETA))).toBeUndefined();
+    expect(betaLocales(registry)).toEqual(['en-US']);
+  });
+
+  it('undeclared, en-US then de-DE: both are admitted, beta\'s own template', async () => {
+    const { registry, register } = await boot();
+    expect(await register(base())).toBeUndefined();
+    expect(await register(dependent())).toBeUndefined();
+    expect(await caught(() => registry.registerItem(type, member('beta', 'en-US'), 'name', BETA))).toBeUndefined();
+    expect(await caught(() => registry.registerItem(type, member('beta', 'de-DE'), 'name', BETA))).toBeUndefined();
+    expect(betaLocales(registry)).toEqual(['de-DE', 'en-US']);
+  });
+});
