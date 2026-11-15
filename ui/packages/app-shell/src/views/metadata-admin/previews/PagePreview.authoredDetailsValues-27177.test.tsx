@@ -46,11 +46,15 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
   return { ...actual, usePermissions: () => permsStub as any };
 });
 
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { PagePreview } from './PagePreview';
 import {
   deriveStudioDetailSections,
   toAuthoredDetailSections,
   MORE_DETAILS_DEFAULT_LABEL,
+  UNGROUPED_SECTION_DEFAULT_LABEL,
 } from '../../recordDetailSections';
 
 const OBJECT = 'showcase_account';
@@ -87,7 +91,10 @@ const RECORD = {
 /** The page the full-create seed writes for this object: authored, named fields. */
 function fullCreateSeed(): Record<string, unknown> {
   const sections = toAuthoredDetailSections(
-    deriveStudioDetailSections(OBJECT_DEF as any, { moreDetails: MORE_DETAILS_DEFAULT_LABEL }),
+    deriveStudioDetailSections(OBJECT_DEF as any, {
+      moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+      ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+    }),
   );
   const synth = buildDefaultPageSchema(OBJECT_DEF as any, sections ? { sections: sections as any } : undefined) as {
     regions: unknown[];

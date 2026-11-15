@@ -45,6 +45,7 @@ import {
     registerTryCatchNode,
     registerWaitNode,
     registerLogicNodes,
+    registerHttpNodes,
 } from './builtin/index.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { withLoaderSetFromPull } from './loader-set.test-support.js';
@@ -81,7 +82,7 @@ function rig() {
     const ctx = { logger: createTestLogger(), getService: () => undefined } as any;
     for (const register of [
         registerSubflowNode, registerMapNode, registerLoopNode, registerParallelNode,
-        registerTryCatchNode, registerWaitNode, registerLogicNodes,
+        registerTryCatchNode, registerWaitNode, registerLogicNodes, registerHttpNodes,
     ]) {
         (register as (e: AutomationEngine, c: unknown) => void)(engine, ctx);
     }
@@ -420,5 +421,116 @@ describe('the region refusal cancels what it can read of a deeper suspension cha
         }
         expect(cancel.mock.calls.map((c) => c[0])).toEqual(ids);
         expect(logger.error).not.toHaveBeenCalled();
+    });
+});
+
+// Ruling 6810500711, letter D: the record save never waits on an external
+// system. A flow that runs after a record change holds the save until it
+// returns, and a `subflow` / `map` node awaits its child, so an inline outbound
+// call a child retries holds the save through the whole backoff ladder. The
+// after-save judge refuses that shape in the flow's own graph at registration;
+// it cannot see the child, which may register later. So the arming gate's
+// subflow-retry half reads it over the flows the engine holds: such a caller
+// is registered but not armed, with its own `unboundCause`, and asked again
+// whenever a flow its calls reach changes.
+describe('the arming gate declines an after-save flow whose subflow child retries an inline call', () => {
+    const HOOK = (id = 'hook', extra: Record<string, unknown> = {}): Node => ({
+        id, type: 'http', label: 'Hook', config: { url: 'https://example.test/hook', method: 'POST', ...extra },
+    });
+    const retrying = (inner: Node, id = 'guard'): Node => ({
+        id, type: 'try_catch', label: 'Guard',
+        config: { retry: { maxRetries: 2, backoffMs: 500 }, try: { nodes: [inner], edges: [] } },
+    });
+    const RETRY_RUN = { errorHandling: { strategy: 'retry', maxRetries: 2 } };
+
+    it.each<[string, () => Record<string, unknown>, () => Record<string, unknown>, string]>([
+        [
+            "the child's own retrying try_catch",
+            () => chain('lead_sync', [start(false), retrying(HOOK()), END]),
+            () => chain('lead_after', [start(true), call('lead_sync'), END]),
+            "`try_catch` 'guard' (`retry.maxRetries: 2`)",
+        ],
+        [
+            "the child's own whole-run retry",
+            () => chain('lead_sync', [start(false), HOOK(), END], RETRY_RUN),
+            () => chain('lead_after', [start(true), call('lead_sync'), END]),
+            "the flow's `errorHandling`",
+        ],
+        [
+            "the caller's retrying try_catch around the call",
+            () => chain('lead_sync', [start(false), HOOK(), END]),
+            () => chain('lead_after', [start(true), retrying(call('lead_sync'), 'outer'), END]),
+            "`try_catch` 'outer' (`retry.maxRetries: 2`)",
+        ],
+        [
+            "the caller's whole-run retry",
+            () => chain('lead_sync', [start(false), HOOK(), END]),
+            () => chain('lead_after', [start(true), call('lead_sync', 'map'), END], RETRY_RUN),
+            "the flow's `errorHandling`",
+        ],
+    ])('retried by %s: registered, not armed, naming the call, the inline call and the retry', (_label, child, caller, retriedBy) => {
+        const { engine, logger, isBound } = rig();
+        engine.registerFlow('lead_sync', child() as never);
+        engine.registerFlow('lead_after', caller() as never);
+
+        expect(engine.getFlow('lead_after'), 'the caller is still registered').toBeDefined();
+        expect(isBound('lead_after')).toBe(false);
+        const row = stateOf(engine, 'lead_after');
+        expect(row).toMatchObject({ enabled: true, bound: false, unboundCause: 'retried_callout_in_subflow' });
+        expect(row?.reason).toContain("node 'hook' (`http`) of child flow 'lead_sync' calls an outside system inline");
+        expect(row?.reason).toContain(`retried by ${retriedBy}`);
+        expect(declineWarnings(logger, 'lead_after')).toHaveLength(1);
+    });
+
+    it('reads through a child to the flow that holds the retried call', () => {
+        const { engine, isBound } = rig();
+        engine.registerFlow('lead_push', chain('lead_push', [start(false), retrying(HOOK()), END]));
+        engine.registerFlow('lead_sync', chain('lead_sync', [start(false), call('lead_push'), END]));
+        engine.registerFlow('lead_after', chain('lead_after', [start(true), call('lead_sync'), END]));
+        expect(isBound('lead_after')).toBe(false);
+        expect(stateOf(engine, 'lead_after')?.reason)
+            .toContain("of flow 'lead_push' (reached through 'lead_sync' → 'lead_push')");
+    });
+
+    it('is asked again on every child registration: armed with no child, disarmed by a retried inline call, armed again once the call is durable', () => {
+        const { engine, isBound } = rig();
+        engine.registerFlow('lead_after', chain('lead_after', [start(true), call('lead_sync'), END]));
+        expect(isBound('lead_after'), 'no child yet: nothing retries').toBe(true);
+
+        engine.registerFlow('lead_sync', chain('lead_sync', [start(false), retrying(HOOK()), END]));
+        expect(isBound('lead_after')).toBe(false);
+        expect(stateOf(engine, 'lead_after')?.unboundCause).toBe('retried_callout_in_subflow');
+
+        engine.registerFlow('lead_sync', chain('lead_sync', [start(false), retrying(HOOK('hook', { durable: true })), END]));
+        expect(isBound('lead_after')).toBe(true);
+        expect(stateOf(engine, 'lead_after')?.unboundCause).toBeUndefined();
+    });
+
+    it.each<[string, () => Record<string, unknown>, () => Record<string, unknown>]>([
+        [
+            'a retried durable http node in the child',
+            () => chain('lead_sync', [start(false), retrying(HOOK('hook', { durable: true })), END]),
+            () => chain('lead_after', [start(true), call('lead_sync'), END]),
+        ],
+        [
+            'an inline call nothing retries',
+            () => chain('lead_sync', [start(false), HOOK(), END]),
+            () => chain('lead_after', [start(true), call('lead_sync'), END]),
+        ],
+        [
+            'a caller that runs before the save',
+            () => chain('lead_sync', [start(false), retrying(HOOK()), END]),
+            () => chain('lead_after', [
+                { ...start(true), config: { objectName: 'lead', triggerType: 'record-before-create' } },
+                call('lead_sync'), END,
+            ]),
+        ],
+    ])('CONTROL: %s arms', (_label, child, caller) => {
+        const { engine, logger, isBound } = rig();
+        engine.registerFlow('lead_sync', child() as never);
+        engine.registerFlow('lead_after', caller() as never);
+        expect(isBound('lead_after')).toBe(true);
+        expect(stateOf(engine, 'lead_after')?.unboundCause).toBeUndefined();
+        expect(declineWarnings(logger, 'lead_after')).toEqual([]);
     });
 });

@@ -768,7 +768,8 @@ export interface AutomationResult {
      */
     userMessage?: string;
     /**
-     * The refusal a node's write met inside the run, structured —
+     * The refusal a node met inside the run (a data node's read or write, or a
+     * `script` node's function resolution), structured —
      * `{ code, message }`, `code` in its WIRE spelling (`UNIQUE_VIOLATION`
      * for a unique refusal), the shape a record save of the same write
      * answers with (ruling B′ on #24914; #24996).
@@ -1040,6 +1041,14 @@ export interface FlowRuntimeState {
  *   at the region boundary the first time that child suspends. Author remedy:
  *   move the call onto the top-level graph, or republish the child without a
  *   node that suspends, and the flow arms.
+ * - `retried_callout_in_subflow` — the arming gate declined the flow because it
+ *   runs after a record change and a `subflow` / `map` node of it reaches a
+ *   child flow holding an inline outbound call (`http` without `durable: true`,
+ *   or `connector_action`) that something on the call chain retries: the save
+ *   waits for the run and the run for its child, so a failing call would hold
+ *   the user's save through every attempt and backoff delay. Author remedy:
+ *   make the child's `http` node durable, or remove the retry, and the flow
+ *   arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -1051,6 +1060,7 @@ export const FLOW_UNBOUND_CAUSES = [
     'disabled_subflow',
     'notice_after_suspending_subflow',
     'suspending_subflow_in_region',
+    'retried_callout_in_subflow',
     'missing_trigger',
     'binding_failure',
 ] as const;
@@ -1372,6 +1382,16 @@ export interface ConnectorConnectionState {
 export interface ConnectorConnectionRequest {
     /** The declarative connector instance, by name. */
     connector: string;
+    /**
+     * ADR-0150 D9 (#31699) — the package whose instance of `connector` is
+     * meant, when two packages of different namespaces each declare one of the
+     * name. The namespace-addressed connection door
+     * (`/automation/connectors/:ns/:name/connection`) fills it from the address;
+     * left out, the bare name must resolve to one instance or the call is
+     * refused `409` (ambiguity is reported, never guessed). A connect that
+     * already recorded a connection keeps that connection's package.
+     */
+    package?: string;
     /** The caller — its organization selects the connection, its user stamps the row. */
     context?: ExecutionContext;
     /**

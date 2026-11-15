@@ -30,7 +30,9 @@ import { notifyDataChanged } from '@object-ui/react';
 // Test-only and off the `@object-ui/types` barrel; the vitest alias makes this
 // the same module instance the provider's `sharedGetJson` uses.
 import { resetInflightGetsForTesting } from '../../../packages/types/src/http-inflight';
+import { clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
+import { __resetAppDefaultLocaleForTests, loadAppDefaultLocale } from './languageSeed';
 // Not on the `@object-ui/auth` barrel; the vitest alias maps that barrel to
 // `packages/auth/src`, so this deep path is the SAME module instance the
 // provider's `getSessionOwnerChangeCount` reads.
@@ -401,6 +403,33 @@ describe('LocalizationFetchProvider', () => {
       authUser = null;
       window.localStorage.clear();
       resetInflightGetsForTesting();
+      __resetAppDefaultLocaleForTests();
+      clearSharedDiscoveryCache();
+    });
+
+    it("with no choice on this device, the read states the app's declared default (objectstack#33231)", async () => {
+      // Discovery serves `locale.default: 'zh-CN'`; the server answers the
+      // `Accept-Language` rung with what it was told, else the browser's en-US.
+      fetchMock().mockImplementation(async (url: string, init: RequestInit) =>
+        String(url).endsWith('/api/v1/discovery')
+          ? ok({ success: true, data: { locale: { default: 'zh-CN', supported: ['zh-CN'], timezone: 'UTC' } } })
+          : ok({
+              authenticated: true,
+              currency: null,
+              locale: (init.headers as Record<string, string>)['Accept-Language'] ?? 'en-US',
+              timezone: 'UTC',
+            }),
+      );
+      // The boot starts this read before the app mounts (`seedTenantLanguage`).
+      void loadAppDefaultLocale('');
+
+      renderUnderLanguage('zh-CN');
+
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
+      expect(statedOn(1)).toBe('zh-CN');
+      expect(fetchMock()).toHaveBeenCalledTimes(2);
+      // The seed the next boot reads is the app's default, not the browser's.
+      expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
     });
 
     it('a language picked before sign-in is the one the read states, and the dates follow it', async () => {

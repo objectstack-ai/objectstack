@@ -332,15 +332,50 @@ describe('ADR-0143 D4 — authorization_code: refresh', () => {
         const idp = tokenEndpoint();
         const { store } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
         const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch, now: () => 0 });
-        handle.seed('org_a', 1, { accessToken: 'dummy-at-seeded', expiresAt: 3_600_000 });
+        handle.seed('org_a', 1, { accessToken: 'dummy-at-seeded', expiresAt: 3_600_000 }, 'row_org_a');
         expect((await handle.get({ organizationId: 'org_a' })).auth).toEqual({ type: 'bearer', token: 'dummy-at-seeded' });
         expect(idp.state.requests).toHaveLength(0);
         // A seed under a stale revision is not served.
-        handle.seed('org_a', 0, { accessToken: 'dummy-at-stale', expiresAt: 3_600_000 });
+        handle.seed('org_a', 0, { accessToken: 'dummy-at-stale', expiresAt: 3_600_000 }, 'row_org_a');
         expect((await handle.get({ organizationId: 'org_a' })).auth).toEqual({ type: 'bearer', token: 'dummy-at-1' });
         handle.forget('org_a');
         await handle.get({ organizationId: 'org_a' });
         expect(idp.state.requests).toHaveLength(2);
+    });
+    it('[#31699] a cached token is served only for the connection row it was obtained for, never another row at the same revision', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch, now: () => 0 });
+        // A seed for another row of the organization (another package's connection) is not served.
+        handle.seed('org_a', 1, { accessToken: 'dummy-at-other-row', expiresAt: 3_600_000 }, 'row_other');
+        const first = (await handle.get({ organizationId: 'org_a' })).auth;
+        expect(first).not.toEqual({ type: 'bearer', token: 'dummy-at-other-row' });
+        expect(idp.state.requests).toHaveLength(1);
+        // Warm: the same row at the same revision is served from the cache.
+        expect((await handle.get({ organizationId: 'org_a' })).auth).toEqual(first);
+        expect(idp.state.requests).toHaveLength(1);
+        // The read now chooses another row whose revision matches the cached one: refreshed, not served.
+        const row = held.get('org_a')!;
+        held.set('org_a', { ...row, id: 'row_b' });
+        expect((await handle.get({ organizationId: 'org_a' })).auth).not.toEqual(first);
+        expect(idp.state.requests).toHaveLength(2);
+    });
+
+    it('[#31699] a read that joins a refresh in flight for another row of the organization is refused, never served that row\'s token', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch, now: () => 0 });
+        let release!: () => void;
+        idp.state.gate = new Promise<void>((r) => { release = r; });
+        const first = handle.get({ organizationId: 'org_a' });
+        while (idp.state.requests.length === 0) await new Promise((r) => setTimeout(r, 0));
+        // While row_org_a's refresh is out, the read chooses another row.
+        held.set('org_a', { ...held.get('org_a')!, id: 'row_b' });
+        const second = handle.get({ organizationId: 'org_a' });
+        release();
+        await expect(first).resolves.toMatchObject({ auth: { type: 'bearer' } });
+        await expect(second).rejects.toMatchObject({ status: 503 });
+        expect(idp.state.requests).toHaveLength(1);
     });
 });
 

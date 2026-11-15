@@ -2167,6 +2167,18 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "검색 URL",
             helpText: "선택 사항입니다. OIDC 검색 문서 URL(https)입니다. 비워 두면 `<issuer>/.well-known/openid-configuration`에서 도출합니다. 여기에 지정한 엔드포인트는 이 공급자에 대해 신뢰됩니다."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "Userinfo 엔드포인트 URL",
             helpText: "선택 사항입니다. 검색 문서가 지정한 엔드포인트 대신 사용할 OIDC userinfo 엔드포인트 URL(https)입니다. 여기에 지정한 엔드포인트는 이 공급자에 대해 신뢰됩니다. 검색 문서가 서버가 신뢰하지 않는 userinfo 호스트를 지정해 등록이 거부되면 이 값을 입력하세요."
@@ -2253,6 +2265,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             label: "매핑: 그룹 속성",
             helpText: "선택 사항입니다. 사용자의 그룹을 담는 어설션 속성입니다. 로그인할 때마다 해당 그룹에 매핑된 권한 집합이 부여됩니다. 비워 두면 그룹을 매핑하지 않습니다.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

@@ -22,10 +22,18 @@
  * the overlay); a refusal the package door raises before its first write leaves
  * v1 as before; the other package's own entries are not touched by a refused
  * upgrade of this one.
+ *
+ * [#33050] A clean upgrade REPLACES what the body ships: the 1.0.0-only page,
+ * app and permission set (item and claim) are withdrawn; the same body
+ * registered again keeps everything; an environment overlay of a dropped item
+ * and an item registered under the id outside the body are kept; a refusal
+ * later in the same run puts every withdrawn item and claim back, in place;
+ * and a dropped bare name is free at once while one still shipped stays held.
  */
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine.js';
+import { BareNameConflictError } from './registry.js';
 
 const PKG = 'com.probe.upgrade';
 const HOST = 'com.probe.host';
@@ -251,7 +259,9 @@ describe('[#28697] refused-upgrade controls', () => {
         expect(engine.listDatasourceDefs().map((d) => d.name)).toContain('probeup_ds_v2');
         expect(registry.resolvePicklistOptions('probeup_industry')?.map((o) => o.value)).toEqual(['finance', 'retail']);
         expect(((registry.getObject('probeup_old') as any)?.fields?.tier?.options ?? []).map((o: any) => o.value)).toEqual(['gold', 'platinum', 'silver']);
-        expect(registry.securityCatalogNamesHeldBy(PKG, 'permission' as any)).toEqual(['probeup_v1_ps', 'probeup_v2_ps']);
+        // [#33050] FROM `['probeup_v1_ps', 'probeup_v2_ps']` TO the 2.0.0 set alone:
+        // the permission set 2.0.0 no longer ships is withdrawn with its claim.
+        expect(registry.securityCatalogNamesHeldBy(PKG, 'permission' as any)).toEqual(['probeup_v2_ps']);
         expect(registry.defaultRecordPageHoldersOf('probeup_new').map((h: any) => h.page)).toEqual(['probeup_v2_record']);
     });
 
@@ -269,5 +279,91 @@ describe('[#28697] refused-upgrade controls', () => {
         refusal(() => engine.registerApp(V2({ objects: [object('probeup_held')] }) as any));
         expect({ pkg: engine.registry.getPackage(HOST), held: engine.registry.getObjectContributors('probeup_held'), industry: engine.registry.resolvePicklistOptions('probeup_industry') }).toEqual(hostBefore);
         expect(engine.registry.getObjectOwner('probeup_held')?.packageId).toBe(HOST);
+    });
+});
+
+// ── [#33050] what the new version no longer ships ─────────────────────────
+
+describe('[#33050] a re-registration withdraws the items the previous body shipped and the new one does not', () => {
+    const itemNames = (engine: ObjectQL, type: string, packageId: string) =>
+        engine.registry.listItems<any>(type, packageId).map((i) => i.name).sort();
+
+    it('a clean 2.0.0 withdraws the 1.0.0-only page, app and permission set, and serves what it ships', () => {
+        const engine = installed();
+        expect(itemNames(engine, 'page', PKG)).toEqual(['probeup_v1_page', 'probeup_v1_record']);
+
+        engine.registerApp(V2() as any);
+
+        expect(itemNames(engine, 'page', PKG)).toEqual(['probeup_v2_page', 'probeup_v2_record']);
+        expect(itemNames(engine, 'app', PKG)).toEqual(['probeup_app_v2']);
+        expect(itemNames(engine, 'permission', PKG)).toEqual(['probeup_v2_ps']);
+        expect(engine.registry.getItem('page', 'probeup_v1_page')).toBeUndefined();
+        expect(engine.registry.getItem('app', 'probeup_app')).toBeUndefined();
+        expect(engine.registry.securityCatalogNamesHeldBy(PKG, 'permission' as any)).toEqual(['probeup_v2_ps']);
+        // The other package's items are not this package's to withdraw.
+        expect(itemNames(engine, 'picklist', HOST)).toEqual(['probeup_industry']);
+    });
+
+    it('re-registering the same body keeps every item it ships', () => {
+        const engine = installed();
+        const shipped = () => {
+            // The package record is re-stamped (`installedAt`, `updatedAt`) by every registration.
+            const { package: _record, ...items } = served(engine).items;
+            return { items, catalog: served(engine).catalog };
+        };
+        const before = shipped();
+        engine.registerApp(V1() as any);
+        expect(shipped()).toEqual(before);
+    });
+
+    it('keeps an environment overlay of a dropped item and an item registered under the package id outside its body', () => {
+        const engine = installed();
+        // The bare slot (ADR-0005 overlay, `sys_metadata` hydration) and a
+        // registration under the package's id that no body made.
+        engine.registry.registerItem('page', { name: 'probeup_v1_page', type: 'app', label: 'Tenant page' } as any);
+        engine.registry.registerItem('page', { name: 'probeup_side_page', type: 'app' } as any, 'name' as any, PKG);
+
+        engine.registerApp(V2() as any);
+
+        expect(engine.registry.getItem<any>('page', 'probeup_v1_page')?.label).toBe('Tenant page');
+        expect(itemNames(engine, 'page', PKG)).toEqual(['probeup_side_page', 'probeup_v2_page', 'probeup_v2_record']);
+    });
+
+    it('a refusal later in the same run puts every withdrawn item and claim back', () => {
+        const engine = installed();
+        const before = served(engine);
+        const err = refusal(() => engine.registry.restoringOnRefusal(() => {
+            engine.registerApp(V2() as any);
+            expect(engine.registry.getItem('page', 'probeup_v1_page')).toBeUndefined();
+            throw Object.assign(new Error('a later member of the artifact is refused'), { code: 'INVALID_METADATA', status: 422 });
+        }));
+        expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(served(engine)).toEqual(before);
+        expect(engine.registry.getItem<any>('page', 'probeup_v1_page')?.name).toBe('probeup_v1_page');
+    });
+
+    it('a dropped bare name is free at once once the holders are sealed; one still shipped stays held', () => {
+        const engine = new ObjectQL();
+        const withConnectors = (version: string, names: string[]) => ({
+            id: PKG,
+            name: PKG,
+            version,
+            connectors: names.map((name) => ({ name, label: name, type: 'api', enabled: false })),
+        });
+        engine.registerApp(withConnectors('1.0.0', ['probeup_dropped_conn', 'probeup_kept_conn']) as any);
+        engine.registry.sealBareNameHolders();
+
+        engine.registerApp(withConnectors('2.0.0', ['probeup_kept_conn']) as any);
+
+        const other = (name: string) => ({
+            id: HOST,
+            name: HOST,
+            connectors: [{ name, label: `${name} (host)`, type: 'api', enabled: false }],
+        });
+        engine.registerApp(other('probeup_dropped_conn') as any);
+        expect(engine.registry.getItem<any>('connector', 'probeup_dropped_conn')?._packageId).toBe(HOST);
+        const held = refusal(() => engine.registerApp({ ...other('probeup_kept_conn'), id: EXT, name: EXT } as any));
+        expect(held).toBeInstanceOf(BareNameConflictError);
+        expect(held).toMatchObject({ status: 422, incomingPackageId: EXT, existingHolder: { kind: 'package', packageId: PKG } });
     });
 });

@@ -615,6 +615,49 @@ describe('row-level security — each scoped persona kept to its rows by a route
     ]);
     expect(rowTags(narrowed(), card)['access-security.row-level-security']!.status).toBe('pass');
   });
+
+  describe("a scoped detail of a master the persona reads in full, narrowed by the detail's own read policy", () => {
+    // The gallery build's shape: the detail is controlled by its parent, the
+    // master is `public_read` (every persona reads it), and the persona's set
+    // also carries a read policy on the detail itself. The engine ANDs that
+    // policy with the master-derived filter, so the detail is kept to the
+    // persona's rows.
+    const contractor = { ...CARD.run.personas[0]!, scope: [{ object: 'task', field: 'project.owner', value: 'u_kim' }] };
+    const card = { ...CARD, run: { ...CARD.run, personas: [contractor, CARD.run.personas[1]!] } };
+    const ownTasks = { name: 'own_tasks', object: 'task', operation: 'all', using: 'project in current_user.my_project_ids' };
+    const openMaster = (detailPolicies: Bag[]) =>
+      richArtifact((stack) => {
+        stack.objects[0].sharingModel = 'public_read';
+        stack.permissions[0].rowLevelSecurity = detailPolicies;
+      });
+    const enforced = (a: Bag) => rowTags(a, card)['access-security.row-level-security']!.checks;
+
+    it('passes: a detail policy that lowers to a filter and admits only some rows', () => {
+      expect(readArtifactFacts(openMaster([])).objects.get('task')?.sharingModel).toBe('controlled_by_parent');
+      expect(enforced(openMaster([ownTasks]))).toEqual([
+        { check: 'row-level-security:task->enforced', pass: true, detail: 'enforced for pm_contractor' },
+      ]);
+    });
+
+    it('still fails with no detail policy, or one that admits every row: the master is followed', () => {
+      for (const policies of [[], [{ ...ownTasks, using: 'true' }], [ownTasks, { ...ownTasks, name: 'all_tasks', using: 'true' }]]) {
+        expect(enforced(openMaster(policies)), JSON.stringify(policies)).toEqual([
+          { check: 'row-level-security:task->enforced', pass: false, detail: 'no read policy on pm_contractor narrows project' },
+        ]);
+      }
+    });
+
+    it('still fails with a detail policy that does not lower to a filter, beside one that does', () => {
+      for (const policies of [[{ ...ownTasks, using: 'size(name) > 2' }], [ownTasks, { ...ownTasks, name: 'long_tasks', using: 'size(name) > 2' }]]) {
+        const dead = String(policies[policies.length - 1]!.name);
+        expect(enforced(openMaster(policies)), JSON.stringify(policies)).toEqual([{
+          check: 'row-level-security:task->enforced',
+          pass: false,
+          detail: `the read policy ${dead} on pm_contractor does not lower to a filter on task, so it matches no row`,
+        }]);
+      }
+    });
+  });
 });
 
 describe('report — a report whose dataset binds an object the card names', () => {

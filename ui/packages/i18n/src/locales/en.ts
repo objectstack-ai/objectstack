@@ -142,6 +142,12 @@ const en = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: 'Showing the first {{shown}} of {{total}} records. Narrow the filter.',
     rowCeilingNoteUnknownTotal: 'Showing the first {{shown}} records. Narrow the filter.',
+    // objectstack#33229 — the heading of the trailing section that holds the
+    // fields no declared field group claims (`deriveFieldGroupLayout`'s keyless
+    // bucket), drawn only when declared groups precede it: the record detail
+    // body and the object form arms. Without it those fields sat headerless
+    // under the last group and read as its members.
+    ungroupedSection: 'Other',
   },
   actions: {
     decisionOutput: {
@@ -3267,6 +3273,10 @@ const en = {
       noAccountText: "Don't have an account?",
       signUpText: 'Sign up',
       signingIn: 'Signing you in…',
+      directSignIn: {
+        description: "Sign in with your organization's single sign-on.",
+        retry: "Continue with single sign-on",
+      },
       ssoHandoff: 'Continue to {{target}}',
       // Phone/OTP sign-in labels. `LoginForm` interpolates `{seconds}` with a
       // literal `.replace('{seconds}', …)` of its own (in `LoginForm`),
@@ -3371,8 +3381,24 @@ const en = {
         ssoAccountNotInvited: "Your account isn't set up for this system yet. Ask your administrator to invite you.",
         ssoAccountNotLinked: "An account with your email already exists here, but it isn't connected to single sign-on. Sign in another way, or ask your administrator to connect it.",
         ssoResponseRejected: "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
+        // A refused account creation on the sign-in return: the email is not at a domain
+        // this system accepts (`EMAIL_DOMAIN_NOT_ALLOWED`, from the SSO proven-domain rule
+        // or the `email_domain` audience posture), or is not an address (`INVALID_EMAIL`).
+        ssoEmailDomainNotAllowed: "No account was created: your email address isn't at a domain this system accepts new accounts from. Use your organization email, or ask your administrator.",
+        ssoEmailNotAnAddress: "No account was created: your organization's sign-in service did not send a usable email address for you. Ask your administrator to check the single sign-on setup.",
         ssoStartFromLoginPage: "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
         ssoTechnicalDetails: "Technical details",
+        directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
+        directSignInUnavailable: "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
+        directSignInRateLimited: "Too many sign-ins were started from this network just now. Wait a few seconds, then try again.",
+        // objectstack#32992 — `access_denied`: the identity provider refused the
+        // signed-in account for this environment, with its two ways on.
+        ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
+        ssoSwitchAccount: "Switch account",
+        ssoBackToConsole: "Back to console",
+        ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
+        // A signed-in person's link refused by the callback (`email_does_not_match`), shown where they land.
+        linkEmailMismatch: "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
@@ -4061,6 +4087,11 @@ const en = {
     back: 'Back',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: 'Records appear here once you publish',
+      message: 'You are previewing an object that is not published yet, so it has no records. Publish to start adding records, or to load its sample data.',
+    },
     empty: {
       loadFailedTitle: 'Draft preview failed to load',
       loadFailedDescription: 'The draft overlay could not be read. Retry, or check your connection.',
@@ -4868,6 +4899,11 @@ const en = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Send message',
     scrollToBottom: 'Scroll to the latest message',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: 'Sends when the current reply finishes',
+      queuedCancel: 'Cancel',
+    },
     answer: {
       showFull: 'Show full answer',
       collapse: 'Collapse',
@@ -4961,6 +4997,9 @@ const en = {
       countSeedData: 'sample data',
       extendTarget: 'Adding to existing app: {{app}}',
       awaitingConfirm: 'Awaiting confirmation',
+      // objectstack#32984 — the plan card's build states.
+      confirmed: 'Confirmed',
+      buildFailed: 'Not built — nothing was created',
       iterateOrNew: {
         question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
         questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
@@ -4971,6 +5010,7 @@ const en = {
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
+      suggestedFieldLegend: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
       nameField: 'Name: {{field}}',
     },
     build: {
@@ -4993,6 +5033,15 @@ const en = {
       verifying: 'Checking the change…',
       verifyStep: 'step {{n}}',
       verified: 'Checked the change',
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: '{{count}} to fix',
+      issuesSummary: 'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
+      warningsSummary: 'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
+      issuesDetails: 'Technical details',
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: '{{count}} need attention',
+      needsAttention_one: '{{count}} needs attention',
+      needsAttention_other: '{{count}} need attention',
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
@@ -5575,6 +5624,9 @@ const en = {
     disableAppNamed: 'Disable {{name}}',
     setDefault: 'Set as default',
     setDefaultNamed: 'Set {{name}} as default',
+    // The disabled star's reason (its tooltip and accessible description)
+    // when the app already is the default.
+    alreadyDefault: 'Already the default app',
     deleteApp: 'Delete app',
     deleteAppNamed: 'Delete {{name}}',
     // Delete is a two-click control: the first click arms it and the label

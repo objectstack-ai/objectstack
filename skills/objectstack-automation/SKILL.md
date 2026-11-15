@@ -70,7 +70,7 @@ Built-in (plugins register more):
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
 | `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end |
-| `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
+| `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first; in a `record-after-*` flow it (or `errorHandling.strategy: 'retry'`) may not reach an inline `http` / `connector_action`: the save would wait out every attempt. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
 | `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller) |
@@ -91,11 +91,11 @@ Built-in (plugins register more):
 
 | Node | Purpose |
 |:-----|:--------|
-| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
+| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action`. Retried after a record change: `durable: true` (outbox-queued, else sent once in the background, unretried; no response) |
 | `notify` | Send a notification (below) |
-| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge the `inputSchema` fit yet |
+| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge the `inputSchema` fit yet. Retried after a record change: drop the retry, or run the flow on demand / on a schedule |
 | `script` | Call a **registered** function (*Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress`, which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen means "Next", no count. `progress` in a node `config` is refused |
 
 #### Human Decision
 
@@ -265,10 +265,10 @@ Most are caught by `objectstack build`:
 
    **The name resolves from the flow's package, as `subflow`'s `flowName`
    does**, the platform's function (registered under no package) in every
-   flow's reach; a `.custom` override reads as a package-less flow. `acme.crm`
-   and `acme.sales` both shipping `normalize_phone` each run their own (the boot
-   warns `Bare-name conflict at boot`). If the flow's package holds none, two
-   holders in reach (the platform's counts) or one only outside its
+   flow's reach; a `.custom` override reads as a package-less flow. Packages of
+   two `namespace`s each run their own `normalize_phone` (one namespace, or
+   none: refused at install; a boot warns `Bare-name conflict at boot`). If the
+   flow's package holds none, two holders in reach or one only outside its
    `dependencies` closure fail the step as a guard (no `fault` edge;
    `$error.code: 'RESOURCE_CONFLICT'` in a `try_catch`); a flow door answers
    `400 FLOW_FAILED`, `error.details.innerRefusal` naming each holder. Fix:
@@ -428,8 +428,7 @@ A flow around it also owns `label`, `type`, `nodes` and the `edges`
 }
 ```
 
-> **Prefer `record-after-*`** unless you must modify or reject the record;
-> **guard** one that writes its own object, or it re-triggers itself. A
+> **Prefer `record-after-*`**; **guard** one that writes its own object, or it re-triggers itself. A
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
 
@@ -456,14 +455,8 @@ action contract spans several vendors; the callback is signed in no form
 
 ## Verify your work
 
-A bare ref (`status == 'open'`) resolves (fields are flattened into scope), so
-a typo there is only an advisory did-you-mean; `record.status` stays canonical
-and `os validate` errors on an unknown `record.<field>`:
-
-```bash
-os validate     # CEL/predicate validation + schema
-# or: os build  # the same gates, plus emits dist/
-```
+`os validate` (`os build` also emits `dist/`); CEL checks: **objectstack-formula**
+§ Verify your work.
 
 ---
 

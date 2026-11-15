@@ -18,14 +18,24 @@
 // `automation:packaged` ref and its page retired (D11). D4 keeps the ACTION
 // switch where it was, so the actions half stays in Setup as its own entry.
 //
-// Two deliberate absences worth stating so they are not "fixed":
-//  - no `requiresService: 'automation'` — the action switches ride the
+// Its audience is its page's own data read, and nothing else (#33224):
+//  - `visible: current_user.can('sys_metadata_activation', 'read')` — the page
+//    reads the ledger, so a member who may not read it is not shown the entry
+//    and does not land on it. This entry used to carry no audience at all; that
+//    was a developer choice (#12491), not a ruling, and it made the entry the
+//    Setup landing page of every member, including a separation-of-duties
+//    officer whose ledger read answers 403, so the officer's Setup opened on
+//    `activation ledger HTTP 403` (#33224). The console's object-read prune
+//    judges `type: 'object'` entries only, so a `component` entry needs its own.
+//  - still no `requiresService: 'automation'` — the action switches ride the
 //    `sys_metadata_activation` ledger this package registers (#12419) and work
 //    on compositions with NO automation service; gating the entry on that
 //    service would hide a page that still works there.
-//  - no `requiredPermissions` — like the rest of `group_apps`: the Setup
+//  - still no `requiredPermissions` — like the rest of `group_apps`: the Setup
 //    app's own `setup.access` gates the app, and the activation WRITE doors
-//    enforce `manage_metadata` / the ADR-0126 §5 operator gate server-side.
+//    enforce `manage_metadata` / the ADR-0126 §5 operator gate server-side. A
+//    capability gate here would hide the page from a member who may read the
+//    ledger, and the page reads, not writes, to render.
 import { describe, it, expect } from 'vitest';
 import { NavigationContributionSchema } from '@objectstack/spec/ui';
 
@@ -38,6 +48,7 @@ type NavItem = {
   componentRef?: string;
   requiresService?: string;
   requiredPermissions?: string[];
+  visible?: string;
   children?: NavItem[];
 };
 
@@ -79,6 +90,12 @@ describe('the Setup Packaged Actions entry targets the console component (ADR-01
   it('does not gate on the automation service (the action switches work without it, #12419)', () => {
     expect(entry().item.requiresService).toBeUndefined();
     expect(entry().item.requiredPermissions).toBeUndefined();
+  });
+
+  it("is shown to the members who may read the ledger its page reads (#33224)", () => {
+    // The page's data source is `/data/sys_metadata_activation`; the
+    // predicate names that object and the `read` verb, nothing broader.
+    expect(entry().item.visible).toBe("current_user.can('sys_metadata_activation', 'read')");
   });
 
   it('parses as a NavigationContribution the runtime merge accepts', () => {

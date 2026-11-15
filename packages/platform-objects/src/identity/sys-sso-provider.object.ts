@@ -116,13 +116,19 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
         { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this system.' },
         { name: 'clientSecret', label: 'Client Secret', type: 'password', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
-        // The two endpoints a registration can name explicitly (#32297). The bridge
-        // passes each under the same name into `oidcConfig`, and an endpoint the
+        // The endpoints a registration can name explicitly (#32297, #33395): the
+        // five members of plugin-auth `OIDC_NAMED_ENDPOINTS`. The bridge passes
+        // each under the same name into `oidcConfig`, and an endpoint the
         // registration names is trusted for that registration (plugin-auth
-        // `AuthManager.ssoDiscoveryTrustedOrigins` reads the issuer, the discovery
-        // URL and the userinfo URL alike), so both help texts say so: it is the
-        // remedy the refusal of an untrusted discovery endpoint names.
+        // `AuthManager.ssoDiscoveryTrustedOrigins` reads the issuer and every
+        // named endpoint alike), so each help text says so: it is the remedy the
+        // refusal of an untrusted discovery endpoint names. An IdP whose token,
+        // key or userinfo endpoint sits on another host than its issuer (Google)
+        // registers from this form only when each of them is named.
         { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'url', required: false, helpText: 'Optional. OIDC discovery document URL (https). Leave blank to derive `<issuer>/.well-known/openid-configuration`. An endpoint named here is trusted for this provider.' },
+        { name: 'authorizationEndpoint', label: 'Authorization URL', type: 'url', required: false, helpText: 'Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust.' },
+        { name: 'tokenEndpoint', label: 'Token URL', type: 'url', required: false, helpText: 'Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token' },
+        { name: 'jwksEndpoint', label: 'JWKS URL', type: 'url', required: false, helpText: 'Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs' },
         { name: 'userInfoEndpoint', label: 'Userinfo URL', type: 'url', required: false, helpText: 'Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a userinfo host the server does not trust.' },
         // The OIDC userinfo opt-out, stored as the provider's `skip_user_info`
         // (plugin-auth `sso-sign-in-options.ts`): claims come from the verified
@@ -195,6 +201,10 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'mapLastName', label: 'Map: Last name attribute', type: 'text', required: false, placeholder: 'surname', helpText: 'Optional. Assertion attribute mapped to the user’s last name. Defaults to "surname". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname' },
         { name: 'mapName', label: 'Map: Display name attribute', type: 'text', required: false, placeholder: 'displayName', helpText: 'Optional. Assertion attribute mapped to the user’s full name, used when the first and last name attributes are absent. Defaults to "displayName", then the NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname' },
         { name: 'mapGroups', label: 'Map: Groups attribute', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
+        // The attribute the provider keys its accounts on instead of the
+        // NameID, stored as `mapping.extraFields.accountKey` (plugin-auth
+        // `sso-saml-account-key.ts`). Blank keeps the default.
+        { name: 'mapAccountKey', label: 'Map: Account key attribute', type: 'text', required: false, placeholder: 'http://schemas.microsoft.com/identity/claims/objectidentifier', helpText: 'Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.' },
       ],
     },
     {

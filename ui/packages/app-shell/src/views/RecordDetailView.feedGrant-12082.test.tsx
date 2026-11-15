@@ -426,3 +426,68 @@ describe('on the column store the reaction control reads feedReactionColumn: upd
     expect(!!addReaction(view)).toBe(offered);
   });
 });
+
+/**
+ * Which store the chatter uses is asked of the object registry only by a
+ * caller who may read `sys_comment_reaction` (objectstack#33343). The metadata
+ * door serves an object's definition only to a caller its read check admits,
+ * so a caller whose grants hold no read on the object was answered 404 on every
+ * record page; that answer took the column store. Here the registry is the
+ * by-name scope reader, which records each name the page asks.
+ */
+describe('the reaction store is asked of the registry only by a caller who may read sys_comment_reaction (objectstack#33343)', () => {
+  /** Mounts the page over a by-name registry; returns the object names it was asked. */
+  async function mountAsking(perms: MePermissionsResponse | null, registry: unknown[], dataSource = makeDataSource()) {
+    const asked: string[] = [];
+    const pages = [PAGE];
+    const readObjectScope = (scope: { packageId?: string; names?: readonly string[] }) => {
+      asked.push(...(scope.names ?? []).filter((name) => typeof name === 'string' && name !== ''));
+      const served = scope.names
+        ? registry.filter((o) => scope.names!.includes((o as { name: string }).name))
+        : registry;
+      return { objects: served, served, missing: [], settled: true, failed: [], refused: {}, answers: {}, views: [] };
+    };
+    const metadata = {
+      ...metadataFor(registry),
+      readObjectScope,
+      getTypeStatus: (type: string) => (type === 'object' ? 'idle' : 'ready'),
+      ensureType: async () => pages,
+    } as any;
+    const page = (
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={dataSource}
+            objects={OBJECTS}
+            onEdit={() => {}}
+            objectNameOverride={OBJECT_NAME}
+            recordIdOverride={RECORD_ID}
+            embedded
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>
+    );
+    const view = render(perms ? <MePermissionsProvider initialPermissions={perms}>{page}</MePermissionsProvider> : page);
+    await within(view.container).findByText(COMMENT_BODY);
+    await act(async () => {});
+    const reactionReads = dataSource.find.mock.calls.filter(([objectName]: [string]) => objectName === REACTION);
+    return { asked, reactionReads };
+  }
+
+  it('a caller whose grants hold no read on sys_comment_reaction is not asked about it, and takes the column store its absence took', async () => {
+    const { asked, reactionReads } = await mountAsking(answer({ [COMMENT]: SHAPE.full }), REGISTRY.column);
+    expect(asked).not.toContain(REACTION);
+    expect(reactionReads).toEqual([]);
+  });
+
+  it('CONTROL — a caller who may read it asks the registry, and the records store reads its rows', async () => {
+    const { asked, reactionReads } = await mountAsking(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.readOnly }), REGISTRY.records);
+    expect(asked).toContain(REACTION);
+    expect(reactionReads).toHaveLength(1);
+  });
+
+  it('CONTROL — with no permission provider every grant reads open: the registry is asked, as before', async () => {
+    const { asked } = await mountAsking(null, REGISTRY.records);
+    expect(asked).toContain(REACTION);
+  });
+});

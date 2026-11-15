@@ -48,6 +48,16 @@ import {
   type NotNullPort,
   type OrganizationOwnershipApplyReport,
 } from './organization-ownership-apply.js';
+// Clocked windows measure behaviour, never loading: the ceremony's dynamic
+// imports are paid here, at collection (`check:test-source-alias`).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 
 const ORG = 'org_default';
 
@@ -111,7 +121,14 @@ const RULES = ['share_custom', 'share_collides'];
 
 async function apply(
   l: ReturnType<typeof ledger> = ledger(),
-  opts: { posture?: string; webhooks?: boolean; rules?: boolean; notNull?: boolean; notNullPort?: NotNullPort } = {},
+  opts: {
+    posture?: string;
+    webhooks?: boolean;
+    webhookList?: ReadonlyArray<{ name: string; packageId: string | null }>;
+    rules?: boolean;
+    notNull?: boolean;
+    notNullPort?: NotNullPort;
+  } = {},
 ): Promise<OrganizationOwnershipApplyReport> {
   const posture = opts.posture ?? 'single';
   const database = join(dir, 'fixture.db');
@@ -129,7 +146,7 @@ async function apply(
       conflicts: reviewedConflictsOf(reviewed),
     },
     catalog: { async resolve() { return undefined; } },
-    ...(opts.webhooks === false ? {} : { declaredWebhooks: { async list() { return WEBHOOKS; } } }),
+    ...(opts.webhooks === false ? {} : { declaredWebhooks: { async list() { return opts.webhookList ?? WEBHOOKS; } } }),
     ...(opts.rules === false
       ? {}
       : { declaredSharingRules: { async rules() { return RULES.map((name) => ({ name, refused: null, packageId: 'com.example.app' })); } } }),
@@ -382,6 +399,73 @@ describe('ownership shape generation 1 — the ceremony steps an 18.0 database o
     expect(rules.blockers[0]).toMatch(/Under the isolated posture the declaration's switch is deployment-wide/);
     expect(rows(`SELECT name FROM sys_sharing_rule WHERE id = 'rule_custom'`)).toEqual([{ name: 'share_custom' }]);
     expect(rows(`SELECT COUNT(*) AS n FROM sys_metadata_activation WHERE metadata_type = 'sharing_rule'`)).toEqual([{ n: 0 }]);
+  });
+
+  /**
+   * [ADR-0150 D8, #32695] A customized copy writes the declaration's
+   * activation row, which names one holder. Of a name two packages declare,
+   * a copy whose definition names no package names none of them: its row
+   * names no package (the name-keyed switch it was), and the run says so,
+   * naming each holder. BASE: the holder listed last was picked
+   * (`new Map(list)`), so the row named whichever package the composition
+   * listed last.
+   */
+  for (const [order, webhookList] of [
+    ['listed last', [...WEBHOOKS, { name: 'deal_won', packageId: 'com.example.other' }]],
+    ['listed first', [{ name: 'deal_won', packageId: 'com.example.other' }, ...WEBHOOKS]],
+  ] as const) {
+    it(`5a [#32695] two holders (the second ${order}), a customized copy naming no package: its row names no package, said naming both`, async () => {
+      const other = 'com.example.other';
+      db.exec(`UPDATE sys_webhook SET definition_json = json_remove(definition_json, '$._packageId') WHERE id = 'whk_switched'`);
+      const report = await apply(ledger(), { webhookList });
+      const done = step(report, 'declared-webhooks');
+      expect(done.status).toBe('done');
+      expect(rows(`SELECT name, package_id, active FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = 'deal_won'`))
+        .toEqual([{ name: 'deal_won', package_id: null, active: 1 }]);
+      const said = done.notes.filter((n) => n.includes('whk_switched') && n.includes('names no package'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain("'com.example.app'");
+      expect(said[0]).toContain(`'${other}'`);
+    });
+  }
+
+  /**
+   * [ADR-0150 D8, #32695 review S1] When the environment is one of the
+   * holders, a row naming no package is the environment slot's OWN switch
+   * (`webhookSlotSwitch` reads `rows.get(null)` as it), so writing one would
+   * pick the environment. Nothing is written and the run reports the copy's
+   * switch, naming each holder, in either listed order.
+   */
+  for (const [order, webhookList] of [
+    ['listed last', [...WEBHOOKS, { name: 'deal_won', packageId: null }]],
+    ['listed first', [{ name: 'deal_won', packageId: null }, ...WEBHOOKS]],
+  ] as const) {
+    it(`5a [#32695] the environment and a package hold the name (the environment ${order}), a customized copy naming no package: no switch row, said naming both`, async () => {
+      db.exec(`UPDATE sys_webhook SET definition_json = json_remove(definition_json, '$._packageId') WHERE id = 'whk_switched'`);
+      const report = await apply(ledger(), { webhookList });
+      const done = step(report, 'declared-webhooks');
+      expect(done.status).toBe('done');
+      expect(rows(`SELECT COUNT(*) AS n FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = 'deal_won'`))
+        .toEqual([{ n: 0 }]);
+      const said = done.notes.filter((n) => n.includes('whk_switched') && n.includes('no switch row was written'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('the environment');
+      expect(said[0]).toContain("'com.example.app'");
+      expect(done.notes.filter((n) => n.includes('whk_switched') && n.includes('switched off it keeps'))).toHaveLength(0);
+    });
+  }
+
+  it('5a [#32695] CONTROL a customized copy whose definition names its package writes that package\'s row, beside a second holder listed first', async () => {
+    await apply(ledger(), { webhookList: [{ name: 'deal_won', packageId: 'com.example.other' }, ...WEBHOOKS] });
+    expect(rows(`SELECT name, package_id, active FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = 'deal_won'`))
+      .toEqual([{ name: 'deal_won', package_id: 'com.example.app', active: 1 }]);
+  });
+
+  it('5a [#32695] CONTROL one holder, a customized copy naming no package: that holder\'s row, as before', async () => {
+    db.exec(`UPDATE sys_webhook SET definition_json = json_remove(definition_json, '$._packageId') WHERE id = 'whk_switched'`);
+    await apply();
+    expect(rows(`SELECT name, package_id, active FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = 'deal_won'`))
+      .toEqual([{ name: 'deal_won', package_id: 'com.example.app', active: 1 }]);
   });
 
   it('5a without the declared webhooks to read, a seeded row blocks the step and nothing is deleted', async () => {

@@ -23,8 +23,9 @@
  * and one tool name, which the one-holder rule no longer calls a clash
  * (#31701, #31697, #31699, #31985; ADR-0150 D2/D9), so the sealed-clash
  * section never lists them; nor the picklist `m31693_tone` they both declare
- * (#31700). The clash the seal still records is the connector `m31693_link`
- * both declare: a connector name is held once per deployment.
+ * (#31700); nor, since the connector narrowed last (#31699 PR 3), the
+ * connector `m31693_link` both declare. Two holders of different namespaces
+ * are no clash for any covered type now, so the section is empty.
  *
  * Over a database an older release left: two managed `sys_sharing_rule` rows
  * naming `m31693_share` (two holders: ambiguous) and `m31693_only_a` (one
@@ -95,7 +96,7 @@ const rule = (name: string) => ({
   accessLevel: 'read', sharedWith: { type: 'user', value: 'u1' }, active: true,
 });
 const list = (name: string) => ({ name, label: name, options: [{ label: 'One', value: 'one' }] });
-/** The connector A and B both declare: a connector name is still held once per deployment, the sealed clash. */
+/** The connector A and B both declare, in their own namespaces: no clash since #31699 PR 3 (it was the sealed clash). */
 const link = (tag: string) => ({ name: 'm31693_link', label: `${tag} link`, type: 'api', description: `${tag} link`, enabled: false });
 /** The agent, the skill (#31701), the object-less action (#31697), the email template (#31699) and the tool (#31985) A and B both declare, in their own namespaces. */
 const ai = (tag: string) => ({
@@ -170,6 +171,23 @@ async function rowsOf(dbFile: string, table: string): Promise<Array<Record<strin
   }
 }
 
+/**
+ * The ids of the rows the seed writes, and so the `--id` every bind below
+ * passes: fixed, never minted. A minted id is a 16-character nanoid, whose
+ * alphabet carries `-`, and oclif reads a flag VALUE whose first two
+ * characters spell one of the command's short flags as that flag: the bind
+ * declares `-y` (`--yes`), so an id minted as `-y…` (1 in 4096) is refused
+ * at parse, `Flag --id expects a value`, exit 2, before the command writes a
+ * byte, in either spelling, `--id X` or `--id=X`. With minted ids that was a
+ * case going red at random in about one run in a thousand, in milliseconds,
+ * on an empty stdout.
+ */
+const SEEDED_IDS = {
+  m31693_share: 'm31693_share_row',
+  m31693_only_a: 'm31693_only_a_row',
+  suggestion: 'm31693_suggestion_row',
+} as const;
+
 /** A database the served platform provisioned, with the rows an older release left (module doc). */
 async function seedDatabase(file: string): Promise<void> {
   const stack = await bootSchemaStack({
@@ -179,13 +197,14 @@ async function seedDatabase(file: string): Promise<void> {
   try {
     const ql: IDataEngine = stack.kernel.getService('objectql');
     const ctx = { context: { isSystem: true, tenantId: ORG } };
-    for (const name of ['m31693_share', 'm31693_only_a']) {
+    for (const name of ['m31693_share', 'm31693_only_a'] as const) {
       await ql.insert('sys_sharing_rule', {
-        name, label: name, object_name: 'm31693a_task', criteria_json: '{}', recipient_type: 'user', recipient_id: 'u1',
+        id: SEEDED_IDS[name], name, label: name, object_name: 'm31693a_task', criteria_json: '{}', recipient_type: 'user', recipient_id: 'u1',
         access_level: 'read', active: false, managed_by: 'package', organization_id: ORG,
       }, ctx);
     }
     await ql.insert('sys_audience_binding_suggestion', {
+      id: SEEDED_IDS.suggestion,
       package_id: A, permission_set_name: 'm31693_env_set', anchor: 'everyone', status: 'pending', organization_id: ORG,
     }, ctx);
   } finally {
@@ -215,23 +234,36 @@ async function run(command: typeof MigrateStoredReferences | typeof MigrateStore
     return true;
   }) as typeof process.stdout.write;
   const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(swallow);
-  vi.spyOn(process.stderr, 'write').mockImplementation(swallow);
+  const stderrWrites = vi.spyOn(process.stderr, 'write').mockImplementation(swallow);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   let thrownExit: number | undefined;
+  let thrownMessage: string | undefined;
+  const started = Date.now();
   try {
     try {
       await command.run(argv, { root: CLI_ROOT });
     } catch (error) {
       if (!isExitSignal(error)) throw error;
       thrownExit = (error as { oclif?: { exit?: number } }).oclif?.exit;
+      thrownMessage = (error as Error).message;
     }
     const raw = stdout.mock.calls.map((c) => String(c[0])).join('').trim();
-    let payload: any;
-    try { payload = JSON.parse(raw); } catch { payload = { unparsed: raw.slice(-400) }; }
     const stderr = errors.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
-    return { payload, raw, exitCode: thrownExit ?? (process.exitCode as number | undefined) ?? 0, stderr };
+    const exitCode = thrownExit ?? (process.exitCode as number | undefined) ?? 0;
+    let payload: any;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      // Loud, never a bare `{ unparsed: '' }`: a run that printed no JSON
+      // document says why: its exit code, the exit signal's own message (an
+      // oclif parse refusal throws before the command writes a byte), how long
+      // it ran, the argv, and the tail of everything it wrote to stderr.
+      const stderrTail = [stderr, stderrWrites.mock.calls.map((c) => String(c[0])).join('')].join('\n').trim().slice(-800);
+      payload = { unparsed: raw.slice(-400), exitCode, thrown: thrownMessage ?? null, ms: Date.now() - started, argv, stderr: stderrTail };
+    }
+    return { payload, raw, exitCode, stderr };
   } finally {
     process.exitCode = savedExit;
     vi.restoreAllMocks();
@@ -239,8 +271,11 @@ async function run(command: typeof MigrateStoredReferences | typeof MigrateStore
 }
 
 const report = (db: string) => run(MigrateStoredReferences, ['--database-url', `file:${db}`, '--json']);
-const bind = (db: string, table: string, id: string, pkg: string, yes = true) =>
-  run(MigrateStoredReferencesBind, ['--table', table, '--id', id, '--package', pkg, ...(yes ? ['--yes'] : []), '--database-url', `file:${db}`, '--json']);
+const bind = (db: string, table: string, id: string, pkg: string, yes = true) => {
+  // `SEEDED_IDS` says why an id that opens with `-` may never reach the argv.
+  if (id.startsWith('-')) throw new Error(`bind(): the row id "${id}" opens with "-", which the bind's flag parser can read as a flag; seed a fixed id`);
+  return run(MigrateStoredReferencesBind, ['--table', table, '--id', id, '--package', pkg, ...(yes ? ['--yes'] : []), '--database-url', `file:${db}`, '--json']);
+};
 const shareRow = async (db: string) => (await rowsOf(db, 'sys_sharing_rule')).find((r) => r.name === 'm31693_share')!;
 const suggestionRow = async (db: string) => (await rowsOf(db, 'sys_audience_binding_suggestion')).find((r) => r.permission_set_name === 'm31693_env_set')!;
 
@@ -307,10 +342,11 @@ describe('os migrate stored-references (the report)', () => {
       d8: 'R17', object: 'm31693a_task', field: 'hue', packageId: A, name: 'm31693_hue', reason: 'outside-closure',
       candidates: [{ holder: 'package', packageId: C, address: 'm31693c/m31693_hue' }],
     }]);
-    // [#31701, #31697, #31699, #31700, #31985] Only the connector: never the
-    // agent, the skill, the object-less action, the email template, the
-    // picklist and the tool A and B hold in two namespaces.
-    expect(payload.sealedClashes).toEqual([{ type: 'connector', name: 'm31693_link', candidates: [`package "${A}"`, `package "${B}"`] }]);
+    // [#31701, #31697, #31699, #31700, #31985] Never the agent, the skill, the
+    // object-less action, the email template, the picklist and the tool A and
+    // B hold in two namespaces; [#31699 PR 3] nor the connector (FROM: the
+    // one sealed clash, naming both).
+    expect(payload.sealedClashes).toEqual([]);
     // The served platform carries no automation or approvals table here: named, not silently skipped.
     expect(payload.tablesNotCarried).toEqual(expect.arrayContaining(['sys_automation_run', 'sys_flow_credential', 'sys_approval_request']));
   }, CASE_TIMEOUT_MS);
@@ -458,7 +494,7 @@ describe('os migrate stored-references bind', () => {
     const db = caseDb(controlDb);
     const share = await shareRow(db);
     const { payload, exitCode } = await bind(db, 'sys_sharing_rule', String(share.id), A);
-    expect(payload).toMatchObject({ outcome: 'refused', reason: 'resolved', written: 0 });
+    expect(payload, JSON.stringify(payload).slice(0, 1600)).toMatchObject({ outcome: 'refused', reason: 'resolved', written: 0 });
     expect(exitCode).toBe(1);
     expect((await shareRow(db)).package_id ?? null).toBeNull();
   }, CASE_TIMEOUT_MS);

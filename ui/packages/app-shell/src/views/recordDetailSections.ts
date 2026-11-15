@@ -22,7 +22,8 @@
  * Pinned by `recordDetailSections.agreement-12442.test.ts` beside this file.
  */
 
-import { deriveFieldGroupDetailSections } from '@object-ui/plugin-detail';
+import { deriveFieldGroupDetailSections, resolveDetailSections } from '@object-ui/plugin-detail';
+import { BUILT_IN_LANGUAGE_CODES, loadBuiltInLocale } from '@object-ui/i18n';
 import { AUDIT_FIELD_NAMES, HIDDEN_SYSTEM_FIELD_NAMES } from './record-detail-system-fields.js';
 
 /**
@@ -67,10 +68,30 @@ export interface RecordDetailSectionsObject {
   fieldGroups?: unknown;
 }
 
+/**
+ * A section heading in one of the two forms `@objectstack/spec`'s `I18nLabel`
+ * declares for `record:details` `sections[].label`: text, or an inline locale
+ * map (`{ en, 'zh-Hans', … }`) that `record:details` resolves for the viewer's
+ * language with `pickLocalized`.
+ */
+export type SectionHeading = string | Readonly<Record<string, string>>;
+
 /** Display text the derivation writes into a section it authors itself. */
 export interface RecordDetailSectionLabels {
   /** Heading of the collapsible secondary section (section name `details`). */
   moreDetails: string;
+  /**
+   * Heading of the section holding the fields no declared field group claims
+   * (`deriveFieldGroupLayout`'s keyless trailing bucket). Read only when the
+   * object's `fieldGroups` apply, so the bucket always follows at least one
+   * titled group and never sits headerless under it (a collapsed one
+   * included). An object with no groups keeps its untitled primary section.
+   *
+   * A surface that draws the page passes the translated text. A surface that
+   * PERSISTS the page passes {@link loadPersistedUngroupedHeading}'s inline
+   * locale map, so the saved heading stays translated.
+   */
+  ungrouped: SectionHeading;
 }
 
 /**
@@ -81,6 +102,54 @@ export interface RecordDetailSectionLabels {
  * judges it against the en pack).
  */
 export const MORE_DETAILS_DEFAULT_LABEL = 'More details';
+
+/**
+ * The English heading of the ungrouped-fields section: the en text of the
+ * `common.ungroupedSection` key. ⛔ Never persisted as a heading: a page Studio
+ * saves carries {@link loadPersistedUngroupedHeading}'s locale map instead.
+ */
+export const UNGROUPED_SECTION_DEFAULT_LABEL = 'Other';
+
+/**
+ * Whether the object's `fieldGroups` apply, i.e. whether its default record
+ * page draws the ungrouped bucket under its own heading.
+ */
+function fieldGroupsApply(objectDef: RecordDetailSectionsObject): boolean {
+  return deriveFieldGroupDetailSections(objectDef as any) !== null;
+}
+
+/**
+ * The ungrouped bucket's heading in the form a PERSISTED page writes it: an
+ * inline locale map holding the `common.ungroupedSection` text of every
+ * catalogue `@object-ui/i18n` ships, keyed by its language tag.
+ *
+ * A saved page is metadata, so it cannot carry the shell's `t()` call, and a
+ * plain string would render in one language for every viewer. The inline map
+ * is the `I18nLabel` form `@objectstack/spec` declares for exactly this, and
+ * `record:details` resolves it for the viewer's language (`pickLocalized`), so
+ * the saved page reads the same heading the running page translates.
+ *
+ * The catalogues are fetched only when the object's `fieldGroups` apply, the
+ * one case a persisted page writes this heading. Otherwise it answers the
+ * English default, which {@link deriveStudioDetailSections} does not read.
+ * A catalogue that fails to load rejects the whole call: a partial map would
+ * save English for the missing languages.
+ */
+export async function loadPersistedUngroupedHeading(
+  objectDef: RecordDetailSectionsObject | null | undefined,
+): Promise<SectionHeading> {
+  if (!objectDef || !fieldGroupsApply(objectDef)) return UNGROUPED_SECTION_DEFAULT_LABEL;
+  const catalogues = await Promise.all(
+    BUILT_IN_LANGUAGE_CODES.map(async (code) => [code, await loadBuiltInLocale(code)] as const),
+  );
+  const heading: Record<string, string> = {};
+  for (const [code, catalogue] of catalogues) {
+    const common = catalogue?.common as Record<string, unknown> | undefined;
+    const text = common?.ungroupedSection;
+    if (typeof text === 'string' && text.length > 0) heading[code] = text;
+  }
+  return heading;
+}
 
 /**
  * The sections the running app's default record page passes to
@@ -165,16 +234,22 @@ export function deriveRecordDetailSections(
     // 1) fieldGroups-derived sections (the ADR-0085 semantic role,
     //    same shared derivation the runtime form honours). Declared
     //    groups render as titled cards in declared order; the
-    //    trailing untitled bucket (ungrouped fields) still goes
+    //    trailing keyless bucket (ungrouped fields) still goes
     //    through the primary/"More details" split so long-form
     //    fields stay tucked away.
     const grouped = deriveFieldGroupDetailSections(objectDef as any);
     if (grouped) {
       return grouped.flatMap<Record<string, unknown>>((sec: any) => {
         if (!sec.name) {
-          return splitPrimarySecondary(
+          // The bucket only exists after at least one declared group, so
+          // its primary half gets its own heading and card: drawn
+          // untitled, its fields read as members of the group above it,
+          // and as hidden ones when that group is collapsed. No `name`, so
+          // `record:details` uses the translated label as written.
+          const [primary, ...rest] = splitPrimarySecondary(
             (sec.fields as any[]).map((f: any) => f.name),
           );
+          return [{ ...primary, label: labels.ungrouped, showBorder: true as const }, ...rest];
         }
         // A declared group is written as the spec's own REFERENCE form,
         // `{ group: KEY }` (`RecordDetailsProps.sections[].group`,
@@ -201,18 +276,25 @@ export function deriveRecordDetailSections(
  * The sections a Studio surface passes to `buildDefaultPageSchema` for the
  * object's default record page.
  *
- * `undefined` when the object's `fieldGroups` apply: the synthesizer's own
- * `resolveDetailSections` then writes the groups as spec `{ group }`
- * references, which is what Studio has written for a grouped object since
- * objectui#11630, and this card leaves it so. Otherwise the running app's own
- * split — the same call, not a copy of it.
+ * When the object's `fieldGroups` apply: the synthesizer's own sections
+ * (`resolveDetailSections`), which write each group as the spec's
+ * `{ group, columns }` reference and the trailing ungrouped bucket as an
+ * enumerated section, with the bucket headed by `labels.ungrouped`. Untitled,
+ * that bucket read as part of the group above it, while the running page draws
+ * it under its own heading. Otherwise the running app's own split — the same
+ * call, not a copy of it.
  */
 export function deriveStudioDetailSections(
   objectDef: RecordDetailSectionsObject | null | undefined,
   labels: RecordDetailSectionLabels,
 ): Array<Record<string, unknown>> | undefined {
   if (!objectDef) return undefined;
-  if (deriveFieldGroupDetailSections(objectDef as any)) return undefined;
+  const references = resolveDetailSections(objectDef as any) as Array<Record<string, unknown>> | undefined;
+  if (references) {
+    return references.map((section) =>
+      typeof section.group === 'string' ? section : { label: labels.ungrouped, ...section },
+    );
+  }
   return deriveRecordDetailSections(objectDef, labels);
 }
 

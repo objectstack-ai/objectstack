@@ -20,12 +20,23 @@
  *  - `source = 'database'` (the loader's own rows; `SysMetadataRepository`
  *    never writes the column);
  *  - its stored body names a package (`storedItemPackageId`: the envelope's
- *    `packageId`, else the registry's `_packageId` stamp).
+ *    `packageId`, else the registry's `_packageId` stamp) — [#32985] and not by
+ *    that stamp alone (below).
  *
  * A row whose body names no package is the environment's own item, or a
  * customization whose holder the row cannot name, and is left as it is. So is
  * a row whose package already has a row of the same name (binding it would
  * make two rows of one slot), and a row whose update fails.
+ *
+ * [#32985; maintainer decision 2026-11-14 on #32985] So is a row whose body
+ * names its package by the registry's `_packageId` stamp alone — no
+ * `packageId`, no legacy `package` (`stampOnlyPackageOf`), left `stamp-only`:
+ * `@objectstack/metadata` 17.0.0–18.3.0 saved the host's stamp into the
+ * environment's own rows on a host that declares its package, and from the
+ * row alone such a row cannot be told from one of the host's items. Binding
+ * it would make it the host's for every reader of `package_id`. A row of a
+ * package's item whose code still ships is bound by that item's next save;
+ * `detectStampOnlyRows` reports each such row with its history evidence.
  *
  * A bundled type (`email_template`, keyed by `locale`) holds a row per member
  * in one slot, as `DatabaseLoader.save` writes it (#32489): its slot is
@@ -58,6 +69,7 @@ import {
   storedItemPackageId,
   storedRowMemberOf,
 } from '../package-slotted-store.js';
+import { stampOnlyPackageOf } from '../stamp-only-row.js';
 
 /** The two reads/writes this migration needs; an `IDataDriver` is one. */
 export interface DatabaseLoaderRowStore {
@@ -65,8 +77,11 @@ export interface DatabaseLoaderRowStore {
   update(table: string, id: string, data: Record<string, unknown>): Promise<unknown>;
 }
 
-/** Why a candidate row was left unbound. */
-export type DatabaseLoaderRowLeftReason = 'package-less' | 'slot-taken' | 'update-failed';
+/**
+ * Why a candidate row was left unbound. [#32985] `stamp-only`: its body names
+ * its package by the `_packageId` stamp alone (see the module doc).
+ */
+export type DatabaseLoaderRowLeftReason = 'package-less' | 'stamp-only' | 'slot-taken' | 'update-failed';
 
 /** What {@link migrateDatabaseLoaderRowPackages} did. */
 export interface DatabaseLoaderRowPackagesResult {
@@ -102,6 +117,10 @@ export async function migrateDatabaseLoaderRowPackages(
     const packageId = bodyPackageId(row.metadata);
     if (packageId === undefined) {
       result.left.push({ ...at, reason: 'package-less' });
+      continue;
+    }
+    if (stampOnlyPackageOf(parsedBody(row.metadata)) !== undefined) {
+      result.left.push({ ...at, reason: 'stamp-only' });
       continue;
     }
     if (taken.has(slotOf(row, packageId))) {

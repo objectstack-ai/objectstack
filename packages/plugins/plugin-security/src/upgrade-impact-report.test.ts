@@ -437,12 +437,17 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
       });
       const r = await boot(d, 'walled');
       expect(r.report.withheldWebhooks.map((w) => w.packageId).sort()).toEqual([OTHER_VENDOR, VENDOR].sort());
-      // [#33016 S2] The disabled holder's address answers 409 until it is
-      // enabled again: its finding says so, and the line says to enable first.
+      // [#33016 S2] The disabled holder's address refuses the switch until it
+      // is enabled again: its finding says so, and the line says to enable
+      // first. [#33263, record nit N5] The refusal is 404 for a sole holder
+      // and 409 beside another (the door's own pins in runtime's
+      // `catalog-activation-door.test.ts`); the line said 409 for both.
       expect(r.report.withheldWebhooks.map((w) => [w.packageId, w.packageDisabled ?? false]).sort())
         .toEqual([[order[0], false], [order[1], true]].sort());
       const line = errorLines(r).find((m) => m.includes('sys_webhook row(s) hold the name of a webhook')) ?? '';
       expect(line).toContain('A finding marked packageDisabled names a disabled package');
+      expect(line).toContain("(404 while the package is the name's only holder, 409 naming the other holders while another package declares it too)");
+      expect(line).not.toContain('answers 409 until');
       expect(line).toContain('enable the package first, then switch it there');
     });
   }

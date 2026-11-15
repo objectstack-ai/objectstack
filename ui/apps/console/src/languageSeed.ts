@@ -53,9 +53,32 @@
  * session the ruling explicitly accepts on a brand-new device — and the switch
  * would land at an unbounded time, which is the opposite of a bounded race.
  * The seed lands in the cache instead, and the next boot is correct forever.
+ *
+ * ## The app's declared default outranks the browser (objectstack#33231)
+ *
+ * The endpoint's rungs are the caller's own `sys_user.locale`, else the
+ * request's `Accept-Language`, else the deployment default. A bare `fetch`
+ * sends the BROWSER's header, so for a user with no personal locale the second
+ * rung always answered and the seed was the browser language: an app that
+ * declares `i18n.defaultLocale: 'zh-CN'` (served as discovery `locale.default`)
+ * still handed an `en-US` browser an English console, while the server wrote
+ * to that same user in Chinese.
+ *
+ * So, when the device holds no explicit choice, the read states the app's
+ * declared default as its `Accept-Language`. The server's rungs are unchanged:
+ * a stored `sys_user.locale` still answers first, and the stated default only
+ * decides the rung below it. The console's language for a signed-in user is
+ * therefore `sys_user.locale` → the app's declared default → (no default
+ * served) the browser → `en`. Discovery always serves a `locale.default`: an
+ * app with no `i18n` block is served `en`, and that is the default it gets.
+ * {@link loadAppDefaultLocale} reads it through the console's one shared
+ * discovery request, and `LocalizationFetchProvider`'s every-boot read states
+ * the same value, so the two reads still share one request and the
+ * revalidation keeps the cached seed on the app default.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
+import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { sharedGetJson } from '@object-ui/types';
 
 /**
@@ -69,6 +92,74 @@ export const SEED_RACE_TIMEOUT_MS = 500;
 interface MeLocalizationResponse {
   authenticated?: boolean;
   locale?: string | null;
+}
+
+/**
+ * How long the console's discovery request may run before it is abandoned.
+ * The request is shared with the data adapter's `connect()`, so this bound is
+ * the adapter's too; it matches the shell's own discovery bound.
+ */
+const DISCOVERY_TIMEOUT_MS = 10_000;
+
+/** This page-load's read of the app's declared default, once started. */
+let appDefaultLocale: Promise<string | undefined> | null = null;
+
+/** The discovery document, through the console's one shared request. */
+async function fetchDiscovery(serverBase: string): Promise<unknown> {
+  return getSharedDiscovery(serverBase, async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), DISCOVERY_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${serverBase}/api/v1/discovery`, {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        throw Object.assign(new Error(`discovery ${res.status}`), { status: res.status });
+      }
+      const body = await res.json();
+      return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+}
+
+/**
+ * The app's declared default language, discovery `locale.default`
+ * (objectstack#33231), or `undefined` when discovery does not answer one.
+ *
+ * Started once per page-load and never rejects: the first call starts the
+ * read, every later call shares it. A failed or unreadable discovery answers
+ * `undefined`, and the reads that state it then send the browser's own header,
+ * which is the console's behaviour without a served default.
+ */
+export function loadAppDefaultLocale(serverBase: string): Promise<string | undefined> {
+  if (!appDefaultLocale) {
+    appDefaultLocale = fetchDiscovery(serverBase).then(
+      (discovery) => {
+        const value = (discovery as { locale?: { default?: unknown } } | null)?.locale?.default;
+        return typeof value === 'string' && value.length > 0 ? value : undefined;
+      },
+      () => undefined,
+    );
+  }
+  return appDefaultLocale;
+}
+
+/**
+ * This page-load's read of the app's declared default, or `null` when nothing
+ * has started one. `seedTenantLanguage` starts it on every boot, before the
+ * app mounts, so the console's in-app reads find it here.
+ */
+export function startedAppDefaultLocale(): Promise<string | undefined> | null {
+  return appDefaultLocale;
+}
+
+/** Test seam: forget this page-load's read of the app's declared default. Not public. */
+export function __resetAppDefaultLocaleForTests(): void {
+  appDefaultLocale = null;
 }
 
 /**
@@ -86,6 +177,9 @@ interface MeLocalizationResponse {
  * answer belongs to the previous session.
  */
 async function fetchAndCacheSeed(serverBase: string): Promise<void> {
+  // The owner is read after this wait, when the request leaves: it carries the
+  // session that holds the browser then, not the one before the wait.
+  const appDefault = await loadAppDefaultLocale(serverBase);
   const ownerAtRequest = getSessionOwnerChangeCount();
   try {
     // Shared in flight with `LocalizationFetchProvider` (objectui#5544), which
@@ -97,7 +191,15 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
     // only, so on the boots where they do NOT overlap each still fetches.
     const json = await sharedGetJson<MeLocalizationResponse>(
       `${serverBase}/api/v1/auth/me/localization`,
-      { credentials: 'include', headers: { Accept: 'application/json' } },
+      {
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          // The app's declared default decides the rung below the user's own
+          // locale (objectstack#33231); none served, the browser's header goes.
+          ...(appDefault ? { 'Accept-Language': appDefault } : {}),
+        },
+      },
     );
     if (json?.authenticated === false) return;
     if (getSessionOwnerChangeCount() !== ownerAtRequest) return;
@@ -120,6 +222,12 @@ export async function seedTenantLanguage(
   // The user's own choice outranks the seed (ruling point 1), so there is
   // nothing for a seed to decide — and no reason to spend a request asking.
   if (readStoredLanguage()) return;
+
+  // Started on every choice-less boot, not only the first visit, and not
+  // awaited here: `LocalizationFetchProvider`'s every-boot read states the same
+  // default (objectstack#33231), and the request is the one the data adapter's
+  // `connect()` makes anyway, so it costs no request of its own.
+  void loadAppDefaultLocale(serverBase);
 
   // Stale-while-revalidate (ruling point 2): a cached seed applies at boot
   // immediately, with no waiting. Revalidation is not this module's job — the

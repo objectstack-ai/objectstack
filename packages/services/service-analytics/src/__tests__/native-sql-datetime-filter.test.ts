@@ -109,7 +109,7 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
 
     const { sql, params } = await strategy.generateSql(query, ctx);
 
-    expect(sql).toContain('assessed_at >= $1');
+    expect(sql).toContain('"assessed_at" >= $1');
     // The hook's return is bound verbatim, at the hook's own JS type — the
     // strategy adds no interpretation of its own. (This assertion used to be
     // described as "the value that matches the stored datetime"; that is the
@@ -135,7 +135,7 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
 
     const { sql, params } = await strategy.generateSql(query, ctx);
 
-    expect(sql).toContain('assessed_at >= $1');
+    expect(sql).toContain('"assessed_at" >= $1');
     expect(params).toEqual(['2025-06-18T00:00:00.000Z']);
     expect(typeof params[0]).toBe('string');
   });
@@ -197,7 +197,7 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
     const { sql, params } = await strategy.generateSql(query, ctx);
     // `<= 2025-06-18` means "including everything on June 18th": the bound is
     // June 19th's midnight, compared with `<` — not midnight of the 18th.
-    expect(sql).toContain('assessed_at < $1');
+    expect(sql).toContain('"assessed_at" < $1');
     expect(params).toEqual([Date.parse('2025-06-19T00:00:00.000Z')]);
   });
 
@@ -210,7 +210,7 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
       where: { assessed: { $lte: '2025-06-18T12:00:00.000Z' } },
     };
     const { sql, params } = await strategy.generateSql(query, ctx);
-    expect(sql).toContain('assessed_at <= $1');
+    expect(sql).toContain('"assessed_at" <= $1');
     expect(params).toEqual([Date.parse('2025-06-18T12:00:00.000Z')]);
   });
 

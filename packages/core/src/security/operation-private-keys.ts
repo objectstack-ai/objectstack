@@ -18,8 +18,11 @@
  *
  *  - the ADR-0057 D1 access DEPTH the sharing owner-match expands to —
  *    `__readScope` / `__writeScope`, plus the ADR-0090 D10 delegator halves
- *    `__delegatorReadScope` / `__delegatorWriteScope`, stamped in place by
- *    `security-plugin.ts` (`sc.__readScope = …`);
+ *    `__delegatorReadScope` / `__delegatorWriteScope`, stamped by the authz
+ *    middleware (`security-plugin-authz-middleware.ts`, step 2.6) onto the
+ *    envelope it hands the rest of ITS operation's chain — since #33051 a copy
+ *    of the caller's, never the caller's own, because one caller envelope
+ *    serves concurrent operations on different objects;
  *  - the engine's internal privilege markers on the same channel —
  *    `__expandRead` marks a read as a lookup EXPANSION sub-read (it no longer
  *    relaxes any gate — #7626 removed that waiver — but it still travels with
@@ -101,10 +104,10 @@ export const OPERATION_PRIVATE_KEY_PREFIX = '__';
  *    receives (which is exactly what plugin-security does before it calls the
  *    sharing service) can never write back into the operation context the caller
  *    was handed;
- *  - inbound — the engine's middleware stamps a depth for the object it is about
- *    to read onto whatever it is handed, so forwarding a caller's envelope BY
- *    REFERENCE would write that depth back into the request context the route
- *    goes on using.
+ *  - inbound — a middleware that stamps a depth for the object it is about to
+ *    read onto whatever it is handed (plugin-security's did, in place, until
+ *    #33051) would, through an envelope forwarded BY REFERENCE, write that
+ *    depth back into the request context the route goes on using.
  *
  * ⛔ Never `return exec;` on the "nothing to strip" path. The copy is the point,
  * not an optimisation to skip when the envelope happens to be clean — the two

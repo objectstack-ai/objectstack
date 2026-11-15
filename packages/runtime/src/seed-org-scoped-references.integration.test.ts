@@ -287,6 +287,26 @@ describe('#33207 an organization-scoped load resolves a person through membershi
     expect(north.errors).toHaveLength(1);
   });
 
+  it('an object walled by another tenant column resolves within the load organization, on that column', async () => {
+    const { engine, replayer, dealsOf, logger } = await boot({ posture: 'isolated', data: [deals([{ name: 'Deal 1', tag: 'Gold' }])] });
+    const sys = { context: { isSystem: true } } as any;
+    // South's Gold exists FIRST, so a probe that ignored the tenant column
+    // would hand North the South row.
+    await engine.insert('crm_workspace_tag', { id: 'tag_gold_s', name: 'Gold', workspace_id: ORG_SOUTH }, sys);
+    await engine.insert('crm_workspace_tag', { id: 'tag_gold_n', name: 'Gold', workspace_id: ORG_NORTH }, sys);
+
+    const north = await replayer!(ORG_NORTH);
+    const south = await replayer!(ORG_SOUTH);
+
+    expect(north.errors).toEqual([]);
+    expect(south.errors).toEqual([]);
+    expect((await dealsOf(ORG_NORTH))[0].tag).toBe('tag_gold_n');
+    expect((await dealsOf(ORG_SOUTH))[0].tag).toBe('tag_gold_s');
+    // The probe ran: no refusal was said for the tag table.
+    const refused = logger.warn.mock.calls.filter((c) => (c[1] as { object?: string } | undefined)?.object === 'crm_workspace_tag');
+    expect(refused).toEqual([]);
+  });
+
   it('the organization table answers only for the load organization', async () => {
     const { replayer, dealsOf } = await boot({ posture: 'isolated', data: [deals([{ name: 'Mine', home_org: 'North' }, { name: 'Theirs', home_org: 'South' }])] });
     await replayer!(ORG_NORTH);

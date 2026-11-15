@@ -37,10 +37,14 @@
  *
  * `Vary: Accept-Encoding` goes on every response this could encode, whatever
  * the request accepted and whatever the body's size, so a shared cache never
- * hands one client's encoding to another. It also goes on the `HEAD`, `206`
- * and `304` answers for such a response, which are never encoded themselves:
- * a `HEAD` carries the header fields its `GET` would, and a cache refreshes a
- * stored answer's headers from a `304`. The `ETag` is passed through
+ * hands one client's encoding to another. It also goes on the `HEAD` and `206`
+ * answers for such a response, which are never encoded themselves: a `HEAD`
+ * carries the header fields its `GET` would. The rule reads the answer it is
+ * handed, never the route's `200`, so a `304` carries it only when the `304`
+ * itself carries a compressible `Content-Type` (the dispatcher's `res.json()`
+ * answers do; the Console's bare stable-file `304` does not). A cache that
+ * refreshes a stored answer from a `304` keeps the stored `Vary`, so a `304`
+ * without one loses nothing. The `ETag` is passed through
  * unchanged: the metadata and record doors compare an `If-Match` token against
  * it strongly, so rewriting it to a weak `W/` form on encoded answers would make
  * every save that pins the version it just read fail its precondition.
@@ -219,8 +223,9 @@ export async function compressResponse(
     if (vary !== '*' && !(vary && VARY_ACCEPT_ENCODING.test(vary))) {
         c.header('Vary', vary ? `${vary}, Accept-Encoding` : 'Accept-Encoding');
     }
-    // A `HEAD`, a partial answer and a revalidation carry the `Vary` of the
-    // full answer they stand for, and are never encoded themselves.
+    // A `HEAD`, a partial answer and a revalidation are never encoded
+    // themselves. A `304` reaches this line only when it carries a
+    // compressible `Content-Type` of its own: a bare `304` gets no `Vary`.
     if (c.req.method === 'HEAD' || c.res.status === 206 || c.res.status === 304) return;
 
     const length = declaredLength(c.res.headers);

@@ -34,6 +34,7 @@ import { storedRowDocument } from './item-lock.js';
 import { installedManifestsOf, isPairOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
 import type { InstalledPackageSource } from '@objectstack/metadata-core';
 import { isPackageScopedType } from '@objectstack/core';
+import { PACKAGE_SLOTTED_STORE_TYPES } from '@objectstack/metadata';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { bindStoredRow } from './stored-row-binding.js';
@@ -224,6 +225,28 @@ function namesNoHolderAmongMany(
     if (holders.length < 2) return false;
     const installed = installedManifestsOf(registry);
     return !holders.some((holder) => isPairOf(bound, holder, installed));
+}
+
+/**
+ * [#33127, ADR-0150 D4 "registry overlay slot (ADR-0005)"] Whether a stored row
+ * of `canonicalType` bound to a package registers into that package's overlay
+ * slot (`SchemaRegistry#registerItem`'s `storedRowPackage`) instead of the
+ * name's one bare slot: the types the metadata service stores per `(package,
+ * name)` ({@link PACKAGE_SLOTTED_STORE_TYPES}), so the registry keeps one entry
+ * per stored row as the store keeps one row per package. With one bare slot,
+ * two packages' rows of a name (or a package's row beside its pair's, or a
+ * pair's row beside the package-less row of one member) kept only the row
+ * registered last: the other package's exact read and its registry item
+ * answered its shipped item, or nothing, by save or hydration order.
+ *
+ * ⛔ Not a `flow`: the name's one bare slot keeps the shipping package's
+ * declared override over any other row ({@link incomingTakesStoredFlowSlot},
+ * #28717), which the boot pull reads. ⛔ Not a `permission`: a stored fork of
+ * a shipped permission set keeps the disposition of its own maintainer ruling
+ * (see {@link judgesRowHolder}). A package-less row keeps the bare slot.
+ */
+function takesPackageOverlaySlot(canonicalType: string): boolean {
+    return PACKAGE_SLOTTED_STORE_TYPES.has(canonicalType) && canonicalType !== 'flow' && canonicalType !== 'permission';
 }
 
 /** {@link pairRowEnvelopeHolder}'s answer for a row that is not a customization pair's row of a two-holder name. */
@@ -430,7 +453,7 @@ export class ProtocolRegistryHydrationFacet {
      * rather than reading it back from the caller. Same sentence the boot
      * re-hydration already writes for the same rows.
      */
-    static async applyObjectRegistryMutation(host: Pick<ProtocolHost, 'classifyObjectContribution' | 'engine' | 'overlayPackageMismatchError' | 'packagelessAddress'>, request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<void> {
+    static async applyObjectRegistryMutation(host: Pick<ProtocolHost, 'classifyObjectContribution' | 'engine' | 'overlayPackageMismatchError' | 'packagelessAddress'>, request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<ObjectRegistryRefusal | undefined> {
         // [#8862] The `&& request.type !== 'objects'` limb that stood here is
         // GONE. It did not merely admit a plural, it registered under one —
         // `registerItem` below mints the entry under the spelling that arrived
@@ -485,7 +508,13 @@ export class ProtocolRegistryHydrationFacet {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
             );
+            // [#33005] …and handed back, so a door that answers success over
+            // this write can say the object is not served
+            // ({@link reportObjectRegistryRefusal}). Callers that answer no
+            // receipt ignore it and keep the line above as their whole report.
+            return { error: err };
         }
+        return undefined;
     }
 
     /**
@@ -898,13 +927,19 @@ export class ProtocolRegistryHydrationFacet {
             if (typeof owner === 'string' && owner !== '') shippers.add(owner);
             if (!incomingTakesStoredFlowSlot(held, registered, shippers, installedManifestsOf(registry))) return true;
         }
-        registry.registerItem(type, registered, 'name' as any);
+        // [#33127, ADR-0150 D4] A row bound to a package takes that package's
+        // overlay slot ({@link takesPackageOverlaySlot}), so each stored row of
+        // the name keeps its own entry and each package's exact read serves its
+        // own, in every save and hydration order.
+        const rowPackage = boundPackageOf(options.packageId);
+        const overlaySlot = rowPackage !== undefined && takesPackageOverlaySlot(canonicalType);
+        registry.registerItem(type, registered, 'name' as any, undefined, overlaySlot ? { storedRowPackage: rowPackage } : undefined);
         // [#32820] A package-less row wearing the envelope of the one holder
         // served now is recorded, so an enable serving a second holder builds
         // it again ({@link healSoleHolderEnvelopes}); any other registration
-        // of the key forgets it.
+        // of the key forgets it. [#33127] A package overlay slot is another key.
         const member = bundleMemberOf(type, data);
-        recordSoleHolderEnvelope(registry, envelopeKey(type, rowName, member),
+        if (!overlaySlot) recordSoleHolderEnvelope(registry, envelopeKey(type, rowName, member),
             !options.packageId && typeof envelopePackage === 'string' && envelope && HEALED_OVERLAY_TYPES.has(canonicalType)
                 ? { host, type, canonicalType, name: rowName, member, data, holder: envelopePackage, registered }
                 : undefined);
@@ -1429,7 +1464,7 @@ export class ProtocolRegistryHydrationFacet {
              * {@link HydrationOptions}.
              */
             reboundFrom?: { readonly packageId: string | null };
-        }): Promise<void> {
+        }): Promise<ObjectRegistryRefusal | undefined> {
         // [#8862] The `|| request.type === 'objects'` limb is GONE — this
         // branch admitted the plural that {@link applyObjectRegistryMutation}
         // then consumed. All four call sites of this method fold at their
@@ -1468,8 +1503,9 @@ export class ProtocolRegistryHydrationFacet {
             // would make a runtime-created object unreachable for data CRUD
             // rather than merely un-listed. This branch has never carried the
             // kernel-scope gate below either, for the same reason.
-            await host.applyObjectRegistryMutation(request);
-            return;
+            // [#33005] The refusal, when the registry refused the object, is
+            // this method's answer; every other branch answers `undefined`.
+            return host.applyObjectRegistryMutation(request);
         }
         // [#28574] An `object_extension` row is its package's `'extend'`
         // contributor of the object it names: not org-gated and not
@@ -1484,10 +1520,10 @@ export class ProtocolRegistryHydrationFacet {
                     `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
                 );
             }
-            return;
+            return undefined;
         }
         // [#23298] Whose registry this is — never `environmentId` alone.
-        if (!host.registryTakesStoredRows()) return;
+        if (!host.registryTakesStoredRows()) return undefined;
         try {
             await host.hydrateOverlayIntoRegistry(request.type, request.item, {
                 packageId: request.packageId ?? undefined,
@@ -1503,6 +1539,7 @@ export class ProtocolRegistryHydrationFacet {
                 `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
             );
         }
+        return undefined;
     }
 
     /**
@@ -1754,8 +1791,17 @@ export class ProtocolRegistryHydrationFacet {
                 registry.removeObjectOverlay(name);
             }
 
-            let healed = false;
-            if (typeof registry.removeRuntimeShadow === 'function') {
+            // [#33127, ADR-0150 D4] A removed row bound to a package sat in that
+            // package's overlay slot (`SchemaRegistry#removePackageOverlaySlots`,
+            // the types {@link takesPackageOverlaySlot} names): that slot is
+            // retired, and tier 1 does not touch the bare slot, which holds the
+            // package-less row, still stored. The walk then stops where tier 1
+            // stops, where a packaged artifact of the name is served.
+            const removedBinding = packageId === HEAL_BINDING_UNKNOWN ? undefined : boundPackageOf(packageId);
+            const slotRetired = removedBinding !== undefined && typeof registry.removePackageOverlaySlots === 'function'
+                && registry.removePackageOverlaySlots(singular, name, memberKey, (id: string) => id === removedBinding).length > 0;
+            let healed = slotRetired && host.isArtifactBacked(singular, name);
+            if (!slotRetired && typeof registry.removeRuntimeShadow === 'function') {
                 healed = registry.removeRuntimeShadow(singular, name, memberKey);
                 if (type !== singular) {
                     healed = registry.removeRuntimeShadow(type, name, memberKey) || healed;
@@ -1815,6 +1861,13 @@ export class ProtocolRegistryHydrationFacet {
             const remainingRows = canonical === 'object' && host.isUnservedSealedOverlay(canonical, name)
                 ? []
                 : storedRows ?? [];
+            // [#33127] A caller that does not know the removed row's binding (a
+            // peer on a signal naming no package): every package overlay slot
+            // whose package no remaining row is bound to is the removed row's.
+            if (packageId === HEAL_BINDING_UNKNOWN && storedRows != null && typeof registry.removePackageOverlaySlots === 'function') {
+                const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id)));
+                registry.removePackageOverlaySlots(singular, name, memberKey, (id: string) => !bindings.has(id));
+            }
             if (remainingRows.length > 0) {
                 if (canonical === 'object' && !host.isArtifactBacked(canonical, name)) {
                     const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id) ?? 'sys_metadata'));
@@ -2393,5 +2446,60 @@ export function objectStorageSyncRefusedNotice(name: string, err: unknown): Runt
         hint:
             "Resolve the datasource's refusal, then publish the object again (which re-runs the sync), "
             + 'or restart the server, which syncs the storage of every registered object.',
+    };
+}
+
+/**
+ * [#33005] What {@link ProtocolRegistryHydrationFacet.applyObjectRegistryMutation}
+ * answers when the registry refused the object it was asked to register: the
+ * thrown value, whole. The row is already persisted; this is the one fact the
+ * write-through used to keep to a `warn` line.
+ */
+export interface ObjectRegistryRefusal {
+    readonly error: unknown;
+}
+
+/**
+ * [#33005] The rule id of the advisory a publish answers with when the runtime
+ * registry refused an object the publish made live. Stable across releases,
+ * like {@link OBJECT_STORAGE_SYNC_REFUSED}: the key a client groups, suppresses
+ * or acts on the notice by.
+ */
+export const OBJECT_REGISTRY_REFUSED = 'object-registry-refused';
+
+/**
+ * [#33005] A door that answers success over a registry write-through the
+ * registry refused: one `error` line for the operator, then one `warning` for
+ * the caller, on the doors and in the shape of
+ * {@link objectStorageSyncRefusedNotice}. `error` by AGENTS.md "Degradation log
+ * levels": the publish answers success and its definition is stored, while the
+ * object is not served, so a seed load or data read against it answers
+ * `OBJECT_NOT_FOUND` until something registers it. Said once per refused object
+ * of a write; the write is deliberately NOT failed (ADR-0067 D2: the registry
+ * mutation runs after the metadata commit). The thrown text is a separate
+ * argument, and reaches the caller only under {@link clientFacingFailureText}.
+ */
+export function reportObjectRegistryRefusal(name: string, refusal: ObjectRegistryRefusal): RuntimeAuthoringIssue {
+    const err = refusal.error as { message?: unknown } | undefined;
+    console.error(
+        `[Protocol] object '${name}' was published but the runtime registry REFUSED it — its definition is stored `
+        + 'and the publish answered success, so it looks usable while every data read, write and seed load against '
+        + 'it answers OBJECT_NOT_FOUND until it is registered. Fix: resolve the registry\'s refusal (logged after '
+        + 'this line), then publish the object again, which re-runs the registration, or restart, since the boot '
+        + 'registers every stored object.',
+        err?.message ?? refusal.error,
+    );
+    return {
+        rule: OBJECT_REGISTRY_REFUSED,
+        severity: 'warning',
+        where: `object "${name}"`,
+        path: '',
+        message:
+            `object '${name}' was published, but the runtime registry refused it `
+            + `(${clientFacingFailureText(refusal.error, 'the reason is in the server log')}), so it is NOT served: `
+            + 'until it is registered, data reads, writes and seed loads against it answer OBJECT_NOT_FOUND.',
+        hint:
+            "Resolve the registry's refusal, then publish the object again (which re-runs the registration), "
+            + 'or restart the server, which registers every stored object.',
     };
 }

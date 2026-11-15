@@ -467,6 +467,7 @@ const UNBOUND_CAUSE_KEYS: Readonly<Record<string, string>> = {
   disabled_subflow: 'engine.studio.auto.unboundCause.disabled_subflow',
   notice_after_suspending_subflow: 'engine.studio.auto.unboundCause.notice_after_suspending_subflow',
   suspending_subflow_in_region: 'engine.studio.auto.unboundCause.suspending_subflow_in_region',
+  retried_callout_in_subflow: 'engine.studio.auto.unboundCause.retried_callout_in_subflow',
   missing_trigger: 'engine.studio.auto.unboundCause.missing_trigger',
   binding_failure: 'engine.studio.auto.unboundCause.binding_failure',
 };
