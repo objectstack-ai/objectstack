@@ -20,12 +20,13 @@ import { buildApiError } from '../error-envelope.js';
 import {
     admitAutomationAddress,
     automationAddressRegistryOf,
-    bareNameRefusal,
+    bareNameAdmission,
     readAutomationAddress,
     automationRouteAllow,
     AUTOMATION_DOOR_LITERALS,
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
+    type AutomationAddressSlot,
 } from './automation-address.js';
 // [#31696] One holder's flow of a shared name, served from its own slot; a
 // start's admission walks callees from the calling flow's package.
@@ -1255,7 +1256,7 @@ async function automationRegistryOf(deps: DomainHandlerDeps, context: HttpProtoc
 
 /**
  * [ADR-0150 D5, child G1] The item a BARE by-name run or read names, for the
- * bare name's `409` (`bareNameRefusal`): the flow of the trigger, toggle, read
+ * bare name's `409` (`bareNameAdmission`): the flow of the trigger, toggle, read
  * and run doors, and the connector instance of the connection door. The
  * definition writes (`PUT` / `DELETE /:name`, the clone) are absent: they
  * answer their own `409` with its remedy (`flowWriteRefusal`).
@@ -1279,15 +1280,19 @@ function bareByNameItem(parts: readonly string[], method: string): { type: 'flow
     return undefined;
 }
 
-/** [ADR-0150 D5, child G1] A bare by-name door's `409`, when the resolver refuses its name. */
-function bareByNameRefusal(
+/**
+ * [ADR-0150 D5, child G1] A bare by-name door's `409`, when the resolver
+ * refuses its name. [ADR-0150 D3, #33386] Judged over the served holders
+ * (`bareNameAdmission`): a name two packages hold whose one served holder
+ * remains is that holder's slot, never a `409` naming a disabled package.
+ */
+function bareByNameAdmission(
     registry: AutomationAddressRegistry | undefined,
     parts: readonly string[],
     method: string,
-): AutomationAddressRefusal | undefined {
+): AutomationAddressRefusal | AutomationAddressSlot | undefined {
     const item = bareByNameItem(parts, method);
-    const refusal = item ? bareNameRefusal(registry, item.type, item.name) : undefined;
-    return refusal ? { status: 409, refusal } : undefined;
+    return item ? bareNameAdmission(registry, item.type, item.name) : undefined;
 }
 
 /**
@@ -3861,19 +3866,31 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // [ADR-0150 D9, #31699] A connector name two packages hold, addressed by
     // the namespace of one of them: the connection door connects, reads and
     // revokes that holder's instance (`ConnectorConnectionRequest.package`).
+    //
+    // [ADR-0150 D3, #33386] Every admission here is judged over the served
+    // holders: a bare name two packages hold whose one served holder remains
+    // is served from that holder's slot, as its address is (seat ruling
+    // 6884403301). `item` is the address's item, else the bare door's own.
     let connectorPackage: string | undefined;
     {
+        const door = bareByNameItem(parts, m);
+        const item = address.qualifier ? address.item : door;
         const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
-            : bareByNameRefusal(addressRegistry, parts, m);
-        if (admission?.status === 'slot' && address.item?.type === 'connector' && bareByNameItem(parts, m)?.type === 'connector') {
+            : bareByNameAdmission(addressRegistry, parts, m);
+        if (admission?.status === 'slot' && item?.type === 'connector' && door?.type === 'connector') {
             connectorPackage = admission.packageId;
         } else if (admission?.status === 'slot') {
-            const slotted = bareByNameItem(parts, m)?.type === 'flow' && address.item
-                ? flowSlotView(automationService, admission.packageId, address.item.name)
+            const slotted = door?.type === 'flow' && item
+                ? flowSlotView(automationService, admission.packageId, item.name)
                 : undefined;
-            if (!slotted) return { handled: true, response: automationAddressRefusalResponse(deps, { status: 409, refusal: admission.refusal }) };
-            automationService = slotted;
+            if (slotted) {
+                automationService = slotted;
+            } else if (address.qualifier || door?.type !== 'flow') {
+                return { handled: true, response: automationAddressRefusalResponse(deps, { status: 409, refusal: admission.refusal }) };
+            }
+            // [#33386] Else a bare flow name and no slot entries: the bare
+            // service, whose bare entries judge the served holders themselves.
         } else if (admission) {
             const byRun = !address.qualifier && admission.status === 409 && parts[1] === 'runs' && parts[2]
                 ? await runSlotView(automationService, parts[0], parts[2], admission.refusal.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])))

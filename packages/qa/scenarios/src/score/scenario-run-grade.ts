@@ -623,9 +623,58 @@ const WITHHELD_ACT = new RegExp(
   'i',
 );
 
-/** The reply's wording declines ({@link DECLINE}, {@link WITHHELD_ACT}). */
+/** A finding a report may negate: "there is no error", "no problem found". Never a field or a value the data could hold. */
+const PROBLEM = '(?:errors?|problems?|issues?|bugs?|faults?|failures?|warnings?|mistakes?|discrepanc(?:y|ies)|conflicts?|anomal(?:y|ies)|duplicates?|(?:anything|nothing) (?:is )?(?:wrong|amiss|unusual|off))\\b';
+/**
+ * Up to `n` characters within one sentence (no stop, colon, semicolon or line
+ * break), none of them a word that describes a CELL rather than a field's
+ * existence: "no record with an empty account field" and "no other fields
+ * filled in" report on values, not on what the data can hold.
+ */
+const span = (n: number) => `(?:(?!\\b(?:empty|blank|null|unset|missing|other|filled|required|editable)\\b)[^.;:!?\\n]){0,${n}}?`;
+
+/**
+ * A reply that says the data does not hold what was asked: the question's
+ * object has no field for it, or the data does not record it. The wordings the
+ * recorded eval runs use for an honest decline on an `unanswerable` question
+ * ("The Account object has no revenue field", "There is no revenue or annual
+ * revenue field", "Neither object has a sponsor field", "No tax-rate field
+ * exists", "The app's data doesn't record a sponsor"), and on a `withheld`
+ * one, where the persona's view of the app lacks the field ("The Project
+ * object has no hours field").
+ *
+ * The negation binds to RECORDING, as {@link WITHHELD_ACT}'s binds to acting:
+ * a missing field is named as one (`field`, after the negation, in the same
+ * sentence), and a "does not record" takes the data, the app, a record or an
+ * object as its subject. So a report that negates a finding — "there is no
+ * error", "no problem found", "it does not record anything wrong", "the record
+ * has no errors in any field" — reads as no decline, and so does a cell
+ * report ("none has an empty account field") and an absent OBJECT ("The app
+ * has no task object, so I counted projects: 2"), which answers some other
+ * question rather than declining this one. Either apostrophe.
+ *
+ * The cost: an answer that explains its route through a missing field ("the
+ * contact object has no industry field, so I joined accounts") also reads as
+ * declining. On an answerable question that changes no verdict — its figures
+ * decide — only the `declined` mark.
+ */
+const UNRECORDED = new RegExp(
+  [
+    // "has no sponsor field", "have no revenue, amount or similar field", "There is no X field", "there's no field for it"
+    `\\b(?:has|have|there(?:['’]s| is| are)) no (?!${PROBLEM})${span(40)}\\bfields?\\b`,
+    // "Neither object has a sponsor field", "None of the three objects (…) carries a tax field"
+    `\\b(?:neither|none)\\b${span(80)}\\b(?:has|have|carr(?:y|ies)|holds?) an? ${span(40)}\\bfields?\\b`,
+    // "No tax-rate or tax-amount field exists", "no field records the sponsor"
+    `\\bno (?!${PROBLEM})${span(40)}\\bfields? (?:exists?|records?|holds?|stores?|tracks?|captures?)\\b`,
+    // "The app's data doesn't record a sponsor", "The data does not record a tax rate"
+    `\\b(?:app|data|database|records?|objects?|system) (?:does not|doesn['’]t|do not|don['’]t|did not|didn['’]t) (?:record|store|track|capture)\\b(?!\\s+(?:any |an? |that |the )?${PROBLEM})`,
+  ].join('|'),
+  'i',
+);
+
+/** The reply's wording declines ({@link DECLINE}, {@link UNRECORDED}, {@link WITHHELD_ACT}). */
 export function declines(replyText: string): boolean {
-  return DECLINE.test(replyText) || WITHHELD_ACT.test(replyText);
+  return DECLINE.test(replyText) || UNRECORDED.test(replyText) || WITHHELD_ACT.test(replyText);
 }
 
 export interface PersonaRunInput {
