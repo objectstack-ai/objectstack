@@ -30,17 +30,20 @@
  * (#32310).
  */
 
+import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
 import { sendError } from '@objectstack/types';
 import { handleRouteError } from './error-response.js';
 import { wantsMetaItemLayers } from './meta-item-read-gate.js';
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import type { MetaItemReadHandler } from './meta-item-read-routes.js';
-import type { RestServer } from './rest-server.js';
+import { mayReadPendingDrafts, type RestServer } from './rest-server.js';
 
 /** The `RestServer` members {@link registerMetaQualifiedItemRoute} reads. */
 export interface MetaQualifiedItemRouteHost {
     readonly routeManager: RestServer['routeManager'];
     resolveProtocol: RestServer['resolveProtocol'];
+    /** [#33385, review S1] The caller, asked only to judge an admitted draft switch at `_env`. */
+    resolveExecCtx: RestServer['resolveExecCtx'];
 }
 
 /**
@@ -77,21 +80,22 @@ const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.
  * the registry has not read, and the refusal stands.
  *
  * [#33385, review S1] Only the read that judged the name is admitted this
- * way. A draft read (`?state=draft`, `?preview=draft`) or the deprecated
- * layered view (`?layers=`) reads other rows than the plain read, so for it
- * the marked refusal stands, as on `main` ({@link readsAsJudged}).
+ * way. An admitted draft read (`?state=draft`, `?preview=draft`) or the
+ * deprecated layered view (`?layers=`) reads other rows than the plain read,
+ * so for it the marked refusal stands, as on `main` (`readsAsJudged`, asked
+ * only once the refusal is marked).
  */
 async function admitEnvironmentAddress(
     p: QualifiedAddressProtocol,
     request: { type: string; name: string; member?: string },
-    query: Readonly<Record<string, unknown>>,
+    readsAsJudged: () => Promise<boolean>,
 ): Promise<void> {
     try {
         p.admitEnvironmentQualifier?.(request);
     } catch (refusal) {
         if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
-            || !readsAsJudged(query)
-            || typeof p.getMetaItem !== 'function') throw refusal;
+            || typeof p.getMetaItem !== 'function'
+            || !(await readsAsJudged())) throw refusal;
         let withheld: boolean;
         try {
             withheld = (await p.getMetaItem(request))?.item == null;
@@ -100,18 +104,6 @@ async function admitEnvironmentAddress(
         }
         if (!withheld) throw refusal;
     }
-}
-
-/**
- * [#33385, review S1] Whether the read `_env` would admit is the plain read
- * naming no package that {@link admitEnvironmentAddress} judges the name with:
- * no draft switch and no layered view. Read off the raw query, before either
- * draft switch is admitted per caller, so the answer never depends on whether
- * the caller may read drafts, nor on whether a draft exists.
- */
-function readsAsJudged(query: Readonly<Record<string, unknown>>): boolean {
-    const draft = (value: unknown) => typeof value === 'string' && value.toLowerCase() === 'draft';
-    return !draft(query.state) && !draft(query.preview) && !wantsMetaItemLayers(query);
 }
 
 /** What the host answered this path before the route existed: its unmatched 404. */
@@ -169,7 +161,16 @@ export function registerMetaQualifiedItemRoute(
                     query.package = address.packageId;
                 } else {
                     const member = typeof query.member === 'string' && query.member !== '' ? query.member : undefined;
-                    await admitEnvironmentAddress(p, { type: params.type, name: params.name, ...(member ? { member } : {}) }, query);
+                    // [#33385, review S1] The read the item read answers this caller: the
+                    // plain read unless `?layers=` asks for the layered view, or a
+                    // draft switch is sent by a caller `mayReadPendingDrafts` admits.
+                    const readsAsJudged = async (): Promise<boolean> => {
+                        if (wantsMetaItemLayers(query)) return false;
+                        const draft = (value: unknown) => typeof value === 'string' && value.toLowerCase() === 'draft';
+                        if (!draft(query.state) && !draft(query.preview)) return true;
+                        return !mayReadPendingDrafts(await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable));
+                    };
+                    await admitEnvironmentAddress(p, { type: params.type, name: params.name, ...(member ? { member } : {}) }, readsAsJudged);
                 }
                 await readItem(asItemRead(req, params, query), res);
             } catch (error: any) {

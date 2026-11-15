@@ -5763,7 +5763,7 @@ export class RestServer {
         // `/layers`, `/publish`, `/rollback`, `book/:name/tree`), which keep
         // their routes (ruling Q1 on #31691).
         registerMetaQualifiedItemRoute.call(
-            { routeManager: this.routeManager, resolveProtocol: (...a) => this.resolveProtocol(...a) },
+            { routeManager: this.routeManager, resolveProtocol: (...a) => this.resolveProtocol(...a), resolveExecCtx: (...a) => this.resolveExecCtx(...a) },
             scope,
             readMetaItem,
         );

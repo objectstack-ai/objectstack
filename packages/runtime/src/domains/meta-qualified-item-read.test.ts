@@ -486,7 +486,7 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
         // layered view (`?layers=`) are not the read naming no package that
         // judged the name, so a marked refusal stands for them: `main`'s 409,
         // never an enabled package's draft or stored row at `_env`.
-        it(`${type}: only a disabled holder in the registry — \`_env\` with a draft or layered switch refuses 409, as on main, never an enabled package's draft or row`, async () => {
+        it(`${type}: only a disabled holder in the registry — \`_env\` with an admitted draft switch or the layered view refuses 409, as on main, a caller not admitted to drafts is answered the plain read's 404, never an enabled package's draft or row`, async () => {
             const refusedAtEnv = async (query: Record<string, string>) => {
                 const env = await read(`/${type}/_env/solo`, query);
                 expect([env.status, env.body?.error?.code, query], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT', query]);
@@ -499,6 +499,15 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
                 metadata: JSON.stringify({ name: 'solo', label: `gamma draft ${type}` }) });
             const draftReads: Record<string, string>[] = [{ state: 'draft' }, { state: 'DRAFT' }, { preview: 'draft' }];
             for (const query of draftReads) await refusedAtEnv(query);
+            // A caller `mayReadPendingDrafts` does not admit is answered the plain
+            // read whatever it sends, so `_env` answers it as the plain read does:
+            // 404, never the draft, and never a 409 naming the disabled holder.
+            const member = { ...ctx(), executionContext: { userId: 'u_member', systemPermissions: [] } };
+            for (const query of draftReads) {
+                const env = await read(`/${type}/_env/solo`, query, member);
+                expect([env.status, env.body?.error?.code, query], JSON.stringify(env.body)).toEqual([404, 'RESOURCE_NOT_FOUND', query]);
+                for (const text of [`gamma draft ${type}`, B]) expect(JSON.stringify(env.body ?? null)).not.toContain(text);
+            }
             // An enabled package's unhydrated active row: the layered view.
             storedRows = [{ id: 'row_gamma', type, name: 'solo', state: 'active', package_id: C,
                 metadata: JSON.stringify({ name: 'solo', label: `gamma row ${type}` }) }];

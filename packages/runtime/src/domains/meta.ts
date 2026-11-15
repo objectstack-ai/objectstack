@@ -1142,23 +1142,24 @@ const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.
  * item or refuses, a package holds the name through a stored row the
  * registry has not read, and the refusal stands.
  *
- * [#33385, review S1] Only the read that judged the name is admitted this way:
- * for a draft read (`?state=draft`, `?preview=draft`) or the deprecated layered
- * view (`?layers=`), read off the raw query as `RestServer`'s route reads it,
- * the marked refusal stands, as on `main`. The raw query, so the answer never
- * depends on whether the caller may read drafts, nor on whether a draft exists.
+ * [#33385, review S1] Only the read that judged the name is admitted this way.
+ * `judged` is false when the read the caller is answered is not that plain
+ * read: an ADMITTED draft switch (`?state=draft`, `?preview=draft`, as
+ * `mayReadPendingDrafts` admits it) or the deprecated layered view
+ * (`?layers=`). Then the marked refusal stands, as on `main`. A caller the
+ * draft switches do not admit is answered the plain read, so it is judged.
+ * `RestServer`'s qualified route passes the same judgment.
  */
 async function admitEnvironmentAddress(
     protocol: MetaDomainProtocol | undefined,
     request: { type: string; name: string; member?: string },
-    query: Readonly<Record<string, unknown>> | undefined,
+    judged: boolean,
 ): Promise<void> {
     try {
         protocol?.admitEnvironmentQualifier?.(request);
     } catch (refusal) {
-        const draft = (value: unknown) => typeof value === 'string' && value.toLowerCase() === 'draft';
         if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
-            || draft(query?.state) || draft(query?.preview) || wantsMetaItemLayers(query)
+            || !judged
             || typeof protocol?.getMetaItem !== 'function') throw refusal;
         let withheld: boolean;
         try {
@@ -2195,7 +2196,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // a name only disabled packages hold answers its 404, #33385).
             if (environmentQualified) {
                 const qualifierProtocol = await resolveProtocol(deps, _context);
-                await admitEnvironmentAddress(qualifierProtocol, { type: singularType, name, ...memberSelector }, query);
+                await admitEnvironmentAddress(qualifierProtocol, { type: singularType, name, ...memberSelector },
+                    !isDraftRead && !previewDrafts && !wantsMetaItemLayers(query));
             }
 
             // [#5882 · #20478] The DEPRECATED spelling of the layered view,
