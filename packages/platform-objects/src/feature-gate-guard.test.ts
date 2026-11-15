@@ -282,7 +282,8 @@ describe('feature-gate completeness guard (#2874)', () => {
   describe('the inputs a hide-when-on flag shows while on (SHOWN_WHEN_ON)', () => {
     it.each(SHOWN_WHEN_ON)('%s carries the inverse of %s as && conjuncts', (path, flag) => {
       expect(PUBLIC_AUTH_FEATURES[flag].semantics, `${flag} is hide-when-on, or the input belongs in gatedInputs`).toBe('hide-when-on');
-      expect(PUBLIC_AUTH_FEATURES[flag].gatedInputs ?? [], `${path} is not also booked the other way`).not.toContain(path);
+      const booked = (PUBLIC_AUTH_FEATURES[flag] as { gatedInputs?: readonly string[] }).gatedInputs ?? [];
+      expect(booked, `${path} is not also booked the other way`).not.toContain(path);
       const { visibleSource } = resolveGatedInput(path);
       expect(visibleSource, `${path} has a visible predicate`).toBeDefined();
       for (const term of [`has(features.${flag})`, `features.${flag} == true`]) {
