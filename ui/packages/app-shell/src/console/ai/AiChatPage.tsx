@@ -3044,6 +3044,7 @@ export function ChatPane({
             const payload = (await metadataClient.publishPackageDrafts(packageId)) as
               | (Record<string, unknown> & {
                   success?: boolean;
+                  outcome?: string;
                   error?: { message?: string };
                   failedCount?: number;
                   failed?: PublishFailure[];
@@ -3053,7 +3054,11 @@ export function ChatPane({
             // A non-2xx now throws inside the client with the server's own
             // message, caught below like any other failure. What is left here
             // is the 2xx batch verdict.
-            if (payload?.success === false) {
+            // objectstack#33277 — `published_unregistered` answers `success:
+            // false` over drafts that DID land (the registry refused an object,
+            // whose warning the client has already reported): not a failure
+            // here, as it was not while the server answered `published`.
+            if (payload?.success === false && payload?.outcome !== 'published_unregistered') {
               // The status is no longer in hand — a non-2xx threw above — so
               // the last rung is a sentence rather than "HTTP 200".
               throw new Error(

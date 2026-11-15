@@ -1798,9 +1798,10 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
  * `success: false` on a 200 with `publishedCount: 0`, `published: []` and the
  * whole batch in `failed[]` (`BATCH_ABORTED` marks the non-causal items).
  * `success: false` alone does NOT mean a refusal — a publish with no pending
- * drafts answers it too, with `failed: []`; `outcome` (#10462) names which of
- * the three exits answered, so no consumer has to reverse-engineer that from
- * `failed.length`.
+ * drafts answers it too, with `failed: []`, and so does a publish whose drafts
+ * landed while the runtime registry refused an object among them (#33277);
+ * `outcome` (#10462) names which of the four exits answered, so no consumer
+ * has to reverse-engineer that from `failed.length`.
  *
  * **`probes` is deliberately OPAQUE** — see its own note below. Do not model
  * it here without a consumer-driven card (#9406 ruling).
@@ -1812,13 +1813,22 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'rollback answers false on a 200 — but so does a publish with nothing '
     + 'to promote, so false alone is NOT a refusal: read `outcome`, '
     + 'not this boolean or the HTTP status. Always equal to '
-    + '`outcome === \'published\'` (pinned). It does NOT cover the '
-    + 'best-effort receipts below, each of which reports its own `success`.',
+    + '`outcome === \'published\'` (pinned), so it is also false on '
+    + '`published_unregistered`, where the drafts landed but an object is not '
+    + 'served. It does NOT cover the best-effort receipts below, each of '
+    + 'which reports its own `success`.',
   ),
-  outcome: z.enum(['published', 'refused', 'nothing_to_publish']).describe(
+  outcome: z.enum(['published', 'published_unregistered', 'refused', 'nothing_to_publish']).describe(
     'First-class discriminant for WHICH exit answered — the fact '
     + '`success` compresses into one boolean. `published`: at least one draft '
-    + 'promoted and none refused. `refused`: the batch was refused — a '
+    + 'promoted, none refused, and the runtime registry took every promoted '
+    + 'object. `published_unregistered`: the drafts landed exactly as '
+    + 'on `published` — the metadata is live and stays live — but the runtime '
+    + 'registry refused at least one promoted object, so that object is not '
+    + 'served: until something registers it, data reads, writes and seed '
+    + 'loads against it answer OBJECT_NOT_FOUND. `unregistered[]` names each '
+    + 'such object; do not seed or read it before it is registered (publish '
+    + 'it again, or restart). `refused`: the batch was refused — a '
     + 'pre-flight violation or the ADR-0067 D2 all-or-nothing rollback; the '
     + 'per-item story is in `failed[]`, which is non-empty exactly on this '
     + 'outcome (the invariant consumers previously had to reverse-engineer, '
@@ -1829,8 +1839,10 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'invariants, pinned in the conformance suites: '
     + '`success === (outcome === \'published\')`; `refused` if and only if '
     + '`failed.length > 0`; `nothing_to_publish` if and only if '
-    + '`published.length === 0 && failed.length === 0`. Values are lowercase '
-    + 'snake, matching the `sys_metadata_audit` outcome vocabulary.',
+    + '`published.length === 0 && failed.length === 0`; '
+    + '`published_unregistered` if and only if `unregistered` is present. '
+    + 'Values are lowercase snake, matching the `sys_metadata_audit` outcome '
+    + 'vocabulary.',
   ),
   publishedCount: z.number().int().describe(
     'Number of drafts promoted to active — `published.length`. 0 on every '
@@ -1903,6 +1915,24 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     'Items that did not publish. Because the batch is all-or-nothing '
     + '(ADR-0067 D2), a non-empty list means NOTHING landed: '
     + '`published: []`, `publishedCount: 0`.',
+  ),
+  unregistered: z.array(z.object({
+    type: z.string().describe('Metadata type of the published item the registry refused (`object`).'),
+    name: z.string().describe('Name of the object that is published but not served.'),
+    rule: z.enum(['object-registry-refused']).describe(
+      'Why it is not served, as a stable rule id: the same id as the '
+      + 'warning on this object\'s `published[]` element, whose `message` '
+      + 'and `hint` say what happened and how to fix it.',
+    ),
+  })).optional().describe(
+    'Present ONLY on `outcome: \'published_unregistered\'`, and then '
+    + 'non-empty: each promoted object the runtime registry refused, in '
+    + 'publish order. Every entry also appears in `published[]` — '
+    + 'its metadata IS live, nothing was rolled back (ADR-0067 D2 runs the '
+    + 'registration after the metadata commit) — but the object is not '
+    + 'served until something registers it, so a caller about to seed or '
+    + 'read it should publish it again or restart first. Absent on every '
+    + 'other outcome; an empty array is never emitted.',
   ),
   seedApplied: z.object({
     success: z.boolean().describe(
