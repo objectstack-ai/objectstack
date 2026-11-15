@@ -478,26 +478,30 @@ function checkGalleryFloor(card: ScenarioCard, refuse: Refuse) {
 }
 
 /**
- * A card declaring `workingDays` needs `asOf`, and every ISO date value under `run` and `iterate` other
- * than `asOf` on a Monday to Friday: the run-date rebase moves such a card by whole working days, which
- * a weekend date has no place in.
+ * A card declaring `workingDays` needs `asOf`, and `asOf` and every ISO date value under `run` and `iterate`
+ * on a Monday to Friday: the run-date rebase moves such a card by whole working days, which a weekend date
+ * has no place in. A weekend `asOf` would be counted as the Friday before it, so it and that Friday would
+ * move onto the same run date.
  */
 function checkWorkingDays(card: ScenarioCard, refuse: Refuse) {
   if (card.asOf === undefined) {
     refuse(['workingDays'], '`workingDays` needs `asOf`: the working days are counted from the card\'s today');
     return;
   }
+  const check = (v: string, at: IssuePath): void => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?=$|T)/.exec(v);
+    if (!m) return;
+    const t = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (t.getUTCMonth() !== Number(m[2]) - 1 || t.getUTCDate() !== Number(m[3])) return;
+    const w = t.getUTCDay();
+    if (w === 0 || w === 6) {
+      refuse(at, `\`${v}\` is a ${w === 0 ? 'Sunday' : 'Saturday'}, but the card declares \`workingDays\`: move it to a working day, or drop \`workingDays\` if the card does not keep to them`);
+    }
+  };
+  check(card.asOf, ['asOf']);
   const walk = (v: unknown, at: IssuePath): void => {
-    if (typeof v === 'string') {
-      const m = /^(\d{4})-(\d{2})-(\d{2})(?=$|T)/.exec(v);
-      if (!m || v.slice(0, 10) === card.asOf) return;
-      const t = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-      if (t.getUTCMonth() !== Number(m[2]) - 1 || t.getUTCDate() !== Number(m[3])) return;
-      const w = t.getUTCDay();
-      if (w === 0 || w === 6) {
-        refuse(at, `\`${v}\` is a ${w === 0 ? 'Sunday' : 'Saturday'}, but the card declares \`workingDays\`: move it to a working day, or drop \`workingDays\` if the card does not keep to them`);
-      }
-    } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, [...at, i]));
+    if (typeof v === 'string') check(v, at);
+    else if (Array.isArray(v)) v.forEach((x, i) => walk(x, [...at, i]));
     else if (v !== null && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (k !== '$comment') walk(x, [...at, k]);
   };
   walk(card.run, ['run']);

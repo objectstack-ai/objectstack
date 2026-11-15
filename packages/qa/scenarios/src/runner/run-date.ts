@@ -25,13 +25,14 @@
  * Working days: a whole-day delta that is not whole weeks puts a Monday-to-
  * Friday date on a weekend, so a leave request's days, the balances they come
  * off and an ask that names "Wednesday" change meaning. A card that declares
- * `workingDays: true` keeps every date it holds, but its today, on a working
- * day (the loader refuses one that does not), and moves them by whole WORKING
- * days instead ({@link shiftWorkingDays}): `asOf` still lands on the run date
- * itself, a date before it lands on or before the run date and a date after it
- * after the run date, consecutive working days stay consecutive, and N working
- * days between two dates stay N. The run date may be a weekend: the card's
- * other dates then move as they would for the Friday before it. A whole-week
+ * `workingDays: true` keeps every date it holds, its today included, on a
+ * working day (the loader refuses one that does not), and moves them by whole
+ * WORKING days instead ({@link shiftWorkingDays}): `asOf` still lands on the
+ * run date itself, a date before it lands before the run date and a date after
+ * it after the run date, consecutive working days stay consecutive, and N
+ * working days between two dates stay N. The run date may be a weekend: the
+ * card's other dates then move as they would for the Friday before it, and only
+ * `asOf` lands on the weekend day itself. A whole-week
  * delta would keep the weekdays too, but only by putting the prompt's today up
  * to three days off the run date, the very mismatch this rebase removes.
  *
@@ -225,6 +226,8 @@ function moveFor(card: LoadedScenario['card'], asOf: string, runDate: string): M
     return (t) => new Date(t.getTime() + days * DAY_MS);
   }
   const [from, to] = [dayOf(asOf), dayOf(runDate)];
+  // A weekend asOf would count as the Friday before it, and that Friday would move onto the run date too.
+  if (!isWorkingDay(from)) throw new Error(`card declares workingDays but its asOf ${asOf} is a weekend`);
   const days = workingDaysBetween(asOf, runDate);
   return (t) => {
     if (t.getTime() === from.getTime()) return to;
@@ -237,8 +240,9 @@ function moveFor(card: LoadedScenario['card'], asOf: string, runDate: string): M
  * `scenario` with its card's dates moved so `asOf` is `runDate`, and its truths
  * computed again over the moved seed. A card with no `asOf`, or one already on
  * `runDate`, is returned as it is. `scopeFigures` stay: both moves map distinct
- * dates to distinct dates (the working-day move keeps every date but `asOf` on
- * a working day, and `asOf` alone on the run date), so no count it holds moves.
+ * dates to distinct dates (the working-day move takes working days to distinct
+ * working days, and `asOf`, itself a working day, alone onto the run date), so
+ * no count it holds moves.
  */
 export function rebaseScenario(scenario: LoadedScenario, runDate: string): LoadedScenario {
   const { asOf } = scenario.card;

@@ -324,12 +324,12 @@ describe('leave_balances on seven consecutive run dates: its working days stay w
           expect(isWorking(v), `${path} ${v}`).toBe(true);
         }
       }
-      // What was before the card's today is on or before the run date; what was after it, after.
+      // What was before the card's today is before the run date; what was after it, after.
       const before = new Map(leaves(leave.card.run));
       for (const [path, v] of leaves(r.card.run)) {
         const was = before.get(path);
         if (typeof v !== 'string' || !ISO.test(v) || typeof was !== 'string') continue;
-        if (was < leave.card.asOf!) expect(v <= runDate, `${path}: ${was} → ${v}`).toBe(true);
+        if (was < leave.card.asOf!) expect(v < runDate, `${path}: ${was} → ${v}`).toBe(true);
         if (was > leave.card.asOf!) expect(v > runDate, `${path}: ${was} → ${v}`).toBe(true);
       }
 
@@ -405,6 +405,15 @@ describe('a card that declares workingDays is refused when it cannot keep to the
     ).toEqual([]);
   });
 
+  it('a weekend asOf: it would count as the Friday before it, and land on the run date with that Friday', () => {
+    const refused = refusalsOf((c) => {
+      c.asOf = '2026-10-03';
+    });
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toContain(': asOf: ');
+    expect(refused[0]).toMatch(/2026-10-03.*Saturday.*workingDays/);
+  });
+
   it('no asOf to count the working days from', () => {
     const refused = refusalsOf((c) => {
       delete c.asOf;
@@ -414,5 +423,35 @@ describe('a card that declares workingDays is refused when it cannot keep to the
 
   it('cleans up', () => {
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('a weekend asOf on a workingDays card would put two dates on one day: refused before it can', () => {
+  // A Saturday asOf (2026-11-14) beside a Friday (2026-11-13), run on Wednesday 2026-11-18: counted as
+  // its Friday, the move is 3 working days, the Friday goes to 11-18 and asOf goes to 11-18 too, so
+  // "yesterday" and "today" become one date and a count over dates moves.
+  const friday = '2026-11-13';
+  const card = structuredClone(leave.card);
+  card.asOf = '2026-11-14';
+  card.run.seed.leave_day[0].leave_date = friday;
+  const weekendToday: LoadedScenario = { ...leave, card };
+
+  it('the rebase refuses it rather than map the Friday and asOf onto the same run date', () => {
+    expect(() => rebaseScenario(weekendToday, '2026-11-18')).toThrow(/asOf 2026-11-14 is a weekend/);
+    // The collision it prevents: counted from the Friday, the Friday itself moves onto the run date.
+    expect(shiftWorkingDays(friday, workingDaysBetween('2026-11-14', '2026-11-18'))).toBe('2026-11-18');
+  });
+
+  it('the loader refuses the same card first, at asOf', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-weekend-asof-'));
+    try {
+      const file = join(dir, 'leave_balances.json');
+      writeFileSync(file, JSON.stringify(card, null, 2));
+      const refused = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' }).refusals.map(formatRefusal);
+      expect(refused.filter((r) => r.includes(': asOf: '))).toHaveLength(1);
+      expect(refused.filter((r) => /workingDays/.test(r))).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

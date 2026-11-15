@@ -579,8 +579,8 @@ export const ScenarioCardSchema = z.strictObject({
   /** The fixed "today" relative windows are computed against (`YYYY-MM-DD`). */
   asOf: z.iso.date().optional(),
   /**
-   * The card's dates keep to working days, Monday to Friday: every ISO date under `run` and `iterate`
-   * but `asOf` falls on one (the loader refuses a weekend), and the run-date rebase moves them by whole
+   * The card's dates keep to working days, Monday to Friday: `asOf` and every ISO date under `run` and
+   * `iterate` fall on one (the loader refuses a weekend), and the run-date rebase moves them by whole
    * working days instead of whole days, so a weekday stays a weekday on every run date. Needs `asOf`.
    */
   workingDays: z.literal(true).optional(),

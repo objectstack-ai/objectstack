@@ -56,8 +56,8 @@ are computed again over the moved seed). An author therefore must not rely on a 
 date or on the day of the week: a date written as a Wednesday may run as a Sunday, an ask's weekday
 name is written again for the moved date, and a `this_month` window holds whatever the moved seed
 puts in it. A card whose dates keep to working days (leave taken Monday to Friday, a day count that
-skips weekends) declares `"workingDays": true`: every date it holds but `asOf` must then fall on a
-Monday to Friday, or the card is refused, and the run moves those dates by whole working days
+skips weekends) declares `"workingDays": true`: `asOf` and every other date it holds must then fall
+on a Monday to Friday, or the card is refused, and the run moves those dates by whole working days
 instead, so a working day stays a working day on every run date and N working days between two
 dates stay N (a weekend run date moves them as for the Friday before it). Public holidays are out
 of scope either way.
