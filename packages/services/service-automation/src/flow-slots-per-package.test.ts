@@ -1069,3 +1069,117 @@ describe('[#33386] a run of a name two slots hold judges the served holders', ()
         expect(answers[goOf(OPS)]).toMatchObject({ success: false, ran: [] });
     });
 });
+
+/**
+ * [ADR-0150 D3, #33748; seat ruling 6884403301, amendment 3] A trigger
+ * binding of a slot whose package is disabled does not dispatch it: no run,
+ * never another package's flow in its place. Judged when the trigger fires,
+ * so a runtime disable (both slots stay armed) stops the slot and a re-enable
+ * dispatches it again with no re-arm. A boot disable arms nothing of the
+ * disabled package; the re-sync that arms it on enable makes it dispatch.
+ * The slot keys, the bindings and the dispatch holder do not move
+ * (amendment 7). A name one package holds is outside the ruling: its trigger
+ * answers as on `main` (CONTROL).
+ */
+describe('[#33748] a trigger binding does not dispatch a slot whose package is disabled', () => {
+    const tagOf = (packageId: string) => packageId.split('.').pop()!;
+    let armed: Map<string, (c: unknown) => Promise<void>>;
+    let started: string[];
+
+    beforeEach(() => {
+        armed = new Map();
+        started = [];
+        engine.registerTrigger({
+            type: 'record_change',
+            start: (b: { flowName: string }, callback: (c: unknown) => Promise<void>) => {
+                started.push(b.flowName);
+                armed.set(b.flowName, callback);
+            },
+            stop: (key: string) => { armed.delete(key); },
+        } as unknown as FlowTrigger);
+    });
+
+    /** Fire every armed binding once, as a matching write would; the tags of what ran, sorted. */
+    async function fireAll(): Promise<string[]> {
+        ran = [];
+        for (const [key, callback] of armed) await callback({ params: { flowName: key } });
+        return [...ran].sort();
+    }
+
+    function heldOnly(packageId: string, body: { name: string }): void {
+        registry.registerItem('flow', { ...body, _packageId: packageId }, 'name' as never, packageId);
+        loaderSets[body.name] = [...new Set([...(loaderSets[body.name] ?? []), packageId])];
+    }
+
+    const skipSaid = () => engineLogger.info.mock.calls.filter(([message]: [string]) => /which is disabled — the flow was not run/.test(message));
+
+    describe.each([[P1, P2], [P2, P1]].map((order) => [order.map(tagOf).join(' then '), order] as const))('registered %s', (_o, order) => {
+        it.each([[P1, P2], [P2, P1]])('runtime disable, %s disabled: its slot is not dispatched, the other is; re-enabled, it dispatches again with no re-arm', async (off, on) => {
+            for (const holder of order) ship(holder, triggered('t', tagOf(holder)));
+            const bindings = engine.getActiveTriggerBindings();
+            const startedBefore = [...started];
+            expect([...armed.keys()].sort()).toEqual([`${P1}/t`, `${P2}/t`]);
+            expect(await fireAll()).toEqual([tagOf(P1), tagOf(P2)].sort());
+
+            registry.disablePackage(off);
+            expect(await fireAll()).toEqual([tagOf(on)]);
+            expect(await fireAll()).toEqual([tagOf(on)]);
+            expect(skipSaid()).toHaveLength(1);
+            expect(skipSaid()[0][1]).toMatchObject({ flow: 't', package: off, slot: `${off}/t` });
+            expect(engineLogger.error).not.toHaveBeenCalled();
+            // Amendment 7: nothing durable moved, nothing was re-armed or released.
+            expect(engine.flowSlotKey(off, 't')).toBe(`${off}/t`);
+            expect(engine.flowSlotKey(on, 't')).toBe(`${on}/t`);
+            expect(engine.flowDispatchHolder('t')).toMatchObject({ claimBare: false });
+            expect(engine.getActiveTriggerBindings()).toEqual(bindings);
+
+            registry.enablePackage(off);
+            expect(await fireAll()).toEqual([tagOf(P1), tagOf(P2)].sort());
+            expect(started).toEqual(startedBefore);
+            // A later disable is said again.
+            registry.disablePackage(off);
+            expect(await fireAll()).toEqual([tagOf(on)]);
+            expect(skipSaid()).toHaveLength(2);
+        });
+
+        it('runtime disable, both disabled: no slot is dispatched; each is said once', async () => {
+            for (const holder of order) ship(holder, triggered('t', tagOf(holder)));
+            registry.disablePackage(P1);
+            registry.disablePackage(P2);
+            expect(await fireAll()).toEqual([]);
+            expect(await fireAll()).toEqual([]);
+            expect(skipSaid().map(([, meta]: [string, { package: string }]) => meta.package).sort()).toEqual([P1, P2]);
+            expect(engine.flowSlotKey(P1, 't')).toBe(`${P1}/t`);
+            expect(engine.flowSlotKey(P2, 't')).toBe(`${P2}/t`);
+        });
+
+        it.each([[P1, P2], [P2, P1]])('boot disable, %s disabled (its flows not armed): it is not dispatched; enabled and re-synced, it is', async (off, on) => {
+            for (const holder of order) (holder === off ? heldOnly : ship)(holder, triggered('t', tagOf(holder)));
+            registry.disablePackage(off);
+            expect([...armed.keys()].some((key) => key.startsWith(`${off}/`))).toBe(false);
+            expect(await fireAll()).not.toContain(tagOf(off));
+
+            // The enable's re-sync registers the package's flow (ADR-0150 D4: one slot per holder).
+            registry.enablePackage(off);
+            ship(off, triggered('t', tagOf(off)));
+            expect([...armed.keys()].sort()).toEqual([`${P1}/t`, `${P2}/t`]);
+            expect(await fireAll()).toEqual([tagOf(off), tagOf(on)].sort());
+        });
+    });
+
+    it('CONTROL — a name two packages hold, nothing disabled: both slots dispatch, nothing is said', async () => {
+        ship(P1, triggered('t', 'alpha'));
+        ship(P2, triggered('t', 'beta'));
+        expect(await fireAll()).toEqual(['alpha', 'beta']);
+        expect(skipSaid()).toEqual([]);
+    });
+
+    it('CONTROL — a name one package holds: its trigger answers as on `main`, disabled or not (outside the ruling)', async () => {
+        ship(P1, triggered('solo', 'alpha'));
+        expect([...armed.keys()]).toEqual(['solo']);
+        expect(await fireAll()).toEqual(['alpha']);
+        registry.disablePackage(P1);
+        expect(await fireAll()).toEqual(['alpha']);
+        expect(skipSaid()).toEqual([]);
+    });
+});
