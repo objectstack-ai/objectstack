@@ -470,9 +470,9 @@ export class ActionsFacet {
     // handler stays in its own coordinate's slot takes that handler back —
     // the very entry that slot holds, so `coordinateOfUnqualified` still
     // finds it — the last coordinate holding the key, in the order the
-    // slots were created. Left empty, a call that names no package answered
-    // "not found" for an action the remaining owner still holds, where the
-    // same composition booted without the removed package runs that owner's
+    // slots were created (not the last registration of this key). Left
+    // empty, a call that names no package answered "not found" for an action
+    // a remaining owner still holds; it now runs one remaining holder's
     // handler. While two or more packages still hold the key the bare call
     // is refused naming them ({@link unqualifiedHandler}) whichever entry
     // this restores.
