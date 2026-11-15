@@ -136,8 +136,9 @@ masked, the computed field is stripped whole. A computed field whose
 expression reads the record in a way no field name describes (a
 computed key such as `record[record.k]`, a method or macro on `record`,
 or `record` passed whole to a function) is withheld whenever the caller
-may not read any other field of the object. To let a role read a
-computed field, grant it read on every field the expression reads.
+may not read any other field of the object. To let a permission set's
+holders read a computed field, grant that set read on every field the
+expression reads.
 
 **On write** — `insert` / `update` requests are checked **before** the
 operation reaches the driver. If the payload contains any field the
