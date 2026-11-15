@@ -421,7 +421,7 @@ describe('the uncounted re-walk is bounded while a chain stays skipped (review#3
     expect(await s.sealer.runPass()).toBe(0);
     expect(windowsRead.size).toBe(1 + AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS); // the floor window, then the cap
     expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message))
-      .toContainEqual(expect.stringMatching(/'ledger_probe'.*walked .* windows that seal nothing.*chain 'org:org_s'/));
+      .toContainEqual(expect.stringMatching(/'ledger_probe'.*walked .* windows that seal nothing.*chain\(s\) 'org:org_s'/));
   });
 });
 

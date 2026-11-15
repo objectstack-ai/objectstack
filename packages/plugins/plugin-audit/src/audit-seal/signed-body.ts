@@ -65,6 +65,16 @@ export interface CheckpointSignedBody {
   readonly tenant_id: string | null;
   readonly sequence: number;
   readonly kind: AuditCheckpointKind;
+  /**
+   * ADR-0154 D4 amended (S7): a chain's window seals into consecutive
+   * checkpoints of at most N leaves. This one's place among them, from 0 — for
+   * a `window` part, its place in the window's `window` parts (a pass that
+   * resumes a window it left mid-way continues the count); for a `late` part,
+   * its place in the one late sealing of the window that wrote it.
+   */
+  readonly part_index: number;
+  /** Whether this is the last part of its sealing: a window, or one late sealing of it. */
+  readonly final_part: boolean;
   readonly window_start: string;
   readonly window_end: string;
   /** The sealed-through watermark (D3). */
@@ -191,6 +201,26 @@ function fencingToken(raw: unknown): string {
   return value;
 }
 
+/**
+ * A flag in its one meaning: `true` or `false`, or the `1` / `0` (number or
+ * text) a driver with no boolean column hands back. Absent is refused, never
+ * read as either.
+ */
+function flag(row: Readonly<Record<string, unknown>>, field: string): boolean {
+  const value = row[field];
+  if (value === true || value === 1 || value === '1' || value === 'true') return true;
+  if (value === false || value === 0 || value === '0' || value === 'false') return false;
+  throw new SignedBodyError(`${field}: true or false is required`);
+}
+
+/**
+ * A stored checkpoint's place among its window's parts (S7), read alone — the
+ * sealer's resume reads it without judging the whole body.
+ */
+export function checkpointPartOf(row: Readonly<Record<string, unknown>>): { readonly part_index: number; readonly final_part: boolean } {
+  return { part_index: count(row, 'part_index'), final_part: flag(row, 'final_part') };
+}
+
 /** A JSON column: stored as JCS text, or handed back already parsed by a driver with JSON columns. */
 function json(row: Readonly<Record<string, unknown>>, field: string): unknown {
   const value = row[field];
@@ -240,6 +270,7 @@ export function checkpointBodyFromRow(row: Readonly<Record<string, unknown>>): C
     tenant_id: nullableText(row, 'tenant_id'),
     sequence: count(row, 'sequence'),
     kind: oneOf(row, 'kind', AUDIT_CHECKPOINT_KINDS),
+    ...checkpointPartOf(row),
     window_start: instant(row, 'window_start'),
     window_end: instant(row, 'window_end'),
     sealed_through: instant(row, 'sealed_through'),
