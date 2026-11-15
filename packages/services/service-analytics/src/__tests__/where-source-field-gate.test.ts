@@ -587,8 +587,8 @@ describe('#5669 — what the gate must NOT do', () => {
         // strategy's call and the join allowlist's (ADR-0021 D-C); either way the
         // answer must not be THIS GATE's verdict. Measured on both
         // strategies: NativeSQL joins it
-        // (`LEFT JOIN "owner" … WHERE "owner"."region" = $1`), ObjectQL declines it
-        // with its own cross-object message.
+        // (`LEFT JOIN "owner" … WHERE "owner"."region" = $1`), ObjectQL declined it
+        // with its own cross-object message (and, since #33335, serves it below).
         //
         // [#5716] The assertion used to be `code !== 'INVALID_FIELD'`, which was a
         // PROXY for "not this gate" — available only while the strategy's own
@@ -608,20 +608,22 @@ describe('#5669 — what the gate must NOT do', () => {
         };
         // [#31944] `owner` is a field of the account, as a relationship hop is: a
         // hop naming no field of the object it leaves is refused by its own gate.
-        const { service } = makeService({ cubes: [joined], fields: [...ACCOUNT_FIELDS, 'owner'] });
+        const { service, filters } = makeService({ cubes: [joined], fields: [...ACCOUNT_FIELDS, 'owner'] });
 
         const settled = await settle(
             service.query({ cube: 'joined_cube', measures: ['count'], where: { 'owner.region': 'NA' } } as any),
         );
 
-        expect(settled.message).toMatch(/cross-object filter \("owner\.region"\)/);
-        // The lie this case exists to prevent, asserted as itself.
-        expect(settled.message).not.toMatch(/constrains field 'region'/);
+        // [#33335] ObjectQL no longer declines it: it hands the engine the
+        // nested-relation condition beneath `owner`. The gate's verdict is still
+        // absent — the lie this case exists to prevent, asserted as itself —
+        // and the related `region` reaches the engine beneath the relation, not
+        // as a base column.
+        expect(settled.message).toBeUndefined();
         expect(settled.field).toBeUndefined();
-        // …and positively, the strategy's envelope: the member as the request
-        // spelled it, under the request key it was written on.
-        expect(settled.member).toBe('owner.region');
-        expect(settled.param).toBe('where');
+        expect(filters).toHaveLength(1);
+        expect(filters[0]).toMatchObject({ $and: [{ owner: { region: 'NA' } }] });
+        expect(Object.keys(filters[0] as object)).not.toContain('region');
     });
 
     it('judges a NESTED relation filter by its relation field, a column of the object — and hands it to the engine as written', async () => {

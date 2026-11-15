@@ -7,20 +7,15 @@
  * package-scoped resolver (`resolvePackageScopedName`, `@objectstack/objectql`),
  * never by list order.
  *
- * A connector is addressed by `(package, name)`. The engine keeps one live
- * instance per name, and the reconcile that materializes declared instances
- * is context-free: it reads the whole environment's declaration, so it asks
- * as a caller with no package — the environment's own item, else the unique
- * package holder, else a refusal naming every candidate. A refused name is not
- * materialized: the reconcile reports the refusal (the boot fails loudly on a
- * host-declared entry, as it does for a duplicate name) and tears down what
- * it materialized before, so no flow dispatches to one of the candidates on a
- * guess. Every other answer leaves the name to the reconcile as it stood.
- *
- * While phase 1's one-holder refusal stands (`connector` is one of its types)
- * no two packages hold a connector name, so this refuses nothing on a booted
- * deployment; it is the reader the type's trailing backstop child (ADR-0150
- * D9) narrows that refusal behind.
+ * A connector is addressed by `(package, name)` (ADR-0150 D4). Two packages
+ * of different namespaces may each declare an instance of one name (ADR-0150
+ * D9, the narrowing of phase 1's one-holder refusal for this type, #31699):
+ * the engine holds both, and a bare name is resolved for its caller's package
+ * — the flow that dispatches, the mapping a pull reads, the connection door's
+ * address — to exactly one of them, or refused naming every candidate. A
+ * declared entry with no package of its own is the instance of the package
+ * the name resolves to; under two holders it is no instance at all, and the
+ * reconcile reports it instead of materializing it as either.
  *
  * A connector a plugin registers in code (`engine.registerConnector`) is no
  * registry item: the resolver answers not-found for it, and it keeps the
@@ -30,7 +25,6 @@
 import {
     resolvePackageScopedName,
     type PackageScopedHolder,
-    type PackageScopedRefusal,
     type PackageScopedRegistry,
     type PackageScopedResolution,
 } from '@objectstack/objectql';
@@ -45,23 +39,6 @@ export function packageScopedRegistryOf(registry: unknown): PackageScopedRegistr
         && typeof r.getAllPackages === 'function'
         ? (registry as PackageScopedRegistry)
         : undefined;
-}
-
-/**
- * The refusal of every declared connector name in `names` that resolves to no
- * single holder (ADR-0150 D3, a caller with no package), keyed by name. A name
- * the resolver answers — or does not hold at all — is absent.
- */
-export function refusedConnectorNames(
-    registry: PackageScopedRegistry,
-    names: Iterable<string>,
-): Map<string, PackageScopedRefusal> {
-    const refused = new Map<string, PackageScopedRefusal>();
-    for (const name of new Set(names)) {
-        const resolved = resolvePackageScopedName(registry, { type: 'connector', name });
-        if (resolved.status === 'refused') refused.set(name, resolved);
-    }
-    return refused;
 }
 
 /**

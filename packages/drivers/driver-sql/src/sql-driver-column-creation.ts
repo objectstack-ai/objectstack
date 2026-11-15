@@ -42,7 +42,7 @@
  */
 
 import { FILE_REFERENCE_TYPES, numericColumnFor } from '@objectstack/spec/data';
-import { GLOBAL_TENANT, canonicalIndexKey, hashShadowColumnFor, parseHashShadowKeyParts } from './schema-drift.js';
+import { GLOBAL_TENANT, canonicalIndexKey, hashShadowColumnFor, hashShadowDigestSql, parseHashShadowKeyParts } from './schema-drift.js';
 import type { HashShadowKeyPart } from './schema-drift.js';
 import type { Knex } from 'knex';
 import {
@@ -226,18 +226,12 @@ export class ColumnCreationFacet {
     if (!this.isMysql) return false;
     const shadow = SqlDriver.hashShadowColumnFor(indexName);
     const ref = (c: string) => `\`${c.replace(/`/g, '``')}\``;
-    // The DECLARED key part: NULL-safe parts in their COALESCE form (commit df1c75c4b),
-    // plain parts as the bare column.
-    const part = (c: string) =>
-      nullSafeColumns?.has(c) ? `COALESCE(${ref(c)}, '${GLOBAL_TENANT}')` : ref(c);
-    // ONE argument needs no separator, and CONCAT of one value would only add
-    // a chance to get the encoding wrong.
-    const expr =
-      columns.length === 1
-        ? part(columns[0]!)
-        : `CONCAT(${columns.map(part).join(', 0x1f, ')})`;
+    // The DECLARED key parts: NULL-safe parts in their COALESCE form (commit df1c75c4b),
+    // plain parts as the bare column. One builder (`hashShadowDigestSql`), so
+    // the digest the sync writes and the digest the differ recognises in a
+    // MySQL functional guard cannot drift apart.
     const addColumn =
-      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2(${expr}, 256))) STORED`;
+      `ADD COLUMN ${ref(shadow)} VARBINARY(32) GENERATED ALWAYS AS (${hashShadowDigestSql(columns, nullSafeColumns)}) STORED`;
     const addKey = `ADD UNIQUE KEY ${ref(indexName)} (${ref(shadow)})`;
     // Commit cd1348802: the shadow column OUTLIVES the index it carries. Dropping a
     // UNIQUE key by name does not drop the generated column keyed by it, so

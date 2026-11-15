@@ -1214,11 +1214,10 @@ Once a guard stands, the next safe sync (or `os migrate apply`) retires the key
 it stands beside — the grant's `(user_id, permission_set, organization_id)`, the
 connection's `(organization_id, connector_name)` — as one `replace_unique_index`
 categorized safe, created before it is dropped. Until then that key stays and
-keeps refusing a second package's grant or connection of one name. On an
-upgraded MySQL database both old keys stay, because `driver-sql` does not read a
-guard's functional key part as a guard there, so a second package's grant or
-connection of one name stays refused on MySQL. A database created fresh on
-MySQL never has the old keys.
+keeps refusing a second package's grant or connection of one name. On MySQL 8
+the guard is a functional key part, and `driver-sql` reads it as the guard it is,
+so an upgraded MySQL database retires both old keys the same way. A database
+created fresh on MySQL never has the old keys.
 
 Under `--json` the section is the `schemaSyncIndexes` array, whose entries carry
 `table`, `index`, `keyParts`, `rowScope` and a `status` of `build`, `blocked` or

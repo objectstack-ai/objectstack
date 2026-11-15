@@ -97,7 +97,10 @@ A webhook reaches the dispatcher one of two ways:
   cannot tell apart (two packages sharing one namespace, or a package that
   declares no namespace beside another holder) are each switched by the exact
   qualifier, `POST /api/v1/security/_activation/webhook/:name?package=<package>`.
-  It writes that holder's
+  An activation row naming a package that no longer declares the name switches
+  no remaining holder (ADR-0150 D8), so to keep the webhook off, switch each
+  holder off at `POST /api/v1/security/_activation/webhook/:name?package=<package>`.
+  Each switch writes that holder's
   own `sys_metadata_activation` row of type `webhook` and overrides the
   declared `isActive` in either direction
   (ADR-0131 D6, regime C — the door, its authority tiers and its refusals are

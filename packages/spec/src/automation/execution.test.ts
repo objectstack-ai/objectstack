@@ -395,6 +395,34 @@ describe('ExecutionLogSchema', () => {
       startedAt: '2026-02-01T10:00:00Z',
     })).toThrow(); // missing trigger
   });
+
+  describe('a run\'s waitMs (#32284)', () => {
+    const resumedScreenRun = {
+      id: 'run_screen', flowName: 'collect_details', status: 'completed' as const,
+      trigger: { type: 'manual' }, steps: [validStep],
+      startedAt: '2026-02-01T10:00:00Z', completedAt: '2026-02-01T10:00:18.691Z',
+      durationMs: 18691, waitMs: 18500,
+    };
+
+    it('keeps it through a parse beside durationMs, so a client validating the run reads both', () => {
+      const log = ExecutionLogSchema.parse(resumedScreenRun);
+      expect(log.waitMs).toBe(18500);
+      expect(log.durationMs).toBe(18691);
+    });
+
+    it('stays absent on a run that carries none, never defaulted to 0', () => {
+      const { waitMs: _omitted, ...unrecorded } = resumedScreenRun;
+      expect('waitMs' in ExecutionLogSchema.parse(unrecorded)).toBe(false);
+    });
+
+    it('refuses a negative or fractional value at its path', () => {
+      for (const waitMs of [-1, 1.5]) {
+        const res = ExecutionLogSchema.safeParse({ ...resumedScreenRun, waitMs });
+        expect(res.success).toBe(false);
+        expect(res.error?.issues[0].path).toEqual(['waitMs']);
+      }
+    });
+  });
 });
 
 // ==========================================

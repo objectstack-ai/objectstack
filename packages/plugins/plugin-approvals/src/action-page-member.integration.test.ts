@@ -37,6 +37,14 @@ import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import type { ApprovalService } from './approval-service.js';
 import { renderResultPage } from './action-link-pages.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+// Clocked windows measure behaviour, never loading. On an `ObjectKernel` the
+// core `i18n` fallback is present, so the plugin's `kernel:ready` hook imports
+// `./translations/index.js`, which loads `@objectstack/platform-objects/apps`
+// from `dist/` cold. Paid inside whichever case boots first, that load took
+// ~0.7 s of a 1.0 s case on an idle 4-vCPU box and pushed the case to
+// 5.7-6.2 s on loaded Test Core shards, past the 5000 ms `testTimeout`.
+// Loaded here, it is paid during collection, which no timeout clocks.
+import './translations/index.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const SUBMITTER = { userId: 'u_submitter', positions: [], permissions: [] } as any;

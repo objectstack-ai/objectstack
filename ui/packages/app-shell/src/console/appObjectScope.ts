@@ -430,12 +430,24 @@ function hasRecordFormOverlay(search: string): boolean {
   return sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
 }
 
-/** The objects an object's lookup and master-detail fields point at. */
+/**
+ * The objects an object's drawn lookup and master-detail fields point at.
+ *
+ * A target is read for the cell that links and names it, so a field declared
+ * `hidden: true` asks for none: no surface this scope serves draws it. That
+ * includes the injected system scope anchors (`organization_id` and
+ * `owning_business_unit_id`), which point at `sys_organization` and
+ * `sys_business_unit` from every object; asking their definitions read nothing
+ * a page draws, and for a caller the object read check refuses, the metadata
+ * door answers that definition as absent (ADR-0106 as amended by ruling record
+ * 6787890900), so the read answered 404 on every route of every object.
+ */
 function lookupTargetNames(def: any): string[] {
   const fields = def?.fields;
   const defs: any[] = Array.isArray(fields) ? fields : Object.values((fields ?? {}) as Record<string, any>);
   const out = new Set<string>();
   for (const field of defs) {
+    if (field?.hidden === true) continue;
     if ((field?.type === 'lookup' || field?.type === 'master_detail') && typeof field.reference === 'string' && field.reference) {
       out.add(field.reference);
     }

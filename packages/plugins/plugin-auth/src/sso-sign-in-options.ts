@@ -293,6 +293,23 @@ export interface SamlProviderScope {
    * runs (`sso-saml-standard-claims.ts`); empty when none could be read.
    */
   assertionAttributeNames?: readonly string[];
+  /**
+   * The account key the posted assertion was read for, when the provider keys
+   * its SAML accounts on a stable attribute (`sso-saml-account-key.ts`).
+   */
+  accountKey?: SamlAccountKeyReading;
+}
+
+/**
+ * One SAML ACS request's account-key reading (`sso-saml-account-key.ts`): the
+ * stable attribute the provider keys its accounts on, and the NameID and that
+ * attribute's value as the posted assertion carries them, read before the
+ * vendor verified it.
+ */
+export interface SamlAccountKeyReading {
+  readonly attribute: string;
+  readonly nameId: string;
+  readonly value: string;
 }
 
 const samlProviderScope = new AsyncLocalStorage<SamlProviderScope>();
@@ -343,9 +360,20 @@ export function runWithSamlProviderScope<T>(scope: SamlProviderScope, run: () =>
       singleLogout: scope.singleLogout === true,
       providerId: scope.providerId,
       assertionAttributeNames: scope.assertionAttributeNames ? [...scope.assertionAttributeNames] : [],
+      accountKey: scope.accountKey ? { ...scope.accountKey } : undefined,
     },
     run,
   );
+}
+
+/**
+ * The account-key reading of the SAML request in scope and the provider it
+ * names; `undefined` with no scope, no provider, or no reading.
+ */
+export function samlAccountKeyInScope(): (SamlAccountKeyReading & { providerId: string }) | undefined {
+  const scope = samlProviderScope.getStore();
+  if (!scope?.accountKey || typeof scope.providerId !== 'string' || !scope.providerId) return undefined;
+  return { ...scope.accountKey, providerId: scope.providerId };
 }
 
 /**
