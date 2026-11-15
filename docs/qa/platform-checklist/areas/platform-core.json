@@ -4574,36 +4574,36 @@
     },
     {
       "id": "platform-core.bare-name-one-holder-refusal",
-      "title": "A covered bare name has one package holder: installing a second package that holds a connector name (the covered types NAMESPACE_SCOPED_BARE_NAME_TYPES does not list: connector alone at revision 4) is refused 422 naming both, the narrowed types (picklist, mapping, dataset, api, object-less action, function, flow, webhook, email template, agent, skill and tool) are held per namespace, and a clash an earlier deployment already holds boots with a warning",
+      "title": "A covered bare name has one holder per namespace: two packages in two namespaces may each hold the connector qa_conn, the webhook, the flow and the agent (every covered type is in NAMESPACE_SCOPED_BARE_NAME_TYPES since #33431), a package with no namespace that declares a held connector name is refused 422 naming every holder it meets, and a clash an earlier deployment already holds between a package with no namespace and another holder boots with a warning",
       "since": "v18.4",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): every install"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a connector qa_conn (a catalog descriptor: name, label and type 'api', no provider and enabled: false, so nothing is materialized or dispatched), a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted; a package that declares a webhook also declares requires: ['webhooks', 'realtime'], which the stack schema refuses it without), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
-          "for the cold-boot leg: a scratch app that registers two code packages which both hold the connector qa_conn (the doors judge nothing during a boot, so both register), booted on its own port and file DB. No install door is needed: one defineStack whose packages[] holds two bodies (ids com.qa.addr-c and com.qa.addr-d, each with its own namespace and its own connector qa_conn; ADR-0130 D4, packages/spec/src/stack.zod.ts) registers both at boot, and the CLI judges no bare name, so it builds"
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a connector qa_conn (a catalog descriptor: name, label and type 'api', no provider and enabled: false, so nothing is materialized or dispatched), a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted; a package that declares a webhook also declares requires: ['webhooks', 'realtime'], which the stack schema refuses it without), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline); plus a third, qa_e (manifest id com.qa.addr-e, built the same way but declaring NO namespace), which holds only the connector qa_conn (the same inert catalog descriptor)",
+          "for the cold-boot leg: a scratch app that registers two code packages which both hold the connector qa_conn (the doors judge nothing during a boot, so both register), booted on its own port and file DB. No install door is needed: one defineStack whose packages[] holds two bodies (ids com.qa.addr-c, namespace qa_c, and com.qa.addr-d, which declares NO namespace, each with its own connector qa_conn: a holder with no namespace meets every other holder, so the pair still clashes where two namespaces would not; ADR-0130 D4, packages/spec/src/stack.zod.ts) registers both at boot, and the CLI judges no bare name, so it builds. composeStacks([c, d], { manifest: 'preserve' }) of two such stacks is the shape QA run #33853 built and booted; keep it"
         ]
       },
       "steps": [
         "install qa_a, then qa_b; record each answer and GET /api/v1/packages",
-        "rebuild qa_b without the connector qa_conn (keep the webhook qa_hook, the flow qa_sync and the agent qa_helper) and install it again; record the answer",
+        "install qa_e (no namespace, holding the connector qa_conn); record the answer and GET /api/v1/packages",
         "boot the cold-boot app and read the boot log"
       ],
       "acceptance": [
         {
-          "clause": "the second package holding a covered name is refused 422 naming both packages and a rename, and leaves nothing installed",
+          "clause": "a package with no namespace that declares a name another package holds is refused 422 naming the holders, and leaves nothing installed",
           "oracle": "api",
-          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming connector qa_conn, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename). connector is the one covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) that packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES does not list at this revision, so two namespaces do not lift it. Re-read that complement before the run: a covered type still outside the list is the type this clause and acceptance[3] drive, and a type the list has gained is now acceptance[1]'s; qa_b is absent from the package list",
+          "verify": "installing qa_e answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming connector qa_conn, com.qa.addr-e and both holders it meets, com.qa.addr-a and com.qa.addr-b, with no rename, since a package with no namespace has no prefix to suggest (packages/objectql/src/registry.ts#bareNameRenameFor) (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT). Every covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) is in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES since #33431, so two namespaces never clash; two holders still clash when they meet (packages/objectql/src/bare-name-one-holder.ts#bareNameHoldersMeet over packages/spec/src/kernel/namespace-prefix.ts#namespacedHoldersMeet): a holder with no namespace meets every holder. The message's reason sentence is product copy tracked apart (#33507) and is not scored here; qa_e is absent from the package list",
           "evidence": "the 422 body and the package list"
         },
         {
-          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the webhook qa_hook, the flow qa_sync and the agent qa_helper",
+          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the connector qa_conn, the webhook qa_hook, the flow qa_sync and the agent qa_helper",
           "oracle": "api",
-          "verify": "the rebuilt qa_b installs 200 while both hold qa_hook, qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696, webhook #32577, tool #33124); the covered types that list lacks, connector alone at this revision, are still one holder per deployment",
+          "verify": "qa_b installs 200 while both hold qa_conn, qa_hook, qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696, webhook #32577, tool #33124, connector #33431); no covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) is left outside that list. Re-read the complement before the run: a type outside it is one holder per deployment, and qa_b's 200 on it is acceptance[0]'s FAIL, not this clause's pass",
           "evidence": "the 200 answer"
         },
         {
@@ -4613,19 +4613,19 @@
           "evidence": "the install answer"
         },
         {
-          "clause": "a clash the deployment already holds does not stop the boot: it boots and warns once naming both holders and the rename, changing nothing about which holder each caller is served",
+          "clause": "a clash the deployment already holds does not stop the boot: it boots and warns once naming both holders, changing nothing about which holder each caller is served",
           "oracle": "log",
-          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the connector qa_conn, both packages and the rename (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning)",
+          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the connector qa_conn, com.qa.addr-c and com.qa.addr-d; it names a rename only when the later-registered of the two declares a namespace (qa_c_qa_conn), since com.qa.addr-d has none to suggest (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning). The seal reports a pair only when the two holders meet (packages/objectql/src/bare-name-one-holder.ts#bareNameHoldersMeet), so two namespaces' holders boot with no warning, while a holder with no namespace beside any other holder still warns",
           "evidence": "the warning line"
         }
       ],
       "negative": [
-        "the second install answering 200 and the connector name then serving one of the two is a FAIL",
+        "qa_e's install answering 200 and the connector name then serving one of the holders is a FAIL",
         "a cold boot refused because of a pre-existing clash is a FAIL while the mode is warn",
-        "reading the rebuilt qa_b's 200 beside qa_a's flow qa_sync as a defect is wrong: flow is held per namespace since #31696, and the bare flow address answers 409 naming both"
+        "reading qa_b's 200 beside qa_a's connector qa_conn or flow qa_sync as a defect is wrong: connector is held per namespace since #33431 and flow since #31696, and the bare connector or flow address answers 409 naming both"
       ],
       "variants": [
-        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives connector (one holder per deployment: the covered types NAMESPACE_SCOPED_BARE_NAME_TYPES does not list) and webhook, flow and agent (per namespace), and names the types it did not drive"
+        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives connector (per namespace across qa_a and qa_b, refused to the namespace-less qa_e, and the namespace-less cold-boot pair) and webhook, flow and agent (per namespace), and names the types it did not drive"
       ],
       "automated": {
         "kind": "unit",
@@ -4633,10 +4633,10 @@
       },
       "source": [
         "packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE (the cold boot, and why the doors judge nothing during it)",
-        "packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (the types narrowed per namespace; objectql's bare-name-one-holder.ts re-exports it)",
+        "packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (the types narrowed per namespace, every covered type since #33431; objectql's bare-name-one-holder.ts re-exports it), and packages/objectql/src/bare-name-one-holder.ts#bareNameHoldersMeet (which holders still meet: a holder with no namespace meets every holder)",
         "packages/objectql/src/registry.ts#BareNameConflictError (422 NAMESPACE_CONFLICT)",
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D9 (phase 1 stands until each child B narrows it)",
-        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace), #32577 (webhook per namespace), #33124 (tool per namespace)"
+        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace), #32577 (webhook per namespace), #33124 (tool per namespace), #33431 (connector per namespace)"
       ],
       "history": [
         {
@@ -4668,6 +4668,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[1] names a buildable cold-boot fixture (card #33330, row 226 of the #32908 close-out ledger; QA run #33089 comment 6850460138 on #32908, which reached the leg this way). A defineStack with a packages[] of two bodies registers both code packages at boot (ADR-0130 D4, packages/spec/src/stack.zod.ts), and packages/cli/src/utils holds namespace co-owner and object-name judgements but no bare-name one, so the stack builds and the boot log is where the clash shows. No acceptance clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "stale-spec re-point of acceptance[0], acceptance[1] and acceptance[3] (with the title, fixtures, steps[1], negative[0], negative[2], variants and source), QA run #33853, card #33860. #33431 (322ded7d) put connector in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, so every covered type (BARE_NAME_ONE_HOLDER_TYPES) is now held per namespace and the complement r4 drove is empty: QA installed both qa_conn holders 200 and the namespaced cold-boot pair warned about nothing. acceptance[1] gains connector. acceptance[0] is re-pointed, not retired: a holder with no namespace still meets every holder (bareNameHoldersMeet over namespacedHoldersMeet), and QA's probe of a namespace-less com.qa.addr-e got 422 PLUGIN_REGISTER_FAILED naming com.qa.addr-a; the namespace-less shape is chosen over a same-namespace co-owner because it needs no dependency or object prefix in the fixture and is the one QA measured live, and its refusal carries no rename (bareNameRenameFor). acceptance[3] is re-pointed, not retired: sealBareNameHolders still reports a pair that meets, so the cold-boot fixture's com.qa.addr-d drops its namespace; the composeStacks preserve fixture stays. Re-read at main 895783a1 and read through a throwaway ObjectKernel probe at that commit (the flow-family pin's harness, packages/objectql/src/registry-bare-name-one-holder-flow-family.test.ts, not committed): a cold boot of com.qa.addr-c (qa_c) and a namespace-less com.qa.addr-d, each holding connector qa_conn, warns once naming both (with the rename only when the namespaced one registers later); the control of two namespaces warns nothing; after the seal a namespace-less com.qa.addr-e is refused 422 NAMESPACE_CONFLICT naming com.qa.addr-a and com.qa.addr-b. The CLI build, the install door and the boot log are not driven live by this edit",
+          "ref": "#PENDING-33860"
         }
       ]
     },
