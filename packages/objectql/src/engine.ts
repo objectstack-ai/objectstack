@@ -4250,6 +4250,7 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return readRegistry(); },
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
+      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
   }

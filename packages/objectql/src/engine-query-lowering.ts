@@ -69,8 +69,11 @@ import {
   lowerRelationSite,
   RELATION_FILTER_ID_CAP,
   relationFilterCapError,
+  relationSemiJoinDatasourceError,
   type RelationReplacement,
 } from './relation-filter-lowering.js';
+import { planRelationSemiJoinLeaf, RELATION_SCOPE_PLAN } from './relation-semi-join.js';
+import type { EngineReadOptions } from './engine-top-level.js';
 import { aggregatedRowColumnClasses } from './having-filter.js';
 import { relationSitesOf, resolveThenLowerWhere, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
 import type { ObjectQL } from './engine.js';
@@ -90,6 +93,7 @@ export interface QueryLoweringHost {
   readonly [SECURITY_SERVICE_SOURCE_SLOT]: unknown;
   resolveRelateThenLowerWhere: ObjectQL['resolveRelateThenLowerWhere'];
   find: ObjectQL['find'];
+  resolveDatasourceBinding: ObjectQL['resolveDatasourceBinding'];
 }
 
 /**
@@ -181,8 +185,16 @@ export async function resolveWhereTokens(
  * Returns `where` by reference when it holds no condition — the common path
  * reads nothing and allocates nothing beyond one walk.
  */
+/**
+ * The verbs whose `where` reaches the engine's executor boundary, where a
+ * `ReadableIds` leaf is composed (ADR-0139 D2): a single-valued relation
+ * condition is served as a semi-join there. A write verb's `where`
+ * (`update`, `delete`) keeps the id read, under the cap.
+ */
+const SEMI_JOIN_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
 export async function lowerRelationConditions<W>(
-  this: Pick<QueryLoweringHost, '_registry' | 'relatedSchemaOf' | 'find'>,
+  this: Pick<QueryLoweringHost, '_registry' | 'relatedSchemaOf' | 'find' | 'resolveDatasourceBinding'>,
   object: string,
   operation: string,
   where: W,
@@ -195,6 +207,27 @@ export async function lowerRelationConditions<W>(
   const context = `${operation}('${object}')`;
   const replacements: RelationReplacement[] = [];
   for (const site of sites) {
+    if (!site.multiple && SEMI_JOIN_READ_VERBS.has(operation)) {
+      // [relation semi-join] A single-valued relation: the related read is
+      // PLANNED, not run, and its final `where` becomes the scope of a
+      // `ReadableIds` leaf the driver compiles into one nested subquery —
+      // no id list, no cap (`relation-semi-join.ts`).
+      const objectDatasource = this.resolveDatasourceBinding(object)?.datasource;
+      const targetDatasource = this.resolveDatasourceBinding(site.target)?.datasource;
+      if (objectDatasource !== targetDatasource) {
+        throw relationSemiJoinDatasourceError(site, context, objectDatasource, targetDatasource);
+      }
+      const leaf = await planRelationSemiJoinLeaf(site.target, (sink) => this.find(
+        site.target,
+        { where: site.condition as FilterCondition, fields: ['id'], ...(execCtx ? { context: execCtx } : {}) },
+        { [RELATION_SCOPE_PLAN]: sink } as EngineReadOptions,
+      ));
+      replacements.push({ kind: 'value', value: { $in: leaf } });
+      continue;
+    }
+    // A multi-valued relation (a JSON list column) has no `IN` membership
+    // test on the SQL family: its condition is still matched against the ids
+    // the related read returns, under the cap.
     const rows = await this.find(site.target, {
       where: site.condition as FilterCondition,
       fields: ['id'],

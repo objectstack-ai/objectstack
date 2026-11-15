@@ -30,8 +30,9 @@
  */
 
 import { SortNodeSchema, lowerFilterCondition, resolveSearchFieldResolution } from '@objectstack/spec/data';
-import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
+import { RELATION_SCOPE_PLAN, type RelationScopePlanSink } from './relation-semi-join.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { collectCredentialFields, collectInternalReadFields } from './secret-fields.js';
@@ -546,6 +547,16 @@ export class FindFacet {
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
       const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context);
+      // [relation semi-join] A PLANNED read (`relation-semi-join.ts`): the
+      // final `where` is handed to the planner in place of the driver call,
+      // and the read answers no rows. Only the engine's own nested-relation
+      // lowering sets this symbol-keyed option.
+      const planSink = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN];
+      if (typeof planSink === 'function') {
+          (planSink as RelationScopePlanSink)(driverAst.where as FilterCondition | undefined);
+          opCtx.result = [];
+          return opCtx.result;
+      }
 
       try {
           let result = await driver.find(object, driverAst, driverOptions);
