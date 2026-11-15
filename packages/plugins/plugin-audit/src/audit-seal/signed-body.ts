@@ -72,13 +72,24 @@ export interface CheckpointSignedBody {
    * resumes a window it left mid-way continues the count); for a `late` part,
    * its place in the one late sealing of the window that wrote it.
    *
+   * The count may skip a number: a part whose rows were all deleted or moved
+   * between the sealer's two reads of the window is not written and takes no
+   * index (parts 0 and 2, say). Nothing reads continuity, and nothing requires
+   * a final part, since a window whose last part emptied has none. A removed
+   * interior part still shows in the chain links (`gap`, `link`); a removed
+   * newest part does not, and its rows read unsealed.
+   *
    * Absent, with `final_part`, from a checkpoint written before the amendment:
    * such a body signed neither key, so it is read back without them and reads
    * as one part, final. A body holding one of the two and not the other is
    * refused.
    */
   readonly part_index?: number;
-  /** Whether this is the last part of its sealing: a window, or one late sealing of it. Absent with `part_index`. */
+  /**
+   * Whether this is the last part of its sealing: a window, or one late
+   * sealing of it. Absent with `part_index`. A window whose last part emptied
+   * between the two reads has no final part (see `part_index`).
+   */
   readonly final_part?: boolean;
   readonly window_start: string;
   readonly window_end: string;

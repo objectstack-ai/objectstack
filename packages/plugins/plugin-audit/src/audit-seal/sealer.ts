@@ -109,9 +109,14 @@ export const AUDIT_SEAL_MAX_LEAVES = 10_000;
 /**
  * review#3 S1: windows a pass may walk that seal nothing — every row of them
  * belongs to a chain sealed past them, or to a chain skipped in this pass —
- * before it stops walking. Only a skipped chain holds the floor back so that
- * such windows recur; this bounds what each pass re-reads while it stays
- * skipped. One late horizon's worth of windows.
+ * while a chain is skipped, before it stops walking. Only a skipped chain
+ * holds the floor back so that such windows recur; this bounds what each pass
+ * re-reads while it stays skipped. One late horizon's worth of windows.
+ *
+ * With no chain skipped the walk is not cut: such windows are then only what
+ * a chain skipped before (fixed since, or with nothing left to seal) left
+ * behind, and walking on to the next window that seals something is what
+ * moves the floor past them. Cut there, the floor would never move again.
  */
 export const AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS = AUDIT_SEAL_LATE_HORIZON_MS / AUDIT_SEAL_WINDOW_MS;
 /** Sign attempts of one checkpoint before the pass gives up (the S1 loop). */
@@ -302,7 +307,7 @@ export class AuditSealer {
    * for it; this says so at `error`, once per {@link REPORT_REPEAT_MS}.
    */
   private reportIdleStop(object: string, stop: { at: number; windows: number }, skipped: ReadonlyMap<string, unknown>): void {
-    const chains = [...skipped.keys()].map((key) => `'${key}'`).join(', ') || 'none in this pass';
+    const chains = [...skipped.keys()].map((key) => `'${key}'`).join(', '); // never empty: the bound counts only while one is skipped
     this.report(`idle:${object}`, () =>
       `AuditSealer: '${object}' walked ${stop.windows} windows that seal nothing in one pass and stopped there — ` +
       `its rows from the window of ${iso(stop.at)} on are NOT being sealed while the skipped chain(s) ${chains} ` +
@@ -501,8 +506,10 @@ class ObjectPass {
       cursor = windowOf(oldest);
     }
     // Windows oldest first from the floor; each chain is sealed from its own cursor. A window that only re-reads
-    // chains already sealed (or skipped) past it does not count toward the pass's windows, but toward its own
-    // bound (review#3 S1): a chain that stays skipped holds the floor, and every pass walks on from there.
+    // chains already sealed (or skipped) past it does not count toward the pass's windows; while a chain is
+    // skipped it counts toward its own bound (review#3 S1): a chain that stays skipped holds the floor, and every
+    // pass walks on from there. With none skipped it counts toward nothing, so the walk reaches the next window
+    // that seals something and the floor moves on.
     for (let n = 0, idle = 0; n < MAX_WINDOWS_PER_PASS;) {
       const next = await this.firstRowAt(cursor, due);
       if (next === null) break;
@@ -513,7 +520,7 @@ class ObjectPass {
       const start = windowOf(next);
       const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(tenantOf(row))));
       if (chains.size > 0) n += 1;
-      else idle += 1;
+      else if (this.skipped.size > 0) idle += 1;
       await this.writeChains(chains, start, 'window', Math.max(this.watermark ?? Number.NEGATIVE_INFINITY, Math.min(start, this.stuckFrom())));
       cursor = start + AUDIT_SEAL_WINDOW_MS;
     }
@@ -754,7 +761,9 @@ class ObjectPass {
     for (let at = 0; at < ordered.length; at += size) {
       const seed = generateCheckpointSeed();
       const leaves = await this.leavesOf(key, seed, ordered.slice(at, at + size), start);
-      if (leaves.length === 0) continue; // every row of the part went since the window was read
+      // Every row of the part went since the window was read: nothing is written, and its index is not reused, so
+      // part_index may skip one, and a window whose last part emptied has no final part. Nothing reads either.
+      if (leaves.length === 0) continue;
       await this.writeCheckpoint(key, chain.tenantId, seed, leaves, start, kind, watermark, {
         part_index: first + at / size,
         final_part: at + size >= ordered.length,
@@ -860,9 +869,13 @@ class ObjectPass {
       // S1: the chain's window head, re-read under the lease: a window another sealer sealed (or passed)
       // since this pass began is not sealed again. Windows of a chain are sealed oldest first, and the parts of
       // one window in order (S7), so only a later window or a part of this one at this index or past it refuses.
+      // A checkpoint of this window written before the amendment is the whole window; its part index is NULL,
+      // which no comparison matches on SQL (`NULL >= 0` is not true), so it is matched as NULL.
+      const thisWindow = { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) };
       if (kind === 'window' && (await this.storedCheckpoint(chainKey, { kind: 'window', $or: [
         { window_start: { $gte: iso(start + AUDIT_SEAL_WINDOW_MS) } },
-        { window_start: { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) }, part_index: { $gte: part.part_index } },
+        { window_start: thisWindow, part_index: { $gte: part.part_index } },
+        { window_start: thisWindow, part_index: { $null: true } },
       ] }))) {
         throw new Error(`chain '${chainKey}' already holds a window checkpoint at or after part ${part.part_index} of ${iso(start)}; it is not sealed twice`);
       }
