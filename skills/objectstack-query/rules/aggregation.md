@@ -112,15 +112,21 @@ const rows = await engine.aggregate('order', {
 ```
 
 `having` filters *groups*; `where` filters the *input rows* before grouping —
-use `where` to shrink the scan, `having` to threshold the aggregates.
+use `where` to shrink the scan, `having` to threshold the aggregates. `avg` /
+`min` / `max` over no rows is `null`, and no value fails every ordering test
+([filter rules](./filters.md)): `having: { average: { $lte: 0 } }` drops it.
 
 ## Filtered Aggregation (FILTER WHERE)
 
 > ✅ **Enforced.** A per-aggregation `filter` scopes that one measure, so a
-> total and a conditional count share ONE call. Any aggregation carrying a
-> non-empty `filter` forces the in-memory path — no driver compiles a
-> conditional aggregate, and one reached directly refuses `NOT_IMPLEMENTED`;
-> unfiltered aggregations keep native push-down.
+> total and a conditional count share ONE call. A driver that declares
+> `supports.aggregationFilter` (`driver-sql`; `driver-turso` outside remote
+> mode) runs it in the database, compiled as that datasource's `where` is: it
+> answers what the same condition answers there (text by the database
+> collation) and is refused where it is — a `{ $field }` comparison on a column
+> the object does not declare, `INVALID_FILTER` / 400. On any other driver the
+> engine reads the scoped rows and evaluates the filter itself. A column with
+> no value fails its ordering tests either way ([filter rules](./filters.md)).
 
 <!-- os:check -->
 ```typescript
