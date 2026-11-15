@@ -2,8 +2,8 @@
   "number": 32995,
   "kind": "issue",
   "title": "runtime action route (#32751 follow-up): stop citing ruling A for the disabled-holder answer in code, and pin a disabled package's object-less action",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T02:55:31Z",
-  "updated_at": "2026-11-14T17:43:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T21:40:06Z",
+  "closed_at": "2026-11-14T21:40:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

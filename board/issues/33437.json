@@ -1,0 +1,35 @@
+{
+  "number": 33437,
+  "kind": "issue",
+  "title": "SSO SAML: key accounts on a stable per-provider attribute (Entra objectidentifier by default) so the app and the IdP portal reach one account",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "domain:server",
+    "enhancement",
+    "lease:A1",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:11:53Z",
+  "updated_at": "2026-11-14T23:28:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33437",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4d1NJYFGVi2FRztyBNo\n\nFiling gate: ③ a maintainer-directed task. The maintainer's decision, recorded on #32146 (comment 6884252770, 2026-11-14T21:10Z, decision card): \"B — key SAML accounts on a configured stable attribute, scoped to the same provider (Entra default `objectidentifier`; other IdPs name the attribute). Both entries reach the same account and survive an email rename. Includes a migration of existing SAML account rows. Cross-provider and password accounts stay under the current linking rule.\"\nAmended by the maintainer 2026-11-14T21:12Z (#32146 comment 6884275195): \"no migration of existing SAML account rows — there are no production customers yet. B applies to new sign-ins only.\"\nReader: server area A1 (auth and identity) of the area-lease pilot #33059, by an `os-dev` subagent; `priority:p2`.\nDedupe (open and closed): `is:issue SAML objectidentifier account key` 1 hit (#32146, the parent); `is:issue SAML stable attribute NameID account` 1 hit (#32146).\n\n## 维护者速读\n\n同一个人先从应用登录(SP 发起),再从 Entra「我的应用」门户进入(IdP 发起)时,两次的 NameID 不同。#33418 之后不会再建第二个账号,但门户那次会被拒(account_not_linked)。按你选的 B:SAML 账号改用同一提供方的稳定属性(Entra 默认 `objectidentifier`,可配置)做键,两种入口都进同一个账号,改邮箱也不丢。按你 21:12Z 的补充,不迁移已有的 SAML 账号记录,只对新的登录生效。\n\n## Business reason\n\nAn organization on Microsoft Entra ID whose people open the app from the My Apps portal after first signing in from the app is refused today (since #33418) instead of being signed in, and before #33418 got a second account. Keying on a stable per-person attribute of the same provider lets both entries reach one account, and keeps the account when the person's email changes.\n\n## Expected\n\n1. A SAML provider can name a stable account-key attribute; with none named, an Entra provider (issuer on `sts.windows.net` / `login.microsoftonline.com`) uses `http://schemas.microsoft.com/identity/claims/objectidentifier`. When the assertion carries it, the SAML account's key is that value, not the NameID.\n2. Scope: the same provider only. A sign-in through provider A never reaches an account made through provider B by this key; cross-provider and password accounts stay under the current linking rule.\n3. No migration (maintainer amendment 21:12Z): existing SAML account rows keyed on a NameID are left as they are; the stable key applies to accounts created from now on.\n4. Measured on the real stack (better-auth + @better-auth/sso, a signed assertion): SP-initiated then IdP-initiated with a persistent NameID ends on one account and both sign in; portal-first then SP-initiated likewise.\n5. sso.mdx then states that both entries reach one account (the line #33418 had to withdraw), and the Setup form names the new attribute.\n\nParent: #32146 (lands with PR #33418)."
+}

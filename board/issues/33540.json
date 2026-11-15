@@ -1,0 +1,32 @@
+{
+  "number": 33540,
+  "kind": "issue",
+  "title": "pm: the relay's governedReviewPlan still summons the approvers on a low-risk Tier H PR the seat may land",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:00:46Z",
+  "updated_at": "2026-11-15T00:49:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33540",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight). Contract review 6886243839 of PR #33531 (card #33501) agreed with the dev's out-of-scope finding: `governedReviewPlan` in `scripts/pm/fleet-write/execute.mjs` (L809, called at L1849 to L1881) plans its reviewer requests from paths alone. Once #33501 lands, a PR the low-risk arm reads as Tier S still gets os-zhuang and hotlong requested as reviewers. That is a summons, not a block, but it puts every delegated PR back in the maintainers' queue, which is what the ruling took away.\n\nRuling-ref: Leehom, project chat 2026-11-14T22:42:56Z, 「同意 把低风险的 Tier H 放权给座位」\n\n## What lands\n\n1. `governedReviewPlan` takes the same low-risk reading the queue guard uses (`lowRiskArmVerdict` / `pullLowRiskReading` from `check-governed-merges.mjs`, one reader, no second parser) and requests no approver when the reading is low-risk Tier S.\n2. When the reading cannot be made (pull unread, labels unread), the plan stays as today and summons.\n3. Self-test rows: a low-risk skills-wording PR plans no approver; the same PR with `Clause-②: yes`, a `security` label or a non-skills changeset plans both.\n\n## Scope\n\n`scripts/pm/fleet-write/**`. Tier S. `skip-changeset`. `Clause-②: no`.\n\nBlocked-by: #33501 (PR #33531)\n"
+}

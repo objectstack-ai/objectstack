@@ -1,0 +1,33 @@
+{
+  "number": 33452,
+  "kind": "pull_request",
+  "title": "docs(plugin-hono-server, hono): say which 304 answers carry Vary, and that the hosted door leaves compression to the platform",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:31:09Z",
+  "updated_at": "2026-11-14T23:06:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33452",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DH9e4qEZ6HPSFPqXCYcdFui)_\nFixes #32565\nFixes #32536\n\nClause-②: no\nMetadata-protocol: none\n\nSeat: domain:server#5 · os-elon-musk · session_016WV4cxHwXNcGcAHNerZsom (area-lease pilot #33059, area A5).\n\n## 维护者速读\n\n- 改了什么:文档改为如实描述压缩中间件对 304 的 `Vary` 行为;并写明托管入口(`createHonoApp`)不压缩、由平台或 CDN 负责。代码零行为变化,只改注释与文档,加一个 304 测试。\n- 为什么改:README 和协议文档说\"所有 304 都带 `Vary: Accept-Encoding`\",实际只有自带可压缩 `Content-Type` 的 304 才带(控制台静态文件的 304 不带);托管入口谁负责压缩此前无文档,裁决 Y′ 要求写明。\n- 风险与回滚:风险极低,运行时代码未动;回滚即 revert 本 PR。\n- 先看:`packages/plugins/plugin-hono-server/src/response-compression.test.ts`(新 304 用例,钉住两种 304 形态);`packages/adapters/hono/README.md`(托管入口规则);`content/docs/deployment/production-readiness.mdx`(新节)。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-hono-server exec vitest run src/response-compression.test.ts`,预期 25 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n**#32565 (304 and `Vary`).** Route chosen: make the docs say what the server does, and pin it. The middleware decides from the answer it is handed (`variesByEncoding` reads the answer's own `Content-Type`); it cannot see the `200` a `304` stands for. Measured on this branch with two `304` shapes over a real socket:\n\n- the Console's stable-file shape (`new Response(null, { status: 304, headers: { etag, cache-control } })`, `packages/cli/src/utils/console.ts`): no `Content-Type`, **no `Vary`**;\n- the dispatcher's shape (`res.status(304)` then `res.json(undefined)`, which is how `packages/runtime/src/dispatcher-plugin.ts` writes the translation bundle's body-less `304`): Hono's `c.json` stamps `Content-Type: application/json`, so this `304` **does** carry `Vary: Accept-Encoding`. The card's premise holds for the Console producer only; the i18n producer already gets the `Vary` on the self-hosted door.\n\nWhy not the code fix: the middleware cannot tell which route would encode its `200`, so \"add `Vary` to a bare `304`\" would mean adding it to every bare `304`, including ones for images and other types this server never encodes. A cache refreshing a stored answer from a `304` copies the `304`'s header fields onto it, so that would add a `Vary` the stored answer never had. Docs that say exactly what happens is the smaller honest change; nothing is wrong in a cache today because a `304` without `Vary` leaves the stored `Vary` in place.\n\nEdited: the `## Vary and ETag` paragraph of the module docblock and the comment on the early return in `response-compression.ts` (no code line changed); the plugin README; `content/docs/protocol/kernel/http-protocol.mdx`.\n\n**#32536 (hosted door).** Ruling Y′ (comment 6813607394 on #32155, item 3) records that `createHonoApp` does not compress and that the platform or CDN does. Premise re-checked on `origin/main` `ba35dfd7`: `git grep -n \"Content-Encoding\\|compress\" -- packages/adapters/hono/src` answers exit 1 (no hits), and `git grep -n -i \"vary\\|accept-encoding\" -- packages/adapters/hono/src` answers exit 1 too. Written down in `packages/adapters/hono/README.md` (new section) and `content/docs/deployment/production-readiness.mdx` (new section, a table of which door compresses), with a cross-link from the protocol page. Both say to check the host compresses, to fix it at the host rather than in the app, and to keep the `ETag` unchanged (saves compare it strongly as `If-Match`).\n\nChangeset: `.changeset/32565-compression-vary-304-hosted-door.md`, `patch` for `@objectstack/plugin-hono-server` and `@objectstack/hono` (their READMEs ship in the tarball).\n\n## Tests\n\n- New case in `response-compression.test.ts`: a `304` carries `Vary: Accept-Encoding` only when it carries a compressible `Content-Type`, and is never encoded. Both producer shapes above, raw HTTP through `node:http`.\n- No ablation: the diff changes no tested behaviour (the new case pins existing behaviour; the code edits are comments).\n\n## Acceptance notes\n\n- The Y′ ruling text says the middleware appends `Vary` \"on HEAD, 304 and 206 answers too, with the same merge rule\"; the landed implementation does that for answers that pass the `Content-Type` gate, and this PR does not change that. It makes the docs match it; it does not reverse the ruling. Triage on #32565 placed the wording in the lane's discretion.\n- Not measured: whether every hosted target compresses by default. The docs therefore name no host as compressing; they tell the operator to check, as #32536 asks. If a target turns out not to compress, the edge-native compression work is a separate card per #32536.\n\n## Verification\n\nReadings below were taken at head `91ade098` (tests) and the derived gate run named in the report comment.\n\n<details><summary>plugin-hono-server test + typecheck</summary>\n\n`bash scripts/pm/os-verify-lock.sh -c \"pnpm --filter @objectstack/plugin-hono-server test && pnpm --filter @objectstack/plugin-hono-server typecheck\"`: `Test Files 42 passed (42)`, `Tests 548 passed (548)`; typecheck `tsc --noEmit` both programs clean, `check:test-typecheck: OK`; `VERDICT command-exit 0`.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nClaim records: #32565 comment 6884374681 · #32536 comment 6884780070 (branch claude/area-A5-32565).\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cxHwXNcGcAHNerZsom -->"
+}

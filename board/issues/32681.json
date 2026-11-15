@@ -2,8 +2,8 @@
   "number": 32681,
   "kind": "issue",
   "title": "metadata: a package-less object-bound action row is keyed per (package, name) by DatabaseLoader but per (object, name) by the registry, so the boot pass files it as one holder's customization",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:56:04Z",
-  "updated_at": "2026-11-14T20:05:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T22:08:46Z",
+  "closed_at": "2026-11-14T22:08:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 8,
   "locked": false,

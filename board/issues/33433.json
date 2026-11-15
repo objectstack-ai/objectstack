@@ -1,0 +1,37 @@
+{
+  "number": 33433,
+  "kind": "pull_request",
+  "title": "test(rest): give the view CONTROL read the budget its cold lint load needs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T20:52:41Z",
+  "updated_at": "2026-11-14T21:48:10Z",
+  "closed_at": "2026-11-14T21:48:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T21:48:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33433",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\n## Summary\n\nTest-only. `packages/rest/src/meta-qualified-item-route.test.ts` › \"CONTROL — a type ADR-0150 does not address by package (view) is served as before\" timed out (`Test timed out in 5000ms`) in two merge-queue builds for #33322 (runs 43633136778: 5089ms, 43637152754: 5281ms). It passed in a third queue build on the same code (43633195065: 2816ms).\n\n## Why\n\nIt is the file's only served `view` read. `metadata-diagnostics.ts` attaches `@objectstack/lint` warnings to view reads and loads the lint bundle lazily, so the first view read in a vitest worker pays the cold load: measured on `main` b4624440, 716–853ms for the first drive and 1–2ms for an identical second drive; loading the bundle alone took 1027ms. On a loaded runner that load passes 5s. Nothing hangs. It only shows when the queue runs `rest` uncached (e.g. a PR that changes `turbo.json`).\n\n## What changes\n\n- The one test gets a 30s budget, with a comment naming the cold load it pays for. Assertions unchanged.\n\nLocal: origin/main 4 runs and main + #33322 2 runs, 302/302 each.\n\nNo changeset (test-only).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+}

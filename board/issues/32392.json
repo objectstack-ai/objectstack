@@ -2,8 +2,8 @@
   "number": 32392,
   "kind": "issue",
   "title": "skills: the `master_detail` parent-currency path owes two follow-ups (ui dashboards aggregate rule, data eval case)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T05:05:03Z",
-  "updated_at": "2026-11-14T18:46:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T00:44:35Z",
+  "closed_at": "2026-11-15T00:44:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

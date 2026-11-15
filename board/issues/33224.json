@@ -2,8 +2,8 @@
   "number": 33224,
   "kind": "issue",
   "title": "setup: a user holding view_all_audit_log has no Audit Log entry in Setup (it sits under group_diagnostics, gated by manage_platform_settings), and the Setup landing page answers 403 for them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T05:36:40Z",
-  "updated_at": "2026-11-14T17:17:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T21:27:57Z",
+  "closed_at": "2026-11-14T21:27:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

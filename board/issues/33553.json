@@ -1,0 +1,35 @@
+{
+  "number": 33553,
+  "kind": "issue",
+  "title": "automation: a connector_action node sends input keys its action does not declare to the provider (open input schemas, no refusal)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "finding",
+    "lease:A5",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:19:05Z",
+  "updated_at": "2026-11-15T01:46:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33553",
+  "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ② out-of-scope finding, class a, from #33346 row 254 (PR #33547; os-dev-report 6886439582, `out_of_scope_findings[2]`). ⛔ Not a claim; triage sets the lane and grade. #33346 was re-graded p2 on this row (6885601326) because stale inputs reached the provider.\nDedupe: `is:issue is:open connector undeclared input` and `is:issue is:open judgeConnectorInput` find only #33346.\n\n## What happens\n\nA `connector_action` flow node whose `connectorConfig.input` holds keys the chosen action does not declare sends them to the provider at run time. PR #33547 stops the Studio designer from saving such keys on a connector/action switch; flows already saved with stale keys, and flows written by any other path (API, package import, AI authoring), still send them.\n\n## Why (read on `origin/main` `e3f0cfd4` by the #33346 dev)\n\n- `packages/services/service-automation/src/builtin/connector-nodes.ts` ~L139 `resolveValueSlotMap(cfg.input)` hands the whole map to the handler.\n- `judgeConnectorInput` refuses only schema violations, and every shipped connector input schema is open (no `additionalProperties: false`), so undeclared keys pass.\n\n## Acceptance (for the owning lane to decide the shape)\n\n- An input key the action does not declare is refused loudly (at publish, or at run), or dropped with a recorded warning — not silently sent. Contract-first is the default (publish-time refusal)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 33461,
+  "kind": "pull_request",
+  "title": "docs(kernel): auth-service handleRequest names the whole surface, the mount-layer checks and the transport argument",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:40:02Z",
+  "updated_at": "2026-11-14T22:41:11Z",
+  "closed_at": "2026-11-14T22:41:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T22:41:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33461",
+  "body": "Fixes #32725\n\n## 维护者速读\n\n- **改了什么:** 只改一页合同文档 `content/docs/kernel/contracts/auth-service.mdx` 的 `handleRequest` 小节,补上三件事:转发宿主拿到插件的全部登录接口;IP 白名单等挂载层检查在这条路径上执行;可选的第二个参数 `{ remoteAddress }` 与代理后的 `server.trustProxy`。示例改成两参数调用。\n- **为什么改:** 上一轮改动合入后,转发给 `handleRequest` 的宿主会开始执行挂载层检查,文档仍是旧的单参数写法,接入方照抄会漏传客户端地址,在设了 `allowed_ip_ranges` 的部署上被 `403 IP_NOT_ALLOWED` 拒绝。\n- **风险与回滚:** 纯文档,不发布任何包,无运行时影响;回滚即还原这一页。\n- **先看:** `content/docs/kernel/contracts/auth-service.mdx` 的 `### handleRequest` 小节(新增的三条要点和示例)。\n- **两分钟验证:** 打开 PR 的 Files 视图,读 `handleRequest` 小节,预期看到三条要点与 `authService.handleRequest(request, { remoteAddress })`。\n- **需要你做的:** 无,席位落地。\n\n## What changes\n\nThe `handleRequest` section of the `IAuthService` contract page now states, in the wording of the merged changeset `auth-handlerequest-whole-surface` and the `IAuthService.handleRequest` docblock in `packages/spec/src/contracts/auth-service.ts`:\n\n1. An implementation answers its whole auth route surface there; with the shipped `plugin-auth`, a forwarding host gets every route the self-hosted mount serves under `/api/v1/auth/*` (the platform's own mounts and better-auth behind them), not better-auth alone.\n2. The mount-layer checks run on that path: the IP allow-list (`allowed_ip_ranges`), the one-account-per-request rule, the organization IP list and the platform-admin wrappers.\n3. The optional second argument, `handleRequest(request, { remoteAddress })`, or `server.trustProxy` behind a proxy that sets `X-Forwarded-For`; with neither, a deployment that sets `allowed_ip_ranges` answers `403 IP_NOT_ALLOWED`.\n\nThe example now shows the two-argument call. One sentence notes that the second argument belongs to the plugin's `AuthManager` and that the `IAuthService` shape on the page is unchanged (the changeset's own last line), so a reader typed against the interface is not misled. The interface block above stays as the spec declares it. `skills/**` is untouched.\n\nEach claim was checked against main before writing it:\n\n- `AuthManager.handleRequest(request, transport?: { remoteAddress?: string })` answers through the bound route surface for any path under `basePath` (`packages/plugins/plugin-auth/src/auth-manager.ts`); `DEFAULT_AUTH_BASE_PATH` is `/api/v1/auth`.\n- `AuthPlugin.bindAuthRouteSurface` runs `mountAuthRoutes` on the private table in `init()`; that function registers the D5 allow-list middleware (answering `403` with code `IP_NOT_ALLOWED`), the organization IP list middleware (`runAtMountDoor`), the one-account-per-request middleware and the `/admin/*` routes behind `judgePlatformAdmin` (`packages/plugins/plugin-auth/src/auth-plugin.ts`).\n- `isClientIpAllowed` refuses an undetermined address while ranges are set, and `resolveClientAddress` reads forwarded headers only under `trustProxy`.\n\nNo changeset: the page ships in no package's `files[]`, so this PR carries `skip-changeset`.\n\n## Tests\n\nDocs-only; no package test is owed. The derived gate families were run locally (see Verification).\n\n## Acceptance notes\n\nNone.\n\n## Verification\n\nAll 43 families from `node scripts/pm/dispatch-gates.mjs --commands` ran on head `df9fea6f4d` (after merging current `origin/main`), each exit 0; reconciliation: `Run reconciliation — 43 derived, 43 run, 0 NOT-MEASURED, 0 UNRUN` with a derived zero (every line carried its exit code).\n\n<details>\n<summary>Gate readings</summary>\n\n- `pnpm check:doc-authoring` exit 0, `pnpm check:doc-anchors` exit 0, `pnpm check:doc-frontmatter` exit 0, `pnpm check:docs-single-h1` exit 0, `pnpm check:nul-bytes` exit 0, `pnpm check:docs-transcript-drift` exit 0, `pnpm --filter @objectstack/spec run check:docs` exit 0, `pnpm --filter @objectstack/spec run check:skill-examples` exit 0 (344 prose examples type-check across 3 surfaces), the two `@objectstack/lint` doc gates exit 0, and the remaining derived families exit 0.\n- Prerequisite builds run first under the verify lock: `@objectstack/lint` closure (VERDICT command-exit 0) and the `@objectstack/client` / `@objectstack/client-react` closures (VERDICT command-exit 0); before those builds three families answered exit 3 (nothing measured) and were re-run green.\n- CI-owned families (type-check lanes, artifact rosters, wide-population families) are left to the PR's check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1NJYFGVi2FRztyBNo)_\n"
+}

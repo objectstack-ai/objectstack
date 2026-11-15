@@ -1,0 +1,34 @@
+{
+  "number": 33497,
+  "kind": "issue",
+  "title": "qa(scenarios): refusalMeets never sees a hook's declared refusal; the MCP door serves it as declaredCode beside the status's catalogue code",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T22:38:27Z",
+  "updated_at": "2026-11-15T00:25:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33497",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (found while reviewing in-flight work). Contract review 6885289276 of PR #33488 (card #33257, a hook's declared refusal) found this outside its diff. The PR's dev probed the live answer.\n\n## What is wrong\n\n`refusalMeets` in `packages/qa/scenarios/src/score/scenario-operation-grade.ts` lets a declared `VALIDATION_FAILED` be met by \"the app's own rule\": a 4xx answer whose `code` is not in the spec's `ErrorCode` catalogue. Its docblock says a hook's declared refusal (`OVER_RECEIPT` at 422, `ASSET_NOT_IN_STOCK` at 409) \"reaches the MCP door with its own code\".\n\nOn main it does not. The MCP data tools serve a hook's declared refusal with `code` set to the status's catalogue code (for example `RESOURCE_CONFLICT` at 409) and the hook's own code as `declaredCode` (#31407, `packages/mcp/src/mcp-server-runtime.ts`). The runner (`packages/qa/scenarios/src/runner/observe.ts`) keeps `code` and `status` but not `declaredCode`. So `refusalMeets` sees a catalogue code and returns false. No declared hook refusal, at any status, meets `VALIDATION_FAILED` on a live run. The grader's unit tests miss this because they pass `ASSET_NOT_IN_STOCK` in as `code` directly.\n\nLive probe (PR #33488's dev, on main): a sandboxed hook declaring `ASSET_NOT_IN_STOCK` at 409 answers `409 RESOURCE_CONFLICT` with `declaredCode: ASSET_NOT_IN_STOCK`.\n\n## Fix\n\nThe runner keeps `declaredCode` on a refused answer. `refusalMeets` treats a present `declaredCode` at a 4xx status as the app's own rule. Re-pin the unit tests on the wire shape the door actually serves. Correct the docblock and `packages/qa/scenarios/README.md` to match.\n\n## Reach\n\nThe scenario lane's grade of every card whose build refuses through a hook's declared refusal. Skills now teach declared refusals (PR #33488), so builds will hit this more often.\n"
+}

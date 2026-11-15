@@ -2,8 +2,8 @@
   "number": 33389,
   "kind": "issue",
   "title": "objectql: the security-catalog name-conflict refusals still say a permission set holds one name per deployment",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "documentation",
     "domain:server",
     "lease:E2",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T18:15:59Z",
-  "updated_at": "2026-11-14T18:52:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T00:26:01Z",
+  "closed_at": "2026-11-15T00:26:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33389",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nOut-of-scope finding of #32758 (PR #33384, dev report 6882046858), class b, release text.\n\n`packages/objectql/src/registry.ts`: the `SecurityCatalogNameConflictError` hot-install message (about `:2878-2882` on `main`) and `coldBootConflictMessage` (about `:2818`) both say \"Positions, permission sets and capabilities each hold one name per deployment: an assignment names a position or a permission set by its bare name\". Since PR #32742 a grant carries `permission_set_package` and two namespaces may hold one permission-set name. The refusals themselves still fire only where `permissionSetHoldersMeet` says the holders meet, so only the sentence is wrong.\n\n**TO:** say positions and capabilities hold one name per deployment, and a permission set one name per namespace (co-owners of one namespace, a package with no namespace, the platform namespaces and `guest_portal` keep one holder), matching the describe and docs #33384 lands. Update any test that pins the old sentence.\n\nNo rule change. `Clause-②: no` / `Metadata-protocol: none`; `@objectstack/objectql` patch.\n\nclass: b · type: Docs · Grade: p3 (shipped refusal text, refusal itself correct) · domain: server"

@@ -1,0 +1,31 @@
+{
+  "number": 33596,
+  "kind": "issue",
+  "title": "Scenario grader: a 403 on an operation whose declared outcome is applied is charged to the operation, not to the build that denied it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:14:34Z",
+  "updated_at": "2026-11-15T02:14:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33596",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M1), quoted there; also ① grader defect, measured. `reach:` eval#1 round 1, 2026-11-14 (control cards, scratch, published 18.4.0, runner at objectstack `d683e6f3`, model claude-fable-5-1).\n\n## What happened\n\n- `invoice_with_line_items` op `add_line` as `sales_rep` (declared `applied`): answer `refused PERMISSION_DENIED (403)`, 0 writes. Graded as an operation failure.\n- `project_with_tasks` ops `add_task` (`applied`), `drop_packing` (`pending_confirmation`) and `task_without_title` (`write_validation`) as `contractor`: all `refused PERMISSION_DENIED (403)`; the validation half could not be measured because the probe also met 403.\n- Build scored 32/32 and 30/30 on those cards. 4 of the 7 operation points lost that round were the built app's permission set, not the agent.\n\n## Carrier\n\n- `packages/qa/scenarios/src/score/scenario-operation-grade.ts` grades the observed answer against the declared outcome; `isProbedOperation` (`src/schema.ts`, used in `src/score/index.ts`) probes only `refused` creates and updates.\n- The runner's own probe (`src/runner/observe.ts`) already writes as the persona through the same MCP door.\n\n## Done when\n\n- For an operation declared `applied` (and a `pending_confirmation` one whose agent write met 403), the runner sends the declared write itself as the persona; when the platform answers 403 the operation is **not measured: the build denies the persona this write**, and the scorecard carries a Build finding naming persona, object and verb.\n- The `write_validation` probe that meets the build's 403 is reported the same way when the card gives that persona the write (today `buildLockOf` covers only a locked field plus a declared action).\n- A test pins each case on a recorded fixture; a 403 the card declares (`refused PERMISSION_DENIED`) still grades as today.\n\n## Reader\n\nThe epic PM of #33595 dispatches it to `os-dev` (`domain:devx`, `packages/qa/scenarios`). eval#1 replays the recorded runs at M1 close-out.\n\nDedup: see #33595 (no duplicate; #33414 #33415 #33256 are other grader defects, all closed)."
+}

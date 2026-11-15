@@ -1,0 +1,30 @@
+{
+  "number": 33582,
+  "kind": "issue",
+  "title": "console first load: the Studio en strings and metadata-form i18n are still in the eager closure (split from #33293)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T01:25:54Z",
+  "updated_at": "2026-11-15T01:25:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33582",
+  "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: split card of #33293 (p3), per its order's split clause; the edges were measured by PR #33580 (os-dev-report 6887255208, PR body \"Acceptance notes\" → \"Why this PR stops here\"). Reader: `domain:ui`. Grade p3, the parent's grade, self-graded by the lane seat under the maintainer's 「定级你可以自己决定」.\nDedupe: `is:issue is:open i18n-ns-studio eager` finds only the parent #33293.\n\n## What the user sees\n\nEvery Console route still downloads the Studio `en` string namespace (`i18n-ns-studio-en`, 64.3 KB gzipped) and `metadata-form-i18n` before it asks for data, though only Studio and Setup pages draw them.\n\n## Where (edges read from the module graph of the #33580 build `30cbab20`)\n\n`namespaces/studio/index.ts` imports `en.ts` statically by design (the synchronous `en` fallback, objectstack#25922), and `index.ts` is eager twice over:\n- the `i18n-runtime` manual chunk group (`/packages/i18n/`) captures it into an eager chunk;\n- four eager modules import app-shell's `metadata-admin/i18n.ts`: `studio-design/studio-canvas-preview.tsx` (bare-imported by the package entry for its load-time `registerStudioCanvasPreview('object', …)`), `metadata-admin/datasource/register.ts` (`DatasourceResourcePage` by value), `PositionGrantCells` (by value, from `builtinComponents.tsx`), and `CreateViewDialog` → `objectDatasets` → `useDatasetCatalog`.\n- Two small stragglers ride the same edges: `object-fields-io` (via `preview/DraftChangesPanel.tsx`) and `json-schema-to-fields` (via `DatasourceResourcePage`).\n\n## Acceptance\n\n- The default canvas preview in `studio-canvas-preview.tsx` moves to a module of its own and is registered lazily (a file split of about 400 lines in a `sideEffects`-array module).\n- `DatasourceResourcePage` and the two position cells are registered lazily (the `lazyPage` shape #33580 added in `builtinComponents.tsx`); `CreateViewDialog` is lazy in `ObjectView`.\n- An `i18n-ns-studio` group in `ui/apps/console/vite.config.ts`, like `i18n-ns-marketplace`. The synchronous `en` fallback stays.\n- Measured from `apps/console/dist/eager-closure.json` on two builds: `i18n-ns-studio-en` and `metadata-form-i18n` leave the closure; Studio and Setup draw as before, `en` strings included, in a built console in a real browser.\n\nRefs #33293"
+}

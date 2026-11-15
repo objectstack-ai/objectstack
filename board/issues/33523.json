@@ -1,0 +1,34 @@
+{
+  "number": 33523,
+  "kind": "issue",
+  "title": "import: a lookup cell resolves a name across the whole target object, not within the row's own master reference, so a repeated detail name (\"Advance 30%\" on two contracts) fails the row with reference_ambiguous",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A3",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T23:27:28Z",
+  "updated_at": "2026-11-15T01:46:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33523",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n## What happens (@objectstack 18.4.0, measured by HotCRM's Order to Cash browser pass on 2026-11-14)\n\nHotCRM's invoice import sets both `crm_contract` and `crm_billing_milestone`. The billing milestone is a `controlled_by_parent` detail of the contract. When a cell names the milestone by title (for example \"Advance 30%\"), the import resolves that name across **every** `crm_billing_milestone` row. If two contracts each have an \"Advance 30%\" step, the row fails with `reference_ambiguous`, even though the row's own contract identifies exactly one of them. You can reproduce this with HotCRM's shipped `assets/import-templates/invoices.csv` once two contracts carry a step with the same name.\n\nThe record form's picker does narrow by contract (lookupFilters / dependent picker), so the form and the import disagree.\n\n## Ask\n\nWhen a lookup's target has a master_detail (or a declared dependent filter) whose master the same row also sets, the import resolves the name **within that master** first. Ambiguity is answered only inside that scope.\n\n## Acceptance\n\n1. Two masters each have a detail named X. An import row that sets master A and detail \"X\" resolves A's X. The same holds for B.\n2. A row with no master cell keeps today's behaviour (whole-object lookup, `reference_ambiguous` on a tie).\n3. A name absent under the row's master answers `reference_not_found`, not a match under another master.\n4. The import mapping docs and the data skill describe the scoping.\n\n## HotCRM side\n\nUntil this ships, HotCRM's docs tell importers to use the step's record id when step names repeat across contracts."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 33564,
+  "kind": "issue",
+  "title": "metadata-protocol: reverting a revert commit restores nothing (its items carry prevVersion null), against ADR-0067 D3",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "finding",
+    "lease:E1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:39:07Z",
+  "updated_at": "2026-11-15T00:45:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33564",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a defect found by the at-tier contract review 6886701800 of PR #33465, card #32504; code outside that diff).\n\n**What is wrong.** `revertCommit` in `packages/metadata-protocol/src/protocol.ts` restores an item only when it has a `prevVersion` (or deletes it when it did not exist before). An item with `existedBefore: true` and no `prevVersion` takes neither branch and lands in neither `reverted[]` nor `failed[]`. Every revert commit records its restored items with `prevVersion: null`, and `readRevertableCommit` accepts revert commits. So reverting a revert silently restores nothing and reports nothing. ADR-0067 D3 promises an append-only history where a revert is itself revertible, and the `protocol.ts` docblock says \"itself revertible\".\n\n**What lands.** Either record the version a revert replaced (so a revert commit carries a real `prevVersion`) and make revert-of-revert restore, or refuse a revert commit at `readRevertableCommit` by name and amend D3. Name the skipped outcome in the result either way. Pin it with a revert-of-revert test.\n\nRelated: #32504 / PR #33465 (the ADR-0067 amendment names this outcome or leaves it undecided).\n"
+}

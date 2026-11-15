@@ -1,0 +1,37 @@
+{
+  "number": 33444,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): a host can keep a platform baseline contribution at read, or decline it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "lease:A2",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:20:22Z",
+  "updated_at": "2026-11-15T01:08:25Z",
+  "closed_at": "2026-11-15T01:08:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T01:08:24Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33444",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DXuamRUC67fx2TTYrFfyuSH)_\n\nFixes #33132\n\nClause-②: yes (widening) — `SecurityPlugin` accepts a new, opt-in option, `platformBaselineOverrides`, and the package exports two new types, `PlatformBaselineOverride` and `PlatformBaselineOverrides`. Omitted, every platform baseline contribution is admitted as contributed, as before.\nMetadata-protocol: none\n\n## Maintainer quick read\n\n- What changes: a host can now say, in its `SecurityPlugin` configuration, \"members keep reading attachments but may not create them\" (or withhold a platform service's grant entirely). Before, cloud had to wrap an internal security-service function to get this, and a rename of that function would have silently dropped the protection.\n- Why: 18.4 put storage's attachment set (`storage_attachment_member`: read and create on `sys_attachment`) on every member's baseline. Cloud's control plane is cross-tenant and must not let an organization administrator create attachments there.\n- Risk and rollback: opt-in only; nothing changes for a host that does not declare the option. Rollback is a revert.\n- Read first: `packages/plugins/plugin-security/src/platform-baseline-sets.ts` (`readPlatformBaselineOverridesOption`, `applyOverrides`, `unmatchedOverrides`).\n- Two-minute check: `pnpm --filter @objectstack/plugin-security exec vitest run src/platform-baseline-sets`.\n- Needed from you: nothing.\n\n## What changes\n\n- `SecurityPluginOptions.platformBaselineOverrides` (new): contributed set name → object → `'read'` (keep read, withhold create) or `'decline'` (withhold the object). Example: `{ storage_attachment_member: { sys_attachment: 'read' } }`. A malformed declaration (non-object, empty set name, a set entry naming no object, object `'*'`, a verdict other than `'read'`/`'decline'`) is refused when the plugin is constructed.\n- `platform-baseline-sets.ts`:\n  - `PlatformBaselineSets` takes the overrides. In `contribute`, the contribution is first held to every existing seam rule as the contributor wrote it, and only then narrowed. An override never adds a bit: `'read'` on an object the set grants create only withholds that object.\n  - The narrowed body is what is registered in the catalog and joined to the baseline, so the data plane, `security/explain`, the effective-access read and the `everyone` anchor all read it.\n  - A set the overrides leave granting nothing is not registered, so it holds no name in the engine registry, and joins no baseline (`joined: false`, the answer a no-baseline deployment already gives).\n  - `unmatchedOverrides()` lists entries no admitted contribution matched.\n- `security-plugin.ts`: at `kernel:bootstrapped`, each unmatched override is logged at `warn`, naming it, so a renamed set or object is said rather than silently left in force.\n- `security-plugin-security-service.ts`: the admission line appends what the host narrowed, and its meta carries `overridden`. Without overrides the line is byte-identical to today's (the existing integration pin still passes unchanged).\n- `index.ts`: exports the `PlatformBaselineOverride` / `PlatformBaselineOverrides` types for hosts.\n- `content/docs/permissions/attachments-access.mdx`: documents the option under \"Who holds the object grant\".\n- Changeset: `@objectstack/plugin-security` patch, `Clause-②: yes (widening)` (review#3 M1).\n\n## Tests\n\n- `platform-baseline-sets.test.ts` (unit): `'read'` narrows and the narrowed body is registered; `'decline'` on one of two objects keeps the other; a fully declined set is not registered and joins nothing; `'read'` never adds read; a contribution the seam refuses is still refused with an override present; unmatched overrides are reported; no override leaves the contribution as is; five malformed declarations refused.\n- `platform-baseline-sets.integration.test.ts` (real kernel, card acceptance): with `{ pbs_notes_member: { pbs_note: 'read' } }`, the set still joins, a member reads the object, a member's create is refused 403 and `explain` says create is not allowed, the catalog holds read on / create off, the admission line names the narrowing, and an override naming an uncontributed set is warned once at boot.\n\n## Verification\n\n- `pnpm --filter @objectstack/plugin-security exec vitest run`: 267 files / 6671 tests passed (45 skipped).\n- `tsc --noEmit` on `tsconfig.json` and `tsconfig.test.json`: clean. ESLint on the touched files: clean.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` is not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cz2MxDkQYCC4U8indM"
+}

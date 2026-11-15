@@ -1,0 +1,32 @@
+{
+  "number": 33565,
+  "kind": "issue",
+  "title": "skills(objectstack-automation): teach that a retried outbound call inside a subflow or map body under an after-record-change trigger is registered but never armed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:39:10Z",
+  "updated_at": "2026-11-15T00:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33565",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up recommended by the at-tier contract review 6886689695 of PR #33482, card #32525).\n\nPR #33482 teaches that an `after-record-change` flow's retry may not reach an inline outbound `http` or `connector_action` node, in the `try_catch`, `http` and `connector_action` rows. It does not teach the other half: an outbound node reached through a `subflow` or a `map` body under the same retry is registered but not armed (`unboundCause: retried_callout_in_subflow`). That half fails silently, so it is the one an author most needs a sentence for.\n\n**What lands.** One sentence in `skills/objectstack-automation/SKILL.md` (or the flows reference it owns) naming the silent half and its remedy, checked against the engine's walk on `main`. Also correct the pre-existing \"`errorHandling.retry`\" wording near line 155 to the real spelling. `@objectstack/skills` patch. Token ratchet paid in place.\n\nBlocked-by: #32525 (PR #33482)\n"
+}

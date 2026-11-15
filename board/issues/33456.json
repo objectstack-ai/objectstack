@@ -1,0 +1,32 @@
+{
+  "number": 33456,
+  "kind": "issue",
+  "title": "metadata-protocol: an action's route beside a package-less row on another object judges no declaration for the holder's own object, and serves the row under the holder's envelope (ADR-0150 D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "lease:E1",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:37:09Z",
+  "updated_at": "2026-11-14T21:37:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33456",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyrFFk86Jqf7Mp5Rzw\n\nParent: #32681 (out-of-scope findings of its second half, PR #33422). Filed by area E2; the change lives in `packages/metadata-protocol/src/**`, so it is leased to area E1. Area-lease pilot #33059, lease:E1.\n\n## Premise (measured on PR #33422 at `8efae7e95f`, runtime harness: real `ObjectStackProtocolImplementation`, real `MetadataPlugin` boot pass over a writable `sys_metadata` double; HTTP not measured)\n\nShapes: package ALPHA binds action `approve` to `account` and a package-less row binds `approve` to `contact` (the mirror shape); or package BETA binds it to `contact` alone and a package-less row binds it to `account` (the single-holder cell). Both save orders.\n\n1. **The holder's own route judges no declaration.** `/actions/account/approve` (mirror) and `/actions/contact/approve` (single-holder cell): `resolveRouteActionDeclaration` finds no declaration. The execution face (`getMetaItemForExecution`; `judgeBareActionRead` returns `undefined` beside one package holder) answers the environment's item on the *other* object, and the route rejects it as another object's action. Measured identical before and after PR #33422 (metadata fix ablated and rebuilt), so the boot fold never caused it. PR #32551's review records this face as its owner seat's follow-up; no open card carried it.\n2. **The package-less row is served under the holder's envelope.** On `/actions/contact/approve` (mirror), the environment's `custom` item is served carrying the holder's `_packageId` (`com.acme.alpha`, or `com.acme.beta` in the single-holder cell) and `_provenance: 'package'`. The route's own `packageId` stays unset and the environment's handler runs. Likely cause: the artifact envelope lookup (`lookupArtifactItem` with `envelopePackageId`) keys by name, not `(object, name)`.\n\n## Do\n\n- The execution face judges an action by `(package, object, name)` (ADR-0150 D4), as the store and the plural read now do (#33318, #33422): the holder's route answers the holder's own item; the package-less row's route answers the environment's item.\n- The envelope graft names the holder only for the item that holder holds at that `(object, name)`.\n- Declare each moved answer FROM→TO with its Clause-② arm and pin both transports where they reach, both save orders.\n\n## Acceptance\n\n- CONTROLs: one package on one object with a package-less row on the same object (its customization, unchanged); two packages on one object (refusal naming both, unchanged); no package-less row.\n- Red line: resolution is never loosened; an ambiguity is reported, never guessed.\n\nSuggested-grade: p3 · first-party reach 0 (no first-party path writes a package-less action row, #32681).\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 33468,
+  "kind": "issue",
+  "title": "[PM seat] eval — 🟢 os-tesla",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:54:22Z",
+  "updated_at": "2026-11-14T22:00:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33468",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/eval.md` (⛔ not copied here). This is **`eval` seat 1**, the lane's first seat; the lane carries no `domain:*` label and no `pm:queue`.\n\n## Current PM — 🟢 os-tesla\n\n- **Seated:** `os-tesla` · `session_01L9qibzr7AespGQoymAnLtn` · 2026-11-14T21:58Z, on the maintainer's 「你帮我开一个 eval座位」 (2026-11-14T21:51Z).\n- **Cadence:** the maintainer handed the schedule to this seat (「你自己控制定时可以吗？」, 2026-11-14T21:51Z), superseding the charter's maintainer-set-only line for this seat; the schedule is recorded on `Patrol:` below. Rounds that call a billed API (ask-accuracy baseline, hosted chat eval set) run only inside a budget the maintainer approves per round.\n- **Patrol:** `trig_01EMWRjYEwP1Te8nCkHrPsZy` · `CRON_TZ=Asia/Shanghai 17 10 * * 6` (weekly scenario-card round, subscription quota only; fires into this session). **Mailbox:** PR #33469.\n- **Posture ledger:** lives in the project; this post holds only the stub.\n\n## Inherited ledger\n\n- **Queue snapshot:** none. A new lane: no prior seat, no claim, no PR, no runner thread.\n- **Handed over from `epic:#3600#1`** (triage ruling #30349 comment 6884837817, knocked on #33469 as 6884844595): ① the gallery debut #30349 (the maintainer merges the first `Gallery refresh for ObjectStack …` PR on objectstack-ai/gallery; no seat merges it); ② the daily gallery refresh, runbook `packages/qa/scenarios/README.md` (\"The scheduled task's runbook\"), created by this seat only **after** `epic:#3600#1` records on objectstack-ai/cloud#3600 that its own refresh task is deleted; ③ follow #33414 and #33415 (`domain:devx`, dispatched), then re-run the refresh; ④ weekly scenario cards and per-release ask baselines.\n- **Scenario library at seating:** `docs/qa/scenarios/` at `d683e6f3`: 9 cards (3 `control`, 6 `starter`).\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`). ⛔ No GitHub MCP writes.\n- Scorecards and trend readings live in the project; product defects go through the filing gate to the owning lane; leaks are reported per `security-findings.md` only.\n"
+}

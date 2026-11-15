@@ -1,0 +1,33 @@
+{
+  "number": 33570,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): seed replay matches a global object's rows unscoped",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:47:50Z",
+  "updated_at": "2026-11-15T01:45:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33570",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nFixes #33554\nClause-②: no\nMetadata-protocol: none\n\n**Stacked on #33550** (not merged when this was opened): this branch is cut from `claude/area-A4-33411` and its diff against `main` carries #33550's two commits until that lands.\n\n## 维护者速读\n\n- 改了什么:按组织重放种子数据时,全局对象(无组织列、未声明租户字段,例如 `tenancy: { enabled: false }`)的已有行改为不按组织过滤匹配,所有组织的重放都更新同一条共享行。\n- 为什么改:原先对这类对象按 `organization_id` 过滤,该列不存在,驱动直接抛 INVALID_FILTER,种子行落不了地。\n- 风险与回滚:只影响全局对象的重放匹配,判定复用引用探针已有的 `global` 判据(一处读法);回滚即 revert 本 PR。\n- 先看:`packages/metadata-protocol/src/seed-loader.ts` 的 `isGlobalSeedObject` 与 `loadExistingRecords` 里的过滤分支;`packages/runtime/src/seed-org-scoped-references.integration.test.ts` 末尾新增的 describe。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run src/seed-org-scoped-references.integration.test.ts`,预期 23 个用例全绿。\n- 需要你做的:无,席位落地(须待 #33550 先合入)。\n\n## What changes\n\n- `packages/metadata-protocol/src/seed-loader.ts`\n  - New module predicate `isGlobalSeedObject(objectName, definition)`: an author's object (no `managedBy`) with no organization column (declared or injected) that resolves no tenant field, excluding `sys_user` / `sys_organization`. This is exactly the predicate `probeScopeOf` used inline for its `global` scope; `probeScopeOf` now calls it, so the reference probe and the replay match share one reading.\n  - `organizationColumnOf` answers `null` for a global object, and `loadExistingRecords` then reads existing rows unscoped on a per-organization replay. Every organization's replay upserts the one shared row instead of throwing the driver's INVALID_FILTER on a nonexistent `organization_id`.\n  - Stamp side checked, no code change needed: a global object always gets `null` from `seedRowTenantColumn` (no organization column, no tenant field), so its rows are neither stamped nor refused for a column they do not have. The new test pins it.\n  - Review nit N1 on #33550: the `organizationColumnOf` jsdoc and the `loadExistingRecords` jsdoc now each sit directly above their own method.\n- `packages/runtime/src/seed-org-scoped-references.integration.test.ts`: a new top-level describe on the real AppPlugin + SqlDriver (better-sqlite3) harness. In the first case, two organizations replay `crm_country` (`tenancy: { enabled: false }`) upsert on `name`: North inserts 1, South inserts 0, exactly one `Japan` row exists with no organization, and a second replay by both is idempotent. In the second case, a load with no organization (two organizations, no pin) writes the global row instead of refusing it.\n- Changeset: `@objectstack/metadata-protocol` patch.\n\n## Tests\n\nAll runs are at head `5d02c2e281`.\n\n- `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/seed-org-scoped-references.integration.test.ts`: Test Files 1 passed (1), Tests 23 passed (23). #33550's tenantField cases and the `organization_id` control are green.\n- `pnpm --filter @objectstack/metadata-protocol test`: Test Files 340 passed | 9 skipped (349), Tests 22866 passed | 43 skipped.\n- `pnpm --filter @objectstack/metadata-protocol typecheck` exited 0, and so did `pnpm --filter @objectstack/runtime typecheck`.\n- eslint `--no-inline-config` on both changed source files exited 0.\n- Ablation via `scripts/ablation-replace.mjs`, at commit `5d02c2e281`, with a metadata-protocol rebuild on each leg (runtime resolves it through `dist/`).\n  - Mutation: the unscoped branch was replaced with the old `organization_id` fallback filter. `ablation-dist-preflight` found the marker in 2 built files, and the result was Tests 1 failed | 22 passed. The failing case is \"two organizations replay it: exactly one shared row…\".\n  - Restore: blob equals HEAD and `git diff HEAD` is empty. After the rebuild, preflight `--absent` found the marker absent from all 24 built files and the tree clean.\n  - The no-organization case stays green under the mutation, as expected: it pins the stamp side, which this diff does not change.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 64 local families at `5d02c2e281`. Their run status and any NOT MEASURED entries are in the os-dev report on #33554. The full runtime package suite and `test:repo` are left to CI (`Test Core`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n"
+}

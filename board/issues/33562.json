@@ -1,0 +1,30 @@
+{
+  "number": 33562,
+  "kind": "issue",
+  "title": "AI chat: two messages sent while a new conversation is being created, then a failed create, give back only the second message (the first is dropped)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:38:53Z",
+  "updated_at": "2026-11-15T00:38:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33562",
+  "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ① a user-visible defect with a named producer, measured by the developer of PR #33561 (#33420) with a rendered probe (report 6886717406, Acceptance notes \"Two sends, then a failed create\"). Reader: `domain:ui` (`ui/packages/plugin-chatbot` + `ui/packages/app-shell`). Grade p3, self-graded by the lane seat under the maintainer's 「定级你可以自己决定」: a narrow path (two sends inside one held create, then the create fails) that drops typed text.\nDedupe: `is:issue is:open ChatbotEnhanced restore` and `is:issue is:open first message create failed` find nothing open.\n\n## What the user sees\n\nOn a new AI chat conversation, the user sends a message, then a second one while `POST /conversations` is still running. The create then fails. The \"Couldn't send your message\" notice shows and the message box gets back only the second message. The first one is gone: it is neither in the box nor sent on the retry.\n\n## Where (after PR #33561)\n\n- `ui/packages/app-shell/src/console/ai/AiChatPage.tsx` `useDeferredFirstSend` joins the two sends into one held message and, on the host's `createError`, drops it from the stash (so a retry does not send it twice).\n- `ui/packages/plugin-chatbot` `ChatbotEnhanced`'s not-sent rollback restores its OWN last-submitted text, so only the second part comes back.\n\n## Acceptance\n\n- `ChatbotEnhanced` can take the text to restore from the host (an optional prop; Clause-② yes (widening) on `@object-ui/plugin-chatbot`, record owed), and `ChatPane` hands it the joined held text on a failed create.\n- Pin through the rendered `AiChatPage` (the #33420 harness `AiChatPage.firstMessageDrawnAtOnce-33420.test.tsx`): two sends during a held create, 503 → the box holds both parts, first part first; retry sends the joined text once. CONTROL: one send restores as today.\n\nBlocked-by: #33561"
+}

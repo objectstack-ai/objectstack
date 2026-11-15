@@ -1,0 +1,30 @@
+{
+  "number": 33494,
+  "kind": "issue",
+  "title": "object_extension door: the gate's served snapshot carries a sibling package's extension field with no priority, so the door's formula-cycle verdict differs from os build on ties and outranked entries",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T22:34:57Z",
+  "updated_at": "2026-11-14T23:41:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33494",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #33153 (PR #33442), contract review round 2, record 6885259034 finding 1 and its observation. Class a, door/build disagreement.\n\n**What happens:** at the `object_extension` publish door the gate folds the written entry over the target **as served** (#33072's snapshot). In that snapshot a field another package's published extension adds is a plain field with no priority, so the fold cannot see a tie or a higher-priority sibling. `os build` folds every entry by priority and serves the winner.\n\nThree shapes, each needing two packages that add one field name plus a formula cycle:\n1. **Tie** (both at priority 200, the written entry cyclic): the door refuses; the build drops the tied name and reports nothing.\n2. **Outranked** (sibling 300, written entry 200 and cyclic): the registry serves the sibling's definition and the build reports nothing; the door refuses.\n3. **False negative** (seen in review, present before PR #33442): a higher-priority sibling's definition of a name the entry also adds closes a cycle through another field of the entry. The door folds the entry's definition over the sibling's and sees no cycle; the build reports the entry's member.\n\n(1) and (2) refuse where the build accepts; (3) accepts where the build refuses. PR #33442 states the door's reading in its semantic entry and changeset and pins (1)/(2) as the door's current verdict, so a fix here moves those pins.\n\n**TO:** the door's snapshot keeps each extension field's package and priority (or the gate folds stored entries by priority itself), so the door serves the same winner the build does; then the formula-cycle report (and any other as-served check on this door) agrees with the build in all three shapes. Update PR #33442's entry text and pins accordingly. If this needs a spec change to the snapshot shape, say so on the card first.\n\n`Clause-②`: (1)/(2) widen at the door, (3) narrows at the door; declare per the fix. Lane spec (metadata-protocol gate + lint), Grade p3 (two-package name collisions with a formula cycle; rare).\n\nclass: a · type: Bug · Grade: p3 · domain: spec"
+}

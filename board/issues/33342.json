@@ -2,8 +2,8 @@
   "number": 33342,
   "kind": "issue",
   "title": "webhooks: signing secret undecryptable at boot before LocalCryptoProvider is wired (fail-closed transient)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "bug",
     "domain:server",
     "lease:E2",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:12:52Z",
-  "updated_at": "2026-11-14T18:48:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T01:08:25Z",
+  "closed_at": "2026-11-15T01:08:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33342",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\n## What is wrong\nRow 258 (record #33096 · 6851700388), item `integration-system.webhook-lifecycle`. During boot, a webhook that fires before `LocalCryptoProvider` is wired can't decrypt its signing secret. It fails closed, so nothing unsigned goes out, but the delivery is refused for a reason that is only boot order.\n\n## Do\nWire the crypto provider before the webhook dispatcher can fire, or hold early deliveries until it is ready. Pin the boot order.\n\n## Grade\n**p2**: it fails closed and is transient.\n\n## Reader\n`domain:server`, pilot **Area E2** (webhooks)."

@@ -1,0 +1,32 @@
+{
+  "number": 33447,
+  "kind": "issue",
+  "title": "docs: the navigationContributions section does not say a contributed entry's `order` sorts it among the target app's own entries",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:23:18Z",
+  "updated_at": "2026-11-14T23:06:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33447",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #33234 (ruled C, no change; ruling record 6884379643), part (2), class a, docs gap.\n\n**What the card's filer believed:** a module cannot place its contributed entry between two of the app's own entries, because \"a contribution is appended after the target group's own items\".\n\n**What the code does (read on `main` by the seat, not run):**\n- `SchemaRegistry.applyNavContributions` (`packages/objectql/src/registry.ts` ~:10842) pushes each contribution's `items` into the target group's `children` (or the top level) as authored, `order` and all.\n- The console sorts every level by `order` after the fold: `ui/packages/layout/src/navOrder.ts#byNavOrder`, used at the top level and in each group's children (`NavigationRenderer.tsx`) and by the mobile tab bar (`AppSchemaRenderer.tsx`). No `order` sorts as `0`; equal values keep authored (fold) order.\n- So a contributed `{ ..., order: 25 }` lands between the app's `order: 20` and `order: 30` entries, in a group or at the top level. It only works if the app numbers its own entries; with none numbered, every entry is `0` and a contribution stays after the app's own items.\n\n**Gap:** `content/docs/ui/apps.mdx`, the `navigationContributions` section (~:829-870), describes `group` and `priority` only. `priority` orders contributions among themselves; nothing says the item's own `order` places it among the host's entries, or that the host has to number its entries for that. The \"Navigation items\" table (~:297) says `order` sorts \"within the same level\" without saying that contributed entries take part.\n\n**TO:**\n1. One short paragraph (and one line in the example) in the contributions section: the merged items sort with the host's entries of that level by `order`; `priority` is only the merge order between contributions, the tie-break for equal `order`; give the \"host must number its entries\" consequence.\n2. A pin, objectql side: a registry test that a contributed item keeps its `order` through `applyNavContributions` (group and top level), so the fold never re-numbers or drops it. The console sort is already pinned by `byNavOrder`'s tests; cite them in the docs paragraph's commit, do not duplicate them.\n\nNo rule change, no new key. `Clause-②: no` / `Metadata-protocol: none`; docs plus one test, `@objectstack/objectql` no bump unless a source line moves.\n\nclass: a · type: Docs · Grade: p3 (docs gap; a downstream filer misread it, product right) · domain: spec"
+}

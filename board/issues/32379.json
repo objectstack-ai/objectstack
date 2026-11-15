@@ -2,8 +2,8 @@
   "number": 32379,
   "kind": "issue",
   "title": "skills(objectstack-api): `FLOW_FAILED`'s `innerRefusal` is taught as a write refusal only; a `script` node's function-name refusal fills it with `RESOURCE_CONFLICT`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T01:06:48Z",
-  "updated_at": "2026-11-14T18:39:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T21:50:56Z",
+  "closed_at": "2026-11-14T21:50:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

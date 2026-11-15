@@ -1,0 +1,33 @@
+{
+  "number": 33484,
+  "kind": "issue",
+  "title": "pm skills: no open card leaves a lane without a state (Part-of landings, stay-behind, on-hold grade), and the triage sweep runs the five disjunctions exactly",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T22:23:29Z",
+  "updated_at": "2026-11-14T23:02:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33484",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. In the triage seat session on 2026-11-14 the maintainer asked 「排查一下p1任务为什么没在队列，如何优化」. Triage answered with five optimizations, and the maintainer ruled 「优化建议，可以skills立卡优化」. Measured on `main` the same evening.\n\n## 维护者速读\n\n27 张开着的 p1 只有 5 张在队列。漏掉的主要原因是两个：一是车道用 `Part of` 合入一部分、或座位下班留下留守卡时，摘掉 `pm:dispatched` 却不补状态，卡就成了没人管的半状态；二是分诊的兜底筛查跑的是简化版，没接住。本卡改五处：写入门禁拦截「摘派发不补状态」，收尾规则写清剩余部分怎么交，搁置卡降级并记原级别，分诊筛查脚本化，轮次记录列出待维护者及卡龄。\n\n## What was measured (2026-11-14, ~22:00Z)\n\n- Open `priority:p1`: 27. In `pm:queue`: 5. Stateless half-states: **#32087** (p1 security; `pm:dispatched` removed 02:17Z, still assigned; listed as a stay-behind by `security#2`'s seat-offline at 03:07Z) and **#32908** (p1; `pm:dispatched` removed 19:52Z while assigned). Two p2 cards had the same shape: **#32984** (ui#1 landed `Refs`, cleared state and assignee, and the remainder belongs to cloud) and **#33353** (devx#4 landed `Part of` and removed `pm:dispatched`; the remainder is a qa drive). Three skills `finding` cards (#33402–#33404) sat untouched for about 3 hours.\n- On hold yet still `priority:p1`: #27124, #27287, #31763 (restarted 2026-11-14) and #32481. The grade predates the hold, and no rule touches it.\n- Triage repaired all of the above by hand: comments 6884906679 and 6884912957, and the first touches on #33402–#33404.\n\n## What lands\n\n1. **Write-door guard** (`scripts/pm/label-write.mjs`, plus the close and fleet-write paths that strip labels): on an **open** issue, refuse a write that removes the last `pm:*` state label (`pm:dispatched`, `pm:queue`, `pm:blocked`, `pm:on-hold`, …) unless the same write adds another state, adds `needs-user-decision`, or closes the issue. Also refuse a write that leaves an assignee on a card whose state is `pm:queue`, `pm:blocked` or `pm:on-hold`. Pin both with the script's `--self-test`.\n2. **The landing rule for a remainder** (`references/landing-operations.md` L68, where 「给 `Part of` 卡收口」 says to close out but not what to): in the same stroke as MERGED, the remainder gets a state for **its** lane: `pm:queue` with that lane's `domain:*` (change the domain when the remainder belongs to another lane), `pm:blocked` with a `Blocked-by:`, or `pm:on-hold` with `Restart-when:`. Clear the assignee. Apply the same to a seat-offline stay-behind (`seat-lifecycle.md` L41): either the offline seat sets the state in its offline stroke, or triage does it on reading the `seat-offline` knock, in that round.\n3. **Hold means not urgent** (`SKILL.md` state table, `pm:on-hold` row; `triage-duties.md` L43): putting a card on hold lowers it to `priority:p3` in the same stroke and records the old grade on the `Restart-when:` line as `Restart-grade: pN`. A restart restores that grade. Trackers and epics on hold follow the same rule. Then the `priority:p1` view is the p1 work.\n4. **Triage sweep as a script** (`scripts/pm/`, e.g. `first-touch-sweep.mjs`): run disjunctions ①–⑤ exactly as `triage-duties.md` L15–18 defines them (① has no `pm:*`, no `needs-user-decision` and no `domain:*`, not \"no labels\"; ③ has `domain:*` and no state). Paginate fully and compare each count with `total_count` (`sweep INCOMPLETE` when they differ). Triage had been running a narrowed hand version: ① as `no:label`, ③ skipped, and results cut at 12. That is why the cards above waited.\n5. **\"Awaiting the maintainer\" with age** in the round record and the daily board (`triage-duties.md` L14): list every open `needs-user-decision` and `pm:awaiting-maintainer` card with its age. For example, #25583 has been in `pm:awaiting-maintainer` since 2026-10-25, and #33200 and #33223 have been decision cards since 2026-11-14 13:16Z.\n\n## Done when\n\n- The guard refuses a stateless strip on an open card, and the self-test pins it.\n- The three reference files carry the remainder, stay-behind and on-hold rules, and the on-hold rule says `Restart-grade:`.\n- Triage's patrol prompt calls the sweep script, and the script reports `INCOMPLETE` on a count mismatch.\n- Then triage regrades the cards on hold under the new rule in one batch: #27124, #27287 and #32481 today.\n\nReader: `domain:skills` (pm-dispatch references and `scripts/pm/`). ⛔ Not a claim."
+}

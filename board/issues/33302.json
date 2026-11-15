@@ -2,8 +2,8 @@
   "number": 33302,
   "kind": "issue",
   "title": "runtime: the POST /packages install and the package enable route register a package without announcing metadata:reloaded, so subscribers (the renamedFrom holder carry, among others) only see it at the next boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,25 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
+    "lease:A5",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T16:16:09Z",
-  "updated_at": "2026-11-14T16:50:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T23:39:24Z",
+  "closed_at": "2026-11-14T23:39:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33302",
   "body": "domain:server#7 · sunhaolin · session_017xRBcSZ51q2s3nMfakhdJ3\n\nFollow-up from #33238 (PR #33245). This is open question 2 of the dev report on that card; the dev and review#2 (6879548824, 6880449445) both route it to a runtime-lane card of its own. ⛔ Not a claim; triage sets the lane and grade.\n\n**Gap:** the marketplace install-local door registers a package and then announces `metadata:reloaded` with `app/MANIFESTID`. After PR #33245, plugin-security's `renamedFrom` holder carry runs on that announcement. The runtime's `POST /packages` install and its package enable route also register positions, but neither announces `metadata:reloaded`. On those two doors, a package's renamed positions keep their holders on the old name until the next boot. The same goes for every other `metadata:reloaded` subscriber (for example flows and translations): none of them hears these two doors.\n\n**Expected:** both doors announce `metadata:reloaded` after they register, in the payload spelling install-local uses (`changed: ['app/ID']`), so every subscriber re-syncs as it does for install-local. Pin it: a hot `POST /packages` install of a package that renames a position moves the holder with no restart.\n\n**Measured by the #33238 dev at PR #33245 head; not re-measured here:** neither route calls `trigger('metadata:reloaded', …)`.\n\nDedupe: `metadata:reloaded packages install enable announce` → #33238 only (the parent card)."

@@ -1,0 +1,30 @@
+{
+  "number": 33588,
+  "kind": "issue",
+  "title": "skills(automation, query, ui): four more evals list must_contain literals their own expected_output lacks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T01:59:48Z",
+  "updated_at": "2026-11-15T01:59:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33588",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (measured by the developer of PR #33586, card #33404, report 6887628715, over every `skills/objectstack-*/evals/*.json` on `main` 4bba8b8f; the card fixed the data skill's three only). `reach:` an eval whose reference answer fails its own literal cannot tell a right agent answer from a wrong one.\n\n**What is wrong.** Four more evals list an `assertions.must_contain` literal their own `expected_output` lacks:\n- `skills/objectstack-automation/evals/flows-triggers-approvals.json` eval 20: `type: 'subflow'`\n- `skills/objectstack-automation/evals/integrations-declared.json` eval 2: `dialect: 'cel'`\n- `skills/objectstack-query/evals/filters-pagination-search.json` eval 2: `keyset`\n- `skills/objectstack-ui/evals/analytics-inline-vs-dataset.json` eval 1: `dataset`\n\n(The objectui bundle writes `expected_output` as a prose summary and its own `check:skill-eval-tokens` checks tokens against the skill text, so its 17 misses read as that bundle's convention and are out of scope.)\n\n**What lands.** For each, decide whether the literal or the reference answer is wrong against `main` and fix that side; `@objectstack/skills` patch. Re-run the measurement over all `skills/objectstack-*/evals` in the PR body.\n\n**Not decided here.** A shape check (every `must_contain` literal appears in `expected_output`, about 15 lines over the existing JSON) would stop the drift; adding a gate is the maintainer's call, so the PR names it as an option and does not add it.\n\nSerial: the automation evals wait for PR #33577 only if it touches them (it does not); `objectstack-ui` evals are also edited by #33560 (different file). `Clause-②: no`.\n\nDedupe (open AND closed): `is:issue must_contain expected_output` → #33404 (the data skill, PR #33586) only. **New.**\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 33451,
+  "kind": "pull_request",
+  "title": "fix(mcp): validate_expression keeps the hidden __search companion out of scope",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:30:10Z",
+  "updated_at": "2026-11-15T02:10:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33451",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nFixes #33338\nClause-②: yes (widening) — `@objectstack/spec/data` gains the `SEARCH_COMPANION_FIELD` constant; `@objectstack/objectql` re-exports the same value it exported before.\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:MCP 工具 `validate_expression` 不再在 `inScope.fields` 里列出隐藏的 `__search` 搜索伴生列;表达式里读它(如 `record.__search`)现在按 `unknown-field` 拒收,与 `os validate` 的判定一致。\n- 为什么改:这一列对调用方不可见(所有读路径都会剥掉它),但 AI 读到列表后会写出引用它的表达式,工具答 ok 而发布门禁拒收,工具和门禁两套答案。\n- 第二版(复审后 CI 超时):第一版在首次调用时加载整个引擎包只为读一个字段名,测试里首次调用超过 5 秒。现在字段名放进 `@objectstack/spec/data`(`SEARCH_COMPANION_FIELD`),引擎和 MCP 都读这一个常量,MCP 不再在运行时依赖引擎。首次调用从 5.4 秒降到 60 毫秒。\n- 风险与回滚:spec 新增一个导出常量(patch:不改元数据协议),引擎照旧以同名导出;其他字段照旧;回滚即撤销本 PR。\n- 先看:`packages/spec/src/data/search-fields.ts`(新常量)、`packages/mcp/src/mcp-http-tools.ts`(跳过伴生列)、`packages/objectql/src/search-companion.ts`(改为转出)。\n- 需要你做的:无,区内复审后落地。\n\n## What changes\n\n- `validate_expression` built its field list from the object as the caller is served it. Where pinyin search is on, that object carries the hidden `__search` companion beside the declared fields, so the tool listed `__search` in `inScope.fields` and answered `ok: true` for `record.__search != ''`. `os validate` judges an expression against the declared and injected columns only, so the same rule fails there with `unknown-field`, and every record read strips the column.\n- The tool now skips the companion when it builds the field list it judges and lists. Only `__search` is removed: other hidden system columns (`organization_id`, `owning_business_unit_id`, `queue`) are injected columns an expression may read, and `os validate` accepts them. Both transports share this handler.\n- **Where the name lives (second revision).** The first revision imported `SEARCH_COMPANION_FIELD` from `@objectstack/objectql` lazily on the first call. Under the test source alias that first call transformed the engine barrel and outran vitest's 5 s budget (`Test Core (7/8)`: `mcp-validate-expression.option-labels.test.ts` › LIT, reproduced locally at 5433 ms; the lean `/core` entry still took about 2 s, and 3.3 s under load). The name now lives in the protocol as `SEARCH_COMPANION_FIELD` in `@objectstack/spec/data`, next to the search-field resolution that already documents the companion. `@objectstack/objectql` provisions and strips the column under that constant and re-exports it unchanged, and `@objectstack/mcp` imports it statically from the spec. mcp's dependency on the engine becomes a devDependency (the pin provisions the companion with the engine's own `provisionSearchCompanion`). One name, no engine load for a string.\n\n## Tests\n\n- New top-level describe in `packages/mcp/src/mcp-validate-expression.test.ts`, served by the real producers (`applyInjectedSystemColumns`, `provisionSearchCompanion`, `describeServedObject`): the served object carries the companion; `inScope.fields` lists `name`, `email`, `created_at` and not `__search`; a read of `__search` is refused `unknown-field` at the validation, formula and flow_condition sites, as `validateStackExpressions` refuses it. Pre-fix red and the ablation of the filter line are recorded in the first revision (2 of 3 red).\n- The timeout: the LIT case ran 5433 ms (red) on the first revision and 60 ms at the final head.\n\n## Verification\n\n<details><summary>Local runs at the final head (after merging origin/main)</summary>\n\n- `@objectstack/mcp`: vitest 64/64 files, 1177/1177 tests; typecheck OK. `@objectstack/spec` `src/data`: 169/169 files, 6230 passed, 1 todo. `@objectstack/objectql` search suites: 11/11 files, 205/205 tests.\n- `dispatch-gates.mjs --commands`: 104 families derived and run, exit codes recorded. All exit 0 after `gen:api-surface` and `gen:export-origins` were committed and spec was rebuilt, except `check:generated`, exit 1, whose only remaining item is `test-typecheck-debt.json`. That is a directional ratchet this diff does not touch (no spec test changes; the file last changed on main 2026-11-13), and the gate itself says not to regenerate it unless `check:test-typecheck` asks.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC -->\n"
+}

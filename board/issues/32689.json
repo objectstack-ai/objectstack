@@ -2,8 +2,8 @@
   "number": 32689,
   "kind": "issue",
   "title": "runtime: the action activation door drops the declaration's ambiguity refusal, so two packages' same-named global action answers 404 'has no declaration' instead of 409 naming the holders (ADR-0150)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T10:14:02Z",
-  "updated_at": "2026-11-14T19:20:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T20:50:59Z",
+  "closed_at": "2026-11-14T20:50:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

@@ -1,0 +1,30 @@
+{
+  "number": 33529,
+  "kind": "issue",
+  "title": "hook publish door: a `record.*` read in a `beforeFind` / `afterFind` hook condition is not refused, though a read event carries no record and the engine rejects the read at run time",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T23:42:37Z",
+  "updated_at": "2026-11-14T23:42:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33529",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nOut-of-scope finding of #33246 (PR #33434, round-3 contract review record 6885550922 finding S2; dev report 6886033779). Class a, door gap.\n\n**What happens:** a hook whose events are `beforeFind` / `afterFind` (any event that carries no current record) may declare a `condition` that reads `record.<field>`. The publish door has no gate for this: a required field publishes there on `main`, and on `main` a nullable or stamped column was refused only incidentally, by the null-guard rule. At run time the engine rejects such a read (#4775, `hook-wrappers.ts`: a read event carries no record), so the condition faults and the read is rejected.\n\nPR #33434 keeps `main`'s verdict on read-event hooks (no stamped-column skip there), so it does not make this worse; it does not close it either.\n\n**TO:** the hook door (and `os build` / `os validate` / `os lint`, one rule) refuses a `record.`-rooted (and bare-name) read in the `condition` of a hook whose events include a read event, with a message naming the event and what the condition can read there. Measure first: which events carry no record, and what a find hook's condition legitimately reads (query, user, …). Narrowing; declare per ADR-0087 (semantic entry if first-party or shipped examples are hit).\n\n`Clause-②: no (narrowing)` expected. Lane spec (lint + metadata-protocol door), Grade p3 (authoring error that faults at run time; no data written).\n\nclass: a · type: Bug · Grade: p3 · domain: spec"
+}

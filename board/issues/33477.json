@@ -1,0 +1,37 @@
+{
+  "number": 33477,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): warn at boot about each stored SSO provider whose domain list holds an entry that names no domain",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T22:09:10Z",
+  "updated_at": "2026-11-15T00:54:55Z",
+  "closed_at": "2026-11-15T00:54:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T00:54:53Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33477",
+  "body": "Fixes #33313\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:plugin-auth 在 `kernel:ready` 只读扫描一次全部已存储的 `sys_sso_provider`,对 domain 列表里含有「非裸主机名」条目(如 `https://acme.com`)的每个 provider 打一条 warn,写明 provider id 与条目;sso.mdx 补一句如何在启动日志里找到它们。\n- 为什么改:注册/编辑早已拒收这类条目,但规则上线前存下的行没有被改写,且被读作「不指向任何域名」——provider 看着配置正常,实际没有任何邮箱落在它已证明的域名上,运维无从察觉。\n- 风险与回滚:只读、只打日志,不写任何行;无引擎、对象未注册或读取失败都静默跳过且不抛错。回滚即撤掉 auth-plugin.ts 里新增的那个 hook。\n- 先看:`packages/plugins/plugin-auth/src/sso-stored-domain-entries.ts`(读与告警文本);`packages/plugins/plugin-auth/src/auth-plugin.ts` 新增的 `kernel:ready` hook;`sso-account-at-proven-domain.ts` 中 `ssoDomainEntryNotBare` 改为复用 `ssoDomainEntriesNotBare` 的那段(拒收行为须保持不变)。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-auth exec vitest run src/sso-stored-domain-entries.test.ts`,预期 9 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- New `packages/plugins/plugin-auth/src/sso-stored-domain-entries.ts`: `reportSsoProvidersWithNonBareDomainEntries(engine, logger)` reads `provider_id` and `domain` of every stored `sys_sso_provider` once, as the system (`withSystemContext`, the reader `findSsoDomainClaim` uses), and logs ONE `warn` per provider whose `domain` list holds an entry the register / edit refusal refuses, naming the provider id and each such entry, with the fix (send the bare host names as `domain` to `POST /api/v1/auth/sso/update-provider`, then verify the domain again). It writes nothing. No engine, an engine without `find`, an unregistered `sys_sso_provider` or a failed read reports nothing (the failure goes to `debug`) and never throws into boot.\n- `sso-account-at-proven-domain.ts`: the predicate behind `ssoDomainEntryNotBare` is lifted into `ssoDomainEntriesNotBare(domain): string[]` (every refused entry, trimmed, in list order). `ssoDomainEntryNotBare` now names the first of them; its refusal shape and text are unchanged. One predicate serves the refusal and the report, so the report names exactly what register / edit would refuse.\n- `auth-plugin.ts`: a `kernel:ready` hook beside the legacy SSO client-secret sweep (the precedent this mirrors: same engine lookup, `objectql` then `data`) runs the report.\n- `content/docs/permissions/sso.mdx`: the existing stored-entry paragraph (which already states the fix) gains two sentences saying where to find such providers (one boot warning each) and that the warning changes no row.\n- Changeset: `@objectstack/plugin-auth` patch.\n\nLevel: `warn`, not `error` (AGENTS.md degradation log levels): nothing claims to be persisted that is not; the provider refuses the sign-ins it cannot judge.\n\n## Tests\n\n`packages/plugins/plugin-auth/src/sso-stored-domain-entries.test.ts` (9 cases), module and wiring:\n\n- a provider stored with `https://acme.com` produces exactly one warning naming `acme-okta` and `https://acme.com` (message and meta);\n- CONTROL: a provider with only bare entries (`acme.com, sub.acme.com, bücher.de`) produces none, and the control did read the rows;\n- mixed lists: only offending providers are named, every offending entry once, bare entries of the same list not named;\n- one predicate: for a table of spellings, a warning appears exactly when `ssoDomainEntryNotBare` refuses;\n- no stored row changes: zero insert / update / delete calls, the stored rows deep-equal before and after, one read carrying `context.isSystem`;\n- no engine / engine without `find` / unregistered object / failed read: resolves `[]`, no throw, no warning;\n- through `AuthPlugin.start()` + `kernel:ready`: one warning for the stored `https://acme.com` provider; none for bare entries (CONTROL); boots with no engine.\n\n## Acceptance notes\n\n- The warning is per boot, per provider: a multi-node deployment logs it once on each node. Nothing is recorded, so a corrected provider stops being named on the next boot.\n- `check:engine-double-contract` lists the double's `update` / `delete` as `unrecognised` (informational, exit 0); the double holds only `find` and the three write verbs, which exist to prove nothing is written.\n\n## Verification\n\n<details><summary>Ablation (two legs, each restored and proven by blob == HEAD and an empty `git diff HEAD`, via `scripts/ablation-replace.mjs`)</summary>\n\n1. `sso-stored-domain-entries.ts`: the `logger.warn(ssoStoredDomainEntryWarning(finding), {` call replaced by a no-op. Anchor 1 -> 0, blob 1b78d465c5ab -> 6ddef6556248. Run: `Tests 4 failed | 5 passed (9)`; red are the acme warning, the mixed list, the one-predicate table and the plugin wiring case; the CONTROL and no-engine cases stay green, as they should. Restored: blob == HEAD (1b78d465c5ab).\n2. `auth-plugin.ts`: the hook's `await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);` replaced by a no-op. Anchor 1 -> 0, blob 131c0b801ab5 -> 135919eee65e. Run: `Tests 1 failed | 8 passed (9)`, the red one is the plugin wiring case. Restored: blob == HEAD (131c0b801ab5).\n\nThe test imports the module by relative path from `src/`, so no `dist/` leg is involved.\n</details>\n\n<details><summary>Local runs on head 44b6033089 (after merging origin/main)</summary>\n\n- `pnpm --filter '@objectstack/plugin-auth...' build && pnpm --filter @objectstack/plugin-auth typecheck && pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2` under the verify lock: `VERDICT command-exit 0`; `check:test-typecheck: OK`; `Test Files 274 passed (274)`, `Tests 5301 passed | 10 skipped (5311)`.\n- Exit 0: `check:engine-double-contract`, `check:startup-registry-verdict`, `check:durability-log-level`, `check:doc-authoring`, `check:nul-bytes`, `check:issue-citations`, `check:system-context-census`, `check:test-source-alias`, `check:cross-package-test-inputs`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`, and eslint `--no-inline-config` on the four changed source files.\n- The rest of the derived families (`dispatch-gates.mjs --ran`: 106 derived, 32 run locally) run in CI's `Lint & Repo Gates`.\n- Public surface: neither new symbol is exported from the package index, so no dependent package tests are owed.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1NJYFGVi2FRztyBNo)_\n"
+}

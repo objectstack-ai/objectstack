@@ -1,0 +1,37 @@
+{
+  "number": 33458,
+  "kind": "pull_request",
+  "title": "docs(skills): the object enable table names aiReadable",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:38:44Z",
+  "updated_at": "2026-11-15T00:44:12Z",
+  "closed_at": "2026-11-15T00:44:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-15T00:44:10Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33458",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X13WJLvJKXyx6BgqdzPrLLZ)_\n\nFixes #32974\n\ndomain:skills#1 · os-project-manager · session_01FEkQ5nzn5SncinMdswdSzM\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`objectstack-data` 技能的对象能力表(`enable`)加一行 `aiReadable`:只用于平台系统对象(`sys_*`,不含 `sys_metadata`、`sys_metadata_history`),开放只读 AI 访问(查询、取单条、聚合、describe、列表,永不写);应用对象从不声明它,连 `false` 也会在解析时被拒。\n- 为什么改:#32971 新增了 `enable.aiReadable`,技能文字没教,AI 照着能力表写应用对象时既不知道它存在,也不知道写在业务对象上会被拒。\n- 风险与回滚:纯技能文字,一个文件加 1 行,外加一个 `@objectstack/skills` patch changeset;不动 schema、不动运行时;回滚即还原本 PR。\n- 先看:`skills/objectstack-data/SKILL.md` 第 121 行(能力表最后一行)。\n- 两分钟验证:`git diff origin/main -- skills/`,预期只见能力表末尾新增 `aiReadable` 一行,默认列为 `—`。\n- 需要你做的:受管面 Tier H(`skills/**`):请批准或合并。\n\n## What changes\n\n- **`skills/objectstack-data/SKILL.md`, Object Capabilities (`enable`) table**, one row after `clone`:\n\n  `| aiReadable | — | Platform sys_* objects only (not sys_metadata, sys_metadata_history): read-only AI access (query, get, aggregate, describe, list; no write). App objects never declare it, false included: refused at parse |`\n\n  (backticks around the identifiers in the file). The Default column reads `—`, not `false`: an absent key is closed, and writing `false` on an app object is itself refused, so a `false` default would invite the one value that fails.\n- **`.changeset/32974-skills-enable-ai-readable-row.md`**: `'@objectstack/skills': patch`, carrying both declaration lines.\n\n## Why\n\nRead on `origin/main` ba35dfd7, `packages/spec/src/data/ai-read-exposure.ts`:\n\n- `aiReadExposureRefusal(objectName, enable)` judges any declared value (`false` included; only an absent or `undefined` key passes) in this order: first the stored-metadata family (`isStoredMetadataBodyObject`, `STORED_METADATA_BODY_OBJECTS` = `sys_metadata`, `sys_metadata_history`, in `packages/spec/src/kernel/stored-metadata-body-objects.ts`) is refused whatever the key says; then a `sys_` name (`/^sys_/i`) is accepted; every other name is refused (\"is not a system object ... Remove it\").\n- `ObjectSchema`'s refinement calls it through `refuseMisplacedAiReadExposure` (`object.zod.ts`), so every door that parses an object refuses it: `ObjectSchema.create`, `defineStack`, `os validate` and the object save door.\n- `isAiReadExposed(schema)` answers `true` only for the boolean `true` on a `sys_*` object outside that family.\n- The key is live after #32442: `isAiReadExposed` is read by `packages/runtime/src/domains/mcp.ts`, `packages/mcp/src/mcp-http-tools.ts` and `packages/mcp/src/stdio-data-bridge.ts`, and two platform objects declare it (`sys_user` in `platform-objects`, `sys_approval_request` in `plugin-approvals`). The `.describe` text in `ObjectCapabilities` says the same as the new row.\n\n## Acceptance notes\n\n- No eval is added or extended: no eval under `skills/objectstack-data/evals/` asks for the `enable` table (the only `trackHistory` hit is a `must_not_contain` in a lifecycle eval), and `objects-fields-relationships.json` and `rules/relationships.md` belong to open PRs #33394 and #33427 and are untouched.\n- The order expected `SKILL.md` might sit at its token ceiling; measured headroom was 59 tokens before the row and 0 after, so no other text was cut and no ceiling moved. The review round's fix (naming the two refused objects) was paid inside the row itself (`never a write` to `no write`, `An app object never declares` to `App objects never declare`).\n\n## Verification\n\nHead `fa4ef05c`, base `origin/main` ba35dfd7.\n\n<details><summary>Line and token budget (skills/**)</summary>\n\n- `skills/objectstack-data/SKILL.md`: 477 to 478 lines, 26441 to 26678 bytes; token ratchet 6606 to 6665 (ceiling 6665, headroom 0). No ceiling raised.\n- Whole package, all `skills/*/SKILL.md`: 4602 to 4603 lines, 235787 to 236024 bytes. Bundle total (whole shipped tree): 244310 to 244369 tokens.\n- `node scripts/pm/check-skill-line-ratchet.mjs`: exit 0. `node scripts/check-skills-token-ratchet.mjs`: exit 0.\n\n</details>\n\n<details><summary>Derived gates: 46 derived, 44 run green, 2 NOT MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 46 families for the two paths; each was run with its exit code captured before any pipe.\n\n- 41 exit 0 on the first run, among them `check-adr-0087-registration`, `check-empty-changeset`, `check-skills-token-ratchet` (scan and `--self-test` each), `@objectstack/spec check:skill-docs`, `check:doc-authoring`, `check:nul-bytes`, `check:pm-governed-merges`, `check:published-files`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:skill-identifier-liveness`, `check:skill-links`.\n- `@objectstack/lint check:doc-formula-expressions`: first exit 3 (no lint dist); exit 0 after `pnpm --filter \"@objectstack/lint...\" build` under the verify lock (VERDICT command-exit 0, 89s; rebuilt for head fa4ef05c, 73s).\n- `check:dts-closure` and `check:sourcemap-no-sources-content`: first exit 3, then exit 0 after that build, sweeping only the 5 built packages, not every package's `dist/`.\n- NOT MEASURED, exit 3 PREREQUISITE NOT MET (every package's `dist/`): `check:dual-build-cjs-loads`, `check:lean-entry-closure`. No package source is touched, so no full build was paid; CI builds and runs them.\n- `--ran`: \"46 derived famil(ies) accounted for — 44 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)\".\n- CI families are read from this PR's check-runs, not re-run here.\n\n</details>\n\n<details><summary>Tier and governed readings</summary>\n\n- `dispatch-gates --tier`: MANDATORY contract-review tier, `skills/**` under clause ① (the published catalog); no one-line exit for this surface.\n- `node scripts/pm/check-governed-merges.mjs --branch claude/project-thread-7ha66d`: exit 3, GOVERNED, landing tier H (人合). 1 of 2 paths on the register (`skills/**`); the changeset is not. Size +11 / -0, under the 3000 threshold.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5nzn5SncinMdswdSzM\n\n<!-- signed: domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb -->\n"
+}

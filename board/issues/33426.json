@@ -1,0 +1,36 @@
+{
+  "number": 33426,
+  "kind": "pull_request",
+  "title": "test(cli): stored-references binds name fixed row ids, and a run with no JSON says why",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T20:22:22Z",
+  "updated_at": "2026-11-14T21:28:00Z",
+  "closed_at": "2026-11-14T21:27:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T21:27:58Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33426",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D4Jsmd91BqTVB7dSii9uJMV)_\nFixes #32976\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只改一个测试文件。`os migrate stored-references` 集成测试给种子行写死 id(不再随机生成),并且当命令没有输出 JSON 时,测试失败信息会带上退出码、oclif 抛出的错误原文、耗时、argv 和 stderr 尾部。\n- 为什么改:偶发失败已复现并定位。行 id 是 16 位 nanoid,字母表含 `-`;bind 命令声明了短参数 `-y`(`--yes`),oclif 会把以 `-y` 开头的参数值当成 `-y` 参数,在解析阶段就拒绝(`Flag --id expects a value`,退出码 2),命令一个字节都没写,所以 16 ms、stdout 为空。概率约 1/4096 每个 id。\n- 风险与回滚:只动测试,不发布任何包;回滚即 revert 本 PR。\n- 先看:`packages/cli/src/commands/migrate/stored-references.integration.test.ts` 的 `SEEDED_IDS` 注释与 `run()` 里的空 stdout 诊断分支。\n- 两分钟验证:`pnpm --filter @objectstack/cli exec vitest run --project integration src/commands/migrate/stored-references.integration.test.ts`,预期 13/13 通过。\n- 需要你做的:本 PR 只改测试、不发布任何包,需要挂 `skip-changeset` 标签(dev 未自挂)。产品侧缺陷(以 `-y` 开头的 id 在任何拼写下都无法 bind)已作为发现上报,未在本 PR 修。\n\n## What changes\n\n`packages/cli/src/commands/migrate/stored-references.integration.test.ts` only:\n\n1. **The rows the seed writes carry fixed ids** (`SEEDED_IDS`), so every `bind --id` the file passes is deterministic. Before, the ids were minted by the SQL driver as `nanoid(16)`, whose alphabet contains `-`.\n2. **A run that prints no JSON document fails loudly.** `run()` no longer answers a bare `{ unparsed: '' }`: it adds the exit code, the exit signal's own message (an oclif parse refusal throws before the command writes a byte), the elapsed ms, the argv, and the tail of stderr. The CONTROL bind assertion prints that payload as its message.\n3. **`bind()` refuses an id that opens with `-`** before it reaches the argv, naming why, instead of an opaque parse refusal.\n\n### Root cause (reproduced, not inferred)\n\noclif 5.1.2's parser (`lib/parser/parse.js`, `parseFlag`) refuses a flag value whenever `findFlag(value)` resolves it to one of the command's flags; `findShortFlag` looks only at the value's second character. `os migrate stored-references bind` declares `yes` with `char: 'y'`, so a row id beginning with `-y` is read as `-y` and refused: `Flag --id expects a value`, exit 2, in **both** spellings, `--id X` and `--id=X`. In the test, that `CLIError` carries `oclif.exit`, so `isExitSignal` swallows it as an ordinary exit and stdout is empty: the exact signature of run 43341064666 (CONTROL failed in 16 ms on `{ unparsed: '' }`, every other case green; next group green on the same shard because the next seed minted different ids).\n\nMeasured: a sweep of all 4096 two-character prefixes after `-` through the bind's real flag set refuses exactly the 64 that begin `-y` and no other. With three ids bound per run, roughly one run in 1,400 hits it.\n\n### Not fixed here (reported as a finding)\n\nThe same refusal is a product defect at the public door: a row whose minted id begins with `-y` cannot be bound by `os migrate stored-references bind` in any spelling (`objectstack: INVOCATION ERROR — Flag --id expects a value`, exit 2, 0 bytes on stdout under `--json`). It is a family (any string flag carrying a minted id on a command that declares a short flag; 27 commands declare `-y`), so it is reported to the seat with evidence rather than patched in this test PR.\n\n## Tests\n\n<details><summary>Integration file, final head: 13/13</summary>\n\n```\npnpm --filter @objectstack/cli exec vitest run --project integration --maxWorkers=2 src/commands/migrate/stored-references.integration.test.ts\n Test Files  1 passed (1)\n      Tests  13 passed (13)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Reproduction (one-time ablation through scripts/ablation-replace.mjs, restored to HEAD)</summary>\n\nThe `bind()` guard was replaced by `id = '-y' + id` (anchor 1 to 0, blob b4ae84406ba7 to d53987cede12) and only the CONTROL bind case run. It failed in 27 ms with the CI signature, now loud:\n\n```\nAssertionError: {\"unparsed\":\"\",\"exitCode\":2,\"thrown\":\"Flag --id expects a value\",\"ms\":13,\"argv\":[\"--table\",\"sys_sharing_rule\",\"--id\",\"-ym31693_share_row\",...,\"--json\"],\"stderr\":\"\"}\n Tests  1 failed | 12 skipped (13)\nablation-replace: ok restored: blob == HEAD (b4ae84406ba7) and git diff HEAD is empty\n```\n</details>\n\n<details><summary>CLI unit tier and typecheck (head 01321f651)</summary>\n\n```\npnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2\n Test Files  2 failed | 416 passed (418)\n      Tests  5930 passed | 29 skipped (5959)\n```\n\nThe two failed files are `test/published-subpath-console.pin.test.ts` and `test/published-subpath-hook-body.pin.test.ts`, both refusing at setup with `packages/cli is not built (./dist/index.js is absent)`: only the CLI's dependency closure was built locally. NOT MEASURED locally, reason: prerequisite (no CLI dist); this diff touches neither. CI's Test Core builds and runs them.\n\n```\npnpm --filter @objectstack/cli typecheck\ncheck:test-typecheck: OK — @objectstack/cli's test layer compiles under packages/cli/tsconfig.test.json\nos-verify-lock: VERDICT command-exit 0\nnpx eslint --no-inline-config packages/cli/src/commands/migrate/stored-references.integration.test.ts   exit 0\n```\n</details>\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates, head 01321f651): 49 exit 0, 4 NOT MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 53 commands for the one changed path; each was run and its exit code recorded, and `--ran` reconciled: `53 derived famil(ies) accounted for — 49 run, 4 NOT-MEASURED (4 DERIVED from a recorded exit 3)`.\n\nThe four exit-3 families refused their own prerequisite (the workspace is not fully built locally): `check:dual-build-cjs-loads`, `check:i18n`, `check:i18n-coverage`, `check:i18n-walk-parity`. NOT MEASURED locally, reason: prerequisite; CI's Lint and Repo Gates runs them.\n</details>\n\nNot merged with `origin/main` before opening: it is 13 commits ahead of the base, none under `packages/cli`, so CI's merge ref is the first joint reading.\n\nThis PR changes only a test file and publishes nothing, so it needs the `skip-changeset` label (not added by the dev).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw787kMeaX7oyz7DDC\n"
+}

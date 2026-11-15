@@ -2,8 +2,8 @@
   "number": 32354,
   "kind": "issue",
   "title": "metadata-protocol: a name held only by stored rows of two packages, one disabled, answers by save order, and /layers takes the first composite when the environment holds its own item (ADR-0150 D3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T21:16:34Z",
-  "updated_at": "2026-11-14T18:53:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T22:08:29Z",
+  "closed_at": "2026-11-14T22:08:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 18,
   "locked": false,

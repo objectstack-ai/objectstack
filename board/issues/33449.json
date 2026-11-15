@@ -1,0 +1,36 @@
+{
+  "number": 33449,
+  "kind": "pull_request",
+  "title": "test(dogfood): take the admin search terms from rows the stock admin is served",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A2",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:28:45Z",
+  "updated_at": "2026-11-14T22:37:09Z",
+  "closed_at": "2026-11-14T22:37:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T22:37:07Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33449",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DXuamRUC67fx2TTYrFfyuSH)_\n\nFixes #33429\n\nClause-②: no — a test-only change in the private `@objectstack/dogfood` package; nothing publishes.\nMetadata-protocol: none\n\n## Maintainer quick read\n\n- What changes: one dogfood test now picks its search words from rows the admin can actually see, so it stops failing at random in the merge queue.\n- Why: it ejected #33364 and #33409 from the queue. It is not a product bug. Sometimes the word it picked came from an activity row about an internal object (`sys_oauth_resource`) that no one is allowed to read through the data API, so the admin's search correctly found nothing.\n- Risk and rollback: test only. Rollback is a revert.\n- Needed from you: nothing.\n\n## Cause (measured locally on the stock showcase boot)\n\n- The test took its term from `ql.find(table, { limit: 1 })` under the system context, with no sort. That row varied between boots: four boots gave `showcase_invoice_line`, `showcase_expense_line`, `showcase_task` and `sys_oauth_resource`.\n- The boot writes one `sys_activity` row about `sys_oauth_resource` (the MCP resource registration, no actor). `GET /data/sys_oauth_resource` answers 404 `OBJECT_API_DISABLED`, and the activity read gate serves a row only to a reader who can read its parent, so the stock admin is served none of that object's activity rows.\n- A probe over every `object_name` the boot wrote: the admin's `$search` and its `$filter` on the name both answer more than 0 rows for every name except `sys_oauth_resource`, where both answer 0. When that row came first, line 96 saw 0. Both victims failed on that assertion, not on a timeout.\n\nNo wait or retry is added.\n\n## What changes\n\n- `packages/qa/dogfood/test/audit-log-admin-search.dogfood.test.ts`: each term is the `object_name` of the newest row the stock admin reads through the same data door (`$orderby=created_at desc` on `sys_audit_log`, `timestamp desc` on `sys_activity`, `$top=1`). The armed control and the comment say so.\n\n## Verification\n\n- The changed file, run 3 times on a built tree: 3/3 passed each run.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Nothing publishes here.)\n- [x] 6. `packages/spec` is not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cz2MxDkQYCC4U8indM\n"
+}

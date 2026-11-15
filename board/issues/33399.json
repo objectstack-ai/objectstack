@@ -2,7 +2,7 @@
   "number": 33399,
   "kind": "pull_request",
   "title": "fix(runtime)!: the action activation door answers a name two packages hold with 409 naming both, as the execution door does, not 404 \"has no declaration\"",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T18:39:00Z",
-  "updated_at": "2026-11-14T19:26:26Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-14T20:50:59Z",
+  "closed_at": "2026-11-14T20:50:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T20:50:57Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33399",

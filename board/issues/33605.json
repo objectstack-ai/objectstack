@@ -1,0 +1,31 @@
+{
+  "number": 33605,
+  "kind": "issue",
+  "title": "pm: verify a contract-review sub-agent was served at CONTRACT_REVIEW_TIER before its record can claim the tier (repo script, post-stamped refusal, rule line)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:22:54Z",
+  "updated_at": "2026-11-15T02:22:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33605",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (Leehom's ruling: card 「决定 #33531 合并前要先补齐哪些缺口」, option A 「先补三项再合并」, tapped 2026-11-15T02:21:59Z: 「安全路径规则、增删改名仍归人合、达档校验脚本先落地，之后再合并 #33531；其余四项立卡后跟。」 This card is the third item, the tier-evidence script). Priority p1 by that ruling: it lands before PR #33531 (card #33501) is handed to him. `reach:` every seat that adopts a sub-agent contract review and writes `Served-tier: CONTRACT_REVIEW_TIER`.\n\n**What is wrong.** A contract-review record names its tier as the constant `CONTRACT_REVIEW_TIER` (`scripts/pm/dispatch-gates.mjs`, `'claude-fable-5-2'`), but nothing checks that the review was served by that model. On 2026-11-14 from 18:19Z one seat launched its review sub-agents without `model: fable`; 19 records claimed the tier falsely and 7 of those PRs merged before the seat found it by grepping its own task output (corrections posted on every PR; the at-tier re-review found a must-fix two off-tier rounds had passed, PR #33465). The queue guard cannot verify the tier either: the record is a self-written name, and AGENTS.md keeps model identifiers out of comments. The only check today is a script in one seat's scratch folder.\n\n**What lands.**\n1. A repo script (for example `scripts/pm/verify-review-tier.mjs`) that reads a review sub-agent's output transcript and exits 0 only when every served model it records equals `CONTRACT_REVIEW_TIER` (imported, not respelled) and the transcript carries no model-fallback notice. An unreadable, empty or unparseable transcript refuses (non-zero, with the reason). A `--self-test` pins: all-tier passes; one off-tier turn refuses; a fallback notice refuses; no model field refuses.\n2. `scripts/pm/post-stamped.mjs` refuses to write a `## Contract review` body whose `Served-tier:` names `CONTRACT_REVIEW_TIER` unless the call carries the evidence (for example `--tier-evidence PATH`) and the script in 1 passes on it. The evidence stays local: no model identifier and no path enters the comment. Records that name another tier, and every non-record comment, are unaffected. Pin both directions in post-stamped's self-test.\n3. One rule line in `.claude/skills/pm-dispatch/references/contract-review.md`: every contract-review Agent call passes the tier's model explicitly, and the record is posted only through the evidence check.\n\n**Boundary.** This catches honest failure (a missing model parameter, a mid-run fallback). It does not stop a seat writing a false record; that is the post-merge audit's job (#33603).\n\n**Open for the developer to measure and state:** the transcript format(s) seats actually produce (the Agent tool's JSONL output, a card thread's session), and whether a review run in a separate thread can produce evidence the seat can pass. If one format is all that is reachable now, say so and refuse the rest.\n\nSurface: `scripts/pm/**`, `.claude/skills/pm-dispatch/references/contract-review.md`; `skip-changeset`. `Clause-②: no`. Related: #33501 (PR #33531 waits on this), #33541, #33601, #33603, #33604.\n\nDedupe (open AND closed): `is:issue Served-tier evidence verify` and `is:issue contract review tier fallback script` → none open; #10299 (closed, the fuse's \"self-check the current model\" step not self-executable) is the older form of this gap. **New.**\n"
+}

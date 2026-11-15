@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "lease:A4",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T19:21:57Z",
-  "updated_at": "2026-11-14T19:45:39Z",
+  "updated_at": "2026-11-15T00:20:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33411",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC\n\nFound while fixing #33393 (PR #33409), measured on its branch at `99f60e1df` with a temporary test case (real AppPlugin + SqlDriver over better-sqlite3), then removed.\n\n## Line\n\nA seed dataset OF an object walled by a declared `tenancy.tenantField` with `systemFields.tenant: false` (e.g. `{ object: 'crm_workspace_tag', mode: 'upsert', externalId: 'name', records: [{ name: 'Silver' }] }`) · AppPlugin's per-organization seed replayer on a walled boot · rare (custom tenant field) · measured.\n\n`replayer(ORG_NORTH)` throws the driver's INVALID_FILTER (\"A filter on object crm_workspace_tag names a column the database could not resolve\"). Cause: `SeedLoaderService.loadExistingRecords` (`packages/metadata-protocol/src/seed-loader.ts`, the per-tenant replay branch) filters the SOURCE object's existing rows by `where.organization_id`, the hard-coded column #33393 fixed on the reference-target side.\n\n## Not a mechanical fix\n\nThe loader also has to decide what it stamps on such rows: `seedRowNeedsOrganization` answers only for `organization_id`. So the fix needs (a) the existing-rows filter on the resolved tenant column, and (b) a rule for stamping the declared tenant column on seeded rows (or refusing such a dataset with a named error instead of a driver refusal).\n\nReader who acts: `packages/metadata-protocol/src/seed-loader.ts` (`loadExistingRecords`, `seedRowNeedsOrganization`), `packages/runtime/src/seed-org-scoped-references.integration.test.ts`.\nSuggested grade: p3. Lane: `domain:server`.\n"

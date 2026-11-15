@@ -1,0 +1,32 @@
+{
+  "number": 33471,
+  "kind": "issue",
+  "title": "studio: a seeded record page saves its \"More details\" section heading as plain English, so viewers in other languages read English where the running page translates it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:59:12Z",
+  "updated_at": "2026-11-15T01:31:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33471",
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible defect with a named producer. The #33377 os-dev read it on the code, not live (report 6884820455, `out_of_scope_findings[0]`, class a), and it surfaced beside PR #33470.\nReader: `domain:ui` (`ui/packages/app-shell` Studio seed). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: one heading in the wrong language on saved Studio-seeded pages, with no wrong data.\nDedupe: `is:issue is:open \"More details\" seed` finds only #33377 (the ungrouped-bucket heading, a sibling).\n\n## 维护者速读\n\nStudio 给对象新建页面时，种子会把「More details」分区标题按英文原文写进保存的页面。运行中的记录页会按语言包（`detail.sectionMoreDetails`）翻译这个标题，但保存过的页面只会显示英文，除非对象自己的语言包里写了 `_sections.details.label`。\n\n## Producer\n\n- `ui/packages/app-shell/src/views/metadata-admin/anchors.ts` (Studio's record-page create seed) and `metadata-admin/previews/PagePreview.tsx` `convertToFull` pass `MORE_DETAILS_DEFAULT_LABEL` (`'More details'`) as the `details` section's label. It is persisted as a plain string.\n- `record:details` resolves `sectionLabel(OBJECT, 'details', 'More details')`. With no `_sections.details.label` in the object's bundle, the viewer reads the English text, while the running page translates it via `detail.sectionMoreDetails`.\n\n## Acceptance\n\n- A seeded page saves the `details` heading in a form that stays translated, and keeps the per-object `_sections.details.label` override working. PR #33470 (#33377) settles the form for the ungrouped bucket: the spec's `I18nLabel` inline locale map, read from every shipped catalogue. Measure whether the same form keeps the override, and pick accordingly.\n- Pin: a seeded page for an object with no field groups and a long-text field reads the translated heading under a non-English locale. CONTROL: an object bundle with `_sections.details.label` still wins.\n- ⛔ No spec change, and no migration of pages already saved; say in the PR what an existing page shows."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 33593,
+  "kind": "issue",
+  "title": "objectql: an extend layer's record-mode currency amount is judged against the object as served, so a bad follow pair is refused at the run that completes it (not at a later no-change upgrade of the parent)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:E2b",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:11:41Z",
+  "updated_at": "2026-11-15T02:11:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33593",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4czXwx6JtQPvacrzzUw\n\nSplit from #32934 item 2 (os-dev report 6887729320, measured on main by area E2b). Area-lease pilot #33059, lease:E2b. The seat ruling below was reviewed once before filing.\n\n## Premise (measured)\nA package that only EXTENDS an object can add a record-mode currency amount that follows:\n- a parent field with no ISO 4217 code,\n- a missing field, or\n- a field reached through its own new master_detail.\n\nAll three are ADMITTED. `recordCurrencyFollowRefusalOf` (registry.ts) passes `partial: ownership === 'extend'`, and `recordCurrencyFollowRefusal` (record-currency-aggregate-door.ts) returns before the follow and other-ends halves. The bad amount is then served, and a later no-change upgrade of the parent's owner is refused 422 on the extension's field, which blames the wrong package. Controls: the same amount in an own object body gets 422; installing parent and extension together gets 422. Run end, the batch writer (batch-object-registration.ts) and single save share this path.\n\n## Ruling: A, amended\n- **R1:** every layer is judged as the served fold of its object (base + enabled extensions + the incoming body), never as the partial body.\n- **R2:** if the extended object is not registered, there is no verdict (unchanged).\n- **R3:** the run that completes a bad pair is refused, whichever end it holds. No order is exempt. This includes an extension registered before its object's owner, so the owner's own-body loop and the other-ends check also read the served extensions.\n- **R4:** an extension that arrives before the parent's code field exists is refused, the same as an own body.\n- **R5:** cross-extension: the followed field is read from the served parent. A missing or disabled supplier means refusal; the same artifact passes at run end.\n- **R6:** a parent upgrade that removes or de-codes a followed field is refused, because the upgrade is the breaking change. The message names the extension's package and field.\n- **R7:** a no-change upgrade is never refused.\n\n## Acceptance\n- Clause-② table: every moved answer FROM→TO, in both registration orders, at run end, in the batch writer, and on single save.\n- CONTROLs: an own body, and parent + extension installed together.\n- Pin, or file separately, whether uninstalling or disabling a supplier extension (R5) and enabling a package ask the door.\n- `Metadata-protocol: narrowed` goes to contract review. Add a minor changeset line. No legacy-data migration or heal (maintainer, 2026-11-14: no production customers yet).\n\n## Files\n- packages/objectql/src/record-currency-aggregate-door.ts\n- packages/objectql/src/registry.ts (shared file; check open PRs from A4 and E1 first)\n- packages/metadata-protocol/src/registry-question.ts (header prose only; E1 owns this file, so coordinate with E1)\n- Tests beside manifest-service-artifact-refusal-restores.test.ts, plus batch-writer tests."
+}

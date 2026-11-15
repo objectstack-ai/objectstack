@@ -1,0 +1,34 @@
+{
+  "number": 33508,
+  "kind": "issue",
+  "title": "Queue-flake anchor: src/action-page-member.integration.test.ts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "lease:A3",
+    "pm:dispatched",
+    "queue-flake-anchor"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T22:59:28Z",
+  "updated_at": "2026-11-15T02:13:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33508",
+  "body": "`src/action-page-member.integration.test.ts` has ejected **11 pull requests** from the merge\nqueue within a rolling 24 hours — **5 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #33227 | independent | [43651866154](https://github.com/objectstack-ai/objectstack/actions/runs/43651866154) |\n| #33439 | S2 · root | [43647280081](https://github.com/objectstack-ai/objectstack/actions/runs/43647280081) |\n| #33442 | S3 · inherited | [43664839229](https://github.com/objectstack-ai/objectstack/actions/runs/43664839229) |\n| #33444 | S4 · root | [43655916437](https://github.com/objectstack-ai/objectstack/actions/runs/43655916437) |\n| #33450 | S3 · root | [43663304554](https://github.com/objectstack-ai/objectstack/actions/runs/43663304554) |\n| #33451 | S3 · inherited | [43664809991](https://github.com/objectstack-ai/objectstack/actions/runs/43664809991) |\n| #33452 | independent | [43649385454](https://github.com/objectstack-ai/objectstack/actions/runs/43649385454) |\n| #33463 | S2 · inherited | [43649139727](https://github.com/objectstack-ai/objectstack/actions/runs/43649139727) |\n| #33472 | S4 · inherited | [43659594732](https://github.com/objectstack-ai/objectstack/actions/runs/43659594732) · [43657223386](https://github.com/objectstack-ai/objectstack/actions/runs/43657223386) |\n| #33495 | S4 · inherited | [43661768268](https://github.com/objectstack-ai/objectstack/actions/runs/43661768268) |\n| #33517 | S3 · inherited | [43665114269](https://github.com/objectstack-ai/objectstack/actions/runs/43665114269) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE chain reaches another victim's queue HEAD (directly, or through\ngreen groups queued between them) contains that victim's tree by construction.\nA single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the roots above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [43665114269](https://github.com/objectstack-ai/objectstack/actions/runs/43665114269) (PR #33517).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:src/action-page-member.integration.test.ts -->"
+}

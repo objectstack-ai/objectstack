@@ -1,0 +1,33 @@
+{
+  "number": 33501,
+  "kind": "issue",
+  "title": "pm: land low-risk governed PRs on the seat review (Tier S arm for skills wording and docs), per the 2026-11-14 delegation ruling",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T22:45:02Z",
+  "updated_at": "2026-11-14T23:49:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33501",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ③ maintainer-directed. Ruling-ref: Leehom, project chat 2026-11-14T22:42:56Z, verbatim 「同意 把低风险的 Tier H 放权给座位」, agreeing to the scope the coordinator proposed to him. In the coordinator's words, not his: pure docs, ADR annotations or notes, and skills wording are landed by the seat itself once the in-seat contract review passes. Anything that touches a contract (spec or published types, Clause ②, narrowing) or security still goes to Leehom.\n\n## 维护者速读\n\n你已同意把低风险的 Tier H 交给席位落地，但门禁还没跟上：合并队列的 Governed Surface Queue Guard(必需检查)只在 os-zhuang / hotlong 批准或入队时放行 Tier H,`skills/**` 在登记表里写死为 Tier H。席位现在入队会被弹出。本卡把裁决落到登记表、门禁和 AGENTS.md 第 14 条，合入仍需你亲手合并(它本身改的是 Tier H 文件)。\n\n## What blocks the ruling today\n\n- `scripts/pm/check-governed-merges.mjs` `GOVERNED_SURFACES`: `skills/**` and `docs/adr/**` are Tier H. The header says \"Published `skills/**` stays Tier H: the seat did not propose moving it.\"\n- `scripts/pm/check-governed-queue-guard.mjs` (the `merge_group` leg of the required check `Governed Surface Queue Guard`) passes a Tier H PR only on an APPROVED review or an enqueue by `GOVERNED_APPROVERS` (`os-zhuang`, `hotlong`). A Tier S PR passes on the seat's own `## Contract review` PASS record for the current head.\n- `AGENTS.md` Prime Directive 14 lists these surfaces as Tier H, and `pnpm check:pm-governed-prose` holds that paragraph to the register.\n\n## What lands\n\n1. **A low-risk arm of Tier S in the register**, under the ruling's scope:\n   - `skills/**` (with `.changeset/**`) is Tier S when the diff touches no other governed path and no `packages/**`, `ui/packages/**` or other published source.\n   - `docs/**` and `content/docs/**` prose are ungoverned already. State in the register header that they need nothing.\n   - `docs/adr/**`: a note or annotation is low risk, but a change to a decision is not, and paths alone cannot tell them apart. Propose a mechanical reading in `open_questions`, for example a `Low-risk: annotation` line on the seat's PASS record that the guard reads, or leave ADRs Tier H. Do not decide it in code without the seat's word.\n   - Fail closed as today: a mixed diff, a Clause-② trigger, a `security` label, or an unreadable record is Tier H.\n2. **The guard** reads the new arm through `governedTierFor` (no second copy), with `--self-test` rows pinning each of these: a pure skills diff on a PASS record passes; skills plus `packages/spec/**` stays H; skills with `Clause-②: yes` stays H; no record stays H.\n3. **AGENTS.md Prime Directive 14 and the pm-dispatch references** (`landing-operations.md`, `lanes/skills.md`, `contract-review.md` where they restate the tier) name the low-risk arm and cite this ruling. `check:pm-governed-prose` stays green.\n4. **The post-merge audit** (`check-governed-merges.mjs`) reports a low-risk Tier S merge without a PASS record as a finding, as it does for `.claude/**` today.\n\n## Done when\n\nA pure `skills/**` wording PR with a same-head PASS record lands through the queue on the seat's enqueue, and the guard refuses each of the H cases above.\n\n## Reach\n\nEvery lane's skills and docs PRs. About seven PRs are waiting on a maintainer click right now (#33394, #33455, #33458, #33460, #33475, #33480, #33482).\n"
+}

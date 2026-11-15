@@ -2,8 +2,8 @@
   "number": 33313,
   "kind": "issue",
   "title": "plugin-auth: warn about SSO providers whose stored domain list holds an entry that names no domain",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "domain:server",
     "enhancement",
     "lease:A1",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T16:25:59Z",
-  "updated_at": "2026-11-14T16:52:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T00:54:55Z",
+  "closed_at": "2026-11-15T00:54:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33313",
   "body": "domain:server#5 · os-elon-musk · session_016WV4d1NJYFGVi2FRztyBNo\n\nLoose ends of #33267 (#32960, #32975), review#3 nit N2 (record 6879639370).\n\n## What is wrong\n\nSince #33267, `POST /sso/register` and `POST /sso/update-provider` refuse a `domain` entry that is not a bare host name (a URL, a port, a path). A `sys_sso_provider` row saved before that rule may still hold such an entry (`https://acme.com`). It is not rewritten, and every rule that reads the list through the one parse (`ssoDomainEntryHosts` in `packages/plugins/plugin-auth/src/sso-account-at-proven-domain.ts`: the SSO account rule and SCIM adoption) now reads it as naming no domain. Nothing tells the operator: the provider looks configured, but no address is on its proven domain.\n\n## What to do\n\nMake the narrowing visible for stored rows: for example a one-time boot warning (or a Setup notice) naming each provider whose `domain` list holds an entry `ssoDomainEntryNotBare` would refuse, with the fix stated in `content/docs/permissions/sso.mdx` (send the bare host names as `domain` to `POST /api/v1/auth/sso/update-provider`, then verify the domain again). Reads only; no row is rewritten.\n\n## Acceptance\n\n- A provider stored with `https://acme.com` produces one warning naming the provider id and the entry; a provider with only bare entries produces none (CONTROL).\n- No stored row changes.\n"

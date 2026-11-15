@@ -2,8 +2,8 @@
   "number": 33340,
   "kind": "issue",
   "title": "activation ledger package-key upgrade: raw DATABASE_ERRORs and wrong counts on the upgrade path",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "bug",
     "domain:server",
     "lease:A4",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:11:34Z",
-  "updated_at": "2026-11-14T18:47:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T01:08:25Z",
+  "closed_at": "2026-11-15T01:08:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33340",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\n## What is wrong\nRow 43 (record #32940 §1, #33048 · 6846028996), item `platform-core.activation-ledger-package-key-upgrade`, route (a):\n1. The pre-upgrade migrate plan prints a stray `no such column` DATABASE_ERROR.\n2. A raw UNIQUE DATABASE_ERROR prints before the friendly ERROR.\n3. The plan says '1 row(s) name no package' while 4 rows name none. The count is wrong.\n4. The conflict-boot sentence calls a package-held row an environment item.\n\n## Do\n- Fix the count (3) and the label (4). An operator acts on both.\n- Keep raw driver errors (1, 2) behind the friendly error, so the operator sees one answer.\n\n## Grade\n**p2**: the operator is misled on the upgrade path. No data is written wrong.\n\n## Reader\n`domain:server`, pilot **Area A4** (schema sync)."

@@ -1,0 +1,30 @@
+{
+  "number": 33603,
+  "kind": "issue",
+  "title": "pm: the post-merge governed audit has no owner or schedule, and shows a seat landing through the low-risk arm as a breach",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:21:09Z",
+  "updated_at": "2026-11-15T02:21:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33603",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-up F of a Fable evaluation of the low-risk Tier H delegation that Leehom asked for, write-up `/mnt/project-files/pm-orders/review/33531-delegation-review.md`, read on PR #33531 head `e2b1cabc`; rated not blocking the merge of #33531). `reach:` AGENTS.md Prime Directive 14 names the post-merge audit as the compensating control for seat-landed merges, but no one runs it and its report cannot tell an arm landing from a violation.\n\n**What is wrong.** `scripts/pm/check-governed-merges.mjs` is a manual, report-only script with no schedule. It classifies merges by path, so a skills PR the seat lands through the low-risk arm shows as \"Tier H merged without approval\", indistinguishable from a breach (record 6886787995 nit N3 on PR #33531, not carded until now).\n\n**What lands.** The audit lists arm landings apart, and for each one checks a same-head at-tier PASS record exists. A weekly owner runs it (a patrol step or a scheduled workflow, whichever the fleet's rules allow) and the result is posted where the maintainer reads it.\n\n`scripts/pm/**`, possibly `.github/workflows/**` (governed); `skip-changeset`. `Clause-②: no`. Blocked-by: #33501 (PR #33531). Dedupe: `is:issue check-governed-merges audit weekly` → none. **New.**\n"
+}

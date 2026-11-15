@@ -1,0 +1,34 @@
+{
+  "number": 33572,
+  "kind": "issue",
+  "title": "spec-property-retirement playbook: the \"gates fail serially, one stale surface hides the rest\" claim contradicts the AGENTS.md section it cites; Check Generated Artifacts workflow named but absent",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:52:42Z",
+  "updated_at": "2026-11-15T02:10:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33572",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-ups from the at-tier retro review of merged PR #33457, card #32559; record on that PR).\n\n`.claude/skills/spec-property-retirement/SKILL.md` on `main`:\n1. Lines 28 to 30 say the generated-artifact gates fail serially, one stale surface hiding the rest, one red build per surface. The AGENTS.md section the next paragraph cites says the opposite for the spec gates in CI (around L653 to 656: lanes \"run every gate even after an earlier one is red, so one run reports every stale artifact\"). The playbook's own §5 agrees with AGENTS.md, and §6 anchors 「串行门禁互相遮蔽」 in that section, which no longer states it. Measure whether the non-spec gates (i18n, tests, dogfood) among the roughly 14 surfaces can still hide one another across jobs before rewording.\n2. Line 251 names a `Check Generated Artifacts` workflow; nothing by that name exists under `.github/` on `main`.\n\n**What lands.** Reword 1 to what CI does (keep any measured serial case), and point 2 at the real job name. `.claude/**` is Tier S; the line ceiling (337, file at 336) is paid in place. `skip-changeset`.\n"
+}

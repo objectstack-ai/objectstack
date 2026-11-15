@@ -1,7 +1,7 @@
 {
   "number": 33014,
   "kind": "issue",
-  "title": "[PM seat] qa · seat 3 — ⏳ vacant",
+  "title": "[PM seat] qa · seat 3 — 🟢 os-tesla",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T04:05:51Z",
-  "updated_at": "2026-11-13T23:08:26Z",
+  "updated_at": "2026-11-14T21:42:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33014",
-  "body": "qa#3 · os-tesla · session_01L9qibw6yXcLi9aRRBpPT4W\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 3**; seat 1 is #31433, seat 2 is #32023.\n\n## Current PM — ⏳ vacant\n\n- **Predecessor:** `os-tesla` · `session_01L9qibw6yXcLi9aRRBpPT4W` · seated 2026-11-13T04:05Z, signed off 2026-11-13T23:04Z on the maintainer's 「skills qa security 当前任务处理完下班」 (2026-11-13T23:01Z). `check-handover.mjs` exit 0 (no claim, no decision outside the inbox).\n- **Patrol:** none (charter). **Mailbox:** PR #33015 closed at sign-off; a successor reopens one when seated.\n- **Takeover:** `/pm-dispatch 接手` (qa), then read this post first, then the sign-off brief below it.\n\n## Inherited ledger\n\n- **Queue snapshot:** none. This seat holds no `pm:queue` card, no claim, no PR and no running runner thread.\n- **18.4.0 round 2 (#32908), done:** R2-TOUCH `touched:5fb79bc0` at ee9ad834 — #33025, #33048, #33058; part A at 8e3d4a54 — #33087 (P0), #33088 (p0 fixes), #33089 (round-1 FAILs), #33090 (upgrade); part B `touched:ee9ad834` — #33081, #33094, #33096; part C `touched:8e3d4a54` at c4196099 — #33092, #33093. Verdict on #32908 (6852613241): no release blocker.\n- **Post-release:** `smoke:npm-18.4.0` on the published 18.4.0 — #33105 (21 PASS / 1 FAIL); docs card #33106 (no `releases/v18/18-4.mdx`, no v18.4.0 upgrading row; third release in a row after #26631, #29933).\n- **Extracted cards** are graded and dispatched by triage and the owning lanes, not by this seat.\n- **Cross-lane memo:** the round's five private draft advisories are the security lane's (`Notify: security` sent to #33040 for each); which to fix and publish awaits the maintainer. Not carried here.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`). ⛔ No GitHub MCP writes.\n- Next release: run `smoke:npm-<version>` in the shape of #33105 / #30022, and the round-2 increments in the shape of the records above.\n"
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 3**; seat 1 is #31433, seat 2 is #32023.\n\n## Current PM — 🟢 os-tesla\n\n- **Seated:** `os-tesla` · `session_01L9qibzj9DrVWXkq7joYHGB` · 2026-11-14T21:42Z, on the maintainer's 「开一个 qa」「座位」 (2026-11-14T21:36Z). `Successor-of: session_01L9qibw6yXcLi9aRRBpPT4W` (same account, signed off 2026-11-13T23:04Z).\n- **Patrol:** none (charter: no self-start, no scheduled task; wakes on the maintainer's word and the mailbox). **Mailbox:** PR #33459.\n- **Posture ledger:** lives in the project; this post holds only the stub.\n\n## Inherited ledger\n\n- **Queue snapshot:** none. This seat holds no `pm:queue` card, no claim, no PR and no running runner thread.\n- **Last round:** 18.4.0 round 2 (#32908, verdict 6852613241: no release blocker) and `smoke:npm-18.4.0` (#33105, docs card #33106). The full record list is in the previous body revision and the sign-off brief 6867164782.\n- **Open `qa-run` records (qa-rollup at seating):** 1 — #32135 (`all`, 2026-11-10), not this seat's.\n- **Extracted cards** are graded and dispatched by triage and the owning lanes, not by this seat.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`). ⛔ No GitHub MCP writes.\n- Next release: run `smoke:npm-<version>` in the shape of #33105 / #30022, and the increments in the shape of the 18.4.0 round-2 records.\n"
 }

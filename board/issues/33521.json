@@ -1,0 +1,34 @@
+{
+  "number": 33521,
+  "kind": "issue",
+  "title": "console: the record page offers the retired sys_comment.reactions column PATCH to a member refused sys_comment_reaction (400 INVALID_FIELD)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:E1",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T23:23:56Z",
+  "updated_at": "2026-11-15T02:11:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33521",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cy1y7UNVbT2QAdmgdn\n\nFollow-up of #33343 item 2 (PR #33499), filed on seat 5's instruction. ⛔ Not a claim.\n\n## Gap (measured live on `main` ba35dfd7, showcase boot, stock member)\n\n- The record page picks the reaction **`column` store** when `sys_comment_reaction` reads as absent (`ui/packages/app-shell/src/views/RecordDetailView.tsx`, around line 3179). A member refused that object (no grant, so its definition answers 404) lands there too.\n- The column store offers the reaction control under `feedReactionColumn` = update on `sys_comment`, which `member_default` grants.\n- Clicking it PATCHes `sys_comment.reactions`, a column retired by migration 18: `PATCH /api/v1/data/sys_comment/ID {reactions}` answers **400 INVALID_FIELD** \"Unknown field reactions on object sys_comment\". (`POST /api/v1/data/sys_comment_reaction` answers 403 for the same member.)\n\n## Expected\n\nOffer the column PATCH only where `sys_comment_reaction` is genuinely **undeployed**, never where the caller is merely refused it or the column is retired. Keep the column path itself: the cloud's v17 pin still needs it. A refused caller gets no reaction control (or a read-only one), not a request that is bound to fail.\n\n## Separate decision (not this card)\n\nWhether every member should get read + create on `sys_comment_reaction` (`member_default`) is a maintainer decision now with Elon (#22566 left the shipped set open). This card fixes the console either way.\n\n## Do\n\n1. Pin on `main`: refused member → column store → control offered → 400. CONTROLs: object undeployed → column path still used; grant held → records store.\n2. Tell \"undeployed\" apart from \"refused\" in the store pick, with no new server signal if the existing meta/grant reads suffice; else stop and report.\n\nGrade p2 (a stock member sees a control that always fails). Clause-②: no expected. Metadata-protocol: none.\n"
+}

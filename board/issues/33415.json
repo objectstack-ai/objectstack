@@ -2,8 +2,8 @@
   "number": 33415,
   "kind": "issue",
   "title": "Scenario grader: \"I didn't lend out AST-0041\" is not read as a decline (WITHHELD_ACT's closed verb list lacks the cards' domain verbs)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T19:36:24Z",
-  "updated_at": "2026-11-14T19:36:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T22:42:11Z",
+  "closed_at": "2026-11-14T22:41:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33415",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① grader defect, measured. `reach:` the second gallery debut refresh, 2026-11-14T18:45Z (card `asset_lifecycle`, scratch, published 18.4.0, runner at objectstack main `e0ce1b52`, which includes #33256; model claude-opus-5-5). Scorecard: Build 135/136, Seed 559/559, 问数 15/15, operations 6/6, Iterate Build 146/147, Iterate 问数 15/15, Iterate operations 5/6. `gallery-refresh` refused the export on the two checks below, and both are grader readings. Epic objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nIterate operation `check_out_asset_in_repair` as `asset_admin` (a probed `write_validation` operation).\n- The agent sent **no write** and replied: \"I didn't lend out AST-0041. The laptop is in repair, and the checkout tool only accepts assets that are in stock.\" It then gave the open repair order.\n- That is a decline. The grade says `agent:refused:VALIDATION_FAILED-or-withheld | refused (no write attempted), and the reply neither declines the write nor asks for a correction`.\n\n## Carrier\n\n- `packages/qa/scenarios/src/score/scenario-run-grade.ts` `WITHHELD_ACT` (≈line 515): a first-person negation bound to a closed list of acting verbs (approve, submit, change, …).\n- `lend` / `lent` is not in that list. Neither are other domain verbs the cards use: check out, assign, issue, hand over, transfer, dispose, book, reserve, allocate, return.\n- `withheldWrite` (`runner/observe.ts` ≈202) therefore reads this as not withheld, and the card's guardrail fails on a correct, careful agent.\n- The first debut run that day passed this same operation only because its wording happened to differ.\n\n## Ask\n\n1. Extend the acting verbs with the domain verbs the nine cards' operations use. Derive them from the cards' operation prompts, so a new card's verb is not missed; enumerate them under a test.\n2. Or make the reading wording-light: no write call, no write, and the reply names the operation's target record (here AST-0041) next to a first-person negation. Choose one and state why.\n3. A test with this reply, plus negatives that must stay \"no decline\" (for example \"I didn't find a problem\", or a report that negates a finding).\n4. Re-grade the recorded run.\n\nReader: `domain:devx` lane seat, from `pm:queue`. Dedupe: open issues for `WITHHELD_ACT` / `withheld word list`, 0 hits. Priority p2: it falsely blocks a gallery export."

@@ -1,0 +1,30 @@
+{
+  "number": 33604,
+  "kind": "issue",
+  "title": "pm: a same-head PASS record that still lists an open should-fix clears the queue guard",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:21:12Z",
+  "updated_at": "2026-11-15T02:21:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33604",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-up G of a Fable evaluation of the low-risk Tier H delegation that Leehom asked for, write-up `/mnt/project-files/pm-orders/review/33531-delegation-review.md`, read on PR #33531 head `e2b1cabc`; rated not blocking the merge of #33531). `reach:` a head whose record is PASS with a should-fix still owed can be landed by the seat, because the guard reads only the word PASS.\n\n**What is wrong.** The contract-review rule says a should-fix earns a delta review of its fix before landing. The queue guard (and the low-risk arm in PR #33531) reads `VERDICT: PASS` on a same-head record and nothing else, so a PASS record that lists an open should-fix on that very head clears the guard.\n\n**What lands.** Either the guard reads the record's finding grades and refuses a same-head PASS that lists an open must-fix or should-fix, or the seat's pre-landing check does, and the rule text says which. Pin it.\n\n`scripts/pm/**`, `.claude/skills/pm-dispatch/**`; `skip-changeset`. `Clause-②: no`. Related: #33541 (the Tier S leg reads no verdict at all). Dedupe: `is:issue PASS should-fix owed guard` → none. **New.**\n"
+}

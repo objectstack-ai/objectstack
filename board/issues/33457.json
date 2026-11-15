@@ -1,0 +1,34 @@
+{
+  "number": 33457,
+  "kind": "pull_request",
+  "title": "docs(skills): retirement playbook counts the six spec artifacts AGENTS.md lists",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:37:29Z",
+  "updated_at": "2026-11-15T00:43:28Z",
+  "closed_at": "2026-11-14T22:41:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T22:41:08Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33457",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XD6mdWfXBW1DwhGX4pmzcXs)_\n\nFixes #32559\n\ndomain:skills#1 · os-project-manager · session_01FEkQ5pgZkWpPb19V8zBWrx\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:内部技能 `spec-property-retirement` 开头一句把 AGENTS.md「Touched `packages/spec`?」一节说成「八个生成产物」,改为与该节一致的「六个」;顺带把被折行甩出来的单字行「是」接回原句。\n- 为什么改:这本删属性手册让读者去对照 AGENTS.md 那一节数要重生成的产物,数字对不上会让人以为漏了两个产物、去找不存在的东西。\n- 风险与回滚:仅 `.claude/**` 一个文件,+2 / -3,净减 1 行;不动任何包、schema 或运行时;回滚即还原本 PR。\n- 先看:`.claude/skills/spec-property-retirement/SKILL.md` 第 29–33 行。\n- 两分钟验证:`git diff origin/main -- .claude/skills/spec-property-retirement/SKILL.md`,预期只见「八个」变「六个」、单字行「是」并回下一行。\n- 需要你做的:无,席位落地(受管面 Tier S,席内复核记录后入队)。\n\n## What changes\n\n`.claude/skills/spec-property-retirement/SKILL.md`, two edits, nothing else:\n\n- **The artifact count.** The intro's pointer 「AGENTS.md §\"Touched `packages/spec`?\"(八个生成产物)」 now reads 「(六个生成产物)」. The cited section on `origin/main` 31b4b9fc (and on ba35dfd7, the commit the order names) says at `AGENTS.md:652`: \"`packages/spec` has **six** checked-in generated artifacts\". Its table has six rows. The section is unchanged between those two commits.\n- **The stray wrap line.** The one-character line 「是」 is joined to the line after it, so 「…于是你得到的 / 是每个面一轮红构建,而不是一轮报出全部。」 reads as one sentence again. Wording is unchanged.\n\nThe file goes from 337 to 336 lines. No line is added, so nothing needs paying for.\n\n## Tests\n\nProse in an internal skill only. No tested behaviour changed, so there is no ablation.\n\n## Acceptance notes\n\n- **Line ceiling left at 337.** The file now sits one line under its `check-skill-line-ratchet` ceiling (headroom 1). Lowering the ceiling to 336 would mean editing `scripts/pm/check-skill-line-ratchet.mjs`, and the claim limits the file surface to the SKILL.md. The ratchet header calls headroom \"the budget for ordinary rule edits\", so a 1-line headroom is allowed. The seat can lower it in a later ratchet pass if it wants to.\n- **Table-row pin note (already on main).** The ratchet prints an info line for this file: the widest table row is 324 bytes against a pin of 326. That predates this diff, which touches no table row.\n\n## Verification\n\n<details><summary>Gates (head fd2574d4, merge base 31b4b9fc)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 19 commands for the one path. Each ran with its exit code captured before any pipe. All 19 exit 0:\n\n- `check-closing-keyword-parity` (scan and `--self-test`), `check-comment-mask-corpus` (22274 files, 0 disagree), `plan-test-core-shards --self-test`, `check-harness-current --self-test`.\n- `pnpm check:` `agent-test-spelling`, `ci-filter-parity`, `cross-package-test-inputs`, `doc-authoring`, `driver-memory-census`, `gitlink-declared`, `nul-bytes`, `pm-governed-merges`, `pm-skill-ratchet` (this file: \"336 lines (ceiling 337; headroom 1)\"), `refd-timer-probe`, `required-contexts`, `skill-frame-sync`, `watch-hint-literal`.\n- `@objectstack/lint check:doc-formula-expressions`: the first run exited 3 (no lint dist). After building `@objectstack/formula` and `@objectstack/lint` under the verify lock (VERDICT command-exit 0, 88s), it exits 0.\n- `--ran` reconciliation: \"19 derived famil(ies) accounted for — 19 run, 0 NOT-MEASURED (a DERIVED zero — all 19 recorded an exit code and none of them is 3)\".\n- Not derived, run anyway: `node scripts/check-skills-token-ratchet.mjs` exit 0.\n- CI families come from this PR's check-runs. They were not re-run here.\n\n</details>\n\n<details><summary>Tier and governed readings</summary>\n\n- `dispatch-gates --tier`: no path-derived mandate. The surface matches none of the 4 declared globs, so the tier stays the PM's call (default opus).\n- `node scripts/pm/check-governed-merges.mjs --branch claude/project-thread-aio343`: exit 3, GOVERNED, landing tier S (席内达档复核落地). 1 of 1 path hits the register (`.claude/**`). Size +2 / -3, under the 3000 threshold.\n- Changeset: `skip-changeset`. `.claude/**` ships in no package.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5pgZkWpPb19V8zBWrx)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5pgZkWpPb19V8zBWrx\n\n<!-- signed: domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb -->\n"
+}

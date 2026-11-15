@@ -1,0 +1,32 @@
+{
+  "number": 33516,
+  "kind": "issue",
+  "title": "pm: first-touch sweep follow-ups from the #33484 review (oldest-first paging, ⑤ pre-filter, H24 on blocked and on-hold, CI wiring)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:blocked",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T23:21:52Z",
+  "updated_at": "2026-11-15T01:10:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33516",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-ups owed by work in flight). Contract review 6885812549 of PR #33510 (card #33484) left these as nits for a follow-up card. They are measured on the PR's head `451ada3e` and read on `main` once #33510 lands.\n\n## What lands\n\n1. **Sweep paging (N2).** `scripts/pm/first-touch-sweep.mjs` reads pages newest-first. If a card closes between two page reads, a still-open card can be skipped while the counts still match. Walk oldest-first and dedupe by number. Add a self-test row that shifts the page window.\n2. **Disjunction ⑤ pre-filter (N3).** ⑤ pre-filters on a card's current labels, so a card whose creation-minute `pm:queue` or `priority:*` has since come off is never judged. Read the label timeline, or say in the header which reading ⑤ makes and why.\n3. **Half-state rule H24 (N4).** `scripts/pm/check-half-states.mjs` H24 checks an assignee on `pm:queue` only. Since #33484, `SKILL.md` names an assignee on `pm:blocked` or `pm:on-hold` a half-state too. Widen H24 to all three and pin it in the self-test. Triage then repairs the open cards it finds (2 `pm:blocked` cards carried an assignee at filing).\n4. **CI wiring (N7).** The sweep's `--self-test` runs nowhere automatically. Add a root `package.json` script and a `lint.yml` step beside the other pm self-tests. `lint.yml` is under `.github/workflows/**`, so this part is governed and the maintainer lands it.\n\n## Scope\n\n`scripts/pm/**`, root `package.json`, `.github/workflows/lint.yml`. No published package moves, so `skip-changeset`. `Clause-②: no`.\n\nBlocked-by: #33484 (PR #33510)\n"
+}

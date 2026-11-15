@@ -2,8 +2,8 @@
   "number": 33393,
   "kind": "issue",
   "title": "Seed loader: an org-scoped reference probe filters on organization_id even when the target declares another tenantField",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T18:21:49Z",
-  "updated_at": "2026-11-14T19:19:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T21:40:03Z",
+  "closed_at": "2026-11-14T21:40:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

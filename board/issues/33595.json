@@ -1,0 +1,30 @@
+{
+  "number": 33595,
+  "kind": "issue",
+  "title": "Eval scoring v2: attribute scenario-card losses to the right owner, then compare haiku / sonnet / opus",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "pm:epic",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:13:28Z",
+  "updated_at": "2026-11-15T02:17:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33595",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiling-gate category: ③ maintainer-directed (verbatim, this project's eval seat thread, 2026-11-15): 「你建议的任务全部立卡，你负责开 devx 车道派发处理」 · 「立专题卡，然后派专题pm」. Also ④: the parent of the milestone children below.\n\n## Why (business)\n\n- The eval lane measures whether an AI can build and then query an ObjectStack app correctly: customers building with Claude Code most likely use opus; the cloud product's default for both building and ask is haiku.\n- Round 1 of the eval seat (3 control cards, scratch, published 18.4.0, 2026-11-14) lost 7 of 15 operation points, and 4 of them were the AI-built app's permission set refusing a write the persona should be allowed (403). The Build half scored full marks, so the score blamed the ask side for a build error.\n- Until losses land on the right owner (build, ask, or grader), a haiku / sonnet / opus comparison and the per-release baseline measure the grader as much as the models. Without this the maintainer cannot answer \"is haiku good enough as the cloud default\".\n\n## Milestone table\n\nRolling split (`references/seat-lifecycle.md` 〈Epic 子树车道〉): only the current milestone is cards; the rest are rows.\n\n| Milestone | Child | Blocked-by | Lane |\n|:--|:--|:--|:--|\n| M1 attribution fixes | #33596 — a 403 on an operation that should succeed is probed and charged to Build | — | domain:devx |\n| M1 attribution fixes | #33597 — Build checks that each persona's permission set covers the reads and writes the card gives it | — | domain:devx |\n| M1 attribution fixes | #33598 — the leak check does not read a figure out of a record identifier (`INV-003` → 3) | — | domain:devx |\n| M1 attribution fixes | #33599 — an `unanswerable` reply that declines but also states a figure is not correct | — | domain:devx |\n| M1 close-out | (eval#1) replay the recorded haiku / sonnet / opus control runs under the fixed grader, report the comparison | #33596 #33597 #33598 #33599 | eval |\n| M2 measurement range | row — `--ask-repeats N`, scorecard reports k/N per question | M1 | domain:devx |\n| M2 measurement range | row — an ask-only mode: run 问数 and operations on a fixed built artifact, so ask models compare on the same app | M1 | domain:devx |\n| M2 measurement range | row — `--lang zh\\|en` and `--prompt short\\|detailed` (today the build prompt takes `en ?? zh` and only `detailed`, `packages/qa/scenarios/src/runner/prompts.ts`) | M1 | domain:devx |\n| M2 measurement range | row — the scorecard sums ask-side time and reported cost per served model | M1 | domain:devx |\n| M2 measurement range | row — grade the `injection_as_data` guardrail (declared by every card; no grading code under `src/runner/` or `src/score/`) | M1 | domain:devx |\n| M2 close-out | (eval#1) cross matrix: opus build × haiku / sonnet ask, and the reverse | M2 | eval |\n| M3 depth | row — confirm-then-execute as a two-turn operation (today only the \"asks first\" half is measured) | M2 | domain:devx |\n| M3 depth | row — restore the seed before each operation, so one failed write does not cascade | M2 | domain:devx |\n| M3 depth | row — a multi-run summary table (author model × ask model) | M2 | domain:devx |\n| M3 depth | row — control cards gain Chinese prompts; each card 3 unanswerable questions with paired answerable twins; avg / max / min truths | M2 | domain:devx (`docs/qa/scenarios/**`) |\n| M3 depth | row — at least 2 held-out cards in the private overlay (never in this repository) | M2 | overlay owner |\n\nEach milestone's close-out posts the split summary here (next cards, lanes, edges, cost); the next milestone's cards are filed on the maintainer's go.\n\n## Readers\n\n- **The epic PM** (`epic:#<this>#1`, to be seated in its own project thread on the maintainer's 「派专题pm」) dispatches the M1 children to `os-dev` and lands them.\n- **eval#1** (#33468) owns this table, replays recordings at each close-out, and writes the scorecards (internal only; no accuracy figure is published).\n\n## Dedup\n\n`gh api search/issues` on objectstack, open and closed, 2026-11-15: `is:issue \"scenario grader\" in:title` → 4 (#33414 #33415 #33256 #30290, all closed and different defects); `\"scenario runner\" in:title` → 14 (all closed; #31160 added the model flags this epic uses); `\"scenario permission set\" in:title` → 0; `injection_as_data` → 0. No duplicate.\n"
+}

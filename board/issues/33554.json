@@ -1,0 +1,33 @@
+{
+  "number": 33554,
+  "kind": "issue",
+  "title": "Seed replay: a dataset of a global object (tenancy disabled) throws INVALID_FILTER on a per-organization replay",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A4",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:21:48Z",
+  "updated_at": "2026-11-15T00:59:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33554",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC\n\nFound while fixing #33411 (PR #33550). Measured, not inferred: a temporary case in that PR's integration harness (real AppPlugin + SeedLoaderService + ObjectQL + SqlDriver over better-sqlite3), since removed.\n\n## Line\n\nAppPlugin's per-organization seed replayer (the replay that runs on a `sys_organization` insert) · a seed dataset of an object declared `tenancy: { enabled: false }` (a global catalog) · every walled boot that ships such a dataset · measured.\n\n`replayer(ORG_NORTH)` on `{ object: 'crm_country', mode: 'upsert', externalId: 'name', records: [{ name: 'Japan' }] }`, where `crm_country` declares `tenancy: { enabled: false }`, throws the driver's INVALID_FILTER (\"A filter on object crm_country names a column the database could not resolve\"), and the row does not land.\n\nCause: `SeedLoaderService.loadExistingRecords` (`packages/metadata-protocol/src/seed-loader.ts`) filters existing rows by organization on every per-organization replay. A global object resolves no tenant column, so the filter falls back to `organization_id`, which the object does not have. This is the same before and after #33550, which only made the column follow a declared `tenancy.tenantField`.\n\n## Do\n\n- On a per-organization replay, match a global object's existing rows unscoped. Key the decision on the same predicate `probeScopeOf` already uses for `'global'` (the #33409 reference-probe precedent), so there is one reading and no second list. Every new organization's replay then upserts the one shared row instead of throwing.\n- The alternative is to refuse such a dataset by name. It is not recommended: a global catalog seeded with an app is a normal shape, and the unscoped match is what the reference probe already does.\n- Pin with a real AppPlugin + SqlDriver integration case: two organizations replay a global dataset, exactly one shared row exists after both, and a second replay is idempotent. Keep the #33411 tenantField case and an ordinary `organization_id` control green. Ablate.\n\nReader who acts: `packages/metadata-protocol/src/seed-loader.ts`.\nSuggested grade: p2 (a seed dataset that cannot land; no wrong data written). Lane: `domain:server`. Serial after #33550 (same function).\n"
+}

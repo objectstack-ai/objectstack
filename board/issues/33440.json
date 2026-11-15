@@ -1,0 +1,31 @@
+{
+  "number": 33440,
+  "kind": "issue",
+  "title": "spec refusals: give the four long refusals PR #32332 left as follow-ups a short head and hint (INVALID_FILTER comparand type, windowFunctions tombstone, object-form fields entry, engine cursor option)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:14:49Z",
+  "updated_at": "2026-11-14T21:14:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33440",
+  "body": "domain:devx#4 · os-project-manager · session_01FEkQ5ooRyyS95kdyC2dPEX\n\nSource: #32908 §1 close-out, ledger row 55 (`api-backend.error-envelope-ledger`, the plain-object comparand `INVALID_FILTER` face), which the dev's report 6881013689 held as an open question. Ruling-ref: the maintainer chose option B, 「B 立 p3 卡补短标题」, on a decision card in this account's project, 2026-11-14T21:12:49Z: one p3 product card for this face that also takes along PR #32332's other listed follow-ups. The checklist row is not changed. The evaluation is at `/mnt/project-files/pm-orders/devx/32908-row55-decision-analysis.md`, and this card carries its §6.\n\n## What is wrong\n\nPR #32332 (merged 2026-11-10, #32169 item 2 and #32279) gave the long spec refusals a one-sentence head plus `details.hint` (`withRefusalHead` / `refusalHead`, with a head of at most 160 characters). Its body lists four refusals it left unheaded, under \"Follow-ups, not in this diff\". No card carries them. Four issue searches found none, and nothing on `main` heads them (`filter-comparand-type.ts` carries no `refusalHead` at `87330e89`):\n\n1. **The comparand-TYPE face**, in `packages/spec/src/data/filter-comparand-type.ts`. It fires on a plain object, a `Map`, an out-of-range bigint or `undefined` in a comparand slot. Over HTTP, `GET ?filter={\"title\":{\"$eq\":{\"a\":1}}}` answers 400 `INVALID_FILTER` with a 404-character message and no `hint`.\n2. **The `query.windowFunctions` tombstone** (454 characters) and **`FIELD_NODE_OBJECT_FORM_REMOVED`**, the object-form `fields` entry (1,056 characters). Both are in `packages/spec/src/data/query.zod.ts`.\n3. **The `FieldOperatorsSchema` operator-slot sentences**, in `packages/spec/src/data/filter.zod.ts`, wherever a filter is judged outside the save-door walk.\n4. **The engine option refusal** `find('x') does not recognise option 'cursor': …`, in `packages/objectql/src/engine-top-level.ts`. It embeds `QUERY_CURSOR_REMOVED` inside its own sentence, so it is not headed.\n\n## Ask\n\n- Head each of the four with the same mechanism as #32332: a head of at most 160 characters, with the rest moved to `details.hint`. Keep codes, statuses and paths unchanged.\n- Update the rest pin. Its two CONTROLs (`windowFunctions` and the comparand-type face) now become headed, so the pin needs a different headless control. Choose one that is still unheaded on `main` and name it.\n- Tests: one pinned case for each face, covering the head length, the hint presence and the code/status unchanged. Include the HTTP `GET ?filter=` object-comparand case for face 1.\n- Expected declaration, as on #32332: `Clause-②: yes (widening)`. The seat confirms it at dispatch, and contract review applies.\n\nOut of scope: any checklist text. `api-backend.error-envelope-ledger`'s clauses do not measure message length, and the item passed at r9 in #32949.\n\nRelated: #32169 (closed), #32279 (closed), PR #32332, #32949 (QA record), #32305 (the console reads `details.hint`).\n\nReader: `domain:server` lane seat, from `pm:queue`. Priority p3: there is no user report and the refusal is still a coded 400, so it is never mistaken for success. Dedupe: open issues for `refusalHead filter-comparand-type` and `windowFunctions FIELD_NODE_OBJECT_FORM_REMOVED`, 0 hits."
+}

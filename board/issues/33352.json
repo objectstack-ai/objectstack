@@ -2,8 +2,8 @@
   "number": 33352,
   "kind": "issue",
   "title": "test doors: 8 product arms that no door reaches (v18.4.0 sweep): add a door or pin as unit-only",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:16:53Z",
-  "updated_at": "2026-11-14T18:53:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T21:40:04Z",
+  "closed_at": "2026-11-14T21:40:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33352",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\nThese product arms can't be driven through any real door. Each area owner picks one: add a test door (env-gated, like the existing `OS_*` test switches), or rule the arm unit-pinned so the checklist clause says so.\n\n## Rows\n- 73 (#33025 · 6844741021, #33081 · 6850173588): no door mints a raw or live approval action token. Affects `approvals.email-action-token-door`, five rows. **A3**\n- 74 (#33025): the A4 walled-leg grant of `activation-write-operator-gate` has to be placed outside HTTP. **A5**\n- 76 (#33025): `attachments-storage.upload-session-abort`: the abort-failure seam and the 'failed'-producer seam exist only in unit tests. **A3**\n- 77 (#33025, #33081): `api-backend.action-activation-door-contract` A4(b): the metadata-plane 503 arm has no door. **E2**\n- 78 (#33025, #33081): `ai.mcp-namespace-faces` N2: no colliding-face pair can be staged through the authoring doors. **E1**\n- 191 (#33081 · 6850173588): `read-inherits-parent-rls`: the bounded-probe warning half can't be reached on stock. **A2**\n- 234 (#33092 · 6850793622): `droppedFields` over HTTP (#33068) needs a fixture past the lint (`OS_ALLOW_UNLINTED_METADATA_WRITES=1` or a stored flow from before the rule). **E1**\n- 14 (#32949 §1), runner tooling: the plugin-email testkit's `startFakeSmtp` takes no port option, so parallel runners collide. **A2**\n\n## Do\nFor each row, add the door, or write \"unit-pinned: <test path>\" on this card so devx can update the clause. Don't add a door that a production config can turn on.\n\n## Grade\n**p2** (tooling).\n\n## Reader\n`domain:server`. Areas are given per row; server#5 assigns rows across areas."

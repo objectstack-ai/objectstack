@@ -2,8 +2,8 @@
   "number": 33371,
   "kind": "issue",
   "title": "RUNNER.md connector entry: the showcase self-URL is frozen at compile time on a --no-compile boot, so exporting OS_PORT is not the fix there",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:56:32Z",
-  "updated_at": "2026-11-14T19:16:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T20:52:02Z",
+  "closed_at": "2026-11-14T20:50:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33371",
   "body": "domain:devx#4 · os-project-manager · session_01FEkQ5ooRyyS95kdyC2dPEX\n\nSource: #32908 ledger row 94, measured live by the #33334 dev on `origin/main` `87330e89` (PR #33367, Acceptance notes and the row-94 line of its table). Filed by the devx seat as the route for that finding; #33367 deliberately wrote nothing for it.\n\n## What is wrong\n\n`docs/qa/platform-checklist/RUNNER.md`'s connector self-URL entry (about L305–L351 on `main`) says the showcase's declarative connectors follow an exported `OS_PORT`, cites QA run #25817 (measured before #26130), and prescribes **\"boot with `OS_PORT=<port>` exported\"** as the fix. RUNNER also prescribes `os dev --no-compile` on a shared checkout. The two do not compose:\n\n- Artifact compiled with no `OS_PORT` → `dist/objectstack.json` carries `http://127.0.0.1:3000` four times.\n- Boot `--no-compile` with `OS_PORT=41771` exported; a `showcase_task` create fires `showcase_declarative_connector_ping` → run `failed`, `connector_action(showcase_status_api.request) failed: fetch failed`.\n- `GET /api/v1/meta/connector/showcase_status_api` → `baseUrl: http://127.0.0.1:3000`; nothing listens on 3000.\n\n## Why this is a RUNNER correction, not a runtime card\n\n`examples/app-showcase/src/system/self-url.ts`'s header already states the behaviour as designed: `os dev` recompiles in the serving environment (#26130) \"except under `os dev --no-compile`, which serves the metadata as last built\", and on the artifact path the value \"is frozen at BUILD time — set the env for the build, not just the boot\". The product matches its own documentation; RUNNER's entry is what is stale. (If the maintainer later wants the declarative instance to follow the serving environment on a `--no-compile` boot, that is a separate runtime card; nothing here asks for it.)\n\n## Scope\n\nDocs only, `docs/qa/platform-checklist/RUNNER.md`:\n\n1. Rewrite the connector self-URL entry to the measured fact: on a `--no-compile` (or `--artifact`) boot the self-URL is whatever the last compile saw; `OS_PORT` at boot time does not move it. Name the working routes, each re-measured before it is written: compile in a private copy with the run's `OS_PORT` (or `SHOWCASE_SELF_URL`) exported, or set `SHOWCASE_SELF_URL`/`OS_PORT` for a run that compiles — and say which of them is safe on a shared checkout (a compile rewrites the shared `dist/objectstack.json`).\n2. Keep the \"a `fetch failed` here impersonates an egress block\" warning; date-stamp the #25817 reading as pre-#26130.\n3. Fold in the #33367 dev's second observation in the same entry or the port entry: `os dev` shifts to the next free port when the requested one is held (`plugin-hono-server` adapter `listen` tries `targetPort + attempt`) and prints the shift, while the runner's shell keeps its own `OS_PORT` value — read the port from the boot log, not from the variable.\n\nOut of scope: any change to `self-url.ts`, the showcase connectors or the CLI.\n\n## Acceptance\n\n- The entry no longer prescribes exported `OS_PORT` as the fix on a `--no-compile` boot.\n- Each prescribed route is backed by a live measurement recorded in the PR (connector dispatch succeeds, `meta/connector` baseUrl shows the run's port).\n- `pnpm check:platform-checklist` and the derived gates exit 0.\n\nPriority p2 (QA-runner correctness; a wrong recipe scores a correct product as BLOCKED). Serial: after #33367 merges (same file)."

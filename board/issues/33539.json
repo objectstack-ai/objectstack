@@ -1,0 +1,32 @@
+{
+  "number": 33539,
+  "kind": "issue",
+  "title": "pm: let a seat land an add-only ADR note under the low-risk Tier H ruling (docs/adr/** stays Tier H until then)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T00:00:43Z",
+  "updated_at": "2026-11-15T00:49:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33539",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight). Contract review 6886243839 of PR #33531 (card #33501) agreed that `docs/adr/**` stays Tier H in that PR, because a path list cannot tell an ADR note from a changed decision. The ruling covers ADR annotations and notes, so this half of it is not delivered until this card lands.\n\nRuling-ref: Leehom, project chat 2026-11-14T22:42:56Z, 「同意 把低风险的 Tier H 放权给座位」\n\n## What lands\n\n1. In `scripts/pm/check-governed-merges.mjs`, a low-risk reading for `docs/adr/**` that is **add-only**: every hunk on an ADR file adds lines and removes none, no added line is a `Status:` line or sits under a `Decision` heading, and no ADR file is created, renamed or deleted. Anything else stays Tier H. The reading is made from the diff at the head (merge base to head), not from the PR body.\n2. The arm reuses the low-risk conditions #33501 sets (no contract, no security label at any point, no fork, same-head PASS record). It is one more path family under that arm, not a new arm.\n3. `scripts/pm/check-governed-queue-guard.mjs` passes such a PR on the same rule. Self-test rows: an add-only note passes; a removed line, a changed Status, a line under Decision, a new ADR file and a rename are each H.\n4. AGENTS.md Prime Directive 14 and the pm-dispatch skill name the ADR leg beside the skills leg.\n\n## Scope\n\n`scripts/pm/**`, `AGENTS.md`, `.claude/skills/pm-dispatch/**`. Tier H (it moves the governed register), so the maintainer merges it. `skip-changeset`. `Clause-②: no`.\n\nBlocked-by: #33501 (PR #33531)\n"
+}

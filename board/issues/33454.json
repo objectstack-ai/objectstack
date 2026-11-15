@@ -1,0 +1,33 @@
+{
+  "number": 33454,
+  "kind": "issue",
+  "title": "MCP describe_object lists the hidden __search companion field (both transports)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A4",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T21:33:06Z",
+  "updated_at": "2026-11-15T00:48:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33454",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cw787kMeaX7oyz7DDC\n\nFound while fixing #33338 (PR #33451, which only drops the companion from `validate_expression`'s `inScope.fields`). Measured, not inferred: before that fix, the failing pin received `__search` from this producer's output.\n\n## Line\n\nMCP `describe_object` on an object with field-scoped search · both MCP transports · every caller that introspects such an object · measured.\n\n`describeServedObject` (`packages/mcp/src/mcp-server-runtime.ts`, and its twin in `packages/runtime/src/domains/mcp.ts`) passes every served field through. So `describe_object` lists the hidden `__search` companion column (marked readonly/system) that the registry adds for field-scoped search. The checklist item `search.field-scoped-narrowing` A2 says that field is invisible, and after #33451 `validate_expression` refuses a read of it with `unknown-field`. An agent reading `describe_object` is therefore offered a field that every other door refuses.\n\n## Do\n\n- Skip `SEARCH_COMPANION_FIELD` (objectql's own constant, the one #33451 reuses) in `describeServedObject` on both transports. Do not add a second list. If the two twins can share one helper, prefer that.\n- Pin it on both transports: a field-scoped search object's `describe_object` answer has no `__search`, and ordinary fields plus the platform's other system columns (`organization_id`, etc.) are still listed. Ablate.\n\nReader who acts: `packages/mcp/src/mcp-server-runtime.ts`, `packages/runtime/src/domains/mcp.ts`.\nSuggested grade: p2 (wrong information to the caller, no data written), raised once for MCP focus → p1, the same reading as #33338. Lane: `domain:server`.\n"
+}
