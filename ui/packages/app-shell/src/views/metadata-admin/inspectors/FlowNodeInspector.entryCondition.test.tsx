@@ -120,7 +120,11 @@ describe('#6226 the flow inspector hands the entry condition its trigger vocabul
       .parentElement!;
     const subject = row.querySelector('[role="combobox"]') as HTMLElement;
     await userEvent.click(subject);
-    const opts = (await screen.findAllByRole('option')).map((o) => o.textContent ?? '');
+    // A field subject reads by its label with its spelling beside it
+    // (objectstack#33864): read the spelling, the hint where there is one.
+    const opts = (await screen.findAllByRole('option')).map(
+      (o) => (o.querySelector('.font-mono') ?? o).textContent ?? '',
+    );
     expect(opts).toContain('status');
     expect(opts).toContain('previous.status');
     // One subject per value: the bare spelling, never `record.FIELD` beside it
