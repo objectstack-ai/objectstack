@@ -503,7 +503,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
   'WP (#26220): a deleted published package is retired whole, `<package>#*`': 59,
   'DX (#26324): an export named `default` is reached through an import, never through the word': 19,
-  'SP (#30598): a LITERAL subpath key of the `exports` map, `<package>/<subpath>#...`': 73,
+  'SP (#30598): a LITERAL subpath key of the `exports` map, `<package>/<subpath>#...`': 80,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -4930,11 +4930,12 @@ export function wildcardKeysMatching(map, subpath) {
  * the key's own file in place of `index`: its types entry `dist/<p>.d.ts` (or a
  * twin) is generated from exactly one of `src/<p>.ts` / `src/<p>.tsx`. Refused by
  * name: a key reached only through a WILDCARD key, a key absent from the map
- * (`keyAbsent: true`, which is what a retired key looks like at HEAD), a key whose
+ * (`keyAbsent: true`, which is what a retired key looks like at HEAD; `noExportsMap: true`
+ * beside it when the manifest has no `exports` map or `"exports": null`), a key whose
  * entry is no TypeScript declaration (`./style.css`), and a key that cannot be
  * mapped or maps ambiguously.
  *
- * @returns {{ refusal: string, keyAbsent?: boolean } | { entry: string, dir: string }}
+ * @returns {{ refusal: string, keyAbsent?: boolean, noExportsMap?: boolean } | { entry: string, dir: string }}
  */
 export function sourceEntryAt(rev, cwd, pkgName, pkgs, kit, subpath = '.') {
   const info = pkgs.get(pkgName);
@@ -5500,8 +5501,12 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
     const { op, at, symbol, member } = r;
     const t = `\`runtime-export-retired ${op.ref}\` [predicate 2: no-metadata-surface]`;
     if (op.whole && op.subpath !== '.') {
-      // A whole subpath key (#30598) asks what a whole package asks, of the files
-      // its entry reaches and of the specifier \`<package>/<subpath>\`.
+      // A whole subpath key (#30598) asks what a whole package asks, of the
+      // package's OWN files its entry reaches (`sourceFiles`, filtered to the
+      // package directory) and of the specifier `<package>/<subpath>`. Another
+      // workspace package's file the entry re-exports is that package's: a name
+      // re-exported from it is judged as an export operand, where predicate 2
+      // refuses it when its declaration is a metadata surface (SP-G6 / SP-R20).
       const site = at.sourceFiles.find((f) => metadataSurfaceKind(f) !== null);
       if (site) {
         problems.push(
@@ -8917,6 +8922,26 @@ function selfTest() {
     red('SP-R18 a key whose `types` condition names a TS SOURCE file is refused as no declaration entry', sp([`${REX_PKG}/raw#X`], '- FROM `X` TO nothing.', {
       base: { [rexPath('package.json')]: SP_MANIFEST({ ...SP_EXPORTS, './raw': { types: './src/raw.ts', import: './dist/raw.mjs' } }), [rexPath('src/raw.ts')]: 'export const X = 1;\n' },
     }), [/the `\.\/raw` key of `@objectstack\/plugin-email` names no TypeScript declaration entry/, /a TS SOURCE file is not one/]);
+    // A1 (#30598 at-tier review 6886775383): a subpath entry that RE-EXPORTS another
+    // workspace package's root reaches that package's files, which are not this
+    // package's. The whole-key form judges the package's own files, as `<package>#*`
+    // does; the re-exported name is judged when it is named, and refused there.
+    const SPEC_ROOT = {
+      'packages/spec/package.json': JSON.stringify({ name: '@objectstack/spec', version: '1.0.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs' } } }),
+      'packages/spec/src/index.ts': "export { TemplateSchema } from './ui/template.zod.js';\n",
+      'packages/spec/src/ui/template.zod.ts': 'export const TemplateSchema = {};\n',
+      [rexPath('src/templates.ts')]: `export { TemplateSchema } from '@objectstack/spec';\n${SP_TPL_BASE}`,
+    };
+    green('SP-G6 `#*` on a key whose entry re-exports ANOTHER workspace package\'s root: that package\'s files are not this key\'s', sp(
+      [`${TPL}#*`], WHOLE_LINE, { base: SPEC_ROOT, head: SP_GONE }));
+    red('SP-R20 ...while the re-exported NAME, named as an export operand, is refused at predicate 2', sp(
+      [`${TPL}#TemplateSchema`], '- FROM `TemplateSchema` TO `TemplateSchema` from `@objectstack/spec`.', { base: SPEC_ROOT, head: { [rexPath('src/templates.ts')]: SP_TPL_BASE } }),
+    [/`runtime-export-retired @objectstack\/plugin-email\/templates#TemplateSchema` \[predicate 2: no-metadata-surface\] is false: `TemplateSchema` is declared in packages\/spec\/src\/ui\/template\.zod\.ts \(a Zod schema\)/]);
+    const r17c = sp([`${TPL}#renderTemplate`], RENDER_LINE, { head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: undefined }) } });
+    red('SP-R17c the same with the `exports` FIELD missing at HEAD (not null): no whole-key hint either', r17c,
+      [/it declares no `exports` map at all\)/, /neither this\n\s+operand nor `@objectstack\/plugin-email\/templates#\*` can prove the retirement/]);
+    assert(!/LEFT the `exports` map at HEAD is retired whole/.test(messages(r17c)) && !/"exports": null/.test(messages(r17c)),
+      `SP-R17d: a missing field is reported as missing, with no whole-key hint. Got:\n${messages(r17c)}`);
     red('SP-R19 a member operand whose TYPE left the subpath entry is pointed at the SUBPATH export spelling', sp([`${TPL}#TemplateOptions.legacy`],
       '- FROM `TemplateOptions.legacy` TO nothing.', { head: { [rexPath('src/templates.ts')]: 'export const KEEP_TEMPLATES = 1;\n' } }),
     [/named as an export \(`@objectstack\/plugin-email\/templates#TemplateOptions`\)/]);

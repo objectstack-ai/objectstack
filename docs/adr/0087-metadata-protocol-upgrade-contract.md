@@ -1039,7 +1039,9 @@ fails predicates 2 and 3 outright — it bumps `@objectstack/spec` and adds
 
 The vocabulary above gained a seventh answer, with three operand kinds that may be
 mixed in one marker (the third, `<package>#*`, amended 2026-10-27, #26220 — see the
-second 2026-10-27 amendment note under D9):
+second 2026-10-27 amendment note under D9; each may name a literal subpath key after the
+package, `<package>/<subpath>#…`, amended 2026-11-14, #30598 — see the 2026-11-14 amendment
+note under D9):
 
 ```text
 <!-- adr-0087: not-required (runtime-export-retired <package>#<Export>[, ...]) <why> -->
@@ -1216,22 +1218,28 @@ package's root entry is followed through the same mapping.
 >
 > - an operand that only a **wildcard** key reaches (`@object-ui/i18n/locales/zh`, through
 >   `./locales/*`), and an operand that spells a `*` in its subpath;
-> - a key whose entry is **not a TypeScript declaration** (`./style.css`): it exports no
->   name a TypeScript consumer imports;
+> - a key whose entry is **not a TypeScript declaration**: a stylesheet (`./style.css`) or a
+>   JSON file exports no name a TypeScript consumer imports, and a `types` condition naming a
+>   `.ts` source file names no declaration entry the mapping can read;
 > - a key that **cannot be mapped** (`dist/score.d.ts` with no `src/score.ts`), or maps to
 >   both `.ts` and `.tsx`;
-> - a key the map does not have. At HEAD that refusal names the whole-key spelling.
+> - a key the map does not have. At HEAD that refusal names the whole-key spelling, unless
+>   the package has no `exports` map there, where the whole-key form is refused too.
 >
 > `<package>/<subpath>#*` retires the KEY while the package stays, the subpath twin of
 > `<package>#*`:
 >
 > 1. **retired-from-entry**: at the merge base the key is a literal key whose entry maps as
 >    above. At HEAD the package is still a workspace member (a deleted one is `<package>#*`),
->    it declares an `exports` map (without one every file is importable by path, so no key's
->    absence proves anything), the key is not in that map, and no wildcard key reaches it.
-> 2. **no-metadata-surface**: none of the files the key's entry reaches is a metadata
->    surface, and no metadata surface outside the package names `<package>/<subpath>` in
->    code, read as for `<package>#*`.
+>    it declares an `exports` map (without one, or with `"exports": null`, which Node and
+>    TypeScript read as absent, every file is importable by path, so no key's absence proves
+>    anything), the key is not in that map, and no wildcard key reaches it.
+> 2. **no-metadata-surface**: none of the package's own files the key's entry reaches is a
+>    metadata surface, and no metadata surface outside the package names
+>    `<package>/<subpath>` in code, read as for `<package>#*`. Another workspace package's
+>    file that the entry re-exports is that package's, as for `<package>#*`: a name re-exported
+>    from it is judged when it is named as an export operand, and is refused there when it is
+>    a metadata surface.
 > 3. **from-operands-named**: one FROM line names the specifier
 >    (`` - FROM `<package>/<subpath>` TO … ``); the key's exports take no line of their own.
 >
