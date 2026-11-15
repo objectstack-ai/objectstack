@@ -361,7 +361,9 @@ export interface AuthoringRuleContext {
    * argument `validateStackExpressions` gives for the same write: there the
    * snapshot's objects are the registry's served definitions, carrying the
    * injected columns as declared fields, so the rule reads them back to the
-   * authored shape the build judges (`stripInjectedSystemColumns`).
+   * authored shape the build judges (`stripInjectedSystemColumns`); and it
+   * leaves out a label group every member of which already shared the label on
+   * the target without the written entry, a clash the entry did not create.
    */
   runtimeWriteType?: string;
   /**
@@ -2388,10 +2390,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // packages' extensions by priority (`storedObjectExtensions`, the build's
   // fold) and reads the served objects back to their authored shape
   // (`runtimeWriteType`, the expression rule's argument for the same input).
-  // The differential charges the write with the clash its entry creates and
-  // nothing the target already carried. MEASURED first: the one first-party
-  // `objectExtensions` entry (app-showcase's `showcase_account` overlay) adds
-  // no clash, as written or in any locale.
+  // The write is charged with the clash its entry creates and nothing the
+  // target already carried: the gate's differential cancels an unchanged
+  // group, and the rule itself drops a group every member of which already
+  // shared the label on the target (one the entry shrank by taking a member
+  // out), whose message the baseline cannot hold. MEASURED first: the two
+  // first-party `objectExtensions` entries (app-showcase's `showcase_account`
+  // overlay, plugin-auth's `sys_sso_provider` secret) add no clash, as
+  // written or in any locale.
   {
     name: 'lintDuplicateFieldLabels',
     tier: 'gating',
@@ -2403,7 +2409,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack, ctx) =>
       duplicateFieldLabelFindings(stack, {
         ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
-        ...(ctx.runtimeWriteType === 'object_extension' ? { servedObjects: true } : {}),
+        ...(ctx.runtimeWriteType === 'object_extension' ? { extensionWrite: true } : {}),
       }).map((f) => ({
         severity: f.severity,
         rule: f.rule,

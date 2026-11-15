@@ -76,9 +76,16 @@
  * field two packages tie on is left out as the build leaves it out, and the
  * injected columns read back to the platform's own definitions
  * (`stripInjectedSystemColumns`, as the expression rule reads the served
- * objects there), so `owner_id` is named as the platform's column. The gate's
- * differential charges the write only with a clash its entry creates: a clash
- * the target already carried is in the baseline too, with the same message.
+ * objects there), so `owner_id` is named as the platform's column. The write
+ * is charged only with a clash its entry creates: a clash the target already
+ * carried is in the gate's baseline too, with the same message, and a group
+ * every member of which already shared the label on the target (what is left
+ * of a clash after the entry took a member out, by a new label, `hidden: true`
+ * or a tie at the deciding priority) is not reported, since its message names
+ * fewer fields than the baseline's and would otherwise read as new. The door
+ * carries no `translations`, so it compares the authored labels and the
+ * platform's own translations of its columns only; a clash a translation
+ * bundle creates is the build's to find.
  */
 
 import {
@@ -192,11 +199,13 @@ export interface DuplicateFieldLabelOptions {
    */
   storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
-   * The objects are the registry's SERVED definitions, carrying the injected
-   * columns as declared fields: read them back to the authored shape first.
-   * Set by the door on an `object_extension` write only.
+   * The publish door's `object_extension` write: the objects are the
+   * registry's SERVED definitions (the injected columns carried as declared
+   * fields), read back to the authored shape first; and a group the written
+   * entry did not create (every member already shared the label on the
+   * target) is not reported. Set by the door on that write only.
    */
-  servedObjects?: boolean;
+  extensionWrite?: boolean;
 }
 
 /**
@@ -205,6 +214,38 @@ export interface DuplicateFieldLabelOptions {
  */
 export function lintDuplicateFieldLabels(stack: AnyRec): DuplicateFieldLabelFinding[] {
   return duplicateFieldLabelFindings(stack);
+}
+
+/**
+ * One object's clashing label groups per pass (the authored pass, then each
+ * locale), over `servedObj`'s fields with the injected columns beneath them.
+ */
+function clashPassesOf(
+  obj: AnyRec,
+  objectName: string,
+  servedObj: AnyRec | undefined,
+  bundle: TranslationBundle,
+): { injectedNames: Set<string>; passes: Map<string, Map<string, string[]>> } {
+  // The injected columns first, so an authored field of the same name
+  // replaces the platform's definition, as it does at registration.
+  const fields: Record<string, AnyRec> = {};
+  const injectedNames = new Set<string>();
+  for (const [name, def] of injectedColumnDefsFor(obj)) {
+    fields[name] = { ...def };
+    injectedNames.add(name);
+  }
+  for (const f of recordsOf(servedObj?.fields)) {
+    if (typeof f.name !== 'string') continue;
+    fields[f.name] = f;
+    injectedNames.delete(f.name);
+  }
+  const passes = new Map<string, Map<string, string[]>>();
+  passes.set(AUTHORED, clashes(visibleLabels(fields)));
+  for (const locale of localesOf(bundle)) {
+    const doc = translateObject({ name: objectName, fields } as ObjectLike, bundle, { locale });
+    passes.set(locale, clashes(visibleLabels((doc.fields ?? {}) as Record<string, AnyRec>)));
+  }
+  return { injectedNames, passes };
 }
 
 /**
@@ -218,47 +259,47 @@ export function duplicateFieldLabelFindings(
 ): DuplicateFieldLabelFinding[] {
   const findings: DuplicateFieldLabelFinding[] = [];
   if (!isRec(stack)) return findings;
-  if (options.servedObjects === true) {
+  const extensionWrite = options.extensionWrite === true;
+  if (extensionWrite) {
     stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
   }
+  const stored = options.storedObjectExtensions ?? [];
   const declared = recordsOf(stack.objects);
-  const served = objectsWithoutTiedFields(objectsAsServed(stack, options.storedObjectExtensions ?? []));
+  const served = objectsWithoutTiedFields(objectsAsServed(stack, stored));
+  // On an extension write, each target as served WITHOUT the written entry:
+  // the same objects and stored extensions, no `objectExtensions` of the
+  // stack's own. Index-aligned with `declared` (the fold maps one to one).
+  const before = extensionWrite
+    ? objectsWithoutTiedFields(objectsAsServed({ objects: stack.objects }, stored))
+    : undefined;
 
   declared.forEach((obj, i) => {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     if (!objectName) return;
 
-    // The injected columns first, so an authored field of the same name
-    // replaces the platform's definition, as it does at registration.
-    const fields: Record<string, AnyRec> = {};
-    const injectedNames = new Set<string>();
-    for (const [name, def] of injectedColumnDefsFor(obj)) {
-      fields[name] = { ...def };
-      injectedNames.add(name);
-    }
-    for (const f of recordsOf(served[i]?.fields)) {
-      if (typeof f.name !== 'string') continue;
-      fields[f.name] = f;
-      injectedNames.delete(f.name);
-    }
-
     const bundle = fieldBundleFor(stack, objectName);
+    const { injectedNames, passes: candidatePasses } = clashPassesOf(obj, objectName, served[i], bundle);
+    const beforePasses = before ? clashPassesOf(obj, objectName, before[i], bundle).passes : undefined;
+
     // group key (sorted field names + label) → the passes it clashes in.
     const groups = new Map<string, { names: string[]; label: string; passes: string[] }>();
-    const record = (pass: string, labels: ReadonlyMap<string, string>): void => {
-      for (const [label, names] of clashes(labels)) {
+    for (const [pass, clashing] of candidatePasses) {
+      for (const [label, names] of clashing) {
+        // [#33644] On an extension write a group every member of which
+        // already shared this label on the target in this pass is no clash
+        // the entry created: it is the target's own, or what is left of it
+        // after the entry took a member out (relabelled, hidden, or tied at
+        // the deciding priority). The gate's differential compares whole
+        // messages, which name every member, so a shrunken group would
+        // otherwise read as new.
+        const prior = beforePasses?.get(pass)?.get(label);
+        if (prior && names.every((n) => prior.includes(n))) continue;
         const sorted = [...names].sort();
         const key = `${sorted.join('\u0000')}\u0001${label}`;
         const group = groups.get(key) ?? { names: sorted, label, passes: [] };
         group.passes.push(pass);
         groups.set(key, group);
       }
-    };
-
-    record(AUTHORED, visibleLabels(fields));
-    for (const locale of localesOf(bundle)) {
-      const doc = translateObject({ name: objectName, fields } as ObjectLike, bundle, { locale });
-      record(locale, visibleLabels((doc.fields ?? {}) as Record<string, AnyRec>));
     }
 
     for (const { names, label, passes } of groups.values()) {

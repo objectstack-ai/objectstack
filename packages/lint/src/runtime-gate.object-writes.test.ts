@@ -763,6 +763,57 @@ describe('the object_extension door refuses an extension that adds a field under
     const winning = ext({ region: { type: 'text', label: 'Subject' } }, { priority: 210 });
     expect(labelErrors(gateExtension(winning, [servedWithOther], [other]))).toHaveLength(1);
   });
+
+  it('an entry that takes a member out of a clash the target already serves is not charged for what is left', () => {
+    // The target serves `subject` and `topic` under `Subject`, and another
+    // package's extension adds `region` under `Subject` too: one group of three.
+    const clashing = { ...TARGET, fields: { ...TARGET.fields, topic: { type: 'text', label: 'Subject' } } };
+    const other = { extend: 'xl_ticket', fields: { region: { type: 'text', label: 'Subject' } } };
+    const servedClash = served({ ...clashing, fields: { ...clashing.fields, region: other.fields.region } });
+    // The control: the three-member group is real, at the build.
+    expect(atBuild({ objects: [clashing], objectExtensions: [other] })).toEqual([
+      expect.stringContaining("'region', 'subject' and 'topic' under one label \"Subject\""),
+    ]);
+    for (const item of [
+      ext({ region: { type: 'text', label: 'Region' } }, { priority: 210 }),
+      ext({ region: { type: 'text', label: 'Subject', hidden: true } }, { priority: 210 }),
+      // A tie at the deciding priority leaves `region` out of the comparison.
+      ext({ region: { type: 'text', label: 'Region' } }),
+    ]) {
+      const result = gateExtension(item, [servedClash], [other]);
+      expect(result.rulesRun).toContain('lintDuplicateFieldLabels');
+      // `'subject' and 'topic'` is the target's own clash, smaller now.
+      expect(labelErrors(result), JSON.stringify(result.errors)).toEqual([]);
+    }
+    // Taking `region` out and putting a new field in under the label is a
+    // clash the entry creates, and is charged.
+    const swaps = labelErrors(gateExtension(
+      ext({ region: { type: 'text', label: 'Region' }, headline: { type: 'text', label: 'Subject' } }, { priority: 210 }),
+      [servedClash],
+      [other],
+    ));
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0]!.message).toContain("'headline', 'subject' and 'topic' under one label \"Subject\"");
+  });
+
+  it('a clashing extension already stored is not charged to the target\'s own object save; the build reports it on the target', () => {
+    const stored = { extend: 'xl_ticket', fields: { assignee: { type: 'user', label: '负责人' } } };
+    // Stored before the door judged extensions: the registry serves its field
+    // on the target.
+    const servedWithStored = served({ ...TARGET, fields: { ...TARGET.fields, assignee: stored.fields.assignee } });
+    const save = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { ...TARGET, description: 'edited' },
+      context: { objects: [servedWithStored] },
+    });
+    expect(save.rulesRun).toContain('lintDuplicateFieldLabels');
+    // The save is judged on the body it sends, which carries no extension field.
+    expect(save.errors, JSON.stringify(save.errors)).toEqual([]);
+    // At the build the stack's extension folds onto the declared target, and
+    // the clash is reported there.
+    const built = lintDuplicateFieldLabels({ objects: [TARGET], objectExtensions: [stored] });
+    expect(built.map((f) => f.where)).toEqual(['object "xl_ticket"']);
+  });
 });
 
 /**
