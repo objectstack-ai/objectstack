@@ -111,6 +111,10 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shar
 // rejects outright.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// The object plane reaches `@objectstack/lint` only through a dynamic import; paid
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 
 interface Row {
     id: string;

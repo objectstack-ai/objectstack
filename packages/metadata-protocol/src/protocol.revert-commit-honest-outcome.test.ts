@@ -33,6 +33,10 @@ import {
     assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// The object plane reaches `@objectstack/lint` only through a dynamic import; paid
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 
 const PKG = 'app.demo';
 const INSTALLED_PACKAGES: ReadonlySet<string> = new Set([PKG]);
