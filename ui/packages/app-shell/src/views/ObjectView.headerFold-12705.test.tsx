@@ -282,6 +282,47 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
   });
 });
 
+/**
+ * objectstack#33988 — a list that declares no primary (no New, no toolbar
+ * action authored `variant: 'primary'`) is offered no folded face: that face
+ * would keep no labelled action, so a long description alone sent the page's
+ * one action into the `⋯` at desktop width (hotclm's 「Launch Contract」). The
+ * header keeps `actions` at every width and the description truncates instead.
+ */
+describe('a list with no declared primary keeps its actions labelled (objectstack#33988)', () => {
+  const LAUNCH = { name: 'launch_contract', label: 'Launch Contract', type: 'script', locations: ['list_toolbar'] };
+  /** The card's object: no New for the reader, one undeclared toolbar action, its English description. */
+  const CONTRACTS = {
+    name: 'demo_contract',
+    label: 'Contract',
+    pluralLabel: 'Contracts',
+    description:
+      'A contract from intake to archive: parties, commercial and legal terms, lifecycle status and the stamps each stage leaves.',
+    fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } },
+    actions: [LAUNCH],
+  };
+
+  // A 1366 px laptop and a 1440 px desktop, each less the 256 px sidebar, and
+  // a tablet-wide header between the phone header and the desktop.
+  it.each([1110, 1184, 700])('at a %i px header the action stays a button and the header does not fold', (width) => {
+    headerWidth = width;
+    principal = { create: false };
+    const { cluster, labelled, openMenu } = renderList(CONTRACTS);
+    expect(cluster.hasAttribute('data-folded')).toBe(false);
+    expect(labelled()).toEqual(['Launch Contract']);
+    expect(openMenu()).toEqual(['Add to favorites']);
+  });
+
+  it('CONTROL: authored `variant: primary`, the same list still folds at a 600 px header, keeping it labelled', () => {
+    headerWidth = 600;
+    principal = { create: false };
+    const { cluster, labelled, openMenu } = renderList({ ...CONTRACTS, actions: [{ ...LAUNCH, variant: 'primary' }] });
+    expect(cluster.getAttribute('data-folded')).toBe('true');
+    expect(labelled()).toEqual(['Launch Contract']);
+    expect(openMenu()).toEqual(['Add to favorites']);
+  });
+});
+
 describe('declaredPrimaryToolbarAction (objectui#12705)', () => {
   it('is the `variant: primary` list-toolbar action with the lowest order, never the first by position', () => {
     const late = { ...INVITE, name: 'late', order: 5 };
