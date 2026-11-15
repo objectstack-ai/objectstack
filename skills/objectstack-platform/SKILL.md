@@ -197,7 +197,7 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 ## Driver Selection Guide
 
-Memory and MongoDB may loudly refuse a query capability SQL serves (no slower fallback).
+Memory and MongoDB may loudly refuse a query capability SQL serves.
 
 | Driver | Package | Best For | Notes |
 |:-------|:--------|:---------|:------|
