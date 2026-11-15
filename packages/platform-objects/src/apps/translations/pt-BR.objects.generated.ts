@@ -3098,6 +3098,92 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_environment_user_outbox: {
+    label: "Environment User Invitation",
+    pluralLabel: "Environment User Invitations",
+    description: "Invitations sent to and cancelled at the hosting organisation for this environment's people, one row per call, with its delivery status.",
+    fields: {
+      id: {
+        label: "ID",
+        help: "Row id. Sent to the host as the delivery id, so it can drop a repeat of the same call."
+      },
+      user_id: {
+        label: "User ID",
+        help: "The person the call is about. Text, not a lookup: the row outlives a removed person."
+      },
+      email: {
+        label: "Email",
+        help: "The person's email address when the call was made."
+      },
+      kind: {
+        label: "Kind",
+        help: "What the host is told: an invitation sent, cancelled or re-sent.",
+        options: {
+          added: "Invited",
+          deactivated: "Deactivated",
+          reactivated: "Reactivated",
+          removed: "Removed"
+        }
+      },
+      status: {
+        label: "Status",
+        help: "Pending and Sending: the host has not taken the call yet and it is retried. Sent: the host took it. Accepted: the person signed in. Failed: the host refused it or the retries ran out. Superseded: a later call about the same person replaced it.",
+        options: {
+          pending: "Pending",
+          in_flight: "Sending",
+          sent: "Sent",
+          accepted: "Accepted",
+          failed: "Failed",
+          superseded: "Superseded"
+        }
+      },
+      attempts: {
+        label: "Attempts",
+        help: "How many times the host has been called for this row."
+      },
+      next_attempt_at: {
+        label: "Next Attempt At (ms)",
+        help: "When a pending row is next tried, in epoch milliseconds."
+      },
+      claimed_until: {
+        label: "Claimed Until (ms)",
+        help: "While a call is in flight: when the claim lapses and another worker may try the row again."
+      },
+      claim_token: {
+        label: "Claim Token",
+        help: "Names the one claim that holds an in-flight row."
+      },
+      last_attempt_at: {
+        label: "Last Attempt At"
+      },
+      last_error: {
+        label: "Last Error",
+        help: "Why the last call did not land: the host's own sentence for a refusal, else what failed."
+      },
+      refusal_code: {
+        label: "Refusal Code",
+        help: "The host's machine code when it refused the call."
+      },
+      event_json: {
+        label: "Event",
+        help: "The event the host is told, as built when the administrator acted: the person, the administrator and their cloud user id. A retry sends it unchanged."
+      },
+      sent_at: {
+        label: "Sent At"
+      },
+      accepted_at: {
+        label: "Accepted At"
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
+      },
+      failed: {
+        label: "Failed"
+      }
+    }
+  },
   sys_notification: {
     label: "Evento de notificação",
     pluralLabel: "Eventos de notificação",
