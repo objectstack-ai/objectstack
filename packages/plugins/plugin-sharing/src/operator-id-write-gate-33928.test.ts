@@ -2,7 +2,7 @@
 
 /**
  * The sharing write gate on a write whose `where.id` is an OPERATOR object
- * (`{ $in: [...] }`, `{ $nin: [...] }`), not a row id.
+ * (`{ $in: [...] }`, `{ $eq: ... }`), not a row id.
  *
  * The gate used to stringify any `where.id` into the row it judged by id, so
  * `{ $in: ['row_1'] }` was judged as the row "[object Object]", which no caller
@@ -20,7 +20,7 @@
  *    gives, the same refusal envelope, and deletes nothing. The gate does not
  *    tell a cascade from a user's bulk write: whatever shape the engine deletes
  *    a parent's children in, the child it may not delete refuses as by id;
- *  - another operator shape (`$nin`) is scoped per matched row by the same
+ *  - another operator shape (`$eq`) is scoped per matched row by the same
  *    filter, never judged as a by-id string;
  *  - a scalar id is judged by id exactly as before.
  *
@@ -42,7 +42,7 @@ const OTHER = 'usr_opid_other';
 const ORDER = 'qa_opid_order';
 /** Owner-scoped (`private` OWD with an `owner_id`): record sharing enforces on it. */
 const LINE = 'qa_opid_line';
-/** Owner-scoped like LINE, holding only the rows of the `$nin` pin, whose predicate names no other key. */
+/** Owner-scoped like LINE, holding only the rows of the `$eq` pin. */
 const TAG = 'qa_opid_tag';
 
 const SYSTEM = { isSystem: true, tenantId: ORG } as const;
@@ -206,20 +206,18 @@ describe('sharing write gate: an operator-valued id is a predicate write, never 
   });
 
   describe('another operator shape is scoped per matched row, never judged as a by-id string', () => {
-    it('a `$nin` delete deletes only the matched rows the caller owns, and answers no error', async () => {
-      // The whole predicate is `where.id`, as in the `$in` pins: the shape the gate used to judge by id.
-      await ql.insert(TAG, [
-        { id: 'n1_mine1', owner_id: ME },
-        { id: 'n1_mine2', owner_id: ME },
-        { id: 'n1_theirs', owner_id: OTHER },
-        { id: 'n1_kept', owner_id: ME },
-      ], SYS);
+    it('an `$eq` delete of an owned row deletes it; of a not-owned row answers no error and leaves it', async () => {
+      // `$eq` reaches the gate as `where.id` itself; `$nin` / `$ne` do not (the engine lowers them to a
+      // null-aware `$and` first), so `$eq` is the other operator shape the gate used to judge by id.
+      await ql.insert(TAG, [{ id: 'e1_mine', owner_id: ME }, { id: 'e1_theirs', owner_id: OTHER }], SYS);
 
-      const got = await outcomeOf(ql.delete(TAG, { where: { id: { $nin: ['n1_kept'] } }, multi: true, context: asCaller() } as never));
+      const mine = await outcomeOf(ql.delete(TAG, { where: { id: { $eq: 'e1_mine' } }, multi: true, context: asCaller() } as never));
+      const theirs = await outcomeOf(ql.delete(TAG, { where: { id: { $eq: 'e1_theirs' } }, multi: true, context: asCaller() } as never));
 
-      expect(got).toMatchObject({ kind: 'landed' });
+      expect(mine).toMatchObject({ kind: 'landed' });
+      expect(theirs).toMatchObject({ kind: 'landed' });
       const rows = (await ql.find(TAG, { context: SYSTEM } as never)) as Array<{ id: string }>;
-      expect(rows.map((r) => String(r.id)).sort()).toEqual(['n1_kept', 'n1_theirs']);
+      expect(rows.map((r) => String(r.id)).sort()).toEqual(['e1_theirs']);
     });
   });
 
