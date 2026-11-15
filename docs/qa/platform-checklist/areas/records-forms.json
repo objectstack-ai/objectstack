@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 19,
+      "revision": 20,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -213,7 +213,7 @@
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
         "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). At 1440 px the page also draws a top-level tab row — Overview, Activity (动态), then its panels (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row) — and its Activity tab is the same door as ?related=timeline. The panel itself shows only the newest lines, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the panel. Screenshot first, then read the change lines",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). At 1440 px the page also draws a top-level tab row — Overview, Activity (动态) with its count, then one tab for each related panel that has records, while an empty panel's tab waits in the row's '+N' dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row, partitionRecordTabsByRecords), so on the fresh account this item creates the row reads just 'Overview / Activity N' (QA run #33784) — and its Activity tab is the same door as ?related=timeline. The panel itself shows only the newest lines, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the panel. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
         "delete via the record header's 'More actions' (⋯) menu → Delete (the menu also holds Refresh / Add to favorites / Share; detail.moreActions), or the list row's menu; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
@@ -397,6 +397,12 @@
           "date": "2026-11-14",
           "change": "steps[1], steps[8], acceptance[3].verify and acceptance[5].verify re-pointed to the console as QA run #32953 met it (R1 record 6840055541, parked on #32908 and listed in the #33329 batch as rows 29 and 216; #33087 comment 6850382730). The record header holds Delete under its 'More actions' menu; the list's quick search opens from its search icon (search-icon-button, ui/packages/plugin-list/src/ListView.tsx); a create lands on the new record's page, not the list (ui/packages/app-shell/src/console/AppContent.tsx, the objectstack#2604 save invariant), so the 'list at create' screenshot needs an explicit navigation back and a reload; and Industry opens on Technology, its default:true option (examples/app-showcase/src/data/objects/account.object.ts). No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 20,
+          "date": "2026-11-15",
+          "change": "steps[5]'s tab row re-pointed: QA run #33784 (at a557fa38) read 'Overview / Activity 2' at 1440 px with no panel tabs, because a related panel takes a row tab only once it has records and an empty one waits in the '+N' dropdown (RecordPageColumns.tsx partitionRecordTabsByRecords, ui/packages/plugin-detail/src/synth/recordTabRow.ts). Ledger row 9. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -915,7 +921,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -946,7 +952,7 @@
         "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[0] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
         "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
-        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. Reach a page form's /new or /edit route by in-app navigation (the row's Edit, or New), not by a fresh page load: the page form's save goes back one history entry (RecordFormPage navigate(-1)), so on a deep-linked load it leaves the document and the toast goes with it — a driver artifact, not a lost save",
+        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. The page form's /new and /edit routes are reached by URL only: the record page's Edit opens the form as a modal (?form=ID, footer 'Update'), not the page (QA run #33861). A deep-linked page form saves and stays in the app: RecordFormPage's goBack goes back one entry only when the console pushed one (history.state.idx above 0) and otherwise replaces to the record page (edit) or the list (create) (ui/packages/app-shell/src/views/RecordFormPage.tsx)",
         "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
       ],
       "acceptance": [
@@ -1044,6 +1050,12 @@
           "date": "2026-11-08",
           "change": "fixtures.requires[0]'s overlay recipe moves to the customization pair (ADR-0146 D11): ensure-customization, a draft PUT into com.example.showcase.custom carrying overrides, publish-drafts, and DELETE on the pair to revert; the package-less overlay PUT is the older shape. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "steps[6] re-pointed: the record page's Edit opens a modal (?form=ID), so the page routes are reached by URL (QA run #33861, ledger row 140), and a deep-linked page form no longer leaves the document on save (RecordFormPage goBack replaces to the record or the list when nothing was pushed). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -1052,7 +1064,7 @@
       "title": "Header-level conditional rules: visibleWhen / requiredWhen / readonlyWhen on invoice fields, enforced on BOTH ends",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1070,13 +1082,13 @@
       },
       "steps": [
         "open /_console/apps/com.example.showcase/showcase_invoice; open INV-1002 (draft) in its form",
-        "flip status draft → sent; observe issued_on gain a required marker; attempt save with issued_on empty; capture the block",
+        "flip status draft → sent; observe issued_on gain a required marker; attempt save with issued_on empty; capture the block. The edit form's date input is a typed text field in the browser locale's format (MM/DD/YYYY under en-US, QA run #33861), and the invoice form saves through POST /api/v1/batch, one atomic update with its lines (ui/packages/plugin-form/src/MasterDetailForm.tsx), not a PATCH on the record: a network check for the save reads /api/v1/batch",
         "set issued_on; save; re-read via GET /api/v1/data/showcase_invoice/<id>",
         "direct API negative: POST /api/v1/data/showcase_invoice with status 'sent' and no issued_on; capture the refusal",
         "read the client lock on an edit form whose Status is Paid: open INV-1001 (sent) in its edit form and set Status to Paid without saving — verify paid_on appears and is required, and tax_rate renders read-only — then cancel. A stored-paid invoice offers no edit surface to read the lock on: its row Edit and its record page's Edit are disabled (userActions.edit.disabledWhen record.status == 'paid') and its record page has no inline editor, so on INV-1003 record that disabled Edit (clause 4's evidence) instead of looking for a form",
         "direct API: PATCH /api/v1/data/showcase_invoice/<INV-1003 id> with tax_rate: 99; then GET the row and compare tax_rate to its pre-PATCH value",
         "on the invoice LIST, inspect INV-1003's row actions: Edit visible but disabled, Delete absent; compare a draft row's untouched menu",
-        "on INV-1002 (draft), verify paid_on is NOT rendered at all"
+        "on a draft invoice, verify paid_on is NOT rendered at all — INV-1004 (seeded draft): INV-1002 is sent by now, since steps[1]-[2] flipped it"
       ],
       "acceptance": [
         {
@@ -1183,6 +1195,12 @@
           "date": "2026-10-31",
           "change": "steps[4], acceptance[2] and [3] (clauses) and negative[1] corrected. From QA run #27438 (W3-C2b, at c4c515ad; the steps[4] finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). A stored-paid invoice has no edit surface: userActions.edit.disabledWhen disables its row Edit and record-page Edit, so 'open INV-1003 (paid) … tax_rate renders read-only' cannot be driven. The client lock and paid_on's mount are read on INV-1001's edit form with Status set to Paid, unsaved. negative[1] is scoped to a PATCH that leaves status paid: the strip judges the merged record, so a same-write status change unlocks tax_rate by design. Read at base a0f865491d: invoice.object.ts (userActions, the tax_rate and paid_on rules), rule-validator.ts (stripReadonlyWhenFields; isReadonlyWhenLocked binds the merged record). The server half of clause 2 and every other clause are unchanged",
           "ref": "#27438"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "steps[1] names the date input's typed text format and the save's door, POST /api/v1/batch (the invoice form is a master-detail form), and steps[7] reads paid_on's absence on INV-1004, because steps[1]-[2] leave INV-1002 sent. QA run #33861, ledger row 133. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -1339,7 +1357,7 @@
       "title": "Cascading and gated select options: dependsOn + per-option visibleWhen, client narrows / server rejects",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1358,7 +1376,7 @@
         ]
       },
       "steps": [
-        "open a New Cascading Select form (/_console/apps/com.example.showcase/showcase_cascade or its nav entry)",
+        "open a New Cascading Select form (/_console/apps/com.example.showcase/showcase_cascade/new, the RecordFormPage route; /_console/apps/com.example.showcase/showcase_cascade, or the nav entry, lands on the list, so press New there)",
         "verify province is gated (empty/disabled) until a country is chosen",
         "pick country=cn; enumerate province options (expect exactly Zhejiang, Guangdong); switch to us; re-enumerate (California, Texas) and verify a previously chosen cn province CLEARED",
         "as the org_admin persona (NOT the seeded admin, who is org_owner and outside the gate), enumerate tier options (Standard + Restricted); save a record with tier=restricted. Record as well that the seeded admin's enumeration lacks Restricted: that is the predicate as authored, not a defect of this item",
@@ -1458,6 +1476,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[2]'s server and persistence halves, acceptance[4] and negative[1] at the REST data door (#26573 slice 2). The org_admin persona is a signed-up member whose membership is graded admin, read back from the resolved positions; the seeded admin is org_owner and does not hold org_admin. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "steps[0]'s URL re-pointed: /_console/apps/com.example.showcase/showcase_cascade lands on the list (QA run #33861); the New form is its /new route (ui/packages/app-shell/src/console/AppContent.tsx, ':objectName/new' → RecordFormPage). Ledger row 131. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -1466,7 +1490,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1484,7 +1508,7 @@
       },
       "steps": [
         "open New Invoice (/_console/apps/com.example.showcase/showcase_invoice → New); fill name os-qa-<runid>, account=Northwind, status=draft",
-        "add two lines in the inline grid: pick a product on each (observe description/unit_price auto-fill), set quantities; watch amount recompute read-only as qty × unit_price",
+        "add two lines in the inline grid: pick a product on each (observe description/unit_price auto-fill), set quantities; watch amount recompute read-only as qty × unit_price. Fill the grid's auto trailing blank row for each new line rather than pressing 'Add line' while it exists: 'Add line' turns that blank into a middle row, which the save submits as an all-null line create, and the batch then answers 400 'Product is required' with nothing written (an untouched trailing blank is skipped; QA run #33861)",
         "Save ONCE; capture the network trace of the save",
         "re-read master + lines via GET /api/v1/data/showcase_invoice?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] and the lines by the returned invoice id; check invoice.total against the sum of line amounts",
         "add a third line via the edit form and save; re-read invoice.total; delete that line; re-read total again",
@@ -1600,6 +1624,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[1], [2], [3], acceptance[5]'s persisted half and negative[0] at the batch door (#26573 slice 3); acceptance[2] now has a pin on invoice.total itself. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "steps[1] gains a driver note: 'Add line' beside the grid's trailing blank row makes it a middle all-null row that the save submits and the batch refuses (400 'Product is required', nothing written). QA run #33861, ledger row 146. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -1608,7 +1638,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1630,7 +1660,7 @@
       },
       "steps": [
         "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the column-tier page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
-        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. Record page v3 draws no tab strip there. The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the details column, and the non-primary children — Contacts among them — are compact cards in the related column, each naming at most 3 rows with no pager (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Only below 760 px is the page tabbed, with those cards under one 'Related' tab (?tab=related)",
+        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. At 1440 px the page also draws its top-level tab row over the columns (Overview, Activity N, then one tab per related list that has records, e.g. Contacts 26; the empty ones in its '+N' dropdown; ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; QA run #33861), so a role=tab strip there is expected: enumerate the lists from the column layout under it. The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the details column, and the non-primary children — Contacts among them — are compact cards in the related column, each naming at most 3 rows with no pager (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Only below 760 px is the page tabbed, with those cards under one 'Related' tab (?tab=related)",
         "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
         "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
         "diff page-1 and page-2 row ids for overlap",
@@ -1763,6 +1793,12 @@
           "date": "2026-11-14",
           "change": "steps[0] names the route to the full record page (QA run #33048's note, comment 6846028996): a list click opens the record drawer, the console's default record-open mode (ui/packages/app-shell/src/views/ObjectView.tsx), so the column-tier page steps[1] reads is reached by 'Open as full page' or the /record/ID route. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-15",
+          "change": "steps[1] re-pointed: it said record page v3 draws no tab strip at the column tier, but at 1440 px QA run #33861 met both the two-column layout and the top-level tab row (Overview, Activity 0, Contacts 26, Field Zoo …), which RecordPageColumns draws over the columns. Ledger row 150. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -2441,7 +2477,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2453,7 +2489,7 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)', listViews.gantt: startDateField/endDateField/titleField/progressField, and lockField 'done'). Two seeded tasks are done ('Audit current IA', 'App wireframes'), so a locked bar sits beside draggable ones on every stock boot"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares lockField: 'done' but NO dependenciesField / parentField. So the locked-task drag is live on the stock boot with no overlay, while auto-schedule and the subtree drag stay unreachable: acceptance[1] and the auto-schedule half of acceptance[2] score blocked(fixture) BY DESIGN (maintainer ruling 2026-11-14 on #33351: no dependency field is added to the showcase; a run states the gap, it is not a failure). The default task list's visualization switcher binds its own gantt block without lockField; this item drives the named Schedule (Gantt) view only. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The direct drag on a locked LEAF bar has no pin: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned, and GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar') proves a locked leaf loses its grips and link dot, NOT that dragging its body writes nothing. So the sub-leg is scored live: drag a done bar → no PATCH, and the row re-reads unchanged (updated_at identical); the control, a drag of a not-done bar on the same view → PATCH 200. QA run #27438 (G4a, at c4c515ad) proved that leg on a view overlay carrying the same key; the stock view now carries it, so no overlay is needed",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares lockField: 'done' but NO dependenciesField / parentField. So the locked-task drag is live on the stock boot with no overlay, while auto-schedule and the subtree drag stay unreachable: acceptance[1] and the auto-schedule half of acceptance[2] score blocked(fixture) BY DESIGN (maintainer ruling 2026-11-14 on #33351: no dependency field is added to the showcase; a run states the gap, it is not a failure). A run may close the gap at runtime without touching the showcase source (QA run #33914, at b914e724): a showcase.custom pair overlay of the view showcase_task.gantt adding dependenciesField: 'notes' (the task's textarea; normalizeDependencies in ui/packages/plugin-gantt/src/ObjectGantt.tsx reads a comma-separated list of predecessor ids) makes the auto-schedule control render (ObjectGantt passes autoSchedule only when dependenciesField is set). Both clauses then run live: name the overlay in the run record and delete it afterwards. Without the overlay they stay blocked(fixture) as ruled. The default task list's visualization switcher binds its own gantt block without lockField; this item drives the named Schedule (Gantt) view only. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The direct drag on a locked LEAF bar has no pin: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned, and GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar') proves a locked leaf loses its grips and link dot, NOT that dragging its body writes nothing. So the sub-leg is scored live: drag a done bar → no PATCH, and the row re-reads unchanged (updated_at identical); the control, a drag of a not-done bar on the same view → PATCH 200. QA run #27438 (G4a, at c4c515ad) proved that leg on a view overlay carrying the same key; the stock view now carries it, so no overlay is needed",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
@@ -2464,10 +2500,10 @@
         "host onBeforeTaskUpdate veto restores the bar with no write (fixture-gated)"
       ],
       "steps": [
-        "open the task Schedule (Gantt) view; wait for bars to render (screenshot first)",
-        "drag one task bar to new dates; capture the PATCH and re-read the record over the API",
+        "open the task Schedule (Gantt) view; wait for bars to render (screenshot first). The view opens at Day scale on today (GanttView's viewMode defaults to 'day', ui/packages/plugin-gantt/src/GanttView.tsx), where the seeded done bars sit off-screen: switch to Month (gantt-view-mode-month) before any drag (QA run #33914)",
+        "drag one task bar to new dates, grabbing its body near the top edge: a drag that starts at the bar's vertical centre can catch the progress handle, which sits at the progress boundary on the bottom edge, and PATCHes {progress} instead (QA run #33861; put a stray progress write back to its seeded value); capture the PATCH and re-read the record over the API",
         "reload and confirm the bar re-renders from the persisted dates",
-        "drag a done task's bar (locked by the view's lockField 'done'): capture that no PATCH is sent and re-read the row (dates and updated_at unchanged); drag a not-done bar as the control (PATCH 200). The auto-schedule leg (toolbar auto-schedule, confirm dialog, cancel once with zero writes, then apply) needs a dependenciesField no stock view declares: record acceptance[1] and the auto-schedule half of acceptance[2] blocked(fixture) per knownGaps[0]",
+        "drag a done task's bar (locked by the view's lockField 'done'): capture that no PATCH is sent and re-read the row (dates and updated_at unchanged); drag a not-done bar as the control (PATCH 200). The auto-schedule leg (toolbar auto-schedule, confirm dialog, cancel once with zero writes, then apply) needs a dependenciesField no stock view declares: drive it on knownGaps[0]'s runtime overlay, or record acceptance[1] and the auto-schedule half of acceptance[2] blocked(fixture) per knownGaps[0]",
         "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `showcase_contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
       ],
       "acceptance": [
@@ -2567,6 +2603,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0], knownGaps[0], variants[2] and steps[3]: the stock Schedule (Gantt) view now declares lockField 'done' (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt), so the locked-leaf drag is driven on the stock boot with no overlay; the auto-schedule half stays blocked(fixture) by design. Maintainer ruling 2026-11-14 on #33351 (row 263, option C: add lockField now, narrow the dependency half). Read at base ba35dfd78: GanttConfigSchema lockField (view.zod.ts), ObjectGantt.tsx (locked = record[lockField]), task.object.ts (done is a boolean). No clause changed",
           "ref": "#33351"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "steps[0] switches to Month first (the view opens at Day scale on today, so the done bars are off-screen; QA run #33914, ledger row 220); steps[1] says to grab a bar near its top edge, off the progress handle (QA run #33861, row 141); knownGaps[0] and steps[3] add the runtime overlay QA run #33914 used (dependenciesField 'notes' on a showcase.custom pair overlay) as a live route for acceptance[1] and the auto-schedule half of acceptance[2], keeping blocked(fixture) as the stock verdict the #33351 ruling set, which adds no dependency field to the showcase (row 219). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -2575,7 +2617,7 @@
       "title": "Kanban card drag across columns persists the group-field change server-side",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2591,7 +2633,7 @@
         "open the task kanban; screenshot after render",
         "drag one card from column A to column B; capture the update request",
         "re-read the record over the API; reload the view and locate the card",
-        "attempt a drag that the server rejects (e.g. an illegal state_machine transition per task_status_flow) and observe the recovery"
+        "attempt a drag that the server rejects (an illegal state_machine transition per task_status_flow) and observe the recovery. The board's per-lane drop gate (#25933, ui/packages/plugin-kanban/src/KanbanImpl.tsx) refuses an FSM-illegal drop on the client, so a plain illegal drag never reaches the server: record that leg (the card stays, no update request), then make the board's copy of a row stale (change its status over the API after the board loaded) and drag it into a lane that is legal from the status the board shows but illegal from the stored one, which the server answers 400 invalid_transition (QA run #33861). Record both legs"
       ],
       "acceptance": [
         {
@@ -2630,6 +2672,12 @@
           "date": "2026-08-07",
           "change": "initial — kanban was render-only in view-type-gallery; the drag interaction chain had no coverage",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "steps[3] re-pointed: the board's client lane gate (#25933) stops an FSM-illegal drop before any request, so reaching acceptance[2]'s server 400 needs a stale board; the step now records both legs. QA run #33861, ledger row 144. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -2742,7 +2790,7 @@
       "title": "A named import mapping maps foreign CSV headers and re-imports idempotently",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2768,7 +2816,7 @@
           "evidence": "the reads"
         },
         {
-          "clause": "re-importing the same file AS THE SAME CALLER is idempotent (upsert on the mapping's key, email) — no duplicate rows. Idempotent per caller: showcase_inquiry is sharingModel 'private' (examples/app-showcase/src/data/objects/inquiry.object.ts), so the upsert matches only rows the importer can read, and a different caller (a member re-importing the admin's file) creates new rows — RLS working, not a fail",
+          "clause": "re-importing the same file AS THE SAME CALLER is idempotent (upsert on the mapping's key, email) — no duplicate rows. Idempotent per caller: showcase_inquiry is sharingModel 'private' (examples/app-showcase/src/data/objects/inquiry.object.ts), so the upsert matches only rows the importer can read, and a different caller (a member re-importing the admin's file) creates new rows — RLS working, not a fail. Idempotent with the request's writeMode left unset: the mapping's mode and upsertKey apply as DEFAULTS, so an explicit request writeMode (e.g. 'insert') overrides the mapping's upsert by design and its re-import inserts again (packages/rest/src/import-prepare.ts, 'Artifact-declared write semantics apply as DEFAULTS') — send none",
           "oracle": "api",
           "verify": "row count unchanged after the second import by the same caller",
           "evidence": "before/after counts"
@@ -2802,6 +2850,12 @@
           "date": "2026-11-14",
           "change": "acceptance[1] says 'idempotent per caller' and acceptance[0].verify names the partial value map (QA run #33092's C-api notes, comment 6850793622, for idempotent-per-caller; QA run #33058's P2 notes, comment 6846283471, for the Channel pass-through): showcase_inquiry is private-OWD (inquiry.object.ts), so the upsert match sees only the caller's rows; and the map transform passes an unmapped Channel value through verbatim (packages/core/src/utils/import-mapping.ts). The clause's obligation for one caller is unchanged. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[1] states the precondition the idempotence holds under: the request leaves writeMode unset, since an explicit writeMode overrides the mapping's upsert by design (import-prepare.ts). QA run #33910, ledger row 200. The clause's oracle and verdict are unchanged; it now names the request shape it was always scored on. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -3201,7 +3255,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3212,7 +3266,7 @@
         "app": "showcase",
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
-          "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
+          "a record to comment on whose page carries a discussion surface: a seeded showcase_project (the record:discussion panel at the foot of its Project Detail page, examples/app-showcase/src/ui/pages/project-detail.page.ts) or a seeded showcase_account (the comment composer of its synthesized page's 动态 stream). ⛔ Not a showcase_task: its authored Task Detail page (kind 'full', examples/app-showcase/src/ui/pages/task-detail.page.ts) draws no discussion surface at all (QA run #33861)",
           "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. The mentioned user must hold read on sys_comment. The platform baseline member_default now grants it (read, create, edit; packages/plugins/plugin-security/src/objects/default-permission-sets.ts, pinned by member-default-explicit-allow.test.ts), so a freshly minted member's GET /api/v1/data/sys_comment answers 200 on both boots (QA run #33048 at ee9ad834, comment 6846028996); before that grant it answered 403 and every mention was withheld `cannot_read_thread` (#26625, #27441). steps[13] proves the read rather than granting it; the scratch qamention_comment_reader set is needed only on a boot where the member's read answers 403"
         ],
         "provisioning": {
@@ -3223,16 +3277,16 @@
           "the @mention TARGET and the bell/notification clauses need a SECOND user. A stock showcase boot is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the user with POST /api/v1/auth/admin/create-user, which answers mustChangePassword true, and the user calls POST /api/v1/auth/change-password and signs in again before it drives anything (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration'). ⛔ Do not record those clauses blocked(fixture) on the 403: the refusal is the posture working, and the admin door mints the user on the same boot. The optimistic-reconcile, sys_comment and activity-interleave clauses need only the author",
           "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
           "acceptance[9]'s cross-organization leg runs live on its own group-posture boot (fixtures.requires[2]) through steps[13]'s walled sequence, which #26625 wrote and drove once at main 1708115e2f: the control mention in organization B notified the user, and both mentions on organization A's account (by id, by email) were withheld cannot_read_source. A run that cannot boot the posture records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; both live legs, the stock `single` one and the walled one, are driven live",
-          "acceptance[7]'s changes_only leg has no stock carrier: the panel offers that mode only on an object with field history (ui/packages/plugin-detail/src/RecordActivityTimeline.tsx getFilterOptions), and the stock showcase's only authored record:discussion panel sits on showcase_project (examples/app-showcase/src/ui/pages/project-detail.page.ts), which has none (QA run #33048, comment 6846028996). Until a fixture puts the panel on such an object, that leg is blocked(fixture)"
+          "acceptance[7]'s changes_only leg has no stock carrier: the panel offers that mode only on an object with field history (ui/packages/plugin-detail/src/RecordActivityTimeline.tsx getFilterOptions), and the stock showcase's only authored record:discussion panel sits on showcase_project (examples/app-showcase/src/ui/pages/project-detail.page.ts), which has none (QA run #33048, comment 6846028996). A fixture that put the panel on such an object would not offer it either: the panel offers changes_only from RecordFieldHistoryContext, which RecordDetailView fills from its sys_audit_log read, and that read goes out only for the page it synthesizes, never for an assigned page (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyPage), while a record:discussion panel always sits on an authored, assigned page (QA run #33861). So the leg is blocked(fixture) on every stock or scratch page; the synthesized page's stream offers its own Changes chip, a different control that scores nothing here"
         ]
       },
       "steps": [
-        "as admin, open a record detail with the discussion panel (feeds enabled); screenshot",
+        "as admin, open the detail of fixtures.requires[1]'s record (feeds enabled) on its discussion surface — the Project Detail panel of a showcase_project, or a showcase_account's 动态 stream; screenshot",
         "type a comment containing an @mention (the mention autocomplete offers mentionSuggestions); post it",
         "observe the OPTIMISTIC comment row appear immediately; capture the sys_comment create",
         "reload the record page (no sys_comment refetch follows a post within ~6 s, QA run #24616), then confirm the optimistic row reconciles with the server row (same id → union-by-id merge, no duplicate, no phantom)",
         "read sys_comment over the API: GET /api/v1/data/sys_comment?$filter for the record's thread_id, ordered by created_at asc — the posted comment is present",
-        "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, in time order. The direction depends on the surface: the default record page's timeline stream is newest-first (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts mergeTimelineStream), while an authored record:discussion panel — e.g. the footer of the Project Detail page on a showcase_project record (examples/app-showcase/src/ui/pages/project-detail.page.ts) — lists oldest-first (RecordDetailView mergeFeedRows). Record which surface you read. On an object with enable.trackHistory (showcase_account) the stream drops the activity's own `updated` row in favour of the audit's field-change line (mergeTimelineStream), so read this on a showcase_task, or on the panel",
+        "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, in time order. The direction depends on the surface: the default record page's timeline stream is newest-first (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts mergeTimelineStream), while an authored record:discussion panel — e.g. the footer of the Project Detail page on a showcase_project record (examples/app-showcase/src/ui/pages/project-detail.page.ts) — lists oldest-first (RecordDetailView mergeFeedRows). Record which surface you read. On an object with enable.trackHistory (showcase_account) the stream drops the activity's own `updated` row in favour of the audit's field-change line (mergeTimelineStream), so read this on the Project Detail panel, or on the 动态 stream of a synthesized-page object without field history (showcase_field_zoo). ⛔ Not on a showcase_task: it declares trackHistory too, and its authored Task Detail page draws neither the stream nor the panel (QA run #33861)",
         "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it. The bell is SERVER-backed: plugin-audit writes one sys_notification (topic collab.mention) per mentioned user (packages/plugins/plugin-audit/src/audit-writers.ts), and the console's bell reads sys_inbox_message joined with sys_notification_receipt (ui/packages/app-shell/src/hooks/useInboxBell.ts), its badge counting unread TOPICS (two mentions on one thread read '1 unread topic'); GET /api/v1/notifications still carries the per-row unreadCount the clause reads, and mark-read is POST /api/v1/notifications/read or /read/all — read unreadCount there",
         "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
         "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qafeeds_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qafeeds_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qafeeds_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
@@ -3240,7 +3294,7 @@
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — the four FeedFilterMode values are offered by an authored record:discussion panel, not by the default record page, whose timeline stream has its own chips All / Activity / Discussion / Changes (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts TIMELINE_STREAM_FILTERS). Drive it on a showcase_project record, whose Project Detail page ends in a record:discussion panel (examples/app-showcase/src/ui/pages/project-detail.page.ts): post one comment there and make one attributable edit, then cycle the panel's filter control through every value it offers, screenshotting each state before reading the rendered rows. It offers changes_only only on an object with field history (getFilterOptions, ui/packages/plugin-detail/src/RecordActivityTimeline.tsx), and showcase_project has none, so on stock the panel offers three: all, comments_only, tasks_only (see acceptance[7])",
         "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the unit pin ui/packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts and record the substitution",
-        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. Prove the member reads sys_comment: GET /api/v1/data/sys_comment as the member answers 200 (member_default grants it, fixtures.requires[2]); only if it answers 403, grant it as the walled leg's item (4) below does. Without the read every mention below is withheld, the account comment's included, and the leg measures nothing. sys_comment.mentions is a JSON-STRING field (a textarea, packages/plugins/plugin-audit/src/objects/sys-comment.object.ts): send it as a string such as \"[\\\"USER_ID\\\"]\", since an array body answers 400 'expected a string, received an array'. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) prove the user reads sys_comment (member_default grants it; GET /api/v1/data/sys_comment as the user answers 200) and, only on a boot where it answers 403, grant it: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. Prove the member reads sys_comment: GET /api/v1/data/sys_comment as the member answers 200 (member_default grants it, fixtures.requires[2]); only if it answers 403, grant it as the walled leg's item (4) below does. Without the read every mention below is withheld, the account comment's included, and the leg measures nothing. sys_comment.mentions is a JSON-STRING field (a textarea, packages/plugins/plugin-audit/src/objects/sys-comment.object.ts): send it as a string such as \"[\\\"USER_ID\\\"]\", since an array body answers 400 'expected a string, received an array'. Create the two records as admin first: POST /api/v1/data/showcase_private_note {title} (its required field is title; it has no name field, examples/app-showcase/src/data/objects/private-note.object.ts) and POST /api/v1/data/showcase_account {name}. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) prove the user reads sys_comment (member_default grants it; GET /api/v1/data/sys_comment as the user answers 200) and, only on a boot where it answers 403, grant it: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
       ],
       "acceptance": [
         {
@@ -3429,6 +3483,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[2], steps[6], steps[11], steps[13], acceptance[3].verify and acceptance[7] re-pointed, with one knownGaps line added, from QA run #33048's notes (comment 6846028996) and the B-browser record (#33094 comment 6852480973). member_default now grants sys_comment read (packages/plugins/plugin-security/src/objects/default-permission-sets.ts), so the scratch reader set becomes a fallback; the bell reads sys_inbox_message + sys_notification_receipt and badges topics (ui/packages/app-shell/src/hooks/useInboxBell.ts); sys_comment.mentions is a JSON string (sys-comment.object.ts); and since objectstack#30074 ruling C the panel offers changes_only only on an object with field history (RecordActivityTimeline.tsx getFilterOptions), so acceptance[7] scores the modes offered and its changes_only leg is blocked(fixture) on stock. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[1], steps[0] and steps[5] steer off showcase_task, whose authored Task Detail page has no discussion surface and no stream (QA run #33861, ledger row 148): the record is a showcase_project (panel) or a showcase_account (stream), and the interleave is read on the panel or on showcase_field_zoo's stream. steps[13] creates the private note with its required title. knownGaps[3] says the changes_only mode is offered only where the page is synthesized, which an authored record:discussion panel never is (RecordDetailView historyPage; row 149). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -3437,7 +3497,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3462,9 +3522,9 @@
       ],
       "steps": [
         "open showcase_task grid; screenshot",
-        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a density from the toolbar — three modes, Compact / Comfortable / Spacious, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
+        "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a density with the list's one density control, a button that steps to the next mode on each click (its title 'Density: MODE (click to cycle)', ui/packages/plugin-list/src/ListView.tsx; QA run #33861 met it in the Display popover), not a menu of options — three modes, Compact / Comfortable / Spacious, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
         "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
-        "group-by status; confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
+        "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
         "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
         "reload once more; confirm every personalization survives; capture a screenshot per variant"
@@ -3552,6 +3612,12 @@
           "date": "2026-10-20",
           "change": "automated dropped and fixtures.knownGaps[0] rewritten — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 scored every clause not-run on its three objectui unit pins (green at the sweep's console pin 4016370af3c9, all adjacent); QA run #24616 passed the item by hand after round 1's #24572 handed it over. As a P2 item with no pin it is now Tier 3. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "steps[1] names the density control as one cycling button, and steps[3] says a runtime group-by persists in the URL (uf__group), not in the user's list preference, so a bare-URL reload drops it by design; 'Add group field' groups by the first field at once. QA run #33861, ledger row 142. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -3560,7 +3626,7 @@
       "title": "Admin saved-view lifecycle: create kanban via dialog (staged as a per-item draft, live only after Publish), rename/set-default/pin/delete each hit the meta overlay and survive reload; non-admin affordances absent and server-refused",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3588,7 +3654,7 @@
         "as admin, open showcase_task; open the Create View dialog; choose kanban; set groupByField = status; create — capture PUT /api/v1/meta/view/<name>?mode=draft (the console's create handler → createRuntimeMetadata → metadataClient.save(…, {mode:'draft'}): ADR-0034 stages every runtime-created view as an invisible per-item draft under the qualified name showcase_task.<key>) carrying {type:'kanban', kanban:{groupByField:'status'}}; the console lands on view/<name>?preview=draft",
         "click Publish on the draft-preview bar — capture POST /api/v1/meta/view/<name>/publish (meta.publishItem); then reload WITHOUT ?preview=draft and confirm the new kanban view is live and groups by status. Before the publish, a plain (published-only) read does not serve it — the draft isolation itself is studio-authoring.view-authoring-live's to score",
         "rename the view via Manage Views; capture the PUT; reload confirms the new label",
-        "set the view as default (unsets the prior default); capture the PUT(s); reload confirms the default moved",
+        "set the view as default (unsets the prior default); capture the PUT(s). Where the prior default is a packaged view, its unset goes through the customization pair, POST /api/v1/packages/BASE/ensure-customization (BASE the view's package, com.example.showcase) then a PUT with ?package=com.example.showcase.custom, so the PUTs come in two shapes (QA run #33861); reload confirms the default moved",
         "pin the view; capture the PUT (isPinned); reload confirms it pinned",
         "delete the view; capture DELETE /api/v1/meta/view/<name>; reload confirms it is gone",
         "as the non-admin, open the same object; confirm the create-view and manage-views (rename/default/pin/delete) affordances are ABSENT",
@@ -3647,6 +3713,12 @@
           "date": "2026-10-13",
           "change": "steps[0] and [1], acceptance[0] (clause, verify, evidence), acceptance[1].verify, the title and source[1] and [2] re-pointed to the draft-first create (stale spec, #23163 A0; parked on #23121, carried by #23169). The Create View dialog stages the new view as a per-item draft (PUT …?mode=draft, ADR-0034) and lands on ?preview=draft; it goes live only after Publish (POST …/publish). Rename, default, pin and delete on the published view write the live overlay directly. QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243) drove create as draft-then-publish and passed every other leg. Re-read from objectui source at that pin, still this repo's .objectui-sha: ObjectView.tsx, runtime-metadata-persistence.ts createRuntimeMetadata, data-objectstack updateView",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "steps[3] names the two PUT shapes: unsetting a packaged prior default goes through the customization pair (ensure-customization, then PUT ?package=com.example.showcase.custom), not a plain PUT. The clause still holds. QA run #33861, ledger row 151. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -3655,7 +3727,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3669,7 +3741,7 @@
         ],
         "knownGaps": [
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
-          "OPEN defect, acceptance[5] expected FAIL until it is fixed — #28552: the banner draws the uncapped server total (ui/packages/plugin-grid/src/components/BulkActionBar.tsx, the grid.bulkSelectAllMatching, grid.bulkAllMatchingSelected and grid.bulkSelectedAllMatches strings, each counting totalMatching) while resolveBulkRows stops at its local HARD_CAP of 5000 (ui/packages/plugin-grid/src/ObjectGrid.tsx), so past 5000 the user is told every match is selected and the action processes the first 5000. Read at base 37184244"
+          "FIXED defect #28552 (d5da45b27, #28606): over BULK_SELECT_ALL_MATCHING_CAP, 5000 (ui/packages/plugin-grid/src/bulkSelectAllMatchingCap.ts, the one constant resolveBulkRows in ui/packages/plugin-grid/src/ObjectGrid.tsx reads too), the bar names the cap and the total through grid.bulkSelectAllMatchingCapped, grid.bulkAllMatchingSelectedCapped and grid.bulkSelectedAllMatchesCapped ('Only the first 5000 of M matching records will be processed.'; zh-Hans 「将处理前 5000 条（共匹配 M 条记录）。」) in ui/packages/plugin-grid/src/components/BulkActionBar.tsx, pinned by ui/packages/plugin-grid/src/__tests__/BulkActionBar.selectAllMatchingCap-28552.test.tsx. acceptance[5] is expected to PASS (QA run #33861 read it passing at a557fa38); a FAIL there is a regression to extract, not this gap. Read at base 895783a1"
         ]
       },
       "steps": [
@@ -3786,6 +3858,12 @@
           "date": "2026-11-08",
           "change": "steps[7]: deleteMany takes {\"ids\": [...]}; a bare array answers 400. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "knownGaps[1] retired its 'acceptance[5] expected FAIL until #28552' wording: #28552 is fixed (d5da45b27, #28606), the bar names the 5000 cap through the three *Capped strings, and QA run #33861 read acceptance[5] passing (ledger row 128). acceptance[5] itself never said FAIL and is unchanged. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -4142,7 +4220,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4272,7 +4350,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/object-hook-lifecycle-showcase.dogfood.test.ts, on the showcase as shipped over REST with the server log read off stdout/stderr: acceptance[0] (a /data POST of an inquiry with no source reads back source web and status new), acceptance[1] (a padded title reads back trimmed after the POST and after the PATCH), acceptance[2] and negative[2] (done false → true logs 'task completed: TITLE' once settled), acceptance[3] and negative[3] (a priority-only PATCH of the done task logs no second line), acceptance[4] and acceptance[5] (a spent-only PATCH to 1100 over a stored budget of 1000 logs 'project over budget: NAME (1100 / 1000)'; an under-budget PATCH logs none). packages/qa/dogfood/test/object-hook-lifecycle-scratch.dogfood.test.ts, on scratch hooks over REST: acceptance[6] and negative[0] (a throwing beforeInsert under abort is 400 with its sentence and lands no row), acceptance[7] and negative[1] (a throwing async afterUpdate under log keeps the PATCH and logs '[hook] handler failed (onError=log; suppressing)' with the hook's name, never the fire-and-forget line), acceptance[8] and negative[4] (int(record.name) on a non-numeric name, under onError log, is 400 VALIDATION_ERROR naming the hook and 'operation aborted', never the condition source, no row and no '[REST] Unhandled error' line; a numeric name is the 201 control) and acceptance[9] (priority 10 logs before priority 90, declared in the opposite order). packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (the beforeInsert stamp on an anonymous inquiry submit) and packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (the beforeDelete onError:'abort' throw → REST error body) stay named. The declarative-wrapper MECHANISM pins in packages/objectql (hook-condition-previous-scope.test.ts, hook-condition-merged-record.test.ts, hook-binder.test.ts, hook-condition-fail-loud.test.ts) stay evidence of their own layer"
+        "ref": "packages/qa/dogfood/test/object-hook-lifecycle-showcase.dogfood.test.ts, on the showcase as shipped over REST with the server log read off stdout/stderr: acceptance[0] (a /data POST of an inquiry with no source reads back source web and status new), acceptance[1] (a padded title reads back trimmed after the POST and after the PATCH), acceptance[2] and negative[2] (done false → true logs 'task completed: TITLE' once settled), acceptance[3] and negative[3] (a priority-only PATCH of the done task logs no second line), acceptance[4] and acceptance[5] (a spent-only PATCH to 1100 over a stored budget of 1000 logs 'project over budget: NAME (1100 / 1000)'; an under-budget PATCH logs none). packages/qa/dogfood/test/object-hook-lifecycle-scratch.dogfood.test.ts, on scratch hooks over REST: acceptance[6] and negative[0] (a throwing beforeInsert under abort is 400 with its sentence and lands no row), acceptance[7] and negative[1] (a throwing async afterUpdate under log keeps the PATCH and logs '[hook] handler failed (onError=log; suppressing)' with the hook's name, never the fire-and-forget line), acceptance[8] and negative[4] (int(record.name) on a non-numeric name, under onError log, is 400 VALIDATION_ERROR naming the hook and 'operation aborted', never the condition source, no row and no '[REST] Unhandled error' line; a numeric name is the 201 control) and acceptance[9] (priority 10 logs before priority 90, declared in the opposite order). packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (the beforeInsert stamp on an anonymous inquiry submit) and packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (the beforeDelete onError:'abort' throw → REST error body) stay named. packages/verify/src/harness.hook-refusal-door.test.ts (a handler hook's declared refusals catalogue answering one zh-CN envelope on both bootStack doors, the source handler and the artifact body) stays named too, as evidence of its own layer: no clause here scores a hook's refusals, which is new coverage for a checklist-author card, not this item's. The declarative-wrapper MECHANISM pins in packages/objectql (hook-condition-previous-scope.test.ts, hook-condition-merged-record.test.ts, hook-binder.test.ts, hook-condition-fail-loud.test.ts) stay evidence of their own layer"
       },
       "source": [
         "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture and the three showcase_guard_paid_invoice_line_* guards beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
@@ -4357,6 +4435,12 @@
           "date": "2026-11-14",
           "change": "steps[2] names showcase_task's required project, and fixtures.requires[3] names the package-less hook PUT (QA run #33048, comment 6846028996): project is a required master_detail (examples/app-showcase/src/data/objects/task.object.ts), so a padded-title POST without it answers 400 before the hook's effect is readable; and hook is allowRuntimeCreate (packages/spec/src/kernel/metadata-plugin.zod.ts), so a fresh-name PUT with no ?package= saves env-wide. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-15",
+          "change": "automated.ref names packages/verify/src/harness.hook-refusal-door.test.ts, which exists at the base and was missing (QA run #33785, ledger row 13). It is named as evidence of its own layer only; the hook-refusal locale coverage the same note asked for is new coverage, left to a checklist-author card. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -4702,7 +4786,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4722,7 +4806,7 @@
       },
       "steps": [
         "boot the showcase on its own port and DB — every stock boot is provider-wired: the canonical `os dev` (which spawns `serve --dev`, packages/cli/src/commands/dev.ts) wires LocalCryptoProvider exactly as `os serve` does (QA run #27438's os dev boot wrote aes-256-gcm ciphertext; fixtures.knownGaps[1]); sign in as the seeded admin; keep an API token",
-        "WRITE ciphertext: POST /api/v1/data/showcase_field_zoo {name:'sec-1', f_secret:'topsecret-value'}; GET the row over the API and confirm f_secret reads back as the SECRET_MASK, never 'topsecret-value'; where DB access exists, confirm the business-row column holds a 'secret:<handle>' ref and the plaintext lives only (encrypted) in sys_secret",
+        "WRITE ciphertext: POST /api/v1/data/showcase_field_zoo {name:'sec-1', f_master_detail:'PROJECT_ID', f_secret:'topsecret-value'}, PROJECT_ID any seeded showcase_project's id (GET /api/v1/data/showcase_project). f_master_detail (Master-Detail → Project) is required (examples/app-showcase/src/data/objects/field-zoo.object.ts): without it the POST answers 400 VALIDATION_FAILED 'Master-Detail → Project is required' (QA run #33861), so every field-zoo POST of this item carries it, steps[4]'s included, or the refusal read there is the validator's, not the crypto gate's; GET the row over the API and confirm f_secret reads back as the SECRET_MASK, never 'topsecret-value'; where DB access exists, confirm the business-row column holds a 'secret:<handle>' ref and the plaintext lives only (encrypted) in sys_secret",
         "MASK on read for f_password too: POST f_password='p@ssw0rd!'; GET and confirm f_password reads back as the mask (generic password: plaintext-at-rest but masked-on-read)",
         "ECHOED-MASK no-op: PATCH the row's f_secret back as the SECRET_MASK sentinel; GET and confirm the stored secret is UNCHANGED (a form round-trip re-submitting the mask does not wipe it)",
         "FAIL-CLOSED: on a boot with NO CryptoProvider registered (deliberately unwired), POST f_secret='x' and capture the refusal; confirm NOTHING was persisted (no row, or the field left unset) — cleartext never lands",
@@ -4826,6 +4910,12 @@
           "date": "2026-10-31",
           "change": "steps[0] no longer implies `os serve` is needed for the crypto provider. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). `os dev` spawns `serve --dev`, so the canonical dev boot wires LocalCryptoProvider too, and the run's os dev boot wrote aes-256-gcm ciphertext. Read at base a0f865491d: packages/cli/src/commands/dev.ts (the serve --dev spawn), serve.ts (the LocalCryptoProvider wiring). Not touched here: whether the in-process HTTP pin scores acceptance[3] / negative[1], which waits on a ruling. No clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "steps[1]'s body gains the required f_master_detail: QA run #33861's POST without it answered 400 'Master-Detail → Project is required' (ledger row 135). The step says every field-zoo POST here carries it, so the fail-closed probe of steps[4] reads the crypto refusal, not a validation one. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -4990,7 +5080,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5019,7 +5109,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qauniq_item') only where the object declares no label, and states 'No record was written.', while the user-facing `error` names the field by its label ('A record with this LABEL already exists') where a single offending column is reported and the field has a label, and is otherwise generic ('A record with this value already exists') — never by its API key, which stays on `field`; NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named on BOTH stock indexes: the single-column 'global' index reports its one column, and the tenant-scoped index of a bare `unique: true` is the composite (organization_id, FIELD) whose organization part is the implied scope, so FIELD is named there too: `error` 'A record with this SKU already exists', developerMessage 'Duplicate record refused on 'LABEL': a unique constraint on 'SKU' already holds this value. No record was written.', and `field` the API key 'sku' (packages/types/src/unique-violation.ts#uniqueViolationField). The generic sentences ('A record with this value already exists', 'a unique constraint already holds these values') are left for a key that determinably names no single authored column, such as a composite of two authored columns, which no step here drives. The `object.field` wording is the memory driver's and stays a memory-pin assertion",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qauniq_item') only where the object declares no label, and states 'No record was written.', while the user-facing `error` names the field by its label ('A record with this LABEL already exists') where a single offending column is reported and the field has a label, names the fields of a composite unique index the object DECLARES by their labels where the columns the store reported match that index and every one of its fields has a label ('A record with the same “LABEL1”, “LABEL2” already exists', in the writer's locale), and is otherwise generic ('A record with this value already exists') — never by its API key, which stays on `field`; NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named on BOTH stock indexes: the single-column 'global' index reports its one column, and the tenant-scoped index of a bare `unique: true` is the composite (organization_id, FIELD) whose organization part is the implied scope, so FIELD is named there too: `error` 'A record with this SKU already exists', developerMessage 'Duplicate record refused on 'LABEL': a unique constraint on 'SKU' already holds this value. No record was written.', and `field` the API key 'sku' (packages/types/src/unique-violation.ts#uniqueViolationField). The generic sentences ('A record with this value already exists', 'a unique constraint already holds these values') are left for a key that names no single authored column and matches no declared unique index whose fields all carry labels (packages/objectql/src/duplicate-record-error.ts buildEndUserMessage; the duplicate_record_fields sentence in packages/spec/src/system/operation-message.ts). No step here drives a composite. The `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
           "verify": "the refusal body — status, code, the developerMessage naming the object (read from developerMessage, not from the user-facing `error`), and on both the sku and the gsku collision the field named by its label in `error` and developerMessage and by its API key on `field` — + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
@@ -5160,6 +5250,12 @@
           "date": "2026-11-14",
           "change": "acceptance[0] (clause, verify) and automated.ref re-pointed to the field-naming duplicate sentence (stale spec, QA run #33025 acceptance[0], card #33032 item 1). 28a15270 (#32935) made an organization-scoped unique field's composite key (organization_id, FIELD) name FIELD (packages/types/src/unique-violation.ts#uniqueViolationField), so on the live SQLite leg the bare `unique: true` collision now answers 'A record with this SKU already exists', developerMessage '… a unique constraint on 'SKU' already holds this value. No record was written.' and `field` 'sku', where r13 expected the generic sentence. The dogfood pin packages/qa/dogfood/test/field-unique-rest-refusal.dogfood.test.ts already asserts these bodies for both sku and gsku. Status 409, UNIQUE_VIOLATION, the object naming, 'No record was written.' and the driver-anonymity bar are unchanged. Read at base e540baf8",
           "ref": "#33032"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-15",
+          "change": "acceptance[0] re-pointed: it still called the user sentence generic for a composite of two authored columns, but since #33348 a declared unique index whose fields all carry labels is named by those labels in the writer's locale (duplicate_record_fields; QA run #33785 finding 4, ledger row 14). No step drives a composite, so no verdict moves; the clause now states the rule the code answers by. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -5402,7 +5498,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5416,7 +5512,7 @@
         ],
         "knownGaps": [
           "no showcase object declares trackHistory:true on a REFERENCE field, so the referenced-record-title rendering (clause 5) is a unit-pin verdict (audit-lookup-summary.test.ts) unless a scratch tracked lookup is authored — record which the verdict rests on",
-          "showcase_task's record page is the authored kind:'full' showcase_task_detail page (examples/app-showcase/src/ui/pages/task-detail.page.ts), which draws no timeline stream, and RecordDetailView serves its sys_audit_log read only to a synthesized page (RecordDetailView.recordOpenWaves-13010.test.tsx: 'an assigned page of a trackHistory object never reads the audit log'). So the task's absent read holds with or without enable.trackHistory, and it does not prove the flag half of the gate on its own. No showcase object pairs per-field flags, no enable block and a synthesized page. The flag half rests on the historyEnabled code read unless a scratch object with that shape is authored"
+          "showcase_task's record page is the authored kind:'full' showcase_task_detail page (examples/app-showcase/src/ui/pages/task-detail.page.ts), which draws no timeline stream, and RecordDetailView serves its sys_audit_log read only to a synthesized page (RecordDetailView.recordOpenWaves-13010.test.tsx: 'an assigned page of a trackHistory object never reads the audit log'). So the task's absent read holds with or without enable.trackHistory, and it does not prove the flag half of the gate on its own. No showcase object pairs per-field flags, no enable block and a synthesized page, so the flag half is driven on a scratch object of that shape: QA run #33861 (at a557fa38) authored one (per-field trackHistory flags, no enable block, the synthesized page) and observed the flag half live. Only a run that cannot author it falls back to the historyEnabled code read, and says so"
         ]
       },
       "steps": [
@@ -5550,6 +5646,12 @@
           "date": "2026-11-14",
           "change": "negative[2] says how to stage the status change it reads (QA run #33048, comment 6846028996): showcase_task's status runs a state machine (examples/app-showcase/src/data/objects/task.object.ts transitions: backlog → todo → in_progress), so a direct backlog → in_progress PATCH answers 400 invalid_transition. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-15",
+          "change": "knownGaps[1] re-pointed: QA run #33861 closed the flag half live on a scratch object (per-field flags, no enable block, synthesized page), so the gap now names that route and keeps the code read as the fallback (ledger row 137). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -6477,7 +6579,7 @@
       "title": "Undo a business-record delete from its toast: the confirm asks without promising permanence, the toast offers Undo, and Undo restores the record through the recycle bin, while a platform-object delete keeps \"cannot be undone\"",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -6492,7 +6594,7 @@
         ]
       },
       "steps": [
-        "open the project PID's record page in the console and choose Delete; read the confirm dialog, then confirm",
+        "open the project PID's record page in the console and choose Delete from the record header's ⋯ 'More actions' menu (Refresh, Add to favorites, Share, Delete; it is no inline button, QA run #33914); read the confirm dialog, then confirm",
         "read the toast; click its Undo before it closes",
         "reload the project's record page and its Tasks related list",
         "from the showcase_project list view, delete QA-RB2-<run> from its row menu, read the toast and click Undo",
@@ -6527,7 +6629,7 @@
       ],
       "negative": [
         "an Undo that re-creates the record (a POST /api/v1/data/showcase_project with a new id) is a FAIL: undo is a restore, never a create",
-        "an Undo offered to a caller without allowRestoreOwnDeleted on the object is a FAIL (ui/packages/app-shell/src/utils/recycleBinRestore.ts#canRestoreOwnDeletes); the admin holds it through modifyAllRecords, so this item cannot show the absence — do not score it from the admin's view"
+        "an Undo offered to a caller without allowRestoreOwnDeleted on the object is a FAIL (ui/packages/app-shell/src/utils/recycleBinRestore.ts#canRestoreOwnDeletes); the admin holds it through modifyAllRecords, so do not score it from the admin's view. Show the absence as a member who may delete but holds no restore grant: node scripts/qa/qa-fixture.mjs contributor-member --position showcase_ops mints one, whose showcase_ops set (examples/app-showcase/src/security/permission-sets.ts, OpsPermissionSet) deletes showcase_project_membership rows with no allowRestoreOwnDeleted, so the toast's missing Undo and the restore door's 403 are both observable on a stock boot (QA run #33914)"
       ],
       "traps": [
         "stale-console-bundle",
@@ -6556,6 +6658,12 @@
           "date": "2026-11-14",
           "change": "steps[4], acceptance[0].verify and acceptance[2].verify re-pointed (checklist-accuracy notes of QA run #32940, parked in its body and in #33048 comment 6846028996 and #33094 comment 6852480973). The bulk leg moves to the showcase_task All Tasks list: the only project grid declares bulkActionDefs (examples/app-showcase/src/ui/views/project.view.ts), and ObjectGrid draws the implicit bulk Delete only when a grid declares none (ui/packages/plugin-grid/src/ObjectGrid.tsx effectiveBulkActions), so the expected toast is 'Deleted 2 Task records'. The confirm dialog on a record with cascading children carries a second sentence naming them (ui/packages/core/src/actions/recordDelete.ts, objectActions.deleteCascade); it is still no permanence promise. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "steps[0] finds Delete under the record header's ⋯ 'More actions' menu (row 222), and negative[1] drops 'this item cannot show the absence': the showcase_ops member that qa-fixture.mjs contributor-member --position showcase_ops mints may delete showcase_project_membership rows with no restore grant, so the absence and the 403 restore door are observable on a stock boot (row 221). QA run #33914. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -6564,7 +6672,7 @@
       "title": "Setup → Recycle bin lists the objects whose bin the caller manages, shows each deleted record with who deleted it and until when it is kept, restores one, and empties an object's bin after a confirm",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -6578,7 +6686,7 @@
         ]
       },
       "steps": [
-        "open Setup and choose Recycle bin in its navigation (the nav entry opens /_console/apps/setup/component/data/recycle-bin, ui/packages/app-shell/src/views/setup/recycleBin.ts#recycleBinPagePath)",
+        "open Setup and choose Recycle Bin in its navigation (the entry's label, packages/platform-objects/src/apps/setup-nav.contributions.ts nav_recycle_bin; the page itself is titled 'Recycle bin') (the nav entry opens /_console/apps/setup/component/data/recycle-bin, ui/packages/app-shell/src/views/setup/recycleBin.ts#recycleBinPagePath)",
         "read the object list, filter it by \"proj\", and pick Project",
         "read the entries table; choose Restore on the entry with related records",
         "pick Task, choose Empty recycle bin, read the dialog and confirm"
@@ -6634,6 +6742,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0148 recycle bin: the Setup page to restore or empty (#31835). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
           "ref": "#32020"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "steps[0] spells the Setup nav label as it renders, 'Recycle Bin' (setup-nav.contributions.ts nav_recycle_bin); the page title stays 'Recycle bin'. QA run #33861, ledger row 153. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -6642,7 +6756,7 @@
       "title": "The edit form's home-amount preview says what will be stored before save: the converted amount, the home-currency line, a missing document date, a date no rate covers, and a rate the user may not read",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -6657,13 +6771,13 @@
         ],
         "provisioning": {
           "use": "search:qa-contributor-bound-member",
-          "why": "acceptance[3] needs a member who edits invoices but may not read sys_exchange_rate: member_default names no business object and showcase_contributor grants invoices only (packages/platform-objects/src/system/sys-exchange-rate.object.ts#SysExchangeRate). The recipe's step 5 gives the member an invoice of their own. Without it acceptance[3] scores blocked(fixture)"
+          "why": "acceptance[3] needs a member who edits invoices but may not read sys_exchange_rate: member_default names no business object and showcase_contributor grants invoices only (packages/platform-objects/src/system/sys-exchange-rate.object.ts#SysExchangeRate). The recipe's step 5 gives the member an invoice of their own, with no line and no currency: steps[2] gives the prep that makes its preview mount. Without it acceptance[3] scores blocked(fixture)"
         }
       },
       "steps": [
         "as admin, open a USD draft invoice's edit form and read the line under Amount (data-testid home-amount-preview)",
         "change Currency to EUR and read the line; clear Invoice date and read it; set Invoice date to 2024-06-01 and read it; do not save",
-        "cancel, then as the contributor-bound member open their own invoice's edit form, set Currency to EUR and a 2025 date, and read the line"
+        "cancel. Prepare the member's own invoice first: the recipe gives it no line and no currency, so its amount (a formula that is null while currency_code is empty, examples/app-showcase/src/data/objects/invoice.object.ts) is blank and the preview never mounts, and setting Currency in the form alone does not fill it, because the formula is evaluated on save. As admin, POST one showcase_invoice_line on that invoice (its required fields as GET /api/v1/meta/object/showcase_invoice_line declares them); as the member, PATCH the invoice's currency_code to USD (QA runs #33861 and #33914). Then, as the contributor-bound member, open their own invoice's edit form, set Currency to EUR and a 2025 date, and read the line"
       ],
       "acceptance": [
         {
@@ -6716,6 +6830,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0144 multi-currency: the home-amount preview and its states (#31724). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
           "ref": "#32020"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "steps[2] and fixtures.provisioning.why add the prep the contributor recipe's invoice needs before the preview mounts (an admin-posted line, a member PATCH of currency_code to USD): the recipe's invoice has no line and no currency, so amount stays null. QA runs #33861 and #33914, ledger rows 143 and 224 (one edit). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
@@ -6765,7 +6885,7 @@
       "title": "An action's param dialog runs its declared preflight read: the panel moves from loading to ready with the declared fields, a seeded param is drawn read-only from the answer and submitted as it, and a failed read draws the error panel, leaves the seed empty and holds Confirm",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -6785,7 +6905,7 @@
         ]
       },
       "steps": [
-        "open the task's record page; press QA preflight probe in the record header with the network panel recording",
+        "open the task's record page; press QA preflight probe in the record header, or under its ⋯ overflow menu (a menuitem) where the header already shows three inline actions, with the network panel recording",
         "screenshot the dialog as soon as it opens, then again once the read answers; read the panel's data-status at each",
         "read the Notes param: its control, its value and its hint",
         "type 3 into Estimate (h) and Confirm; capture the dispatch request and its answer; GET the task",
@@ -6856,6 +6976,12 @@
           "date": "2026-11-14",
           "change": "fixtures.knownGaps gains the record-page fact behind QA run #32940's fixture note (#32908 parked line; #33094 comment 6852480973): showcase_task's default record page is task-detail.page.ts (isDefault), whose page:header lists its actions by id, so the two scratch record_header actions draw no button there. The gap names the two shapes a run can use and asks it to record which; no fixture body was rewritten, because neither shape was driven at this base. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "steps[0] says where the action draws: QA run #33861 met the two probe actions under the record header's ⋯ overflow as menuitems, because the header already carried three inline actions (ledger row 126). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
+          "ref": "#PENDING-33963"
         }
       ]
     },
