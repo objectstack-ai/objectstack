@@ -1,0 +1,35 @@
+{
+  "number": 34101,
+  "kind": "issue",
+  "title": "The bare /published read of a name two packages register: pin both transports, give the REST 409 its candidates, decide the dispatcher's swallow (ADR-0150 D3/D5)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "lease:E1",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:34:20Z",
+  "updated_at": "2026-11-15T18:55:24Z",
+  "closed_at": "2026-11-15T18:55:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34101",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jTkZnXtRhuEiiyidvJ\n\nFiling gate: class (a), a measured inconsistency on a public door, raised as should-fix F1 by the review on PR #33885 (review-b record 6897231104, verdict 6897239914). PR #33885 declares the REST move in its changeset; this card carries the rest.\nPrior rulings read: ADR-0150 D3/D5 (a name two holders hold is refused, never guessed; the refusal names the candidates); review-b record 6897231104 F1 and N1 on #33885. Dedupe: searched `published two holders candidates`, `getMetaItemLayered PackageScopedNameRefusedError published`, `dispatcher published swallow refusal` and `meta published details.candidates`, with no open match.\n\n## Measured, with reach\n- Public door: `GET /api/v1/meta/:type/:name/published` with no package named, for a name that two served packages register in code. The example is the dashboard `sales`, registered by `app.alpha_demo` and `app.beta_demo`.\n- Host: a `RestServer` with no `objectQLProvider`.\n- Measured at PR #33885 head e516f3534b with the real protocol and the real `SchemaRegistry`, in both registration orders.\n- REST answers 409 `RESOURCE_CONFLICT` with no `details`, so `details.candidates` is missing. The plain read `GET /meta/:type/:name` of the same name answers 409 with `details.candidates` naming both packages. So does `/layers` after #33885.\n- Before #33885 the same request reached the published exit and answered 501 `NOT_IMPLEMENTED` when the host resolves no metadata service.\n  - Read from the tree, not measured: on a host whose metadata service has `getPublished`, it returns whatever `getPublished` gives.\n- With the engine wired, the REST door already answered 409 with no `details`, in both orders.\n- Dispatcher twin (`packages/runtime/src/domains/meta.ts`, `/published`, about lines 1632–1670): it catches the same `PackageScopedNameRefusedError` from `getMetaItemLayered` and answers only `OBJECT_PACKAGE_DISABLED`. Any other throw falls through to the code/package snapshot, so the two transports disagree on the same request.\n  - Read from the tree, not measured.\n- Neither transport's bare `/published` is pinned in this composition.\n\n## Landing point\n- `packages/rest/src/meta-item-history-routes.ts`: the `/published` route's final catch (`handleRouteError(res, error)`, about line 1489) should carry `{ packageScopedCandidates: true }`, as the `/layers` and plain-read catches do.\n- `packages/runtime/src/domains/meta.ts`: the `/published` catch around `getMetaItemLayered`.\n- Pins go in a card-named test file in `packages/rest/src/` and in `packages/runtime/src/domains/`, unless AGENTS.md routes them into an existing shared harness file (for example `meta-layers-ambiguous-package.test.ts`).\n- Optional, review N1: `packages/plugins/plugin-security/src/security-catalog-echo.ts` (`echoSecurityCatalogMutation`) should also recover from the two-holder refusal at a package-unbound address (`packageId: null`), not only when the address is `undefined`.\n\n## Expected\n- A bare `/published` of a name two served packages register answers on both transports what the plain read answers: 409 `RESOURCE_CONFLICT` with `details.candidates` naming both.\n  - This holds in both registration orders, with or without an engine wired, and serves neither holder's body.\n- `?package=` of each holder still serves that holder's published view.\n- CONTROL: a name one package registers is served.\n- The REST/dispatcher difference gets decided (refuse on both, or a ruled reason to keep serving the snapshot), then pinned.\n\nClause-② arm: `yes (widening)` for the added `details.candidates` key on an already-published error payload. It becomes `yes (narrowing)` if the dispatcher twin is ruled to refuse where it serves the snapshot today. `Metadata-protocol: none`."
+}

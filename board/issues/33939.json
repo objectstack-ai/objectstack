@@ -1,0 +1,34 @@
+{
+  "number": 33939,
+  "kind": "pull_request",
+  "title": "pm-dispatch: five review wording nits in three references",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:39:48Z",
+  "updated_at": "2026-11-15T15:39:16Z",
+  "closed_at": "2026-11-15T15:39:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T15:39:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33939",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9W4ZNFSqwVgp5qMMfFx2WyN)_\n\nFixes #33749\n\ndomain:skills#1 · os-steve · session_01ADHkmRCNBwQpANmcFekd9x\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:三份 pm-dispatch 参考文件里五处复审遗留的措辞小问题,全部原地改,行数不变(63/104/82)。\n- 为什么改:PR #33731 复审记下的五个 nit;不改会让席位读错 nit 去向、落地前检是否认后续记录、24h 流量的时点和 ADR/技能文本卡按什么单位立。\n- 风险与回滚:只动三行规则文字的措辞,无代码、门禁或棘轮上限变化;回滚即还原本 PR。\n- 先看:`references/triage-duties.md` 第 74 行(谁立卡不变,只补单位:每个实施 PR 一张);`references/contract-review.md` 第 51 行;第 41-42 行。\n- 两分钟验证:`node scripts/pm/check-skill-line-ratchet.mjs`,预期全部 ✓,三个文件行数等于上限且无超过 120 字节的行。\n- 需要你做的:无,席位落地(Tier S)。\n\n## What changes\n\nFive nits in six in-place line edits, 0 net lines (+6 / -6), every touched line at or under 120 bytes. Each item is the card's, verbatim line re-read on `origin/main` 895783a1.\n\n- **N2, `contract-review.md` L41-42.** The nit route now points at the filing rule: 「转后续卡(`filing-gate.md`)」. Bytes paid in the same bullet: 「同一复核者」 to 「原复核者」 (the spelling `lanes/review.md` already uses for the delta reviewer), 「delta 复核修复」 to 「delta 复核」, the repeated subject 「nit 」 after 「仅 nit 即终轮,」 dropped, and 「(无碍正确性与契约)」 to 「(无碍正确与契约)」, which lets 「由」 move up to L41. 「只改散文面」 is kept. 「PR 后续卡」 lost its 「PR」: the card title lives in `filing-gate.md` now pointed at.\n- **N5, `filing-gate.md` L35.** 「接受偏差」 back to 「接受的偏差」, the spelling of `contract-review.md` L42 and of the ACCEPT checklist in `SKILL.md` (核对六项 … 接受的偏差). The title code span is now separated from 「逐项勾」 by a space. Paid in place: the three 「、」 inside the parenthesis became `/` (the file's own sub-list separator, as in 「文案/文档」).\n- **N6, `contract-review.md` L51.** Pre-check ① now reads 「现 head 末条同形达档 PASS,无未闭前两级」: the LATEST record on the head governs, and a finding it records as closed no longer counts. That is what the queue guard does (`check-governed-queue-guard.mjs`: a later same-head delta record that closes the findings clears; one that raises a new should-fix refuses though an older clean PASS stands). Paid in place: 「两条」 (the ① ② that follow count them) and 「在案」 (「末条」 takes its place).\n- **N3, `triage-duties.md` L16.** 「每 3 小时」 now names its clock: 「UTC 3 倍数时的轮次记录」, the rounds whose UTC hour is divisible by 3. That keeps the 3-hour cadence and judges by fire time, as L9 of the same file does for tiers (never by a counter). Paid in place: the list's three 「、」 became `,`.\n- **N4, `triage-duties.md` L74.** Now 「ADR/技能文本携带注记 ⛔ 不挂实施卡,每实施 PR 一 `domain:skills` 卡;ADR 由落地席合并后立。」 Who files stays as on `main`: the skills-text card is triage's at first touch (`lanes/skills.md` 「分诊首触即立本域子卡」), the ADR card the landing seat's after the merge (`execution-duties.md`). Only the unit is added: one card per implementation PR, for both halves. The PR need not exist yet; the card is named by the PR it will follow.\n\n## Tests\n\nNo test changes; no script, workflow or package is touched.\n\n## Acceptance notes\n\n- **Review round 1 (record 6896322254, FAIL with M1):** M1 fixed by the record's fix (a), the seat's ruling: L74 keeps `main`'s actors and only gains the per-PR unit for both halves. Moving the skills-text card's filer would need a decision card, which this nit card does not carry. Nits Na (restore 「只」) and Nb (name the clock in L16) taken, both in place.\n- **N2 compression:** none of the dropped words carries a rule. 「修复」: the delta review is of the fix by definition (`lanes/review.md` 「delta 复审归原复核者」). 「正确性」 to 「正确」 keeps the nit definition's meaning (no harm to correctness or contract).\n- `grep` over `scripts/`, `.claude/`, `.github/`, `docs/` and `AGENTS.md` for every replaced phrase (「无前两级」, 「复核修复」, 「同一复核者」, 「PR 后续卡」, 「接受偏差」, 「逐项勾」, 「每 3 小时」, 「只改散文面」, 「前检两条」) finds no pin outside the three files.\n- Serial: #33716 and #33601 also edit `contract-review.md` and wait for this PR.\n\n## Verification\n\nAll on head `c448de7a`, derived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (20 families, no paths passed).\n\n<details><summary>Derived gates: 20 run, 20 exit 0; reconciliation</summary>\n\n- `pnpm check:pm-skill-ratchet`: exit 0 (contract-review.md 63/63, triage-duties.md 104/104, filing-gate.md 82/82, no line over 120 bytes; touched lines 120, 118, 119, 120, 120, 119)\n- `pnpm check:pm-skill-id-lint`: exit 0 (115 files clean)\n- `pnpm check:skill-frame-sync`, `pnpm check:pm-record-recognisers`, `pnpm check:pm-half-states`, `pnpm check:pm-governed-merges`, `pnpm check:pm-label-write`: exit 0\n- `pnpm check:doc-authoring`, `pnpm check:nul-bytes`, `pnpm check:agent-test-spelling`, `pnpm check:cross-package-test-inputs`, `pnpm check:driver-memory-census`, `pnpm check:gitlink-declared`, `pnpm check:refd-timer-probe`, `pnpm check:watch-hint-literal`: exit 0\n- `node scripts/check-closing-keyword-parity.mjs` and `--self-test`, `node scripts/check-comment-mask-corpus.mjs`, `node scripts/pm/check-harness-current.mjs --self-test`: exit 0\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions`: exit 0, after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the verify lock (VERDICT command-exit 0)\n- `dispatch-gates --ran`: 20 derived families accounted for, 20 run, 0 NOT-MEASURED (a derived zero: all 20 recorded an exit code)\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRCNBwQpANmcFekd9x)_\n\n<!-- signed: domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19 -->\n"
+}

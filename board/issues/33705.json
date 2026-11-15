@@ -2,8 +2,8 @@
   "number": 33705,
   "kind": "issue",
   "title": "pm: check-owed-reviews and the H43 patrol read verdicts from any author and the first match, unlike the queue guard",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T06:50:03Z",
-  "updated_at": "2026-11-15T07:50:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T15:41:09Z",
+  "closed_at": "2026-11-15T15:39:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33705",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight: the at-tier contract review 6890532571 on PR #33687, card #33541, found this outside its diff, by reading).\n\nAfter PR #33687 the queue guard reads a Tier S record only from `FLEET_BOT_LOGIN` or `GOVERNED_APPROVERS` and only on exactly one `VERDICT:` line. `scripts/pm/check-owed-reviews.mjs` and the H43 patrol in `check-half-states.mjs` still read every author and take the first verdict match (`contractReviewVerdictOf`). They can show a PR as reviewed, or as PASS, where the guard now refuses it. This affects display and patrol only; the guard decides the landing.\n\n## What lands\n\nBoth readers take the guard's author binding and the guard's one-line verdict reading (one reader, imported, not copied), with a self-test row each for an untrusted author's PASS and a two-line record.\n\nWait for PR #33687 to merge (same files). Display only, so p3 by the seat's reading; triage grades.\n"

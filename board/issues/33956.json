@@ -1,0 +1,37 @@
+{
+  "number": 33956,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): hide Resend Invitation on a cloud-managed environment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:53:12Z",
+  "updated_at": "2026-11-15T17:22:59Z",
+  "closed_at": "2026-11-15T17:22:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T17:22:56Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33956",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi92RMf51Kdq6B1SCtfWLQzZt)_\n\nFixes #33758\nClause-②: no — it narrows where one action is offered; no acceptance set or public export widens\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：「重新发送邀请」(Resend Invitation) 在云托管环境里不再出现，和「邀请用户」的四处入口、「复制邀请链接」一样隐藏；非托管环境照旧显示。\n- 为什么改：托管环境的成员只从身份提供方进入，邀请接口在托管环境一律返回 409，重新发送也不例外；按钮留着只会让管理员点了看到冲突错误。\n- 风险与回滚：只给一个操作加了一个可见性条件，并在功能开关登记表里登记；回滚即还原本 PR，无数据或接口变化。\n- 先看：`packages/platform-objects/src/identity/sys-invitation.object.ts`（新增的 `visible` 一行）、`packages/spec/src/kernel/public-auth-features.ts`（`cloudManaged.gatedInputs` 新增一条）、`identity/cloud-managed-visibility.test.ts`（新钉子）。\n- 两分钟验证：`pnpm --filter @objectstack/platform-objects exec vitest run src/identity/cloud-managed-visibility.test.ts src/feature-gate-guard.test.ts`，预期全绿，其中 Resend Invitation 的托管隐藏用例在列。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `sys_invitation.resend_invitation` gains `visible: 'features.cloudManaged != true'`, the same authored term the four `invite_user` mirrors carry. A resend is a call to `POST /api/v1/auth/organization/invite-member`, which plugin-auth's before-hook refuses on a cloud-managed environment with `409 RESOURCE_CONFLICT` whatever the body says, resends included. The lowered predicate becomes `((features.cloudManaged != true) && INVITE_REACH) && features.organization != false`, matching the mirrors.\n- `PUBLIC_AUTH_FEATURES.cloudManaged.gatedInputs` books `sys_invitation.actions.resend_invitation`, as `feature-gate-guard.test.ts` requires of every `features.*` reference (its reverse walk reds an unbooked one; its forward row now holds the action to the gate).\n- Root changeset `.changeset/33758-hide-resend-invitation-cloud-managed.md`: `patch` on `@objectstack/platform-objects` and `@objectstack/spec`.\n\n## Tests\n\n- New block in `identity/cloud-managed-visibility.test.ts`, evaluated through `@objectstack/formula`'s CEL engine on the parsed object: Resend is hidden on an unexpired pending row and on a pending row past its `expires_at` while managed, offered on both as before when the flag is off, and still hidden when `organization` is off.\n- Forced test edit: `platform-objects.test.ts`, the lowering row for `SysInvitation.resend_invitation` now expects the managed term first (`((MANAGED) && INVITE) && ORG`), the same shape as the `invite_user` rows. The row pins the served predicate byte-for-byte, so it has to move with the gate.\n- Not edited: `invitation-delivery-copy.test.ts` keeps its \"Resend stays offered on a pending row past its expires_at\" pin green unchanged (it evaluates with `cloudManaged` unset, which reads as unmanaged).\n\n## Acceptance notes\n\n- `resend_invitation` carries no `status` term of its own; which rows it appears on is decided by the list views that project it (the pending view). Unchanged here, noted only because the card's Facts say \"offered on a pending invitation row\".\n\n## Verification\n\nHead: 8883bc6e.\n\n<details><summary>Ablation: the term removed, the pins go red (4 failed)</summary>\n\nMutation through `scripts/ablation-replace.mjs` on `sys-invitation.object.ts`: the line `visible: 'features.cloudManaged != true',` under `resend_invitation` removed (anchor x1 to x0, marker `ABLATED-33758` x0 to x1, blob 81560437a0c7 to 72d6a4077144). No build step: the three suites import the object from `src/` by relative path.\n\n```\n× sys_invitation.actions.resend_invitation is gated on cloudManaged          (feature-gate-guard forward row)\n× SysInvitation...#resend_invitation lowers to the previous hand-written predicate  (platform-objects.test.ts)\n× is hidden on an unexpired pending row while the environment is cloud-managed\n× is hidden on a pending row past its expires_at while the environment is cloud-managed\nTests  4 failed | 310 passed (314)\nos-verify-lock: VERDICT command-exit 1\nablation-replace: ok restored: blob == HEAD (81560437a0c7) and `git diff HEAD` is empty\n```\n\nA first attempt was a no-op: its anchor missed (the comment line starts with `// `), and the tool refused to run (`ANCHOR MISS`, exit 3), so nothing was measured on it. A second spelled a replacement that was a substring of its anchor and was refused for the same reason (`replacement count moved 1 -> 1`); restored, nothing measured. The third is the reading above.\n\n</details>\n\n<details><summary>Package tests and typecheck</summary>\n\n```\npnpm --filter @objectstack/platform-objects build && test && typecheck\n Test Files  122 passed (122)\n      Tests  1999 passed (1999)\nos-verify-lock: VERDICT command-exit 0\npnpm --filter @objectstack/spec typecheck && vitest run src/kernel\n Test Files  65 passed (65)\n      Tests  1487 passed (1487)\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 87 commands)</summary>\n\nRun at head 8883bc6e, each exit captured before any pipe, reconciled with `dispatch-gates --ran`:\n\n```\nRun reconciliation — 87 derived, 85 run, 2 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 87 derived famil(ies) accounted for — 85 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3).\n```\n\n- 85 exit 0, none red. `pnpm check:i18n` and `pnpm check:lean-entry-closure` first answered exit 3 (PREREQUISITE NOT MET); after the closure build each names, both re-ran exit 0 (`check-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys)`).\n- NOT MEASURED, reason: `node scripts/check-plugin-teardown-shape.mjs --self-test` (its positive control is pinned to a commit outside this shallow clone; checker-health only) and `pnpm check:dual-build-cjs-loads` (reads every package's built output; a full `pnpm build` is CI's). Both run in CI's `Lint & Repo Gates`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSvqbEXcD82ahq7W2C)_\n"
+}

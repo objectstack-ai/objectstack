@@ -1,0 +1,35 @@
+{
+  "number": 33994,
+  "kind": "pull_request",
+  "title": "fix(cli): os datasource introspect --out jail judges the realpath, not the spelling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:34:50Z",
+  "updated_at": "2026-11-15T16:43:26Z",
+  "closed_at": "2026-11-15T16:43:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T16:43:24Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33994",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbTGhxJSYAmQXU7efVdNqrpw)_\nFixes #33841\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`os datasource introspect --out` 写文件前按解析符号链接后的真实位置判断是否在当前目录内;`--out` 本身是符号链接也拒绝。\n- 为什么改:原检查只看路径字面,项目里一个指向外部目录的符号链接就能让服务端生成的草稿写到项目外,且退出码 0。\n- 风险与回滚:只动这一个命令的 `--out` 分支;拒绝文案与退出码 2 不变;回滚即 revert 本 PR。\n- 先看:`packages/cli/src/commands/datasource/introspect.ts` 的 `landsInside`(上溯到最近的已存在目录再 realpath),然后是同目录新测试。\n- 两分钟验证:`pnpm --filter @objectstack/cli exec vitest run --project unit src/commands/datasource/introspect-out-jail.test.ts`,预期 8 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`packages/cli/src/commands/datasource/introspect.ts`: after the existing lexical check (absolute path, `../` escape; both unchanged), `--out` is judged again on the location the write would really land on:\n\n1. an `--out` that is an existing symlink is refused (`writeFile` follows it, even when it dangles);\n2. the realpath of the nearest existing ancestor directory of the target must sit under the realpath of the current directory.\n\nBoth refusals reuse the existing message (`--out must be a relative path within the current directory: OUT`) and its exit code 2. A plain relative in-tree path writes as before, also from a current directory reached through a symlink. No directory is created: a missing intermediate directory still fails in `writeFile` with `ENOENT`, as before.\n\nNew test beside it, `introspect-out-jail.test.ts` (unit tier: no spawn, no driver), each case in its own temp tree removed in `afterEach`:\n\n- in-tree directory symlink to an outside dir: refused, exit 2, outside dir stays empty;\n- target that is an existing (dangling) symlink: refused, exit 2, nothing written outside;\n- plain nested in-tree path: writes the server's source;\n- cwd reached through a symlink: still writes;\n- missing subdirectory: `ENOENT` as before, not the jail refusal, nothing created;\n- `../x.object.ts`, `objects/../../x.object.ts` and an absolute path: refused exactly as before.\n\nChangeset: `@objectstack/cli` patch.\n\n## Tests\n\n<details><summary>Ablation 1: realpath of the ancestor replaced by the lexical path (on-disk proof, red quoted)</summary>\n\n```\nablation-replace: anchor   \"const real = await realpath(dir);\"  x1 (before)\nablation-replace: ok mutation landed: anchor 1 -> 0, blob 1337969a6392 -> 579c69b33151\n FAIL  ... > refuses an in-tree directory symlink that points outside, and writes nothing there\nAssertionError: expected undefined to deeply equal { …(2) }\n FAIL  ... > still writes when the cwd itself is reached through a symlink\n      Tests  2 failed | 6 passed (8)\nablation-replace: ok restored: blob == HEAD (1337969a6392) and `git diff HEAD` is empty\n```\n</details>\n\n<details><summary>Ablation 2: the symlink-target leg removed</summary>\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob 1337969a6392 -> 6665d1768957\n FAIL  ... > refuses a target that is itself an existing symlink, even a dangling one\n      Tests  1 failed | 7 passed (8)\nablation-replace: ok restored: blob == HEAD (1337969a6392) and `git diff HEAD` is empty\n```\n</details>\n\n<details><summary>Suites on head 7229d6274a</summary>\n\n```\npnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2 src/commands/datasource/\n Test Files  2 passed (2)\n      Tests  20 passed (20)            (8 new + 12 in envelope-unwrap.test.ts; run on fff6074a7, before the main merge, which touched no datasource file)\n\nNODE_OPTIONS=--max-old-space-size=8192 pnpm --filter @objectstack/cli typecheck   -> TYPECHECK-EXIT=0\n\npnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2       (whole unit tier)\n Test Files  2 failed | 421 passed (423)\n      Tests  5981 passed | 29 skipped (6010)\n the two failures: test/published-subpath-console.pin.test.ts, test/published-subpath-hook-body.pin.test.ts,\n both \"packages/cli is not built (./dist/index.js is absent)\" (a prerequisite, the closure build excluded cli itself);\n after pnpm --filter @objectstack/cli build:\n Test Files  2 passed (2)\n      Tests  29 passed (29)\n```\n\nThe `integration` tier is left to CI: the diff touches no integration-tier file, no spawn entry and no driver boot path.\n</details>\n\n## Acceptance notes\n\n- The check and the write are two steps, so a symlink swapped in between them is not caught (time-of-check to time-of-use). The card's threat is a symlink already present in the tree; closing the race would need an `O_NOFOLLOW` open on every path component, which is not what the card asked for.\n- The existing lexical prefix check still spells the separator as `/`, so on Windows it reads as refusing every `--out` (read from the code, not run). Unchanged here, noted only; the new check uses `path.sep`.\n- The pre-existing `envelope-unwrap.test.ts` also drives this command; these pins went into a new file as the claim's file surface names, not into that one.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, head 7229d6274a)</summary>\n\n```\nRun reconciliation: 65 derived, 61 run, 1 NOT-MEASURED, 3 UNRUN.\n61 run: exit 0 each (pnpm check:i18n-walk-parity first exited 3, CLI not built; exit 0 after the cli build).\nNOT MEASURED: pnpm check:i18n-coverage, exit 3: examples/app-showcase needs @objectstack/connector-slack built (example closure, unrelated to this diff); CI runs it.\nUNRUN, left to CI: pnpm check:type-check-debt (verify-lock gate, rebuilds spec dist), pnpm check:dual-build-cjs-loads, pnpm check:i18n.\ndispatch-gates --tier: no path-derived mandate; Clause-② no (narrows a CLI flag's accepted paths to what its own refusal already declared; no spec, schema or published export moves).\neslint --no-inline-config on the two touched .ts files: exit 0.\n```\n</details>\n\nSession: `session_01QsR2jTEivi2wogPpeo3xd5` (https://claude.ai/code/session_01QsR2jTEivi2wogPpeo3xd5)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -2,8 +2,8 @@
   "number": 33571,
   "kind": "issue",
   "title": "docs(ADR-0055): three sentences still state the master-edit write rule without the writeRequiresMasterRead caveat (follow-up of #33425)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:52:39Z",
-  "updated_at": "2026-11-15T00:58:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:09:21Z",
+  "closed_at": "2026-11-15T16:09:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33571",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-ups from the at-tier retro review of merged PR #33425, card #33373; record on that PR).\n\nPR #33425 added the 2026-11 amendment to `docs/adr/0055-master-detail-controlled-by-parent.md` (the `writeRequiresMasterRead` opt-in) and ⚠️ notes on the older lines it changes. Three sentences on `main` still read as if no opt-in exists:\n1. The 2026-09-07 amendment's Write bullet (near line 136) says the walk runs the three master-edit legs \"on every hop\", with no ⚠️. On an opted-in hop the walk asks read and stops.\n2. The 2026-11-07 status line (\"setting a master asks edit… emptying one asks edit\") has no ⚠️, though its body line and the 2026-10-26 status line got one.\n3. \"`checkControlledByParentWrite` answers `deny` for all of them\": the member's signature is `(object, recordId, context)`, so it answers only for a stored row, not an insert or a re-point body.\n\n**What lands.** One ⚠️ pointer on each of 1 and 2 to the 2026-11 amendment, and 3 reworded to what the member judges. No ruled sentence changes. `docs/adr/**` is Tier H; `skip-changeset`; `Clause-②: no`. Optional in the same PR: the invariant paragraph's \"every refusal still says 'requires edit access'\" (the null-master owner refusal never did).\n"

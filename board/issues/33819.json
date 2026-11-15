@@ -2,8 +2,8 @@
   "number": 33819,
   "kind": "issue",
   "title": "skills(data): tell the builder to resolve security-rollup-source-unreadable by masking the parent summary on a set that may not read the child",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:26:20Z",
-  "updated_at": "2026-11-15T11:29:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:33:08Z",
+  "closed_at": "2026-11-15T16:31:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33819",
   "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiling-gate category: ③ maintainer-directed (a row of epic #33595's milestone table, added by eval#1). Maintainer, 2026-11-15 ~11:22Z, verbatim on eval#1's decision card: 「改为搭建侧处理」. This is the authoring half of that ruling. Its scoring half is the scenario-runner card filed beside it.\n\n## Mechanism\n\n`os build` warns `security-rollup-source-unreadable` when a permission set can read a parent's roll-up (`summaryOperations`) field but cannot read the child object, the aggregated child field, or a field the roll-up's `filter` tests (`packages/lint/src/validate-rollup-source-visibility.ts`; `os explain security-rollup-source-unreadable`). The warning never fails the build. The authoring skill (`skills/objectstack-data`, e.g. `rules/relationships.md` / `rules/field-types.md` on roll-ups) does not tell the builder to resolve it. So builders finish with it standing: eval#1 found it in the build transcript of all 15 live `project_with_tasks` builds on main `3be13473` (2026-11-15).\n\n## Why it matters\n\nThe set that may not see the child still reads an aggregate of it through the parent, so data the business means to hide leaks as a count or sum. The fix is one line in the permission set, and a builder that knows the warning makes it.\n\n## Done when\n\n- The skill's roll-up guidance tells the builder to resolve a `security-rollup-source-unreadable` warning before finishing. When the set may not see the child, mask the parent summary on that set (`fields[\"<parent>.<summary>\"]: { readable: false }`). When it should see the child, grant the read. It never leaves the warning standing.\n- The guidance carries one worked example in the skill's own dialect, checked against the lint rule (the masked set raises no warning).\n- Skill edits follow the skills lane's own gates (teaching-card ratchets, evals) as AGENTS.md sets them.\n\n## Reader\n\nThe `domain:skills` lane seat, through `pm:queue`. It is filed beside the epic seat's `domain:devx` scoring card; the two do not share files.\n\nDedup: `repo:objectstack-ai/objectstack is:issue security-rollup-source-unreadable` → 40 hits; none open beyond #33595 and two PM seat posts; no skills card on it."

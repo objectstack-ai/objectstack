@@ -1,0 +1,33 @@
+{
+  "number": 34093,
+  "kind": "issue",
+  "title": "ADR-0055: mark the 2026-11-07 chain clause for writeRequiresMasterRead, and narrow \"answers deny for all of them\" to a stored row",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:27:14Z",
+  "updated_at": "2026-11-15T18:57:03Z",
+  "closed_at": "2026-11-15T18:57:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34093",
+  "body": "domain:skills#2 · os-steve · session_01ADHkmRxXmVQ41fqnaTPGAv\n\nFiling gate: ① (follow-ups named by reviews of work in flight: F2 of the at-tier contract review 6899080787 on PR #34075, card #33432; and nit 6 of the at-tier review 6886893250 on PR #33425, which no card carries — #33432 took nits 1 to 5 only). Both are outside PR #34075's claimed edits. Dedupe: `repo:objectstack-ai/objectstack is:issue is:open ADR-0055 chain writeRequiresMasterRead`: only #33432.\n\nBlocked-by: #33432 (PR #34075, same file; serial).\n\n## 维护者速读\n\n- 内容:只改 ADR-0055 两处措辞,不改代码。① 2026-11-07 状态行与正文 Chains 条说「主记录为空的链上一跳按该行的属主规则结束链」;在声明了 `writeRequiresMasterRead` 的子对象那一跳,链在问主记录读权后就结束,不再看那一跳的属主规则,这两处还没加注。② 「`checkControlledByParentWrite` answers `deny` for all of them」:该成员只问已存的记录,新增和改挂主记录的请求体问不到它,应收窄为「对这类调用者的已存记录」。\n- ADR 属受管文件,需要您亲手合并。\n\n## What to write\n\nOn `main` (after PR #34075 lands, re-read every line number):\n\n1. **F2.** The 2026-11-07 status line's clause \"a chain hop with no master of its own ends the chain under the same rule\", and the 2026-11-07 body's **Chains** bullet (\"A hop whose master is itself `controlled_by_parent` with an optional master of its own, left empty, ends the chain there and asks that row's owner rule\"). On a hop whose detail declares `writeRequiresMasterRead`, `security-plugin-cbp-write-gate.ts#assertControlledByParentChainEditable` asks read on that master row and `break`s before it looks at that row's own reference, so the owner rule is not asked there. Add one in-place ⚠️ clause at each spot, in the form PR #34075 used for the same status line; do not rewrite the old text.\n2. **Nit 6 of 6886893250.** In \"What a refusal answers\" (2026-11-14 amendment): \"`ISecurityService.checkControlledByParentWrite` answers `deny` for all of them\". The member's signature is `(object, recordId, context)`: it answers the by-id cases only; an insert or a re-point body cannot be put to it. Narrow it to \"for a stored row of such a caller\" (insert-only edit if it can be done that way; otherwise the smallest replacement, kept on the record in the PR body).\n3. Leave the `**Status**:` line, ADR-0139 and every other section alone. No code, no test, no changeset (`skip-changeset`). Gates: the ADR registry, index and anchor checks `dispatch-gates --commands` derives.\n\n## Reader\n\n`domain:skills` (`docs/adr/**` is governed: maintainer merge, Tier H). Size XS. Same class as #33432.\n\n⛔ Not a claim. Grading is triage's."
+}

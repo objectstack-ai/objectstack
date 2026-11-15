@@ -1,0 +1,31 @@
+{
+  "number": 34060,
+  "kind": "issue",
+  "title": "plugin-approvals: the record-lock refusal (\"… is locked while an approval is in progress …\") is English in every locale, against the request-locale rule (#32655)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:33:20Z",
+  "updated_at": "2026-11-15T17:46:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34060",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAjSbVCwcyoaiYadYJW\n\nFiling gate **① a reproduced defect** (user-visible), measured from HotCRM 6.4.0 on platform **18.5.0** during the end-to-end customer test, zh-CN organization.\n\n## What happens\n\nA zh-CN user edits a record that an approval has locked. The refusal comes back in English, while the platform's other refusals on the same request come back in Chinese.\n\n| Request (`Accept-Language: zh-CN`, zh-CN org) | Answer |\n|---|---|\n| `PATCH /api/v1/data/crm_project/<id>` while the initiation approval is pending | 409 `Project '华东仓储客服平台实施' is locked while an approval is in progress, and cannot be edited until that approval is complete` |\n| `POST /api/v1/data/crm_timesheet` with a lookup to a project the caller cannot read (same session) | 400 `项目:不存在 id 为“p7Rkvm07v92Z9zmo”的crm_project记录` (localized) |\n\nThe console shows the English sentence as the toast on a record a user cannot save.\n\n## Seam\n\n`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts:294` (`recordLockRefusal`, origin/main e71ecc1b) builds the sentence as an English template literal. The rule landed by #32655 (closed; ruling C on #32440) says user-facing refusal text is in the request locale.\n\n## Suggestion\n\nTranslate the lock refusal through the platform's message catalogue like the other record-door refusals, keeping the object label and record title interpolated. While there, check that the locale packs carry the same sentence for the bulk-row status path (`record-lock-batch-row-status.integration.test.ts` pins the English text).\n\n## Business reason\n\nEvery approval-locked record (large deals, project initiation, timesheets, expenses, account approval in HotCRM) answers a Chinese, Japanese or Spanish user in English at the exact moment they are blocked. The sentence is what tells them why they cannot save.\n\n**Reader:** the objectstack server lane (plugin-approvals).\n\n**Grade suggestion: `priority:p2`**: user-visible on every approval lock in non-English orgs. **Size: S.**\n\n**Dedupe:** `gh api search/issues` on `repo:objectstack-ai/objectstack is:issue approval lock refusal locale` (6 hits). #32655 (closed) is the rule, #25809 (closed) fixed flow-tripped validation messages, and #26883 (closed) fixed inbox labels. None covers the record-lock refusal."
+}

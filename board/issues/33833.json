@@ -2,8 +2,8 @@
   "number": 33833,
   "kind": "issue",
   "title": "手机宽度下列表的视图名被截成一个字（「全部客户」显示为「全.」）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:49:42Z",
-  "updated_at": "2026-11-15T12:50:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T17:04:28Z",
+  "closed_at": "2026-11-15T17:03:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33833",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，reach: 界面实测一次。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq`（Jack，免费版，HotCRM 6.1.2）。报告：https://claude.ai/artifact/XaMk7Uo36seWMKsPy5ETPM，视口 375×812，HotCRM → 客户。\n\n## 现象\n\n顶部工具条把视图切换器挤到只剩「全.」，旁边「· 10」「在队列中」和四个图标按钮占满了宽度；用户看不出当前是哪个视图。页面本身没有横向滚动（scrollWidth 375）。\n\n## 业务理由\n\n手机上切视图是常用操作；只剩一个字时无法分辨「全部客户」「我的客户」等视图。\n\n## 修复方向\n\n窄屏下把视图名放到第一行、工具按钮折叠到「更多」，或视图名至少保留 4–6 个字再省略。\n\n## 验收\n\n1. 375px 宽度下视图名完整显示或至少可辨认（如「全部客户」）。\n\n## Reader\n\nobjectstack console 车道（`domain:ui`），列表工具条的窄屏布局。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack mobile view switcher name truncated` → 3 条，均为 QA 汇总卡，没有该截断问题的卡。"

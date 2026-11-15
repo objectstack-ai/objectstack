@@ -1,0 +1,33 @@
+{
+  "number": 34072,
+  "kind": "pull_request",
+  "title": "fix(console): the Settings pages send the session language, so server-composed copy matches the page",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:47:48Z",
+  "updated_at": "2026-11-15T18:03:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34072",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9FyqJR42pdMEnHR57kzbNCK)_\nFixes #33857\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：控制台「设置」页的四个请求（读设置列表、读某个命名空间、保存、执行动作）现在带上会话界面语言作为 `Accept-Language`，取值来源是页面根元素的 `lang` 属性（`document.documentElement.lang`），和元数据、数据请求用的同一个来源。\n- 为什么改：服务端按请求语言拼文案（本地化页的「默认币种已锁定」横幅、保存被拒的提示、动作结果），之前这四个请求只带浏览器自己的语言，中文会话在英文浏览器上看到的这几处是英文，页面其余部分是中文。\n- 风险与回滚：只改 `settings/api.ts` 的请求头构造；没有界面语言时不发这个头，行为与之前完全相同；不碰服务端、不碰鉴权。回滚即还原这一个提交。\n- 先看：`ui/apps/console/src/pages/settings/api.ts` 的 `jsonHeaders`；再看 `api.envelope.test.ts` 末尾新增的一组测试。\n- 两分钟验证：`pnpm --dir ui exec vitest run apps/console/src/pages/settings/api.envelope.test.ts`，预期 28 条全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`jsonHeaders()` in `ui/apps/console/src/pages/settings/api.ts` is the header set all four `/api/settings` calls send (`listSettingsManifests`, `getSettingsNamespace`, `saveSettingsNamespace`, `runSettingsAction`). It now adds `Accept-Language` from `document.documentElement.lang` when that is non-empty.\n\n- Source: the html element's `lang` attribute is what `createAuthenticatedFetch` in `@object-ui/auth` stamps on the console's metadata and data calls, and the i18n provider keeps it in step with the language switcher. No second locale source is introduced; the docblock says the two stamps must agree.\n- The server side is unchanged: `requestLocaleOf` in `service-settings`' `settings-routes.ts` already reads the top `Accept-Language` tag (the card measured `curl -H 'Accept-Language: zh-CN'` answering the zh-CN currency-lock copy).\n- Unchanged: with no `lang` on the html element the header is left out and the browser's own goes, as before. `getJudgedClientAddress` (the `/api/v1/auth` client-address read in the same module) is not one of the four calls and returns no composed copy; it is untouched.\n\n## Tests\n\nOne new top-level `describe` in the module's existing harness `api.envelope.test.ts` (no new file), against the harness's `fetch` stub:\n\n- each of the four calls, with the html element's `lang` set to `zh-Hans`, sends `Accept-Language: zh-Hans` and keeps `Accept` / `Content-Type: application/json`;\n- CONTROL: each of the four calls with an empty `lang` on the html element sends no `Accept-Language`;\n- a language switch between two calls reaches the second (`['en', 'zh-Hans']`).\n\nNo existing test was edited.\n\n## Acceptance notes\n\n- Routing these four calls through `createAuthenticatedFetch` itself (the move `services/approvalsApi.ts` made) was weighed and not taken here: it also adds the bearer, `X-Tenant-ID`, session-rotation adoption and the 401/403 session events to the settings calls, and every settings test whose `fetch` double has no `headers` member (about 14 files under `pages/settings/__tests__/`) would need a forced edit, because that transport reads `response.headers`. That is a transport change, not this card's. Left as an open question for the seat.\n- The card's acceptance (the Localization banner reads `默认币种已锁定：USD` on a zh-CN session) is pinned at the request layer here; it was not re-measured in a browser against a live server. The card's own curl control shows the server answers that copy for `Accept-Language: zh-CN` / `zh-Hans`.\n\n## Verification\n\n<details><summary>Ablation (fix committed first; restored blob == HEAD)</summary>\n\n- `node scripts/ablation-replace.mjs` deleted the `if (lang) headers['Accept-Language'] = lang;` line (anchor 1 -> 0, blob 55abaf1f -> 4caa2363) and ran `api.envelope.test.ts`: 5 failed | 23 passed (28). Red: the four \"sends the session language\" cases and the language-switch case. The four CONTROL cases stay green. Restore: blob == HEAD 55abaf1f, `git diff HEAD` empty.\n\n</details>\n\n<details><summary>Local runs at d41fbf12</summary>\n\n- `pnpm --dir ui exec vitest run apps/console/src/pages/settings/` (under the verify lock): Test Files 40 passed (40); Tests 387 passed (387).\n- `pnpm --filter @object-ui/console run type-check` (after `turbo run build --filter='@object-ui/console^...'`, under the verify lock): exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 36 derived families, each run, all exit 0; `--ran` reconciliation: 36 derived, 36 run, 0 NOT-MEASURED, 0 UNRUN. `pnpm --dir ui exec vitest run scripts/`: 171 files passed, 2 skipped; 5065 tests passed, 2 skipped.\n- Branch rebased onto `main` e71ecc1b before the runs; nothing pushed before the rebase.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmTMJ1tS7fhvnNnQSxg)_\n"
+}

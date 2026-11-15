@@ -2,8 +2,8 @@
   "number": 33537,
   "kind": "issue",
   "title": "os deploy --dry-run against a runtime reads the install ledger file while the real install reads the database, so a host that kept its DB but lost .objectstack/ gets a clean plan and then a 409",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "bug",
     "domain:server",
     "lease:A5",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T23:53:10Z",
-  "updated_at": "2026-11-15T00:55:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:08:32Z",
+  "closed_at": "2026-11-15T16:08:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33537",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nFound by a qa#3 routine round (owed:weekly) at objectstack main 0c2aeb96, beside the clauses of `cli.deploy-runtime-dry-run-json` (off-clause probe, RUNNER rule 8). Severity: low. No open issue covers it; related: #32913 (stating and pinning the moved install-local answers, the dry run among them).\n\n## Reproduction (scaffold package `com.qa.deploy`, a showcase runtime booted with a file DB)\n\n1. `os deploy` version 1.0.0 (object `qa_deploy_item` with a text field `note`) to the runtime → \"Live: … now serves com.qa.deploy 1.0.0\"; the runtime writes `.objectstack/installed-packages/com.qa.deploy.json` under its app directory and the package row into its DB.\n2. Remove that one file (`.objectstack/installed-packages/com.qa.deploy.json`), leaving the database as it is — the shape of a host whose database volume persists but whose app directory does not.\n3. Author 1.1.0 that renames `note` → `memo` without `renamedFrom`, then `os deploy --dry-run` → exit 0, \"Version: 1.1.0 (not installed)\", \"Objects + qa_deploy_item\", \"Nothing in this plan asks for a confirmation\".\n4. `os deploy --json` (off-TTY) against the same runtime → exit 1, `result: \"refused\"`, 409 `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, `installedVersion: \"1.0.0\"` (read from the DB).\n\nExpected: the dry run answers what the install will answer — \"installed: 1.0.0\" and \"would stop for your confirmation\" — as it does when the file is present (re-run with the file restored: plan correct).\n\n## Mechanism (from source, not proven by a pin)\n\nThe dry run's answer (`answerUpgradeDryRun` in the cloud-connection `marketplace-install-local-plugin.ts`) reads the on-disk install ledger (`this.ledger.read`), while the install gate reads the installed version from the database, so the two disagree whenever the ledger file and the DB drift apart.\n\nQA-source: #33534 · cli.deploy-runtime-dry-run-json · observed beside the clauses"

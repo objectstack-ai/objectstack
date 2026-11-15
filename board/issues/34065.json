@@ -1,0 +1,33 @@
+{
+  "number": 34065,
+  "kind": "pull_request",
+  "title": "ci(stale): exempt the governed-merges audit card from stale closing",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:35:37Z",
+  "updated_at": "2026-11-15T19:08:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34065",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi97iMBTNTVSni5kLP5hxtETh)_\n\nFixes #33993\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** `stale.yml` 的 `exempt-issue-labels` 加上 `governed-merges-audit`,上方补一行注释说明原因;其它键不动。\n- **为什么改:** 治理合并周审立的卡在受管审批人亲手关之前都是未裁状态。巡查一旦停摆,这张卡 74 天后会被 stale 机器人关掉,而机器人关卡不算裁决,只由这张卡承载的 BREACH 行就此不在任何打开的卡上。与已有的 `tracking` 豁免同理。\n- **风险与回滚:** 只影响 stale 机器人跳过带该标签的 issue,不碰 PR 规则、不碰其它 workflow。回滚即还原这一行。\n- **先看:** `.github/workflows/stale.yml` 第 53–54 行(新注释与 `exempt-issue-labels`)。\n- **两分钟验证:** 看 diff 只有 2 增 1 删;`exempt-issue-labels` 的值读作 `pinned,security,roadmap,tracking,governed-merges-audit`。\n- **需要你做的:** 受管文件(`.github/workflows/**`,Tier H),需维护者合并或由 GOVERNED_APPROVERS 批准后由席位落地。\n\n## What changes\n\n- `.github/workflows/stale.yml`: `exempt-issue-labels` now names `governed-merges-audit`, and one comment line above it gives the reason, beside the existing `tracking` line.\n\n## Why\n\nThe weekly `governed-merges-audit` job in `.github/workflows/fleet-patrols.yml` files its card with `ANCHOR_IDENTITY_LABEL: governed-merges-audit` (line 1632 at `origin/main` fb79d47c). Its header states that a close rules the card's BREACH rows only when the closer is in `GOVERNED_APPROVERS` and that a stale-bot close rules nothing, and that carried BREACH rows leave the card only when the maintainer closes it. If the patrol stops, nothing refreshes the open card, so the stale bot would mark it at 60 days and close it 14 days later, taking the carried rows off every open card. The `tracking` exemption already covers the same failure for the half-state patrol's anchor.\n\n## Tests\n\nNo test pins this workflow key; a config-only change carries no ablation.\n\n## Acceptance notes\n\nNone.\n\n## Verification\n\n- `exempt-issue-labels` parses as `pinned,security,roadmap,tracking,governed-merges-audit` (YAML load of the edited file).\n- `node scripts/pm/check-governed-merges.mjs --branch HEAD`: GOVERNED, landing tier H (`job:stale` holds a write token).\n- No `actionlint` in this container; CI's workflow lint families judge the file.\n\n<details><summary>Derived gates at d63d5ea2: 35 run, all exit 0; --ran reconciliation 0 NOT-MEASURED</summary>\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-self-test-wired.mjs :: exit 0\nnode scripts/check-self-test-wired.mjs --self-test :: exit 0\nnode scripts/check-self-test-workflow-commands.mjs :: exit 0\nnode scripts/check-self-test-workflow-commands.mjs --self-test :: exit 0\nnode scripts/check-step-collectors.mjs :: exit 0\nnode scripts/check-step-collectors.mjs --self-test :: exit 0\nnode scripts/check-whole-set-label-write.mjs :: exit 0\nnode scripts/check-whole-set-label-write.mjs --self-test :: exit 0\nnode scripts/docs-audit/check-drift-comment.mjs :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:aggregator-roster :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:declared-population-live :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:node-version :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-dispatch-gates :: exit 0\npnpm check:pm-expected-skips :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-post-stamped :: exit 0\npnpm check:pm-record-recognisers :: exit 0\npnpm check:pnpm-acquisition :: exit 0\npnpm check:pnpm-filter-targets :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:required-contexts :: exit 0\npnpm check:shard-attestation :: exit 0\npnpm check:stall-guard-budget :: exit 0\npnpm check:stall-guard-headroom :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:workflow-status-functions :: exit 0\npnpm check:workflow-step-name-quoting :: exit 0\n\n✓ dispatch-gates --ran: 35 derived famil(ies) accounted for — 35 run, 0 NOT-MEASURED\n```\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (n/a: no spec change)\n- [x] 2. Every name I added uses the casing for its kind. (no new names)\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` is the CI-owned repo scan, not run locally)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (repo workflow only: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRCCWkucpDJMdEL9qC)_\n\n<!-- signed: domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z -->\n"
+}

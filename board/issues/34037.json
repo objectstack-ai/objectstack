@@ -1,0 +1,35 @@
+{
+  "number": 34037,
+  "kind": "pull_request",
+  "title": "fix(pm): dequeue read-back pins and jsdocs; a carried approval refused on a seat signature on any line",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:04:55Z",
+  "updated_at": "2026-11-15T18:06:40Z",
+  "closed_at": "2026-11-15T18:06:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T18:06:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34037",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9N1Z1u2rEtm3MkQHMEhxcoQ)_\nPart of #33768\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:给中继出队(dequeue)补一条自测——出队后第二次读 PR 失败时不算确认、整对重读;两处函数注释改成\"读两次\";插队的\"携带批准\"评论只要任一行带席位签名就拒收(原来只看首行)。\n- 为什么改:这是 PR #33732 复审留下的三条小尾巴(E2、E3、D3),注释与文件头不一致,签名藏在第二行就能绕过\"席位评论不算维护者批准\"。\n- 风险与回滚:只动 `scripts/pm/fleet-write/` 两个脚本,不发布;D3 只会让更多评论被拒、不会放宽;回滚 = revert 本 PR。\n- 先看:`scripts/pm/fleet-write/ops.mjs` 的 `enqueueFrontSizeLift`(逐行读签名那一行);`execute.mjs` 自测里新增的 \"a SECOND pull read that fails\" 一行。\n- 两分钟验证:`node scripts/pm/fleet-write/execute.mjs --self-test`,应看到 \"424 cases pass across 31 batteries\"。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThree items of the #33768 checklist (review follow-ups of PR #33732). The rest stay open on the card: the `fleet-write.yml` comment and the AGENTS.md sentence (Tier H, a later governed batch), N1/E1 (measured at the first live stroke), D2, D4 and N2 (each needs a budget or a ruling).\n\n- **E2** (`execute.mjs` self-test). The rows near the dequeue read-back pinned a failed FIRST pull read (`pullLate`: 502, ok) and a merge that shows only on the second read (`mergedLate`), but no failed SECOND read. New row: pull reads ok, 502, ok, ok. The 502 confirms nothing, so the queue is read again at the interval and the pair starts over. It lands at three polls (clock `3 * DEQUEUE_POLL_MS`), with 5 pull GETs and 4 GraphQL calls. The pr_dequeue battery pin goes 28 → 29, with a roster comment.\n- **E3** (jsdocs). `dequeueAction` now says the pull's own GET reads it open and unmerged TWICE, one `pollMs` apart, and that a failed second read starts the pair over. `dequeuePullAfter` now says it judges ONE of the two reads and the executor lands only when both are `ok`. Both match the file headers.\n- **D3** (optional hardening, taken: it stays inside `scripts/pm/fleet-write/**`). `enqueueFrontSizeLift` runs the passed-in signature reader on every line of the `approval_comment`, not only the first non-empty one. A seat signature on any line refuses the carry, and the reading says \"holds the seat signature\". The row \"⭐ CARRIED, the other way: … signature line further down … still carries it\" flips to \"⛔ CARRIED, refused on ANY line\", which also checks that the reading names the seat. The SIZE lift battery stays at 12 cases; its name (\"holding a seat signature on any line\"), the `ops.mjs` header paragraph and the `execute.mjs` header sentence now say any line. The reader stays passed in, so `ops.mjs` still imports no guard.\n\nNo changeset: the diff is `scripts/pm/**` only and publishes nothing (`skip-changeset`).\n\n## Tests\n\nAt head 1c433b21:\n\n- `node scripts/pm/fleet-write/execute.mjs --self-test`: 424 cases pass across 31 batteries (423 at base c3c0c30d).\n- Forced test edit: the D3 row \"signature line further down still carries it\" is flipped to a refusal, as the card asks.\n\n<details><summary>Ablations (both red on exactly the new pin, restored, `git diff HEAD` empty)</summary>\n\nRun with `node scripts/ablation-replace.mjs` (the anchor must hit, restore is checked on disk) after the fix was committed.\n\n- E2: the second read's `if (after.ok) return` changed to `if (after.ok || after.pending) return`. Result: `✗ a SECOND pull read that fails (ok, 502) … — got [0,3000,3,3], want [0,9000,5,4]`, 1 of 424 failed.\n- D3: the line scan changed back to `signatureOf(c.body)` (first line only). Result: `✗ ⛔ CARRIED, refused on ANY line … — got [[0,1,200],false], want [[5,0,\"not sent\"],true]`, 1 of 424 failed.\n\n</details>\n\n## Acceptance notes\n\n- Concurrency: PR #33975 (self-test fixtures near L2909–2962) and PR #34022 (removes the mailbox lock rows and battery, so the battery floor goes 31 → 30) also touch `execute.mjs`. Their hunks do not overlap these. Whichever lands later rebases; the floor and the per-battery pins here move independently of #34022's.\n\n## Verification\n\n<details><summary>Derived gates (37 of 37 exit 0, at head 1c433b21)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` listed 37 commands; each one exited 0: check-closing-keyword-parity (+ self-test), check-comment-mask-corpus, check-declaration-mirrors (+ self-test), check-self-test-wired (+ self-test), check-self-test-workflow-commands (+ self-test), check-whole-set-label-write (+ self-test), plan-test-core-shards self-test, bare-root-worklist self-test, and the pnpm checks agent-test-spelling, bash32-floor, ci-filter-parity, cli-command-ids, cross-package-test-inputs, driver-memory-census, entry-guard, gitlink-declared, nul-bytes, parse-guard, pm-close-cards, pm-dispatch-gates, pm-fleet-write-dispatch, pm-fleet-write-execute, pm-fleet-write-validate, pm-issue-transfer, pm-post-stamped, pm-record-recognisers, pm-write-pace, pnpm-filter-targets, pnpm-flag-spellings, refd-timer-probe, scripts-symbol-anchors, watch-hint-literal.\n\n`--ran` reconciliation: `✓ dispatch-gates --ran: 37 derived famil(ies) accounted for — 37 run, 0 NOT-MEASURED (a DERIVED zero — all 37 recorded an exit code and none of them is 3).`\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmPoZhhhS5uc7UQqwZ7\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPoZhhhS5uc7UQqwZ7)_\n"
+}

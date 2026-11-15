@@ -1,0 +1,31 @@
+{
+  "number": 34115,
+  "kind": "pull_request",
+  "title": "pm: the sweep's favourable answer covers the raw status read only; PD14 names the arm's rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T19:36:40Z",
+  "updated_at": "2026-11-15T19:54:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34115",
+  "body": "Fixes #34107\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9DhBTDykFH6f9bchWYkPpus)_\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：补上 #33975 第 5 轮合同复审的两处修复：AGENTS.md PD14 的 CODEOWNERS 一句改为“除低风险臂的行外”（根 ADR 树已随 #33975 离开 CODEOWNERS）；合并后巡检的“有利答案”只给 `diff-tree --raw` 状态读，ADR 补丁读失败时如实记“未测到”。\n- 为什么改：#33975 已在队列中合并，这两处来不及推上去（卡 #34107）；PD14 那句原文在 #33975 之后已不成立，巡检会把一次没读到的补丁当成测到的 Tier H。\n- 风险与回滚：只改一句规则文和一个纯函数的判定条件，回滚即 revert。删掉 `/docs/adr/` 的 CODEOWNERS 行后，根 ADR 的 PR 若以 ready 状态打开（或手动转 ready），GitHub 不再自动发 code-owner 审查请求；对“只增注释以外”的 ADR 改动，裁决改由队列守卫（无 GOVERNED_APPROVERS 批准即拒）和中继逐 PR 请求两位批准人来守住。\n- 先看：`scripts/pm/check-governed-merges.mjs` 的 `favourableArmGitRead`，以及 AGENTS.md 第 306 行。\n- 两分钟验证：`node scripts/pm/check-governed-merges.mjs --self-test`，看 `#33539-S7-…` 一行。\n- 需要你做的：本 PR 动 AGENTS.md（Tier H），保持 draft，请 GOVERNED_APPROVERS 审批。\n\n## What changes\n\n- **AGENTS.md Prime Directive 14** (contract review 6898480793, M4): \"CODEOWNERS routes every Tier H surface but the low-risk catalogs\" becomes \"… but the low-risk arm's rows\". Since #33975 the root ADR tree is an arm row with no CODEOWNERS line, and an ADR tree is not a catalog. One word swap, same line, 118 bytes; AGENTS.md stays at 1050 lines.\n- **`favourableArmGitRead`** (`scripts/pm/check-governed-merges.mjs`, S7): it now answers only the `diff-tree --raw` status read (argv carries `--raw`, not `-p`). The ADR leg's `diff-tree -p` patch read has no favourable answer, so in the post-merge sweep an ADR landing whose patch read alone fails stays NOT MEASURED (sweep incomplete) instead of reading Tier H on a status listing handed back as a patch. The queue, the relay and `--pr` were never affected: there an unread ADR diff already reads H.\n- One self-test row pins it in the sweep battery: `⛔ #33539-S7-an-ADR-landing-whose-patch-read-alone-fails-stays-NOT-MEASURED-only-the-raw-read-has-a-favourable-answer`. The existing N-a row that called `favourableArmGitRead(['diff-tree', LANDED], …)` now passes `--raw` (a forced test edit: the bare argv no longer has a favourable answer).\n\n## Why\n\nPR #33975 merged from the queue at `b60484d4` before these round-5 fixes could be pushed. Card #34107 carries them.\n\n## Verification\n\n- `node scripts/pm/check-governed-merges.mjs --self-test`: 863 assertions, exit 0.\n- Ablation: answering the patch read too (the pre-fix condition) reds exactly the new S7 row; restored, green.\n- `pnpm check:pm-skill-ratchet` green; AGENTS.md 1050 lines.\n- `node scripts/pm/dispatch-gates.mjs --commands` on this head: 38 derived, 38 run, all exit 0, reconciled with `--ran`; `check:adr-anchors` and the 10 importer self-tests exit 0.\n\n### Not carried\n\n- The #33975 round-5 nit N9 (rewrapping and wording the CODEOWNERS header note) is not in this card's file surface, so `.github/CODEOWNERS` is untouched here.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (no formatter ran; `pnpm lint` not run here — no package source changed; CI's ESLint leg reads it)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the required 维护者速读 block)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRrk1KF2ZJk57PwVU9\n\n<!-- signed: domain:skills#1 · os-steve · session_01ADHkmRrk1KF2ZJk57PwVU9 -->\n"
+}

@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T06:41:23Z",
-  "updated_at": "2026-11-15T13:53:54Z",
+  "updated_at": "2026-11-15T17:19:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33695",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cztR1A2CZoxSZyuoGP\n\nFiling gate: ④ child of epic #33631 (SQL performance; maintainer's direct word on the epic). Items R3 + R11 of the M0 ranked list (#33633): https://github.com/objectstack-ai/objectstack/issues/33631#issuecomment-6889544281, corrected by https://github.com/objectstack-ai/objectstack/issues/33631#issuecomment-6889939163 (review#2 PASS 6890102899).\n\n## Maintainer ruling (seat decision card, 2026-11-15T06:40Z)\n\n「两个都加」: schema sync adds implicit indexes on the two system columns, `created_at` (as `(created_at, id)`, the default list order) and `owner_id` (the column a private-OWD read filters on). This supersedes the earlier implicit-index ruling that excluded system columns for want of a measured read.\n\n## Measured (corrected, 1M rows)\n\n- PostgreSQL: the index alone takes the admin default-ordered page 229 → 0.9 ms (member page 101 → 3.2 ms).\n- SQLite: the index does nothing while the vacuous controlled_by_parent chain is in the query; with that chain dropped (the R4 card filed alongside, Blocked-by below) the page goes 1.7 s → 0.09 ms.\n- `owner_id`: small at 10k rows (1.6 → 1.4 ms); grows with private-object size.\n\n## Scope\n\n- Seam: schema sync implicit index set (`schema-drift.ts` ~2295) for driver-sql dialects and Turso.\n- Before/after on the M0 bench (`packages/qa/dogfood/bench/sql-perf`, PR #33662) in the PR, both dialects.\n- SQLite: land with or after the R4 card; PG pays alone.\n\n## Business reason\n\nEvery default-ordered list of a large object sorts its whole filtered set today; on PG an admin list of 1M rows answers in ~1 ms instead of ~230 ms.\n\n## Reader\n\ndomain:server#5 area A4 (schema sync), next account; size S.\n\n## Dedupe\n\n`is:issue is:open implicit index created_at` → 5 hits, none on this seam (only #33631 and seat posts); `owner_id index system column` → 5, none (#33435 is a lint rule).\n"

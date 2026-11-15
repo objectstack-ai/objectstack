@@ -2,8 +2,8 @@
   "number": 33600,
   "kind": "issue",
   "title": "AGENTS.md: the spec artifact gates are said to live in one job, but they run in two Type Check lanes behind the TypeScript Type Check aggregate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T02:18:34Z",
-  "updated_at": "2026-11-15T02:50:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:12:57Z",
+  "closed_at": "2026-11-15T16:12:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33600",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (out-of-scope finding of the developer of PR #33592, card #33572, confirmed by the at-tier contract review 6887829788 on that PR). `reach:` an agent reading AGENTS.md looks for the six spec artifact gates in one job and reads the wrong lane's log.\n\n**What is wrong.** AGENTS.md § \"Touched `packages/spec`? Regenerate its artifacts BEFORE pushing\" (on `main`, around lines 651 to 653) says all six checked-in generated artifacts' gates \"live in one job — `TypeScript Type Check` in `lint.yml`\". On `main` they run in two lanes behind that aggregate: `check:api-surface` in `Type Check · consumer gates` (`lint.yml` around 6116) and the other five in `Type Check · source gates` (around 5145 to 5444); `TypeScript Type Check` (around 6465) is the required aggregate over the lanes. The sentence about lanes running every gate is right.\n\n**What lands.** Say the gates run in the `Type Check · source gates` and `Type Check · consumer gates` lanes, behind the required `TypeScript Type Check` aggregate, and name which lane holds `check:api-surface`. PR #33592 already says this in `.claude/skills/spec-property-retirement/SKILL.md`; keep the two consistent. `AGENTS.md` is governed (Tier H); line and byte budgets apply. `skip-changeset`. `Clause-②: no`.\n\nDedupe (open AND closed): `is:issue \"TypeScript Type Check\" AGENTS.md one job` → none. **New.**\n"

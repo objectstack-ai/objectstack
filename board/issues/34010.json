@@ -1,0 +1,33 @@
+{
+  "number": 34010,
+  "kind": "issue",
+  "title": "Setup: Unlock User may be hidden without the admin plugin although its door is mounted unconditionally — measure, then drop the gate if so",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T16:04:36Z",
+  "updated_at": "2026-11-15T19:10:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34010",
+  "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ an out-of-scope finding of the #33759 dev (os-dev report 6896885009 on PR #33989), confirmed as a real open measurement by contract record 6897296837 (N1), class a (reach not yet measured).\nReader: `domain:ui` (`packages/platform-objects/src/identity/sys-user.object.ts`, `unlock_user`). Grade suggestion: p3 until the door is measured; p2 if it works without the plugin (same reach as #33759).\nDedupe: `is:issue is:open unlock_user requiresFeature admin` — no open card.\n\n## 维护者速读\n\n#33759 让「停用 / 恢复用户」在没有 admin 插件时也显示。「解锁用户」(unlock_user) 仍要求 admin 插件才显示，但它调用的 `admin/unlock-user` 接口看起来是无条件挂载的。如果接口在没有插件时确实可用，这个按钮也该和停用一样放开。\n\n## Facts\n\n- `sys_user.unlock_user` keeps `requiresFeature: 'admin'` (PR #33989 leaves it, as its card asked).\n- `admin/unlock-user` is mounted unconditionally in plugin-auth's `auth-plugin.ts` (read by the contract record on `8631da39`); `set_user_manager`'s comment in `sys-user.object.ts` says the same. Whether the door works end to end without the better-auth admin plugin was NOT measured.\n- After #33989 the block header in `sys-user.object.ts` attaches the \"buttons that 404\" rationale to `unlock_user` by name, which this card verifies or corrects (record nit N1); the same header's sentence that better-auth clears an expired `banned` is stale on plugin-off kernels, where `user-session-admission.ts` clears it (record nit N2).\n\n## Ask\n\nMeasure first: with the admin plugin off, does `admin/unlock-user` unlock a locked user (live pin through the real door)? If yes, drop `requiresFeature: 'admin'` from `unlock_user` the way #33759 did for ban/unban (booking in `PUBLIC_AUTH_FEATURES.admin.gatedInputs` in lockstep, CONTROL roster updated), and fix the header's N1/N2 sentences. If no, keep the gate and correct the header to say why.\n\nBlocked-by: #33759"
+}

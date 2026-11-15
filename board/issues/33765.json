@@ -2,8 +2,8 @@
   "number": 33765,
   "kind": "issue",
   "title": "review follow-ups of PR #33762",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T09:43:27Z",
-  "updated_at": "2026-11-15T09:48:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T15:54:33Z",
+  "closed_at": "2026-11-15T15:52:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33765",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33762 append here. Dedupe: no open issue names PR #33762.\n\n## review follow-ups of PR #33762 (card #33729)\n\nRecord: 6892490875 (at-tier PASS on head `9177c4e4`, nits only). Every item is a nit accepted for the landing; none changes a verdict the audit gives today, and every one fails toward not-measured or is cosmetic.\n\n- [ ] N-a any git throw gives not-measured even where a measured reason already settles Tier H (the sweep reads INCOMPLETE where H was certain).\n- [ ] N-b an unread labels list can still sit inside a `tier-h` reading (not git-side, so outside N5's words).\n- [ ] N-c the N11 no-trusted-author-list branch is defensive only (`loadRecordRecognisers` never produces it); its jsdoc could say so.\n- [ ] N-d the connector hand-off shapes in `verify-review-tier.mjs` are snake_case only: `sendMessage`, hyphenated verbs and hand-offs under other verbs (`request_copilot_review`, `interrupt_session`, `create_`/`run_` session tools) pass.\n- [ ] N-e an edited `Regen-provenance:` row that breaks a carry is not named by the N10 edited-after clause.\n- [ ] N-f the deleted-changeset exception keys on the guard's `show SHA:PATH` argv spelling with no pin tying the two (a change fails toward not-measured).\n- [ ] N-g a dismissal event in the same second as the landing restores the approval (harmless).\n\n`scripts/pm/check-governed-merges.mjs`, `scripts/pm/verify-review-tier.mjs`; `skip-changeset`; `Clause-②: no`. Waits for PR #33762.\n"

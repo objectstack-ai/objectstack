@@ -2,8 +2,8 @@
   "number": 33841,
   "kind": "issue",
   "title": "`os datasource introspect --out` path check is lexical: an in-tree symlink lets the server-generated draft land outside the project directory (hardening)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:54:12Z",
-  "updated_at": "2026-11-15T13:56:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:43:26Z",
+  "closed_at": "2026-11-15T16:43:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33841",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nReproduction (a557fa38; scratch showcase copy served by `os dev` with an admin token holding manage_platform_settings; cwd = the app dir):\n1. `mkdir -p /tmp/outside && ln -s /tmp/outside objects/lnk`\n2. `os datasource introspect showcase_external --table orders --out objects/lnk/qa_sym.object.ts --url http://localhost:&lt;port> --token &lt;admin>`\n\nExpected: the same refusal `--out ../x.ts` and `--out /tmp/x.ts` get (\"--out must be a relative path within the current directory\", exit 2, nothing written). The draft body is server-generated TypeScript, and the jail is meant to keep it inside the project tree.\nActual: exit 0, \"Wrote objects/lnk/qa_sym.object.ts\", and the file is created in /tmp/outside/, outside the project directory.\n\nMechanism: packages/cli/src/commands/datasource/introspect.ts:75-80 computes `target = resolve(process.cwd(), flags.out)` and checks `isAbsolute(flags.out) || !target.startsWith(process.cwd() + '/')`, then calls `writeFile(target, …)`. The check is purely lexical, so symlinks in the path are never resolved. Suggested hardening: realpath the target's parent directory (and cwd) before the in-tree prefix check, and refuse when the resolved parent is outside cwd. Optionally also refuse when the target itself is an existing symlink.\n\nSeverity: low. The operator supplies both the --out path and the directory tree, so no authn/authz, tenant or secret boundary is crossed (the seat ruled it not a security finding). It matters only when a project tree carries a symlink the operator did not plant, for example one committed in a cloned repo.\n\nRegression: not new. The lines are identical at 181ad7d4 (18.4.0), and `git log 181ad7d4..HEAD -- packages/cli/src/commands/datasource/introspect.ts` is empty.\n\nDedupe (open issues, read-only `gh api search/issues`), no match: \"datasource introspect --out symlink\", \"introspect out realpath\", \"--out must be a relative path within the current directory\", \"datasource introspect out path jail\".\n\nQA-source: #33829 · cli.datasource-introspect-codegen · observed beside the clauses"

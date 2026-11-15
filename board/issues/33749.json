@@ -2,8 +2,8 @@
   "number": 33749,
   "kind": "issue",
   "title": "review follow-ups of PR #33731",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:56:45Z",
-  "updated_at": "2026-11-15T09:47:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T15:40:36Z",
+  "closed_at": "2026-11-15T15:39:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33749",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33731 append here.\n\n## review follow-ups of PR #33731 (card #33718)\n\nRecords: 6891667603 (first), the delta on head `51787fa6`. All nits, accepted for the landing.\n\n- [ ] N2 `contract-review.md` L42 names 「PR 后续卡」 without pointing at `filing-gate.md`, where the title, append rule and search live (L41-42 at 120 bytes; needs a payment).\n- [ ] N3 `triage-duties.md` L16 「每 3 小时」 has no anchor in rule text (no 3-hourly round is defined).\n- [ ] N4 `triage-duties.md` L74 「每 PR」 sits among triage-time rules, where the PR often does not exist yet; the ADR half keeps no count.\n- [ ] N5 `filing-gate.md` L35: the code span runs into 「逐项勾」 with no separator; 「接受偏差」 here vs 「接受的偏差」 in `contract-review.md` L42.\n- [ ] N6 `contract-review.md` L51 「无前两级」 leaves implicit that a finding closed by a later same-head record no longer counts; the route is stated only in PR #33736's refusal text and brief.\n\nCarried elsewhere: `landing-operations.md` L13 (PR #33732).\n\n`.claude/skills/pm-dispatch/references/**`; `skip-changeset`; `Clause-②: no`. Waits for PR #33731.\n"

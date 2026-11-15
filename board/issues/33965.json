@@ -1,0 +1,35 @@
+{
+  "number": 33965,
+  "kind": "issue",
+  "title": "checklist: v18.5.0 sweep close-out, batch C: item-text re-points in `platform-core.json`, `cli.json` (with the `cli-18-prerelease-db` recipe)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:04:55Z",
+  "updated_at": "2026-11-15T16:39:09Z",
+  "closed_at": "2026-11-15T16:35:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33965",
+  "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\nCarries the batch-C item-text re-points of #33761 (the v18.5.0 release test sweep anchor); #33761 keeps the other batches, the runner kit and the coverage card. Filing gate ①: the follow-up owed by in-flight work. The anchor's step-1 ledger (comment 6896511848, read at `origin/main` `895783a1`) has 138 item-text re-point rows over about 104 items, too many for one PR; the seat split them by area-file family, one card per family with no shared file (the #32908 precedent, split comment 6881136418). ⛔ Not a claim.\n\n## Scope\n\n- Files: `platform-core.json`, `cli.json` (with the `cli-18-prerelease-db` recipe) under `docs/qa/platform-checklist/areas/` (and `docs/qa/platform-checklist/coverage.json` only if a gate regenerates it).\n- Rows of ledger 6896511848 (disposition `item-text re-point`, 20 (plus the recipe) items): 1 4 5 6 8 36 37 42 44 47 48 89 90 106 108 110 122 123 124 125 183 185 186 194 199 214 216 218\n- Rows repeated across rounds are one edit each. Every row is re-read at `origin/main` first; the edit starts from the measured residue, not the parked text.\n- Each edited item: `revision` +1 and one `history` row (ref = the PR number). The area JSON is not canonical `JSON.stringify`: edit text spans, never re-serialise.\n- ⛔ No product package, no `ui/**`, no `scripts/qa/**`, no `RUNNER.md` (the runner-kit card carries those). ⛔ Not the items #33859, #33860 and #33842 carry.\n- Serial: after PRs #33931 (`platform-core.json`) and #33929 (`cli.json`) merge; the dev starts from `origin/main` with both in.\n\n## Acceptance\n\n- Every row above is edited or answered on the PR with a reading (already right at the PR's base, or moved to another carrier).\n- `check:platform-checklist` and the derived gate families pass.\n\nPriority p1, inherited from #33761 (release acceptance evidence)."
+}

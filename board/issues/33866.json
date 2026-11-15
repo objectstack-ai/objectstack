@@ -2,8 +2,8 @@
   "number": 33866,
   "kind": "issue",
   "title": "spec: the localSignIn jsdoc says \"It changes no server door\", but the provider delete (#33623) and the auth settings save (PR #33781) now answer by it — say \"no sign-in door\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:35:44Z",
-  "updated_at": "2026-11-15T13:00:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:24:24Z",
+  "closed_at": "2026-11-15T16:24:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33866",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ② out-of-scope finding N1 from the CONTRACT_REVIEW_TIER record 6894038792 on PR #33781 (#33358), restated in the delta record 6894124120 and review 6894135404. Grading and lane are triage's. ⛔ Not a claim.\n\n## 维护者速读\n\n- 规范里说本地登录开关\"不改变任何服务端入口\",现在已不准确:删除最后一个身份提供方、保存认证设置这两个入口都会按它判断。\n- 只改两处规范注释的措辞(\"不改变任何登录入口\"),不改行为。\n\n## What\n\nThe spec says of `localSignIn`: \"It changes no server door: password sign-in answers the same either way\". That is at `packages/spec/src/api/auth-endpoints.zod.ts` ~L295-299 and `packages/spec/src/kernel/public-auth-features.ts` ~L399-405 on main. The sign-in doors are indeed unchanged. Two other doors now answer by it: the provider delete (since #33623) and the auth settings save (PR #33781). The sentence should say \"no sign-in door\" and name those two.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue \"changes no server door\"` finds 0."

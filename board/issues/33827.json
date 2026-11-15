@@ -2,8 +2,8 @@
   "number": 33827,
   "kind": "issue",
   "title": "编辑记录保存成功后，记录页约 3 秒内仍显示旧值",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:46:19Z",
-  "updated_at": "2026-11-15T12:50:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:32:23Z",
+  "closed_at": "2026-11-15T16:31:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33827",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，reach: 界面实测一次。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq`（Jack，免费版，HotCRM 6.1.2）。报告：https://claude.ai/artifact/XaMk7Uo36seWMKsPy5ETPM\n\n## 复现\n\n1. HotCRM → 打开一条客户记录（整页）→ 编辑 → 电话填 `021-55550100` → 更新。\n2. 出现「已更新」提示；保存后约 4 秒截图，「联系信息」区仍显示「显示 5 个空字段」，没有电话。\n3. 再过约 3 秒才显示电话，此时动态已记录「更新了 客户：电话」。服务端记录在保存时已是新值（`GET /api/v1/data/crm_account/<id>` 返回 `phone: 021-55550100`）。\n\n## 业务理由\n\n用户看到成功提示却看不到改动，会以为没保存而再编辑一次，或怀疑数据丢失。\n\n## 修复方向\n\n保存成功后用返回的记录立即更新页面（乐观更新或直接替换缓存），而不是等下一次重新取数。objectstack#30082 已在保存后刷新动态与计数，字段区没有一起刷新。\n\n## 验收\n\n1. 保存成功提示出现时，字段区已显示新值。\n\n## Reader\n\nobjectstack console 车道（`domain:ui`），记录页保存后的缓存刷新。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack record page stale after save refresh` → 271 条（含 closed）；最近的 objectstack#30082（保存后刷新动态和计数）已关，不覆盖字段区。"

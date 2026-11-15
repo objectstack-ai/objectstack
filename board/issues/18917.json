@@ -1,7 +1,7 @@
 {
   "number": 18917,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 4 — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
+  "title": "[PM seat] domain:spec · seat 4 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-11-15T12:45:08Z",
+  "updated_at": "2026-11-15T15:34:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 83,
+  "comments": 84,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18917",
-  "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 4**. Other `domain:spec` seats: #6017 (seat 1), #18549 (seat 2), #18883 (seat 3), #19357 (seat 5); ⛔ this post is none of them.\n\n<sub>Refreshed 2026-11-14T22:51Z at seating.</sub>\n\n## Current PM — 🟢 os-project-manager\n\n- **Holder:** `os-project-manager` · `session_01FEkQ5mecqk8M5q9vjKj6aS` (project thread 「运行 spec 车道 2 号席位」 in this account's fleet project \"Objectstack devx spec ui skills review\"; this account's second spec seat beside `domain:spec#1`), seated on the maintainer's word 「同意 给队列最深的 ui 和 spec 各再开一个座位」. The previous holder (`marchtian`) left clock-out brief 6817463248.\n- **Mailbox:** #33505. **Patrol:** `trig_01K7WXZ5Sf4Wt6itzLJH9iqJ` · `50 * * * *`.\n- **Pointer:** posture and ledger live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments of every `domain:spec` seat and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and not in git; writers edit `entries/` and `registry.ts.template`. **`merge=os-regen` paths** merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Concurrency:** up to 5 card threads for this seat (the maintainer's standing per-seat cap 「并发都5」); slots through the project coordinator.\n- **Split with `domain:spec#1`:** cards follow the lane's total order; seat 1 keeps the cards serial behind its own open PRs (#33435 behind PR #33434, #33494 behind PR #33442). Contested picks are settled by the earlier `Claim:`.\n- **Contract review:** this seat runs the `CONTRACT_REVIEW_TIER` review itself in an isolated agent (maintainer 「你有 fable ，车道契约复审可以自己做」).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, which a person merges. ⛔ Release PRs are never touched.\n\n<!-- signed: domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS -->\n"
+  "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 4**. Other `domain:spec` seats: #6017 (seat 1), #18549 (seat 2), #18883 (seat 3), #19357 (seat 5); ⛔ this post is none of them.\n\n<sub>Refreshed 2026-11-15T15:33Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-project-manager` · `session_01FEkQ5mecqk8M5q9vjKj6aS`. Seated 2026-11-14T22:51Z; off duty 2026-11-15T15:33Z on the maintainer's 「当前任务处理完，合并后就下班」 (2026-11-15T11:07Z). Clock-out brief: 6896920047.\n- **Mailbox:** #33505, closed at clock-out; the successor reopens one. **Patrol:** `trig_01K7WXZ5Sf4Wt6itzLJH9iqJ`, deleted at clock-out.\n- **Stay-behind:** none. **In-flight:** none. `check-handover.mjs` exited 0.\n- **Queue snapshot at clock-out (unclaimed, triage routes):** #33868 (skills, p2), #33869 (spec, p3), #33714 (skills), #33644 (spec, P3).\n- **Pointer:** posture and ledger live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#4` + `head:claude/` PRs.\n- **Successor:** `/pm-dispatch 接手`, then read this post and brief 6896920047.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments of every `domain:spec` seat and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and not in git; writers edit `entries/` and `registry.ts.template`. **`merge=os-regen` paths** merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Contract review:** this account's contract reviews go to the review seats (maintainer 「review#1 正在入座，你这个账户后续的契约复审找他」, then 「review#2 就上线了，后续的契约复审交给他」, 2026-11-15), with a `Contract-review-handoff:` line on the PR and `Request: contract-review` on the review seat's mailbox.\n- **Orders:** name `pnpm --filter <pkg> run typecheck` for every touched package (the `dispatch-gates --commands` list omits it), and put every file a behaviour change can turn red on the surface up front (a card thread refuses mid-round seat grants).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, which a person merges. ⛔ Release PRs are never touched.\n\n<!-- signed: domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS -->"
 }

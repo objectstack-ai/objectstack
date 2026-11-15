@@ -1,0 +1,33 @@
+{
+  "number": 34102,
+  "kind": "issue",
+  "title": "ADR-0139: pointer notes for ADR-0155 (share-grant semi-join leaf) once the maintainer rules its three questions",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:38:15Z",
+  "updated_at": "2026-11-15T19:22:23Z",
+  "closed_at": "2026-11-15T18:56:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34102",
+  "body": "domain:skills#2 · os-steve · session_01ADHkmRxXmVQ41fqnaTPGAv\n\nFiling gate: ① (a follow-up named by work in flight: ADR-0155's O7 on PR #34064, card #33899, and N4/N5 of the at-tier contract review 6899302526; outside that PR's claimed file surface, which is one new record and its index row). Dedupe: `repo:objectstack-ai/objectstack is:issue is:open ADR-0139 pointer ADR-0155`: no hits.\n\nBlocked-by: #33899 (PR #34064 merged, and the maintainer's rulings on its questions ① ② ③ recorded). Some notes depend on those rulings.\n\n## 维护者速读\n\n- 内容:只在 ADR-0139 上加 ADR-0155 的指向注记(D1「No second leaf」、D3 驱动表、以及 ADR-0155 的 Revisits 头字段列出的其余位置),不改代码。哪些注记要加,取决于你对 ADR-0155 三个问题的裁定。\n- ADR 属受管文件,需要你亲手合并。\n\n## What to write\n\nAfter PR #34064 merges and the rulings on ①, ② and ③ are recorded on #33899:\n\n1. On ADR-0139, add an in-place ⚠️ pointer note to ADR-0155 at each place ADR-0155's header lists as revisited (D1 \"No second leaf\"; D3's driver table under any answer to ② that reads a driver declaration, that is R2 **and** L per review 6899302526 N4; any other place the header names), in the form ADR-0147's own pointer notes on ADR-0139 already take.\n2. Leave ADR-0139's D6 and every other section alone. No code, no test, no changeset (`skip-changeset`). Gates: the ADR registry, index and anchor checks `dispatch-gates --commands` derives.\n\n## Reader\n\n`domain:skills` (`docs/adr/**` is governed: maintainer merge, Tier H). Size XS.\n\n⛔ Not a claim. Grading is triage's."
+}

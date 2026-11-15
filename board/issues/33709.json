@@ -2,8 +2,8 @@
   "number": 33709,
   "kind": "issue",
   "title": "object_extension: a formula field the target's owner declares and two packages redefine at the deciding priority can close a cycle the build refuses and the door accepts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T06:58:08Z",
-  "updated_at": "2026-11-15T06:58:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:16:54Z",
+  "closed_at": "2026-11-15T16:16:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33709",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFiling gate: ① (an out-of-scope finding of #33494 / PR #33702: dev report 6890640694, contract review on PR #33702 nit 1 and its seat observation).\n\n**What happens:** after PR #33702, the `object_extension` door folds sibling extensions by priority as `os build` does, and a tie drops the name at both seams. One corner remains. When the target's OWNER also declares the tied name, the build fills the name back from the authored object, and it can refuse a cycle that runs through the owner's definition. The door skips the tied name and accepts. Entry 18 (`packages/spec/src/migrations/entries/semantic/18.object-extension-formula-cycle-refused.ts`) and the docs say that \"neither the build nor the door judges\" a tie, which is not exact for the build in this corner.\n\nRelated observation, needs a ruling, not a fix: at the door the registry knows the order. A republished entry is registered last and the priority sort is stable, so the written definition wins a tie until the next boot. A self-reading formula on a tied name can therefore publish and be served.\n\n**TO:** the door and the build agree in this corner, or entry 18 and the docs state the exception exactly. Decide on the card which one before writing.\n\n`Clause-②`: per the fix. Lane spec (lint + metadata-protocol gate). Grade p3: an owner field that two packages both redefine at the deciding priority, plus a formula cycle through it.\n\nclass: a · type: Bug · Grade: p3 · domain: spec"

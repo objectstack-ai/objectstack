@@ -2,8 +2,8 @@
   "number": 33578,
   "kind": "issue",
   "title": "pm: the carried-record regeneration test lists a renamed path by its destination only, so a hop that moves a reviewed file out of its face is not seen",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T01:17:42Z",
-  "updated_at": "2026-11-15T02:10:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T19:51:36Z",
+  "closed_at": "2026-11-15T19:50:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33578",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (an out-of-diff observation of the at-tier delta review 6887175399 of PR #33531, card #33501; its in-diff twin is should-fix SF2 there). `reach:` a carried contract-review record can survive a regeneration hop that moved a reviewed file out of the reviewed face, because the hop's rename is listed by its destination only.\n\n**What is wrong.** `unexplainedPathsBetween` in `scripts/pm/record-recognisers.mjs` (on `main`, the `names` helper inside it) lists a hop's changed paths with `git diff -z --name-only FROM TO` and no `--no-renames`. With rename detection on (git's default), a rename is listed by its destination path only. The review measured this on git 2.43 in a throwaway repository: moving `skills/a/rules/security.md` to `content/docs/security.md` lists only the docs path. A hop that renames a reviewed file to a path that `base` explains, or that the carry otherwise admits, therefore never shows the removed source path, and the carried record can stand for a head where a reviewed file has left its face.\n\n**What lands.** Pass `--no-renames` to every `--name-only` diff the carry machinery reads (this helper and any sibling), so a rename reads as a delete plus an add. Pin it with one self-test case that runs real git in a temporary repository (the fake git readers in the battery cannot see what git lists), plus an argument pin. The guard's row enumeration in `check-governed-queue-guard.mjs` already passes `--no-renames`; PR #33531 fixes its own new call (SF2).\n\n`scripts/pm/**` only, `skip-changeset`. `Clause-②: no`.\n\nDedupe (open AND closed): `is:issue unexplainedPathsBetween` and `is:issue no-renames carried record` → none. **New.**\n"

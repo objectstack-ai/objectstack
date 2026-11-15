@@ -1,0 +1,30 @@
+{
+  "number": 33973,
+  "kind": "issue",
+  "title": "Eval: classify the in-chat write (operations) failures of the 2026-11-15 runs by cause",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:10:14Z",
+  "updated_at": "2026-11-15T15:49:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33973",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nAddressed to the eval lane (eval#1, mailbox PR #33469), filed by the cloud seat at the maintainer's order, verbatim (cloud seat 5 thread, 2026-11-15): 「你用信箱和他沟通，需要的话你自己开云卡片跑评测」. The question it serves, verbatim from the same thread: 「聊天里改数据 出问题的关键还是我们的skills需要优化吧？」.\n\nFiling-gate category: ③ maintainer-directed (quotes above).\n\n## Why (business)\n\nWrites a user asks for in chat are the weakest number in the run record #33920: haiku default 65.5%, haiku medium 71.4%, opus low 80.7%. Raising effort is the cloud card objectstack-ai/cloud#4570, but it buys about 6 points for +17% cost. If the failures come from what the published skills and tool descriptions leave unsaid, fixing the text helps every model at no running cost. The summary numbers point that way, but nobody has looked at the individual failures yet.\n\n## Signals in #33920 that suggest a text or tool cause\n\n- `invoice_with_line_items` (add / remove a line) sits at 60% for haiku default AND haiku medium: effort moves nothing, which reads as missing knowledge, not shallow reasoning.\n- `project_with_tasks` (add a task): 58% → 74% with effort, 82% on opus.\n- Even opus fails about 20% of operations, so part of the loss is not the model.\n\n## Ask\n\nFrom the 45 recorded card runs (`eval/runs/2026-11-15-confirm/<config>/rep<N>/`, held in the eval seat's project files), for every failed operation:\n\n1. Name the operation (card, persona prompt, expected write).\n2. Put it in ONE cause class:\n   - **skills** — the published skill / authoring rules do not say how (for example: how to write a child row against its parent, which field links them, what recomputes after);\n   - **tool** — the MCP tool's input shape, description or error made the right call hard or failed it;\n   - **grader** — the write was right and the scorer misread it;\n   - **model** — the text was clear and the model still got it wrong.\n3. Quote the decisive turn (the call made and the tool's answer), with no record content beyond what the operation needs.\n\nPost the table here, counted per class and per config. Then file the fixes through the filing gate: skills to `domain:skills`, platform tools to `domain:server`, grader to the scenarios runner, anything in the hosted path back to the cloud seat.\n\n## Acceptance\n\n- The table is posted on this card.\n- Each class with at least two failures has a card filed, or a reason why not.\n\n## Not in scope\n\n- No new billed API runs. The ask is a reading of records that already exist. If the records cannot answer it, say so here and the cloud seat will arrange a fresh run."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 33970,
+  "kind": "pull_request",
+  "title": "fix(runtime): a channel list with a member off the declared shape is not judged at the automation save doors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:07:45Z",
+  "updated_at": "2026-11-15T16:26:35Z",
+  "closed_at": "2026-11-15T16:26:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T16:26:33Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33970",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCpddLFmKzR39wJWZpkRMCi)_\nFixes #32733\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:自动化保存检查通知渠道时,消息服务返回的渠道列表里只要有一个元素不是 `{ id }` 形状,就整体按「读不到」处理(不判),不再过滤后误拒所有渠道;迁移说明条目补齐两种不判情形和路径写法。\n- 为什么改:过滤后的空名单会让所有渠道都被 400 拒绝,属于静默误拒;迁移说明要与已发布的 changelog 一致。\n- 风险与回滚:只改判定前的读取,第一方消息服务返回的形状不受影响;回滚即还原单个 commit。\n- 先看:`packages/runtime/src/domains/automation.ts`(`refuseUnknownNotifyChannels` 的读取段)、新增 pin、`18.notify-channel-unknown-refused.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run src/domains/automation-authoring-doors-durable.test.ts`,预期全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **N1.** If `getKnownChannels()` answers a list with any member that is not a `{ id: string }`, the registry is now treated as unreadable: nothing is judged and the save goes on. The declared channel contract, which the check reads structurally in `packages/runtime/src/domains/automation.ts`, is `interface NotifyChannelRegistry { getKnownChannels(): ReadonlyArray<{ id: string; configured: boolean }> }`. Its docblock says: \"Every channel the service knows: the ones registered directly, and each lazy provider (`email`, `sms`, `push`) whether or not its transport is installed yet.\" Its one producer, `MessagingService.getKnownChannels()` in `@objectstack/service-messaging`, answers `Array<{ id: string; configured: boolean }>`. A list off that shape is outside the contract, so it gives no verdict, the same as a reader that throws or answers no list. Before, such members were dropped and the shrunken roster refused every channel the node named. Removing that false refusal is outside any declared accept set and changes no authorable key: `Clause-②: no`, `Metadata-protocol: none`.\n- **N2.** The semantic entry `notify-channel-unknown-refused` (`packages/spec`, data text only) now names every not-judged case the doors have, as the released changelog entry does, and the paths a refusal names. Review face: `CONTRACT_REVIEW_TIER` (packages/spec data text).\n- **N3.** Declined: the field is `relevantWhen`, read by `os migrate meta`, but its contract says to omit it unless the surface lives only under top-level stack keys; a flow saved through the `/automation` doors is stored runtime metadata, outside the stack, so a `stack-declares` question cannot prove it absent. Same for the picklist sibling.\n\n## Tests\n\n- New pin in `automation-authoring-doors-durable.test.ts`: a reader answering bare ids, and a list with one bare id, both save 200 with the node naming `email`.\n- Ablation (filter restored in place of the guard, via `scripts/ablation-replace.mjs`): `× a list with any member that is not a { id: string } is unreadable…  AssertionError: reader-bare-ids: expected 400 to be 200`; restored, blob equals HEAD, `git diff HEAD` empty.\n\n## Acceptance notes\n\n- `content/docs/automation/flows.mdx` does not list the two not-judged cases (before `kernel:ready`, an unreadable reader) nor the list-member and region-body paths; it is outside this PR's surface.\n\n## Verification\n\nAll readings at head `f3979189`, which is `42667cd1` merged with `origin/main`. That main includes #33721 (`83198201`), whose `automation.ts` hunks do not touch the `getKnownChannels()` read. The merge was clean, and the PR delta is exactly the four files below.\n- Under os-verify-lock (VERDICT command-exit 0): runtime `^...` closure build exit 0; runtime typecheck exit 0; spec typecheck exit 0.\n- Spec `src/migrations`: `Test Files 5 passed / Tests 198 passed`.\n- The pin file: `19 passed (19)`.\n- Ablation at this head: `Tests 1 failed | 18 passed`, `AssertionError: reader-bare-ids: expected 400 to be 200`. Restored: blob `d39570fc2127` equals HEAD.\n- Full runtime suite: `Test Files 605 passed (605) / Tests 10959 passed | 19 skipped`.\n- eslint `--no-inline-config` on the three touched `.ts` files: exit 0.\n- `dispatch-gates --commands`: 94 families, all run, reconciled with `--ran` (94 derived, 94 run). All exit 0 except `check:dual-build-cjs-loads`: NOT MEASURED, because it needs a full `pnpm build`. `check:dts-closure` and `check:lean-entry-closure` first exited 3 before the closure was built, then 0 when re-run after it.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUZKdq3PK2Sab53cT3)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

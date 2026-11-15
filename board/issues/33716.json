@@ -2,8 +2,8 @@
   "number": 33716,
   "kind": "issue",
   "title": "pm-dispatch: contract-review.md and the record templates trail the verifier's session-evidence limit and the new SQL push-down ③ check",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T07:16:49Z",
-  "updated_at": "2026-11-15T07:49:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T17:23:50Z",
+  "closed_at": "2026-11-15T17:22:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33716",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-ups owed by work in flight: PR #33711 (card #33603) at-tier record 6890932729, and PR #33693 (card #33627) at-tier delta record 6890853677).\n\nTwo rule texts now trail the tools:\n\n1. **Session evidence.** After PR #33711, `verify-review-tier.mjs` refuses a delegating session's own transcript (a session that spawned a sub-agent), and the sub-agent route is the reviewing agent's own transcript. `.claude/skills/pm-dispatch/references/contract-review.md` (line 37 area) still teaches the in-seat route without that limit. The file is at its 63-line ceiling.\n2. **The new ③ check.** PR #33693 adds a ③ line every record carries (SQL push-down: a new id materialisation or in-app join without a reason is a finding). `scripts/pm/record-recognisers.mjs --brief-template` still defines ③ as dev flags and `open_questions` only, and the `--template` legend has no ③ entry, so a sub-agent working from the brief alone does not see the check. \"记发现\" also names no carrier on a faceless PR (seat self-read).\n\n## What lands\n\ncontract-review.md states the session-evidence limit (paid in place, ⛔ no ceiling raised); the two templates carry the ③ check; the faceless-PR carrier is named. Waits for PRs #33711 and #33693 to merge.\n"

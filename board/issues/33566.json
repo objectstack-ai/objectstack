@@ -14,18 +14,20 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:39:13Z",
-  "updated_at": "2026-11-15T00:52:18Z",
+  "updated_at": "2026-11-15T19:34:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33566",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-ups from the at-tier contract review 6886676047 of merged PR #33480, card #33044).\n\nThe \"Renaming a position\" paragraph in `skills/objectstack-data/rules/security.md` (merged as `8e63ed87`) holds, with three gaps worth a sentence:\n1. It does not tell the author to re-point their own package source that names the old position (a sharing-rule recipient, an approval `position:NAME` slot, RLS over `positions`). \"The boot log lists other references for an admin\" can read as nothing else to do.\n2. \"Recorded under another package\" omits the environment as owner (the `sys_metadata` sentinel).\n3. The card's premise said Setup-authored bodies are read by the holder carry; they are not. Say so, or confirm it against `position-renamed-holder-carry.ts` and record the reading.\n\nAlso restore, somewhere in `skills/**`, the operator rule cut by the PR: the explain endpoint needs `manage_users`. `@objectstack/skills` patch. Token ratchet paid in place.\n"

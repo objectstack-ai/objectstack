@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:50:49Z",
-  "updated_at": "2026-11-15T12:57:42Z",
+  "updated_at": "2026-11-15T20:01:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33834",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷（发版固化的未翻译文字），reach: 界面实测一次。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq`（Jack，免费版，HotCRM 6.1.2）。报告：https://claude.ai/artifact/XaMk7Uo36seWMKsPy5ETPM，界面语言 zh-CN。\n\n## 现象\n\n1. 系统设置 → 系统概览：「按操作分布的审计事件」图例和「按操作统计的事件量」表格里，其余操作都是中文（创建、删除、登录……），只有 **Credential Use** 是英文。该操作由 objectstack#31862 引入。\n2. 系统设置 → AI 与向量化 →「会话标题」：开关下的说明是整段英文「When on, the LLM is asked to produce a short title after the first assistant reply. Disable to save tokens, or leave the title blank to let users name conversations manually.」，同页其他说明都是中文。\n\n## 业务理由\n\n管理员第一天看到的系统概览就有英文；objectstack#28139 刚把 AI 与知识库的帮助改成业务用语，这一段被漏掉。\n\n## 修复方向\n\n为 `credential_use` 审计操作补各语言标签；给会话标题说明补 zh-CN（及 ja、es）译文，并在 i18n 覆盖检查里能捕获这两处。\n\n## 验收\n\n1. zh-CN 下系统概览不出现「Credential Use」。\n2. AI 设置「会话标题」说明为中文。\n\n## Reader\n\nobjectstack i18n / console 车道（`domain:ui`）。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack \"Credential Use\"` → 176 条（含 closed）；前列 objectstack#31862 / #31897 / #31967 是该审计行的功能卡，不涉及标签翻译。\n- `repo:objectstack-ai/objectstack untranslated zh-CN AI settings conversation title` → 5 条；最近的 objectstack#28139（翻译数据生命周期与 AI 帮助）已关，漏了会话标题这一段。"

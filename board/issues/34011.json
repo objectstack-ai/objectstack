@@ -1,0 +1,33 @@
+{
+  "number": 34011,
+  "kind": "issue",
+  "title": "Loose ends after PR #33884 (#33524): pins for three master-edit refusal paths read but not pinned, and the withUserMessage docblock count",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T16:06:25Z",
+  "updated_at": "2026-11-15T16:47:58Z",
+  "closed_at": "2026-11-15T16:47:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34011",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ② out-of-scope findings from review-a's ACCEPT read 6895810194 on PR #33884 (#33524), merged as c59198f05. Nothing is wrong on main; these are owed pins and one comment. ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** #33524 合并后复审留下的收尾：三条已读通但未钉住的拒绝路径，以及一处文档注释计数。\n- **影响：** 无用户可见变化；补的是防回退的测试。\n- **建议：** p3，一个小 PR，只加测试和一行注释。\n\n## Owed\n\n1. Pins (in a new test file named by this card) for the three paths the review confirmed only by reading:\n   - the delegated second gate call (an on-behalf-of write: the delegator's mask is intersected, and the master label never reaches a caller who cannot read the reference);\n   - the nested-chain hop (a refusal above the immediate master names the immediate master, same read check);\n   - the owner-rule refusal reaching a caller who cannot read the reference (it carries the opaque `userMessage`, matching main's reworded master-access refusal).\n2. The `withUserMessage` docblock lists three users; it has four since #33884.\n3. Wording: the #33884 changeset says the owner-rule refusal \"carries no `userMessage`\"; that holds only for a caller who can read the reference. Changesets are not edited after release, so this is recorded here only.\n\nAccepted deviations (not owed, recorded by the review): above the immediate master the sentence names the immediate master; a delegator-pass refusal reads \"You need …\".\n\nPrior rulings read: the review record 6895788536 and ACCEPT read 6895810194 on PR #33884; ruling region of #33524 (comments on the card); no ADR line bears on test-only additions.\nDedupe: searched \"withUserMessage\", \"33884\"; no open card."
+}

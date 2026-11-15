@@ -2,8 +2,8 @@
   "number": 33573,
   "kind": "issue",
   "title": "plugin-security: confirmAudienceBindingSuggestion's bindingCreated cannot tell \"already granted\" from \"not added\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "bug",
     "domain:server",
     "lease:A2",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:58:47Z",
-  "updated_at": "2026-11-15T01:45:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:12:30Z",
+  "closed_at": "2026-11-15T16:12:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33573",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFound by the cloud os-dev agent on objectstack-ai/cloud#4523 (PR objectstack-ai/cloud#4530). It is an out-of-scope finding of class b, with a named producer. The reading was taken at cloud's framework pin 181ad7d4; the same code is on objectstack main 03dc62673e2.\n\n## What happens\n\n- `packages/plugins/plugin-security/src/suggested-audience-bindings.ts`: `confirmAudienceBindingSuggestion` returns `{ suggestion, bindingCreated }`, where `bindingCreated = !before.has(set) && after.has(set)` (around line 1136).\n- `false` therefore covers two different results:\n  - (A) the `everyone` definition already named the set, so members already hold it;\n  - (B) the re-derive did not add it, so members do not hold it.\n- The doc comment (around line 1083) names only the first case.\n- Both cloud consumers must now say \"not confirmed\" in case A, when access actually exists:\n  - AI Studio publish (`packages/service-ai-studio/src/tools/member-access.ts`, `provisionMemberAccess`, PR cloud#4530);\n  - the install path (`packages/service-cloud/.../environment-member-access.ts`, `installMemberAccessOf`, PR cloud#4522).\n\n## Change\n\nMake the answer say what a consumer needs. Either return a three-way result, for example `binding: 'created' | 'already' | 'withheld'`, or return `bound: after.has(set)` beside `bindingCreated`. Then document both cases. Pin each case with a test. cloud then reads the new field and reports `granted` for case A. The cloud half is a follow-up in the `repo:cloud` lane once a release carries this.\n\nSeam: spec: plugin-security `confirmAudienceBindingSuggestion` return shape → runtime: cloud `provisionMemberAccess` and `installMemberAccessOf`.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"

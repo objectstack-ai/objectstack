@@ -1,0 +1,36 @@
+{
+  "number": 33943,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): area-lease review follow-ups (lease label row, review exception, pairwise exemption)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:44:45Z",
+  "updated_at": "2026-11-15T15:52:11Z",
+  "closed_at": "2026-11-15T15:52:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T15:52:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33943",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9TvuHfDnhUBDdivqLavGx8s)_\n\nPart of #33845\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:区域租约模式的复审遗留 7 项落地:`lease:` 标签进 `ensure-pm-labels.sh`;复核席同账号例外写进复核席章程;删掉租约表无人读的「复核席」列;席线程「不读日志」与红检查读日志的冲突写明由子代理读;区签名第三位、在任 PM「会话」与表内会话两两互见三处措辞写清。\n- 为什么改:PR 33777 达档复审留下的 nit(N3、N6–N8、N11–N13),按卡逐条处理;N14(读数四遇豁免卡是否往下读)两种读法会改变席位自退行为,按派发令不擅自选,留待裁定。\n- 风险与回滚:只改席位读的规则文本和一个标签脚本,不碰产品代码和发布包;三份规则文件行数与上限持平(60/21/100);回滚即 revert。\n- 先看:`.claude/skills/pm-dispatch/references/area-lease.md`(N6/N7/N8/N11 四处与删掉的插队指针行),其次 `seat-lifecycle.md` L11,再次 `scripts/pm/ensure-pm-labels.sh` 新增的 `lease:` 段。\n- 两分钟验证:`node scripts/pm/check-skill-line-ratchet.mjs`,预期 area-lease.md 60/60、lanes/review.md 21/21、seat-lifecycle.md 100/100 全绿,无超 120 字节行。\n- 需要你做的:无,席位落地(Tier S,达档契约复审 PASS 后由席位经队列落地);N14 的取舍由席位按决策流程处理。\n\n## What changes\n\nReview follow-ups of PR #33777 (records 6893242470, 6893494266, 6893759817), one commit per item:\n\n- [x] **N3** `d3ea1d6c` — `scripts/pm/ensure-pm-labels.sh` gains a `lease:AREA` row: a `for A in A1 A2 A3 A4 A5 E1 E2 E2b` loop seeding the current lease table's eight pilot values (main repo only, colour `0052cc`, description 90 characters). The comment names the two area-lease.md lines as the family's readers and says the values MOVE when a lane re-cuts its table, the way the release-board loop moves its window. The eight objects exist today as GitHub's auto-created grey with an empty description (read `lease:A1`, `lease:E2b`); `--reconcile` aligns them.\n- [x] **N6** `cf51d0eb` — `lanes/review.md`'s independence line now names the `area-lease.md` exception; `area-lease.md` says the maintainer's word goes in that review thread (该复核线程) instead of the unnamed 本线程.\n- [x] **N7** `f8708dce` — the lease table's 复核席 column is deleted (measured first: no rule in `.claude/`, `docs/` or `scripts/` reads it; routing follows `contract-review.md` alone).\n- [x] **N8** `d25a92af` — under the seat-thread no-log line: the red-check log read owed on a PR the seat lands (`platform-readings.md`) goes to a sub-agent, and one read satisfies both. `platform-readings.md` and `landing-operations.md` are untouched (zero hunk there). The added line is paid by deleting the `插队照 landing-operations.md 三因;⛔ 本文不改队列配置` pointer line. Surviving homes: the three front-jump reasons live in `landing-operations.md` (reached through the landing line's own pointer to that file) and in `lanes/queue.md`, which also reserves queue configuration.\n- [x] **N11** `507a93eb` — the area session fills both the signature's third slot and `Session:` (the writing session, the precedent the second record named).\n- [x] **N12 + N13** `324f14e5` — `seat-lifecycle.md` L11: 在任 PM 会话与其租约表会话两两互见, so the exemption is between sessions and pairwise across the whole group. To stay inside the 120-byte line budget the line drops 算 from 不算占席 and 读数 from 读数三、四 (the two reading lines sit directly above it).\n- [ ] **N14** — not changed; a fork, put to the seat (see Acceptance notes). This is why the first line is `Part of`.\n\n## Tests\n\nNo product code and no test file changes; no forced test edit. Gate readings below.\n\n## Acceptance notes\n\n**N14 — two readings change seat behaviour, so neither is picked here.** Reading four today: the session id of the newest CLOSED lane card carrying a same-seat `Claim:` (one sample, no skip clause; reading three, by contrast, skips the reader's own session). When that card's claim is exempt (a lease-table session), the letter leaves two readings:\n\n- A: pass on to the next closed card whose same-seat claim is not exempt. Strictly more stand-downs: it catches a duplicate or recovery session that closed a card within the round when an area closed a newer one. Cost: in area mode most closed cards are areas', so the walk reads further back each fire. Zero-line edit to L10.\n- B: read four as empty. Today's letter taken literally; fewer stand-downs; reading three still catches any foreign session active on an open card within the round.\n\nA keeps 自退 conservative, and it changes what a seat does in that case, so by the dispatch order this is a fork for the seat's decision path, recommendation A.\n\nLine budget: every touched rule file stays at its ceiling (area-lease.md 60, lanes/review.md 21, seat-lifecycle.md 100) with no line over 120 bytes; no ceiling row moves; no re-wrap was used to buy a line.\n\n## Verification\n\n<details><summary>Derived gates on head 324f14e5</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 33 families on 4 changed paths; each ran with its exit code captured before any pipe: 33 exit 0. `check:doc-formula-expressions` first exited 3 (PREREQUISITE NOT MET, `@objectstack/formula` and `@objectstack/lint` unbuilt); after `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under the verify lock (VERDICT command-exit 0) it exited 0. `--ran` reconciliation: 33 derived, 33 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero, every line carries an exit code). Among them: `check:pm-skill-ratchet`, `check:pm-skill-id-lint` (115 files clean), `check:skill-frame-sync`, `check:pm-label-desc-cap` (47 descriptions, all within 100 characters), `check:pm-governed-merges`, `check:nul-bytes`. The label script has no `--self-test` of its own; `node scripts/pm/check-label-desc-cap.mjs --self-test` drives it under a fake `gh` in both modes and passes.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRMrSoGCHfoMac43ta)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 33759,
   "kind": "issue",
   "title": "Setup: Deactivate and Reactivate are hidden without the admin plugin, though both doors now work there",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T09:29:37Z",
-  "updated_at": "2026-11-15T09:29:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T17:17:35Z",
+  "closed_at": "2026-11-15T17:15:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33759",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ③ a follow-up named by #33227's hand-over and raised as an open question by the #33186 dev (os-dev report 6892329704 on PR #33755); the seat answered it \"own card\".\nReader: `domain:ui` (`packages/platform-objects/src/identity/sys-user.object.ts`, `ban_user` / `unban_user`). Grade p2, self-graded by the seat: deactivating a person is part of the managed onboarding path (cloud#4465; #33227 added the host's `userDeactivated` / `userReactivated` events), and a managed environment may run without the admin plugin.\nDedupe: `is:issue is:open ban_user requiresFeature admin` finds nothing.\n\n## 维护者速读\n\n#33227 之后，「停用 / 恢复用户」接口在没有开启 admin 插件时也能用了，但界面上这两个按钮仍要求 admin 插件才显示。所以没开 admin 插件的环境（包括托管环境）里管理员看不到停用按钮。应当去掉这个限制，其他条件不变。\n\n## Facts\n\n- PR #33227 (`cbb876c1`): `admin/ban-user` and `admin/unban-user` work without the better-auth admin plugin; a banned row is refused a session with `403 BANNED_USER`.\n- `sys_user.ban_user` and `unban_user` still carry `requiresFeature: 'admin'`, so they are hidden wherever `features.admin` is off.\n\n## Ask\n\nDrop `requiresFeature: 'admin'` from `ban_user` and `unban_user` only. Keep their row-state predicates and `requiredPermissions` as they are, and leave every other admin-plugin action as it is. Measure first which kernels gain the two actions (managed and unmanaged without the admin plugin) and state it on the `Clause-②:` line. Pins: offered with `features.admin` off; a live pin bans and unbans through the real door with the admin plugin off; CONTROL: an admin-plugin-only action stays hidden there."

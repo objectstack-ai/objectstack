@@ -1,0 +1,35 @@
+{
+  "number": 33936,
+  "kind": "pull_request",
+  "title": "docs(qa): judge sign-out leftovers by who wrote them in console-sign-out-and-ended-session",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:36:47Z",
+  "updated_at": "2026-11-15T15:39:13Z",
+  "closed_at": "2026-11-15T15:39:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T15:39:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33936",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9QeWfiVREwaGv9ZFnZkZ1Qt)_\n\nFixes #33859\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：平台测试清单 `identity-auth.console-sign-out-and-ended-session` 升到 r3，只改 acceptance[0] 的判定口径（登出后看「被登出用户留下的键」），外加一行 history。\n- 为什么改：QA 跑（#33853）登出后登录页多出 `flow-palette-recents = []`，这是从未登录的匿名登录页自己也会写的空列表，不属于被登出用户；旧口径把它判成红，产品本身没错。\n- 风险与回滚：只改清单 JSON 文本，不动产品代码、不发布任何包；回滚即 revert 本 PR。\n- 先看：`docs/qa/platform-checklist/areas/identity-auth.json` 中该条目的 acceptance[0].verify 与 history r3。\n- 两分钟验证：`pnpm check:platform-checklist`，预期输出 `OK — 16 areas, 429 items`，锚点全部解析。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nChecklist text only; no product code, no pins, no changeset (`skip-changeset`: nothing under any package's `files[]` moves).\n\n**`identity-auth.console-sign-out-and-ended-session` r2 → r3, acceptance[0].verify.** The old verify allowed only the kept keys after sign-out. On stock showcase the login page that follows sign-out also holds `flow-palette-recents` = `[]`, and so does a never-signed-in browser opening `/_console/login`. The new verify:\n\n1. judges \"no key the signed-out user's session wrote survives\", the same test negative[1] already states;\n2. names today's anonymous-shell state exactly, key **and** value: `flow-palette-recents` holding `[]`. Holding anything else is the signed-out user's and fails;\n3. lists the kept set as `SIGNED_OUT_KEPT_KEYS` has it on `main`, which now includes `objectui:auth:signed-out-via-provider` (the identity-provider round-trip note);\n4. tells the runner how to judge any other key outside both lists: compare it with a fresh never-signed-in context opening `/_console/login`. Same key with the same value there means anonymous-shell state, named in the run record so the verify can list it. Anything else is a FAIL.\n\n`evidence` now also asks for the value of every key outside the kept set, since the judgment depends on it. The clause, negative[1] and the other two acceptance rows are unchanged. The `history` row carries `ref: #PENDING-33859`; a second commit replaces it with this PR's number.\n\n**Why name the key and value first, with the diff only as a fallback.** The card offered either. A key-only diff against an anonymous visit would pass a leak that reuses the same key, for example user recents landing in the unscoped `flow-palette-recents`. Naming the value catches that. The diff fallback keeps a future anonymous-shell key from turning into a false red with no instruction.\n\n## Verification\n\nRead against `main` @ `895783a1`:\n\n- **The sweep keeps only the kept set.** `ui/packages/auth/src/ActiveOrganizationStorage.ts` `purgeSignedOutUserClientState` sweeps both stores against `SIGNED_OUT_KEPT_KEYS`, which is `DEVICE_SCOPED_KEYS` (`auth-session-token`, the session-user key, `vite-ui-theme`) plus `objectui-locale`, `objectui-locale-seed` and `objectui:auth:signed-out-via-provider`.\n- **The anonymous key comes back after the sweep.** `ui/packages/app-shell/src/context/FlowPaletteRecentsProvider.tsx` `FlowPaletteRecentsProvider` re-hydrates in an effect keyed on `userId` and always ends with `saveLocal(list, userId)`. With no user, `scopedKey(STORAGE_BASE_KEY, null)` (`UserStateAdapters.tsx`) is the bare `flow-palette-recents` (`PALETTE_RECENTS_KEY`), and `migrateLegacy` returns the list unchanged when there is no user, so the value is `[]`.\n- **Live reading.** See Acceptance notes: the anonymous login page and the post-sign-out login page both hold `flow-palette-recents` = `[]`.\n\n## Acceptance notes\n\n- Live reading at `895783a1` (console built from this tree with `pnpm build && pnpm console:build`, stock showcase on a fresh port, Playwright, one context per leg):\n\n  <details><summary>localStorage / sessionStorage per leg</summary>\n\n  ```text\n  never-signed-in context, /_console/login:\n    local:   flow-palette-recents = []          session: (empty)\n  admin signed in, after writing qa-probe-L to both stores:\n    local:   auth-active-organization-id:u:ID, auth-session-token, auth-session-user-id,\n             flow-palette-recents:u:ID = [], objectui-favorites:u:ID, objectui-locale-seed,\n             objectui-offline-queue, objectui-recent-items:u:ID, os:recovery-pw-first-seen, qa-probe-L\n    session: objectui:metadata:app:ORG:..., qa-probe-L\n  after Account menu, Log out (URL /_console/login, no redirect param):\n    local:   auth-session-user-id, flow-palette-recents = [], objectui-locale-seed\n    session: (empty)\n  ```\n\n  </details>\n\n  This matches the #33853 reading. Under r2 the sign-out leg is a FAIL on `flow-palette-recents`. Under r3 every key left is in the kept set or is the named anonymous-shell key with value `[]`, so the leg passes. Only the acceptance[0] leg was driven; the member landing and the revocation legs were not.\n- Product-side alternative (not done here, per the dispatch): `FlowPaletteRecentsProvider` could skip `saveLocal` when `userId` is null, and the old verify would hold as written. The write carries nothing of any user, so it is not filed as a defect.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQQ3seURgw7TAfvvx2)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmQQ3seURgw7TAfvvx2\n\n<!-- signed: domain:devx#2 · os-steve · session_01ADHkmQQ3seURgw7TAfvvx2 -->\n"
+}

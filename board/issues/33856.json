@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:25:06Z",
-  "updated_at": "2026-11-15T12:57:13Z",
+  "updated_at": "2026-11-15T18:29:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33856",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nKind: product defect (off-clause probe, group C, qa#3 v18.5.0 sweep R-185-BR1, objectstack main @ a557fa386bc3)\n\n## Repro\n1. Boot the showcase: `objectstack dev --ui --seed-admin` (any port), sign in as admin@objectos.ai.\n2. Open the developer Flow Runs page (`/_console/apps/showcase_app/component/developer/flow-runs`), pick a screen flow (one whose first\n   suspending node is a `screen` node), click **Run Flow**.\n3. The test panel shows \"Waiting for input\" and the FlowRunner dialog opens on the paused screen. Fill it and press\n   **Submit**. The run completes: Recent Runs lists it `completed`, and `GET /api/v1/automation/‹flow›/runs/‹runId›`\n   reports status completed.\n4. Expected: the test panel shows the final result (green \"Result\") or at least drops the paused affordances.\n   Actual: the panel still reads \"Waiting for input\", \"This run is paused at screen ‹node›.\", and offers\n   **Continue run**.\n5. Click **Continue run**: the dialog reopens on the same (now completed) run with the old screen. Press **Submit**:\n   the resume door answers 404 `RUN_NOT_FOUND` \"No suspended run 'run_bd679b9d-60e6-45a5-95a4-c671d5f757bf'\",\n   shown inside the dialog.\n\n## Mechanism\n`ui/apps/console/src/pages/developer/FlowRunsPage.tsx`\n- :397 `setResult(res)` stores the trigger response (`status: 'paused'`, `screen`, `runId`).\n- :530 `onComplete={() => { setScreenFlow(null); onExecuted?.(); }}` clears only the runner state; `result`\n  is never updated or cleared when the run finishes.\n- :475–476 the header still picks the `result?.status === 'paused'` branch (\"Waiting for input\").\n- :489 `result?.status === 'paused' && result?.screen && result?.runId && !screenFlow` is now true again (screenFlow\n  is null), so the \"Continue run\" button reappears and reopens a screen the server no longer holds.\nFix direction: in onComplete, clear `result` or replace it with the completed run (re-read the run, or use the\nresume response FlowRunner received).\n\n## Severity guess\nLow: developer/testing surface only; no data harm. The run itself completes correctly; the stale panel misleads\nthe tester and the reopened dialog ends in an error.\n\n## Duplicate searches (read-only, 2026-11-15)\n- `repo:objectstack-ai/objectstack is:issue is:open Continue run` → 22 hits, none about the Flow Runs page (top: #32835, #33343, #31908, #32749, #26472 — unrelated)\n- `… is:issue is:open FlowRunsPage` → 0\n- `… is:issue is:open Waiting for input` → 22 hits, none related (#30591, #33059, #7849, #20966, #9857 …)\n- `… is:issue is:open RUN_NOT_FOUND` → 2 (PM seat trackers #6017, #6015 — unrelated)\n- `… is:issue is:open flow runs page suspended` → 10, none related (#30806, #33784 QA run record, PM seat trackers)\nNo duplicate found.\n\nQA-source: #33853 · automation.flow-runs-page-test-trigger · observed beside the clauses"

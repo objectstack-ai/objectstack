@@ -1,0 +1,33 @@
+{
+  "number": 33959,
+  "kind": "issue",
+  "title": "新增全仓调度车道 repo:objectstack：多席按区租约调度本仓全部卡片，信箱协调分工",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:56:56Z",
+  "updated_at": "2026-11-15T15:01:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33959",
+  "body": "立卡门类别:③ 维护者直派的任务(新增车道,维护者点名)\n\n## 维护者原话(2026-11-15,项目会话)\n\n- 14:51Z 「是否考虑开一个全仓调度车道，按照你现在的执行的方案。后续我启动他就是调度全仓的任务，并且也可以在多个 agent 开多个座位。通过信箱协调分工。」\n- 14:52Z 车道名:「或者叫 objectstack」 · 「就是仓库名」\n\n## 维护者速读\n\n- 新增车道 `repo:objectstack`(全仓调度车道),席位 `repo:objectstack#N`,可在多个账号、多个 agent 上各开一席。\n- 每席按今天 server 席位在用的分区工作法(`references/area-lease.md`)调度本仓全部卡:分区、每区若干 dev、独立复核线程、区内落地非受管 PR。\n- 多席之间靠座位贴上的租约表 + 信箱 `Notify: split` 分区,同一区同一时间只归一席。\n- 现有各域车道照常运行;本车道不抢已被认领或已租出的卡。cloud 整卡仍归 `repo:cloud` 席,安全公告仍归 `security` 席,受管面照〈路径分叉〉由维护者批准或合并。\n- 召唤方式:项目指令行 `pm-dispatch objectstack`。\n\n## 名称核对\n\n`repo:` 类车道词现有工具都认:`check-half-states.mjs` 的签名车道正则、`mailbox-open.mjs` 的座位形状、`fleet-roster.mjs` 把 `repo:X` 席解析为 `objectstack-ai/X`,即本仓全部卡。故不需改 `SEAT_BARE_LANES` / `SIGNATURE_LANE_SOURCE`。\n两处要在章程里写明:\n- `cross-repo-coordination.md` 的单车道仓条(席位自做首触与定级)不适用于本车道,分诊与 `domain:*` 仍归分诊席;\n- 看板上已有的 `repo:objectstack` 标签是缝卡义(H14 对它保守降级),本车道 ⛔ 不给卡挂这个标签。\n\n## 交付(一个 PR)\n\n1. 新增 `.claude/skills/pm-dispatch/references/lanes/objectstack.md`(车道章程,只写全仓与多席特有的规则,其余指向 `area-lease.md`、`execution-duties.md`、`seat-lifecycle.md`)。\n2. `SKILL.md`〈域车道〉表登记一行。\n3. `references/project-forms.md` 席位词行收进 `objectstack`。\n4. `scripts/pm/check-skill-line-ratchet.mjs`:新文件的 `CEILINGS` 行与 `MAX_TABLE_ROW_BYTES` 行;`SKILL.md` 320 → 321(本卡原话为裁决出处)。\n\n## 与在飞工作的关系\n\n- 今天的七条分区规则由 PR #33938(卡 #33907)写进 `area-lease.md`;本章程只引用该文件,不抄规则。\n- 「一文件一写者」改为真交叠检查(维护者 14:41Z 决策卡「今天改规则,并立全部 6 张卡」),脚本化在 #33941;章程写了 `git merge-tree` 读法。\n\n## 受管面\n\n全部改动在 `.claude/**` 与 `scripts/pm/**`;按 SKILL.md〈路径分叉〉定档,以 `check-governed-merges.mjs --pr N` 读数为准。需维护者批准的部分在 PR 速读里写明。\n\n## 查重\n\n`references/lanes/` 现有 cloud、devx、director、eval、hotcrm、mobile、qa、queue、review、security、server、skills、spec、triage、ui;无全仓调度车道。"
+}

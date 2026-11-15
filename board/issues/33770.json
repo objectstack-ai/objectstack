@@ -13,19 +13,21 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T10:01:43Z",
-  "updated_at": "2026-11-15T10:45:27Z",
+  "updated_at": "2026-11-15T17:30:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33770",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33736 append here. Dedupe: the open issues naming PR #33736 are its card #33604 and #33729 (a scope fence only).\n\n## review follow-ups of PR #33736 (card #33604)\n\nRecords: 6891926185 (first), 6892305129 (delta), 6892689104 (delta, PASS on head `38cc292a`, nits only). Every item is a nit; the realistic record forms read right, and N4 fails closed.\n\n- [ ] N1 a self-contradicting finding still clears: a bold title that is exactly \"closed.\" followed by \"Still open for the table cell\" or \"Reopened by this delta.\" in the body. The allowance also takes a `__` title, a tab, and an unpaired `.**`.\n- [ ] N2 a hard line break directly after the state word inside a bold title clears (the rest of the title on the next line). No measured record wraps a finding title.\n- [ ] N3 FAIL spellings still outside the reader: a header-row verdict column (needs table state), `Verdict: PASS → FAIL`, a struck PASS then FAIL, `Verdict was FAIL`, `verdict is: FAIL`, `Verdict -FAIL`, a mark before the cell's word, key and value in one cell, title or lower case in a heading tail.\n- [ ] N4 clean text now refused (fail closed; a repost cures it): `The verdict is fail-closed.`, a table row with a verdict cell and a cell opening `fails closed`, a heading tail such as `PASS, prior FAIL closed`, a bare `FAILED` line.\n\n`scripts/pm/check-governed-queue-guard.mjs`, `scripts/pm/record-recognisers.mjs`; `skip-changeset`; `Clause-②: no`. Waits for PR #33736.\n"

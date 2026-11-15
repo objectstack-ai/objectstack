@@ -2,8 +2,8 @@
   "number": 33745,
   "kind": "issue",
   "title": "Dataset executor: query_dataset accepts measures and dimensions the dataset does not declare (raw fields cited as metrics)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,21 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:A3",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:47:43Z",
-  "updated_at": "2026-11-15T13:54:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:46:00Z",
+  "closed_at": "2026-11-15T16:44:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33745",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFound by the seat's contract review on objectstack-ai/cloud PR #4557 (card cloud#4551, epic cloud#3825), hold 1. Measured at pin 181ad7d4 on the showcase kernel.\n\n## What happens\n\n`query_dataset` accepts members the dataset does not declare: `measures: ['amount']`, `['count']`, or an undeclared dimension. Field-level permissions still apply, so nothing leaks. But the provenance then cites an ad-hoc aggregate as a governed metric, and the answer reads 「来源：指标 amount · 数据集 …」.\n\nADR-0149 makes the dataset the one declared definition. An undeclared member is outside it.\n\n## Change\n\nThe executor refuses measures and dimensions the dataset does not declare. The error names the declared members, so the model can pick one or fall back to the record tools (the D3 fallback). Add tests.\n\nConsumer: cloud's ask agent (PR #4557) labels a fallback as 非指标口径.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"

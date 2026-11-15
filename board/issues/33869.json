@@ -2,8 +2,8 @@
   "number": 33869,
   "kind": "issue",
   "title": "spec filter.zod.ts: state the column-side rule — a column with no value fails an ordering operator (nit N1 of #33698's review)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:37:50Z",
-  "updated_at": "2026-11-15T12:53:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:26:00Z",
+  "closed_at": "2026-11-15T16:26:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33869",
   "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\nFiling gate: ① (nit N1 of contract record 6894395884 on PR #33854 / card #33698).\n\n**What is missing.** `packages/spec/src/data/filter.zod.ts` says \"null is not ordered\" about a `null` **comparand**. It says nothing about a **column** with no value. Since PR #33854, the walker in `packages/objectql/src/having-filter.ts` fails `$gt`, `$gte`, `$lt`, `$lte` and `$between` for a column whose value is `null` or absent. driver-sql's `where` compiler already behaved this way. The walker's docblock cites the spec for this rule, but the spec text does not say it.\n\n**Fix shape.** Describe and TSDoc text only. Add one sentence beside the comparand-side sentence: a column with no value fails every ordering operator and `$between`, in every filter position (`where`, a measure's `filter`, `having`). Name the operators whose answer for a column with no value is their own (`$ne`, `$nin`, `$notContains`, `$exists`, `$null`; #5298 ruling A). Regenerate any artefacts the gates regenerate. `Clause-②: no`, `Metadata-protocol: none`, because #33854 carries the semantic change and this card only states it.\n\nBlocked-by: #33698\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue is:open filter.zod.ts null column ordering`: no open card.\n\nSuggested lane: `domain:spec`. Suggested grade: p3 (prose; the rule is already pinned in code). Triage routes and may re-grade."

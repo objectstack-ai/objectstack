@@ -1,0 +1,35 @@
+{
+  "number": 33930,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): the boot report names a refused grant's candidates and the bind; a refused suggestion's fix follows its column",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:32:10Z",
+  "updated_at": "2026-11-15T15:52:14Z",
+  "closed_at": "2026-11-15T15:52:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T15:52:12Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33930",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbTGhxJSYAmQXU7efVdNqrpw)_\nFixes #32753\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:启动时的目录引用报告现在把「两个包都持有同名权限集、而授权未指明包」的授权列为被拒绝,并列出全部候选包与 `os migrate stored-references bind` 修复;受众绑定建议在包列已有值时不再给出不适用的 bind 提示。\n- 为什么改:原报告把这类授权当作「目录解析不到」,建议「重新声明权限集」,而这改变不了什么;建议的拒绝文案给出的 bind 命令对非空包列直接拒绝。\n- 风险与回滚:只改日志与拒绝文案,没有授权因此多给或少给;回滚即还原两个源文件。\n- 先看:`catalog-reference-report.ts` 的授权循环与授权行日志;`suggested-audience-bindings.ts` 的 `refusedSuggestionFix`;`catalog-reference-report.test.ts` 末尾新 describe。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-security exec vitest run src/catalog-reference-report.test.ts -t \"name two packages hold\"`,预期 4 passed。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **Boot report, permission-set half** (`catalog-reference-report.ts`). A grant whose name the catalog holds but refuses for the grant (a grant naming no package, of a name two packages hold: `ambiguous-in-environment`) is still listed on the grant line, now with the resolver's refusal: `refusal` on the row (`packageId` = the column, `reason`, every candidate, the resolver's sentence), and `refusals` in that organization's meta. The line's fix, appended only when a refusal is listed, follows the column: a refused grant naming no package is bound after review with `os migrate stored-references bind --table sys_user_permission_set --id ID --package PACKAGE`; one that already names a package is granted again naming the candidate meant, then removed. A name nothing holds keeps the old line byte for byte.\n- **Boot report, position half**: unchanged code; now pinned for the two-holder case (`ambiguous-in-environment`, both candidates named).\n- **Suggestion refusal** (`suggested-audience-bindings.ts`, `resolveSuggestedSet`). The refused suggestion's fix follows its `permission_set_package`: a column naming no package keeps the bind; a column that already names a package (one that no longer serves the set) names that package and says the bind does not apply (it writes only a null column), then gives the fix that does: install or enable that package again if its set is the one meant, or dismiss the suggestion. No refusal code or status changes: the `409` and `SuggestionStateError` are as before.\n\n## Tests\n\n- `catalog-reference-report.test.ts`: new describe, four cases: position half (both holders), permission-set half (bare grant with both candidates, stale-column grant with its column, a ghost set with no refusal), the logged line (meta refusals plus both fix sentences), and a CONTROL that a line with no refusal names neither fix.\n- `suggested-audience-bindings.test.ts`: one case in the existing package-scoped harness: two non-null-column refusals carry no bind and name their package and fix; an accepted row's withheld reason says the same. The existing null-column pin (bind named with the row id) is unchanged and green.\n\n## Acceptance notes\n\n- The card's item 2 says \"grant\"; the only refusal that appends the bind for a stale column is a suggestion's (`resolveSuggestedSet`), which has no re-grant or delete door (the table is read-only through the API). Its fix therefore names the two acts that exist: serve the set from the column's package again, or dismiss.\n- `os doctor` does not read this report (no reference to it under `packages/cli/src/commands/doctor.ts`). Surfacing it there is a cli change, left out of this PR.\n\n## Verification\n\nMeasured at 843e83d22 (objectstack-ai/objectstack). The head, 1a99d2ae1, adds only a merge of origin/main, which touches no file under packages/plugins/plugin-security or packages/core.\n\n- `pnpm --filter @objectstack/plugin-security typecheck`: exit 0. `pnpm --filter @objectstack/plugin-security test`: 267 files passed, 6686 passed, 45 skipped.\n- eslint `--no-inline-config` on the four touched source and test files: exit 0.\n- Ablations (each through `scripts/ablation-replace.mjs`, restored to blob == HEAD, `git diff HEAD` empty): (1) the grant row's refusal not attached: 2 red (the permission-set half and the logged line); (2) the suggestion fix always given the null-column branch, the old text: 1 red (the new suggestion pin); (3) the position refusal not recorded: 1 red (the position half).\n- Derived gate families: `node scripts/pm/dispatch-gates.mjs --commands` derived 71 families at 843e83d22; 68 exit 0. NOT MEASURED, each left to CI: `check:dual-build-cjs-loads` and `check:i18n` (exit 3, PREREQUISITE NOT MET: whole-workspace build absent), `check:type-check-debt` (verify-lock queue, exit 99, then the 10-minute foreground cap on retry). `--ran` reconciliation: 71 accounted, 0 UNRUN. `check-partof-closing-keyword` on this body: exit 0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTEivi2wogPpeo3xd5\n"
+}

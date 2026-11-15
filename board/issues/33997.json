@@ -1,0 +1,36 @@
+{
+  "number": 33997,
+  "kind": "pull_request",
+  "title": "docs(qa): v18.5.0 sweep runner kit — qa-fixture --help and oidc-stub, RUNNER.md runner facts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:40:23Z",
+  "updated_at": "2026-11-15T16:26:35Z",
+  "closed_at": "2026-11-15T16:26:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T16:26:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33997",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Hh6t1t7VgnERX7Sim47B9F)_\n\nFixes #33968\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：跑手工具两处——`qa-fixture.mjs` 的 `--help` 不再误跑夹具，新增本地 OIDC 身份提供方夹具 `oidc-stub`;RUNNER.md 补六条跑手环境事实(逐条实测)。\n- 为什么改：18.5.0 发版测试账本里 8 行属于跑手工具，跑手每轮重复踩坑或被迫手搭 OIDC 桩。\n- 风险与回滚：只动 QA 文档和仓内 QA 脚本，不发布、不进产品包;回滚即 revert 本 PR。\n- 先看:`scripts/qa/qa-fixture.mjs`(help 分支与 oidc-stub 段),`docs/qa/platform-checklist/RUNNER.md`(新增条目)。\n- 两分钟验证:`node scripts/qa/qa-fixture.mjs broken-upstream-app --help; echo $?` 应只打印用法、退出 0,`/tmp` 下不出现新的 `qa-broken-upstream-*` 目录。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThe runner-kit rows of the v18.5.0 sweep ledger (anchor #33761, ledger comment 6896511848), each re-read at `origin/main` `895783a1` and measured on this branch.\n\n| Ledger row | What it said | What changed |\n|---|---|---|\n| 7 | `qa-fixture.mjs FIXTURE --help` runs the fixture | A help request anywhere on the line (`--help`, `-h`, or the `help` command) prints the synopsis and common flags, read from the script's own header so the two cannot drift, and exits 0 with nothing run. It is read off the raw arguments before `parseArgs`. |\n| 10 | per-file summary line needs `--reporter=verbose` | Measured otherwise: in a non-TTY shell `verbose` prints one line per test and still no file line; `--reporter=tree` prints `✓ … src/env.test.ts (63 tests)`. RUNNER.md says `--reporter=tree`, with the three readings. |\n| 22 | installed-local removal answers 422; restart with the cached manifest moved aside | RUNNER.md: `DELETE /api/v1/packages/ID` answers 422 `WRITABLE_PACKAGE_REQUIRED`, and `DELETE /api/v1/marketplace/install-local/MANIFEST_ID` removes it at once with no restart (measured), with its 409 cases read from the door's header. |\n| 91 | registry recipe facts belong in RUNNER.md | New entry: the npmjs uplink trusts the egress proxy only through the shell's `NODE_OPTIONS` / `SSL_CERT_FILE` (a cleared environment answers 404 \"no such package available\"), the user door `PUT /-/user/org.couchdb.user:NAME`, and `max_body_size` (12 MB tarball: E413 at default, published at 100mb). |\n| 103 | promote the local OIDC stub to a `scripts/qa` fixture | New `qa-fixture.mjs oidc-stub`: discovery + per-run JWKS on `localhost` from a detached process `teardown` stops; `--register` registers it as the admin and reads it back. RUNNER.md entry added. |\n| 192 | `os dev` takes the next free port silently | It is not silent (both shift lines print, already in RUNNER.md); added the trap the reading names: a \"restart\" while the old server listens is a second server on the next port against the same file DB (measured). |\n| 202 | `pnpm --dir APP exec … 'qa/*.test.json'` resolves inside APP | New entry with the measurement: the pnpm line ran the showcase's suite; the binary by full path, or an absolute glob, ran the staged suite. |\n| 215 | `npm publish tarballs/x.tgz` needs `./` | In the registry entry: without `./` npm 10.9.9 runs `git ls-remote ssh://git@github.com/tarballs/…` and exits 128; with `./` it publishes. |\n\n## Tests\n\n`qa-fixture.mjs` has no self-test, so none was extended; no test file changed. The readings below are the evidence.\n\n<details><summary>--help, before and after</summary>\n\nBefore, at `895783a1`:\n\n```\n$ node scripts/qa/qa-fixture.mjs broken-upstream-app --help\nqa-fixture: copying examples/app-showcase to /tmp/qa-broken-upstream-qbLcb7/app (no node_modules, no build output)\n{ \"fixture\": \"broken-upstream-app\", … }        exit 0  (the fixture ran; torn down after)\n$ node scripts/qa/qa-fixture.mjs --help\nqa-fixture: REFUSED — unknown fixture \"--help\": one of …        exit 2\n```\n\nAfter, at `6ee7aa00`: `broken-upstream-app --help`, `--help`, `-h`, `help`, `walled-boot --port 1 --help` and `teardown -h` each exit 0 with the 14-line usage on stdout, nothing on stderr, and no new `/tmp/qa-broken-upstream-*` directory. A bare call with no fixture still refuses, exit 2.\n\n</details>\n\n<details><summary>oidc-stub, live</summary>\n\n- Standalone: exit 0; discovery and JWKS answered; `teardown --dir DIR` stopped the recorded process group and a request to the stub then got no answer.\n- `os dev` showcase boot on 41900 with `OS_SSO_ENABLED=true` (its `OS_TRUSTED_ORIGINS` named another stub port): `oidc-stub --register --base-url http://localhost:41900 --groups-claim groups` exit 0, read back `groupsClaim: groups`.\n- Control, `os dev` boot on 41910 with `OS_SSO_ENABLED=true` and no `OS_TRUSTED_ORIGINS`: `--register` exit 0. The `isDev` default in `packages/cli/src/commands/serve.ts` trusts `http://localhost:*`, so the fixture prints `OS_TRUSTED_ORIGINS` only for a boot outside `os dev` (that refusal read from source, not booted).\n- Boot without `OS_SSO_ENABLED`: the register door answered 404 `SSO_REGISTER_FAILED`.\n\n</details>\n\n## Acceptance notes\n\n- Row 10's suggested flag was `--reporter=verbose`; the reading shows it gives no per-file line, so RUNNER.md names `--reporter=tree`. The ~50 item clauses that ask for \"the summary line per pin file\" are item text, left to the batch cards.\n- The SSO items' `fixtures.requires[0]` says a local IdP origin must be in `OS_TRUSTED_ORIGINS`; on an `os dev` boot it need not be (measured above). Item text, left to the batch cards.\n- The stub serves no sign-in (authorize, token and userinfo answer 501), so a clause needing a federated sign-in is still not driven by it; RUNNER.md says so.\n- The branch is behind `origin/main` by commits that touch neither changed file.\n\n## Verification\n\n<details><summary>Gates at 6ee7aa00</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 32 families; each ran with stdin from `/dev/null` and exited 0. `--ran` reconciliation: 32 derived, 32 run, 0 NOT-MEASURED, 0 UNRUN. Full `pnpm build --concurrency=2` under the verify lock: VERDICT command-exit 0, 119 tasks.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmNeaCFJ1eiu2gxYU1J)_\n\n<!-- signed: domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z -->\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 34086,
+  "kind": "issue",
+  "title": "check:adr-anchors declares 5 path hints but scans the whole tree, so dispatch-gates under-derives it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:09:48Z",
+  "updated_at": "2026-11-15T19:56:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34086",
+  "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: an out-of-scope note on PR #34080 (card #33848, os-dev-report 6898826924), escalated by the at-tier review 6898932707 with no carrier. ⛔ Not a claim. Grading and lane are triage's.\n\n## 维护者速读\n\n- **现象:** `check:adr-anchors` 声明了 5 条路径提示,但实际扫描整棵树。门禁派生工具按声明判断“改哪些文件要跑它”,所以别处的改动(例如 PR #33975 里 `check-governed-merges.mjs` 的一条夹具字符串)会让它在 CI 变红,而本地派生清单里没有它。\n- **要做的:** 让它的声明和实际读的范围一致:要么把扫描范围收窄到声明的路径,要么把它登记为全树(WIDE)族,让派生工具对任何改动都派它。\n\n## Facts\n\n- PR #33975: a fixture string in `scripts/pm/check-governed-merges.mjs` reddened `check:adr-anchors`; `dispatch-gates --commands` did not derive it for that file list.\n- `scripts/check-adr-anchors.mjs` declares 5 path hints and scans the whole tree (dev report on #33848).\n\n## What lands\n\nThe family's declared population matches what it reads: either a narrowed scan, or a WIDE-population declaration that `dispatch-gates` already knows how to read. A self-test or census row pins it.\n\nDedupe: `is:issue adr-anchors` → no card on this. **New.**\n"
+}

@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "lease:A3",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:40:27Z",
-  "updated_at": "2026-11-15T13:47:50Z",
+  "updated_at": "2026-11-15T17:32:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33892",
   "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\n**① Reproduced defect.** `reach:` hosted staging environment `os-2ph4c1.objectos.app`, 2026-11-15, admin session, `X-OS-Debug-Timing: json`.\n\nReader: `domain:server` lane, one PR in `packages/drivers/driver-turso`.\n\n## What happens\n\nOn a hosted environment, every answer reports zero database work, even when the request plainly reads the database:\n\n| request | status | `db` member | `handler` |\n| --- | --- | --- | --- |\n| `GET /api/v1/data/sys_user?top=1` | 200 | `db;dur=0;desc=\"0 queries\"` | 367 ms |\n| `GET /api/v1/data/sys_user?top=5` | 200 | `db;dur=0;desc=\"0 queries\"` | 503 ms |\n| `GET /api/v1/meta/object/sys_user` | 200 | `db;dur=0;desc=\"0 queries\"` | 201 ms |\n\nThe admin-only `X-OS-Debug-Timing-Detail` header is absent on all three, because there are no `db` detail samples to report.\n\n## Why\n\n- The `db` member and its detail are fed by `SqlDriver.installQueryTiming()` (`packages/drivers/driver-sql/src/sql-driver-class-head.ts:500`), which listens on **knex** `query` / `query-response` events.\n- In remote mode, `TursoDriver` sends its statements through `RemoteTransport` (`packages/drivers/driver-turso/src/remote-transport.ts`), which calls `@libsql/client` directly: `this.client.execute(…)` (about 25 sites) and `this.client.batch(…)` (lines 1348, 2193, 2245, 2272, 2723). Knex never sees these statements, so nothing is counted.\n- Every hosted environment runs on the remote transport, so the hosted plane has no per-request database timing at all.\n\n## Why it matters\n\n- **cloud#4369, reading 1** (in-container round trip to Turso, owed to the transactions topic #32500) cannot be read today without a one-off probe in the container. With this fixed, an admin request with `X-OS-Debug-Timing: json` gives per-statement durations measured inside the container, which is exactly that reading.\n- Hosted performance work (cloud#2914, cloud#3103) has had to infer database time from `handler` totals.\n\n## Expected\n\n- Each `execute` and each `batch` round trip in `RemoteTransport` is counted into the ambient collector: `countServerTiming('db', dur, 'queries')`, the same mark `driver-sql` produces.\n- When detail capture is on, it records the parametrized SQL shape (for a batch, one sample per round trip, labelled e.g. `batch(<n>): <first statement shape>`). Bindings are never recorded.\n- Simplest seam: one private helper wrapping `client.execute` / `client.batch`, used at every call site, or a wrapper installed where `ensureConnected()` creates the client.\n\n## Acceptance\n\n- A unit test in `driver-turso` with a stubbed client and an active `PerfTiming`: one `execute` and one `batch` give `db` count 2, and detail samples carry SQL shapes without bindings.\n- After the pin reaches staging: the three requests above report a non-zero `db` count, and `X-OS-Debug-Timing: json` from an admin returns `X-OS-Debug-Timing-Detail`.\n\n## Not in scope\n\n- No change to the disclosure gate (admin-only per request, global mode via `OS_SERVER_TIMING`).\n- No change to transactions (#32500 stays on hold).\n\nDedupe:\n- `repo:objectstack-ai/objectstack \"Server-Timing\" turso` → 14 hits;\n- `repo:objectstack-ai/objectstack RemoteTransport timing` → 11 hits;\n- `repo:objectstack-ai/objectstack Server-Timing db remote` → 14 hits (open and closed).\n\nThe closest is #32500 (the transactions topic, which needs the reading, not this fix). #24523 (closed) is about an extra authz read, not the timing seam. None covers the remote transport missing from `db` timing.\n\nRelated: cloud#4369, #32500."

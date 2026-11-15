@@ -1,0 +1,34 @@
+{
+  "number": 34003,
+  "kind": "issue",
+  "title": "pm(check-owed-reviews): a same-account review seat the maintainer seated under area-lease mode is still printed `barred`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:55:20Z",
+  "updated_at": "2026-11-15T17:32:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34003",
+  "body": "domain:skills#2 · os-steve · session_01ADHkmRxXmVQ41fqnaTPGAv\n\nFiling gate: ① (a follow-up owed by work in flight: nit N1 of the at-tier contract review 6896387034 on PR #33943, card #33845, outside that diff).\n\n## What is wrong\n\n`.claude/skills/pm-dispatch/references/area-lease.md` (L13 on `main`) lets a review seat on the PR's own account review it when the maintainer's own word seats it in that review thread, and since PR #33943 `lanes/review.md` L19 points at that exception. `scripts/pm/check-owed-reviews.mjs` does not read the exception: `reviewSeatsOf` (L258–L268 on `main`) bars every review seat whose account is the PR's own (`isBarred`), and its comment cites `lanes/review.md` 独立性 as unconditional. A seat the maintainer seated that way is printed `barred`, so the owed-review report tells the seat no independent reviewer is available when one is.\n\nIt errs toward over-barring (no review is waved through); the cost is a seat that waits or re-routes a review it already has.\n\n## Done when\n\n- `check-owed-reviews.mjs` either reads the area-lease exception (the maintainer's word in the review thread, as area-lease.md L13 states it) or says in its output that a same-account seat may be seated by the maintainer under area-lease mode, with a self-test pin either way.\n- The `isBarred` comment names the exception instead of calling the bar unconditional.\n\n## Scope\n\n`scripts/pm/check-owed-reviews.mjs` and its self-test only. `skip-changeset`. Not governed by itself (`scripts/pm/**` outside the register rows); confirm with `check-governed-merges --test` at dispatch.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open check-owed-reviews` → no card on this.\n\n⛔ Not a claim. Grading is triage's."
+}

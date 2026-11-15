@@ -1,0 +1,37 @@
+{
+  "number": 33937,
+  "kind": "pull_request",
+  "title": "fix(auth)!: the environment-access gate on /oauth2/authorize judges every client the request names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:37:57Z",
+  "updated_at": "2026-11-15T16:57:51Z",
+  "closed_at": "2026-11-15T16:57:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T16:57:49Z",
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33937",
+  "body": "Clause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no skill under `skills/**` and no hand-written page under `content/docs/**` teaches `oidcAuthorizeGate` or the authorize endpoint's environment-access gate.\n\n## 维护者速读\n\n- 改了什么:`/oauth2/authorize` 上的环境访问门(`oidcAuthorizeGate`)现在对请求点名的每一个客户端逐一裁决(查询串与请求体里的 `client_id`,字符串或数组,去重),任一被拒即以现有的 403 `ENV_ACCESS_DENIED` 拒绝。\n- 为什么改:门的裁决范围应覆盖请求点名的全部客户端,规则以此为准。\n- 风险与回滚:只影响设置了 `oidcAuthorizeGate` 的部署(托管控制面);开源版与自托管不设,行为不变。回滚即 revert 本提交。\n- 先看:`packages/plugins/plugin-auth/src/auth-manager-before-hook.ts`(`authorizeRequestClientIds` 与门的循环)、`packages/plugins/plugin-auth/src/oauth-authorize-refusal.test.ts`(新增两个 describe)、`.changeset/authorize-gate-judges-every-client-id.md`。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-auth exec vitest run src/oauth-authorize-refusal.test.ts`,预期 31 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe ADR-0069 D5.1 environment-access gate on `/oauth2/authorize` judges every client the request names: the query's `client_id` and the body's `client_id`, each a string or an array, de-duplicated (query first). It refuses with its existing refusal if any one is refused: `403 ENV_ACCESS_DENIED` for a fetch or API client, and for a browser the redirect or readable page it already gets (`oauth-authorize-refusal.ts`, unchanged). A request that names no client anywhere is unchanged, and so is an unauthenticated request.\n\nBREAKING only for a host whose `oidcAuthorizeGate` assumes one call per request: it can now be called once per distinct client named. The callback signature does not change.\n\n## Tests\n\n`packages/plugins/plugin-auth/src/oauth-authorize-refusal.test.ts` (real `AuthManager` + `@better-auth/oauth-provider`), two new top-level describes in the existing harness:\n\n- the gate judges every client the request names: GET refused; form POST refused (envelope); form POST from a browser navigation answers the page, as a refused POST is answered today; JSON POST answers the provider's 415; a query/body pair refused in either order; a form body naming two clients is issued a code only for a client the gate judged and admitted, in either order; a query naming the client twice is refused when either is refused, each judged by itself, in either order; a client named in both judged once; CONTROL an admitted form POST is handed a code; CONTROL a request naming no client is not judged.\n- the gate judges every pass that resumes an authorization: sign-in resume, `POST /oauth2/consent`, `POST /oauth2/continue`, each with a denying-gate leg (refused) and an admitting control (code). A resume pass naming a client that is not a string is judged on that value and refused when it is refused.\n\n`packages/qa/dogfood/test/oidc-authorize-env-gate.dogfood.test.ts`: form POST naming the client in the body refused; query/body pair refused; CONTROL admitting gate hands a code.\n\n## Acceptance notes\n\n- PR overlap: PR 33268 edited the same insertion point in `auth-manager-before-hook.ts`. It landed first, and the merge at `8e83084f92` keeps both declarations.\n\n## Verification\n\n<details><summary>Readings</summary>\n\n- Before the fix (merge base 4b5024de52): the new pins `Tests 4 failed | 23 passed (27)`; every resume-pass leg was already green.\n- With the fix: `Tests 27 passed (27)`. Ablation of the body read: the same 4 red, restored to the HEAD blob.\n- `pnpm --filter @objectstack/plugin-auth test` at `f050ae909b`: `Test Files 277 passed (277)`, `Tests 5501 passed | 10 skipped`; typecheck OK (lock VERDICT command-exit 0). The head `a65fcc623d` adds only a `packages/cli` merge from main.\n- dispatch-gates at `fed9ed9668`: 70 derived, 69 run, 1 NOT-MEASURED (`check:dual-build-cjs-loads`, prerequisite dist; CI runs it).\n- Dogfood battery at `fed9ed9668`: `Tests 3962 passed | 42 skipped (4004)`, VERDICT command-exit 0.\n- Dogfood battery at `a65fcc623d`: `Test Files 467 passed | 3 skipped (470)` · `Tests 3962 passed | 42 skipped (4004)`, no failures, VERDICT command-exit 0. It carries to `8a779dea16`, whose diff changes only tests, a jsdoc comment and the changeset.\n- Review round 2 at `8a779dea16`: `oauth-authorize-refusal.test.ts` `Tests 31 passed (31)`. Ablation of the repeated-parameter arm: 2 red. Ablation of the non-string arm: 1 red. Both restored to the HEAD blob. plugin-auth `Tests 5505 passed | 10 skipped`, and typecheck OK. The changeset gates and the 9 gate families added by `auth-manager.ts` all exit 0.\n- Main merged at `8e83084f92`, after PR 33268 landed at the same insertion point in `auth-manager-before-hook.ts`. The conflict was positional and both declarations are kept, with no line of either changed. plugin-auth at that tree: `Test Files 277 passed (277)` · `Tests 5515 passed | 10 skipped (5525)`, and typecheck OK.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcT1w3zpekijraHJE4f)_\n\n<!-- signed: security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f -->\n\n\n\n"
+}

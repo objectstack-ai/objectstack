@@ -15,7 +15,6 @@
     "domain:server",
     "finding",
     "lease:E1",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,7 +23,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:39:04Z",
-  "updated_at": "2026-11-15T12:09:13Z",
+  "updated_at": "2026-11-15T15:59:12Z",
   "closed_at": "2026-11-15T12:09:13Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -32,7 +31,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33563",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a defect found by the at-tier contract review 6886701800 of PR #33465, card #32504; code outside that diff).\n\n**What is wrong.** In `packages/metadata-protocol/src/protocol.ts`, `revertCommit` restores each item's row through `repo.restoreVersion`, then runs three steps whose failures it never reports:\n- `applyRegistryWriteThrough` catches and warns, or returns a refusal that `revertCommit` discards;\n- `ensureObjectStorage` returns an advisory that goes on `advisories`, not `failed[]`;\n- `runMutationProjector` returns `{ success: false }`, also discarded.\n\nSo an item whose registry write-through or projection failed is reported in `reverted[]` as restored, and the call can answer `success: true`. That contradicts the function's own `protocol.ts` docblock (\"a revert that answers `success: true` is one the running process has already acted on\"). The function's #9174 comment records the outcome as measured.\n\n**Reach.** Every AI-authoring revert and every `rollbackToPackageCommit` step: the stored row and the running registry can disagree while the caller is told the revert worked.\n\n**What lands.** Either report a post-row-write fault in `failed[]` (with the row state named), or keep the outcome and correct the docblock and ADR-0067 to say a revert's `success` covers the row write only. Which one is a contract choice for the owning lane; if it needs the maintainer, say so here. Pin it with a test that fails the write-through after the row write.\n\nRelated: #32504 (PR #33465 rewrites the ADR-0067 amendment to say what the code does today), #33486 (the `rollbackToPackageCommit` docblock).\n"

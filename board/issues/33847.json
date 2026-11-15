@@ -2,8 +2,8 @@
   "number": 33847,
   "kind": "issue",
   "title": "pm(dispatch-gates): changedPathsFromGit reads paths without -z, so a non-ASCII governed path is missed at dispatch",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:08:39Z",
-  "updated_at": "2026-11-15T13:05:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:27:27Z",
+  "closed_at": "2026-11-15T16:26:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33847",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a defect found by at-tier review of PR #33804, records 6893545108 and 6893808803, outside that PR's surface).\n\n`scripts/pm/dispatch-gates.mjs` `changedPathsFromGit` (it feeds `--tier` and `--commands`) lists changed paths without `-z`, and nothing sets `core.quotePath=false`. Git prints a path with a non-ASCII or control character C-quoted (`\"skills/x/\\346\\226\\207.md\"`), which matches no prefix, so a dispatch tier or a derived gate list can miss a governed or gated path. The landing gates now read such paths right (PR #33804), so this is a dispatch-time hole, not a landing hole.\n\n## What lands\n- `changedPathsFromGit` reads with `-z` and splits on NUL, like `enumerateRows` after PR #33804; a real-git self-test row with a non-ASCII path under `skills/**` proves the tier and the derived gate list include it; an ablation reddens it.\n\n`scripts/pm/dispatch-gates.mjs` and its self-test; `skip-changeset`; `Clause-②: no`. Ungoverned. Grading is triage's.\n"

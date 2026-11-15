@@ -2,8 +2,8 @@
   "number": 33868,
   "kind": "issue",
   "title": "skills: teach that a column with no value fails an ordering filter, and the per-measure filter pushdown (follow-up of #33698)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:37:28Z",
-  "updated_at": "2026-11-15T12:53:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T17:23:48Z",
+  "closed_at": "2026-11-15T17:22:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33868",
   "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\nFiling gate: ① (`Skills-docs: follow-up` owed by PR #33854 / card #33698, `Metadata-protocol: semantic` per contract record 6894395884 S1 and seat amendment 6894412038).\n\n**What changes for an author (once PR #33854 lands).**\n1. A column with **no value** (null or absent) fails `$gt`, `$gte`, `$lt`, `$lte` and `$between` in every filter position the engine evaluates: a measure's own `filter`, `having`, and the in-memory `where` that plugin drivers use. So `count where amount $lte 0` no longer counts rows with no amount, and `having: { avg_amount: { $lte: 0 } }` no longer keeps an empty group. This was already true on SQL `where`. `$ne`, `$nin`, `$notContains`, `$exists`, `$null`, the equality family and a `null` comparand are unchanged.\n2. On a driver that declares the new `DriverCapabilities.aggregationFilter` bit (driver-sql; driver-turso in local mode), a per-measure `filter` runs in the database as a conditional aggregate. It answers what the same filter as `where` answers on that datasource, including the text collation, and it refuses what `where` refuses (for example a reference to an undeclared column: 400 `INVALID_FILTER`).\n\n**Where to teach it (measured by grep; the skills seat confirms):** `skills/objectstack-query/rules/filters.md` (the no-value rule), `skills/objectstack-query/rules/aggregation.md` (measure filter: no-value rule, pushdown and `where` parity), `skills/objectstack-ui/rules/dashboards.md` if it states how a measure filter is evaluated, plus an eval case in `skills/objectstack-query/evals/`.\n\n**Reach.** Authors and AI builders writing analytics measures and `having`. Without this, the skill teaches nothing about the no-value rule, and an author can expect `$lte 0` to count empty amounts.\n\nBlocked-by: #33698\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue is:open aggregationFilter`: only #33698.\n\nSuggested lane: `domain:skills`. Suggested grade: p2 (a `semantic` change's owed docs). Triage routes and may re-grade."

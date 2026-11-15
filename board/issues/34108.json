@@ -1,0 +1,32 @@
+{
+  "number": 34108,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a deleted record leaves the recently-accessed list",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T19:17:14Z",
+  "updated_at": "2026-11-15T19:38:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34108",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi97evQ69Yx3njz2MqoYASHxL)_\nFixes #33826\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：删除记录成功后，该记录立刻从「最近访问」里移除（⌘K 命令面板、环境首页、本地缓存与服务端 `ui.recent` 偏好同步）。\n- 为什么改：删掉的记录还挂在最近访问第一条，点进去落到一条不存在的记录，最近访问越用越不可信。\n- 风险与回滚：只加了一个订阅数据源删除事件的监听，只删 `record:对象:ID` 这一条；回滚即 revert 本 PR，无数据迁移。\n- 先看：`ui/packages/app-shell/src/context/RecentItemsProvider.tsx`（`useDropDeletedRecordsFromRecents`）→ `ui/packages/app-shell/src/console/ConsoleShell.tsx`（唯一挂载点）。\n- 两分钟验证：打开一条客户记录 → 更多 → 删除 → 确认，然后按 ⌘K：「最近访问」里不再有它；点 Toast 上的撤销回到该记录后再按 ⌘K，它重新出现在第一条。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `useDropDeletedRecordsFromRecents(dataSource)` (new, module-internal to `@object-ui/app-shell`, not exported from the package index): subscribes to the data source's `onMutation` and, on a `delete` event that names its record (`resource` + `id`), calls the provider's existing `removeRecentItem` with the record entry's id, `record:OBJECT:RECORD_ID` (the id the record page writes). `removeRecentItem` already writes the list, localStorage and the debounced `ui.recent` save, and writes nothing when the entry is absent.\n- `ConnectedShellInner` mounts it once (`DeletedRecordsLeaveRecents`, beside `UserStateBridge`), on the connected adapter. The console's `ConsoleShell` holds `RecentItemsProvider` above every `ConnectedShell`, so the palette (`CommandPalette`), Home and the sidebar read the trimmed list. One subscriber covers every delete door that reports its record (record header, list row, action) with no call at each door, and `RecordDetailView.tsx` is untouched.\n- Undo: the record page's Undo restores the record and navigates back to it; that visit records it again through the record page's existing `addRecentItem` effect. A restore emits no mutation event by design (`restoreRecycleBinEntry`: \"a restore is never a create\"), so nothing re-inserts the entry before the visit.\n- No public surface changes: the `useRecentItems()` value and the package exports are unchanged, so `Clause-②: no` holds.\n\n## Tests\n\n- `ui/packages/app-shell/src/context/__tests__/RecentItemsProvider.test.tsx` gains one top-level `describe` (the shared harness file): the deleted record leaves the list, localStorage and the saved row; CONTROL another record's delete (same object, other object) leaves it listed and saves nothing; CONTROL an `update` event and an id-less `delete` (bulk) drop nothing; after an undo the revisit lists it again at the head; the listener unsubscribes on unmount.\n- `ui/packages/app-shell/src/console/__tests__/ConnectedShell.deletedRecordLeavesRecents-33826.test.tsx` (new): the real `ConnectedShell` under the real recents provider; a delete reported by the adapter drops that record only; the subscription goes away with the shell.\n- No forced test edits.\n\n<details><summary>Test runs (head a6cbed12)</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/context/__tests__/RecentItemsProvider.test.tsx packages/app-shell/src/console/__tests__/ConnectedShell.deletedRecordLeavesRecents-33826.test.tsx`: Test Files 2 passed (2), Tests 28 passed (28), lock VERDICT command-exit 0.\n- Ablation 1 (`scripts/ablation-replace.mjs`, mutation landed anchor 1 to 0, restored blob == HEAD): `DeletedRecordsLeaveRecents` mount deleted from `ConsoleShell.tsx` turns the shell pin red, Tests 2 failed (2).\n- Ablation 2: the `removeRecentItem(recordRecentItemId(...))` call in the hook replaced by a no-op turns 3 pins red (deleted record gone; undo revisit; shell drop), Tests 3 failed / 25 passed (28); restored, `git diff HEAD` empty.\n- No build between legs: ui vitest resolves `@object-ui/*` to `src/` through `ui/vitest.config.mts` aliases.\n\n</details>\n\n## Acceptance notes\n\n- A bulk delete (`bulkDelete`, `bulk('delete')`) emits one resource-level `delete` with no `id`, so its records stay in the recents until opened. Closing it needs the mutation event to carry the deleted ids (`DataSourceMutationEvent` in `@object-ui/types`), a public-type widening outside this card's surface. carrier: seat (named in the report's open_questions).\n- A record deleted elsewhere (another session or user) is not reported to this tab's data source, so it stays listed until opened. The card's optional route (\"opening a recent whose record answers 404 drops it\") lives in the record page's load path (`RecordDetailView.tsx`), which this card's claim fenced off; not done here. carrier: seat.\n\n## Verification\n\n<details><summary>Local gates (head a6cbed12)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 37 commands, each run, all exit 0 (including `pnpm --dir ui exec vitest run scripts/` under the lock, `pnpm check:test-source-alias`, `pnpm check:cross-package-test-inputs`, `pnpm check:nul-bytes`, `pnpm check:published-files`).\n- `--ran` reconciliation: 37 derived, 37 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm --filter @object-ui/app-shell type-check` (after `turbo run build --filter='@object-ui/app-shell^...'`): both `tsc --noEmit` and `tsc -p tsconfig.test.json`, lock VERDICT command-exit 0.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations.\n- Every other family (lint, Test UI shards, Build and E2E UI, the required set): this PR's CI check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmTS7jKcrSq1mgNofuy)_\n"
+}

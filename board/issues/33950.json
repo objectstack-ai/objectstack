@@ -1,0 +1,30 @@
+{
+  "number": 33950,
+  "kind": "issue",
+  "title": "audit: a summary (roll-up) recompute after a child write stamps the child's writer as updated_by on the master record",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:46:58Z",
+  "updated_at": "2026-11-15T15:48:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33950",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n**Measured on 18.5.0** (hotcrm#2487, the Order to Cash write opt-in, CTR-0001).\n- A finance user (Accounts Receivable position) inserts an invoice and a payment under contract CTR-0001.\n- The contract's and the account's summary fields (invoiced, received, receivable) recompute, as they should.\n- Both master records then read **\"Updated by Fin AR\"** with a fresh `updated_at`, though finance edits neither record and holds no edit on either.\n- A sales rep's plan-step write does the same to the contract.\n\n**Why it matters:** `updated_by` / `updated_at` are the audit trail a person reads on the record page. A system-derived recompute shows up as an edit by whoever touched a child. That misleads an auditor, and it can trip \"last modified by\" list views, flows on `updated_by`, or field history.\n\n**Asked:** a summary recompute (and any derivation-only write the engine makes on a master) leaves `updated_by` untouched, or stamps it as the system. Whether it also leaves `updated_at` alone is part of the design: a figure did change. It writes no field-history row attributed to the child's writer. A test: insert a child as user B under a master owned and last edited by user A, then the master's `updated_by` is still A (or the system), never B.\n\n**Consumer:** hotcrm Order to Cash (contracts, accounts) and PSA (project cost roll-ups) both hit it. No hotcrm workaround planned."
+}

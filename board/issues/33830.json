@@ -12,19 +12,22 @@
   },
   "labels": [
     "bug",
-    "domain:ui",
-    "pm:queue",
+    "domain:server",
+    "lease:A3",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:47:20Z",
-  "updated_at": "2026-11-15T12:59:24Z",
+  "updated_at": "2026-11-15T18:35:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33830",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，reach: 界面实测一次。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq`（Jack，免费版，HotCRM 6.1.2）。报告：https://claude.ai/artifact/XaMk7Uo36seWMKsPy5ETPM，环境首页「活动动态」与线索记录的动态。\n\n## 现象\n\n线索转化后的动态写成：「JIANGUO Zhuang 状态: 新建 → 已转化; 已转化: false → true」。选项字段已显示中文标签，布尔字段却显示 `false` / `true`。\n\n## 业务理由\n\n动态是给业务人员看的，中文界面里夹英文布尔字面量，和同一行的选项标签不一致。\n\n## 修复方向\n\n动态渲染布尔变更时用与字段显示一致的文字（是/否，或字段声明的标签），跟随当前语言。\n\n## 验收\n\n1. 中文界面下同一条动态显示「已转化: 否 → 是」（或字段声明的标签）。\n\n## Reader\n\nobjectstack console 车道（`domain:ui`），动态/字段历史的值格式化。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack activity feed boolean false true` → 59 条（含 closed）；最近的 objectstack#30158（字段历史时间线）与 #30584（蓝图布尔默认值）都不涉及动态里布尔值的显示。"

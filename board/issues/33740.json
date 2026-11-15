@@ -2,8 +2,8 @@
   "number": 33740,
   "kind": "issue",
   "title": "Scenario scorecard: sum ask-side time and reported cost per served model",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:43:33Z",
-  "updated_at": "2026-11-15T13:33:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:23:22Z",
+  "closed_at": "2026-11-15T15:27:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33740",
   "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M2 row of its milestone table). Maintainer, 2026-11-15 02:10Z: 「你建议的任务全部立卡，你负责开 devx 车道派发处理」; 08:36Z, on the epic seat's decision card \"M2/M3 的行现在立卡吗?立了交给谁派发?\": \"立卡,留给本专题席位派发\". The row carries the maintainer's 2026-11-15 question 「后续统计是否还要加入花费的时间」.\n\n## Mechanism\n\n`packages/qa/scenarios/src/runner/scorecard.ts` sums cost for authoring turns only: `authorCost()` (~252) feeds the \"Author cost\" row (~421). Question and operation turns keep `reportedCostUsd` on their `TurnSummary` (`orchestrate.ts` ~112-116, ~247), but no row sums them. No turn records elapsed time anywhere: `runner/transcript.ts` reads `total_cost_usd` from the CLI's result line (~139) and nothing for duration.\n\n## Why it matters\n\nThe comparison on #33595 picks an ask model by score per dollar and per minute. Today only the author's cost is stated, so the cheaper ask model's saving and its latency are invisible, and the maintainer asked for time to be added.\n\n## Done when\n\n- Each turn records its wall time, measured by the runner around the driver call, and its reported duration when the CLI states one.\n- The scorecard adds an \"Ask cost\" row and an \"Ask time\" row per mode and per card, grouped by served model, following `authorCost`'s rule: stated only when every counted turn reported a cost, never reading a missing cost as zero. Time is always measured. The author half gets a time row too.\n- The run record carries the per-turn numbers. Tests pin the sums and the not-reported case.\n\n## Reader\n\nThe epic seat `epic:#33595#1` dispatches it to `os-dev` (`domain:devx`, `packages/qa/scenarios`), serial with the other M2 runner cards where files overlap.\n\nDedup: `repo:objectstack-ai/objectstack is:issue scorecard cost per served model` → 1 hit (#33595 itself)."

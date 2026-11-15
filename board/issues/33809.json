@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:14:06Z",
-  "updated_at": "2026-11-15T11:14:06Z",
+  "updated_at": "2026-11-15T17:33:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33809",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nCloud lane card, per 「需要转给 cloud的，应该立 cloud 车道卡」 (Leehom, 2026-10-26T12:40Z). Follow-up of #33689. Q1 was ruled B on 2026-11-15T11:10:57Z (record on #33689).\n\n## 维护者速读\n\n1. **要做的**：云端 service-ai 的待批动作「同意 / 拒绝」接口改成新规则：只有本人、在登录状态下能同意，同意后按本人权限重查再执行。\n2. **为什么**：应用内助手也适用 AI 入口确认规则（裁定 B）。\n3. **范围**：只改云端这两个接口和它们的测试。应用内确认卡保留。\n4. **需要你做的**：无。\n\n## Change (cloud `service-ai`; this project cannot read cloud, so measure first)\n\n`POST /api/v1/ai/pending-actions/:id/approve|reject` (today guarded by `ai:approve`):\n- Only the person the call ran as may decide. An administrator approving someone else's AI proposal goes to the existing `held` outcome (the approvals engine) instead.\n- Take a signed-in session only. Refuse an API key, token or AI identity, whoever it resolves to.\n- An approved action runs as that person with every gate re-checked, and is not asked again.\n\nContract: the spec card #33808 (and the merged contract in `packages/spec/src/contracts/ai-service.ts`, PR #33725)."

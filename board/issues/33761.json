@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T09:34:34Z",
-  "updated_at": "2026-11-15T14:12:45Z",
+  "updated_at": "2026-11-15T15:08:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33761",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: **③ a maintainer-directed task.** On 2026-11-15 the maintainer asked triage to have the qa seat run a pre-release test: 「你信箱让qa席位做一个发版本前的测试」. Business reason: 18.5.0 ships through Version Packages PR #33097, with about 320 commits since `@objectstack/cli@18.4.0`, 59 of them marked breaking (`!`). Customer projects (HotCRM O2C and PSA, the downstream carbon-black CRM) wait on this release. These runs are its evidence. ⛔ Not a claim.\n\nReader: the qa seat runs it (`checklist-test`). Checklist-accuracy lines go to `domain:devx` (the `docs/qa/platform-checklist/**` owner), as in the 18.4.0 sweep #32908. Dedupe: searched `[sweep] v18.5.0`; no anchor exists. The previous one is #32908 (18.4.0, closed).\n\nThis card is the **wave anchor**. RUNNER's extraction obligation applies: checklist-accuracy findings, fixture gaps, `partial` coverage and not-run hand-overs close out **here**; product defects become their own cards, listed in §2; run records are `qa-run` issues that reference this card.\n\n## Plan\n\n**Round 1** on current `main` @ `a557fa386bc3` (or the newest fully green commit when the run starts), with the Console built in-tree from the same commit:\n\n| record | selector | why |\n|---|---|---|\n| R-P0 | `priority:P0` | the standing smoke |\n| R-185 | items touched by the 18.4.0..main diff (`touched:` selector) | the change set of this release |\n| R-CUST | the customer-waited fixes below, as named items, plus an off-clause probe of each | what the waiting customers will run first |\n\nR-CUST, by card:\n- #33250: controlled_by_parent `writeRequiresMasterRead` (HotCRM O2C: a reader of the master inserts and updates detail rows).\n- #33238: `renamedFrom` position holders carried on a hot install or upgrade.\n- #33214 / PR #33641 and #33213: localized hook refusals and duplicate refusals.\n- #33206 / #33207: org-scoped seed (owner references, an organization in the seed execution context). This is BREAKING in walled mode; check that the upgrade note matches behaviour.\n- #33181 / PR #33227: pending SSO-only users, add and CSV import (managed environment).\n- #33512: one-hop cross-object analytics `where`, and its 1000-parent refusal.\n\n**Round 2** on the frozen release sha (the Version Packages merge) once it exists: every round-1 FAIL, plus items touched by fixes that land between the rounds.\n\n## Release read\n\n§0 at round close: PASS / PARTIAL / FAIL per record. Any p0-class failure blocks the cut. A FAIL from a customer item goes to the maintainer at once.\n\n## Owed elsewhere (not this card)\n\nThe 18.5.0 curated release notes (`content/docs/releases/v18`, the 需手动处理 section for the breaking changes), and refreshing the Version Packages PR before the merge."

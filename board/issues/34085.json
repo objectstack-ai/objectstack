@@ -1,0 +1,32 @@
+{
+  "number": 34085,
+  "kind": "pull_request",
+  "title": "fix(console): a screen run finished from Flow Runs no longer reads as paused",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:09:46Z",
+  "updated_at": "2026-11-15T18:29:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34085",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9FFs7vCo5s4ZwH6FsmHDE8q)_\n\nFixes #33856\n\nClause-②: no\nMetadata-protocol: none\n\nClaim by `domain:ui#2` (comment 6898241442), card-thread session `session_01ADHkmSmRojhM8vYjHkVSeg`.\n\n## 维护者速读\n\n- 改了什么：开发者 Flow Runs 页的测试面板里，屏幕流程被 FlowRunner 跑完后，面板重读这条运行记录（`automation.getRun`），把它当作结果显示（绿色「Result」、最终状态与耗时），不再显示「Waiting for input」和「Continue run」。\n- 为什么改：原来完成回调只关掉对话框，面板仍保留触发时的暂停应答；「Continue run」又出现，点开是旧屏幕，提交得到 404 `RUN_NOT_FOUND`。\n- 风险与回滚：只改 `FlowRunsPage.tsx` 的完成回调（加一次运行读取和一个代次守卫，防止旧读取覆盖新一次运行）；用户手动关掉对话框、运行仍暂停时的「Continue run」不变。回滚即 revert。\n- 先看：`ui/apps/console/src/pages/developer/FlowRunsPage.tsx`（`handleComplete`），`FlowRunsPage.test.tsx` 末尾新增的 describe。\n- 两分钟验证：`pnpm --dir ui exec vitest run apps/console/src/pages/developer/FlowRunsPage.test.tsx`，预期 4 passed；把 `onComplete={handleComplete}` 换回旧的内联回调，新用例转红。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`ui/apps/console/src/pages/developer/FlowRunsPage.tsx`** (`FlowTestRunner`): `FlowRunner`'s `onComplete` now runs `handleComplete`. It closes the runner, clears the trigger answer held in `result` (the paused envelope, whose screen the server no longer holds), refreshes the run list as before, then reads the run back with `client.automation.getRun(flow.name, runId)` and shows the stored run as the result. The panel header then takes its status branch from the run row (`completed` reads green \"Result\"), and the \"Continue run\" affordance, which needs `status === 'paused'` plus a `screen`, is gone.\n- `FlowRunner`'s `onComplete` takes no arguments, so the resume answer the runner received is not reachable from this file; reading the run back is the in-surface route (card reading kept on the card, 6895948571).\n- A client without `automation.getRun` gets the page's existing \"… is not available on this client\" panel error; a failed read shows its message. A ref counter, bumped by every new run and by a flow switch, drops a read that lands after the tester has moved on.\n- Unchanged: the runner dismissed while the run is still paused (`onClose`) keeps the paused answer and its \"Continue run\".\n\n## Tests\n\n- **`ui/apps/console/src/pages/developer/FlowRunsPage.test.tsx`**, new top-level describe in the existing harness: run the screen flow, submit the screen, then assert `getRun('reassign_wizard', 'run_1')` was called, the header reads \"Result\", the shown run says `\"status\": \"completed\"`, and neither \"Waiting for input\", \"This run is paused at screen\", nor a \"Continue run\" button remain.\n- Harness change (not a forced edit of any existing assertion): the stubbed client gains a hoisted `getRun` that answers a completed run row, cleared in `beforeEach`.\n- CONTROL, already in the file and still green: \"offers a \\\"Continue run\\\" affordance after the runner is dismissed\" (a still-paused run keeps Continue).\n\n<details><summary>Readings (head 6c401b3f)</summary>\n\n- `pnpm --dir ui exec vitest run apps/console/src/pages/developer/FlowRunsPage.test.tsx` under the verify lock: Test Files 1 passed, Tests 4 passed, VERDICT command-exit 0 (after `pnpm --filter '@object-ui/console^...' build`, also exit 0).\n- Ablation through `scripts/ablation-replace.mjs` (fix committed first): anchor `onComplete={handleComplete}` replaced by the old inline `onComplete` (anchor 1 to 0, blob 8c147b87 to 19a1de0d). The new test went red (\"expected vi.fn() to be called with arguments: [ 'reassign_wizard', 'run_1' ]\"), 1 failed and 3 passed; restored, blob equals HEAD, `git diff HEAD` empty. The page source is imported from `src` by the test, so no rebuild leg applies.\n- `pnpm --filter @object-ui/console run type-check`: exit 0. The console tsc program does not list `FlowRunsPage.test.tsx` (`--listFiles` count 0), so this covers the page, not the test.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 36 commands, each run, each exit 0; `--ran` reconciliation: 36 derived, 36 run, 0 NOT-MEASURED. Also `pnpm check:changeset-fixed` (its roster is under `.changeset`): exit 0.\n\n</details>\n\n## Acceptance notes\n\n- Read-only inference, not measured, outside this file surface: the same stale-`result` shape can follow `onClose` in two cases. (1) A run that ends `refused` shows the refusal in the runner, which never calls `onComplete`; closing it leaves the paused answer, so \"Continue run\" would return for a terminal run. (2) A multi-step wizard dismissed at step 2 keeps step 1's screen in `result`, so \"Continue run\" would reopen step 1. Both need `FlowRunner` to tell its host where the run ended (a run row has no `screen` to re-read), which is `@object-ui/app-shell`, not this page. Carrier: the seat.\n\n## Verification\n\nChangeset: `.changeset/33856-flow-runs-completed-run.md`, `@object-ui/console` patch.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSmRojhM8vYjHkVSeg)_\n"
+}

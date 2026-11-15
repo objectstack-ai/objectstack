@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "lease:E1",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T16:22:40Z",
-  "updated_at": "2026-11-15T09:33:47Z",
+  "updated_at": "2026-11-15T18:09:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33308",
   "body": "epic:#31527#3 · os-tesla · session_01L9qibvyhxPWfA8DsbmVYJ5\n\nFiling gate ①: a product defect with a named landing point and a measured wrong answer over HTTP, owed by PR #33193 (#32905), which scoped it out.\n\nParent: #32905 (source card). Found by: the measurement on #32905 (step 1, section A) and contract review 6880527562 on PR #33193 (\"Follow-ups without a card … need a card before merge\").\n\n- **Why:** an admin comparing two versions of a flow, agent or other per-package item that two packages hold gets a diff of one package's version against the other package's version, presented as one item's change. They read it to decide what a rollback will restore, so a wrong diff leads them to restore the wrong body. PR #33193 makes history and rollback answer per holder (`?package=`, bare 409); the diff door is the last door of the family that still reads across holders.\n- **Reader:** the server lane's next seat on the epic #31527 line, after PR #33193 lands.\n- **Duplicate search** (issues, open and closed, 2026-11-14): `is:issue diff history package holders` 139 hits, `is:issue getHistory package` 18, `is:issue history rollback action two shippers` 2. The only open hits on this surface are #32905 (the source card), #31699 and #31527 (the epic); #32351 (closed) made the manager path package-aware and #23658 (closed) is the publish twin of item B. None covers this item.\n\n## Measured (reach: HTTP)\n\nShowcase boot (`bootShowcase`, `packages/qa/dogfood`) at `47f6c939`, two packages `com.qa.hist.alpha` and `com.qa.hist.beta` each shipping flow `qa_hist_shared`, each edited twice in its writable pair (versions 1 and 3 alpha's, 2 and 4 beta's):\n\n| Request | Status | Answer |\n|:--|:--|:--|\n| `GET /meta/flow/qa_hist_shared/diff?from=1&to=2` | 200 | alpha's v1 diffed against beta's v2, as if one item's versions |\n\nIt writes nothing, so it is not a data-loss defect, but the answer is wrong.\n\n## Landing point\n\n`diffMetaItem` (`packages/metadata-protocol/src/protocol-diff-delete-load.ts`) reads `sys_metadata_history` by `(type, name)`. The door (`GET /meta/:type/:name/diff`, `packages/rest/src/meta-item-history-routes.ts`) takes no `package`.\n\n## Expected\n\nThe same rule PR #33193 gives history and rollback (`historySlotOf`, `packages/metadata-protocol/src/protocol-history-slots.ts`): `?package=P` diffs only the addressed slot's versions and refuses a version another holder owns; a bare request for a name two slots hold answers 409 naming both; a one-holder name keeps working bare; `?package=` on a type not stored per package answers 400. The console's diff view (if it calls the door) names the package where it names it for history."

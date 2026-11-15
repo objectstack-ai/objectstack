@@ -1,0 +1,36 @@
+{
+  "number": 33971,
+  "kind": "issue",
+  "title": "pm-dispatch area-lease: remove the area-thread authorising line (「本区通过复审的 PR 都可以 ready + auto-merge」); no seat needs it, yet seats keep waiting on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:08:36Z",
+  "updated_at": "2026-11-15T16:32:19Z",
+  "closed_at": "2026-11-15T16:31:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33971",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. On the triage thread, 2026-11-15, the maintainer said: 「我问了，没有agent需要我发那句话，是谁提的」, and then 「立skills 卡」. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** 区域租约规则要求您在每条区线程亲手写一句「本区通过复审的 PR 都可以 ready + auto-merge」。新座位照规则来找您要这句话。今天 server#5 在 10:42 把它报成「当前主要瓶颈」，分诊也照转了几轮。\n- **事实:** 您没写这句话，区线程的 PR 照样合进去了（例如 S1 线程的 PR #33771，修 #33683）。您问过，没有一个座位需要它。\n- **要做的:** 删掉这条要求，免得以后的座位继续等它、拿它当瓶颈。\n- **受管文件:** 需要您亲手合并。\n\n## Where\n\n`.claude/skills/pm-dispatch/references/area-lease.md`, section 「开席」, step 3 (origin/main `895783a1`, L26-29):\n\n```\n3. 维护者在每条新线程亲写一句授权行:auto mode 只认本线程维护者原话,转述与点选不算。\n   - 区线程:「本区通过复审的 PR 都可以 ready + auto-merge」\n   - 席线程:「审批人批准后的 Tier H PR 你可以自主落地」\n   - 授权行只解 auto mode 的拦截,⛔ 不改 AGENTS.md 第 14 条的落地档。\n```\n\n`git grep` over `.claude`, `AGENTS.md` and `docs` finds this line nowhere else.\n\n## Change\n\n1. Remove the 区线程 line. An area thread lands a PASS PR under the existing landing rules (`landing-operations.md`, AGENTS.md rule 14 tiers), with no per-thread line from the maintainer.\n2. The 席线程 (Tier H) line is **out of scope**. The seat wrote that it was already given (server#5, 10:36Z), and nothing shows it is unneeded. Keep it unless the maintainer rules otherwise on this card. If it stays, reword step 3 so it names only that line.\n3. A seat that is blocked from landing (by the auto-mode classifier, or a platform refusal) reports the refusal text in its thread, instead of naming a missing maintainer line as the cause.\n\n## Acceptance\n\n- `git grep -n '本区通过复审' origin/main -- .claude` returns nothing.\n- Step 3 of 「开席」 reads coherently without the area line.\n- `Clause-②: no` (internal tooling). The governed surface `.claude/**` needs a maintainer merge.\n\n## Provenance\n\n- server#5's progress answer on #33059 at 10:42Z: \"Landing authorisation (the main bound now) … none has it yet, so every PASS stops at ACCEPT\".\n- The rule came in through #33751 (merged at `45dee177`)."
+}

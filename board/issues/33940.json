@@ -1,0 +1,33 @@
+{
+  "number": 33940,
+  "kind": "issue",
+  "title": "spec: semantic entry cbp-optional-master-admitted says `os lint` reports an omitted `required` at error, but on a default strict `defineStack` app nothing reports it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:41:25Z",
+  "updated_at": "2026-11-15T16:31:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33940",
+  "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\nFiling gate: (b) an out-of-scope finding a landed-card dev measured. Source: the os-dev report on #33842 (comment 6896242374) and PR #33929, whose \"Acceptance notes\" carry the readings. ⛔ Not a claim.\n\nclass: b · reach: a stack author who writes a `controlled_by_parent` object inside a default (strict) `defineStack({ … })` and omits `required` on its sole `master_detail`, then relies on `os lint` to catch the omission, as the published migration note tells them to.\n\n## What the published text says\n\n`packages/spec/src/migrations/entries/semantic/18.cbp-optional-master-admitted.ts` (origin/main `895783a1e8`, around L44–48), the description `os migrate meta` prints:\n\n> Through a raw parse (an object written directly in `defineStack`, or saved through a save door) it does not: `required` defaults to `false` before the object is judged, so an omitted `required` there is read as the optional master, as the maintainer ruled rather than refusing the omission at every door. `os lint` reports the omission at `error` so the author writes one of the two.\n\n#31470 (closed, option B, PR #31523) wrote the same reach line: \"Only `os lint` (`relationship/master-detail-required`) reports it\".\n\n## What was measured (PR #33929, base `895783a1`, scratch copy of examples/app-todo, CLI from the tree)\n\n- Default strict `defineStack({ … })`, sole `master_detail` without `required`: `os lint --json` exit 0, `passed: true`, 0 errors, no `relationship/master-detail-required`. `os validate --json` and `os build` exit 0. The strict parse has already turned the omission into `required: false` before any CLI verb loads the stack, and `packages/lint/src/data-model-rules.ts`'s own docblock says the parse cannot see the omission.\n- `defineStack({ … }, { strict: false })`: `os lint --json` exit 1 with `relationship/master-detail-required` at `objects[2].fields.hdr.required`.\n- The QA run #33829 reproduced the default-door reading twice (card #33842).\n\nSo on the ordinary authoring door, an omitted `required` on the sole master is silently admitted as the optional master and no verb reports it. The note's last sentence is false there.\n\n## Ask (for the lane triage picks)\n\nDecide which half is wrong and fix that one:\n- the prose: the note (and any sibling text #31470 touched) says the lint only sees the omission on a non-strict or raw stack; or\n- the reach: `os lint` reads the pre-parse config so the omission is reported on every door, as the note promises.\n\nThe checklist half is done separately by #33842 (PR #33929): the clause now plants its arm on `{ strict: false }`.\n\nDedupe: searched `cbp-optional-master-admitted` (open and closed, 25 hits); the related closed cards are #31169, #31470, #30905; none covers the default strict door."
+}

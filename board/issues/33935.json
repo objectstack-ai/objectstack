@@ -1,0 +1,33 @@
+{
+  "number": 33935,
+  "kind": "issue",
+  "title": "service-automation: a retried run skips the flow's start condition (errorHandling.strategy 'retry')",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:34:47Z",
+  "updated_at": "2026-11-15T18:23:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33935",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFiling gate: found by contract review 6896167662 ③ (review#2) on PR #33799 / card #33757. This is engine behaviour outside that PR.\n\n**What happens.** In `execute` (`packages/services/service-automation/src/engine.ts`), the start node's `condition` is evaluated first, at about L7724. When it does not hold the run is skipped (about L7729). If evaluating it throws, the catch at about L8166 hands a definition with `errorHandling.strategy: 'retry'` to `retryExecution`. Its attempts go through `executeWithoutRetry` (`dag-traversal.ts` about L1232–L1320), which goes from the start-node lookup straight to `validateNodeInputSchemas` and `executeNode` **without evaluating the start condition**. So when a start condition throws on attempt 1, the later attempts run the nodes ungated.\n\n**Why it matters.** The start condition is the author's gate for whether the flow should run at all. A condition that faults, for example a CEL error against the record, should not open the gate on retry.\n\n**Fix shape (for the engine's owner).** Either re-evaluate the start condition on every retry attempt, or treat a faulting start condition as non-retryable (answer `'failed'` as the default strategy does). Pin it with a test: a throwing condition plus `strategy: 'retry'` runs no node.\n\n**Contract note.** The dry-run contract (#33757, PR #33799) describes the default-strategy behaviour and names this retry divergence. When this card lands, that qualifier can be dropped.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open executeWithoutRetry start condition` returns no open card. Suggested lane: `domain:server` (service-automation). Suggested grade: p2 (a gate bypass on an error path). Triage routes and may re-grade. Filed while spec seat 1 is winding down under 「当前任务处理完，合并后就下班」, so it is not claimed."
+}

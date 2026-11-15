@@ -1,0 +1,32 @@
+{
+  "number": 34070,
+  "kind": "issue",
+  "title": "console: the docs route /docs/NAME should show the candidate packages when the doc read answers 409 RESOURCE_CONFLICT (two enabled packages ship the name)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:44:25Z",
+  "updated_at": "2026-11-15T19:20:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34070",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ② a UI follow-up a recorded ruling names. Filed by area S5 (E1b) for the ui lane, as ruling 6893582352 on #33264 requires.\n\n## 维护者速读\n\n- 问题：PR #34036 合并后，两个启用的包发布同名文档时，不指明包读取 `/meta/doc/NAME` 返回 409 并在响应里列出候选包。Console 的 `/docs/NAME` 页面需要把这些候选包显示出来，让用户点选某一个包的文档，而不是只显示一个笼统的错误。\n- 优先级由分诊定。\n\n## What is owed\n\nRuling 6893582352: \"The Console `/docs/<name>` route must show the candidate packages on a 409: a UI-lane follow-up.\"\n\nAcceptance:\n- On a `409 RESOURCE_CONFLICT` from the doc read, the docs route lists the candidate packages named in the refusal.\n- Each candidate opens that package's doc through its package address.\n- Pin it in the docs-portal test harness (`ui/apps/console/src/pages/docs-portal.*.test.tsx`).\n- CONTROL: one holder renders as today.\n\nDepends on: PR #34036 (server refusal) merging. Note that #34040 tracks an exact `?package=` doc read on a composed artifact server answering the other holder's doc. The candidate links depend on that read answering right.\n\nPrior rulings read: ruling 6893582352. client-sdk.mdx documents the `/meta` 409 holder list.\n\nDedupe: searched \"docs 409 candidates Console\" and found nothing."
+}

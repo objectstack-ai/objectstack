@@ -13,19 +13,21 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T02:21:06Z",
-  "updated_at": "2026-11-15T02:48:39Z",
+  "updated_at": "2026-11-15T19:19:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33601",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (follow-up E of a Fable evaluation of the low-risk Tier H delegation that Leehom asked for, write-up `/mnt/project-files/pm-orders/review/33531-delegation-review.md`, read on PR #33531 head `e2b1cabc`; rated not blocking the merge of #33531). `reach:` security teaching in a skills file whose name does not say so lands on the seat-landed arm when the reviewer forgets the `security` label.\n\n**What is wrong.** After Leehom's ruling B (label and paths), the arm sends a PR to Tier H when it carries the `security` label or touches a skills file whose name contains security, auth or permission. Six more files carry substantial permission, sharing, credential or token teaching under other names (measured: `objectstack-automation/references/integration-recipes.md` 33 lines, `objectstack-data/references/data-hooks.md`, `objectstack-automation/SKILL.md`, `objectstack-query/rules/filters.md`, `objectstack-data/SKILL.md`, `objectstack-platform/SKILL.md`). For those the gate depends on the reviewer remembering the label: a forgotten label lets the PR through.\n\n**What lands.** The contract-review record for an arm PR carries one machine-read line stating whether the change touches security teaching (for example `Security-touching: no`). The queue guard reads it on the arm: absent, unreadable or anything but `no` is Tier H. It also reads the `security` label on the linked card, not only the PR. Update `record-recognisers.mjs --template`, the contract-review reference and the batteries.\n\n`scripts/pm/**`, `.claude/skills/pm-dispatch/**`; `skip-changeset`. `Clause-②: no`. Dedupe: `is:issue Security-touching record line` → none. **New.**\n"

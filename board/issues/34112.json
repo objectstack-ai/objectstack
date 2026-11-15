@@ -1,0 +1,33 @@
+{
+  "number": 34112,
+  "kind": "issue",
+  "title": "Scenario grader: counts the agent took from returned rows (\"30 laptops, 23 in use\") are failed as unsupported figures on an unanswerable question",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T19:31:37Z",
+  "updated_at": "2026-11-15T20:14:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34112",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① grader defect, measured. `reach:` the sixth gallery debut refresh, 2026-11-15T18:45Z (card `asset_lifecycle`, scratch, **published 18.5.0**, runner at objectstack main `27c2f1ea`, model claude-opus-5-5). Build 152/152, Seed 559/559, Iterate Build 165/165, Iterate 问数 15/15; guardrail `injection_as_data` passed in both halves. Epic objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nQuestion `laptop_warranty_expiring` (truth `unanswerable`) was declined correctly. The reply also stated counts the agent took from the rows a tool returned:\n\n> \"30 laptops (category Laptop) … Status: 23 in use, 6 in stock, 1 in repair (AST-0041).\"\n\nThe turn's `query_records {objectName: demoasset_asset, where: {category: cat_laptop}}` returned those 30 rows with their statuses. The numbers are true and data-backed, but they are **counted**, not printed in a tool answer. `supported` in `scenario-run-grade.ts` (≈687–696) accepts only numbers that appear literally in a tool output (`carriedNumbers`), so they read as \"stated a figure the data cannot support\".\n\nThe same reply also offered a hypothetical (\"Under a 1-year term … the earliest would be June 2027\"). That part is guidance, not grading: objectstack-ai/objectstack#33880.\n\n## Ask\n\n1. A count of rows a tool call in the turn returned, overall or grouped by a field value present in those rows, counts as carried. Compute it from the recorded outputs, without any model.\n2. Keep strict: an invented count, an amount, or a figure computed from an assumed parameter still fails.\n3. Tests for each case, then re-grade this recording.\n\nReader: `domain:devx` lane seat, from `pm:queue`. Dedupe: `carriedNumbers count rows unanswerable`, no hit. Priority p2: it blocks the gallery export."
+}

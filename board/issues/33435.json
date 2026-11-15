@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T20:58:59Z",
-  "updated_at": "2026-11-14T22:03:24Z",
+  "updated_at": "2026-11-15T19:13:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33435",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #33246 (PR #33434), its dev report 6884094895 `open_questions` 1. Seat answer: B, a separate card.\n\n**Measured (engine probe, system context):** a row inserted with a system context holds `created_at` / `updated_at`, and NULL in `owner_id`, `created_by`, `updated_by`, `owning_business_unit_id` and `queue`. `buildNullableFieldIndex` (`packages/lint/src/validate-expressions.ts`) leaves every injected column out of the nullable index on purpose, so `os build` (and, after #33434, the publish door) accept `record.owner_id > 'a'` unguarded in a flow or hook condition; on a stored row with NULL there the predicate aborts (flow run fails, hook condition faults).\n\n**First step:** measure what the REST data door stamps for a signed-in user's create (the probe above used a system context), per column and per ownership tier, before deciding. If the door always stamps a column for user writes, the only NULL rows come from system inserts; say whether those reach flows and hooks.\n\n**Candidate fix (to be judged on that evidence):** judge the injected columns the platform does not always populate as nullable at both `os build` and the door; `created_at` / `updated_at` stay never-null. That is a narrowing (`Clause-②: no (narrowing)`, `Metadata-protocol: narrowed`, ADR-0087 entry, measured first-party exposure). If the measurement shows every reachable row is stamped, close with the docblock reasoning made explicit instead.\n\nRelated, noted by the same report and not filed separately: a hop leaf through an injected lookup (`record.owner_id.nmae != null`) is judged at neither the build nor the door.\n\nclass: b · type: Bug · Grade: p3 (coverage gap, not a false refusal; needs measurement) · domain: spec"

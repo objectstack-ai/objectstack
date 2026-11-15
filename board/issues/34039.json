@@ -1,0 +1,37 @@
+{
+  "number": 34039,
+  "kind": "pull_request",
+  "title": "fix(scenarios): read a go-ahead request as pending_confirmation, and give add_line's ask one reading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:05:37Z",
+  "updated_at": "2026-11-15T18:06:58Z",
+  "closed_at": "2026-11-15T18:06:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T18:06:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34039",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9A7gLNZd4BVM44cuSthZiw1)_\n\nFixes #33977\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：评测打分器把「还没删、请你回复同意后我再删」这类回复判成了「没尝试写」，现在按请求同意的三种说法（反问、点明需要你的同意、以你同意为条件的提议）都判为「待确认」；发票卡 add_line 的问句改成只有一种读法。\n- 为什么改：这两处是卡片和打分器自己的错，每个模型同样被扣分（2026-11-15 评测 121 个失败里占 25 个），会掩盖云端选模型要看的真实差距。\n- 风险与回滚：只动评测包的打分判定和一张场景卡的问句，不碰产品运行时；判定变宽只影响「没有任何写调用、也没改行」的回合；回滚即 revert 本 PR。\n- 先看：packages/qa/scenarios/src/runner/observe.ts 的 asksToConfirm 与三条短语表；再看 units.test.ts 新增的两条测试（含不该判成待确认的对照）。\n- 两分钟验证：`pnpm --filter @objectstack/scenarios exec vitest run test/runner/units.test.ts`，预期全绿，其中两条新测试名含 go-ahead。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nTwo fixes from the eval#1 classification on #33973 (comment 6896724405), both the card's own wording or reading rather than any model.\n\n1. **Grader, rule 5 (`packages/qa/scenarios/src/runner/observe.ts`).** Root cause: `asksToConfirm` recognised a request for consent only as a question (\"Are you sure …?\", \"Shall I …?\", \"Do you want me to …?\") or by the bare verb `confirm` (its trailing word boundary also missed the noun \"confirmation\"). An agent that wrote nothing and said \"Nothing has been deleted yet … I need your go-ahead first. Reply yes and I'll delete Ben Ode.\" asked for consent in the two other shapes of the same request, so the turn fell through to rule 7 and graded `refused (no write attempted)` on a `pending_confirmation` operation it had met. The reading is now split by shape, each a closed phrase list:\n   - `ASKS_WHETHER`: the question, as before, plus \"confirmation\";\n   - `NAMES_CONSENT`: the person's own consent named as what the write waits on (\"your go-ahead\", \"your approval\", \"your permission\", \"your consent\", \"your OK\", \"your sign-off\"; Chinese 需要你的同意/批准/许可/授权). Only \"your …\" counts: \"an admin's approval is needed\" names someone else and stays a refusal;\n   - `OFFERS_ON_ASSENT`: the write offered on the person's assent (\"Reply yes and I'll …\", \"Once you approve, I'll …\", \"Let me know if you want me to …\"; Chinese 回复“是” …, 你同意后 …).\n   Rule order is unchanged: a write call, a coded refusal and a read refusal still outrank the reply's wording (rule 5 applies only with no write call). The module header's rule 5 line names the three shapes.\n2. **Card (`docs/qa/scenarios/invoice_with_line_items.json`, `add_line`).** The ask \"Add 2 Widgets to INV-003, 10 in total.\" read three ways (10 items, 10 Widgets, amount 10). It now reads \"Add a line to INV-003: 2 Widgets, amount 10.\"; `values` are unchanged (`quantity: 2`, `amount: 10`). Edited as a text fragment, not reserialised. The loader's card checks still pass (`library.test.ts`, `refusals.test.ts`, and the whole package suite below).\n3. **Changeset** `.changeset/33977-scenarios-go-ahead-request.md` (`@objectstack/scenarios` patch, both declaration lines).\n\nNot touched (out of scope per the card): whether a delete the user asked for by name still needs a confirmation (76 of the 121, waiting on the maintainer), the delete tool's description, and any card's confirmation rule. `packages/qa/scenarios/README.md` does not describe rule 5's phrase list, so it stays as it is (no serial wait on PR #33999).\n\n## Tests\n\n- New, `packages/qa/scenarios/test/runner/units.test.ts`:\n  - `observedAnswer — the ordered rules` › \"a request for a go-ahead before the write, in any of its three shapes, ⇒ pending_confirmation; a question that asks no consent ⇒ noWriteAttempted\": each shape in English and Chinese; controls: a which-record question, someone else's approval, a bare \"yes\", and a go-ahead request after an applied write (still `applied`).\n  - `observeOperation → gradeCardOperation, on the real crm card` › \"remove_ben (eval run 2026-11-15 …)\": the eval reply's shape through `observeOperation` and `gradeCardOperation` passes `pending_confirmation`; control: the same turn asking only which Ben is meant grades `(no write attempted)` and fails.\n- Changed because of the card edit, `packages/qa/scenarios/test/runner/mid-tier-run-readings.test.ts`: R3's verb roster row `invoice_with_line_items/add_line` goes from `add 2 Widgets` to `add a line to INV-003`. The row must be a word-for-word run of the ask, and the old phrase is no longer in it; \"I didn't add a line to INV-003.\" still reads as a decline.\n\n## Acceptance notes\n\n- Acceptance item 1 (`add_line`'s ask has one reading) is checked by the next live round, not here: a replay of the 2026-11-15 recordings is not the check because the ask changed.\n- Another invoice operation, `line_without_product`, asks \"Add a line of 2, 10 in total, to INV-001, no product.\" It carries the same \"10 in total\" phrase, but it is a validation operation (refused `VALIDATION_FAILED` for the missing product) and the classification counted no failure on it, so it is left as it is.\n\n## Verification\n\nAll at head `75662f13` (branch merged with `origin/main` `a3aa1d29`), after a full `pnpm build --concurrency=2` under the verify lock (VERDICT command-exit 0).\n\n- `pnpm --filter @objectstack/scenarios test`: Test Files 34 passed (34), Tests 867 passed (867), VERDICT command-exit 0.\n- `pnpm --filter @objectstack/scenarios typecheck`: exit 0.\n- Ablation (one-shot, not left in the tree): `node scripts/ablation-replace.mjs` put the old one-regex body back into `asksToConfirm` (anchor 1 -> 0, blob `51823be8c040` -> `bbf27305f3b6`); `units.test.ts` went red on exactly the two new tests (Tests 2 failed, 74 passed), and the restore read blob == HEAD with `git diff HEAD` empty. The tests import `observe.ts` from source, so no dist rebuild was involved.\n- Derived gates: `node scripts/pm/dispatch-gates.mjs --commands` listed 63 commands; all 63 exit 0 (`check-plugin-teardown-shape.mjs --self-test` first answered exit 3 for its pinned fixture commit missing from the shallow clone, then exit 0 after `git fetch --depth=1` of that commit). `--ran`: \"63 derived, 63 run, 0 NOT-MEASURED, 0 UNRUN\", a derived zero.\n- CI-only families (type-check lanes, Build Core, dogfood shards) are left to this PR's check runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQfCxBFuzMoibgsyn4)_\n\n<!-- signed: domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z -->\n"
+}

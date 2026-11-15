@@ -1,0 +1,31 @@
+{
+  "number": 34090,
+  "kind": "pull_request",
+  "title": "fix(service-automation): re-evaluate the start condition on every retry attempt",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:20:09Z",
+  "updated_at": "2026-11-15T18:56:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34090",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCpddLFmKzR39wJWZpkRMCi)_\n\nFixes #33935\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:流程配置 `errorHandling.strategy: 'retry'` 时,每次重试都会重新判断开始节点的启动条件;两条执行路径共用同一个判断函数。\n- 为什么改:原来启动条件第一次求值出错后,重试路径完全不看启动条件,直接执行节点,作者设置的\"是否运行\"闸门被一次故障打开,可能写数据或发外部请求。\n- 风险与回滚:只影响\"启动条件求值出错 + retry 策略\"这一错误路径;以前会无条件执行节点的运行,现在会失败或被跳过。回滚即撤销本 PR。\n- 先看:`packages/services/service-automation/src/dag-traversal.ts` 的 `startConditionHolds` 与 `executeWithoutRetry` 里新增的闸门;其次 `engine.ts` 的 `execute` 闸门改为调用同一函数。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run src/start-condition-retry-33935.test.ts`,预期 5 个用例全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `dag-traversal.ts` gains `startConditionHolds`, the one start-node trigger-condition evaluator. No condition authored means the run proceeds. A condition that does not hold returns `false`. A condition that cannot be evaluated throws, as `evaluateCondition` already does (ADR-0032 §1c).\n- `execute()` (attempt 1) calls it instead of its inline copy, and its behaviour is unchanged.\n- `executeWithoutRetry` (every retry attempt) now calls the same gate in the same place, after the start-node lookup and before the input-schema guard and any node. Before, it went straight to the nodes, so a condition that faulted on attempt 1 let attempts 2 and later run the nodes ungated.\n- Result under `strategy: 'retry'`: a condition that faults on every attempt is retried as a fault, and the run ends `failed` with no node executed. A condition that faults once and then holds runs the nodes once. A condition that faults once and then does not hold answers the same `condition_not_met` skip that attempt 1 gives. The default strategy is unchanged.\n- The dry-run contract's retry qualifier (the divergence that the contract for #33757, in PR #33799, names) can be dropped once this lands. That follow-up belongs to the spec owner.\n- A patch changeset for `@objectstack/service-automation`.\n\n## Tests\n\nNew file `packages/services/service-automation/src/start-condition-retry-33935.test.ts`, with five pins written against an executor that counts real node executions:\n\n1. A condition that faults on every attempt (a real CEL fault, `'abc' > 10`) with `retry` and `maxRetries: 2`: no node runs, the result is `success: false`, `status: 'failed'`, the gate is evaluated 3 times, and 3 failed rows are written.\n2. Faults on attempt 1, then holds: the nodes run once and the gate is evaluated twice.\n3. Faults on attempt 1, then does not hold: the `condition_not_met` skip envelope, no node, and the gate is evaluated twice.\n4. CONTROL, default strategy: `failed` on the first fault, one evaluation, one failed row.\n5. CONTROL, `retry` with a condition that holds or does not hold on attempt 1: answered on attempt 1, as before.\n\nAblation (the fix was committed first; `scripts/ablation-replace.mjs`, mutation proven on disk, restore proven): the re-evaluation in `executeWithoutRetry` was replaced with `if (false ...)`. Pins 1–3 went red and the two controls stayed green. Pin 1's red was `expected 1 to be +0` at `expect(runs.count).toBe(0)`: the node ran on a retry attempt, which is the defect reproduced. Restore: blob back to the HEAD blob, and `git diff HEAD` empty.\n\n## Acceptance notes\n\n- `retryExecution` treats a skipped attempt (`success: true`) as a successful attempt and returns it, so a skip on attempt 2 ends the retry loop. That matches attempt 1's skip answer. Attempt 1's fault still left its one `failed` row.\n- The sibling #33893/#33905 fold (branch `claude/area-A5b-33893` at 75b2f32c) also edits `engine.ts`. `git merge-tree` against it and against `origin/main` is clean, and its hunks do not touch the start-condition gate or the `executeWithoutRetry` host.\n\n## Verification\n\nFinal head b55412e9, after merging `origin/main`, with install and the closure rebuilt:\n\n<details><summary>Touched package and direct dependents</summary>\n\n- `pnpm --filter @objectstack/service-automation typecheck`: exit 0 (tsc plus `check:test-typecheck` OK)\n- `pnpm --filter @objectstack/service-automation test`: exit 0, Test Files 283 passed (283), Tests 4006 passed (4006)\n- `@objectstack/trigger-record-change` test: exit 0, 12/12 files, 122/122 tests\n- `@objectstack/trigger-schedule` test: exit 0, 13/13 files, 256/256 tests\n- `@objectstack/plugin-approvals` test: exit 0, 120/120 files, 1652/1652 tests\n- eslint on the three touched source files: exit 0\n\n</details>\n\n<details><summary>Derived gate families</summary>\n\ndispatch-gates --commands derived 71 families for this diff at b55412e9. 70 ran locally, all exit 0 (each exit captured before any pipe; check:type-check-debt ran under the verify lock: re-measure OK, 0 raw tsc errors). 1 not run locally: check:dual-build-cjs-loads, left to CI. The --ran reconciliation reads 71 derived, 70 run, 1 UNRUN (that one).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUZKdq3PK2Sab53cT3)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

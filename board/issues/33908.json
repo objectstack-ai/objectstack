@@ -2,8 +2,8 @@
   "number": 33908,
   "kind": "issue",
   "title": "analytics batch: the same dataset query groups differently depending on its sibling queries in the batch",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "bug",
     "domain:server",
     "lease:A3",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:58:41Z",
-  "updated_at": "2026-11-15T14:14:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T15:29:17Z",
+  "closed_at": "2026-11-15T15:29:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33908",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nSplit from #33223 (seat review). That card asks a rule question about the `(restricted)` bucket; this card is the defect underneath it, and needs no ruling.\n\n## Symptom\n\nPer the #33223 report, a director's `rep` dimension query returns two rows (one per owner) when sent alone, or batched with some siblings. Batched together with a `[grade]` sibling, the same query returns one merged `(restricted)` row. One query, one principal, two answers, decided only by what else is in the batch.\n\nA correct answer must not depend on batch siblings. Either both answers are restricted, or neither is.\n\n## What the seat review already ruled out (read-only)\n\n- The batch gate calls the single-query path per entry (`packages/rest/src/analytics-routes.ts:231`, `:291`, concurrency 6).\n- `queryDataset` registers no shared cube (`packages/services/service-analytics/src/analytics-service.ts:2792-2817`).\n- Read scope is pre-resolved per query (`analytics-service.ts:2012-2018`).\n\nSo the divergence is not in those three places. It has not been reproduced; the first step is a live repro on a real app.\n\n## Done when\n\n1. A failing test reproduces the batch-dependent answer (same principal, same query, two batch shapes).\n2. The fix makes both shapes return the single-query answer.\n3. The test stays as a pin.\n\nThe `(restricted)` merge itself is intended (ADR-0149:57) and is out of scope here. #33223 waits on this card's result before any rule change.\n\nPre-claim lane: domain:server, analytics area."

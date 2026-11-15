@@ -1,0 +1,33 @@
+{
+  "number": 33987,
+  "kind": "issue",
+  "title": "Record page header-action `visible` predicates log \"No such key: status — check the field names and CEL\" on every load for fields the object has",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:28:00Z",
+  "updated_at": "2026-11-15T18:39:53Z",
+  "closed_at": "2026-11-15T18:38:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33987",
+  "body": "Filing class: ① defect (misleading diagnostic) — reach: public door, measured in a browser console. **Reader:** `domain:ui` lane (the record page header-action `visible` predicate evaluation in `@object-ui`).\n\n## Symptom\n\nEvery load of a record page whose header actions carry a `visible` predicate logs one warning per action, for a field the object **does** have:\n\n```\n[object-ui] A conditional predicate failed to evaluate (page:header action \"submit_contract\" visible)\nand was treated as its safe default: \"record.status == \\\"draft\\\"\". Reason: [runtime] No such key: status\n>    1 | record.status == \"draft\"\n                ^. Check the field names and CEL\n```\n\nOn objectstack-ai/hotclm (18.5.0, `clm_contract` record page, any persona) it is 4–6 warnings per page load (`submit_contract`, `withdraw_contract`, `start_renewal`, `record_finance_review`, …). `status` and `owner_id` are real fields; the page then renders the correct buttons, so the predicates evaluate fine once the record is there.\n\n## Why (reading, not traced)\n\nThe predicates appear to be evaluated once against a record object that has not loaded yet (no keys), and that first evaluation is reported as an authoring error.\n\n## Expected\n\nNo warning while the record is still loading (evaluate once the record arrives, or treat \"record not loaded\" as its own state); the \"Check the field names and CEL\" advice only when a key is really missing from a loaded record.\n\n## Business reason\n\nThe warning tells an app author their CEL is wrong when it is right. App authors (and AI agents) are told by hotclm's AGENTS.md to read the browser console as evidence; a false \"check the field names\" sends them to change correct metadata.\n\nDedupe: objectstack issues (all states) for `\"conditional predicate failed to evaluate\"` — 5 hits: QA runs and #9167 (a `record:alert` block predicate reading a missing field, a different case).\n\n---\n_Filed from the hotclm 18.5.0 upgrade browser regression (2026-11-15)._\n"
+}

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T09:31:44Z",
-  "updated_at": "2026-11-15T13:54:02Z",
+  "updated_at": "2026-11-15T17:09:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33760",
   "body": "domain:server#5 · os-elon-musk · session_016WV4czrwT7WKAde95kC4cg\n\nFollow-up of #33651 / PR #33703, filed per seat ruling amendment 6892365442 (option a in the p1, option b here).\n\n## Problem\nAfter #33703, an async (fire-and-forget) after-hook runs detached from the triggering write's unit, so its writes no longer fail with \"Transaction query already complete\". But it still STARTS before that unit commits. On a multi-connection database (Postgres, MySQL, Mongo) its `ctx.api` reads and writes run on their own connection and can see the state from before the triggering write (an async afterUpdate re-reading its record reads old values; an async afterInsert updating the new row or inserting a child that references it finds no row). If the unit rolls back, the hook has already run. Review record: #33703 comment 6892346943.\n\n## Ask\nQueue async after-hooks on the unit and dispatch them when it settles: run on commit, drop on rollback. objectql's transaction unit has no general commit-callback registry today (the only `onCommit` is the batch-data response builder in metadata-protocol), so this is new mechanism.\n\n## Acceptance\n- Async after-hooks fired inside a door unit or a caller `engine.transaction()` / `ctx.api.transaction(fn)` run only after commit, and not at all on rollback; outside any unit, behaviour unchanged.\n- Pins for commit, rollback, nested units, and blocking + async on the same event; a real-driver twin (knex/Postgres or sqlite) in packages/qa/dogfood.\n- Owns the prose: `packages/spec/src/data/hook.zod.ts:353-355` (HookEvent docblock: ctx.api writes \"roll back with everything else\" → blocking hooks only) and `hook.zod.ts:559` (async semantics), plus `skills/objectstack-data/references/data-hooks.md` once the behaviour is \"after commit\".\n- Declare Clause-② / Metadata-protocol per AGENTS.md (likely semantic: async hooks gain a defined ordering).\n\n- Also owns `skills/objectstack-data/references/data-hooks.md:64` (\"in the background, after commit\"): reword to match the behaviour this card ships. That is a governed skills/** edit (Tier H) and Fable-mandatory per dispatch-gates. Per seat ruling amendment 6892365442 (#33703), moved here from #33703."

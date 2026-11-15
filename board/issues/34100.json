@@ -1,0 +1,32 @@
+{
+  "number": 34100,
+  "kind": "pull_request",
+  "title": "docs(seed-data): a reference into a tenantField-walled object resolves to the load organization's row",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T18:34:15Z",
+  "updated_at": "2026-11-15T18:54:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34100",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WLWfdqSAaFLKQRS27UZeAT)_\n\nFixes #33794\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`seed-data.mdx` 里“按组织加载种子时引用解析到哪一行”表格中的一行。以 `tenancy.tenantField` 隔离、没有 `organization_id` 列的对象，现在写的是“只解析到本次加载所属组织的那一行，按该租户列匹配，绝不借用别的组织同名行”。\n- 为什么改：该行还停在 #33393 修复之前，写的是“查询被拒并报告”。修复后种子探针按目标对象解析出的租户列过滤，QA 实测也是各组织各自解析到自己的行。文档与行为不符，会误导写种子的人。\n- 风险与回滚：纯文档一行，不改代码，不发包（skip-changeset）。回滚就是 revert 这一个提交。\n- 先看：`content/docs/data-modeling/seed-data.mdx` 第 476 行附近的表格行。\n- 两分钟验证：`grep -n \"tenancy.tenantField\" content/docs/data-modeling/seed-data.mdx`，应看到新句子，且全仓 `content/docs` 与 `skills/` 再搜不到 “refused and reported” 描述这个场景。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nOne row of the \"References on an organization's own load\" table in `content/docs/data-modeling/seed-data.mdx`.\n\n- Before: an object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column resolves \"nothing on such a load: the lookup is refused and reported, never answered from another organization\".\n- After: \"a row of the load's organization only, matched on that tenant column (the column a seeded row of such an object is stamped with); another organization's row with the same key is never used\".\n\nThe row was written for the first org-scoped reference change and went stale with the seed-probe tenant-column fix (PRs #33409 / #33550). Main's probe, `packages/metadata-protocol/src/seed-loader.ts` at `63db7240`:\n\n```ts\n// probeScopeOf(targetObject)\nconst tenantColumn = resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;\nlet scope: ProbeScope = { kind: 'organization', tenantColumn };\n// ...\n// the probe itself\nif (scope.kind === 'organization') where[scope.tenantColumn] = organizationId;\n```\n\nAn object that declares a `tenantField` and no `organization_id` is neither `sys_user`, `sys_organization` nor a global object (`isGlobalSeedObject` needs no tenant field at all), so it keeps the `organization` scope and is probed on its declared column. The integration test `packages/runtime/src/seed-org-scoped-references.integration.test.ts` pins it: \"an object walled by another tenant column resolves within the load organization, on that column\" (North gets `tag_gold_n`, South gets `tag_gold_s`, no refusal logged) and \"is not taken for a global one: another organization's row is not borrowed\". The stamp half (\"the column a seeded row of such an object is stamped with\") is the shipped 18.5.0 note `1e889b1` in `packages/metadata-protocol/CHANGELOG.md` and the test block \"a dataset OF an object walled by a declared tenant column replays per organization on that column\".\n\n## Tests\n\nNo code changed; no test edits.\n\n## Acceptance notes\n\n- Changesets: `.changeset/33207-seed-org-scoped-references.md` and `.changeset/33393-seed-probe-tenant-column.md` were both consumed by the Version Packages commit `b914e724` (#33097, 18.5.0). Per the order, nothing is touched. The published `packages/metadata-protocol/CHANGELOG.md` 18.5.0 section still carries the 33207 bullet saying a `tenancy.tenantField`-walled target \"keep[s] the old lookup, and its refusal is now reported\" (line 527), which the 33393 note in the same section (line 568) supersedes. AGENTS.md routes a factual error in a released entry to a dedicated docs-only PR amending that entry; that is for the seat to decide (`carrier: seat`). The curated release page `content/docs/releases/v18/18-5.mdx` does not mention this case, so it has nothing to correct.\n- Sweep: `grep -rn -i \"refused and reported\"` over `content/docs` and `skills` at `63db7240` hit only this row; `grep -rn tenantField` over both trees found no other sentence on the seed-reference case. No `skills/**` hit.\n\n## Verification\n\nGates at head `0a569a31`: `dispatch-gates --commands` derived 43 commands; all 43 exit 0. `--ran` with exit codes: \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero)\".\n\n<details><summary>Notes on the run</summary>\n\n`check:skill-examples` first exited 3 (refused before measuring: `packages/client-react/dist` was not built). After `pnpm --filter '@objectstack/client-react...' build` under the verify lock (VERDICT command-exit 0) it exited 0: \"346 prose examples type-check across 3 surface(s)\". The spec and lint closures were built first under the lock (VERDICT command-exit 0).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPBERWks32kU5eiYwm)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 33551,
   "kind": "issue",
   "title": "Setup → Sessions: the revoked-session view keeps the 'Active user sessions' subtitle and the active-only toolbar action (sys_session metadata)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,20 +15,21 @@
     "domain:server",
     "finding",
     "lease:A1",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:18:15Z",
-  "updated_at": "2026-11-15T13:15:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:48:31Z",
+  "closed_at": "2026-11-15T16:48:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33551",
   "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ② out-of-scope finding, class a, from #33346 row 246 (PR #33547; os-dev-report 6886439582, `out_of_scope_findings[0]`; seat ruling 6885601326: no ui-side special case). ⛔ Not a claim; triage sets the lane and grade.\nDedupe: `is:issue is:open sys_session revoked` finds only #33346.\n\n## What the user sees\n\nSetup → Sessions, revoked view: the page keeps the subtitle \"Active user sessions\" and the active-session toolbar button, which belong to the active view.\n\n## Why (read on `origin/main` `e3f0cfd4` by the #33346 dev)\n\n- The subtitle is the session object's OBJECT description: `packages/platform-objects/src/identity/sys-session.object.ts` ~L63.\n- The button is an object-level `list_toolbar` action with no view scoping: same file ~L74-79.\n- The console renders an object's description on every view by design (`ui/packages/app-shell/src/.../objectViewPageHeader.tsx` ~L145), so the fix is in the object's metadata (a neutral description, and the action scoped to the active view), not in the console.\n\n## Acceptance\n\n- The revoked-session view shows no \"active\" subtitle or active-only toolbar action; the active view is unchanged."

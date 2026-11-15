@@ -1,0 +1,32 @@
+{
+  "number": 34069,
+  "kind": "issue",
+  "title": "ADR-0048 status line: drop the \"packages with no dependency relation keep §3.3\" carve-out for doc (a bare doc read of a name two enabled packages hold refuses 409, ruling 6893582352)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T17:43:57Z",
+  "updated_at": "2026-11-15T20:12:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34069",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ② a governed-text follow-up a recorded ruling names. Filed by area S5 (E1b) for the domain:skills lane, as ruling 6893582352 on #33264 requires.\n\n## 维护者速读\n\n- 要做的：ADR-0048 的状态行里保留了一句\"没有依赖关系的包仍按 §3.3（不指明包的读取返回第一个匹配）\"。对文档（doc）类型，这句已被裁决 6893582352 推翻：两个启用的包有同名文档时，不指明包的读取返回 409 并列出各包。\n- 改法：在状态行里把 doc 从这句保留中去掉，并引用该裁决和 PR #34036。\n- 只改文字，不改代码。这是受管面（docs/adr/**），需要维护者批准。\n\n## What is owed\n\n`docs/adr/0048-cross-package-metadata-collision.md` line 3 (Status) reads \"Packages with no dependency relation keep §3.3 and §3.4 as written\". Ruling 6893582352 (maintainer, 2026-11-15, option A) says: \"The ADR-0048 status line drops its 'packages with no dependency keep the old sentence' carve-out for `doc`. That is a docs/adr/** status-line edit, carried by a domain:skills card.\"\n\nAcceptance: the status line names `doc` as outside that carve-out (a bare doc read of a name two or more enabled packages hold answers `409 RESOURCE_CONFLICT` naming every holder), citing ruling 6893582352 and the implementing PR #34036. No other sentence moves.\n\nPrior rulings read: ruling 6893582352 (verbatim above); ADR-0146 D8 (already supersedes §3.3 in part); ADR-0150 D1 keeps `doc` in bucket 1 (addressing unchanged; this is not a re-bucketing).\n\nDedupe: searched \"ADR-0048 status line doc\": none."
+}

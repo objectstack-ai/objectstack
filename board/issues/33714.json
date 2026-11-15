@@ -14,18 +14,20 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T07:10:57Z",
-  "updated_at": "2026-11-15T09:00:01Z",
+  "updated_at": "2026-11-15T18:13:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33714",
   "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\nFiling gate: ① (the `Skills-docs: follow-up owed` line of PR #33710 / card #33659; dev report 6890800748, contract review 6890873219 section ③ (b)).\n\nBlocked-by: #33710\n\n**What is missing (once #33710 lands).** `skills/objectstack-data/rules/field-types.md` teaches `currencyConfig.homeAmount` and the stored home field (a `'dynamic'` `currency`, around its lines 165 to 175), but not the roll-up #33659 admits: a `summary` with `function` `sum` / `min` / `max` / `avg` over that stored home field declares `currencyConfig: { currencyMode: 'dynamic' }` (no `defaultCurrency`), and is then drawn in the organization's home currency on the record page and list cell. An AI author following the skill today either leaves the roll-up a bare number or reaches for `fixed` with the home code, which ADR-0144 rules out (\"Metadata never names the home currency\").\n\n**Fix shape.** One short paragraph and a snippet in that file, next to the `homeAmount` paragraph: the admitted shape, that only a roll-up over a field some `homeAmount.field` names is admitted (`defineStack` refuses any other `dynamic` summary), and that `count` never carries a currency. Source of truth: `packages/spec/src/stack.zod.ts` case (d) and `content/docs/data-modeling/currency.mdx` as changed by #33710.\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue is:open skills field-types home currency summary`: no open card.\n\nSuggested lane: skills. Suggested-grade: p2 (follows parent #33659's grade; an AI author meets it on the first consolidation roll-up). Triage routes and may re-grade."

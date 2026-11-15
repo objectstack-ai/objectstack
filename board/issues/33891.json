@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:40:25Z",
-  "updated_at": "2026-11-15T13:47:19Z",
+  "updated_at": "2026-11-15T17:32:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33891",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，方向已由维护者裁定（2026-11-15，问「托管环境的设置里要不要隐藏自托管才用得到的配置项」，答「当然」）。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，pin `181ad7d4`），环境 `os-6hf1jq` → 系统设置。\n\n## 现象\n\n托管环境的管理员在「系统设置」里看到这些只有自己部署时才有意义的项：\n\n- **文件存储**：「适配器* 环境变量锁定 · S3 / …」，以及 S3 凭据。\n- **AI 与向量化**：LLM 提供商、模型、凭据、温度 0.7、最大输出、请求超时、「测试连接」「重置为环境变量默认值」，以及向量化提供商「禁用」。\n- **知识库**：「适配器* 内存（仅开发/测试）· 已有索引不会迁移」。云用户看到「仅开发/测试」会以为自己的环境配错了。\n\n这些在托管里由平台负责，管理员改不了或不该改；「环境变量」「适配器」也不是云用户能理解的概念。\n\n## 机制\n\n托管判断已有现成的：`isCloudManaged()`（`packages/core/src/stack-auth.ts`），公开给前端的是 `/auth/config` 的 `features.cloudManaged`，`sys-user` / `sys-member` / `sys-invitation` 已经用 `visible: 'features.cloudManaged != true'` 隐藏托管下无效的动作。设置清单（`packages/services/service-settings/src/manifests/*.manifest.ts`）和 Setup 导航还没有用这个判断。\n\n## 修复方向\n\n在托管下（`features.cloudManaged == true`）：\n\n1. Setup 导航和设置总览里不显示「文件存储」「知识库」两项。\n2. 「AI 与向量化」只留租户自己的偏好（会话标题、可观测性），提供商、模型、凭据、温度、超时、向量化整段不显示。\n3. 直接访问这些设置的路由时，显示「此项由平台托管」而不是表单。\n\n**不在本卡范围：**\n\n- 「邮件投递」页保留。cloud#4386 已裁定平台默认代发、且自带 SMTP 仍可覆盖，这页在托管里改为显示平台通道状态，由 objectstack#32799 跟进。\n- 知识库功能在所有部署形态下是否整体隐藏，另行决定。\n\n## 验收\n\n1. staging 托管环境的系统设置导航里没有「文件存储」「知识库」；「AI 与向量化」不出现提供商、温度、向量化。\n2. 直接打开 `/setup/system/settings/storage` 显示「此项由平台托管」。\n3. 本地自托管（不带 `OS_CLOUD_MANAGED`）这些设置照常显示。\n\n## Reader\n\nobjectstack `domain:ui` / service-settings 车道。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack hosted setup hide infrastructure settings` → 0 条（含 closed）。\n- `repo:objectstack-ai/cloud hosted setup hide infrastructure settings` → 0 条。\n- `managed settings storage knowledge hide hosted`（两仓）→ 0 条；`Setup platform managed hosted adapter`（两仓）→ 0 条。\n- 最近的 objectstack#30208（Setup 改用业务管理员能懂的字段，已关）只改文案，不涉及托管下隐藏。"

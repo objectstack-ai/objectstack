@@ -1,0 +1,34 @@
+{
+  "number": 33993,
+  "kind": "issue",
+  "title": "stale.yml: exempt the governed-merges-audit card, so a dead patrol's unruled audit card is not stale-closed with its carried BREACH rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "needs-triage",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:34:17Z",
+  "updated_at": "2026-11-15T17:55:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33993",
+  "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ② review-derived. The at-tier contract review of PR #33982 (record 6896878561 on #33814, ③ Boundary flags) escalated this as a real gap outside that PR's surface. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** 治理合并周审(`governed-merges-audit`)立的卡,被 stale 机器人按普通卡对待:60 天无动静标 stale,再 14 天自动关。\n- **何时会发生:** 巡查活着时,卡上有行就每周刷新,不会 stale。巡查一旦停摆,这张未裁的卡 74 天后被机器人关掉,窗口外的 BREACH 承载行就此不再出现在任何打开的卡上。\n- **要做的:** 在 `stale.yml` 的 `exempt-issue-labels` 里加上 `governed-merges-audit`,与已有的 `tracking` 豁免同理。\n- **受管文件:** `.github/workflows/**`,需要您亲手合并。\n\n## Where\n\n`.github/workflows/stale.yml` L53 (origin/main):\n\n```\nexempt-issue-labels: 'pinned,security,roadmap,tracking'\n```\n\nThe audit job files its card with the identity label `governed-merges-audit` (`.github/workflows/fleet-patrols.yml`, `ANCHOR_IDENTITY_LABEL: governed-merges-audit`). The comment above L53 already gives this reasoning for `tracking`: a dead patrol's anchor must not be silenced by the stale bot.\n\n## Change\n\n1. Add `governed-merges-audit` to `exempt-issue-labels`.\n2. Extend the comment above it in one clause: an audit card is by definition unruled until a governed approver closes it by hand (the close rule that #33814 lands), so a stale close would discard carried BREACH rows that only the card holds.\n\n## Acceptance\n\n- `exempt-issue-labels` names `governed-merges-audit`.\n- The workflow lints green; `skip-changeset`; `Clause-②: no`.\n- Tier H (workflow file): draft, maintainer merges.\n\n## Provenance\n\n- PR #33982 review record 6896878561 (on #33814), out-of-scope note from the dev's report 6896789431.\n"
+}

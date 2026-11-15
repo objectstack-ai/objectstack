@@ -1,0 +1,30 @@
+{
+  "number": 33985,
+  "kind": "issue",
+  "title": "Console boots in the app's default language for a no-locale user even when the browser language is supported — 18.5.0 makes browser detection unreachable (zh-CN browser now gets English)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "needs-user-decision",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:27:54Z",
+  "updated_at": "2026-11-15T16:12:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33985",
+  "body": "Filing class: ① user-visible defect (regression 18.3.0 → 18.5.0) — reach: public door, measured in a browser. **Reader:** `domain:ui` lane (`ui/apps/console/src/languageSeed.ts`, `ui/apps/console/src/LocalizationFetchProvider.tsx`, `ui/packages/i18n/src/i18n.ts`); the precedence itself may need a maintainer ruling (see the last section).\n\n## Symptom\n\nA person with no personal language (`sys_user.locale` null) opens the Console in a **zh-CN browser** on a fresh device. On 18.5.0 every app page renders in **English** (\"My Contracts\", \"Draft\", \"Search…\"); on 18.3.0 the same app, same browser, rendered Chinese.\n\nMeasured on objectstack-ai/hotclm (`i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' }`), Playwright Chromium with `locale: 'zh-CN'` (`navigator.language === 'zh-CN'`), empty localStorage:\n\n| | 18.3.0 | 18.5.0 |\n|---|---|---|\n| `<html lang>` after boot | `zh-CN` | `en` |\n| `Accept-Language` on `GET /api/v1/auth/me/localization` | `zh-CN` | `en` |\n| `localStorage['objectui-locale-seed']` | `zh-CN` | `en` |\n| UI | Chinese | English |\n\n`GET /api/v1/auth/me/localization` with an explicit `Accept-Language: zh-CN` still answers `locale: \"zh-CN\"` on 18.5.0 — the server is fine; the Console never sends the browser language any more.\n\n## Why (reading)\n\n#33231 / PR #33309 (in 18.5.0) set the Console language to `sys_user.locale` → discovery `locale.default` → browser → `en`. Discovery always answers a `locale.default` (the app's `i18n.defaultLocale`, or `en` for an app with no `i18n` block — the ACCEPT on #33231 says so), so the browser tier below it is **never reached**: browser-language detection is dead for every app, including one that ships the browser's language in `supportedLocales`.\n\n## Expected\n\nFor a user with no personal language, a browser language that the app lists in `supportedLocales` is honoured (18.3.0 behaviour); the app default applies when the browser language is not supported. #33231's own suggested fix named this as the alternative (\"make the precedence of the browser vs the app default an explicit, documented setting\").\n\n## Business reason\n\nAny multilingual app whose source/default locale is English (the \"global by default\" shape hotclm and HotCRM use) now greets every Chinese-speaking user in English on first sign-in; each person has to find the language menu before the product is usable. Not fixing it leaves browser detection as dead code.\n\n## Repro\n\n1. An app with `i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] }`, `os dev --seed-admin`.\n2. Open `/_console/` in a browser whose language is zh-CN, fresh profile, sign in as a user with no personal language.\n3. 18.5.0: English. 18.3.0: Chinese.\n\nPlatform version: 18.5.0 (npm). Screenshots: `00-req1-fresh-browser-english.png` vs `00-baseline-18.3-fresh-browser-chinese.png` in the hotclm 18.5 upgrade report.\n\nDedupe: objectstack issues (all states) for `browser language English zh-CN console boot` (55 hits, read the locale ones: #33231 is the change itself, #32140/#33857 are other paths), `pickInitialLanguage` (0), `objectui-locale-seed` (unrelated). Cross-link: hotclm 18.5 upgrade PR.\n\n---\n_Filed from the hotclm 18.5.0 upgrade browser regression (2026-11-15)._\n"
+}

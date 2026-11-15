@@ -2,8 +2,8 @@
   "number": 33748,
   "kind": "issue",
   "title": "fix(service-automation): a runtime-disabled holder's trigger binding still dispatches its flow slot (ADR-0150 D3, #33386 amendment 3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:55:38Z",
-  "updated_at": "2026-11-15T13:52:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T15:39:14Z",
+  "closed_at": "2026-11-15T15:39:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33748",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cx5ZPCyTk8ckTsx4ut\n\nPart of #33386 (split out of PR #33646 by seat 5's routing ruling, after review#3's PASS record 6891968637 at 4a3db01c).\n\n## What\n\nAmendment 3 of seat ruling 6884403301 on #33386 includes **\"trigger binding: no dispatch\"**: a trigger bound to a flow slot of a holder whose package is disabled should not dispatch that slot. PR #33646 implements the other run-side parts of amendment 3 (bare run doors, MCP resume) but not this one.\n\n## Observation (review#3, 6891968637)\n\nA **runtime-disabled** holder's trigger still fires its slot. `main` behaves the same, so #33646 does not regress it; the gap predates it.\n\n## Acceptance\n\n- A trigger binding (record-change, schedule, and any other trigger family that dispatches a flow slot) does not dispatch a slot whose holding package is disabled at runtime; it dispatches again after re-enable.\n- Boot-disabled and runtime-disabled pinned in both registration orders of a name two packages hold, plus a one-holder CONTROL.\n- Durable coordinates (slot keys, run keys, `flowDispatchHolder`) stay judged over every holder (amendment 7).\n- Clause-② answer and changeset per AGENTS.md (likely `yes (narrowing)` with `!`).\n\nArea: E2 (lease:E2). Files: `packages/services/service-automation` engine/trigger dispatch, trigger plugins (`trigger-record-change`, `trigger-schedule`)."

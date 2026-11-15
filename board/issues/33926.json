@@ -1,0 +1,35 @@
+{
+  "number": 33926,
+  "kind": "pull_request",
+  "title": "fix(runtime): an addressed /automation/:ns/:name/(runs|trigger) under an unserved verb answers the automation domain, as its bare path does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:25:13Z",
+  "updated_at": "2026-11-15T15:39:14Z",
+  "closed_at": "2026-11-15T15:39:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T15:39:12Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33926",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCpddLFmKzR39wJWZpkRMCi)_\nFixes #33026\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:独立服务器上,带命名空间地址的 `/automation/:ns/:name/runs`、`/automation/:ns/:name/trigger`、`/automation/trigger/:ns/:name` 收到不支持的方法时,改由自动化领域回答(与不带地址的同一路由一致),不再由传输层回答。\n- 为什么改:同一路由因写法不同返回两种错误信封、两种 `Allow`;匿名调用者在带地址写法上拿到 405(暴露路由形状)而不是 401。\n- 风险与回滚:只在调度器里多声明三条「领域决定所有方法」的路由;已服务的方法照旧;回滚即还原该 PR。\n- 先看:`packages/runtime/src/dispatcher-plugin.ts` 新增的三行声明;`automation-every-verb.hono.integration.test.ts` 的新行与命名空间假数据。\n- 两分钟验证:`pnpm --filter @objectstack/runtime exec vitest run src/automation-every-verb.hono.integration.test.ts`,预期 57/57 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `registerAutomationRoutes` (`packages/runtime/src/dispatcher-plugin.ts`) declares three more patterns through `domainDecidesEveryVerb` (#24228's mechanism): GET `/automation/:ns/:name/runs`, POST `/automation/:ns/:name/trigger`, POST `/automation/trigger/:ns/:name`. These are the addressed shapes (ADR-0150 D5) of the bare rows that were already declared. A verb the router cannot route on them now reaches `dispatch()`, so the anonymous floor answers `401` and the domain's `automationRouteAllow` answers `405` with `Allow: GET` / `Allow: POST` in the dispatcher's envelope.\n- Measured before the change, on a real Hono socket at `1e65a389`: `DELETE /api/v1/automation/crm/send_digest/runs` answered `405`, `Allow: GET, HEAD`, with an `error.details` envelope, for a signed-in and an anonymous caller alike. The bare `DELETE /api/v1/automation/send_digest/runs` answered the domain's `405 Allow: GET` (signed in) and `401` (anonymous). The domain itself was never at fault: dispatched directly, the addressed shapes already answer its `405` (`automation-addressed-route.test.ts`). The gap was only the transport declaration. No edit to `runtime/src/domains/automation.ts`.\n\n## Tests\n\n`automation-every-verb.hono.integration.test.ts` (both prefixes):\n- Added rows: DELETE / POST / PUT on `/automation/crm/send_digest/runs`, GET on `/automation/crm/send_digest/trigger` and GET on `/automation/trigger/crm/send_digest`. Each row has an anonymous `401` case and a signed-in domain `405` case.\n- Added controls: a served POST on both addressed triggers runs the flow; GET and DELETE on `/automation/no_such_ns/send_digest/runs` answer the dispatcher's `404 ROUTE_NOT_FOUND`.\n- `crm` is installed through an ObjectQL registry double answering the holder table the address reads.\n\n<details><summary>Ablation, one per declaration (scripts/ablation-replace.mjs, each restored to the HEAD blob with git diff HEAD empty)</summary>\n\n- Without `:ns/:name/runs`: `Tests 14 failed | 43 passed (57)`. The failures are every addressed `/runs` row on both prefixes, plus the no-namespace DELETE control.\n- Without `:ns/:name/trigger`: `Tests 4 failed | 53 passed (57)`. The failures are the anonymous and signed-in GET on `/automation/crm/send_digest/trigger`, on both prefixes.\n- Without `trigger/:ns/:name`: `Tests 4 failed | 53 passed (57)`. The failures are the anonymous and signed-in GET on `/automation/trigger/crm/send_digest`, on both prefixes.\n\n</details>\n\n## Acceptance notes\n\n- Same behaviour on a `createHonoApp` host (catch-all): it already handed every verb to `dispatch()`. No change there.\n\n## Verification\n\nReadings at `9bdd492b`, the head before the last `origin/main` merge. That merge brought no change to the three files here.\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0.\n- `pnpm --filter @objectstack/runtime test`: `Test Files 603 passed (603) / Tests 10934 passed | 19 skipped`.\n- Direct dependents exercising the dispatcher on Hono: `@objectstack/http-conformance` test, `Test Files 20 passed / Tests 292 passed`. `@objectstack/client` `package-addressing.test.ts`, `83 passed`.\n- `automation-every-verb.hono.integration.test.ts`: `57 passed (57)`.\n- eslint on both touched `.ts` files: exit 0.\n- `dispatch-gates --commands`: 67 run, reconciled with `--ran` (67 derived, 67 run). 65 exit 0. Two NOT MEASURED on prerequisites: `check:dual-build-cjs-loads` needs a full `pnpm build`; `check:type-check-debt`'s inner build never got the lock.\n\nFinal head `39826829` (merge of `origin/main`, which carries #33721 and #33844 in `packages/runtime`): the scoped re-check (closure build, runtime typecheck, the every-verb, addressed-route, contract-mounts, clone-mount and route-ledger suites) is NOT MEASURED. The shared verify lock was held by another worktree's run for over 27 minutes. CI's Test Core runs the package on this head.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUZKdq3PK2Sab53cT3)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

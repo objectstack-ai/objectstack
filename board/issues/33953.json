@@ -1,0 +1,34 @@
+{
+  "number": 33953,
+  "kind": "issue",
+  "title": "plugin-auth loose end after #33268: pending-sso-users.ts header still says set-user-password admits env_native on a managed environment",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:48:39Z",
+  "updated_at": "2026-11-15T16:29:31Z",
+  "closed_at": "2026-11-15T16:29:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33953",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cytdN5jRpgKX58AY4d\n\nFiling gate: ① follow-up owed by landed work (merge-conflict resolution of PR #33268, #33203); p3 code-comment correction.\nBlocked-by: #33268\n\n## What is wrong\n\nAfter #33268, a cloud-managed environment refuses `set-user-password` for every target, an `env_native` row and a platform administrator included. The header of `packages/plugins/plugin-auth/src/pending-sso-users.ts` still says an `env_native` row is what `set-user-password` admits. That holds only on an environment that is not cloud-managed.\n\n## What lands\n\n- Reword that header sentence so it says `set-user-password` admits an `env_native` target only off a cloud-managed environment, and that on a managed environment the door refuses everyone (#33203, ADR-0135 D5.2).\n- Comment-only change; no behaviour, test or changeset needed beyond the repo's usual rules for a comment edit.\n\n## Why\n\nA developer who reads the header before touching the pending-person or password doors would assume a managed environment still lets an `env_native` password through, and could write a test or a door that contradicts ADR-0135 D5.2.\n\n## Reader\n\nThe domain:server seat that next takes a plugin-auth p3; unleased (the #33059 pilot has drained).\n\n## Duplicate check\n\n`repo:objectstack-ai/objectstack is:issue pending-sso-users.ts` → 8 hits (#33187 #33181 #33785 #24762 #23166 …), none about this sentence. `\"PR #33268\" in:body` → 1 hit (#29908, the seat post). `loose ends in:title` → 18, none for plugin-auth after #33268.\n"
+}

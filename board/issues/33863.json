@@ -2,8 +2,8 @@
   "number": 33863,
   "kind": "issue",
   "title": "⌘K palette: after the query is replaced in one input event (paste, or select-all + paste), Enter does nothing when the new hits are a subset of the old ones — no item is selected",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:32:41Z",
-  "updated_at": "2026-11-15T14:15:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:23:27Z",
+  "closed_at": "2026-11-15T16:23:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33863",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**Where.** Console command palette, `ui/packages/app-shell/src/chrome/CommandPalette.tsx`. cmdk runs with `shouldFilter` false and server-ranked record hits.\n\n**Reproduction** (main `a557fa38`, stock showcase, seeded admin, headless Chromium, real keyboard events; reproduced by two independent runs):\n\n1. Open any console page, e.g. `/_console/apps/com.example.showcase/showcase_task`, and press Ctrl/⌘+K.\n2. Type `huaning`. Record hits include the account 华宁科技 and the contact 张伟 (`zhangwei@huaning.example`). The first hit is selected.\n3. Press Ctrl/⌘+A, then paste `zhangwei` (a single `insertText` event).\n4. Wait for the hits to settle (3 s), then press Enter.\n\n- **Expected:** the only hit, 张伟, is selected (`aria-selected=\"true\"`), and Enter opens `/showcase_contact/record/<id>`.\n- **Actual:** the list shows the single hit 张伟 with **no** `aria-selected` item. Enter does nothing: the URL stays on the task list and the palette stays open.\n\n**Controls, same boot.**\n- Typing `zhangwei` key by key, from empty or as the replacement after Ctrl/⌘+A: the hit is selected and Enter opens the contact.\n- One-event inserts whose new hit set is not a subset of the previous one keep a selection and Enter navigates. Measured cases: `Capability` from empty, `proj` → `Capability`, `Initech` → `Globex`.\n\nSo the miss seems to need the previously selected hit to drop out while the remaining hits were already in the list.\n\n**Impact.** A user who pastes a name into ⌘K and presses Enter gets no response. They have to press ↓ or click.\n\n**Regression vs 18.4.0:** unknown. The palette file changed since `181ad7d4` only in #33493 (built-in command label match), which does not touch selection. Not measured on an 18.4.0 build.\n\nQA-source: #33861 · search.command-palette-navigation · observed beside the clauses"

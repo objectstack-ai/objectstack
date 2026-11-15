@@ -2,8 +2,8 @@
   "number": 33923,
   "kind": "issue",
   "title": "Eval seat skill: put the scenario-card round runbook and the eval-run record format in the repository",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:10:27Z",
-  "updated_at": "2026-11-15T14:15:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T16:38:40Z",
+  "closed_at": "2026-11-15T16:37:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33923",
   "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiled by eval#1 (#33468).\n\nFiling-gate category: ③ maintainer-directed, verbatim (eval seat thread, 2026-11-15): 「技能应该进仓库，测试卡也应该进仓库，参考 qa」.\n\n## Why (business)\n\nThe qa seat runs from a skill in the repository (`.claude/skills/checklist-test`) and leaves one `qa-run` record issue per round. The eval seat has only its lane charter (`.claude/skills/pm-dispatch/references/lanes/eval.md`); how it actually runs a round (which models and effort, the 2-hour cap, recording, what replay can and cannot score, how a round becomes a record) lives in one seat's notes. A new eval seat, or the maintainer, cannot repeat or audit a round from the repository. The scenario cards themselves are already in the repository (`docs/qa/scenarios/*.json`), as is the runner (`packages/qa/scenarios`).\n\n## What\n\nA new internal skill `.claude/skills/scenario-eval/SKILL.md` (`metadata.internal: true`, never in the published `skills/` dir), the eval counterpart of `checklist-test`, pointing at `packages/qa/scenarios/README.md` for runner mechanics instead of copying them:\n\n1. **Round plan**: the control cards every round; starter cards scratch-only, one card per command (2-hour background cap), at most two in parallel; build the runner's dependencies first.\n2. **Configs**: the tracked config (today haiku + effort medium, the cloud default) and the reference config (opus + effort low); the CLI default model is never used unnamed. Effort is passed by `CLAUDE_CODE_EFFORT_LEVEL` until objectstack#33739's flag lands.\n3. **Repetitions and noise**: a model or effort decision needs 5 repetitions per config; a single run's Ask moves by ±4 of 58, so a single round reports a trend, not a ranking.\n4. **Recording and replay**: every command records (`--record`); a `recorded:` replay scores Build and Ask but not operations until objectstack#33737's fix, so operations come from live runs only.\n5. **Record**: one `eval-run` record issue per round, shaped like checklist-test §4 (environment, scope, results, reading, findings filed, records kept outside the tree). Labelled `eval-run`. Maintainer ruling 2026-11-15, verbatim on the eval seat's decision card \"eval 测试记录卡放哪个仓?\": \"objectstack 公开仓,像 qa-run\" — records live in this repository with full scores, so the charter's \"⛔ 不对外发布准确率数字\" is amended to exempt scenario-card round records (the ask-accuracy baseline ② keeps it until the maintainer says otherwise).\n6. **Findings**: grader misreads to the scorer's owner (objectstack#33595 rows), product defects through the filing gate, leaks only per `references/security-findings.md`.\n\nAlso amend `lanes/eval.md` 〈产出〉 to name the skill and the record issue, and its 〈座位与唤醒〉 to record that the maintainer handed eval#1 its own schedule (2026-11-14 「你自己控制定时可以吗？」).\n\n## Acceptance\n\n- The skill exists, passes the internal-skill checks (`template-consistency.test.ts`), and a fresh session can run a control-card round and file its record from it alone.\n- `lanes/eval.md` names the skill and the record, and carries the schedule ruling.\n- The first record, objectstack#33920 (filed before the skill), matches the skill's record shape or the skill names what differs.\n\n## Related\n\n- Multi-run aggregation (today a seat-local script) belongs in the runner: the objectstack#33595 M3 row \"a multi-run summary table\"."

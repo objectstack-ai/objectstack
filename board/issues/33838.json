@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:52:06Z",
-  "updated_at": "2026-11-15T11:52:06Z",
+  "updated_at": "2026-11-15T17:21:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33838",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ④ a split of #33665 item 2, on `domain:server#5`'s routing (11:33Z: no server-lane file). ⛔ Not a claim.\n\nThe Studio half of the #33614 follow-up: the extras repeater in `ui/packages/app-shell/src/views/metadata-admin/inspectors/connector-input-fields.ts`. Read #33665 item 2 for the exact gap. Since #33614 (PR #33589), `connector_action` refuses input keys its action does not declare, and the Studio repeater should follow that. The skills half stays on #33665 (`domain:skills`).\n\np3, like #33665. Reader: `domain:ui`."

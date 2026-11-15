@@ -2,24 +2,34 @@
   "number": 33903,
   "kind": "issue",
   "title": "release 18.5.0: a shipped `!` narrowing (#33637 — `os audit verify` now fails on `listed_twice`) and ten other shipped changes have no 18.5.0 CHANGELOG line, because their changesets were still pending at the release commit — recurrence of #29957",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:50:08Z",
-  "updated_at": "2026-11-15T13:50:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T19:13:34Z",
+  "closed_at": "2026-11-15T19:11:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33903",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**What happens.** The release commit of 18.5.0 is tag `@objectstack/spec@18.5.0`, at `b914e724`. It still holds 11 unconsumed changesets in `.changeset/`. Their commits (10:36–11:18Z) are ancestors of the tag, so their code is in the published 18.5.0 tarballs, but no 18.5.0 CHANGELOG names them. Two of them are declared breaking:\n\n- **`ac0b9a5f9` (#33637).** Subject: `fix(plugin-audit)!: seal a window into checkpoints of at most 10,000 rows …`. Its changeset reads \"Clause-②: yes (narrowing)\": `os audit verify` reports a row id that two checkpoints list as the new chain fault `listed_twice` and fails the run, where the 18.4.0 verifier accepted it.\n  - The published `@objectstack/plugin-audit@18.5.0` ships it: `listed_twice` appears in `dist/index.js`, `.mjs` and `.d.mts`.\n  - Its `CHANGELOG.md` has 0 hits.\n  - `content/docs/releases/v18/18-5.mdx` on main (`45dee177b`) has 0 hits for `listed_twice`, `checkpoint`, `#33637` and `#31908`.\n- **`1e65a389e` (#33725, changeset `33689-ai-action-confirmation-elicited`).** The 18-5 page covers it (\"Announced, not yet at any door\"), but `@objectstack/spec@18.5.0`'s CHANGELOG has no line for it.\n\nThe other nine pending changesets at the tag:\n- `33186-managed-add-people-actions`\n- `33609-related-list-parent-lookup-page`\n- `33649-messaging-preferences-emitting-organization`\n- `33660-ai-model-picker-cost-multiplier`\n- `33724-install-relaxes-declared-not-null`\n- `33739-scenario-runner-effort`\n- `33753-scenario-dates-follow-run-date`\n- `33754-scenario-grader-written-date`\n- `a2-skills-docs-32678-32825`\n\nCoverage of the other breaking commits is good. Of the 63 `type(scope)!:` commits in `181ad7d4..b914e724`, the 18-5 page on main cites 62 by sha, including the org-scoped seed change `47a3b95e` / #33222. Only #33637 is missing.\n\n**Reproduction:**\n1. `git show b914e724:.changeset/31908-p4b2-bounded-checkpoints.md` shows the file still exists. `git merge-base --is-ancestor ac0b9a5f9 b914e724` is true. `git ls-tree --name-only b914e724 .changeset/`, minus README and config.json, lists 11 files.\n2. `npm pack @objectstack/plugin-audit@18.5.0`. Then `grep -l listed_twice package/dist/*` finds 3 files, and `grep -c listed_twice package/CHANGELOG.md` gives 0.\n3. `git show 45dee177b:content/docs/releases/v18/18-5.mdx | grep -c -E 'listed_twice|ac0b9a5|33637'` gives 0.\n\n- **Expected:** every change in the published 18.5.0 packages is named in its package's 18.5.0 CHANGELOG, and every `!` change is reachable from the 18-5 page.\n- **Actual:** one shipped narrowing (`os audit verify` now fails a chain 18.4.0 accepted) is named nowhere in 18.5.0's notes, and ten more shipped changes are missing from the 18.5.0 CHANGELOGs.\n\nWho is affected: an operator who runs `os audit verify` after upgrading can see a new failure that no release note explains.\n\n**TO:**\n- An 18.5.0 erratum on `18-5.mdx` naming #33637's FROM → TO: `os audit verify` used to pass a chain with a row listed in two checkpoints, and now fails it with `listed_twice`.\n- The next version bump consumes the 11 changesets.\n- Find out why the #29957 guard did not hold here. That guard says a Version Packages PR cannot land when main gained changesets after its branch point.\n\nSame class as #29957 (18.3.0: a shipped narrowing with no CHANGELOG line, because the Version Packages PR was merged without regenerating). Docs and release process only. Not a security finding.\n\nDedupe: `gh api search/issues`, open and closed. No card exists for 18.5.0.\n- `listed_twice` → #33773 (skills follow-up) and #31908 (epic), neither about the 18.5.0 notes.\n- `31908-p4b2` → no match.\n- `version packages changeset not consumed` → #29957, #25638 and #29933, all closed.\n- `changesets pending at the release commit` → no match.\n- `18.5.0 release page` → #33798 (closed; that card is the page itself).\n\nQA-source: #33900 · smoke:npm-18.5.0 · F1b"

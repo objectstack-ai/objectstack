@@ -1,0 +1,35 @@
+{
+  "number": 34015,
+  "kind": "pull_request",
+  "title": "fix(service-automation): audit inert connector descriptors on the metadata save door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T16:17:07Z",
+  "updated_at": "2026-11-15T17:22:59Z",
+  "closed_at": "2026-11-15T17:22:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T17:22:56Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34015",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCpddLFmKzR39wJWZpkRMCi)_\n\nFixes #33839\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:管理员直接保存(PUT /api/v1/meta/connector/:name)一个带 actions、却没有运行时连接器的目录型 connector 描述时,日志立即给出\"inert connector\"告警;此前要等下一次发布或重启才会出现。\n- 为什么改:原来告警只挂在启动和 metadata:reloaded 上,直接保存不触发这两者,配置了却跑不起来的连接器一直不被提示(PD#10:声明不等于交付,要大声说出来)。\n- 风险与回滚:只改日志,不改任何接口返回。告警改为\"惰性集合变化时才打印\",同一集合不再在每次 reload 重复打印。回滚即 revert 本 PR。\n- 先看:`packages/services/service-automation/src/plugin.ts` 的 `queueConnectorMutationReconcile`(新增审计调用)与 `auditDeclaredConnectors`(去重逻辑)。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run src/connector-descriptor-audit.test.ts`,预期 14 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `queueConnectorMutationReconcile` (the `onMetadataMutation` path, which is the only signal a direct active save raises) now runs `auditDeclaredConnectors` after its reconcile, on the same reconcile queue, so the audit judges the registry that reconcile left.\n- `auditDeclaredConnectors` remembers the inert set it last found (sorted names). It warns only when the set differs, and the warning still names the whole set. A publish raises both the mutation signal and `metadata:reloaded`, so it runs two audits; with this change it still prints one warning. Moving from a set to empty and back warns again. The audit also returns early once the plugin is destroyed, as the reconcile already does.\n- Scope: the card asks for the audit \"wherever the connector reconcile runs\". The other reconcile callers (credential set/clear, connection connect/revoke, the boot-registered pass) do not change the declaration, and a catalog descriptor (no `provider`) is never made live by them, so they are left as they are. See Acceptance notes.\n\n## Tests\n\n`packages/services/service-automation/src/connector-descriptor-audit.test.ts` gains the top-level describe `[#33839] the audit on the metadata save door`. It runs on the real write path: ObjectKernel, ObjectQLPlugin's metadata protocol, and driver-sql on a temporary file. It waits for the audits the write queues to finish before it counts warnings.\n\n- a direct active save of a catalog descriptor warns, naming it;\n- a later publish of a second descriptor prints one more warning (not two), naming both;\n- control: a re-save that leaves the inert set unchanged adds nothing; `enabled: false` empties it quietly; enabling it again warns again;\n- control: a draft save runs no audit.\n\nAblations, run on the committed fix with `scripts/ablation-replace.mjs` (each restored, `git diff HEAD` empty, blob equal to HEAD):\n\n- A: drop the audit call from the mutation path. Result: 3 failed, 11 passed (`expected 0 to be greater than or equal to 1`).\n- B: drop the dedupe (`|| unchanged`). Result: 2 failed, 12 passed (`expected [ …(3) ] to have a length of 2 but got 3`; `… length of 1 but got 2`).\n\n## Acceptance notes\n\n- Read cost: each connector mutation now adds one audit. That is one read of the declaration, the same `readDeclaredConnectorItems({ post: true })` read the reload audit makes. Mutations are coalesced, so a burst of saves reported before the queued run starts costs one reconcile and one audit. Connector saves are rare admin writes.\n- Behaviour change, log only: before this change every `metadata:reloaded` printed the warning again, even when the inert set had not changed. Now it is printed when the set changes. The checklist item `integration-system.connector-descriptor-audit` acceptance[2] (\"the audit re-runs on metadata reload … enabling the scratch descriptor at runtime surfaces the warning without a restart\") still holds, because enabling a descriptor changes the set. Its `automated.ref` says no pin drives a non-boot path; the new describe drives the mutation path (save and publish). `docs/qa/**` is outside this PR's file surface, so it is not edited here.\n- A peer replica that hears the mutation over lane 2 also audits and logs its own view. That is the same reach the reconcile already has.\n\n## Verification\n\nFinal head c931a722 (main merged at 0ac112fc). No incoming commit touched the two edited files. Lock verdicts are quoted below.\n\n<details><summary>service-automation on the final head</summary>\n\n- `pnpm install --frozen-lockfile`, then build `@objectstack/service-automation...`: exit 0\n- `pnpm --filter @objectstack/service-automation typecheck` (tsc and check:test-typecheck): exit 0\n- `pnpm --filter @objectstack/service-automation test`: Test Files 282 passed (282), Tests 3986 passed (3986)\n- lock: `VERDICT command-exit 0 · held the lock 446s`\n\n</details>\n\n<details><summary>Direct dependents (head 4c5b66a4, before the merge)</summary>\n\n- connector-rest 57/57, connector-slack 10/10, connector-openapi 111/111, connector-mcp 119/119, trigger-schedule 256/256, trigger-record-change 122/122. The public surface is unchanged: only private methods and log output change, and no test outside this package pins the warning text (`git grep` of the warning text).\n- cli, dogfood, verify, client, plugin-approvals and examples are left to CI.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands at c931a722)</summary>\n\n- 71 derived. 69 were run locally, each with exit 0 recorded. `--ran` reports 0 NOT-MEASURED and 2 UNRUN.\n- The 2 UNRUN are left to CI: `check:type-check-debt` (needs the lock and a full re-measure; the package typecheck is green) and `check:dual-build-cjs-loads`.\n- `eslint --no-inline-config` on the two edited source files: exit 0. Repo-wide `pnpm lint` is left to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUZKdq3PK2Sab53cT3)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -2,8 +2,8 @@
   "number": 33741,
   "kind": "issue",
   "title": "Scenario runner: --ask-repeats N asks each question N times and the scorecard reports k/N",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,15 +16,21 @@
     "pm:epic",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:43:58Z",
-  "updated_at": "2026-11-15T08:52:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T19:22:07Z",
+  "closed_at": "2026-11-15T19:11:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33741",
   "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M2 row of its milestone table). Maintainer, 2026-11-15 02:10Z: 「你建议的任务全部立卡，你负责开 devx 车道派发处理」; 08:36Z, on the epic seat's decision card \"M2/M3 的行现在立卡吗?立了交给谁派发?\": \"立卡,留给本专题席位派发\".\n\n## Mechanism\n\n`packages/qa/scenarios/src/runner/orchestrate.ts` asks each question once per persona (`for (const q of card.run.questions) for (const persona of [null, ...q.personas])`, ~734). `runner/cli.ts` has no repeat flag. A question's grade is therefore one sample of a non-deterministic agent, and a pass or fail on a single turn cannot be told apart from noise.\n\n## Why it matters\n\nThe haiku / sonnet / opus comparison on #33595 compares 问数 cells that differ by one or two questions. With one sample per question, a model can look better or worse by chance. k/N per question shows how stable an answer is, which the maintainer needs before choosing an ask model.\n\n## Done when\n\n- `--ask-repeats N` (default 1, so today's output is unchanged) asks each (question, persona) turn N times on the same booted app. Each repeat is a fresh agent session.\n- The scorecard reports k/N per question and the Run-问数 cell as passes over all asked turns. The run record keeps every repeat's grade.\n- `recorded:` replays exactly the repeats it recorded and refuses an N the recording does not hold.\n- Tests pin N=1 parity with today and an N=3 tally.\n\n## Reader\n\nThe epic seat `epic:#33595#1` dispatches it to `os-dev` (`domain:devx`, `packages/qa/scenarios`), serial with the other M2 runner cards where files overlap.\n\nDedup: `repo:objectstack-ai/objectstack is:issue \"ask-repeats\"` → 4 hits, none about the runner (#29741, #10012, #19729 closed and unrelated; #33595 the parent)."

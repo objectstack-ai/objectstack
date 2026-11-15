@@ -1,0 +1,33 @@
+{
+  "number": 33988,
+  "kind": "issue",
+  "title": "Console list header: a long object description pushes the primary header action into the \"…\" overflow menu at desktop width",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T15:28:03Z",
+  "updated_at": "2026-11-15T18:42:05Z",
+  "closed_at": "2026-11-15T18:38:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33988",
+  "body": "Filing class: ① user-visible UI defect — reach: public door, measured in a browser (present on 18.3.0 and 18.5.0). **Reader:** `domain:ui` lane (list page header layout in the Console).\n\n## Symptom\n\nOn a list page whose object has a long description, the object's primary header action is not drawn as a button; it is folded into the \"…\" overflow menu, at a 1440 px wide viewport.\n\nobjectstack-ai/hotclm, `clm_contract` list (`My Contracts`), Console in **English**: the description \"A contract from intake to archive: parties, commercial and legal terms, lifecycle status and the stamps each stage leaves.\" fills the header row and the `Launch Contract` button is only reachable through \"…\" (menu: `Launch Contract`, `Add to favorites`). The same page in zh-CN, where the description is shorter, shows the `发起合同` button. Screenshots `00-req1-fresh-browser-english.png` and `01-req1-landing.png` in the hotclm 18.5 upgrade report.\n\n## Expected\n\nThe description truncates (or wraps to its own line) before a primary action collapses into the overflow menu; the primary action stays visible at desktop widths.\n\n## Business reason\n\nThe main thing a requester comes to the list to do (launch a contract) disappears for English readers, purely because of description length.\n\nDedupe: objectstack issues (all states) for `header action overflow description long` — 27 hits, none about the description crowding out the action (#27594 is the list-view switcher, #25945 a tracking card).\n\n---\n_Filed from the hotclm 18.5.0 upgrade browser regression (2026-11-15)._\n"
+}

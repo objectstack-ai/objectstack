@@ -1,0 +1,37 @@
+{
+  "number": 34007,
+  "kind": "issue",
+  "title": "pm-dispatch skills: drop the \"review seat must be another account\" lines (lanes/review.md:19, area-lease.md:13), per the maintainer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T16:00:53Z",
+  "updated_at": "2026-11-15T18:06:41Z",
+  "closed_at": "2026-11-15T18:06:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34007",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. The maintainer, 2026-11-15T15:59Z (project chat): 「定复审席必须由另一个账号来坐 没有这个规定」, then 「是skills的问题吗？应该立卡修改」.\n\n## The text that misstates it (origin/main)\n\n- `.claude/skills/pm-dispatch/references/lanes/review.md:19`: 「⛔ 不复核本账号派发或实现 PR,`area-lease.md` 例外;记录恒带 `Implemented-by:`/`Reviewed-by:` 对。」\n- `.claude/skills/pm-dispatch/references/area-lease.md:13`: 「复核席约每 3 活跃区一席,由他账号坐(`lanes/review.md`);同账号须维护者在该复核线程亲字。」\n\nEffect today: review-b (same account as the dispatching seat) stopped taking claims on a literal reading, stalling S2/S4 PRs.\n\n## Fix\n\nRewrite both lines: a review thread may sit on any account, the dispatching seat's included. Independence is the record's `Implemented-by:`/`Reviewed-by:` session pair (reviewer session ≠ implementing session), and contract-review.md's ④ rule (run by an agent other than the drafter) is unchanged. Line counts unchanged.\n\nBuilt in PR #33938 (branch `claude/area-W0-33907`, Tier S), which is already rewriting area-lease.md."
+}

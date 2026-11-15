@@ -1,0 +1,36 @@
+{
+  "number": 34035,
+  "kind": "pull_request",
+  "title": "fix(components): header-action predicates wait for the record instead of reporting \"No such key\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T16:59:35Z",
+  "updated_at": "2026-11-15T18:38:56Z",
+  "closed_at": "2026-11-15T18:38:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T18:38:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34035",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9E8CzBpSUdLhr9L1Yhzma3U)_\nFixes #33987\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：记录页头部按钮的 `visible` / `hidden` / `disabled` / `pressed` 条件，在记录还没加载完时不再求值，也不再往控制台报错；记录到了再正常求值。\n- 为什么改：页面一打开就拿一条空记录去算条件，每个 `record.status` 这类条件都报 “No such key… check the field names and CEL”，让作者去改其实没错的元数据。\n- 风险与回滚：只动 `page:header` 一个组件；加载中各条件取各自的安全默认值（隐藏 / 不隐藏 / 禁用 / 未按下），与之前出错时的取值一致，记录到了以后行为不变。回滚即还原这一个提交。\n- 先看：`ui/packages/components/src/renderers/layout/containers.tsx` 的 `headerRecordPending` 与 `evalHeaderPredicate`；再看 `page-header-predicate-dialect.test.tsx` 末尾新增的一组测试。\n- 两分钟验证：`cd ui && pnpm exec vitest run packages/components/src/__tests__/page-header-predicate-dialect.test.tsx`，预期 33 条全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nA record page binds its record id at once and its row only when the read answers (`RecordDetailView` hands `data: null` until then; `RecordContextValue.data` is documented as \"undefined while loading\"). `page:header` evaluated its action predicates against `ctx?.data ?? {}`, so during that window every `record.FIELD` predicate faulted with \"No such key\", and the warn-once fault report (keyed by label and predicate) told the author to check the field names of a field the object has, on every page load.\n\n- `headerRecordPending` names the state: a record context is present, it carries a record id, and its row is `null`/`undefined`.\n- `evalHeaderPredicate` answers each key's own fallback while pending and evaluates nothing, so nothing is reported. All four call sites (`visible`, `hidden`, `disabled`, `pressed`) go through it.\n- `disabledReasonFor` gives no \"Not available for this record\" reason while pending: the closed `disabled` fallback is not a fact about a record that has not arrived. Same defect class (a pending record reported as a fact about the record), same file, same gate families.\n- Unchanged: a header with no record bound (no context, or no id) still evaluates, so a `record.*` predicate there still faults and says so; a loaded record that really lacks the key still warns once.\n\nNo change in `ui/packages/core/src/evaluator/**`: the evaluator is right to fault on an empty record; the root cause is the caller spelling an absent record as an empty one.\n\n## Tests\n\nOne new top-level `describe` in the existing shared harness `page-header-predicate-dialect.test.tsx` (no new file):\n\n- pending → no fault report, `visible` answers hidden; record arrives → predicate honoured (shown), still no report;\n- loaded negative direction → hidden, no report;\n- pending `hidden` / `disabled` / `pressed` → rendered, disabled, `aria-pressed=\"false\"`, no `aria-describedby` reason, no report; after load → enabled, pressed, no report;\n- CONTROL: a loaded record missing `f_status` → hidden and exactly one fault naming `f_status`;\n- CONTROL: no record id bound → still faults once.\n\nNo existing test was edited.\n\n## Acceptance notes\n\n- Triage asked whether the rendered buttons are wrong after the record loads. Measured on the shipped code (fix ablated, same harness): pending `[false,false]` with 2 fault reports; after load `[true,false]`, which is the predicates' own verdict. So only the pre-load pass was wrong; the authored rule was already honoured once the record arrived. With the fix: pending `[false,false]`, 0 reports; loaded `[true,false]`, 0 reports.\n- While pending, a predicate that reads only the host scope (for example `ctx.user.isPlatformAdmin == true`) also waits for the record, where it used to evaluate at once. The header shows its record-gated and user-gated actions together, once the row arrives.\n\n## Verification\n\n<details><summary>Ablations (fix committed first; restored blob == HEAD each time)</summary>\n\n- `headerRecordPending` forced to `false`: 3 of the 5 new tests red (`expected [ Array(1) ] to have a length of +0 but got 1` on both pending fault-count pins; the legs test red on `aria-describedby`); both CONTROL tests stay green.\n- only the `disabledReasonFor` pending line deleted: 1 red (the legs test, `aria-describedby`).\n\n</details>\n\n<details><summary>Local runs at a1d4af39</summary>\n\n- `cd ui && pnpm exec vitest run packages/components/src/__tests__/page-header-predicate-dialect.test.tsx`: 33/33 passed.\n- `pnpm --filter @object-ui/components test --maxWorkers=2` (under the verify lock): Test Files 479 passed, 1 skipped (480); Tests 4595 passed, 24 skipped.\n- `pnpm --filter @object-ui/components type-check` (after building the dependency closure): exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 37 derived families, each run, all exit 0; `--ran` reconciliation: 37 run, 0 NOT-MEASURED, 0 UNRUN. `pnpm --dir ui exec vitest run scripts/` first exited 1 only because `@objectstack/client` had no build in this container (unresolved-entry list); after the build it passed 171 files / 5065 tests.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQj66qNAyERYxzoNgw)_\n"
+}

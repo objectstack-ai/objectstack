@@ -1,0 +1,35 @@
+{
+  "number": 33929,
+  "kind": "pull_request",
+  "title": "docs(qa): name the strict:false door for the os lint arm of cli.validate-v18-authoring-verdicts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:31:05Z",
+  "updated_at": "2026-11-15T15:27:55Z",
+  "closed_at": "2026-11-15T15:27:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T15:27:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33929",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9RLPpwU8DGbvk27CbT8Woe4)_\nFixes #33842\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改测试清单 `cli.validate-v18-authoring-verdicts` 一项，把 `os lint` 那一臂的种植位置改到 `defineStack(…, { strict: false })`,并把条款写明这一点。\n- 为什么改：默认严格的 `defineStack` 在 CLI 读到 stack 之前就把省略的 `required` 填成了 false,`os lint` 看不到省略，条款在默认门上永远测不出来(QA 两次复现)。\n- 风险与回滚：只动一份清单 JSON,不碰任何产品包；回滚即 revert 本 PR。\n- 先看:`docs/qa/platform-checklist/areas/cli.json` 中该项的 steps[2]、acceptance[3] 与 history rev 4。\n- 两分钟验证：在示例应用副本里把 `defineStack({...})` 改成 `defineStack({...}, { strict: false })`,种一个只有一个省略 required 的 master_detail 的 cbp 对象，跑 `os lint --json`,应 exit 1 并报 relationship/master-detail-required。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`docs/qa/platform-checklist/areas/cli.json`, item `cli.validate-v18-authoring-verdicts` only (revision 3 → 4), option A of the card (checklist only):\n\n- **steps[2]** now plants the os lint arm on `defineStack({ … }, { strict: false })` and says why the two other doors do not carry it: the default strict `defineStack` parse has already defaulted the omitted `required` to `false` (ruling A of #30905) before any CLI verb loads the stack, and a raw-object default export reaches the rule in `os lint` but is refused by `os validate` / `os build`.\n- **acceptance[3]** clause and verify name that door; the verify adds that the same run also reports `security-controlled-by-parent-no-relation` at error, and that a run on the default strict door (lint exit 0, no finding) is not this clause's arm. The `os validate` / `os build` exit-0 half is unchanged.\n- **history** gains revision 4 with the live readings below.\n\nNo other clause, step, `automated.ref` or `source` entry changed. No product package touched.\n\n## Tests\n\nNo test file changed (checklist JSON only). The readings were driven live; the derived gate families for the diff were run locally (see Verification).\n\n## Acceptance notes\n\n- The seat's order named two doors, `defineStack(…, { strict: false })` or a raw object config. Measured: only the first carries the whole clause. A raw-object default export gets `os lint` exit 1 with the rule, but `os validate` exit 1 and `os build` exit 2 (the export was not built by `defineStack`), which contradicts the clause's other half, so steps[2] names only `strict: false` and says why the raw export is not the door.\n- Out of scope, reported to the seat, not fixed here: the semantic entry `packages/spec/src/migrations/entries/semantic/18.cbp-optional-master-admitted.ts` says that through a raw parse (\"an object written directly in `defineStack`\") an omitted `required` reads as the optional master and \"`os lint` reports the omission at `error`\". On an ordinary strict `defineStack` app `os lint` does not report it (reading A below). This is the #31470 reach line not holding on the default door.\n\n## Verification\n\nReadings at base `895783a1` (origin/main), scratch copy of `examples/app-todo`, CLI from the tree (`packages/cli/bin/run.js`, closure built under the verify lock: `VERDICT command-exit 0`). Planted: `todo_qa_hdr` (sharingModel private) and `todo_qa_line` (sharingModel controlled_by_parent, one field `hdr: { type: 'master_detail', label: 'Hdr', reference: 'todo_qa_hdr' }`, no `required`), both plain object literals.\n\n<details>\n<summary>A. default strict defineStack: os lint reads 0</summary>\n\n```\nos lint --json      exit 0   {\"passed\":true,\"errors\":0}  relationship/master-detail-required findings: 0\nos validate --json  exit 0\nos build            exit 0\n```\n</details>\n\n<details>\n<summary>B. defineStack(…, { strict: false }): os lint reads the rule at error</summary>\n\n```\nos lint --json      exit 1   {\"passed\":false,\"errors\":2}\n  error relationship/master-detail-required at objects[2].fields.hdr.required:\n    master_detail \"todo_qa_line.hdr\" → todo_qa_hdr declares no required: write true (every detail names its master) or false (an optional master)\n  error security-controlled-by-parent-no-relation at objects[2].sharingModel\nos validate --json  exit 0\nos build            exit 0\n```\n</details>\n\n<details>\n<summary>C. raw-object default export (not the door)</summary>\n\n```\nos lint --json      exit 1   relationship/master-detail-required at objects[2].fields.hdr.required; security-controlled-by-parent-no-relation at objects[2].sharingModel\nos validate --json  exit 1\nos build            exit 2   the default export was not built by `defineStack`\n```\n</details>\n\nGate reconciliation (`dispatch-gates.mjs --commands` / `--ran`) is run after the final commit and reported on the card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSRCsvCKhGiYG2hMQY)_\n\n<!-- signed: domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z -->\n"
+}

@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:54:53Z",
-  "updated_at": "2026-11-15T13:51:07Z",
+  "updated_at": "2026-11-15T15:26:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33507",
   "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: found by the #31699 card thread while it fixed PR #33431's dogfood pins. An administrator whose install is refused reads a reason that is no longer true, and so cannot tell what to rename. ⛔ Not a claim; triage sets the lane and grade.\n\n## What happens today\n\n`bareNameReason` in `packages/objectql/src/bare-name-one-holder.ts` (around line 621) builds the sentence every bare-name refusal and boot warning carries. For every type it says the type \"holds one name per deployment … with no package to tell two definitions apart, so with two holders every caller is served the same one, chosen by registration order.\"\n\nThat is still true for the types that have not narrowed. Flow (#31696), webhook (#32577), email template (#32214) and, once #33431 lands, connector now hold one name per **namespace**, and two holders are refused naming both rather than served by registration order. A co-owner refused for one of these four types (for example, a second package of `alpha`'s namespace declaring `alpha`'s connector name) is given the old reason. This predates #33431; main has said it for the flow since #31696.\n\n## What this card would build\n\n- Give the four namespace-scoped types (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) a reason that states their rule: one holder per namespace; another namespace may ship the name; a bare name two holders share is refused naming both.\n- Keep today's sentence for the types still held one per deployment.\n- Pin the sentence for one narrowed type and one unnarrowed type. Move any dogfood or unit pin that quotes the old text.\n\n## Seam\n\n`Seam: objectql:bare-name-one-holder.ts (bareNameReason, NAMESPACE_SCOPED_BARE_NAME_TYPES)`.\n\nDedupe words: `bareNameReason`, `one name per deployment`, `chosen by registration order`, `bare-name refusal reason namespace`."
