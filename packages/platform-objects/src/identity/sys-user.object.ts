@@ -176,20 +176,22 @@ export const SysUser = ObjectSchema.create({
 
     // ── Platform admin operations ───────────────────────────────────────
     //
-    // `unlock_user`, `create_user` and the actions further down that carry
+    // `create_user` and the actions further down that carry
     // `requiresFeature: 'admin'` (#2874) are gated on the better-auth `admin`
     // plugin: when `features.admin` is off the UI hides them instead of
     // rendering buttons that 404. SCIM deployments keep them: SCIM forces the
     // admin plugin (and `features.admin`) on (ADR-0134).
     //
-    // Ban / Unban carry NO `requiresFeature: 'admin'`, deliberately. Their
-    // doors, plugin-auth's `admin/ban-user` / `admin/unban-user`, are
-    // ObjectStack mounts registered whether or not the vendor plugin is on
-    // (`admin-ban-endpoints.ts`): without it the ban is written through the
-    // data engine and the session refusal answers `403 BANNED_USER`
-    // (`user-session-admission.ts`). So `features.admin == true` would hide a
-    // working Deactivate / Reactivate on every kernel that runs without the
-    // plugin, managed environments included. Pinned in
+    // Ban / Unban / Unlock carry NO `requiresFeature: 'admin'`, deliberately.
+    // Their doors, plugin-auth's `admin/ban-user` / `admin/unban-user` /
+    // `admin/unlock-user`, are ObjectStack mounts registered whether or not
+    // the vendor plugin is on. Without it the ban is written through the data
+    // engine and the session refusal answers `403 BANNED_USER`
+    // (`admin-ban-endpoints.ts`, `user-session-admission.ts`); the lockout is
+    // plugin-auth's own (ADR-0069 D2, stamped by its sign-in path), and the
+    // unlock clears it through the data engine. So `features.admin == true`
+    // would hide a working Deactivate / Reactivate / Unlock on every kernel
+    // that runs without the plugin, managed environments included. Pinned in
     // `action-state-visibility.test.ts` (the offer) and plugin-auth's
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
@@ -218,9 +220,11 @@ export const SysUser = ObjectSchema.create({
     // list row the console projects every `record.<field>` an object action's
     // predicate reads (objectui `listViewPredicates`), so the default Users
     // view carries `banned` without showing it; the record header reads the
-    // whole row. `banned` stays true past `ban_expires` until better-auth
-    // clears it at the user's next sign-in, so Unban is offered while the row
-    // says banned. Pinned in `action-state-visibility.test.ts`.
+    // whole row. `banned` stays true past `ban_expires` until the user's next
+    // sign-in clears it (better-auth's admin plugin where it is mounted,
+    // plugin-auth's `user-session-admission.ts` where it is not), so Unban is
+    // offered while the row says banned. Pinned in
+    // `action-state-visibility.test.ts`.
     {
       name: 'ban_user',
       label: 'Ban User',
@@ -287,7 +291,8 @@ export const SysUser = ObjectSchema.create({
     {
       // ADR-0069 D2 — clear a brute-force lockout early (locked_until auto-
       // expires, but an admin can release a user immediately). Hits the
-      // plugin-auth custom route, which is admin-guarded server-side.
+      // plugin-auth custom route, which is admin-guarded server-side and
+      // works without the better-auth admin plugin (block header above).
       name: 'unlock_user',
       label: 'Unlock Account',
       icon: 'lock-open',
@@ -308,7 +313,6 @@ export const SysUser = ObjectSchema.create({
       // `failed_login_count` at the threshold, so one more failure re-locks,
       // and Unlock is what resets that counter.
       visible: 'current_user.isPlatformAdmin == true && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
       refreshAfter: true,
