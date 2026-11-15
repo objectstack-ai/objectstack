@@ -44,6 +44,9 @@ import * as React from 'react';
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+// The source under test reaches a dynamic `import('@objectstack/lint')`; pay
+// that load during collection, never inside a case's clocked window.
+import '@objectstack/lint';
 
 /**
  * The trigger object's field catalog. Stubbed at the hook rather than at the

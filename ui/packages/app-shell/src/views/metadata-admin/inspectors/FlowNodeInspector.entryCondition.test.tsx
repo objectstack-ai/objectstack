@@ -25,6 +25,9 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+// The source under test reaches a dynamic `import('@objectstack/lint')`; pay
+// that load during collection, never inside a case's clocked window.
+import '@objectstack/lint';
 
 // The engine config-schema hook is stubbed empty so the inspector uses its
 // hardcoded field groups (fieldsForNodeType); the trigger field catalog is
