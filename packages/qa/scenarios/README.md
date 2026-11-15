@@ -191,6 +191,8 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # t
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
 pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
+pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # the effort every turn asks for (default: the CLI's own)
+pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
@@ -258,6 +260,16 @@ npx @objectstack/scenarios help                                      # the comma
   `claude-sonnet-4-5-20250929`, `opus` is not) is a mismatch (`modelMismatch`). The scorecard's author rows name the
   served model (`⚠ asked for sonnet` on a mismatch), and its `Run · model` rows count the persona turns per served
   model (`claude-opus-5-5 ×9 ⚠ 9 not sonnet`).
+- **Effort** (`driver.ts`): `--effort LEVEL` passes `claude --effort LEVEL` on every turn; `--author-effort` and
+  `--ask-effort` set the two kinds apart, each in place of `--effort`, as the model flags do. The levels are the CLI's
+  own, read off its `--help` when an effort is asked for (Claude Code 2.1.325: `low`, `medium`, `high`, `xhigh`,
+  `max`): a level it does not list is refused before any card runs, because the CLI itself only warns on an unknown
+  level and runs the turn at its default effort. `CLAUDE_CODE_EFFORT_LEVEL`, which the CLI lets win over `--effort`,
+  never reaches a turn: with no effort flag the runner passes its level as `--effort` (`auto` and `unset` mean the
+  default), so the record names the effort that ran. Every turn records the effort it asked for (`requestedEffort`);
+  no stream reports the effort a turn was served, so there is no served effort to compare. The scorecard shows it
+  beside the served model, on the author rows (`… · claude-haiku-5-5 · effort high`) and the `Run · model` rows
+  (`claude-haiku-5-5 ×24 · effort low`). A turn that asked for none ran at the CLI's default and shows none.
 - **Cost** (`scorecard.ts`): every turn records the cost its driver reported (`reportedCostUsd`: the `claude` CLI's
   `total_cost_usd`, notional under a subscription login, or an external command's report) and, from an external
   command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
@@ -451,7 +463,9 @@ CLI was measured on `codex-cli 0.167.0`:
   (0600, deleted when the turn returns), that holds the persona's key as an `http_headers` `Authorization` header and
   turns off every MCP server of your own config (`enabled = false`). A server of your own named `app` is refused.
 - **Flags**: `--model`, `--author-model` and `--ask-model` pass `-m`; `--author-timeout` is the runner's own clock.
-  `codex exec` has no cap on its agentic turns, so `--author-max-turns` and `--ask-max-turns` are refused. Its JSONL
+  `codex exec` has no cap on its agentic turns, so `--author-max-turns` and `--ask-max-turns` are refused. It has no
+  effort flag either, and its `model_reasoning_effort` config key starts a turn whatever value it is given (measured
+  on 0.167.0), so no level can be checked: `--effort`, `--author-effort` and `--ask-effort` are refused. Its JSONL
   names no model, so the scorecard shows `model not reported (asked for …)`.
 
 ### `--driver external:COMMAND` — the contract
@@ -489,8 +503,11 @@ the directory you run from. For anything more, write a wrapper script.
   graded as the empty answer it is.
 - **Timeout**: `limits.timeoutMs` — `--author-timeout` for `author` (default 60 min), 5 min for `ask`. The runner kills
   a call still running then (SIGTERM).
-- **Limits**: `limits` carries `timeoutMs`, and `maxTurns` (`--author-max-turns` / `--ask-max-turns`) and `model`
-  (`--model`, `--author-model`, `--ask-model`) when given. The command may ignore them; the record states them.
+- **Limits**: `limits` carries `timeoutMs`, and `maxTurns` (`--author-max-turns` / `--ask-max-turns`), `model`
+  (`--model`, `--author-model`, `--ask-model`) and `effort` (`--effort`, `--author-effort`, `--ask-effort`, the level
+  name as typed) when given. The command may ignore them; the record states them. A command that cannot set the
+  effort it is given should fail the call rather than run at its default, or the record names an effort no turn ran
+  at.
 - ⛔ **The key**: the persona's API key is only in `mcp.configFile`, a 0600 file in the shape of Claude Code's
   `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
   when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a
