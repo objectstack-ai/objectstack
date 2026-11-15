@@ -19,6 +19,9 @@
  * Output: `<work-dir>/results/micro-<dialect>-<scale>.{json,md}`, stamped with the
  * `git rev-parse --short HEAD` of this checkout: the "today" SQL is hand-copied
  * from one tree, and a reading describes only the engine of that commit.
+ * `--only m0,r9,r10` runs a subset of the groups (I1–I8, I9, I10) and adds the
+ * groups to the file name. I9 writes nothing; I10 rewrites the summary values
+ * the seed already holds, so it leaves the database as it was.
  */
 
 import { execSync } from 'node:child_process';
@@ -41,7 +44,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (flag === '--pg-url') args.pgUrl = val();
   else if (flag === '--work-dir') args.workDir = resolve(val());
   else if (flag === '--timeout-ms') args.timeoutMs = Number(val());
-  else if (flag === '--only') args.only = val().split(','); // groups: m0 (I1–I8), r9 (I9)
+  else if (flag === '--only') args.only = val().split(','); // groups: m0 (I1–I8), r9 (I9), r10 (I10)
   else throw new Error(`unknown argument: ${process.argv[i]}`);
 }
 
@@ -57,6 +60,7 @@ async function open() {
     return {
       all: async (sql, binds = []) => db.prepare(sql).all(binds),
       run: async (sql) => db.exec(sql),
+      write: async (sql, binds = []) => db.prepare(sql).run(binds),
       close: async () => db.close(),
     };
   }
@@ -69,6 +73,7 @@ async function open() {
   return {
     all: async (sql, binds = []) => { n = 0; const text = sql.replace(/\?/g, () => `$${++n}`); return (await c.query(text, binds)).rows; },
     run: async (sql) => c.query(sql),
+    write: async (sql, binds = []) => { n = 0; const text = sql.replace(/\?/g, () => `$${++n}`); return c.query(text, binds); },
     close: async () => c.end(),
   };
 }
@@ -88,6 +93,65 @@ async function time(db, sql, binds) {
     first = r[0];
   }
   return { ms: Math.round(median(ms) * 100) / 100, rows, first };
+}
+
+/**
+ * I10 (R10): the roll-up recompute after one batch child write on `bench_roll2`
+ * (two summary fields) that touched 10 distinct parents. Today, per parent per
+ * summary field: one aggregate, two full reads of the parent, one update (the
+ * statements `bench.mjs --sql-log` captured for `rollup2_insert_p10`). Target:
+ * one grouped aggregate for both fields and every parent, then one update per
+ * parent. Both write the values the seed already holds, so the database is left
+ * as it was; the target's answer is checked against today's.
+ */
+async function rollupPairs(db) {
+  const parents = Array.from({ length: 10 }, (_, i) => `r2p${pad(i)}`);
+  const seeded = await db.all('select count(*) as n from bench_roll2 where id = ?', [parents[0]]);
+  if (!Number(seeded[0]?.n ?? 0)) return { results: [], note: 'no roll-up rows: run bench.mjs at this scale first' };
+  const today = async () => {
+    const out = {};
+    for (const p of parents) {
+      const sum = (await db.all('select sum(quantity) as value from bench_roll2_item where parent = ?', [p]))[0].value;
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.write('update bench_roll2 set total_quantity = ? where id = ?', [sum, p]);
+      const count = (await db.all('select count(*) as value from bench_roll2_item where parent = ?', [p]))[0].value;
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.write('update bench_roll2 set item_count = ? where id = ?', [count, p]);
+      out[p] = [Number(sum), Number(count)];
+    }
+    return out;
+  };
+  const target = async () => {
+    const rows = await db.all(`select parent, sum(quantity) as total_quantity, count(*) as item_count from bench_roll2_item where parent in (${parents.map(() => '?').join(', ')}) group by parent`, parents);
+    const out = {};
+    for (const r of rows) {
+      await db.write('update bench_roll2 set total_quantity = ?, item_count = ? where id = ?', [r.total_quantity, r.item_count, r.parent]);
+      out[r.parent] = [Number(r.total_quantity), Number(r.item_count)];
+    }
+    return out;
+  };
+  const a = await today();
+  const b = await target();
+  const key = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const same = key(a) === key(b);
+  const seq = async (fn) => {
+    await fn();
+    const ms = [];
+    for (let i = 0; i < args.runs; i++) { const t0 = performance.now(); await fn(); ms.push(performance.now() - t0); }
+    return Math.round(median(ms) * 100) / 100;
+  };
+  return {
+    results: [{
+      item: 'I10 roll-up recompute, 10 parents x 2 summary fields: 80 statements (aggregate + 2 parent reads + update, per parent per field) vs 11 (one grouped aggregate + one update per parent)',
+      today: '10 x [select sum(quantity) … where parent = ?; select * from bench_roll2 where id = ? x2; update bench_roll2 set total_quantity = ?; select count(*) … where parent = ?; select * x2; update … set item_count = ?]',
+      target: 'select parent, sum(quantity), count(*) from bench_roll2_item where parent in (?×10) group by parent; then 10 x update bench_roll2 set total_quantity = ?, item_count = ? where id = ?',
+      todayMs: await seq(today), targetMs: await seq(target),
+      todayAnswer: 'per-parent values', targetAnswer: same ? 'same values' : 'DIFFERENT values', sameAnswer: same,
+      todayStatements: 80, targetStatements: 11,
+    }],
+  };
 }
 
 /**
@@ -232,6 +296,14 @@ async function main() {
       console.log(`${r.item}\n  today ${r.todayMs} ms${r.todayAnswer !== undefined ? ` (answer ${r.todayAnswer})` : ''} · target ${r.targetMs ?? 'n/a'} ms${r.targetAnswer !== undefined ? ` (answer ${r.targetAnswer})` : ''}${r.note ? ` · ${r.note}` : ''}`);
     }
     if (r9.note) console.log(`I9: ${r9.note}`);
+  }
+  if (group('r10')) {
+    const r10 = await rollupPairs(db);
+    for (const r of r10.results) {
+      results.push(r);
+      console.log(`${r.item}\n  today ${r.todayMs} ms · target ${r.targetMs} ms · ${r.targetAnswer}`);
+    }
+    if (r10.note) console.log(`I10: ${r10.note}`);
   }
   if (!group('m0')) return finish(db, commit, results);
   for (const p of pairs) {
