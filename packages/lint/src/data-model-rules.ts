@@ -21,6 +21,7 @@ import {
   BOOLEAN_VALUE_TYPES,
   NUMERIC_VALUE_TYPES,
   isAggregateCompatibleWithFieldType,
+  masterDetailRequiredOmitted,
   referenceCarrierOf,
   type AggregationFunction,
 } from '@objectstack/spec/data';
@@ -348,6 +349,12 @@ const CBP_ORPHAN_CONSEQUENCE =
  * `false`, so it admits the optional master) while `ObjectSchema.create()`
  * forces it to `true`: one source, two meanings, until the author writes one.
  * The fix stays `required: true`, the reading the builder already gives it.
+ * This rule sees the omission on every stack `os lint` loads: an unparsed one
+ * still lacks the key, and on one a strict `defineStack` parsed (the default
+ * door, where the field arrives as `false`) the producer RECORDED it on the
+ * field — `masterDetailRequiredOmitted` (`@objectstack/spec/data`) is that
+ * record's reader (#33940). A field that lost the record (a copy) reads as the
+ * explicit `false`, the optional master: the pre-record reading.
  *
  * Why these three. A `controlled_by_parent` detail derives ALL of its record
  * access from the master its `master_detail` reference names (ADR-0055: such an
@@ -413,8 +420,12 @@ function cbpMasterReferenceFinding(
   // `master_detail`, declared `required: false`, is its optional master — the
   // spelling passes. Beside another `master_detail` an explicit `false` is
   // judged as before; an omitted `required` is reported on every field.
+  // [#33940] On a stack `defineStack` parsed, an omitted `required` arrives as
+  // the parsed `false`; the producer's record of the omission
+  // (`masterDetailRequiredOmitted`) is what tells the two apart, so the
+  // omitted spelling is reported on the default strict door too.
   const soleMasterDetail = masterDetailCount === 1;
-  const optionalMaster = soleMasterDetail && def.required === false;
+  const optionalMaster = soleMasterDetail && def.required === false && !masterDetailRequiredOmitted(def);
   const missingRequired = def.required !== true && !optionalMaster;
   // On the sole `master_detail`, an omitted (or non-boolean) `required` has
   // two honest spellings; elsewhere only `required: true` is one.
