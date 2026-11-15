@@ -70,6 +70,16 @@
         "must_contain": ["$empty: true"],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 8,
+      "prompt": "In one aggregate call on `deal`, return the total number of deals and the number whose `amount` is zero or less. `amount` is an optional number field, and a deal with no amount recorded must count as zero or less.",
+      "expected_output": "`engine.aggregate('deal', { aggregations: [{ function: 'count', alias: 'total' }, { function: 'count', alias: 'non_positive', filter: { $or: [{ amount: { $lte: 0 } }, { amount: { $null: true } }] } }] })` — a column with no value fails every ordering test (`$gt` / `$gte` / `$lt` / `$lte` / `$between`), in a measure's `filter` as in `where` and `having`, so `{ amount: { $lte: 0 } }` alone skips the deals with no amount; the `$null: true` branch adds them. One call: the per-measure `filter` scopes only that count.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["filter", "$or", "$lte: 0", "$null: true"],
+        "must_not_contain": []
+      }
     }
   ]
 }
