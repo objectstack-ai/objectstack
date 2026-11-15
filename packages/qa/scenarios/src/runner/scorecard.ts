@@ -35,7 +35,14 @@
  *     the card. It is stated only when EVERY authoring turn that ran reported
  *     one; otherwise it is `not reported` — a turn that reported none is never
  *     read as zero, and a partial sum is never shown as the channel's cost.
- *   - Run-operations: one per operation; it passes when its grade passes.
+ *   - Run-operations: one per operation; it passes when its grade passes. An
+ *     operation whose grade measured nothing (`OperationGrade.notMeasured`:
+ *     the build denies the acting persona the write the card gives it, and
+ *     the runner's own probe of the declared write was denied 403 too) is
+ *     NOT MEASURED, like a seed-dependent one below. Each write the build
+ *     denies — that one, or a validation operation's probe met by the same
+ *     denial — is a Build finding naming persona, object and verb
+ *     ({@link buildDenialFindings}).
  *   - A turn that errored counts in the total and not in passed.
  *   - Seed: rows loaded of rows sent. A refused row is shown as
  *     `⚠ seed: N refused`, and every question turn and operation that depends
@@ -68,8 +75,9 @@ export interface HalfScores {
   ask?: Tally & { leaks: number; notMeasured: number };
   /**
    * `platformNotMeasured`: measured operations whose platform half met the
-   * build's own lock — graded on the agent half alone, the reason in the
-   * mode's findings ({@link platformNotMeasuredFindings}). Absent ⇒ none.
+   * build's own lock, or the build's denial of the write — graded on the
+   * agent half alone, the reason in the mode's findings
+   * ({@link platformNotMeasuredFindings}). Absent ⇒ none.
    */
   operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
   /** The models the half's question and operation turns were served ({@link modelTally}). */
@@ -184,6 +192,19 @@ export function platformNotMeasuredFindings(r: RunHalf | undefined, half: string
   });
 }
 
+/**
+ * One Build finding per operation whose grade charged a write to the build's
+ * denial (`OperationResult.buildDenial`, `buildDeniesWrite`): the build denies
+ * the acting persona a write the card gives it.
+ */
+export function buildDenialFindings(r: RunHalf | undefined, half: string): string[] {
+  return (r?.operations ?? []).flatMap((o) =>
+    o.buildDenial === undefined
+      ? []
+      : [`${half}: the build denies ${o.buildDenial.persona} the ${o.buildDenial.verb} on ${o.buildDenial.object} that the card gives it (operation ${o.operation}: its probe of the declared write was refused PERMISSION_DENIED (403))`],
+  );
+}
+
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
   const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
   if (turns.length === 0) return undefined;
@@ -261,9 +282,11 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
       ...m.findings,
       ...bareNameFindings(m.build, 'build'),
       ...requiredCycleFindings(m.build, 'build'),
+      ...buildDenialFindings(m.run, 'build'),
       ...platformNotMeasuredFindings(m.run, 'run'),
       ...bareNameFindings(m.iterate?.build, 'iterate build'),
       ...requiredCycleFindings(m.iterate?.build, 'iterate build'),
+      ...buildDenialFindings(m.iterate?.run, 'iterate build'),
       ...platformNotMeasuredFindings(m.iterate?.run, 'iterate run'),
     ],
   };

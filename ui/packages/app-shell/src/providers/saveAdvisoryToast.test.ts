@@ -95,6 +95,28 @@ describe('emitSaveAdvisories (#4133)', () => {
     expect(description).toContain(FINDING.hint);
   });
 
+  it('a finding with a userMessage (objectstack#32657): that sentence replaces message and hint, rule and where stay', () => {
+    const sink = makeSink();
+    const userMessage = '流程“nightly_purge”中的删除步骤没有筛选条件，会删除所有记录。请添加筛选条件。';
+
+    emitSaveAdvisories(event({ advisories: [{ ...FINDING, userMessage }] }), t, sink);
+
+    const description = sink.warning.mock.calls[0]![1]!.description!;
+    expect(description).toBe(`[${FINDING.rule}] ${FINDING.where} — ${userMessage}`);
+    expect(description).not.toContain(FINDING.message);
+    expect(description).not.toContain(FINDING.hint);
+  });
+
+  it('CONTROL: a blank userMessage is no sentence, and the message + hint face stays', () => {
+    const sink = makeSink();
+
+    emitSaveAdvisories(event({ advisories: [{ ...FINDING, userMessage: '  ' }] }), t, sink);
+
+    const description = sink.warning.mock.calls[0]![1]!.description!;
+    expect(description).toContain(FINDING.message);
+    expect(description).toContain(FINDING.hint);
+  });
+
   it('renders `where` as secondary context and omits the machine `path`', () => {
     const sink = makeSink();
 

@@ -130,6 +130,12 @@ export * from './filter-number-comparand-declared-type';
 // seam, and any other string is refused with INVALID_FILTER 400. The engine
 // door is objectql's; this module is the contract only.
 export * from './filter-boolean-comparand-declared-type';
+// [#29486] The STRING-STORED twin of the two doors above — the contract half of
+// the maintainer's ruling: a number or boolean comparand against a declared
+// text- or option-family field is narrowed to String(value), the form the write
+// door stores, at the engine's field-aware seam. It never refuses. The engine
+// arm is objectql's; this module is the contract only.
+export * from './filter-string-stored-comparand-declared-type';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result

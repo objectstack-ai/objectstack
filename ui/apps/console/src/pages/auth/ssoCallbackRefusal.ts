@@ -64,6 +64,18 @@ const ACCESS_DENIED: RefusalCopy = {
     "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
 };
 
+const EMAIL_DOMAIN_NOT_ALLOWED: RefusalCopy = {
+  key: 'auth.login.errors.ssoEmailDomainNotAllowed',
+  defaultValue:
+    "No account was created: your email address isn't at a domain this system accepts new accounts from. Use your organization email, or ask your administrator.",
+};
+
+const EMAIL_NOT_AN_ADDRESS: RefusalCopy = {
+  key: 'auth.login.errors.ssoEmailNotAnAddress',
+  defaultValue:
+    "No account was created: your organization's sign-in service did not send a usable email address for you. Ask your administrator to check the single sign-on setup.",
+};
+
 const GENERIC: RefusalCopy = {
   key: 'auth.login.errors.oauthCallbackFailed',
   defaultValue:
@@ -96,6 +108,20 @@ const GENERIC: RefusalCopy = {
  *    `oauth-authorize-refusal.ts`), and the callback hands it on unchanged.
  *    Its sentence says the same as that provider's own refusal page, and the
  *    page offers the same two ways on ({@link accessDeniedExits}).
+ *  - `EMAIL_DOMAIN_NOT_ALLOWED`: two emitters send it here. With SSO domain
+ *    verification on, an identity provider asked for a new account whose
+ *    email is not at a domain it has proven (plugin-auth
+ *    `sso-account-at-proven-domain.ts`); and the `email_domain` audience
+ *    posture refused a self-serve creation, a social sign-up included, whose
+ *    email is not on the approved-domain list (plugin-auth
+ *    `audience-posture.ts`). The sentence is true of both: nothing was
+ *    created, the address is not at a domain this system accepts new accounts
+ *    from, and a second attempt meets the same rule, so it names the
+ *    organization email and the administrator, not trying again;
+ *  - `INVALID_EMAIL`: the provider asked for a new account and the sign-in
+ *    resolved to a value that is not an email address (no email attribute or
+ *    claim mapped). Nothing was created; only the administrator can fix the
+ *    mapping.
  *
  * A code missing here keeps the generic sentence.
  */
@@ -109,6 +135,8 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
   direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
   access_denied: ACCESS_DENIED,
+  EMAIL_DOMAIN_NOT_ALLOWED: EMAIL_DOMAIN_NOT_ALLOWED,
+  INVALID_EMAIL: EMAIL_NOT_AN_ADDRESS,
 };
 
 /**
@@ -130,6 +158,18 @@ const LINK_EMAIL_MISMATCH: RefusalCopy = {
     "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
 };
 
+const LINK_ALREADY_LINKED_TO_OTHER_USER: RefusalCopy = {
+  key: 'auth.login.errors.linkAlreadyLinkedToOtherUser',
+  defaultValue:
+    'The account was not linked: it is already linked to a different user of this system. Link a different account, or sign in as the user it is linked to and unlink it there first.',
+};
+
+const LINK_UNABLE_TO_LINK: RefusalCopy = {
+  key: 'auth.login.errors.linkUnableToLink',
+  defaultValue:
+    'The account could not be linked. Check that its email address is verified with that sign-in service, then try again. If it still fails, ask your administrator.',
+};
+
 /**
  * Callback `error` code → the sentence for a person who is ALREADY signed in.
  *
@@ -142,12 +182,24 @@ const LINK_EMAIL_MISMATCH: RefusalCopy = {
  *  - `email_does_not_match`: better-auth refused to link a provider account
  *    whose email differs from the signed-in account's
  *    (`accountLinking.allowDifferentEmails` is off). No account row is written.
+ *  - `account_already_linked_to_different_user`: the provider account is
+ *    already linked to another user here (its email now matches the
+ *    signed-in account's, or different emails are allowed). Nothing is
+ *    moved. The sentence names no one.
+ *  - `unable_to_link_account`: better-auth would not link it, chiefly because
+ *    a provider that is not trusted did not assert the email as verified
+ *    (also when linking is turned off, or the account row cannot be written).
+ *
+ * All three are `linkOAuthAccount`'s refusals (better-auth
+ * `oauth2/link-account.mjs`), redirected by the callback to the error URL.
  *
  * Only these codes travel; any other `error` a signed-in person arrives with
  * is left where it was, and nothing from the URL is ever shown as it came.
  */
 const SIGNED_IN_LINK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   email_does_not_match: LINK_EMAIL_MISMATCH,
+  account_already_linked_to_different_user: LINK_ALREADY_LINKED_TO_OTHER_USER,
+  unable_to_link_account: LINK_UNABLE_TO_LINK,
 };
 
 /** Whether `code` is a link refusal a signed-in person is told about where they land. */

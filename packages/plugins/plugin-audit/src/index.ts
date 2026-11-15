@@ -73,6 +73,19 @@ export type {
   PackageLifecycleAuditWriter,
   PackageLifecycleAuditWriterOptions,
 } from './package-lifecycle-audit.js';
+// The `dataset_query` row writer the analytics dataset door reaches through
+// the `audit` slot, opted in per dataset.
+export {
+  buildDatasetQueryAuditRow,
+  createDatasetQueryAuditWriter,
+  DATASET_QUERY_AUDIT_ACTION,
+} from './dataset-query-audit.js';
+export type {
+  DatasetQueryAuditEvent,
+  DatasetQueryAuditWriter,
+  DatasetQueryAuditWriterOptions,
+  DatasetQueryOutcome,
+} from './dataset-query-audit.js';
 export {
   createReadAuditBatcher,
   extractDetailReadId,

@@ -15,21 +15,13 @@
  * metadata type.
  */
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ComponentType } from 'react';
 import { registerAppComponent } from './componentRegistry.js';
 import { registerMetadataResource } from '../views/metadata-admin/registry.js';
-import { PermissionMatrixEditPage } from '../views/metadata-admin/PermissionMatrixEditor.js';
-import { PackagesPage } from '../views/metadata-admin/PackagesPage.js';
 import { PositionGrantedSetsCell, PositionHolderCountCell } from '../views/metadata-admin/PositionGrantCells.js';
-import { PackagedActionsPage } from '../views/setup/PackagedActionsPage.js';
-import { ConnectorCredentialsPage } from '../views/setup/ConnectorCredentialsPage.js';
 import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.js';
-import { ConnectorConnectionsPage } from '../views/setup/ConnectorConnectionsPage.js';
 import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.js';
-import { PositionHoldersPage } from '../views/setup/PositionHoldersPage.js';
-import { PermissionSetAssignmentPage } from '../views/setup/PermissionSetAssignmentPage.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
-import { RecycleBinPage } from '../views/setup/RecycleBinPage.js';
 import { RECYCLE_BIN_REF } from '../views/setup/recycleBin.js';
 import {
   isAggregatedViewContainer,
@@ -105,6 +97,63 @@ const MetadataResourceRouter = lazy(() =>
 function MetadataAdminFallback({ label }: { label: string }) {
   return <div className="p-6 text-sm text-muted-foreground">Loading {label}…</div>;
 }
+
+/**
+ * A page registered BY REFERENCE to its module, loaded the first time it is
+ * drawn (objectstack#33293). Every page below was imported here by value, and
+ * this module is a side-effect import of the package entry, so each one, with
+ * everything it imports, was in the console's EAGER closure: on a dashboard
+ * route the browser downloaded the Packages page, its package form dialog, the
+ * permission-matrix editor and the Setup assignment pages before it asked for
+ * data. Measured from `apps/console/dist/eager-closure.json` and the emitted
+ * chunks' module lists, not from a source search (see the trap above): with
+ * these registrations lazy, the `PackageFormDialog` and
+ * `PositionHoldersSection` chunks leave the closure.
+ *
+ * The same shape as the two registrations above: the `Suspense` boundary lives
+ * inside the registered value, so `registerAppComponent` and
+ * `registerMetadataResource` still receive a component, and no render site
+ * learns about pending. ⛔ It only defers anything while nothing else in the
+ * package's eager graph names the page module statically; the barrel's
+ * `PackagedActionsPage` re-export is tree-shaken today because the console
+ * imports no such name.
+ */
+function lazyPage<P extends object>(label: string, load: () => Promise<ComponentType<P>>): ComponentType<P> {
+  const Page = lazy(() => load().then((component) => ({ default: component })));
+  function LazyPage(props: P) {
+    return (
+      <Suspense fallback={<MetadataAdminFallback label={label} />}>
+        <Page {...props} />
+      </Suspense>
+    );
+  }
+  return LazyPage;
+}
+
+const PackagesPage = lazyPage('packages', () =>
+  import('../views/metadata-admin/PackagesPage.js').then((m) => m.PackagesPage),
+);
+const PermissionMatrixEditPage = lazyPage('permission set', () =>
+  import('../views/metadata-admin/PermissionMatrixEditor.js').then((m) => m.PermissionMatrixEditPage),
+);
+const PackagedActionsPage = lazyPage('packaged actions', () =>
+  import('../views/setup/PackagedActionsPage.js').then((m) => m.PackagedActionsPage),
+);
+const ConnectorCredentialsPage = lazyPage('connector credentials', () =>
+  import('../views/setup/ConnectorCredentialsPage.js').then((m) => m.ConnectorCredentialsPage),
+);
+const ConnectorConnectionsPage = lazyPage('connector connections', () =>
+  import('../views/setup/ConnectorConnectionsPage.js').then((m) => m.ConnectorConnectionsPage),
+);
+const PositionHoldersPage = lazyPage('position holders', () =>
+  import('../views/setup/PositionHoldersPage.js').then((m) => m.PositionHoldersPage),
+);
+const PermissionSetAssignmentPage = lazyPage('permission set assignments', () =>
+  import('../views/setup/PermissionSetAssignmentPage.js').then((m) => m.PermissionSetAssignmentPage),
+);
+const RecycleBinPage = lazyPage('recycle bin', () =>
+  import('../views/setup/RecycleBinPage.js').then((m) => m.RecycleBinPage),
+);
 
 /**
  * The Suspense boundary lives INSIDE the registration value, which is the shape

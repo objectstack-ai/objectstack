@@ -392,9 +392,15 @@ export interface SysMetadataEngine {
   ): Promise<{ deleted: number }>;
   /**
    * Optional. Falls through to direct callback invocation if the
-   * underlying driver lacks ACID support (matches the real
+   * underlying driver cannot open a transaction (matches the real
    * `ObjectQL.transaction` semantics). Repository code must not rely on
-   * rollback for correctness against in-memory drivers.
+   * rollback for correctness where the engine cannot roll back
+   * (`engineCanRollBack` answers no: a default driver with no
+   * `beginTransaction`, or one declaring `supports.transactionsUnsupported`
+   * as remote Turso does). The in-memory driver rolls back, by restoring a
+   * snapshot of its whole store to its state at begin: no isolation, and a
+   * rollback also discards what other callers wrote since that begin, so it
+   * is not safe with concurrent writers.
    *
    * Typed off the `objectql` slot contract (ADR-0119 D1) rather than restated
    * by hand, so this stub surface cannot drift from `ObjectQL.transaction`.
@@ -758,9 +764,14 @@ export class SysMetadataRepository implements MetadataRepository {
   /**
    * Run `cb` inside `engine.transaction(...)` if the engine supports it,
    * otherwise fall through to a direct call. Matches the real
-   * `ObjectQL.transaction` semantics — in-memory drivers (and our test
-   * fakes) get no rollback, which is acceptable because production
-   * always runs on a SQL driver with real ACID.
+   * `ObjectQL.transaction` semantics — a test fake with no `transaction`,
+   * and an engine whose driver cannot roll back (no `beginTransaction`, or
+   * `supports.transactionsUnsupported` as remote Turso declares), get no
+   * rollback: the degrade ADR-0119 D1 declares. A SQL driver is not by
+   * itself a guarantee of rollback (ADR-0067, 2026-11-12 amendment); the
+   * in-memory driver does roll back, by restoring a snapshot of its whole
+   * store to its state at begin: no isolation, and a rollback also discards
+   * what other callers wrote since that begin.
    */
   private async withTxn<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
     if (typeof this.engine.transaction === 'function') {

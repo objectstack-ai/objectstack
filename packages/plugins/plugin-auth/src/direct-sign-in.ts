@@ -211,6 +211,33 @@ export function keptReturnPath(raw: unknown): string | undefined {
   return raw;
 }
 
+/**
+ * The `redirect` the sign-in page was opened with, read from the kept return
+ * path (the page hands the door its own path and query), so a landing back on
+ * the page (the door's own error, or the identity provider's) still knows where
+ * the person was going. Carried only when it is sent once and is itself a kept
+ * return path ({@link keptReturnPath}); otherwise none.
+ */
+export function carriedRedirect(kept: string | undefined): string | undefined {
+  if (kept === undefined) return undefined;
+  let values: string[];
+  try {
+    values = new URL(kept, 'https://return-path.invalid').searchParams.getAll('redirect');
+  } catch {
+    return undefined;
+  }
+  return values.length === 1 ? keptReturnPath(values[0]) : undefined;
+}
+
+/** The Console's `/login`, with the carried `redirect` and the `error` code, when there are any. */
+function signInPageUrl(host: DirectSignInHost, redirect: string | undefined, error?: string): string {
+  const params = new URLSearchParams();
+  if (error !== undefined) params.set('error', error);
+  if (redirect !== undefined) params.set('redirect', redirect);
+  const query = params.toString();
+  return `${host.consolePageUrl('/login')}${query ? `?${query}` : ''}`;
+}
+
 /** Which vendor start a provider takes. */
 export type DirectSignInProvider =
   | { kind: 'oauth'; providerId: string }
@@ -343,6 +370,8 @@ function queryOf(url: URL): Record<string, string[]> {
  *   Console's `/login?error=direct_sign_in_unavailable`, and one `warn` line;
  *   a start the vendor's rate limit refused (`429`) ⇒ the same, with
  *   `error=direct_sign_in_rate_limited` and the reason `rate_limited`.
+ * - Every landing on `/login`, the door's and the vendor's error return
+ *   address alike, carries the page's `?redirect=` ({@link carriedRedirect}).
  *
  * The caller mounts the door only while the setting is on; a call with it off
  * answers `404 RESOURCE_NOT_FOUND` like an unmounted route.
@@ -369,13 +398,18 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
     });
   }
 
+  const requested = url.searchParams.get('callbackURL');
+  const kept = keptReturnPath(requested);
+  // Every landing on the sign-in page keeps the page's own `?redirect=`.
+  const redirectTo = carriedRedirect(kept);
+
   const unavailable = (reason: DirectSignInMiss, providerId?: string): Response => {
     const text = `[auth] Direct sign-in not started: ${reason}. The sign-in page is shown instead.`;
     const meta = { entry: 'direct_sign_in', reason, ...(providerId ? { providerId } : {}) };
     if (host.logger) host.logger.warn(text, meta);
     else console.warn(text, meta);
     const code = reason === 'rate_limited' ? DIRECT_SIGN_IN_RATE_LIMITED : DIRECT_SIGN_IN_UNAVAILABLE;
-    return redirect(`${host.consolePageUrl('/login')}?error=${code}`);
+    return redirect(signInPageUrl(host, redirectTo, code));
   };
 
   let chosen: DirectSignInProvider | { miss: DirectSignInProviderMiss };
@@ -386,8 +420,6 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
   }
   if ('miss' in chosen) return unavailable(chosen.miss);
 
-  const requested = url.searchParams.get('callbackURL');
-  const kept = keptReturnPath(requested);
   if (requested !== null && kept === undefined) {
     host.logger?.debug?.('[auth] Direct sign-in: the return path is not a same-origin path and was dropped.', {
       entry: 'direct_sign_in',
@@ -397,7 +429,7 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
   const callbackURL = kept !== undefined ? `${origin}${kept}` : host.consolePageUrl('/');
   // Defence in depth: whatever was kept, the sign-in returns to this origin.
   if (new URL(callbackURL).origin !== new URL(origin).origin) return unavailable('start_refused');
-  const errorCallbackURL = host.consolePageUrl('/login');
+  const errorCallbackURL = signInPageUrl(host, redirectTo);
 
   const body = chosen.kind === 'oauth'
     ? { provider: chosen.providerId, callbackURL, errorCallbackURL, disableRedirect: true }

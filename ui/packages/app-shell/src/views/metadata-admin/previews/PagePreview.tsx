@@ -23,9 +23,8 @@ import { pageKindNode } from '../../pageKindNode.js';
 import {
   deriveStudioDetailSections,
   toAuthoredDetailSections,
-  loadPersistedUngroupedHeading,
-  MORE_DETAILS_DEFAULT_LABEL,
-  type SectionHeading,
+  loadPersistedSectionLabels,
+  type RecordDetailSectionLabels,
 } from '../../recordDetailSections.js';
 import { PageBlockCanvas } from './PageBlockCanvas.js';
 import { InterfaceListPage } from '../../InterfaceListPage.js';
@@ -338,40 +337,36 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
    * The regions are synthesized AGAIN for the write, in the PERSISTED shape:
    * the detail sections name their fields (`toAuthoredDetailSections`) and
    * carry the persisted headings, exactly as the create-time seed writes them
-   * (`anchors.ts`): "More details" in English under its per-object i18n anchor,
-   * and the ungrouped bucket of a grouped object under the inline locale map of
-   * `common.ungroupedSection`. The canvas's own `renderSchema` holds the RUNTIME
-   * section shape (field objects, a translated heading) and is refused by the
-   * spec as authored metadata. Offered only once the bound object's schema has
-   * loaded, and the ungrouped heading with it: before that the synthesized
-   * regions carry no fields, and copying them would save a page with an empty
-   * body.
+   * (`anchors.ts`): "More details" under the inline locale map of
+   * `detail.sectionMoreDetails` (its per-object i18n anchor still wins), and
+   * the ungrouped bucket of a grouped object under the map of
+   * `common.ungroupedSection`. The canvas's own `renderSchema` holds the
+   * RUNTIME section shape (field objects, a translated heading) and is refused
+   * by the spec as authored metadata. Offered only once the bound object's
+   * schema has loaded, and the persisted headings with it: before that the
+   * synthesized regions carry no fields, and copying them would save a page
+   * with an empty body.
    */
   const slottedRecordPage = isSlotted && isRecordPage;
-  // The persisted ungrouped heading, loaded for the schema it was loaded for:
-  // a heading answered for another object is never written.
-  const [persistedUngrouped, setPersistedUngrouped] = React.useState<{ for: unknown; heading: SectionHeading } | null>(null);
+  // The persisted headings, loaded for the schema they were loaded for: a
+  // heading answered for another object is never written.
+  const [persistedLabels, setPersistedLabels] = React.useState<{ for: unknown; labels: RecordDetailSectionLabels } | null>(null);
   const loadPersistedHeading = canEdit && slottedRecordPage && !!recordSchema;
   React.useEffect(() => {
     if (!loadPersistedHeading) return;
     let cancelled = false;
-    loadPersistedUngroupedHeading(recordSchema).then(
-      (heading) => { if (!cancelled) setPersistedUngrouped({ for: recordSchema, heading }); },
+    loadPersistedSectionLabels(recordSchema).then(
+      (labels) => { if (!cancelled) setPersistedLabels({ for: recordSchema, labels }); },
       () => { /* a catalogue did not load: the convert action stays unavailable */ },
     );
     return () => { cancelled = true; };
   }, [loadPersistedHeading, recordSchema]);
-  const ungroupedHeading = persistedUngrouped && persistedUngrouped.for === recordSchema ? persistedUngrouped.heading : null;
-  const canConvertToFull = loadPersistedHeading && ungroupedHeading !== null;
+  const sectionLabels = persistedLabels && persistedLabels.for === recordSchema ? persistedLabels.labels : null;
+  const canConvertToFull = loadPersistedHeading && sectionLabels !== null;
   const convertToFull = () => {
-    if (!canConvertToFull) return;
+    if (!canConvertToFull || !sectionLabels) return;
     const slots = (draft as { slots?: Record<string, unknown> })?.slots ?? {};
-    const sections = toAuthoredDetailSections(
-      deriveStudioDetailSections(recordSchema, {
-        moreDetails: MORE_DETAILS_DEFAULT_LABEL,
-        ungrouped: ungroupedHeading,
-      }),
-    );
+    const sections = toAuthoredDetailSections(deriveStudioDetailSections(recordSchema, sectionLabels));
     const synth = buildDefaultPageSchema(
       recordSchema,
       sections ? { slots, sections: sections as any } : { slots },
