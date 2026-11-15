@@ -254,6 +254,16 @@ that column. A `count` column never carries `currencyField`. See the
   refuses it, and on a running server a save or publish through the metadata API refuses
   it with **`INVALID_METADATA` / 422** and the same message, whichever object is saved
   second.
+- **A `summary` declaring `currencyMode: 'dynamic'`** (or a `currencyConfig` with no
+  `currencyMode`) is admitted only for a `sum`, `avg`, `min` or `max` of a stored home
+  amount, a child field that a `homeAmount.field` on the child object names (see
+  [Totals in the home currency](#totals-in-the-home-currency)), and naming no currency
+  code. `defineStack` (`os validate` and the build) refuses one over any other
+  child field, naming the child's home amounts. A single-object save or publish through the
+  metadata API on a running server does not judge the child field yet: it parses the one
+  object, so it refuses only what that object shows (#33713). The object itself refuses
+  one that names no child field, one that names a currency code, and a `count` in
+  every mode, at every door.
 - **A dataset measure that declares `currency` over a record-mode amount** is refused at
   compile with **`DATASET_INVALID` / 400**, and so is a `currency` on a derived measure that
   sums record-mode amounts. One code cannot label amounts in several currencies: delete
@@ -443,6 +453,29 @@ full reference is [`os migrate recompute-home-amounts`](/docs/deployment/cli#os-
 The home field is an ordinary stored `currency` field, so every aggregate reads it as it
 reads any amount: a `sum` over `amount_home` is the consolidated total, with no grouping,
 and a `summary` roll-up, a dataset measure or a grid footer over it needs nothing special.
+
+A `summary` stores one number and says its currency only through its own `currencyConfig`.
+To draw a roll-up of the home field as money in the home currency, declare
+`currencyMode: 'dynamic'` on it, with no code: every row of the home field is in the
+organization's home currency, so the total is too, and the metadata never names which
+currency that is.
+
+```typescript
+actual_cost: {
+  type: 'summary',
+  label: 'Actual cost',
+  summaryOperations: { object: 'expense', field: 'amount_home', function: 'sum', relationshipField: 'project' },
+  currencyConfig: { currencyMode: 'dynamic' },
+},
+```
+
+The Console then draws the total in `localization.currency` on the record page and in the
+list cell (`$250.00` under a USD home currency, `CN¥1,800.00` under CNY), the same currency
+a dashboard metric over `amount_home` shows. Without the declaration the roll-up stays a
+bare number. `defineStack` (`os validate` and the build) refuses `dynamic` on any other
+roll-up, because the amounts it reads are not known to be in the home currency; a
+single-object save on a running server does not check that yet (#33713, see
+[Roll-ups and datasets](#roll-ups-and-datasets)).
 
 ## See also
 

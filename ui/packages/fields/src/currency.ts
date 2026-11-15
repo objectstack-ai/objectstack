@@ -47,16 +47,26 @@ export function readFollowedParentObject(field: unknown): string | undefined {
 
 /**
  * Whether a roll-up (`summary`) field declares the currency its value is in
- * (ADR-0144 D6 as amended, the shape #31910 settled): a `fixed` code, or a
+ * (ADR-0144 D6 as amended, the shape #31910 settled): a `fixed` code, a
  * `record` pointer at its own object's code field, the parent's currency its
- * following children were written in. Both roll-up faces then draw the value
- * as money through `resolveFieldCurrency`, with the parent row as the
- * record. `dynamic` is refused on a summary by the spec, and a summary that
- * declares nothing stays a number.
+ * following children were written in, or `dynamic`, the organization's home
+ * currency. Every roll-up face then draws the value as money through
+ * `resolveFieldCurrency`, with the parent row as the record.
+ *
+ * `dynamic` (and a `currencyConfig` naming no `currencyMode`, which the spec
+ * parses as `dynamic`) is admitted by the spec only on a roll-up of a stored
+ * home amount, a child field some `homeAmount.field` names (objectstack#33659).
+ * That field is a `dynamic` currency field in the home currency (ADR-0144 D8
+ * rule 5), so its total is too: `resolveFieldCurrency` answers the tenant
+ * default (`localization.currency`), the code a metric tile over the same home
+ * field resolves, and a plain number when none is set. A summary that declares
+ * no `currencyConfig` stays a number.
  */
 export function summaryDeclaresCurrency(field: unknown): boolean {
-  const config = (field as { currencyConfig?: { currencyMode?: unknown } } | null | undefined)?.currencyConfig;
-  return config?.currencyMode === 'record' || config?.currencyMode === 'fixed';
+  const config = (field as { currencyConfig?: { currencyMode?: unknown } | null } | null | undefined)?.currencyConfig;
+  if (config === null || typeof config !== 'object') return false;
+  const mode = config.currencyMode ?? 'dynamic';
+  return mode === 'record' || mode === 'fixed' || mode === 'dynamic';
 }
 
 /**

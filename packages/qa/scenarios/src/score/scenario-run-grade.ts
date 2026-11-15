@@ -118,6 +118,32 @@ const UNIT: Readonly<Record<string, number>> = {
  */
 const ISO_DATE = /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g;
 
+/** An English month name, capitalised as a date writes it, full or short (`December`, `Dec`, `Sept`). */
+const MONTH = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';
+/** A day of the month, with its ordinal suffix when it carries one (`31`, `1st`). */
+const DAY = '(?:0?[1-9]|[12]\\d|3[01])(?:st|nd|rd|th)?';
+
+/**
+ * A calendar date written out (#33754): a day and a month name in either
+ * order (`31 Dec`, `31st of December 2026`, `Dec 31, 2026`), a month name
+ * with its year (`December 2026`), a slash date with its year (`31/12/2026`,
+ * `12/31/26`, `2026/12/31`), or a Chinese one (`12月31日`, `2026年12月`).
+ * Like {@link ISO_DATE}, it states no figure, so {@link readingsIn} reads
+ * none of its parts. A month name is only read capitalised (`may` is a verb),
+ * a slash date only with its year (`3/4` is a fraction), and a bare number
+ * beside no month stays a figure.
+ */
+const WRITTEN_DATE = new RegExp(
+  [
+    `\\b${DAY}\\s+(?:of\\s+)?${MONTH}\\b\\.?(?:,?\\s+\\d{4}\\b)?`,
+    `\\b${MONTH}\\b\\.?\\s+${DAY}\\b(?:,?\\s+\\d{4}\\b)?`,
+    `\\b${MONTH}\\b\\.?,?\\s+\\d{4}\\b`,
+    '\\b(?:\\d{4}/\\d{1,2}/\\d{1,2}|\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2}))\\b',
+    '(?:\\d{4}\\s*年\\s*)?(?<!\\d)(?:1[0-2]|0?[1-9])\\s*月(?:\\s*(?:3[01]|[12]\\d|0?[1-9])\\s*[日号])?',
+  ].join('|'),
+  'g',
+);
+
 /**
  * A run of Latin letters and digits, its parts joined by `-` or `_` (and a
  * decimal point between digits, `v1.2`) — the shape of a record name, code or
@@ -173,13 +199,13 @@ interface Reading {
 
 /**
  * Every number in `text` as {@link Reading}s, thousands separators dropped,
- * ISO dates and identifiers ({@link isIdentifierToken}) skipped; a unit suffix
+ * ISO dates, written dates ({@link WRITTEN_DATE}) and identifiers ({@link isIdentifierToken}) skipped; a unit suffix
  * adds the multiplied reading too.
  */
 function readingsIn(text: string): Reading[] {
   const out: Reading[] = [];
   const re = /(\d{1,3}(?:[,，]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(万|亿|million|billion|mn|bn|[kKmMbB](?![a-zA-Z]))?/g;
-  const plain = text.replace(ISO_DATE, (d) => ' '.repeat(d.length));
+  const plain = text.replace(ISO_DATE, (d) => ' '.repeat(d.length)).replace(WRITTEN_DATE, (d) => ' '.repeat(d.length));
   const ids = identifierSpans(plain);
   for (const m of plain.matchAll(re)) {
     if (ids.some(([start, end]) => m.index >= start && m.index < end)) continue;
@@ -197,7 +223,7 @@ function readingsIn(text: string): Reading[] {
   return out;
 }
 
-/** Every number in `text`, thousands separators dropped, ISO dates and identifiers skipped; a unit suffix adds the multiplied reading too. */
+/** Every number in `text`, thousands separators dropped, ISO and written dates and identifiers skipped; a unit suffix adds the multiplied reading too. */
 export function numbersIn(text: string): number[] {
   return readingsIn(text).map((r) => r.value);
 }
@@ -597,9 +623,58 @@ const WITHHELD_ACT = new RegExp(
   'i',
 );
 
-/** The reply's wording declines ({@link DECLINE}, {@link WITHHELD_ACT}). */
+/** A finding a report may negate: "there is no error", "no problem found". Never a field or a value the data could hold. */
+const PROBLEM = '(?:errors?|problems?|issues?|bugs?|faults?|failures?|warnings?|mistakes?|discrepanc(?:y|ies)|conflicts?|anomal(?:y|ies)|duplicates?|(?:anything|nothing) (?:is )?(?:wrong|amiss|unusual|off))\\b';
+/**
+ * Up to `n` characters within one sentence (no stop, colon, semicolon or line
+ * break), none of them a word that describes a CELL rather than a field's
+ * existence: "no record with an empty account field" and "no other fields
+ * filled in" report on values, not on what the data can hold.
+ */
+const span = (n: number) => `(?:(?!\\b(?:empty|blank|null|unset|missing|other|filled|required|editable)\\b)[^.;:!?\\n]){0,${n}}?`;
+
+/**
+ * A reply that says the data does not hold what was asked: the question's
+ * object has no field for it, or the data does not record it. The wordings the
+ * recorded eval runs use for an honest decline on an `unanswerable` question
+ * ("The Account object has no revenue field", "There is no revenue or annual
+ * revenue field", "Neither object has a sponsor field", "No tax-rate field
+ * exists", "The app's data doesn't record a sponsor"), and on a `withheld`
+ * one, where the persona's view of the app lacks the field ("The Project
+ * object has no hours field").
+ *
+ * The negation binds to RECORDING, as {@link WITHHELD_ACT}'s binds to acting:
+ * a missing field is named as one (`field`, after the negation, in the same
+ * sentence), and a "does not record" takes the data, the app, a record or an
+ * object as its subject. So a report that negates a finding — "there is no
+ * error", "no problem found", "it does not record anything wrong", "the record
+ * has no errors in any field" — reads as no decline, and so does a cell
+ * report ("none has an empty account field") and an absent OBJECT ("The app
+ * has no task object, so I counted projects: 2"), which answers some other
+ * question rather than declining this one. Either apostrophe.
+ *
+ * The cost: an answer that explains its route through a missing field ("the
+ * contact object has no industry field, so I joined accounts") also reads as
+ * declining. On an answerable question that changes no verdict — its figures
+ * decide — only the `declined` mark.
+ */
+const UNRECORDED = new RegExp(
+  [
+    // "has no sponsor field", "have no revenue, amount or similar field", "There is no X field", "there's no field for it"
+    `\\b(?:has|have|there(?:['’]s| is| are)) no (?!${PROBLEM})${span(40)}\\bfields?\\b`,
+    // "Neither object has a sponsor field", "None of the three objects (…) carries a tax field"
+    `\\b(?:neither|none)\\b${span(80)}\\b(?:has|have|carr(?:y|ies)|holds?) an? ${span(40)}\\bfields?\\b`,
+    // "No tax-rate or tax-amount field exists", "no field records the sponsor"
+    `\\bno (?!${PROBLEM})${span(40)}\\bfields? (?:exists?|records?|holds?|stores?|tracks?|captures?)\\b`,
+    // "The app's data doesn't record a sponsor", "The data does not record a tax rate"
+    `\\b(?:app|data|database|records?|objects?|system) (?:does not|doesn['’]t|do not|don['’]t|did not|didn['’]t) (?:record|store|track|capture)\\b(?!\\s+(?:any |an? |that |the )?${PROBLEM})`,
+  ].join('|'),
+  'i',
+);
+
+/** The reply's wording declines ({@link DECLINE}, {@link UNRECORDED}, {@link WITHHELD_ACT}). */
 export function declines(replyText: string): boolean {
-  return DECLINE.test(replyText) || WITHHELD_ACT.test(replyText);
+  return DECLINE.test(replyText) || UNRECORDED.test(replyText) || WITHHELD_ACT.test(replyText);
 }
 
 export interface PersonaRunInput {

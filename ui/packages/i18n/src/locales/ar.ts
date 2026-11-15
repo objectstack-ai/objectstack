@@ -4312,6 +4312,14 @@ const ar = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'تبقّى {{left}} من حصتك في الذكاء الاصطناعي. النموذج الموسوم بـ ×N يستهلكها أسرع بـ N مرة من النموذج الافتراضي.',
+      confirmTitle: 'هل تريد التبديل إلى {{model}}؟',
+      confirmBody: 'كل رسالة على هذا النموذج تستهلك من حصتك في الذكاء الاصطناعي {{multiplier}} أضعاف ما تستهلكه رسالة على النموذج الافتراضي.',
+      confirmAllowance: 'تبقّى منها {{left}}، وعلى هذا النموذج تنفد أسرع بـ {{multiplier}} مرة.',
+      confirmCancel: 'إلغاء',
+      confirmAction: 'تبديل النموذج',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'إرسال الرسالة',
     scrollToBottom: 'الانتقال إلى أحدث رسالة',

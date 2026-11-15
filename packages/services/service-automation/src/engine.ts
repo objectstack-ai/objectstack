@@ -2739,11 +2739,18 @@ export type PackagedFlowSource = (name: string, packageId?: string) => string | 
  * [#32183] It judges the served holders: a disabled package holds no name.
  * `options.includeDisabledPackages` asks it over every holder instead, the
  * question a durable judgment asks ({@link AutomationEngine.durableFlowHolder}).
+ *
+ * [ADR-0150 D3, #33386] `options.servedCaller` asks the run's question: the
+ * served holders, and a caller whose OWN holding answers is answered only
+ * while its package is served. The served holder read keeps a disabled
+ * caller's own holding (so the activation ledger's `stillHolds` still finds
+ * it); a run of that caller gets no flow from it, and never a closure
+ * holder's (seat ruling 6884403301, amendment 4): `not-found`.
  */
 export type FlowNameResolver = (
     name: string,
     callerPackageId: string | null,
-    options?: { readonly includeDisabledPackages?: boolean },
+    options?: { readonly includeDisabledPackages?: boolean; readonly servedCaller?: boolean },
 ) => PackageScopedResolution | undefined;
 
 /**
@@ -5206,27 +5213,43 @@ export class AutomationEngine implements IAutomationService {
     /**
      * [ADR-0150 D3, #31696] The key the bare flow name `name` means for a
      * caller of package `callerPackageId` (`null`: a caller with no package),
-     * or the refusal. A name one slot holds is its own key, refused only by
-     * the resolver, as before slots. A name two slots hold resolves through
-     * the resolver to the holder it reaches; the caller's own slot, when no
-     * resolver is attached; else it is refused, naming every holder.
+     * the refusal, or `absent`. A name one slot holds is its own key, refused
+     * only by the resolver, as before slots. A name two slots hold resolves
+     * through the resolver to the holder it reaches; the caller's own slot,
+     * when no resolver is attached; else it is refused, naming every holder.
+     *
+     * [ADR-0150 D3, #33386; seat ruling 6884403301] A name two slots hold is
+     * resolved over the SERVED holders (a disabled package holds no name):
+     * one served holder is that holder's slot, two or more are refused naming
+     * the served holders only, and none is `absent` (no flow). A caller whose
+     * own holding is the disabled one is `absent`, never a closure holder's
+     * (`servedCaller`, amendment 4). The slots themselves stay keyed over every
+     * holder ({@link flowSlots}, amendment 7): a disable re-points no slot, it
+     * only moves which slot a bare name reaches. `durable` asks over every
+     * holder instead, as `main` did: the subflow guards' recorded arming
+     * verdicts ({@link flowCallKey}), which a reversible disable re-judges
+     * nowhere.
      */
-    private resolveFlowKey(name: string, callerPackageId: string | null): { key: string } | { refusal: PackageScopedRefusal } {
+    private resolveFlowKey(
+        name: string,
+        callerPackageId: string | null,
+        options?: { readonly durable?: boolean },
+    ): { key: string } | { refusal: PackageScopedRefusal } | { absent: true } {
         // [#31696] A slot key is no flow's name: it names no flow here.
         if (isSlotKeySpelling(name)) return { key: unfiledFlowKey(name) };
         if (!this.flowSlots.isShared(name)) {
             const refusal = this.flowNameRefusal(name, callerPackageId);
             return refusal ? { refusal } : { key: name };
         }
-        // [#32183, R4-G] A name two slots hold resolves over every holder, a
-        // disabled package's included: a disable keeps its slot armed and
-        // moves no caller's answer (`main`'s). The served judgment is #32670's.
-        const resolution = this.flowNameResolver?.(name, callerPackageId, { includeDisabledPackages: true });
+        const resolution = this.flowNameResolver?.(name, callerPackageId,
+            options?.durable === true ? { includeDisabledPackages: true } : { servedCaller: true });
         if (resolution?.status === 'refused') return { refusal: resolution };
         if (resolution?.status === 'resolved' && resolution.holder.kind === 'package') {
             const key = this.flowSlots.keyOf(name, resolution.holder.packageId);
             if (key !== undefined) return { key };
         }
+        // [#33386] No served holder reaches the name: no flow, never another slot.
+        if (resolution?.status === 'not-found' && options?.durable !== true) return { absent: true };
         if (resolution === undefined && callerPackageId !== null) {
             const own = this.flowSlots.keyOf(name, callerPackageId);
             if (own !== undefined) return { key: own };
@@ -5239,11 +5262,30 @@ export class AutomationEngine implements IAutomationService {
      * package, the refusal thrown (409, every holder named). `undefined` for a
      * slot-key spelling (`PACKAGE/NAME`): no flow is named so, so the door
      * answers as for a flow it does not hold ({@link getFlowSlot} takes one).
+     * The removal and history entries read it: a shared name stays refused
+     * there over every holder, served or not.
      */
     private bareFlowKey(name: string): string | undefined {
         if (isSlotKeySpelling(name)) return undefined;
         if (!this.flowSlots.isShared(name)) return name;
         throw new PackageScopedNameRefusedError(this.sharedFlowNameRefusal(name, null));
+    }
+
+    /**
+     * [ADR-0150 D3, #33386] The key the bare entries that READ or RUN a flow
+     * ({@link execute}'s caller-less twin, {@link getFlow}, {@link toggleFlow})
+     * serve for `name`, judged over the served holders ({@link resolveFlowKey}):
+     * a name two slots hold is its one served holder's slot, refused naming
+     * the served holders when two or more serve it, and `undefined` (no flow)
+     * when none does. Seat ruling 6884403301, amendment 9: these entries move
+     * with the doors.
+     */
+    private servedBareFlowKey(name: string): string | undefined {
+        if (isSlotKeySpelling(name)) return undefined;
+        if (!this.flowSlots.isShared(name)) return name;
+        const resolved = this.resolveFlowKey(name, null);
+        if ('refusal' in resolved) throw new PackageScopedNameRefusedError(resolved.refusal);
+        return 'key' in resolved ? resolved.key : undefined;
     }
 
     /** [#31696] The package of the slot `key` files, or `undefined` (a package-less slot, or none). */
@@ -5727,9 +5769,13 @@ export class AutomationEngine implements IAutomationService {
         return [...this.flows.keys()].map((key) => this.flowSlotName(key));
     }
 
-    /** [#31696] Refused (409, naming both) for a name two packages hold: see {@link getFlowSlot}. */
+    /**
+     * [#31696] Refused (409, naming both) for a name two packages serve: see
+     * {@link getFlowSlot}. [#33386] Judged over the served holders
+     * ({@link servedBareFlowKey}): one served holder's flow, `null` when none.
+     */
     async getFlow(name: string): Promise<FlowParsed | null> {
-        const key = this.bareFlowKey(name);
+        const key = this.servedBareFlowKey(name);
         return key === undefined ? null : this.flows.get(key) ?? null;
     }
 
@@ -6575,7 +6621,8 @@ export class AutomationEngine implements IAutomationService {
      * run's node reads the refusal.
      */
     private resolvedFlowCallKey(name: string, callerPackageId: string | null): string {
-        const resolved = this.resolveFlowKey(name, callerPackageId);
+        // [#33386] Over every holder: the guards record an arming verdict.
+        const resolved = this.resolveFlowKey(name, callerPackageId, { durable: true });
         return 'key' in resolved ? resolved.key : unfiledFlowKey(name);
     }
 
@@ -7159,10 +7206,12 @@ export class AutomationEngine implements IAutomationService {
      */
     toggleFlow(name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
         // [#31696] A name two packages hold is refused (409, naming both):
-        // {@link toggleFlowSlot} switches one package's flow.
+        // {@link toggleFlowSlot} switches one package's flow. [#33386] Over
+        // the served holders: one served holder's flow is switched, none is
+        // not found ({@link servedBareFlowKey}).
         let key: string | undefined;
         try {
-            key = this.bareFlowKey(name);
+            key = this.servedBareFlowKey(name);
         } catch (err) {
             return Promise.reject(err);
         }
@@ -7548,6 +7597,8 @@ export class AutomationEngine implements IAutomationService {
         if (isSlotKeySpelling(flowName)) return { success: false, error: `Flow '${flowName}' not found` };
         const resolved = this.resolveFlowKey(flowName, this.flowCallerPackage(context));
         if ('refusal' in resolved) return { success: false, error: resolved.refusal.message };
+        // [#33386] No served holder reaches the name: as for a flow this engine does not hold.
+        if ('absent' in resolved) return { success: false, error: `Flow '${flowName}' not found` };
         return this.executeKey(resolved.key, context, startTime);
     }
 

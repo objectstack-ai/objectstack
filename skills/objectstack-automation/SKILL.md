@@ -22,8 +22,7 @@ metadata:
 
 ## When to Use This Skill
 
-Flows, state machines and approvals, triggers, vendor integrations and
-their callbacks, and **assignment rules**.
+Also vendor-integration callbacks and **assignment rules**.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
@@ -220,8 +219,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
   the remedy.
 - **A computed operand is a value, never a query operator**: a string, number,
   bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
-  of them with no empty entry. Anything else fails the node as a guard before the
-  query runs. Make the expression evaluate to the compared value (for a record,
+  of them with no empty entry. Anything else fails the node as a guard.
+  Make the expression evaluate to the compared value (for a record,
   its `id`), and write conditions in the filter itself.
 
 ---
@@ -249,7 +248,8 @@ Most are caught by `objectstack build`:
 
    Text slots (notify `title` / `message` / `actionUrl`, screen `title` /
    `description`, end `message`, `http` `url` / `headers`) render `{{ }}`
-   holes — a variable path, optional formatter, no logic; a `{…}` token there
+   holes — a variable path, optional formatter (a `default:` argument is
+   literal text, never a path), no logic; a `{…}` token there
    is refused with its `{{ }}` spelling. A date or the run user has no hole:
    assign it first (`assignments: { v: { dialect: 'cel', source:
    'current_user.id' } }`), then write `{{ v }}`.
