@@ -33,8 +33,7 @@
  *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
- *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints
- *   readMailboxComment / MAILBOX_KNOCK_AUTHORS   the doorbell's AUTHOR fence — a knock counts only from the relay or a `GOVERNED_APPROVERS` account; any other author ignored, its body never read
+ *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints; `readMailboxComment` / `MAILBOX_KNOCK_AUTHORS` its AUTHOR fence — a knock counts only from the relay or a `GOVERNED_APPROVERS` account, any other author ignored and its body never read
  *
  * Every definition below was MOVED, names unchanged, out of
  * `check-clause2-carriers.mjs` at the ruling's last step, which deleted the
