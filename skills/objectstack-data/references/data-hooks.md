@@ -295,7 +295,9 @@ same DSL as the [objectstack-query](../../objectstack-query/SKILL.md) skill:
 await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
 await ctx.api.object('candidate').find({ where: { stage: 'hired' } });
 await ctx.api.object('invoice').count({ where: { amount: { $gte: 1000 } } });
-await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner_id: ctx.session?.userId }] } });
+const uid = ctx.session?.userId;
+if (!uid) return;
+await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner_id: uid }] } });
 ```
 
 > `filter:` is tolerated as an **object-valued** alias (normalised to `where`),
