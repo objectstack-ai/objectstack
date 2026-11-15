@@ -3175,10 +3175,18 @@ async function respondToFlowTrigger(
     // declarations, read as the `/actions` door reads them, so an account's
     // start of a flow that a confirmation-gated action targets is refused with
     // that door's own `428`, whatever the request carries.
-    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, {
-        aiExposed: false,
-        actionDeclarations: () => servedActionDeclarations(deps, context),
-    });
+    //
+    // A declaration read that fails is the metadata plane failing to answer
+    // (ADR-0110 D3): `503`, and nothing runs — never an admitted start.
+    let startRefusal: Awaited<ReturnType<typeof flowStartRefusal>>;
+    try {
+        startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, {
+            aiExposed: false,
+            actionDeclarations: () => servedActionDeclarations(deps, context),
+        });
+    } catch (err) {
+        return { handled: true, response: deps.errorFromThrown(err, 503) };
+    }
     if (startRefusal) {
         const details = 'details' in startRefusal ? startRefusal.details : undefined;
         return {

@@ -180,12 +180,13 @@ describe('an AI service account does not start, by name, a flow that a confirmat
             });
         }
 
-        it(`${route}: an action-declaration read that fails refuses the account's start, and nothing runs`, async () => {
+        it(`${route}: an action-declaration read that fails refuses the account's start 503, and nothing runs`, async () => {
             const { trigger, execute } = makeDoors({ listingFails: true });
 
             const answer = await trigger(route, ACCOUNT_EC);
 
-            expect(answer.status).toBeGreaterThanOrEqual(400);
+            expect(answer.status).toBe(503);
+            expect(answer.code).toBe('SERVICE_UNAVAILABLE');
             expect(execute).not.toHaveBeenCalled();
         });
     }
