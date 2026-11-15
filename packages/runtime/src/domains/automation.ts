@@ -3007,6 +3007,37 @@ async function unregisterAndDeleteFlow(
 }
 
 /**
+ * [ADR-0151 D3 rule 3] One service slot rule 2b reads its declarations from,
+ * resolved to the instance the same request's `/actions` door reads, and loud
+ * on failure. No one helper gives both, so this is the smallest composition of
+ * the two that exist:
+ *
+ *  1. `resolveService`, the order every `/actions` read uses (`getObjectQL`
+ *     included): the request's own kernel first on a host that routes a
+ *     request to a kernel of its own, then the host kernel's scoped factory,
+ *     then its singletons. An instance it answers is the door's instance.
+ *  2. Only on a miss, `resolveServiceOrLoud` classifies it: a name nothing
+ *     registered (or a scoped registration with no instance in this scope) is
+ *     absent, `undefined`; any other rejection is re-raised. The quiet probe
+ *     absorbs every rejection, so a miss there is absence or a failure it
+ *     swallowed, and this step is what tells the two apart. Its own order
+ *     (the host's scoped leg first) never decides WHICH instance is read: it
+ *     is asked only when step 1 found none.
+ *
+ * Scoped by the request's environment, as the door's reads are: unscoped, a
+ * scoped registration is a fault to the classifier.
+ */
+async function resolveSlotAsActionsDoorReads(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: 'protocol' | 'objectql' | 'metadata',
+): Promise<any> {
+    const served = await deps.resolveService(context, name, context?.environmentId);
+    if (served != null) return served;
+    return deps.resolveServiceOrLoud(context, name, context?.environmentId);
+}
+
+/**
  * [ADR-0151 D3 rule 3] The action declarations the request's environment
  * serves: what flow start admission's rule 2b reads, for an AI service
  * account only, to find an action that targets the flow and declares
@@ -3021,39 +3052,42 @@ async function unregisterAndDeleteFlow(
  *    actions) and standalone `action` items, and the metadata service's
  *    object and action listings.
  *
- * Absence and failure are told apart on every arm, as at every gate that
- * reads an authorization fact (`resolveServiceOrLoud`): each of the three
- * slots (`protocol`, `objectql`, `metadata`) is resolved loud, so a slot
- * nothing registered is absent and contributes nothing, while a slot that is
- * wired and fails to resolve throws; and each listing (the two merged ones,
- * the registry's two, the metadata service's objects and its standalone
- * `action` items) is read where its throw travels. Any such throw makes the
- * predicate refuse the start `503`. So a host that serves no declaration from
- * any of these sources finds none, and a read that did not happen admits
- * nothing.
+ * Each of the three slots (`protocol`, `objectql`, `metadata`) is the
+ * instance the same request's `/actions` door reads, in every host shape
+ * ({@link resolveSlotAsActionsDoorReads}: the request's own kernel first),
+ * and absence and failure are told apart on every arm: a slot nothing
+ * registered is absent and contributes nothing, while a slot that is wired
+ * and fails to resolve throws; and each listing (the two merged ones, the
+ * registry's two, the metadata service's objects and its standalone `action`
+ * items) is read where its throw travels. Any such throw makes the predicate
+ * refuse the start `503`. So a host that serves no declaration from any of
+ * these sources finds none, and a read failure that reaches this function as
+ * a throw admits nothing. A source that answers a failed read of its own
+ * without throwing is not told apart here: the metadata service's plural
+ * listing reports a loader that failed and answers the other loaders' rows,
+ * and those rows are what is judged.
  */
 async function servedActionDeclarations(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
 ): Promise<Array<{ action: unknown; objectName: string }>> {
-    const envId = context?.environmentId;
-    const protocol = await deps.resolveServiceOrLoud(context, 'protocol', envId);
+    const protocol = await resolveSlotAsActionsDoorReads(deps, context, 'protocol');
     if (typeof protocol?.getMetaItems === 'function') {
         const objects = await readMergedItems(protocol, 'object');
         const actions = await readMergedItems(protocol, 'action');
         return collectActionDeclarations(deps, undefined, objects, actions);
     }
     const rows: Array<{ action: unknown; objectName: string }> = [];
-    // The engine slot resolved loud, as the two listing slots are: the quiet
-    // `getObjectQL` probe reads a wired slot that fails to resolve as no engine.
-    const engine = (await deps.resolveServiceOrLoud(context, 'objectql', envId)) as
+    // The engine the `/actions` door's `getObjectQL` reads, resolved so that a
+    // wired slot that fails to resolve is loud, which that probe is not.
+    const engine = (await resolveSlotAsActionsDoorReads(deps, context, 'objectql')) as
         | { registry?: { listItems?: (type: string) => unknown[] } }
         | undefined;
     const registry = engine?.registry;
     if (typeof registry?.listItems === 'function') {
         rows.push(...await collectActionDeclarations(deps, undefined, registry.listItems('object'), registry.listItems('action')));
     }
-    const metadata = await deps.resolveServiceOrLoud(context, 'metadata', envId);
+    const metadata = await resolveSlotAsActionsDoorReads(deps, context, 'metadata');
     if (typeof metadata?.listObjects === 'function' || typeof metadata?.loadMany === 'function') {
         // Both listings read HERE and handed over, so a throw of either one
         // travels: `collectActionDeclarations` reads a throwing standalone

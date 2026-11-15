@@ -31,6 +31,8 @@ import { describe, it, expect, vi } from 'vitest';
 // window pays that first load (`check:test-source-alias`).
 import '@objectstack/metadata';
 
+import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
+
 import { HttpDispatcher } from './http-dispatcher.js';
 import { confirmationGatedStarterOf, flowStartRefusal } from './flow-start-admission.js';
 
@@ -364,5 +366,92 @@ describe('flowStartRefusal — rule 2b reads the name and the declarations, neve
         const failing = { getFlow: async () => { throw new Error('flow read failed'); } };
         await expect(flowStartRefusal(failing, FLOW, PERSON_EC, door)).rejects.toThrow('flow read failed');
         await expect(flowStartRefusal(failing, FLOW, ACCOUNT_EC, door)).rejects.toThrow('flow read failed');
+    });
+});
+
+describe('the declarations are read from the services the request\'s own /actions door reads, in every host shape', () => {
+    const ENV_ID = 'env-fcg';
+    /** No graceful-shutdown handlers: one kernel per case would otherwise pile up process listeners. */
+    const bareKernel = (): ObjectKernel => new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+    const gatedAction = {
+        name: GATED_ACTION, objectName: OBJECT, type: 'flow', target: FLOW,
+        ai: { exposed: true, description: 'Voids the invoice through its flow, for this test.', requiresConfirmation: true },
+    };
+    /** A protocol whose merged listings serve the gated action, or (`gated: false`) none. */
+    const protocolServing = (gated: boolean) => ({
+        getMetaItems: async ({ type }: { type: string }) => ({
+            type,
+            items: type === 'object' ? [{ name: OBJECT, actions: [] }] : type === 'action' && gated ? [gatedAction] : [],
+        }),
+    });
+    const automationService = () => {
+        const execute = vi.fn(async () => ({ success: true, output: {} }));
+        const getFlow = async (name: string) => (name === FLOW ? { name, type: 'screen', runAs: 'user' } : null);
+        return { execute, getFlow };
+    };
+    const start = async (dispatcher: HttpDispatcher, context: Record<string, unknown>): Promise<Answer> => {
+        const res: any = await dispatcher.handleAutomation(`/${FLOW}/trigger`, 'POST', {}, {
+            request: {}, executionContext: ACCOUNT_EC, ...context,
+        } as any);
+        const error = res.response?.body?.error;
+        return { status: res.response?.status, code: error?.code, details: error?.details };
+    };
+
+    it('kernel-resolver host: the gated action declared on the request\'s own kernel refuses the account\'s start', async () => {
+        const host = bareKernel();
+        host.registerService('protocol', protocolServing(false));
+        const env = bareKernel();
+        env.registerService('protocol', protocolServing(true));
+        const automation = automationService();
+        env.registerService('automation', automation);
+
+        expectConfirmationRefusal(await start(new HttpDispatcher(host as never), { kernel: env, environmentId: ENV_ID }), automation.execute);
+    });
+
+    it('kernel-resolver host: a shape that merely lacks every source gains no 503 — the account starts the flow', async () => {
+        const host = bareKernel();
+        const env = bareKernel();
+        const automation = automationService();
+        env.registerService('automation', automation);
+
+        expect((await start(new HttpDispatcher(host as never), { kernel: env, environmentId: ENV_ID })).status).toBe(200);
+        expect(automation.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('single-environment host: the gated action declared on the default kernel refuses the account\'s start', async () => {
+        const host = bareKernel();
+        host.registerService('protocol', protocolServing(true));
+        const automation = automationService();
+        host.registerService('automation', automation);
+
+        expectConfirmationRefusal(await start(new HttpDispatcher(host as never), {}), automation.execute);
+    });
+
+    it('single-environment host: a shape that merely lacks every source gains no 503 — the account starts the flow', async () => {
+        const host = bareKernel();
+        const automation = automationService();
+        host.registerService('automation', automation);
+
+        expect((await start(new HttpDispatcher(host as never), {})).status).toBe(200);
+        expect(automation.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('SharedProjectPlugin: the gated action the scoped factory serves for the request\'s scope refuses the account\'s start', async () => {
+        const host = bareKernel();
+        host.registerServiceFactory('protocol', (_ctx: unknown, scopeId?: string) => protocolServing(scopeId === ENV_ID), ServiceLifecycle.SCOPED);
+        const automation = automationService();
+        host.registerService('automation', automation);
+
+        expectConfirmationRefusal(await start(new HttpDispatcher(host as never), { environmentId: ENV_ID }), automation.execute);
+    });
+
+    it('SharedProjectPlugin: a scoped factory with no instance in this scope is absence, not a 503 — the account starts the flow', async () => {
+        const host = bareKernel();
+        host.registerServiceFactory('protocol', () => undefined, ServiceLifecycle.SCOPED);
+        const automation = automationService();
+        host.registerService('automation', automation);
+
+        expect((await start(new HttpDispatcher(host as never), { environmentId: ENV_ID })).status).toBe(200);
+        expect(automation.execute).toHaveBeenCalledTimes(1);
     });
 });
