@@ -198,7 +198,10 @@ on:
       # week, each such change already runs the script's own `--self-test` in
       # `lint.yml`, and a live sweep on every one of those pull requests would
       # spend this repository's shared `GITHUB_TOKEN` budget for no new reading.
-      # A change to the job itself (this file) still runs it before it merges.
+      # It still runs before it merges on a change to the job itself (this file),
+      # and — because a `pull_request` run exercises every job — on every pull
+      # request matching a sibling patrol's path above (`scripts/pm/check-half-states.mjs`
+      # among them): one 24 h sweep each, a few dozen API reads, writing nothing.
 
 jobs:
 
@@ -1489,6 +1492,24 @@ jobs:
   # OPEN card is refreshed in place (body only; labels are never rewritten); a
   # CLOSED one is not reopened — a later bad week files a new card naming it.
   #
+  # A refresh never drops a BREACH row and never goes unannounced:
+  #
+  #   * every BREACH row already on the open card that this run did not read
+  #     again (it left the 7-day window, or this week's sweep could not read it)
+  #     is CARRIED into the new body, marked as carried. Rows leave the card only
+  #     when the maintainer closes it — or deletes a ruled row from the body by
+  #     hand, which the next refresh honours. NOT MEASURED rows are one run's
+  #     reading and are NOT carried: each refresh states the current run's.
+  #   * a refresh posts ONE comment naming the run, the BREACH rows new to the
+  #     card, the counts read again and carried, and the NOT MEASURED count — a
+  #     body edit notifies nobody, a comment notifies the card's participants.
+  #
+  # Why the card's `done when` cannot be "a re-run reads clean" for a BREACH: the
+  # arm reads only evidence that existed BEFORE the landing, so a breach keeps
+  # reading breach on every re-run until it ages out of the window. A BREACH row
+  # is closed by the maintainer's ruling on it, recorded on the card; only a
+  # NOT MEASURED row is answered by a clean manual re-run.
+  #
   # ## What it reads, and how
   #
   #   * The sweep reads a FRESH shallow clone of `main` (`--repo-root`), never
@@ -1530,6 +1551,11 @@ jobs:
   # When the sweep could not read its whole window (any exit but 0), after the
   # card is filed — the patrol reporting that a week went unread, never a gate on
   # the repo. A BREACH is a SUCCESSFUL patrol: it files the card and stays green.
+  # A sweep step that hits its own 12-minute timeout (a 7-day sweep measured
+  # 222 s) records no exit code and leaves no complete JSON: the verdict reads
+  # that as NOT MEASURED, so on `main` the card IS filed (or refreshed), and the
+  # run goes red. The step timeout sits under the job's 20 so the verdict, the
+  # artifact, the card and the red step still get their minutes.
   governed-merges-audit:
     # ⛔ This job is NOT a required context and must never become one.
     name: Weekly governed-merges audit
@@ -1591,6 +1617,9 @@ jobs:
 
       - name: Run the governed-merges sweep
         id: sweep
+        # Under the job's 20 on purpose: a timed-out sweep still gets its verdict
+        # (NOT MEASURED), its card on main, and its red step (see the header).
+        timeout-minutes: 12
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -1641,8 +1670,12 @@ jobs:
               try { sweep = JSON.parse(raw); } catch (error) { parseError = String(error?.message ?? error).split('\n')[0]; }
             }
             const breaches = [];
+            // The same rows, keyed, for the card step's carry-forward: the key is
+            // the row's leading `PR #N` or `commit SHA12`.
+            const breachRows = [];
             const unread = [];
-            const rowName = (e) => (e.pr != null ? `PR #${e.pr}` : `commit ${String(e.sha ?? '').slice(0, 12)} (no PR number in its subject)`);
+            const rowKey = (e) => (e.pr != null ? `PR #${e.pr}` : `commit ${String(e.sha ?? '').slice(0, 12)}`);
+            const rowName = (e) => (e.pr != null ? rowKey(e) : `${rowKey(e)} (no PR number in its subject)`);
             const readable = sweep && Array.isArray(sweep.entries) && Array.isArray(sweep.repos);
             if (readable) {
               for (const r of sweep.repos) {
@@ -1653,7 +1686,9 @@ jobs:
                 if (e.arm?.state === 'breach') {
                   const who = e.attribution ? `merged_by ${clean(e.attribution.mergedBy ?? '(none)')} at ${clean(e.attribution.mergedAt ?? '(unknown)')}` : 'merge attribution unavailable';
                   const head = e.arm.headSha ? ` on head \`${String(e.arm.headSha).slice(0, 12)}\`` : '';
-                  breaches.push(`${rowName(e)} — ${clean(e.subject)} — commit \`${String(e.sha ?? '').slice(0, 12)}\`; ${who}${head}: ${clean(e.arm.reason)}`);
+                  const line = `${rowName(e)} — ${clean(e.subject)} — commit \`${String(e.sha ?? '').slice(0, 12)}\`; ${who}${head}: ${clean(e.arm.reason)}`;
+                  breaches.push(line);
+                  breachRows.push({ key: rowKey(e), line });
                 }
                 if (e.arm?.state === 'not-measured') unread.push(`${rowName(e)} low-risk arm NOT MEASURED: ${clean(e.arm.reason)}`);
                 if (e.attributionError) unread.push(`${rowName(e)} attribution unavailable: ${clean(e.attributionError)}`);
@@ -1665,18 +1700,26 @@ jobs:
             }
             const verdict = breaches.length > 0 ? (unread.length > 0 ? 'breach-and-unread' : 'breach') : unread.length > 0 ? 'unread' : 'clean';
             const cap = (rows) => (rows.length > 40 ? [...rows.slice(0, 40), `… and ${rows.length - 40} more — see the run log`] : rows);
+            const unreadLines = [];
+            if (unread.length > 0) {
+              unreadLines.push(`## NOT MEASURED — ${unread.length} reading(s) the sweep could not make`, '', ...cap(unread).map((u) => `- ${u}`), '');
+              if (!readable && stderr) unreadLines.push('```', stderr.slice(-6000).replace(/```/g, "'''"), '```', '');
+            }
             const lines = [];
             if (breaches.length > 0) {
               lines.push(`## ⛔ BREACH — ${breaches.length} low-risk skills arm landing(s) without a same-head at-tier PASS record`, '', ...cap(breaches).map((b) => `- ${b}`), '');
             }
-            if (unread.length > 0) {
-              lines.push(`## NOT MEASURED — ${unread.length} reading(s) the sweep could not make`, '', ...cap(unread).map((u) => `- ${u}`), '');
-              if (!readable && stderr) lines.push('```', stderr.slice(-6000).replace(/```/g, "'''"), '```', '');
-            }
+            lines.push(...unreadLines);
             const counts = readable
               ? `${sweep.entries.length} governed entr${sweep.entries.length === 1 ? 'y' : 'ies'} over ${sweep.scanned ?? '?'} mainline commit(s) since ${clean(sweep.since)}`
               : 'no sweep reading';
-            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'findings.md'), lines.join('\n'));
+            // The card step composes its own BREACH section (this run's rows plus
+            // the open card's carried ones), so it gets the rows, not the markdown.
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'findings.json'), JSON.stringify({
+              breaches: breachRows,
+              unreadCount: unread.length,
+              unreadSection: unreadLines.join('\n'),
+            }));
             core.setOutput('verdict', verdict);
             core.setOutput('counts', counts);
             await core.summary
@@ -1724,8 +1767,10 @@ jobs:
             const identityLabel = process.env.ANCHOR_IDENTITY_LABEL;
             const stateLabel = process.env.ANCHOR_STATE_LABEL;
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-            const findings = fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'findings.md'), 'utf8').trim();
-            if (!findings) throw new Error(`verdict ${process.env.VERDICT} but no findings were rendered — refusing to file an empty card`);
+            const findings = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'findings.json'), 'utf8'));
+            const current = Array.isArray(findings.breaches) ? findings.breaches : [];
+            const unreadSection = String(findings.unreadSection ?? '').trim();
+            if (current.length === 0 && !unreadSection) throw new Error(`verdict ${process.env.VERDICT} but no findings were rendered — refusing to file an empty card`);
 
             // ── Anchor lookup: identity label, then marker or exact title ──────
             const isThisAnchor = (i) => !i.pull_request && (String(i.body ?? '').includes(marker) || i.title === title);
@@ -1750,6 +1795,37 @@ jobs:
             const existing = open[0] ?? null;
             const prior = !existing ? (closed.find((i) => i.state_reason !== 'duplicate') ?? null) : null;
 
+            // ── Carry-forward: a refresh never drops a BREACH row ────────────────
+            // Every keyed row under the open card's BREACH heading that this run
+            // did not read again stays, marked as carried. A row leaves only when
+            // the card is closed, or when the maintainer deletes it from the body.
+            const CARRIED = " · _carried: on this card from an earlier run and not in this run's reading; it stays until this card is closed_";
+            const ROW_KEY = /^- (PR #\d+|commit [0-9a-f]{7,40})\b/;
+            const thisRun = new Set(current.map((b) => b.key));
+            const onCard = new Set();
+            const carried = [];
+            if (existing) {
+              let inBreach = false;
+              for (const raw of String(existing.body ?? '').split(/\r?\n/)) {
+                if (raw.startsWith('## ')) { inBreach = raw.startsWith('## ⛔ BREACH'); continue; }
+                const m = inBreach ? ROW_KEY.exec(raw) : null;
+                if (!m || onCard.has(m[1])) continue;
+                onCard.add(m[1]);
+                if (!thisRun.has(m[1])) carried.push({ key: m[1], line: raw.slice(2).split(CARRIED)[0].trimEnd() });
+              }
+            }
+            const breachTotal = current.length + carried.length;
+            const BREACH_CAP = 100;
+            const breachRowsMd = [...current.map((b) => `- ${b.line}`), ...carried.map((b) => `- ${b.line}${CARRIED}`)];
+            const breachSection = breachTotal === 0 ? '' : [
+              `## ⛔ BREACH — ${breachTotal} low-risk skills arm landing(s) without a same-head at-tier PASS record (${current.length} read by this run, ${carried.length} carried from earlier runs)`,
+              '',
+              ...(breachRowsMd.length > BREACH_CAP
+                ? [...breachRowsMd.slice(0, BREACH_CAP), `… and ${breachRowsMd.length - BREACH_CAP} more, NOT on this card and so not carried — see the run log and the artifact`]
+                : breachRowsMd),
+              '',
+            ].join('\n');
+
             // The weekly `M H * * D` cron makes the `Swept` line decidable (#17720);
             // any other form says so rather than publishing a deadline it did not read.
             const sweptAt = new Date();
@@ -1767,7 +1843,7 @@ jobs:
             const body = [
               `${marker} — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the weekly audit finds this card instead of filing a new one.`,
               '',
-              'Maintainer-action: recognise or roll back each ⛔ BREACH landing below, and read each NOT MEASURED reason — done when every BREACH row carries your word on its pull request (kept, or reverted) and a manual run of the `governed-merges-audit` job of Fleet Patrols reads clean.',
+              'Maintainer-action: rule on each ⛔ BREACH row below (kept, or rolled back) and record that ruling as a comment on this card, and re-run the `governed-merges-audit` job of Fleet Patrols by hand for any NOT MEASURED row — done when every BREACH row has your ruling recorded on this card and a manual run reads no NOT MEASURED row; then close this card. A BREACH row never reads clean on a re-run (the arm reads only evidence that existed before the landing, so the row reads BREACH until it leaves the 7-day window): only your ruling closes it.',
               '',
               '# Weekly governed-merges audit: a BREACH or an unread week on `main`',
               '',
@@ -1780,11 +1856,15 @@ jobs:
               'clean week and closes nothing, so a `Swept` line past its `next by` deadline means the audit died OR the',
               'week was clean; the Actions run list tells the two apart. Ruling: option 0, recorded on #33717.',
               '',
+              'A refresh rewrites this body and comments here. BREACH rows are carried from run to run until this card is',
+              'closed (delete a ruled row from this body by hand to stop carrying it); NOT MEASURED rows are the latest',
+              "run's only.",
+              '',
               ...(prior
                 ? [`⚠️ The previous audit card #${prior.number} was closed on its own merits and a later week is bad again; its conclusion is in that issue.`, '']
                 : []),
-              findings,
-              '',
+              ...(breachSection ? [breachSection] : []),
+              ...(unreadSection ? [unreadSection, ''] : []),
               'The full sweep JSON is the `governed-merges-audit` artifact of the run above (kept 30 days). Re-read the week by',
               'hand: `node scripts/pm/check-governed-merges.mjs --since 7d --repos objectstack` from a fresh `origin/main`.',
             ].join('\n');
@@ -1792,7 +1872,21 @@ jobs:
             if (existing) {
               // Rewritten in place; ⛔ labels are never rewritten on a refresh.
               await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
-              core.notice(`governed-merges audit: ${process.env.VERDICT} — card #${existing.number} refreshed.`);
+              // A body edit notifies nobody: the refresh is announced as a comment.
+              const fresh = current.filter((b) => !onCard.has(b.key)).map((b) => b.key);
+              const again = current.length - fresh.length;
+              const unreadCount = Number(findings.unreadCount) || 0;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number,
+                body: [
+                  `Weekly governed-merges audit refreshed this card — [run log](${runUrl}) · trigger \`${context.eventName}\` · sweep exit ${process.env.AUDIT_EXIT || '(not recorded)'} · verdict \`${process.env.VERDICT}\`.`,
+                  '',
+                  `- ⛔ BREACH rows new to this card: ${fresh.length > 0 ? fresh.join(', ') : 'none'}.`,
+                  `- BREACH rows read again by this run: ${again}; carried from earlier runs: ${carried.length}. They stay until this card is closed.`,
+                  `- NOT MEASURED readings in this run: ${unreadCount}${unreadCount > 0 ? ' (listed in the body; a clean manual re-run answers them)' : ''}.`,
+                ].join('\n'),
+              });
+              core.notice(`governed-merges audit: ${process.env.VERDICT} — card #${existing.number} refreshed (${fresh.length} new BREACH, ${carried.length} carried).`);
               return;
             }
             const created = await github.rest.issues.create({
