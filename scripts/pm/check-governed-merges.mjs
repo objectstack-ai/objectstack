@@ -8688,11 +8688,13 @@ async function selfTest() {
   // ⛔ #33620: governed paths git would C-quote, read through REAL git with a GIT_*-free environment (gitFreeEnv):
   // a non-ASCII name and a name holding a newline. Without `-z` each path list (--branch, the sweep's
   // commitChanges, the workflow split's ls-tree) spells them `"skills/a/\346\226\207\346\241\243.md"` and
-  // `"skills/a/two\nlines.md"`, which match no governed prefix.
+  // `"skills/a/two\nlines.md"`, which match no governed prefix. `core.quotePath=true` is pinned on the command line:
+  // gitFreeEnv strips GIT_* but not a user or system gitconfig, and `core.quotePath=false` there spells the non-ASCII
+  // names raw, which reds the CONTROL witness below.
   const quotedFx = mkdtempSync(join(tmpdir(), 'governed-merges-quoted-paths-'));
   try {
     const fg = (cwd, ...rest) =>
-      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', '-c', 'core.quotePath=true', ...rest],
         { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(quotedFx, 'repo');
     fg(quotedFx, 'init', '-q', repo);
