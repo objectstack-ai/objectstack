@@ -27,6 +27,7 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
 import { ENGINE_FUNCTION_TYPE, NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { MetadataTypeSchema } from '@objectstack/spec/kernel';
 
 /** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
 const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
@@ -742,6 +743,82 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
       expect([item?.label, item?._packageId], `${type} at ${packageId}`).toEqual([label, packageId]);
     }
     expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * [#34040, ADR-0150 D3, red line 2] The same read for every type the registry
+ * does not read by package. The MetadataService keeps such a type by name alone
+ * (the package registered last), and its copy answers before the registry. A
+ * covered type's copy of another package is replaced by the exact qualifier
+ * after the layers. A type outside the covered set has no exact qualifier, so
+ * step 2 declines that copy and the registry answers X's own item.
+ *
+ * BASE (measured before the fix on the composed artifact rig and here):
+ * `?package=alpha` of a `doc` two packages ship answered beta's body, the
+ * service's copy, in the order that registered beta last.
+ */
+describe('[#34040] the exact read never serves the service\'s copy of another package, for every type the registry does not read by package', () => {
+  /**
+   * The enumeration: every declared metadata type the registry does not read by
+   * package, as the exact qualifier sees it. A new type lands in one of these
+   * lists or this pin goes red.
+   */
+  const NOT_READ_BY_PACKAGE = MetadataTypeSchema.options.filter((type) => !(PACKAGE_SCOPED_READ_TYPES as readonly string[]).includes(type));
+  /** Judged by the exact qualifier after the layers (ADR-0150 D5). */
+  const COVERED = NOT_READ_BY_PACKAGE.filter((type) => (PACKAGE_SCOPED_TYPES as readonly string[]).includes(type));
+  /** Not judged by it: step 2 declines another package's copy. */
+  const OUTSIDE = NOT_READ_BY_PACKAGE.filter((type) => !(PACKAGE_SCOPED_TYPES as readonly string[]).includes(type));
+  /** Of them, the types the registry keeps one package holder of (the security catalog). */
+  const ONE_HOLDER = ['position', 'capability'];
+  /** `object`: one package owns the name, and the registry's read (`getObject`) does not read by package. */
+  const NOT_JUDGED = ['object'];
+
+  it('the enumeration: the types outside the exact qualifier, each one pinned below or named as one-holder or not judged', () => {
+    expect([...COVERED].sort()).toEqual([...UNWIRED_COVERED_TYPES].sort());
+    expect([...OUTSIDE].sort()).toEqual(
+      ['capability', 'datasource', 'doc', 'external_catalog', 'field', 'object', 'object_extension', 'position', 'seed', 'translation', 'view'],
+    );
+  });
+
+  const servedWith = (wrongBody: Record<string, unknown>) => {
+    const metadata = {
+      get: vi.fn(async () => wrongBody),
+      getDiagnosed: vi.fn(async () => ({ data: wrongBody, degraded: false, errors: [] })),
+    };
+    const served = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', metadata]]));
+    return { served, metadata };
+  };
+
+  it.each([...NOT_READ_BY_PACKAGE].filter((type) => !ONE_HOLDER.includes(type) && !NOT_JUDGED.includes(type)))(
+    '%s: `?package=` of each holder serves that holder\'s body, whichever holder\'s copy the service keeps',
+    async (type) => {
+      ship(type, 'shared', A);
+      ship(type, 'shared', B);
+      for (const kept of [A, B]) {
+        const { served, metadata } = servedWith({ name: 'shared', label: `${kept.split('.').pop()} ${type}`, _packageId: kept });
+        for (const [packageId, label] of [[A, `alpha ${type}`], [B, `beta ${type}`]] as const) {
+          const answer = await served.getMetaItem({ type, name: 'shared', packageId });
+          expect(labelOf(answer), `${type} at ${packageId}, the service keeping ${kept}'s`).toBe(label);
+        }
+        expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it.each(OUTSIDE.filter((type) => !NOT_JUDGED.includes(type)))('CONTROL — %s: the service\'s copy is served at its own holder\'s address, and a copy bound to no package at any address', async (type) => {
+    ship(type, 'shared', A);
+    const own = servedWith({ name: 'shared', label: 'service copy', _packageId: A });
+    expect(labelOf(await own.served.getMetaItem({ type, name: 'shared', packageId: A })), `${type} at its holder`).toBe('service copy');
+    const unbound = servedWith({ name: 'shared', label: 'service copy' });
+    for (const packageId of [A, B]) {
+      expect(labelOf(await unbound.served.getMetaItem({ type, name: 'shared', packageId })), `${type} at ${packageId}`).toBe('service copy');
+    }
+  });
+
+  it.each(ONE_HOLDER)('%s keeps one package holder: a second package\'s registration of the name is refused', (type) => {
+    ship(type, 'shared', A);
+    expect(() => ship(type, 'shared', B)).toThrow();
   });
 });
 

@@ -54,7 +54,7 @@ const SPECIMENS = [['dashboard', 'mix_dash'], ['agent', 'mix_agent']] as const;
 
 interface Booted { kernel: ObjectKernel; engine: ObjectQL; root: string }
 
-async function bootArtifactKernel(order: readonly string[]): Promise<Booted> {
+async function bootArtifactKernel(order: readonly string[], body: (id: string) => unknown = bodyOf): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     const root = mkdtempSync(join(tmpdir(), 'os-meta-artifact-holders-'));
     const engine = new ObjectQL();
@@ -63,7 +63,7 @@ async function bootArtifactKernel(order: readonly string[]): Promise<Booted> {
     writeFileSync(artifact, JSON.stringify({
         manifest: { id: 'com.qa.host', name: 'host', version: '0.0.1', type: 'app' },
         objects: [], views: [], apps: [], flows: [], requires: [],
-        packages: order.map(bodyOf),
+        packages: order.map(body),
     }));
     await kernel.use(new MetadataPlugin({ watch: false, artifactWatch: false, artifactSource: { mode: 'local-file', path: artifact }, rootDir: root } as any));
     await kernel.use(new ObjectQLPlugin({ ql: engine }));
@@ -77,11 +77,11 @@ async function bootArtifactKernel(order: readonly string[]): Promise<Booted> {
 const errorCodeOf = (body: any): unknown => (body?.error && typeof body.error === 'object' ? body.error.code : body?.code);
 
 /** One bare door's answer on the runtime dispatcher. */
-async function viaDispatcher(kernel: ObjectKernel, path: string) {
+async function viaDispatcher(kernel: ObjectKernel, path: string, query: Record<string, string> = {}) {
     const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
     (dispatcher as any).timedResolveExecutionContext = async () => ({ ...CALLER });
     try {
-        const out: any = await dispatcher.dispatch('GET', path, {}, {}, { request: new Request(`http://localhost/api/v1${path}`) } as any, '/api/v1');
+        const out: any = await dispatcher.dispatch('GET', path, {}, query, { request: new Request(`http://localhost/api/v1${path}`) } as any, '/api/v1');
         return { status: out.response?.status as number | undefined, body: out.response?.body?.data ?? out.response?.body };
     } catch (e) {
         const thrown = resolveThrownHttpError(e);
@@ -90,7 +90,7 @@ async function viaDispatcher(kernel: ObjectKernel, path: string) {
 }
 
 /** One bare door's answer on `RestServer`, through its registered handler. */
-async function viaRest(booted: Booted, route: string, params: Record<string, string>) {
+async function viaRest(booted: Booted, route: string, params: Record<string, string>, query: Record<string, string> = {}) {
     const noop = () => {};
     const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
     const rest: any = new RestServer(server as any, booted.kernel.getService('protocol') as any, { api: { requireAuth: false } } as any);
@@ -104,7 +104,7 @@ async function viaRest(booted: Booted, route: string, params: Record<string, str
     res.status = (code: number) => { res.statusCode = code; return res; };
     res.json = (out: unknown) => { res.body = out; return res; };
     res.header = () => res; res.setHeader = noop; res.send = () => res; res.end = () => res;
-    await handler({ method: 'GET', path: `/api/v1${route}`, params, headers: {}, query: {} }, res);
+    await handler({ method: 'GET', path: `/api/v1${route}`, params, headers: {}, query }, res);
     return { status: res.statusCode as number, body: res.body?.data ?? res.body };
 }
 
@@ -168,6 +168,83 @@ describe.each([
         for (const [type, name] of SPECIMENS) {
             const again = await viaDispatcher(booted!.kernel, `/meta/${type}/${name}`);
             expect([again.status, errorCodeOf(again.body)], JSON.stringify(again.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        }
+    });
+});
+
+// [#34040, ADR-0150 D3, red line 2] The exact address of a `doc`, on the same
+// composed rig. The artifact door's manager keeps a `doc` by name alone (the
+// body registered last), and the by-name read asked it before the registry, so
+// `GET /meta/doc/NAME?package=X` answered the other body whenever it registered
+// last. Measured on this rig before the fix (origin/main 63db7240): `?package=`
+// of the body registered first answered the last one's doc, on both transports.
+const ALPHA = 'com.qa.alpha';
+const BETA = 'com.qa.beta';
+const docBodyOf = (ids: readonly string[]) => (id: string) => ({
+    manifest: {
+        id, name: id.split('.').pop(), namespace: id.split('.').pop(), version: '1.0.0', type: 'app',
+        docs: ids.includes(id) ? [{ name: 'shared_doc', label: `${id.split('.').pop()} doc`, content: `# ${id.split('.').pop()}` }] : [],
+    },
+});
+
+/** The plain read of one doc at `?package=`, on both transports. */
+async function exactDocDoors(booted: Booted, packageId: string) {
+    const query = { package: packageId };
+    return [
+        { door: `dispatcher doc/shared_doc?package=${packageId}`, ...(await viaDispatcher(booted.kernel, '/meta/doc/shared_doc', query)) },
+        { door: `rest doc/shared_doc?package=${packageId}`, ...(await viaRest(booted, '/meta/:type/:name', { type: 'doc', name: 'shared_doc' }, query)) },
+    ];
+}
+
+describe.each([
+    { order: 'alpha registered first', packages: [ALPHA, BETA] },
+    { order: 'beta registered first', packages: [BETA, ALPHA] },
+])('[#34040] the artifact door: two package bodies ship one doc name, $order', ({ packages }) => {
+    let booted: Booted | undefined;
+
+    beforeAll(async () => {
+        booted = await bootArtifactKernel(packages, docBodyOf([ALPHA, BETA]));
+    }, 120_000);
+
+    afterAll(async () => {
+        if (!booted) return;
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        rmSync(booted.root, { recursive: true, force: true });
+    });
+
+    it('the fixture: the metadata service keeps the doc of the body registered last', async () => {
+        const service = booted!.kernel.getService<MetadataManager>('metadata');
+        expect((await service.get('doc', 'shared_doc') as { _packageId?: unknown } | undefined)?._packageId).toBe(packages[packages.length - 1]);
+    });
+
+    it('`?package=X` answers X\'s own doc on both transports, for each holder, never the other\'s', async () => {
+        for (const [packageId, label, other] of [[ALPHA, 'alpha doc', 'beta'], [BETA, 'beta doc', 'alpha']] as const) {
+            for (const answer of await exactDocDoors(booted!, packageId)) {
+                const item = answer.body?.item ?? answer.body;
+                expect([answer.status, item?.label, item?._packageId, answer.door], JSON.stringify(answer.body)).toEqual([200, label, packageId, answer.door]);
+                expect(JSON.stringify(answer.body ?? null), answer.door).not.toContain(`# ${other}`);
+            }
+        }
+    });
+});
+
+describe('[#34040] CONTROL — one body ships the doc: its exact address answers it, unchanged', () => {
+    let booted: Booted | undefined;
+
+    beforeAll(async () => {
+        booted = await bootArtifactKernel([ALPHA, BETA], docBodyOf([ALPHA]));
+    }, 120_000);
+
+    afterAll(async () => {
+        if (!booted) return;
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        rmSync(booted.root, { recursive: true, force: true });
+    });
+
+    it('`?package=alpha` answers alpha\'s doc on both transports', async () => {
+        for (const answer of await exactDocDoors(booted!, ALPHA)) {
+            const item = answer.body?.item ?? answer.body;
+            expect([answer.status, item?.label, answer.door], JSON.stringify(answer.body)).toEqual([200, 'alpha doc', answer.door]);
         }
     });
 });

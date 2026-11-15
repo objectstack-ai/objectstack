@@ -25,11 +25,12 @@ import {
     packageScopedRefusalMessage,
     type PackageScopedRefusal,
 } from '@objectstack/core';
-import { itemDiscriminator } from '@objectstack/metadata-core';
+import { isPairOf, itemDiscriminator } from '@objectstack/metadata-core';
 import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
 import { storedDraftChanges } from './draft-changes.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { type StoredOverlayRow, resolveItemLock, storedRowDocument } from './item-lock.js';
 import {
     type MetadataDiagnostics,
@@ -367,6 +368,42 @@ export async function servedFromDisabledHolder(
         if (atHolder !== undefined && atHolder !== null && sameStoredItem(atHolder, data)) return true;
     }
     return false;
+}
+
+/**
+ * [ADR-0150 D3, red line 2] Is the MetadataService's answer to a read that
+ * names a package (`?package=X`) another package's item? Asked only where the
+ * exact qualifier admitted no address ({@link admitExactQualifier}: a type
+ * outside the set ADR-0150 addresses by `(package, name)`, a `doc` among
+ * them), so no check below the layers replaces such an answer.
+ *
+ * The service keeps such a type by name alone: the item of the package
+ * registered last. Served at step 2, it answered X's address with that
+ * package's body whenever two packages ship the name, in the order that put
+ * the other package last. Not served, the read falls through to the
+ * registry, whose read naming X answers X's own item first.
+ *
+ * Another package's item is one stamped with a package the registry holds
+ * that is neither X nor a customization pair of X or of which X is the pair.
+ * A copy bound to no package (no stamp, `''`, the `sys_metadata` sentinel), a
+ * copy stamped X, and a stamp the registry does not know are served as before.
+ * ⛔ Not an `object`: one package owns an object name, and the registry's read
+ * of it (`getObject`) does not read by package, so it has no item of X's to
+ * answer in its place.
+ */
+export function serviceCopyOfAnotherPackage(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; packageId?: string },
+    data: unknown,
+): boolean {
+    const packageId = request.packageId;
+    if (!packageId || request.type === 'object') return false;
+    const served = storedItemPackageId(data);
+    if (served === undefined || served === packageId) return false;
+    const registry = host.engine?.registry as { getPackage?(id: string): unknown } | undefined;
+    if (typeof registry?.getPackage !== 'function' || registry.getPackage(served) === undefined) return false;
+    const installed = installedManifestsOfEngine(host.engine);
+    return !isPairOf(served, packageId, installed) && !isPairOf(packageId, served, installed);
 }
 
 /** The same item: one object, or (a loader's fresh copy) the same JSON. */
@@ -1090,9 +1127,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
             // or it is a disabled package's customization
             // ({@link servedFromDisabledHolder}).
+            // [ADR-0150 D3, red line 2] …or, at an address naming a package
+            // the exact qualifier does not judge, it is another package's item
+            // ({@link serviceCopyOfAnotherPackage}): the registry answers it.
             if (fromService.data !== undefined && fromService.data !== null
                 && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
-                    || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
+                    || await servedFromDisabledHolder(host, request.name, fromService.data)))
+                && !(exactAddress === undefined && serviceCopyOfAnotherPackage(host, request, fromService.data))) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
