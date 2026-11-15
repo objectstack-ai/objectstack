@@ -1977,6 +1977,33 @@ export function deliveredCardNumber(pr) {
 }
 
 /**
+ * ③'s SQL push-down check, the one wording both printed shapes carry (the brief's ③ line and the
+ * `--template` legend's ③ entry), read from `references/contract-review.md`'s ③ line and AGENTS.md
+ * Prime Directive 5 (SQL first, ruling record 6888468549). It is face-neutral: an engine or driver PR
+ * that touches no schema or governed path meets it too, so every face's brief and record carry it.
+ */
+export const PUSH_DOWN_CHECK =
+  'a new id materialisation or in-app join where SQL could push down is a finding unless a reason is given'
+  + ' (AGENTS.md, Prime Directive 5: SQL first).';
+
+/**
+ * Where the finding goes on a PR no contract-review face touches: no record is owed there
+ * (`references/contract-review.md`: CI plus the seat's self-read, no second agent), so the seat's own
+ * ACCEPT comment on the PR is the only carrier the check has.
+ */
+export const FACELESS_FINDING_CARRIER = "the seat's ACCEPT comment on the PR";
+
+const TEMPLATE_PUSH_DOWN_LINES = Object.freeze([
+  '                    a new id materialisation or in-app join where SQL could push down is a',
+  '                    finding unless a reason is given (AGENTS.md, Prime Directive 5: SQL first).',
+]);
+
+const BRIEF_PUSH_DOWN_LINES = Object.freeze([
+  '     On every face, SQL push-down: a new id materialisation or in-app join where SQL could push down is a',
+  '     finding unless a reason is given (AGENTS.md, Prime Directive 5: SQL first).',
+]);
+
+/**
  * What `--template` prints: the record, fenced, with the calibration around it.
  *
  * ⭐ The notes live OUTSIDE the fence and carry no key-initial line, so nothing
@@ -2034,6 +2061,11 @@ export function contractReviewTemplateLines(values = {}) {
     '                    named there; Tier H approval and the queue guard stay whole-PR. On the narrowing',
     '                    face the floor is every path of the diff outside the prose faces: no path is a remainder,',
     '                    and `+` names every file those hunks make a claim about, read in the cited code.',
+    '  · ③ Boundary flags  every dev flag and every `open_questions` entry answered, or escalated; and on',
+    '                    every face the SQL push-down check:',
+    ...TEMPLATE_PUSH_DOWN_LINES,
+    '                    A PR no face touches has no record: the seat\'s self-read runs the same check,',
+    `                    and the finding goes in ${FACELESS_FINDING_CARRIER}.`,
     '  · ④ Design judgment  on the schema, rules and narrowing faces — the published spec, and the governed register,',
     '                    which holds the skills and ADR surfaces the full-review order names among its rows, and a',
     '                    declared narrowing; the declaration face alone carries no ④. For each `hits` file: does the',
@@ -2257,6 +2289,7 @@ export function contractReviewBriefLines(values = {}) {
     '  ① Derived judgments — every accept-set and public-surface change the diff implies, each named right or wrong.',
     '  ② Semver level — the changeset (or `skip-changeset`) matches what the diff publishes, and the `Clause-②:` line.',
     '  ③ Boundary flags — every dev flag and every `open_questions` entry answered, or escalated.',
+    ...BRIEF_PUSH_DOWN_LINES,
     ...(designJudgment && face?.id === 'narrowing' ? [
       '  ④ Design judgment — the narrowing itself, read against the published spec on `main`: does it take a',
       "     declared capability away at the consumer, or make the spec's own refusal real? A capability declared",
@@ -2425,12 +2458,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head': 14,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 30,
+  // Raised 30 → 32 with ③'s SQL push-down check in the legend on every face, and its faceless-PR carrier: two pins.
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 32,
   // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
   // posted by an untrusted author not read — two pins, two cases.
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 19,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
-  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 23,
+  // Raised 23 → 24 with ③'s SQL push-down check on every face's brief: one pin.
+  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 24,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 22,
@@ -3259,6 +3294,11 @@ export async function selfTest() {
   // quietly print something else. ⛔ Not derived from the constant: a pin
   // written from the thing it pins asserts nothing.
   t('⭐ the printed placeholder is EXACTLY the branch form, assembled or not', says(TPL_RECORD, 'Implemented-by: `claude/issue-NNNN-slug`') && RECORD_TEMPLATE_PLACEHOLDERS.implementedBy === 'claude/issue-NNNN-slug');
+  // -- ③'s SQL push-down check: face-neutral, so every face's legend carries it in the ONE wording --
+  const unwrapped = (text) => text.replace(/\s+/g, ' ');
+  const EVERY_FACE = [{}, ...REVIEW_FACES.map((f) => ({ face: f.id }))];
+  t('⭐ the ③ legend carries the SQL push-down check on EVERY face, declaration included, in the one wording', EVERY_FACE.length === REVIEW_FACES.length + 1 && EVERY_FACE.every((v) => { const text = unwrapped(contractReviewTemplateLines(v).join('\n')); return says(text, '· ③ Boundary flags') && says(text, PUSH_DOWN_CHECK) && text.indexOf('· ③ Boundary flags') < text.indexOf(PUSH_DOWN_CHECK) && text.indexOf(PUSH_DOWN_CHECK) < text.indexOf('· ④ Design judgment'); }));
+  t('…and names where the finding goes on a PR no face touches: the seat\'s self-read, in its ACCEPT comment on the PR', says(unwrapped(TPL_TEXT), "A PR no face touches has no record: the seat's self-read runs the same check, and the finding goes in the seat's ACCEPT comment on the PR.") && FACELESS_FINDING_CARRIER === "the seat's ACCEPT comment on the PR");
   // The CLI: `--template` prints exactly these lines, from a bare terminal.
   const cli = (args) => spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], { encoding: 'utf8', timeout: 60_000 });
   const printed = cli(['--template']);
@@ -3302,6 +3342,7 @@ export async function selfTest() {
   t('⭐ the brief tells a card thread to post the filled brief beside the record, for the seat to read before adopting', says(BRIEF_TEXT, 'posts the filled brief beside the record') && !says(BRIEF_BODY, 'posts the filled brief'));
   t('…and the `hits` faces keep the per-file ④ shape, never the narrowing\'s', ['schema', 'rules'].every((id) => { const b = contractReviewBriefLines({ face: id }).join('\n'); return says(b, 'for EVERY `hits` file') && !says(b, 'the narrowing itself'); }) && !says(BRIEF_BODY, 'the narrowing itself'));
   t('⛔ nor the declaration brief, below tier', !contractReviewBriefLines({ face: 'declaration' }).join('\n').includes('④'));
+  t('⭐ ③ carries the SQL push-down check in EVERY face\'s brief, declaration included, inside the copyable region and in the one wording', [{}, ...REVIEW_FACES.map((f) => ({ face: f.id }))].every((v) => { const b = contractReviewBriefLines(v).join('\n'); const body = b.slice(b.indexOf(BRIEF_TEMPLATE_FENCE_START), b.indexOf(BRIEF_TEMPLATE_FENCE_END)).replace(/\s+/g, ' '); return body.includes(`③ Boundary flags — every dev flag and every \`open_questions\` entry answered, or escalated. On every face, SQL push-down: ${PUSH_DOWN_CHECK}`); }));
   t('⛔ the ④ text keeps the brief free of angle brackets, model identifiers and digit-shaped card numbers', !BRIEF_TEXT.includes('<') && !BRIEF_TEXT.includes('>') && !isModelIdentifierToken(BRIEF_TEXT) && !/#\d/.test(BRIEF_BODY));
 
   // -- #18701: ONE thread set -- what the template STATES, the guard READS -----

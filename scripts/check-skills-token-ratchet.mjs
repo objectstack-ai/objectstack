@@ -1097,7 +1097,13 @@ export const CEILINGS = new Map([
   // file restates another). Maintainer ruling 2026-10-27 on the decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-query/rules/filters.md', 2482],
+  // 2482 -> 2473: re-locked AT the measurement after the no-value ordering
+  // rule (a null or absent column fails `$gt` / `$gte` / `$lt` / `$lte` /
+  // `$between`) was paid in-file by two restatements: the case-sensitivity
+  // paragraph (home: SKILL.md, String Operators) and a second `$between` Date
+  // example (home: the operator table's `$between` row). Arithmetic in bytes:
+  // 9925 -> 9892 (-33 net) -> ceil(9892 / 4) = 2473; headroom 0 tokens.
+  ['skills/objectstack-query/rules/filters.md', 2473],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
