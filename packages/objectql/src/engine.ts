@@ -51,6 +51,7 @@ import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext }
 // [#25522 cut 2] The datasource-routing bodies; the methods of the same names
 // below hand each body the members it reads (`DatasourceRoutingHost`).
 import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
+import { relationSemiJoinServes } from './relation-semi-join.js';
 // [#25522 cut 3] The lifecycle health bodies; the methods of the same names
 // below hand each body the members it reads (`LifecycleHealthHost`).
 import { checkDriversHealth, resolvePrimaryDatasource } from './engine-lifecycle-health.js';
@@ -1543,9 +1544,10 @@ export class ObjectQL implements IObjectQLEngine {
     operation: 'find' | 'findOne' | 'count' | 'aggregate',
     ast: A,
     context: ExecutionContext | undefined,
+    driverOptions?: unknown,
   ): Promise<A> {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    return (SecurityResolversFacet.composeReadableIdsAtBoundary<A>).call(securityResolversHost.of(this), object, operation, ast, context);
+    return (SecurityResolversFacet.composeReadableIdsAtBoundary<A>).call(securityResolversHost.of(this), object, operation, ast, context, driverOptions);
   }
 
   private async composeReadableIdsChain<N>(
@@ -4262,7 +4264,11 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return readRegistry(); },
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
-      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
+      relationSemiJoinServes: (o, t) => relationSemiJoinServes.call({
+        uncomposableReadableIdsParent: (x, y) => this.uncomposableReadableIdsParent(x, y),
+        hasHooksFor: (e, x) => this.hasHooksFor(e, x),
+        getDriver: (x) => this.getDriver(x),
+      }, o, t),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
   }

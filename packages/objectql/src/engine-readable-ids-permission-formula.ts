@@ -64,7 +64,7 @@
  * stays on the class, the contract, and its function keeps the placeholder.
  */
 
-import { plannedRelationScopeOf } from './relation-semi-join.js';
+import { isPlannedRelationLeaf, plannedRelationLeafVerdict } from './relation-semi-join.js';
 import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -168,7 +168,7 @@ export async function composeReadableIdsChain<N>(
   // already run through its whole pipeline as the caller, so the security
   // service is not asked about a parent only such leaves name.
   const askedParents = new Set(
-    sites.filter((s) => plannedRelationScopeOf(s.leaf) === undefined).map((s) => s.leaf.object),
+    sites.filter((s) => !isPlannedRelationLeaf(s.leaf)).map((s) => s.leaf.object),
   );
   for (const parent of parents) {
     if (!askedParents.has(parent)) continue;
@@ -209,11 +209,21 @@ export async function composeReadableIdsChain<N>(
       ? answer
       : { scope: await this.composeReadableIdsChain(chain, answer.scope, nested, [...ancestors, parent]) });
   }
+  // [relation semi-join] A planned leaf whose read's driver options are not
+  // the related read's own is answered by the id read, as the caller, under
+  // the cap — read here, once per leaf, before the synchronous rewrite.
+  const readIdsFor = new Map<object, unknown[]>();
+  for (const s of sites) {
+    const verdict = plannedRelationLeafVerdict(s.leaf, chain.driverOptions);
+    if (verdict?.kind === 'read' && !readIdsFor.has(s.leaf)) readIdsFor.set(s.leaf, [...await verdict.readIds()]);
+  }
   // A parent with no answer (`null`, or never asked: not registered) is
   // `$in: []`.
   return composeReadableIdsLeaves(node, (leaf) => {
-    const planned = plannedRelationScopeOf(leaf);
-    if (planned !== undefined) return planned ? ReadableIds.compose(leaf, planned.scope) : [];
+    const ids = readIdsFor.get(leaf);
+    if (ids !== undefined) return ids;
+    const planned = plannedRelationLeafVerdict(leaf, chain.driverOptions);
+    if (planned !== undefined) return planned.kind === 'compose' ? ReadableIds.compose(leaf, planned.scope) : [];
     const answer = chain.answers.get(leaf.object);
     return answer ? ReadableIds.compose(leaf, answer.scope) : [];
   });

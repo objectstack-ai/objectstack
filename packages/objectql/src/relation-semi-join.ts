@@ -24,32 +24,52 @@
  * That captured `where` becomes the scope of a `ReadableIds` leaf over the
  * related object, which the outer read carries as the relation field's `$in`
  * comparand. The engine's executor boundary composes it with THAT scope
- * ({@link plannedRelationScopeOf}), never by asking the security service a
- * second, narrower question — so a related record is in the subquery exactly
- * when a direct read of the related object with this condition would return
- * it. The tenant wall is the driver's own, applied to the related table with
- * the outer read's options (ADR-0139 D3).
+ * ({@link plannedRelationLeafVerdict}), never by asking the security service
+ * a second, narrower question. The driver applies its tenant wall to the
+ * related table with the OUTER read's options (ADR-0139 D3), so the leaf is
+ * composed only when those options are the related read's own; with that,
+ * a related record is in the subquery exactly when the id read would have
+ * returned it.
+ *
+ * ## Taken only where it is provably the same read as the id read
+ *
+ * Every other case reads the related ids as the caller and matches the field
+ * with `$in`, under the cap — the id read the engine has always run, unchanged
+ * ({@link relationSemiJoinServes}, then the planned read's own outcome, then
+ * the executor boundary's comparison):
+ *
+ * - **Before planning** — the related object has a restriction no planned
+ *   `where` can carry, or the read's driver compiles no subquery: an
+ *   object-scoped middleware or an `afterFind` hook on the related object
+ *   (both act after its driver call), another datasource than the read's
+ *   object, or a driver outside {@link SEMI_JOIN_COMPILING_DRIVERS}.
+ * - **After planning** — the related read did not end at exactly one driver
+ *   call with nothing changing its answer afterwards (a middleware answered
+ *   without the driver, or replaced or filled the answer).
+ * - **At the executor boundary** — the outer read's driver options differ
+ *   from the ones the related read's own driver call was given
+ *   ({@link sameReadDriverOptions}): the subquery is compiled with the outer
+ *   read's options, so only identical options make it the related read's own
+ *   statement. The ids are then read there, as the caller, under the cap.
  *
  * ## What the semi-join means at its edges
  *
  * - **No related record matches** (or none the caller can read): the
  *   subquery is empty, `IN` is FALSE, the row is not selected.
  * - **An empty relation** (`NULL`) is never `IN` any subquery: the row is not
- *   selected, whatever the condition's operator, `$ne` included.
- * - **The related read stopped before its driver call** (a middleware that
- *   answered without asking the driver): nothing was planned, and the leaf is
- *   answered `$in: []` — FALSE, fail-closed, ⛔ never "no restriction".
- * - **The related object lives on another datasource** than the read's
- *   object: refused by name before anything runs — no driver evaluates a
- *   subquery across two datasources.
+ *   selected, whatever the condition's operator, `$ne` included — exactly as
+ *   `IN` over the id list.
+ * - **The planned scope is the deny sentinel**: `$in: []`, as the id read
+ *   over it answers.
  *
  * ## Who evaluates the leaf
  *
- * The composed leaf is ADR-0139's: `driver-sql` (every dialect) and Turso
- * compile it into a nested subquery; `driver-memory` evaluates it in
- * process; a driver that compiles no such leaf (`driver-mongodb`,
- * `driver-odata`) refuses it with its ADR-0139 D3 refusal. There is no
- * staged id-read fallback for those drivers.
+ * The composed leaf is ADR-0139's: `driver-sql` (every dialect, Turso and
+ * the WASM SQLite face included) compiles it into a nested subquery;
+ * `driver-memory` evaluates it in process. Every other driver keeps the id
+ * read: no capability bit says which drivers compile the leaf yet, so the
+ * engine names the ones it knows do, and an unnamed driver is never handed
+ * one by this lowering.
  *
  * ## Forgery
  *
@@ -64,60 +84,151 @@ import { ReadableIds, RLS_DENY_FILTER, type FilterCondition } from '@objectstack
 
 /**
  * The key of the internal read option that turns a `find` into a PLAN: when
- * `options[RELATION_SCOPE_PLAN]` holds a function, `find` calls it with the
- * final driver `where` in place of the driver call and answers `[]`.
+ * `options[RELATION_SCOPE_PLAN]` holds a {@link RelationScopePlan}, `find`
+ * hands it the final driver `where` and driver options in place of the
+ * driver call and answers the plan's own empty `rows`.
  * A symbol, so no wire request, JSON body or spread author input can carry
  * it; never exported from the package.
  */
 export const RELATION_SCOPE_PLAN: unique symbol = Symbol('objectql.relationScopePlan');
 
-/** The sink a planned read hands its final driver `where` to. */
-export type RelationScopePlanSink = (where: FilterCondition | undefined) => void;
+/** What a planned read is handed: where to put its driver call, and what to answer. */
+export interface RelationScopePlan {
+  /** Called at the driver call with exactly what the driver would have been handed. */
+  capture(where: FilterCondition | undefined, driverOptions: unknown): void;
+  /** The answer the planned read gives in place of the driver's: empty, and only this plan's. */
+  readonly rows: unknown[];
+}
+
+/** The driver names whose drivers compile (or, in process, evaluate) a composed `ReadableIds` leaf. */
+export const SEMI_JOIN_COMPILING_DRIVERS: ReadonlySet<string> = new Set([
+  'com.objectstack.driver.sql',
+  'com.objectstack.driver.turso',
+  'com.objectstack.driver.sqlite-wasm',
+  'com.objectstack.driver.memory',
+]);
+
+/** What {@link relationSemiJoinServes} reads off the engine. */
+export interface RelationSemiJoinServesHost {
+  uncomposableReadableIdsParent(object: string, parent: string): unknown;
+  hasHooksFor(event: string, object: string): boolean;
+  getDriver(object: string): { readonly name?: unknown } | undefined;
+}
+
+/**
+ * Whether a read of `object` may PLAN its relation condition on `target` as a
+ * semi-join at all. `false` keeps the id read. Registry facts only — nothing
+ * is read and the caller's context is not consulted:
+ *
+ * - `target` is in neither of ADR-0139 D5's remaining classes for `object`
+ *   (an object-scoped read middleware narrows its rows after its driver call;
+ *   it is bound to another datasource than `object`);
+ * - no `afterFind` hook is registered for `target` (a hook may filter the
+ *   rows the id read returns, after its driver call);
+ * - `object`'s driver compiles the composed leaf ({@link SEMI_JOIN_COMPILING_DRIVERS}).
+ */
+export function relationSemiJoinServes(this: RelationSemiJoinServesHost, object: string, target: string): boolean {
+  if (this.uncomposableReadableIdsParent(object, target) !== undefined) return false;
+  if (this.hasHooksFor('afterFind', target)) return false;
+  const name = this.getDriver(object)?.name;
+  return typeof name === 'string' && SEMI_JOIN_COMPILING_DRIVERS.has(name);
+}
 
 /** What a planned related read answered for one leaf. */
 interface PlannedRelationScope {
-  /** `true` once the related read reached its driver call. */
-  readonly planned: boolean;
-  /** The captured `where` (meaningful only when {@link planned}). */
+  /** The captured driver `where`. */
   readonly where: FilterCondition | undefined;
+  /** The captured driver options of the related read's own driver call. */
+  readonly driverOptions: unknown;
+  /** The id read, as the caller, under the cap — for an outer read whose options differ. */
+  readonly readIds: () => Promise<unknown[]>;
 }
 
 const plannedScopes = new WeakMap<object, PlannedRelationScope>();
 
 /**
- * Build the `ReadableIds` leaf over `target` whose scope is the planned
- * related read's `where`. `plan(sink)` runs that read, handing `sink` to it as
- * the {@link RELATION_SCOPE_PLAN} option; a refusal from it propagates.
+ * Plan the related read and build the `ReadableIds` leaf over `target` whose
+ * scope is its final driver `where`. `plan(p)` runs that read, handing `p` to
+ * it as the {@link RELATION_SCOPE_PLAN} option; a refusal from it propagates,
+ * as the id read's would. `readIds` is the id read itself.
+ *
+ * Answers `null` — read the ids instead — unless the read ended at exactly one
+ * driver call and its answer came back untouched: the plan's own `rows`
+ * object, still empty. A middleware that answered without the driver, or
+ * that replaced or filled the answer after it, is a read the planned `where`
+ * does not describe.
  */
 export async function planRelationSemiJoinLeaf(
   target: string,
-  plan: (sink: RelationScopePlanSink) => Promise<unknown>,
-): Promise<ReturnType<typeof ReadableIds.of>> {
-  let planned = false;
-  let where: FilterCondition | undefined;
-  await plan((final) => {
-    planned = true;
-    where = final;
-  });
+  plan: (p: RelationScopePlan) => Promise<unknown>,
+  readIds: () => Promise<unknown[]>,
+): Promise<ReturnType<typeof ReadableIds.of> | null> {
+  const captured: Array<{ where: FilterCondition | undefined; driverOptions: unknown }> = [];
+  const rows: unknown[] = [];
+  const answer = await plan({ rows, capture: (where, driverOptions) => { captured.push({ where, driverOptions }); } });
+  if (captured.length !== 1 || answer !== rows || rows.length !== 0) return null;
   const leaf = ReadableIds.of(target);
-  plannedScopes.set(leaf, { planned, where });
+  plannedScopes.set(leaf, { ...captured[0], readIds });
   return leaf;
 }
 
+/** Whether this module built `leaf` (a planned relation semi-join leaf). */
+export function isPlannedRelationLeaf(leaf: unknown): boolean {
+  return leaf !== null && typeof leaf === 'object' && plannedScopes.has(leaf);
+}
+
 /**
- * The scope the executor boundary composes `leaf` with when this module built
- * it: `{ scope }` (possibly `undefined`, no restriction beyond the tenant
- * wall — never the case for a non-empty condition), or `null` for `$in: []`
- * (nothing was planned, or the planned read was the deny sentinel).
- * `undefined` when this module did not build `leaf`: an ordinary ADR-0139
- * leaf, composed through the security service.
+ * Driver option keys that never change which rows a read returns: they are
+ * not compared. Every other key — the tenant scope, the transaction, the
+ * timezone, and any key added later — must be equal.
  */
-export function plannedRelationScopeOf(
-  leaf: unknown,
-): { readonly scope: FilterCondition | undefined } | null | undefined {
+const ROW_NEUTRAL_DRIVER_OPTIONS: ReadonlySet<string> = new Set(['bypassTenantAudit', 'traceContext', 'timeoutMs', 'skipCache']);
+
+const isBlank = (v: unknown): boolean => v === undefined || v === null || v === '';
+
+/**
+ * Whether the outer read's driver options are the related read's own, for
+ * every key that can change the rows a read returns — then the subquery the
+ * driver compiles with the outer options is the related read's own statement.
+ * Arrays compare element-wise; everything else by identity.
+ */
+export function sameReadDriverOptions(outer: unknown, related: unknown): boolean {
+  const a = (outer !== null && typeof outer === 'object' ? outer : {}) as Record<string, unknown>;
+  const b = (related !== null && typeof related === 'object' ? related : {}) as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (ROW_NEUTRAL_DRIVER_OPTIONS.has(key)) continue;
+    const x = a[key];
+    const y = b[key];
+    if (isBlank(x) && isBlank(y)) continue;
+    if (Array.isArray(x) && Array.isArray(y)) {
+      if (x.length !== y.length || x.some((v, i) => v !== y[i])) return false;
+      continue;
+    }
+    if (x !== y) return false;
+  }
+  return true;
+}
+
+/** How the executor boundary answers a planned leaf. */
+export type PlannedRelationLeafVerdict =
+  | { readonly kind: 'compose'; readonly scope: FilterCondition | undefined }
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'read'; readonly readIds: () => Promise<unknown[]> };
+
+/**
+ * The executor boundary's answer for `leaf` in a read whose driver is handed
+ * `outerDriverOptions`: `compose` with the planned scope when the options are
+ * the related read's own; `empty` (`$in: []`) when the planned scope is the
+ * deny sentinel, whatever the options (an empty set stays empty); otherwise
+ * `read` — the ids, read as the caller under the cap. `undefined` when this
+ * module did not build `leaf`: an ordinary ADR-0139 leaf, composed through the
+ * security service.
+ */
+export function plannedRelationLeafVerdict(leaf: unknown, outerDriverOptions: unknown): PlannedRelationLeafVerdict | undefined {
   if (leaf === null || typeof leaf !== 'object') return undefined;
   const entry = plannedScopes.get(leaf);
   if (entry === undefined) return undefined;
-  if (!entry.planned || entry.where === (RLS_DENY_FILTER as unknown)) return null;
-  return { scope: entry.where };
+  if (entry.where === (RLS_DENY_FILTER as unknown)) return { kind: 'empty' };
+  if (!sameReadDriverOptions(outerDriverOptions, entry.driverOptions)) return { kind: 'read', readIds: entry.readIds };
+  return { kind: 'compose', scope: entry.where };
 }

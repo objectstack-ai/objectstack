@@ -1289,7 +1289,11 @@ export class DeleteAndAggregateFacet {
         // [ADR-0139 D2] The executor boundary, once for BOTH driver paths below
         // (they are exclusive, and the rows path keeps this `where` by
         // reference): the AST is final once the chain has run.
-        const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context);
+        // One driver-options bag for the boundary and whichever driver call
+        // below runs: a planned relation leaf is composed only when these
+        // are the related read's own (`relation-semi-join.ts`).
+        const aggregateOptions = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
+        const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context, aggregateOptions);
 
         // Prefer driver.aggregate() when available — driver.find() in many
         // drivers (e.g. driver-sql) does not honor `groupBy` / `aggregations`
@@ -1345,7 +1349,7 @@ export class DeleteAndAggregateFacet {
             // natively today; one that grows native support must advertise a
             // capability flag, at which point this post-filter becomes the
             // fallback tier — the dateGranularity two-tier pattern.
-            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
+            const aggregated = await drv.aggregate(object, ast, aggregateOptions);
             return applyHaving(aggregated, ast.having, havingColumnClasses);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
@@ -1389,7 +1393,7 @@ export class DeleteAndAggregateFacet {
         delete rowsAst.groupBy;
         delete rowsAst.aggregations;
         delete rowsAst.having;
-        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
+        const raw = await driver.find(object, rowsAst, aggregateOptions);
         return applyHaving(applyInMemoryAggregation(raw, ast, tz, declaredFields), ast.having, havingColumnClasses);
       });
 
