@@ -57,13 +57,13 @@ import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './rec
 import type { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-door.js';
 import {
   DEFAULT_EXTENDER_PRIORITY, DEFAULT_OVERLAY_PRIORITY, DEFAULT_OWNER_PRIORITY, NO_PACKAGE_REFERRER,
-  OBJECT_FOLD_SCALAR_KEYS, QUEUE_FIELD, admittedFieldPatches, applySystemFields, changedPackagedRuleKeys, computeFQN,
+  OBJECT_FOLD_SCALAR_KEYS, QUEUE_FIELD, admittedFieldPatches, changedPackagedRuleKeys, computeFQN,
   displayKeyOverridesPackagedBase, fieldNamesOf, fieldPatchYieldKey, indexKeysOf, isLeftOutExtension,
-  isPackagelessActionSlotKey, isPlainRecord, leavesExtensionsOut, mergeObjectDefinitions, mergeValidationsByName,
-  optionByValue, ownFieldNamesOf, ownFieldsTarget, parseOverlaySlotKey, parsePackageObjectActions, picklistReferrerOf,
-  provisionTenantScopeIndex, reconcileManagedApiMethods, recordFieldOf, ruleNamesOf, sortActionsByOrder,
-  stableStringify, storedRowPackageOf, tenantRuleSettingsOf, validationRuleName, warnFunctionalCompleteness,
-  warnStrippedLegacyApiMethods, withTenantRuleSettings, withoutWithheldMembers,
+  isPackagelessActionSlotKey, isPlainRecord, leavesExtensionsOut, mergeValidationsByName, optionByValue,
+  ownFieldNamesOf, ownFieldsTarget, parseOverlaySlotKey, parsePackageObjectActions, picklistReferrerOf,
+  reconcileManagedApiMethods, recordFieldOf, ruleNamesOf, sortActionsByOrder, stableStringify, storedRowPackageOf,
+  tenantRuleSettingsOf, validationRuleName, warnFunctionalCompleteness, warnStrippedLegacyApiMethods,
+  withTenantRuleSettings, withoutWithheldMembers,
 } from './registry-top-level.js';
 import type {
   BundleEntry, FoldedExtensionFields, FollowDoorLayer, ObjectContributor, ObjectExtensionBody,
@@ -71,8 +71,8 @@ import type {
   UnboundActionTarget, WithheldExtensions,
 } from './registry-top-level.js';
 import {
-  ObjectOwnershipConflictError, ValidationRuleCopyRefusedError, extendContributionRefusal, objectFieldTypeRefusal,
-  objectQueueColumnRefusal,
+  ObjectOwnershipConflictError, ValidationRuleCopyRefusedError, applySystemFields, extendContributionRefusal,
+  mergeObjectDefinitions, objectFieldTypeRefusal, objectQueueColumnRefusal, provisionTenantScopeIndex,
 } from './registry.js';
 import type { SchemaRegistry } from './registry.js';
 

@@ -42,12 +42,12 @@ import { artifactPackageId, declaredDependencyIds } from '@objectstack/core';
 import { isNamespaceJudged, namespaceNameConflicts, namespacePackageOf } from './namespace-co-owner-names.js';
 import type { NamespacePackage } from './namespace-co-owner-names.js';
 import {
-  computeFQN, declaredOwnedObjectNames, isShareableNamespace, toRecordManifest, withDeclaredFunctionEntries,
+  computeFQN, declaredOwnedObjectNames, toRecordManifest, withDeclaredFunctionEntries,
 } from './registry-top-level.js';
 import type { ArtifactInstallScope, CoOwnershipSource } from './registry-top-level.js';
 import {
   ArtifactObjectNameConflictError, NamespaceAddressLiteralError, NamespaceConflictError, NamespaceNameConflictError,
-  NamespaceObjectNameConflictError,
+  NamespaceObjectNameConflictError, isShareableNamespace,
 } from './registry.js';
 import type { SchemaRegistry } from './registry.js';
 

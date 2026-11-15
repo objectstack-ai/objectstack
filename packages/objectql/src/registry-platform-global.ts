@@ -43,11 +43,9 @@
 import { isInjectedColumnDefinition, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { TENANT_SCOPE_FIELD_DEF, isCodeArtifactBody } from '@objectstack/metadata-core';
-import {
-  DEFAULT_EXTENDER_PRIORITY, TENANT_SCOPE_INDEX, provisionTenantScopeIndex, stableStringify, withoutField,
-} from './registry-top-level.js';
+import { DEFAULT_EXTENDER_PRIORITY, stableStringify, withoutField } from './registry-top-level.js';
 import type { ObjectContributor, ObjectExtensionFoldOptions } from './registry-top-level.js';
-import { extendContributionRefusal } from './registry.js';
+import { TENANT_SCOPE_INDEX, extendContributionRefusal, provisionTenantScopeIndex } from './registry.js';
 import type { SchemaRegistry } from './registry.js';
 
 /**

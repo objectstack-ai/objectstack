@@ -38,9 +38,9 @@ import { ITEM_KEY_DISCRIMINATORS } from '@objectstack/metadata-core';
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
 import { BARE_NAME_ONE_HOLDER_TYPES, BUILT_IN_BARE_NAMES, bareNameHolderKey, bareNameHoldersMeet, declaredBareNames, declaredBuiltInBoundActions, declaredBundleMembers, handlerOwnerPackageId, holdsBareName, isBareNameRegistryType, isBundleAdditionPair, isOverridableBaseline, suggestedBareNameRename } from './bare-name-one-holder.js';
 import type { BareNameHolder, BareNameOneHolderType, BundleHolding } from './bare-name-one-holder.js';
-import { bundleBaseKey, isShareableNamespace } from './registry-top-level.js';
+import { bundleBaseKey } from './registry-top-level.js';
 import type { BareNameConflict, BundleArrival } from './registry-top-level.js';
-import { BareNameConflictError } from './registry.js';
+import { BareNameConflictError, isShareableNamespace } from './registry.js';
 import type { SchemaRegistry } from './registry.js';
 
 /**

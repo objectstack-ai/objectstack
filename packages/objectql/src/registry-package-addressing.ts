@@ -6,10 +6,10 @@
  * `ownersHoldingAName`, `compositeHoldersOf`, `packageScopedHoldersOf`,
  * `bundleMembersHeldBy`, `gateSlotBinding`, `getPackageScopedItem`,
  * `getEnvironmentScopedItem`, `getEnvironmentScopedActions`, `readsByPackage`,
- * `bareSlotEntriesOf`, `rankedForPackage`, `removePackageOverlaySlots`,
- * `orderedOverlayTier`, `getArtifactItem`, `removeRuntimeShadow`,
- * `removeOverlayEntry`, `listItems`, `isPackageDisabled`,
- * `isObjectPackageDisabled`, `isFlowOfDisabledPackage`,
+ * `readBareDoc`, `bareSlotEntriesOf`, `rankedForPackage`,
+ * `removePackageOverlaySlots`, `orderedOverlayTier`, `getArtifactItem`,
+ * `removeRuntimeShadow`, `removeOverlayEntry`, `listItems`,
+ * `isPackageDisabled`, `isObjectPackageDisabled`, `isFlowOfDisabledPackage`,
  * `isActionWithheldByDisabledPackage`, `hasDisabledPackage`,
  * `getRegisteredTypes` moved out of `registry.ts` whole by
  * `scripts/codemod-split-registry.mjs`.
@@ -41,7 +41,10 @@
 
 import { ITEM_KEY_DISCRIMINATORS, readDiscriminatorValue as discriminatorValue, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import { customizationBasePackageId } from '@objectstack/spec/kernel';
+import { PackageScopedNameRefusedError, packageScopedRefusalMessage } from '@objectstack/core';
+import type { PackageScopedResolvableType } from '@objectstack/core';
 import { isPackageScopedReadType } from './package-scoped-read.js';
+import type { PackageScopedRefusal } from './package-scoped-resolver.js';
 import {
   OVERLAY_SLOT_MARK, bundleBaseKey, collectBundle, entriesOfMember, overlaySlotEntriesOf,
   packagelessActionSlotEntriesOf, parseOverlaySlotKey, pickBundleMember, storedRowPackageOf,
@@ -65,8 +68,10 @@ export interface PackageAddressingHost {
   compositeHoldersOf: SchemaRegistry['compositeHoldersOf'];
   gateSlotBinding: SchemaRegistry['gateSlotBinding'];
   getAllObjects: SchemaRegistry['getAllObjects'];
+  getItem: SchemaRegistry['getItem'];
   getObjectOwner: SchemaRegistry['getObjectOwner'];
   getPackage: SchemaRegistry['getPackage'];
+  getPackageScopedItem: SchemaRegistry['getPackageScopedItem'];
   hasDisabledPackage: SchemaRegistry['hasDisabledPackage'];
   invalidateAll: SchemaRegistry['invalidateAll'];
   isBundleAddition: SchemaRegistry['isBundleAddition'];
@@ -79,6 +84,7 @@ export interface PackageAddressingHost {
   readonly objectContributors: SchemaRegistry['objectContributors'];
   overlaySlotBinding: SchemaRegistry['overlaySlotBinding'];
   ownersHoldingAName: SchemaRegistry['ownersHoldingAName'];
+  packageScopedHoldersOf: SchemaRegistry['packageScopedHoldersOf'];
   packagelessActionEntryToRetire: SchemaRegistry['packagelessActionEntryToRetire'];
   pairRowBinding: SchemaRegistry['pairRowBinding'];
   rankedForPackage: SchemaRegistry['rankedForPackage'];
@@ -426,6 +432,49 @@ export class PackageAddressingFacet {
   /** The body of `SchemaRegistry#readsByPackage`; the method's docblock there is its contract. */
   static readsByPackage(type: string): boolean {
     return isPackageScopedReadType(type);
+  }
+
+  /**
+   * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The by-name read of a
+   * `doc` that names no package. `doc` keeps its literal global name and its
+   * addressing (bucket 1); what changes is the context-free read's answer
+   * when two or more ENABLED packages hold the name: a `409
+   * RESOURCE_CONFLICT` naming every holder (`ambiguous-in-environment`), in
+   * place of {@link getItem}'s first composite, which is a registration-order
+   * pick (ADR-0146 D8; the bare save, delete, publish and layered read refuse
+   * the same address already).
+   *
+   * Unchanged: one holder; a package-less bare-slot entry (the environment's
+   * own item) answers first, as {@link getItem} serves it; a disabled package
+   * holds no name ({@link packageScopedHoldersOf}), so beside one enabled
+   * holder the read serves that holder's item, never the disabled one's.
+   * `MetadataFacade.get` serves this answer; the protocol's by-name read asks
+   * it before any layer for its refusal only (`protocol-meta-item-reads.ts`).
+   *
+   * @throws {PackageScopedNameRefusedError} two or more enabled holders.
+   */
+  static readBareDoc<T>(this: Pick<PackageAddressingHost, 'getItem' | 'getPackageScopedItem' | 'metadata' | 'packageScopedHoldersOf'>, name: string, member?: string): T | undefined {
+    const bare = this.metadata.get('doc')?.get(name) as { _packageId?: unknown } | undefined;
+    const stamp = bare?._packageId;
+    if (bare !== undefined && (typeof stamp !== 'string' || stamp === '' || stamp === 'sys_metadata')) {
+      return this.getItem<T>('doc', name, undefined, member);
+    }
+    const served = this.packageScopedHoldersOf('doc', name);
+    if (served.length >= 2) {
+      const base: Omit<PackageScopedRefusal, 'message'> = {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'doc' as PackageScopedResolvableType,
+        name,
+        callerPackageId: null,
+        candidates: served.map((packageId) => ({ kind: 'package' as const, packageId })),
+      };
+      throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    }
+    if (served.length === 1 && this.packageScopedHoldersOf('doc', name, null, { includeDisabledPackages: true }).length > 1) {
+      return this.getPackageScopedItem<T>('doc', name, served[0], member);
+    }
+    return this.getItem<T>('doc', name, undefined, member);
   }
 
   /**

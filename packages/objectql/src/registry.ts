@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectOwnership, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance } from '@objectstack/spec/data';
+import { ServiceObject, ObjectOwnership, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -41,7 +41,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, packageScopedRefusalMessage, permissionSetHoldersMeet, resolvePackageScopedHolders, type PackageScopedResolvableType, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, permissionSetHoldersMeet, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -130,18 +130,19 @@ import {
   DEFAULT_RECORD_PAGE_CONFLICT_CODE, DUPLICATE_ARTIFACT_OBJECT_NAME_CODE, EXTENDED_OBJECTS_LISTED,
   EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE, EXTENSION_MEMBERSHIP_KEYS_REFUSED_CODE, FIND_BOUND_ACTION_COLLISIONS,
   MISPLACED_DEFAULT_PAGE_CODE, NAMESPACE_CONFLICT_CODE, NO_PACKAGE_REFERRER, OBJECT_FIELD_TYPE_REFUSED_CODE,
-  OBJECT_OWNERSHIP_CONFLICT_CODE, OBJECT_QUEUE_COLUMN_REFUSED_CODE, QUEUE_FIELD, REGISTRY_LOG_LEVELS,
-  SECURITY_CATALOG_NAME_RULE, VALIDATION_RULE_COPY_REFUSED_CODE, bareNameColdBootWarning, bareNameConflictLine,
-  bareNameReasonFor, bundleBaseKey, coldBootConflictMessage, collectBundle, overlaySlotEntriesOf, overlaySlotKey,
-  packageBodySlot, parseOverlaySlotKey, parsePackageAction, picklistReferrerOf, sameActionDeclaration, sameHolder,
-  storesObjectLessPackagelessRow, withArrivingMembers, withDiscriminator,
+  OBJECT_OWNERSHIP_CONFLICT_CODE, OBJECT_QUEUE_COLUMN_REFUSED_CODE, OWNING_BUSINESS_UNIT_FIELD, QUEUE_FIELD,
+  REGISTRY_LOG_LEVELS, RESERVED_NAMESPACES, SECURITY_CATALOG_NAME_RULE, VALIDATION_RULE_COPY_REFUSED_CODE,
+  applyFieldPatches, bareNameColdBootWarning, bareNameConflictLine, bareNameReasonFor, bundleBaseKey,
+  carriesTenantScopeColumn, coldBootConflictMessage, collectBundle, declaresTenantIndex, mergeValidationsByName,
+  overlaySlotEntriesOf, overlaySlotKey, packageBodySlot, parseOverlaySlotKey, parsePackageAction, picklistReferrerOf,
+  sameActionDeclaration, sameHolder, storesObjectLessPackagelessRow, withArrivingMembers, withDiscriminator,
 } from './registry-top-level.js';
 import type {
   ArtifactInstallScope, BareNameConflict, BoundActionCollision, BundleArrival, BundleEntry, CoOwnershipSource,
   DefaultRecordPageConflict, ExtendedObjectOfUninstall, FoldedExtensionFields, FollowDoorLayer, ObjectContributor,
-  ObjectExtensionFoldOptions, ObjectFoldScalarKey, PicklistItemLike, PicklistReferrer, RegistryLogLevel,
-  RunRegisteredObject, SchemaRegistryOptions, SecurityCatalogNameConflict, ServedObjectLayer, TenantRuleSettings,
-  UnboundActionTarget, WithheldExtensions,
+  ObjectExtensionBody, ObjectExtensionFoldOptions, ObjectFoldScalarKey, PicklistItemLike, PicklistReferrer,
+  RegistryLogLevel, RunRegisteredObject, SchemaRegistryOptions, SecurityCatalogNameConflict, ServedObjectLayer,
+  TenantRuleSettings, UnboundActionTarget, WithheldExtensions,
 } from './registry-top-level.js';
 // [#33949 codemod] Re-exported by name, so every importer of `./registry.js` reads what it read.
 export {
@@ -152,10 +153,10 @@ export {
   NAMESPACE_CONFLICT_CODE, OBJECT_FIELD_TYPE_REFUSED_CODE, OBJECT_OWNERSHIP_CONFLICT_CODE,
   OBJECT_QUEUE_COLUMN_REFUSED_CODE, type ObjectContributor, type ObjectExtensionFoldOptions, REGISTRY_LOG_LEVELS,
   RESERVED_NAMESPACES, type RegistryLogLevel, type SchemaRegistryOptions, type SecurityCatalogNameConflict,
-  type UnboundActionTarget, type UnboundActionTargetError, VALIDATION_RULE_COPY_REFUSED_CODE, applySystemFields,
-  bareNameColdBootWarning, collectManifestBoundActions, collectManifestObjectNames, computeFQN,
-  describeBoundActionCollision, describeUnboundActionTargets, parseFQN, reconcileManagedApiMethods,
-  warnFunctionalCompleteness, warnStrippedLegacyApiMethods,
+  type UnboundActionTarget, type UnboundActionTargetError, VALIDATION_RULE_COPY_REFUSED_CODE, bareNameColdBootWarning,
+  collectManifestBoundActions, collectManifestObjectNames, computeFQN, describeBoundActionCollision,
+  describeUnboundActionTargets, parseFQN, reconcileManagedApiMethods, warnFunctionalCompleteness,
+  warnStrippedLegacyApiMethods,
 } from './registry-top-level.js';
 // [#33949 codemod] Logging control, object storage and generic metadata storage: the methods of the same names below hand the bodies what they read (`StorageHost`).
 import { StorageFacet } from './registry-storage.js';
@@ -186,9 +187,137 @@ import {
 } from './registry-facet-hosts.js';
 // [#33949 codemod] Exported for the section modules above, which import them (lever (a)); `index.ts` re-exports by name, so none reaches the package.
 export {
-  NOT_A_PAIR_ROW_OF_A_HOLDER, RegistrationRestorePoint, ValidationRuleCopyRefusedError, actionHoldersOnOwnerKeyOf,
-  declaredOverrideBase, pairRowDeclaresAnotherHolder,
+  NOT_A_PAIR_ROW_OF_A_HOLDER, RegistrationRestorePoint, TENANT_SCOPE_INDEX, ValidationRuleCopyRefusedError,
+  actionHoldersOnOwnerKeyOf, declaredOverrideBase, isShareableNamespace, mergeObjectDefinitions,
+  pairRowDeclaresAnotherHolder, provisionTenantScopeIndex,
 };
+
+/**
+ * Deep merge two ServiceObject definitions.
+ *
+ * The merge set is CLOSED and enumerable — this is NOT "every prop, later
+ * value wins":
+ *   - `fields` and `indexes` are merged ADDITIVELY (`fields` keyed by name).
+ *   - `validations` are merged BY NAME ({@link mergeValidationsByName},
+ *     [ADR-0029 D9.2a, 2026-10-30 note]): rules of different names add, and a
+ *     rule of a name already folded replaces it — with `tenantRules`, carrying
+ *     the tenant's `message` and `active`, never the tenant's condition.
+ *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
+ *     `description`) are overridden last-writer-wins, subject to the
+ *     `tenantAuthored` yield rule below. [#30391] A `label` that renames the
+ *     object without a `pluralLabel` beside it also takes the running
+ *     `pluralLabel` off: the plural named the old label.
+ *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
+ *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
+ *     keys onto the named field and its option labels onto the options whose
+ *     stored `value` it names, each key yielding where `tenantPatched` says the
+ *     tenant authored it — the same D9.2a rule as the scalars. A patch reaches
+ *     the owner's own fields only (`ownFields`): one naming any other field,
+ *     a field an extension adds included, is skipped here; the fold names it.
+ *
+ * **Every other top-level prop on `extension` is silently discarded.**
+ * `merged` starts as `{ ...base }` and nothing outside the list above is ever
+ * copied onto it — a caller that hands this function an extension body
+ * carrying an undeclared key, e.g. `tenancy: { enabled: false }`, gets a
+ * valid-but-inert no-op HERE: no error, no warning from this function, the
+ * base's existing value simply wins as if the extension had never named the
+ * key (issue #12680).
+ *
+ * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
+ * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
+ * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
+ * `description` / `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * naming `tenancy`, `permissions`, or any other key outside that list fails
+ * LOUDLY at authoring time with a prescription (#4001; the same rule is
+ * documented at `content/docs/data-modeling/object-extensions.mdx`). This
+ * function's discard is reachable only by a caller that bypasses that
+ * schema — a direct, programmatic `registry.registerObject(def, pkg,
+ * undefined, 'extend', …)` call, which is how this package's own pin
+ * (`registry-object-extension-nonenumerated-prop-discard.test.ts`) exercises
+ * the rule. Extender-writable `tenancy`/`permissions` would in any case be a
+ * separate, much bigger decision that has NOT been made.
+ *
+ * Unlike `tenancy`/`permissions`, this one is not blocked by schema:
+ * `_provenance` is a real top-level prop an `extend` contributor carries
+ * TODAY. Copying it through (as "later value
+ * wins" would) lets a third-party extender flip a tenant-authored object's
+ * `_provenance` to the extending package's — reaching, by a different route,
+ * the exact outcome ADR-0029 D9.3's priority-reranking guard exists to
+ * prevent. `registry-object-overlay-layer.test.ts` ("an extender declaring
+ * priority 140 does not become the base layer") fails if this merge set is
+ * widened to copy it through.
+ *
+ * [ADR-0029 D9.2a] …the SCALAR override above is conditional. `tenantAuthored` names
+ * the scalars the fold's BASE has authored away from the packaged owner's
+ * value; an extender yields on those. See
+ * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
+ * over the base rather than re-derived from the running `merged`; `tenantRules`
+ * ({@link SchemaRegistry.tenantRuleSettings}) is computed once for the same reason.
+ */
+function mergeObjectDefinitions(
+  base: ServiceObject,
+  extension: ObjectExtensionBody,
+  tenantAuthored?: ReadonlySet<ObjectFoldScalarKey>,
+  tenantRules?: ReadonlyMap<string, TenantRuleSettings>,
+  tenantPatched?: ReadonlySet<string>,
+  ownFields?: ReadonlySet<string>,
+): ServiceObject {
+  const merged = { ...base };
+
+  // Merge fields additively
+  if (extension.fields) {
+    merged.fields = { ...base.fields, ...extension.fields };
+  }
+
+  // [ADR-0029 D9.2a, 2026-10-30 note] Merge validations by name
+  if (extension.validations) {
+    merged.validations = mergeValidationsByName(
+      base.validations,
+      extension.validations,
+      tenantRules,
+    ) as ServiceObject['validations'];
+  }
+
+  // Merge indexes additively
+  if (extension.indexes) {
+    merged.indexes = [...(base.indexes || []), ...extension.indexes];
+  }
+
+  // Override scalar props (last writer wins) — [ADR-0029 D9.2a] unless the base has been
+  // authored by the tenant, in which case the extender's packaged default yields.
+  const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
+  if (extension.label !== undefined && !yields('label')) {
+    // [#30391] `pluralLabel` is the plural OF `label`: an extension that renames
+    // the object and declares no plural leaves the running plural naming the
+    // old label, so the object is served as one that declares no
+    // `pluralLabel`. A plural the tenant authored stays (the D9.2a yield), and
+    // an extension that repeats the label it extends renames nothing.
+    if (extension.pluralLabel === undefined && extension.label !== merged.label && !yields('pluralLabel')) {
+      delete merged.pluralLabel;
+    }
+    merged.label = extension.label;
+  }
+  if (extension.pluralLabel !== undefined && !yields('pluralLabel')) {
+    merged.pluralLabel = extension.pluralLabel;
+  }
+  if (extension.description !== undefined && !yields('description')) {
+    merged.description = extension.description;
+  }
+
+  // [ADR-0146 D10, second rule] The extension's display patches of the
+  // owner's own fields (`ownFields`) — never of a field an extension adds,
+  // whatever the priorities, or the answer would depend on which extender the
+  // fold reached first — applied AFTER the additive merges, with each key
+  // yielding where the tenant authored it (`tenantPatched`, ADR-0029 D9.2a),
+  // as the scalars above yield. Two extenders patching one key resolve as the
+  // scalars do: the fold applies contributors in ascending `priority`, so the
+  // higher one is written last.
+  if (extension.fieldPatches) {
+    merged.fields = applyFieldPatches(merged.fields, extension.fieldPatches, tenantPatched, ownFields);
+  }
+
+  return merged;
+}
 
 /**
  * Augment a registered object with implicit system fields.
@@ -299,6 +428,402 @@ export {
  * still resolves from `@objectstack/objectql`.
  */
 export { AUDIT_FIELD_GOVERNANCE };
+
+export function applySystemFields(
+  schema: ServiceObject,
+  opts: {
+    multiTenant: boolean;
+    /**
+     * [ADR-0131 D7] The objects THIS deployment declares platform-global — the
+     * plan's one deployment input. A declared object gets no `organization_id`
+     * here. Omitted or empty ⇒ the plan is byte-identical to the authored one.
+     */
+    platformGlobalObjects?: ReadonlySet<string>;
+  }
+): ServiceObject {
+  // WHICH columns this object carries is the spec's derivation
+  // (`resolveInjectedSystemColumns`, #5378) — one answer shared with every
+  // author-time consumer that must resolve a reference to an injected column
+  // but cannot load this runtime (`@objectstack/lint`). This function keeps sole
+  // ownership of WHAT each column looks like, the same split #3786 established
+  // for the audit family. Do NOT re-derive a condition below: a second copy here
+  // is exactly the drift the plan exists to prevent.
+  //
+  // [#7865] This pass runs for `external` (ADR-0015) objects too — DELIBERATELY
+  // (maintainer ruling 2026-08-12, direction B). The platform provisions no
+  // storage for a federated object (`syncObjectSchema` returns early, no DDL),
+  // so the anchors injected below are registered-but-unprovisioned there; the
+  // machine-readable marker for that fact is `resolveInjectedColumnProvenance`
+  // / `unprovisionedInjectedColumns` (re-exported above from
+  // `@objectstack/metadata-core`), NOT a key on the definitions this function
+  // spreads — the definitions must stay byte-identical to the shipped tables,
+  // because the #7859 Layer-0 guard and the #4326 round-trip strip both read
+  // them by exact identity. Do not add keys here; consumers ask the API.
+  //
+  // [ADR-0131 D7] …and the deployment's platform-global declaration is the
+  // plan's one deployment input: a declared object is planned with no tenant
+  // column, so nothing below injects `organization_id` for it. Passed only when
+  // a deployment declared something, so every other call is the one-argument
+  // plan, byte for byte.
+  const plan =
+    opts.platformGlobalObjects && opts.platformGlobalObjects.size > 0
+      ? resolveInjectedSystemColumns(schema, { platformGlobalObjects: opts.platformGlobalObjects })
+      : resolveInjectedSystemColumns(schema);
+
+  // 1. Hard opt-out at object level (e.g. seed/migration tables).
+  //    Folded into the plan (`systemFields: false` ⇒ every flag false), so the
+  //    cheap path stays cheap without a second reading of the key.
+  //
+  // 2. Skip only `better-auth` managed tables. Their column layout is
+  //    driven by better-auth's own migrations (sys_user, sys_session,
+  //    sys_organization, …) and injecting extra columns here would
+  //    collide with what better-auth expects. Other `managedBy` buckets
+  //    (`platform`, `config`, `system`, `append-only`) all need the
+  //    tenant + audit columns for multi-tenant isolation and time-travel
+  //    history — withholding them silently broke RLS reads on
+  //    sys_audit_log / sys_activity (the SecurityPlugin's
+  //    field-existence safety net dropped `organization_id =
+  //    current_user.organization_id` as "field missing", producing
+  //    RLS_DENY_FILTER → 0 rows for every non-admin caller).
+  //    Both opt-outs are the plan's rows 1-2; the bail below covers them.
+  //
+  // Honor explicit opt-out via either `systemFields.tenant === false`
+  // OR `tenancy.enabled === false`. The latter is the schema-level
+  // declaration that the table is a shared/global catalog (e.g.
+  // sys_package — the Marketplace registry). Without this, the
+  // registry would still inject `organization_id`, and the
+  // SecurityPlugin's RLS layer would filter every cross-org read down
+  // to 0 rows even though the schema explicitly disabled multi-tenancy.
+  //
+  // The `organization_id` COLUMN is provisioned unconditionally (subject only
+  // to the explicit opt-outs above) — its existence no longer depends on the
+  // global multi-tenant flag. Decoupling "does the column exist" from "is
+  // tenancy enabled" is what stops sudo writers (audit / messaging / inbox /
+  // outbox …) from failing with "no column named organization_id" on
+  // single-tenant stacks: they can always stamp the column, and org-scoping
+  // stamps it on insert (under `single` with the Default Organization), so it
+  // is never NULL (ADR-0131 D1). The multi-tenant flag now governs only
+  // whether the column is INDEXED — on a single-tenant DB nothing ever filters
+  // by organization, so the index would be dead weight. That is also why the
+  // plan takes no `multiTenant` input: the flag cannot change what EXISTS, only
+  // what is indexed, so an author-time consumer needs no runtime context.
+  const wantTenant = plan.tenant;
+  const wantAudit = plan.audit;
+
+  // Ownership is auto-provisioned by DEFAULT on user-authored business
+  // objects (correct-by-default for AI authors). It is withheld only where a
+  // per-record owner is meaningless: any platform-managed table (`managedBy`
+  // is set — config/append-only/system/platform; `better-auth` already
+  // returned above), the `sys_*` namespace, or an explicit opt-out via
+  // `ownership: 'business_unit' | 'org' | 'none'` on the schema (Dataverse-style
+  // — catalog / junction tables, plus D1's unit-owned tier, which takes the BU
+  // anchor instead). Note this is the SAFE default direction: forgetting the
+  // opt-out leaves a harmless spare column, whereas the old opt-IN model let
+  // authors silently ship objects with no working ownership at all.
+  // `ownership` is a declared ObjectSchema field (record-ownership model), read
+  // off the typed schema by the plan — no `as any` (#3175).
+  //
+  // [ADR-0117 D1 / #5677] The plan treats the value as a `string`, not the
+  // enum, on purpose: it is also called on pre-parse input. That widening is
+  // what let the engine recognise D1's fourth tier `'business_unit'` BEFORE the
+  // schema could emit it — the ordering #5677 → #5678 exists to guarantee, since
+  // a tier the schema emits first would be judged by a no-overlap literal test
+  // and get the INVERSE of what D1 declares. As of #5678 the spec enum reads
+  // `'user' | 'business_unit' | 'org' | 'none'` and the tier is authorable.
+  //
+  // [ADR-0117 D1 / #5677] The ownership decision is a POSITIVE LIST, deliberately
+  // — it used to read `ownership !== 'org' && ownership !== 'none'`, i.e. a
+  // DENY-list, so ANY value outside the two exclusions fell through to "inject
+  // `owner_id`". That default was safe only while the enum had exactly three
+  // members: D1's `business_unit` tier means "owned by a UNIT, not a person"
+  // (`owner_id` ❌, `owning_business_unit_id` ✅), and under the deny-list it
+  // would have been stamped with `owner_id` — the exact inverse. The same
+  // argument applies to any FIFTH tier a later ADR adds, which is why the list
+  // stays positive rather than being "completed" to the current enum.
+  //
+  // The `sys_*` / `managedBy` ineligibility and the per-tier table
+  //
+  //   ownership        owner_id   owning_business_unit_id
+  //   undefined/user      ✅              ✅
+  //   business_unit       ❌              ✅
+  //   org                 ❌              ❌
+  //   none                ❌              ❌
+  //
+  // all live in `resolveInjectedSystemColumns` now, so the author-time linter
+  // reaches the same verdict instead of guessing (#5378).
+  const wantOwner = plan.owner;
+  const wantOwningBusinessUnit = plan.owningBusinessUnit;
+  // [ADR-0142 D3] The queue column rides with the owner anchor (the plan's
+  // `queue` is its `owner`): "sits in Q" is `queue == Q AND owner_id IS NULL`.
+  const wantQueue = plan.queue;
+
+  // Nothing to INJECT — the two opt-out rows (`systemFields: false`,
+  // `managedBy: 'better-auth'`) and objects whose every column is already
+  // declared.
+  //
+  // [#8608] It still routes through {@link provisionTenantScopeIndex}, like
+  // every other exit below. An object that injects nothing can still CARRY the
+  // tenant column — the author declares their own `organization_id` — and the
+  // wall composes its predicate on exactly that column (measured, not inferred:
+  // plugin-security's `tenancyDisabled` reads `tenancy.enabled` and
+  // `systemFields.tenant` only, so `systemFields: false` leaves the wall live).
+  // Returning `schema` here was the last exit that decided the index by NOT
+  // asking, which is how the withholding survived #8375's convergence.
+  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit && !wantQueue) {
+    return provisionTenantScopeIndex(schema, opts);
+  }
+
+  const additions: Record<string, any> = {};
+  // Platform-owned field settings that must WIN over a declared field, rather
+  // than lose to it like `additions` does (#4447).
+  const overrides: Record<string, any> = {};
+
+  if (wantTenant && !schema.fields?.organization_id) {
+    // [#6562] The authorable shape is the shared table's, spread verbatim.
+    //
+    // [#6810] Nothing is spread ON TOP of it any more. This line used to read
+    // `{ ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant }`, and `indexed`
+    // is the one key that was never a `FieldSchema` key at all — removed in the
+    // 16.x line (#2377, ADR-0049) because a field-level index flag built no
+    // index, and `FieldSchema` is a `strictObject`, so a document carrying it is
+    // rejected BY NAME ("never a FieldSchema key; a field-level index flag built
+    // no index"). #6562's reasoning for leaving it here — that its only consumer
+    // reads the REGISTERED schema, never a served document — held for the
+    // consumer and not for the document: `registerObject` runs this function
+    // BEFORE storing and `getItem('object', …)` serves that post-injection
+    // document, so the key reached `/meta`, where `decorateMetadataItem`
+    // re-parsed the served body and stamped `_diagnostics: { valid: false,
+    // errors: [{ path: 'fields.organization_id', code: 'unrecognized_keys' }] }`
+    // on EVERY registry-backed object — both tenancy modes, both read exits. A
+    // defect report the platform wrote about its own column, on a document the
+    // author never wrote and could not fix, in the channel Studio renders
+    // invalid-metadata banners from.
+    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };
+
+    // [#6810] The tenant INDEX that goes with this column is no longer decided
+    // here. It is {@link provisionTenantScopeIndex}, called on the merged result
+    // at the tail of this function — see #8375 for why a decision spelled out at
+    // this one site could not be reached by the `/meta` read exits.
+  }
+
+  if (wantAudit) {
+    for (const name of AUDIT_PROVENANCE_FIELDS) {
+      const declared = (schema.fields as Record<string, any> | undefined)?.[name];
+      if (!declared) {
+        additions[name] = AUDIT_FIELD_DEFS[name];
+        continue;
+      }
+      // [#4447] The audit family's GOVERNANCE is platform-owned, so a declared
+      // `created_at` cannot make the audit anchor client-writable.
+      //
+      // The injection above is skipped when the object already carries the
+      // field, and the merge below lets `schema.fields` win — correct for an
+      // authored business field, wrong for this family. It is how `created_at`
+      // became writable on an ordinary PATCH: the showcase artifact ships a
+      // materialized `created_at` carrying only FieldSchema DEFAULTS
+      // (`readonly: false`), which shadowed `AUDIT_FIELD_DEFS.created_at`
+      // (`readonly: true`), so the engine's `stripReadonlyFields` had nothing
+      // to key off and the forged value was written straight through — with no
+      // `droppedFields` either, because from the platform's point of view
+      // nothing was dropped.
+      //
+      // Its two siblings only LOOKED protected: the audit hook force-advances
+      // `updated_at`/`updated_by` on every update, so a forged value is
+      // overwritten rather than refused. `created_at` is insert-only, so
+      // nothing overwrote it — one field out of the trio genuinely unguarded.
+      //
+      // Presentation stays the author's (label, description, hidden, group,
+      // ordering …); only the keys that decide WHO MAY WRITE IT are forced.
+      // That leaves the deliberate back-dating path intact: `preserveAudit`
+      // (#3479/#3493) and `isSystem` writes still reinstate the original
+      // timeline, because they are checked downstream of `readonly`, not by it.
+      overrides[name] = { ...declared, ...AUDIT_FIELD_GOVERNANCE[name] };
+    }
+  }
+
+  // Canonical reassignable owner. `system: true` marks it platform-provided
+  // (so tooling/migrations recognise it), but — unlike the audit `*_by`
+  // lookups — it is NOT `readonly`: ownership is transferable, so it stays
+  // editable in forms and assignable via the API. SecurityPlugin auto-stamps
+  // it to the acting user on insert when left NULL.
+  if (wantOwner && !schema.fields?.owner_id) {
+    additions.owner_id = { ...OWNER_FIELD_DEF };
+  }
+
+  // [ADR-0117 D1] Record-level business-unit ownership. Shaped after
+  // `organization_id` (server-stamped scope anchor), NOT after `owner_id`
+  // (a user-assignable business field) — the two differ in exactly the keys
+  // that decide who may write and whether it renders:
+  //
+  //   • `readonly: true` — D3 requires the value to be derived and validated
+  //     server-side (`record.organization_id` must equal the unit's org), so a
+  //     client-supplied value is overwritten, never trusted. Reassignment is a
+  //     TRANSFER-class operation gated on `allowTransfer` (D4), which has not
+  //     landed; until it does, no client write path may set this column.
+  //   • `hidden: true` — nothing stamps the column yet (D2's policy is
+  //     undecided, D8's backfill unwritten), so it is provisioned-but-inert.
+  //     Surfacing a permanently-NULL lookup on every business object's layout
+  //     would advertise a capability the runtime does not deliver (Prime
+  //     Directive #10). Presentation is a one-key flip for the PR that lands
+  //     stamping — a capability grant is not.
+  //   • `required: false` — nullable, like every other injected column.
+  //
+  // ⚠️ None of the three presumes ADR-0117 D2 (`pinned`/`follow_owner`/
+  // `transferable`), which is NOT YET RULED. They are the fail-closed shape:
+  // they grant no capability, so every D2 outcome remains reachable. D2's
+  // `owningBusinessUnit.required` is an INSERT-time rejection rule, not column
+  // nullability — it cannot be read off this definition either. `system: true`
+  // writes (the future stamping middleware, seeds) are checked downstream of
+  // `readonly`, so the flag blocks clients without blocking the platform —
+  // exactly how `organization_id` is stamped today.
+  //
+  // No index: the hierarchical predicate that would use one (`… IN (units)`,
+  // D6) ships with the enterprise scope resolver. An index on a column nothing
+  // writes and nothing filters is dead weight — the same reasoning that gates
+  // `organization_id`'s index on `multiTenant`.
+  if (wantOwningBusinessUnit && !schema.fields?.[OWNING_BUSINESS_UNIT_FIELD]) {
+    additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
+  }
+
+  // [ADR-0142 D3] The ownership-queue column: the queue machine name a record
+  // with no owner SITS IN, and an owned record's home queue. Text, not a lookup
+  // (a declared queue has no row to point at); `readonly: false` like
+  // `owner_id`, because its writers are adjudicated where the owner's are — the
+  // assignment seam stamps it as the platform, and a client's move is a
+  // transfer-class write at plugin-security's step 3.5. `hidden: true`: the
+  // Console's queue affordances read it by name, and a raw machine name on every
+  // layout is not a reading a person needs. Landed with its writers, never ahead
+  // of them (ADR-0078). A declared `queue` never reaches this line on an
+  // eligible object: `registerObject` refuses it ({@link objectQueueColumnRefusal}),
+  // so the `!schema.fields` guard below only ever admits the platform's own
+  // definition coming back through a re-registration.
+  if (wantQueue && !schema.fields?.[QUEUE_FIELD]) {
+    additions[QUEUE_FIELD] = { ...QUEUE_FIELD_DEF };
+  }
+
+  // [#8375] The tenant INDEX is decided over the MERGED result, never over the
+  // input — so this function and the read-exit seam ask the same question of the
+  // same document shape. Both cases below route through it, including the one
+  // that adds no field at all (an object whose every system column is already
+  // declared still owes the index decision).
+  if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) {
+    return provisionTenantScopeIndex(schema, opts);
+  }
+
+  return provisionTenantScopeIndex(
+    {
+      ...schema,
+      // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
+      // `overrides` WIN over it (the audit family's governance is not authorable).
+      fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
+    },
+    opts,
+  );
+}
+
+/**
+ * [#6810, made shareable by #8375] Declare the platform's tenant-scope index on
+ * an object that carries a platform-provisioned `organization_id`, on a
+ * multi-tenant deployment — the ONE implementation of that decision.
+ *
+ * ## Why it is a function and not four lines inside `applySystemFields`
+ *
+ * It was those four lines, and that is precisely how the stamp diverged. The
+ * `/meta` read exits converge the injected system COLUMNS through
+ * `applyInjectedSystemColumns` (`@objectstack/metadata-core`, #6562) — which
+ * cannot reach `applySystemFields`: `@objectstack/objectql` depends on
+ * `@objectstack/metadata-protocol` depends on `@objectstack/metadata-core`, so
+ * the import runs UP the dependency graph. So the converger re-implemented the
+ * half it could reach (the fields map) and silently did not implement the half
+ * it could not (this index), and `GET /meta/object/:name` served a multi-tenant
+ * object reporting no tenant index while the registry's own answer carried one
+ * (#8375).
+ *
+ * The fix is not an `indexes` line added to that copy — a second implementation
+ * is what drifted in the first place. It is this: ONE function, called by the
+ * producer below and by {@link SchemaRegistry.materializeBaseLayer}, which is
+ * the seam #8268 built so a stamp converges at every read exit the day it is
+ * added. `__search` converges by delegating to the registry and has never
+ * drifted; this stamp now converges the same way.
+ *
+ * ## The predicate, stated exactly
+ *
+ * "The object carries a tenant column" — not "this call just injected one", and
+ * [#8459] not "the PLATFORM provisioned it". The first distinction is the whole
+ * reason the decision moved out of the injection branch: at a read exit the
+ * column is ALREADY present (`governServedItem` runs
+ * `applyInjectedSystemColumns` before the seam), so a condition reading
+ * `!schema.fields?.organization_id` is false exactly where the convergence is
+ * needed. {@link carriesTenantScopeColumn} answers the question the old nesting
+ * was really asking, at either site, in either order.
+ *
+ * The second distinction is the 2026-08-13 maintainer ruling on #8459. This
+ * predicate also required the column to be the platform's OWN definition
+ * (`isInjectedColumnDefinition`, byte-for-byte), which #8375 preserved exactly
+ * rather than widening inside a convergence fix. The effect was that an author
+ * who declared their own `organization_id` — adding a label, making it
+ * `required`, pointing it at their own org table — kept the column and silently
+ * lost the index on it, while `computeTenantLayer0Filter` (plugin-security)
+ * went on AND-composing `organization_id = <org>` onto essentially every read of
+ * that object. The deployment's hottest predicate, unindexed, reached by an
+ * additive-looking authoring move that removed a guarantee the author never knew
+ * they held.
+ *
+ * The ruling is one rule, stated once: on a walled deployment the wall's
+ * predicate is indexed, whoever typed the column. ⛔ Not a type judgement — an
+ * `organization_id` declared as `text` gets the index too. Inspecting the
+ * declared type to decide whether it is "really" the tenant anchor was
+ * considered and REJECTED: it is a third predicate at the site where #8375 just
+ * reduced two to one, and its boundary is itself something an author gets
+ * subtly wrong (a `text` org code would lose the index and look fine).
+ *
+ * ⚠️ Recorded gap, deliberately left uncovered by that ruling: an author who
+ * wants NO index on the tenant column has no way to say so. If that need
+ * appears it becomes an explicit declared key — ⛔ it is not grounds to restore
+ * the injected-column condition. What exists today for a DIFFERENT index shape
+ * is {@link declaresTenantIndex}: declare your own single-column tenant index
+ * and the platform declares none.
+ *
+ * `multiTenant: false` declares NO index rather than a false one: on an unwalled
+ * stack nothing filters by organization, so the index is dead weight — the same
+ * intent the retired `indexed` flag's value carried (#6810), expressed as
+ * presence instead of a boolean.
+ *
+ * No `name` on the entry: each driver derives its own (SQL's `buildIndexName` is
+ * table-qualified, which a hardcoded name could not be without colliding across
+ * tables on Postgres; Mongo's index names are per-collection). `unique` is left
+ * at its default `false` — a plain lookup index, never a constraint.
+ *
+ * Idempotent, via {@link declaresTenantIndex}: it runs twice on every
+ * registration (once at the tail of `applySystemFields`, once at the seam) and
+ * the second call is a no-op. Returns `schema` BY REFERENCE when nothing is
+ * owed, so a registry-sourced body pays a comparison and no copy.
+ */
+
+/**
+ * [#8375] The index entry the platform declares for the tenant scope column —
+ * the ONE spelling of it, so the stamp and its write-side strip cannot disagree
+ * about what "the platform's own entry" looks like.
+ */
+const TENANT_SCOPE_INDEX: { fields: string[] } = { fields: ['organization_id'] };
+
+function provisionTenantScopeIndex(
+  schema: ServiceObject,
+  opts: { multiTenant: boolean; platformGlobalObjects?: ReadonlySet<string> },
+): ServiceObject {
+  if (!opts.multiTenant) return schema;
+  if (!carriesTenantScopeColumn(schema, opts.platformGlobalObjects)) return schema;
+  if (declaresTenantIndex(schema)) return schema;
+
+  return {
+    ...schema,
+    // [#6810] Author-declared indexes keep their position; the platform's
+    // tenant index is APPENDED, never merged into or reordering theirs.
+    // The write-side inverse depends on that append being at the END —
+    // see {@link SchemaRegistry.stripProvisionedTenantIndexFrom}.
+    indexes: [...((schema as any).indexes ?? []), { ...TENANT_SCOPE_INDEX }],
+  } as ServiceObject;
+}
 
 /**
  * [#16319] A field declaration reached the registration door with a `type` that
@@ -582,6 +1107,17 @@ export function objectQueueColumnRefusal(schema: unknown): Error | null {
   if (injectedColumnProvenance(schema, QUEUE_FIELD) !== 'author') return null;
   const name = (schema as { name?: unknown })?.name;
   return new ObjectQueueColumnRefusedError(typeof name === 'string' ? name : '(unnamed)');
+}
+
+/**
+ * Platform namespaces that multiple packages may legitimately share, so the
+ * install-time namespace-uniqueness gate (ADR-0048 Phase 1) must never fire on
+ * them: the FQN-exempt reserved namespaces (`base`, `system`) plus `sys`
+ * (system objects such as `sys_metadata` are contributed by many packages — see
+ * {@link SchemaRegistry.registerNamespace}, which is intentionally many-to-one).
+ */
+function isShareableNamespace(ns: string): boolean {
+  return RESERVED_NAMESPACES.has(ns) || ns === 'sys';
 }
 
 /**
@@ -4276,47 +4812,9 @@ export class SchemaRegistry {
     return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
   }
 
-  /**
-   * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The by-name read of a
-   * `doc` that names no package. `doc` keeps its literal global name and its
-   * addressing (bucket 1); what changes is the context-free read's answer
-   * when two or more ENABLED packages hold the name: a `409
-   * RESOURCE_CONFLICT` naming every holder (`ambiguous-in-environment`), in
-   * place of {@link getItem}'s first composite, which is a registration-order
-   * pick (ADR-0146 D8; the bare save, delete, publish and layered read refuse
-   * the same address already).
-   *
-   * Unchanged: one holder; a package-less bare-slot entry (the environment's
-   * own item) answers first, as {@link getItem} serves it; a disabled package
-   * holds no name ({@link packageScopedHoldersOf}), so beside one enabled
-   * holder the read serves that holder's item, never the disabled one's.
-   * `MetadataFacade.get` serves this answer; the protocol's by-name read asks
-   * it before any layer for its refusal only (`protocol-meta-item-reads.ts`).
-   *
-   * @throws {PackageScopedNameRefusedError} two or more enabled holders.
-   */
   private readBareDoc<T>(name: string, member?: string): T | undefined {
-    const bare = this.metadata.get('doc')?.get(name) as { _packageId?: unknown } | undefined;
-    const stamp = bare?._packageId;
-    if (bare !== undefined && (typeof stamp !== 'string' || stamp === '' || stamp === 'sys_metadata')) {
-      return this.getItem<T>('doc', name, undefined, member);
-    }
-    const served = this.packageScopedHoldersOf('doc', name);
-    if (served.length >= 2) {
-      const base: Omit<PackageScopedRefusal, 'message'> = {
-        status: 'refused',
-        reason: 'ambiguous-in-environment',
-        type: 'doc' as PackageScopedResolvableType,
-        name,
-        callerPackageId: null,
-        candidates: served.map((packageId) => ({ kind: 'package' as const, packageId })),
-      };
-      throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
-    }
-    if (served.length === 1 && this.packageScopedHoldersOf('doc', name, null, { includeDisabledPackages: true }).length > 1) {
-      return this.getPackageScopedItem<T>('doc', name, served[0], member);
-    }
-    return this.getItem<T>('doc', name, undefined, member);
+    // [#33949 codemod] The body moved to `registry-package-addressing.ts`, its docblock with it (see `PackageAddressingHost`).
+    return (PackageAddressingFacet.readBareDoc<T>).call(packageAddressingHost.of(this), name, member);
   }
 
   /**
@@ -5596,8 +6094,10 @@ export class SchemaRegistry {
       compositeHoldersOf: (...a) => registry.compositeHoldersOf(...a),
       gateSlotBinding: (...a) => registry.gateSlotBinding(...a),
       getAllObjects: (...a) => registry.getAllObjects(...a),
+      getItem: (...a) => registry.getItem(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
       getPackage: (...a) => registry.getPackage(...a),
+      getPackageScopedItem: (...a) => registry.getPackageScopedItem(...a),
       hasDisabledPackage: (...a) => registry.hasDisabledPackage(...a),
       invalidateAll: (...a) => registry.invalidateAll(...a),
       isBundleAddition: (...a) => registry.isBundleAddition(...a),
@@ -5610,6 +6110,7 @@ export class SchemaRegistry {
       get objectContributors() { return registry.objectContributors; },
       overlaySlotBinding: (...a) => registry.overlaySlotBinding(...a),
       ownersHoldingAName: (...a) => registry.ownersHoldingAName(...a),
+      packageScopedHoldersOf: (...a) => registry.packageScopedHoldersOf(...a),
       packagelessActionEntryToRetire: (...a) => registry.packagelessActionEntryToRetire(...a),
       pairRowBinding: (...a) => registry.pairRowBinding(...a),
       rankedForPackage: (...a) => registry.rankedForPackage(...a),
