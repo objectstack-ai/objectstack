@@ -38,19 +38,28 @@
  * ({@link relationSemiJoinServes}, then the planned read's own outcome, then
  * the executor boundary's comparison):
  *
- * - **Before planning** — the related object has a restriction no planned
- *   `where` can carry, or the read's driver compiles no subquery: an
- *   object-scoped middleware or an `afterFind` hook on the related object
- *   (both act after its driver call), another datasource than the read's
- *   object, or a driver outside {@link SEMI_JOIN_COMPILING_DRIVERS}.
+ * - **Before planning** — the registry already answers: the related object
+ *   has a restriction no planned `where` can carry, or the read's driver
+ *   compiles no subquery: an object-scoped middleware or an `afterFind` hook
+ *   on the related object (both act after its driver call), another
+ *   datasource than the read's object, a federated related object, a related
+ *   object of another tenancy class than the read's object under a walled
+ *   posture (its driver options differ), or a driver outside
+ *   {@link SEMI_JOIN_COMPILING_DRIVERS}. The related read is dispatched once.
  * - **After planning** — the related read did not reach exactly one driver
  *   call, or came back with rows the driver never returned (a middleware
  *   answered without the driver, or added rows after it).
  * - **At the executor boundary** — the outer read's driver options differ
  *   from the ones the related read's own driver call was given
- *   ({@link sameReadDriverOptions}): the subquery is compiled with the outer
- *   read's options, so only identical options make it the related read's own
- *   statement. The ids are then read there, as the caller, under the cap.
+ *   ({@link sameReadDriverOptions}) in a way only the request decides (a
+ *   per-object verdict recorded for the caller): the subquery is compiled
+ *   with the outer read's options, so only identical options make it the
+ *   related read's own statement. The ids are then read there, as the
+ *   caller, under the cap.
+ *
+ * A hop that falls back after planning (either of the last two) dispatches
+ * the related read twice: its middleware chain and `beforeFind` hooks run
+ * for the planned read and again for the id read.
  *
  * ## What the semi-join means at its edges
  *
@@ -81,6 +90,9 @@
  */
 
 import { ReadableIds, RLS_DENY_FILTER, type FilterCondition } from '@objectstack/spec/data';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { isDriverTenantScopedSchema } from './engine-driver-options.js';
+import { isFederatedObject } from './federated-object.js';
 
 /**
  * The key of the internal read option that turns a `find` into a PLAN: when
@@ -113,6 +125,10 @@ export interface RelationSemiJoinServesHost {
   uncomposableReadableIdsParent(object: string, parent: string): unknown;
   hasHooksFor(event: string, object: string): boolean;
   getDriver(object: string): { readonly name?: unknown } | undefined;
+  /** The registered schema of `object` (`undefined` when none is registered). */
+  getObjectSchema(object: string): unknown;
+  /** The tenancy posture in force, as the engine's driver options read it. */
+  resolveEnginePosture(): TenancyPosture;
 }
 
 /**
@@ -125,11 +141,25 @@ export interface RelationSemiJoinServesHost {
  *   it is bound to another datasource than `object`);
  * - no `afterFind` hook is registered for `target` (a hook may filter the
  *   rows the id read returns, after its driver call);
+ * - `target` is not federated (ADR-0015 `external`): the driver prepares a
+ *   federated object's remote catalog facts for the object a read door is
+ *   reading, and a subquery's object is not that object;
+ * - under a walled posture, `object` and `target` are of the same tenancy
+ *   class ({@link isDriverTenantScopedSchema}): otherwise one read's driver
+ *   options carry a tenant scope the other's do not, and the executor
+ *   boundary would fall back after the related read was already planned —
+ *   dispatching it a second time. Deciding it here dispatches it once.
  * - `object`'s driver compiles the composed leaf ({@link SEMI_JOIN_COMPILING_DRIVERS}).
  */
 export function relationSemiJoinServes(this: RelationSemiJoinServesHost, object: string, target: string): boolean {
   if (this.uncomposableReadableIdsParent(object, target) !== undefined) return false;
   if (this.hasHooksFor('afterFind', target)) return false;
+  const targetSchema = this.getObjectSchema(target);
+  if (isFederatedObject(targetSchema)) return false;
+  if (
+    postureEnforcesWall(this.resolveEnginePosture()) &&
+    isDriverTenantScopedSchema(this.getObjectSchema(object)) !== isDriverTenantScopedSchema(targetSchema)
+  ) return false;
   const name = this.getDriver(object)?.name;
   return typeof name === 'string' && SEMI_JOIN_COMPILING_DRIVERS.has(name);
 }

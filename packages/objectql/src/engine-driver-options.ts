@@ -318,7 +318,7 @@ export function buildDriverOptions(
   // federated object by — one spelling of "this schema is the remote's",
   // not a second reading of it.
   const isFederated = isFederatedObject(objectSchema);
-  const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
+  const tenantObject = isDriverTenantScopedSchema(objectSchema);
   const tenantScope = tenantObject
     ? scope.writeTarget
       ? this.driverWriteTarget(execCtx)
@@ -409,6 +409,17 @@ export function buildDriverOptions(
     opts.preserveAudit = true;
   }
   return opts;
+}
+
+/**
+ * Whether a read of an object with this schema can hand its driver a tenant
+ * scope at all — the object's tenancy class: neither tenancy-disabled
+ * (ADR-0066 platform-global posture) nor federated (ADR-0015 `external`).
+ * The one spelling {@link buildDriverOptions} and the relation semi-join
+ * (`relation-semi-join.ts`) both ask.
+ */
+export function isDriverTenantScopedSchema(objectSchema: unknown): boolean {
+  return !isTenancyDisabled(objectSchema) && !isFederatedObject(objectSchema);
 }
 
 /**

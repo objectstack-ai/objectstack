@@ -4275,6 +4275,8 @@ export class ObjectQL implements IObjectQLEngine {
       uncomposableReadableIdsParent: (...a) => this.uncomposableReadableIdsParent(...a),
       hasHooksFor: (...a) => this.hasHooksFor(...a),
       getDriver: (...a) => this.getDriver(...a),
+      getObjectSchema: (name) => this._registry.getObject(name),
+      resolveEnginePosture: () => this.resolveEnginePosture(),
     };
     return relationSemiJoinServes.call(host, object, target);
   }
