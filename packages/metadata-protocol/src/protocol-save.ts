@@ -86,6 +86,8 @@ import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
+import { servedAddressJudgment } from './protocol-meta-item-face.js';
+import { packagelessContentPackage, shippingPackageIds } from './protocol-environment-rows.js';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
@@ -331,7 +333,7 @@ export class ProtocolSaveFacet {
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
+    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -810,10 +812,22 @@ export class ProtocolSaveFacet {
             const address = await host.packagelessAddress(
                 writeType, request.name, itemDiscriminator(writeType, request.item),
             );
-            if (address.candidates.length > 1) {
-                throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
+            // [#32605, epic ruling 6781691009] A name a disabled package also
+            // holds is written where the read naming no package serves it
+            // ({@link servedPackagelessSaveAddress}): never the disabled
+            // package's row, never a new package-unbound row beside an
+            // enabled holder, and a refusal names only the served holders.
+            const served = await servedPackagelessSaveAddress(
+                host, writeType, request.name, itemDiscriminator(writeType, request.item), address,
+            );
+            if (served !== undefined) {
+                if (served.packageId !== null) request = { ...request, packageId: served.packageId };
+            } else {
+                if (address.candidates.length > 1) {
+                    throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
+                }
+                if (address.packageId !== null) request = { ...request, packageId: address.packageId };
             }
-            if (address.packageId !== null) request = { ...request, packageId: address.packageId };
         }
 
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
@@ -2779,4 +2793,59 @@ export class ProtocolSaveFacet {
 
         return report;
     }
+}
+
+/**
+ * [#32605, epic ruling 6781691009 on #32354, ADR-0150 D3/D4/D5] THE WRITE
+ * ADDRESS of a publish-mode save naming no package, for a name a DISABLED
+ * package also holds: the address the read naming no package serves, so the
+ * save writes exactly the row the next read answers. A disabled package holds
+ * nothing an address reaches, so it is never the address and never named.
+ *
+ *  - The read's own judgment first ({@link servedAddressJudgment}, the one
+ *    #32183 and #32354 gave the reads): its served holder is the address; its
+ *    refusal (two or more served holders) is the save's refusal, naming only
+ *    the served holders.
+ *  - Otherwise, when a disabled package is among the packages the stored rows
+ *    are bound to (`address.candidates`, {@link packagelessAddress}), the
+ *    address is judged over the enabled bindings: one is the address, two or
+ *    more are refused naming them. With none left, the row the read serves:
+ *    the package-unbound row when one is stored (the save edits it, as the
+ *    read serves it), else the one enabled package that ships the name (the
+ *    read's content package, {@link packagelessContentPackage}).
+ *  - `undefined` leaves the address to {@link packagelessAddress}, as before:
+ *    no disabled holder, or one only disabled packages hold (no served holder
+ *    to take the write; the save keeps naming that package, as it did).
+ *
+ * Without it the save door counted the disabled holder as a holder: over no
+ * stored row it wrote a package-unbound row (an environment-own item that
+ * shadows both holders once the package is enabled again), over the disabled
+ * package's row alone it updated that row (the read kept serving the enabled
+ * holder's item, so the edit never showed), and over a row of each it refused
+ * `409` naming the disabled package while the read served the enabled one.
+ */
+async function servedPackagelessSaveAddress(
+    host: Pick<ProtocolHost, 'engine' | 'packagelessAddress' | 'shippedArtifactsOf' | 'readItemActiveRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    type: string, name: string, member: string | undefined,
+    address: { readonly packageId: string | null; readonly candidates: readonly string[]; readonly unbound: boolean },
+): Promise<{ packageId: string | null } | undefined> {
+    const registry = host.engine?.registry as { isPackageDisabled?: (id: string) => boolean } | undefined;
+    if (typeof registry?.isPackageDisabled !== 'function') return undefined;
+    const disabled = (id: string): boolean => registry.isPackageDisabled?.(id) === true;
+    const judged = await servedAddressJudgment(host, type, name, member);
+    if (judged?.kind === 'served') return { packageId: judged.packageId };
+    if (judged?.kind === 'refused') {
+        const served = judged.error.refusal.candidates
+            .map((candidate) => (candidate as { packageId?: unknown }).packageId)
+            .filter((id): id is string => typeof id === 'string' && !disabled(id));
+        throw packagelessAddressAmbiguityRefusal('save', type, name, served);
+    }
+    if (!address.candidates.some(disabled)) return undefined;
+    const enabled = address.candidates.filter((id) => !disabled(id));
+    if (enabled.length > 1) throw packagelessAddressAmbiguityRefusal('save', type, name, enabled);
+    if (enabled.length === 1) return { packageId: enabled[0] ?? null };
+    if (address.unbound) return { packageId: null };
+    const shippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].filter((id) => !disabled(id));
+    const content = packagelessContentPackage({ packageId: null, candidates: [] }, shippers.map((id) => ({ _packageId: id })));
+    return typeof content === 'string' ? { packageId: content } : undefined;
 }
