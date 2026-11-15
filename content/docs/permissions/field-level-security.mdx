@@ -126,10 +126,18 @@ stripped from every record before the response leaves the engine.
 
 **Computed fields follow their inputs** — a caller who cannot read a
 field cannot read any computed field (a `formula`, or a stored field
-with an `expression`) whose expression reads it, directly or through
-another computed field: it is stripped and refused as a filter or
-aggregate input exactly as the field it reads is, and where that field is
-served partially masked the computed field is stripped whole.
+with an `expression`) whose expression reads it: on its own record,
+through another computed field, or on the record it reads through a
+reference. Such a computed field is withheld exactly as the field it
+reads is: stripped from records, refused as a filter, sort, group or
+aggregate input, and left out of the fields served to that caller,
+including the object schema. Where that field is served partially
+masked, the computed field is stripped whole. A computed field whose
+expression reads the record in a way no field name describes (a
+computed key such as `record[record.k]`, a method or macro on `record`,
+or `record` passed whole to a function) is withheld whenever the caller
+may not read any other field of the object. To let a role read a
+computed field, grant it read on every field the expression reads.
 
 **On write** — `insert` / `update` requests are checked **before** the
 operation reaches the driver. If the payload contains any field the

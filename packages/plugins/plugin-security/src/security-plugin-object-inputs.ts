@@ -258,9 +258,10 @@ export function computePartialMaskRules(
 export function computeQueryGuardFieldPerms(
   this: Pick<ObjectInputsHost, 'computePartialMaskRules' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'>,
   objectName: string,
-  secMeta: Pick<ObjectSecurityMeta, 'computedFieldReads' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
   permissionSets: PermissionSet[],
   delegatorSets: PermissionSet[] | null,
+  hopWithheld: Iterable<string> = [],
 ): Record<string, { readable: boolean; editable: boolean }> {
   let guard = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
   guard = this.foldFieldRequiredPermissions(guard, secMeta.fieldRequiredPermissions, permissionSets);
@@ -276,8 +277,9 @@ export function computeQueryGuardFieldPerms(
     }
   }
   // Field-level security covers what a value is computed from: a computed
-  // field reading a field withheld here is not queryable either.
-  return foldComputedFieldReads(out, secMeta.computedFieldReads).perms;
+  // field reading a field withheld here, here or through a reference
+  // (`hopWithheld`), is not queryable either.
+  return foldComputedFieldReads(out, secMeta.computedFieldInputs, [], hopWithheld).perms;
 }
 
 /**
@@ -458,6 +460,7 @@ export function maskOperationResult(
   permissionSets: PermissionSet[],
   secMeta: ObjectSecurityMeta,
   delegatorSets: PermissionSet[] | null,
+  hopWithheld: Iterable<string> = [],
 ): void {
   if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
     const basePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
@@ -480,9 +483,10 @@ export function maskOperationResult(
     );
     // Field-level security covers what a value is computed from: a computed
     // field reading a field this caller may not read, or is served partially
-    // masked, directly or through another computed field, is deleted as well —
+    // masked — on this record, on the record it reads through a reference
+    // (`hopWithheld`), or through another computed field — is deleted as well,
     // whole, even where a masking rule of its own would have applied.
-    const folded = foldComputedFieldReads(fieldPerms, secMeta.computedFieldReads, Object.keys(partialRules));
+    const folded = foldComputedFieldReads(fieldPerms, secMeta.computedFieldInputs, Object.keys(partialRules), hopWithheld);
     fieldPerms = folded.perms;
     for (const f of folded.withheld) delete partialRules[f];
     if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
@@ -631,4 +635,46 @@ export function extractTargetField(
   // regex did not match.
   const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(?:==|=|IN|in)(?=\s|\()/);
   return m ? m[1] : null;
+}
+
+/**
+ * The body of `SecurityPlugin#resolveHopWithheldFields`; the method's docblock there is its contract.
+ */
+export async function resolveHopWithheldFields(
+  this: { readLocalReadableFields: (object: string, context: unknown) => Promise<string[] | undefined> },
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
+  context: unknown,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const inputs = secMeta.computedFieldInputs ?? {};
+  const targets = secMeta.computedHopTargets ?? {};
+  const readable = new Map<string, Promise<ReadonlySet<string> | null>>();
+  const readableOn = (object: string): Promise<ReadonlySet<string> | null> => {
+    let hit = readable.get(object);
+    if (!hit) {
+      hit = this.readLocalReadableFields(object, context).then(
+        (fields) => (Array.isArray(fields) ? new Set(fields) : null),
+        () => null,
+      );
+      readable.set(object, hit);
+    }
+    return hit;
+  };
+  for (const [field, input] of Object.entries(inputs)) {
+    for (const [ref, leaves] of input.hops ?? []) {
+      const target = targets[ref];
+      if (!target) continue;
+      const fields = await readableOn(target);
+      if (fields === null || [...leaves].some((leaf) => !fields.has(leaf))) {
+        out.add(field);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Does any computed field of this posture read through a reference? */
+export function postureHasComputedHops(secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs'>): boolean {
+  return Object.values(secMeta.computedFieldInputs ?? {}).some((input) => (input.hops?.size ?? 0) > 0);
 }

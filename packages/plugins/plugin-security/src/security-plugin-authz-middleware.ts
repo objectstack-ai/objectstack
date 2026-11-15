@@ -145,6 +145,7 @@ import {
 } from './ownership-queue-gate.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { externalGrantPatch } from './external-owd-grant-stamp.js';
+import { computedFieldsReadingThroughReferences } from './field-masker.js';
 
 /**
  * The layered computation's options, as the class declares them: the
@@ -556,6 +557,7 @@ export interface AuthzMiddlewareHost {
   resolveCallerPosture: SecurityPlugin['resolveCallerPosture'];
   resolveOperationPrincipals: SecurityPlugin['resolveOperationPrincipals'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
+  resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   resolvePreImageFloorDrop: SecurityPlugin['resolvePreImageFloorDrop'];
   resolveSharingWriteVerdict: SecurityPlugin['resolveSharingWriteVerdict'];
   writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
@@ -563,7 +565,7 @@ export interface AuthzMiddlewareHost {
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -761,7 +763,10 @@ export function registerAuthzMiddleware(
           );
         }
         await next();
-        this.maskOperationResult(opCtx, grantCallerSets, grantCallerPosture, null);
+        // The grant stands in for a caller this context does not resolve, so a
+        // computed field read through a reference cannot be judged for it on
+        // the referenced object: it is withheld (fail closed).
+        this.maskOperationResult(opCtx, grantCallerSets, grantCallerPosture, null, computedFieldsReadingThroughReferences(grantCallerPosture.computedFieldInputs));
         return;
       }
       throw new PermissionDeniedError(
@@ -859,6 +864,13 @@ export function registerAuthzMiddleware(
     // per-field capability contract, and no grant-based narrowing — see
     // resolveCallerPosture, which the field projections read too.
     const secMeta = await this.resolveCallerPosture(opCtx.object, permissionSets);
+    // Field-level security covers what a value is computed from, on a record
+    // read through a reference too: the computed fields withheld for that
+    // (resolveHopWithheldFields), asked once per operation and only by a
+    // reader that needs them — the query guards (2.5b, 2.9) and step 4.
+    let hopWithheldMemo: Promise<Set<string>> | undefined;
+    const hopWithheld = (): Promise<Set<string>> =>
+      (hopWithheldMemo ??= this.resolveHopWithheldFields(secMeta, opCtx.context, { fallbackOnEmptySets: false }));
 
     // [#3545] Fail CLOSED when the object's own posture could not be resolved.
     // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
@@ -1681,7 +1693,7 @@ export function registerAuthzMiddleware(
       // values outright on a single-row group). One derivation, shared with
       // step 2.9 and the published `getQueryableFields` — see
       // computeQueryGuardFieldPerms.
-      const queryGuard = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets);
+      const queryGuard = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld());
       if (Object.keys(queryGuard).length > 0) {
         const ast: any = opCtx.ast ?? {};
         const referenced = new Set<string>();
@@ -2585,7 +2597,7 @@ export function registerAuthzMiddleware(
       // folded in as non-queryable by the one derivation this guard shares
       // with step 2.5b and the published `getQueryableFields`
       // (computeQueryGuardFieldPerms).
-      const guardPerms = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets);
+      const guardPerms = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld());
       if (Object.keys(guardPerms).length > 0) {
         // [#2982 follow-up] For a bulk WRITE the caller's own predicate is
         // `opCtx.options.where` (untouched); `opCtx.ast.where` may ALREADY
@@ -2787,7 +2799,7 @@ export function registerAuthzMiddleware(
     // closes the read leak on the response image. [#21062] The body is
     // {@link maskOperationResult}, which the ADR-0056 public-form grant
     // branch above reads too — one masker for both.
-    this.maskOperationResult(opCtx, permissionSets, secMeta, delegatorSets);
+    this.maskOperationResult(opCtx, permissionSets, secMeta, delegatorSets, await hopWithheld());
   };
   ql.registerMiddleware(authzMiddleware);
   return authzMiddleware;

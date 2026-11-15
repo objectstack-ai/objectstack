@@ -65,7 +65,9 @@ import {
   getObjectFieldNames,
   loadObjectFieldNames,
   maskOperationResult,
+  postureHasComputedHops,
   probeMetadataOutage,
+  resolveHopWithheldFields,
   probeUnpublishedDraft,
   resolveUnresolvedCause,
   warnAuthoredTenantPolicyOnce,
@@ -311,7 +313,7 @@ import {
 import {
   type MatchesFilterOptions,
 } from '@objectstack/formula';
-import { FieldMasker, computedFieldReads, type ComputedFieldReads } from './field-masker.js';
+import { FieldMasker, computedHopTargetsOf, readComputedFieldExpression, type ComputedFieldInput, type ComputedFieldInputs } from './field-masker.js';
 import {
   PermissionDeniedError,
 } from './errors.js';
@@ -531,14 +533,21 @@ interface ObjectSecurityMeta {
    */
   fieldMaskingRules: Record<string, FieldMaskingRule>;
   /**
-   * The fields of this object each computed field (a `formula`, or a stored
-   * field declaring an `expression`) reads, `null` where they cannot be named
-   * ({@link computedFieldReads}). Field-level security covers what a value is
-   * computed from: the result masker and the query guard withhold a computed
-   * field from a caller who may not read a field it reads, directly or
-   * through another computed field (`foldComputedFieldReads`).
+   * What each computed field of this object (a `formula`, or a stored field
+   * declaring an `expression`) is computed from ({@link readComputedFieldExpression}).
+   * Field-level security covers what a value is computed from: every reader
+   * of the field map — the result masker, the query guard, the read
+   * projection and the explain `fls` layer — withholds a computed field from
+   * a caller who may not read a field it reads, directly or through another
+   * computed field (`foldComputedFieldReads`).
    */
-  computedFieldReads: ComputedFieldReads;
+  computedFieldInputs: ComputedFieldInputs;
+  /**
+   * The object each reference field a computed field reads through points
+   * at, by reference field name: where the fields a computed field reads on
+   * the referenced record are judged ({@link resolveHopWithheldFields}).
+   */
+  computedHopTargets: Record<string, string>;
   /**
    * [#3545] The object's posture could NOT be resolved — neither the live
    * ObjectQL schema nor the metadata service returned it. Every other field is
@@ -2360,7 +2369,7 @@ export class SecurityPlugin implements Plugin {
       const readLogger = () => this.logger;
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
-      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
+      const host: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveHopWithheldFields' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'> = {
         addressedByIdWriteId: (...a) => this.addressedByIdWriteId(...a),
         addressedPredicateWrite: (...a) => this.addressedPredicateWrite(...a),
         assertControlledByParentWrite: (...a) => this.assertControlledByParentWrite(...a),
@@ -2392,6 +2401,7 @@ export class SecurityPlugin implements Plugin {
         resolveCallerPosture: (...a) => this.resolveCallerPosture(...a),
         resolveOperationPrincipals: (...a) => this.resolveOperationPrincipals(...a),
         resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+        resolveHopWithheldFields: (...a) => this.resolveHopWithheldFields(...a),
         resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
         resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
         writeCheckFieldOptions: (...a) => this.writeCheckFieldOptions(...a),
@@ -2599,7 +2609,7 @@ export class SecurityPlugin implements Plugin {
     const readQl = () => this.ql;
     const readResolveKernelService = () => this.resolveKernelService;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
+    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
       baselinePermissionSets: this.baselinePermissionSets,
       checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
       collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
@@ -2612,6 +2622,7 @@ export class SecurityPlugin implements Plugin {
       get permissionEvaluator() { return readPermissionEvaluator(); },
       get ql() { return readQl(); },
       readRowById: (...a) => this.readRowById(...a),
+      resolveHopWithheldFields: (...a) => this.resolveHopWithheldFields(...a),
       get resolveKernelService() { return readResolveKernelService(); },
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
@@ -3166,9 +3177,12 @@ export class SecurityPlugin implements Plugin {
    * {@link resolvePermissionSetsForContext}, builds the field-permission map
    * with the SAME evaluator + `requiredPermissions` fold the read mask uses,
    * intersects the on-behalf-of delegator's mask (ADR-0090 D10, fail-closed on
-   * a dangling delegator), then returns every schema field NOT marked
-   * non-readable — the exact complement of what {@link FieldMasker.maskResults}
-   * deletes (fields without an explicit permission entry pass through).
+   * a dangling delegator), folds in every computed field the read mask
+   * deletes for what it is computed from (`foldComputedFieldReads`, with
+   * {@link resolveHopWithheldFields} — the fold step 4 takes), then returns
+   * every schema field NOT marked non-readable — the exact complement of what
+   * {@link FieldMasker.maskResults} deletes (fields without an explicit
+   * permission entry pass through).
    *
    * Returns `undefined` when the object schema can't be resolved, so the caller
    * falls back to its own projection. A system context (`context.isSystem`)
@@ -3218,7 +3232,7 @@ export class SecurityPlugin implements Plugin {
   private computeReadableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean },
+    options: { fallbackOnEmptySets: boolean; hops?: boolean },
   ): Promise<string[] | undefined> {
     // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
     const host: Pick<FieldReadersHost, 'resolveProjectionFieldMask'> = {
@@ -3374,7 +3388,7 @@ export class SecurityPlugin implements Plugin {
   async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
     const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
     if (mask.kind === 'answer') return mask.fields;
-    const queryGuard = mask.readQueryGuardPerms();
+    const queryGuard = mask.readQueryGuardPerms(await mask.readHopWithheld());
     return mask.allFields.filter((f) => queryGuard[f]?.readable !== false);
   }
 
@@ -3399,9 +3413,13 @@ export class SecurityPlugin implements Plugin {
       fieldPerms: Record<string, { readable: boolean; editable: boolean }>;
       readPartialMaskRules: () => Record<string, FieldMaskingRule>;
       /** [#20935] The middleware's query-guard map for these sets (computeQueryGuardFieldPerms). */
-      readQueryGuardPerms: () => Record<string, { readable: boolean; editable: boolean }>;
+      readQueryGuardPerms: (hopWithheld?: Iterable<string>) => Record<string, { readable: boolean; editable: boolean }>;
       /** [#26594] The write gate's verdict on an update of `row` naming every field (computeForbiddenFieldWrites). */
       readRowForbiddenWrites: (row: Record<string, unknown>) => Promise<string[]>;
+      /** What each computed field of the object is computed from (the posture's `computedFieldInputs`). */
+      computedFieldInputs: ComputedFieldInputs;
+      /** The computed fields withheld for what they read through a reference ({@link resolveHopWithheldFields}). */
+      readHopWithheld: () => Promise<Set<string>>;
     }
   > {
     // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
@@ -3409,8 +3427,9 @@ export class SecurityPlugin implements Plugin {
     const readPermissionEvaluator = () => this.permissionEvaluator;
     const readQl = () => this.ql;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+    const host: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
       computeForbiddenFieldWrites: (...a) => this.computeForbiddenFieldWrites(...a),
+      resolveHopWithheldFields: (...a) => this.resolveHopWithheldFields(...a),
       computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
       computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
@@ -5841,11 +5860,11 @@ export class SecurityPlugin implements Plugin {
     const fieldRequiredPermissions: Record<string, string[]> = {};
     // [#8993] Per-field partial-masking rules: { fieldName -> FieldMaskingRule }.
     const fieldMaskingRules: Record<string, FieldMaskingRule> = {};
-    // What each computed field reads: { fieldName -> its own fields read }.
-    const computedReads: Record<string, ReadonlySet<string> | null> = {};
+    // What each computed field is computed from: { fieldName -> its reads }.
+    const computedFieldInputs: Record<string, ComputedFieldInput> = {};
     const collectComputedReads = (fname: string, fdef: unknown) => {
-      const reads = computedFieldReads(fdef);
-      if (reads !== undefined) computedReads[fname] = reads;
+      const input = readComputedFieldExpression(fdef);
+      if (input !== undefined) computedFieldInputs[fname] = input;
     };
     const collectMaskingRule = (fname: string, fdef: any) => {
       const raw = fdef?.maskingRule;
@@ -5927,7 +5946,8 @@ export class SecurityPlugin implements Plugin {
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       fieldMaskingRules,
-      computedFieldReads: computedReads,
+      computedFieldInputs,
+      computedHopTargets: computedHopTargetsOf(computedFieldInputs, fields),
       unresolved: !obj,
       // [#10401 / #10424] Explanation only, and only on the path that is already
       // refusing. All causes deny identically — see the field's TSDoc.
@@ -6132,9 +6152,10 @@ export class SecurityPlugin implements Plugin {
    */
   private computeQueryGuardFieldPerms(
     objectName: string,
-    secMeta: Pick<ObjectSecurityMeta, 'computedFieldReads' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+    secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
+    hopWithheld: Iterable<string> = [],
   ): Record<string, { readable: boolean; editable: boolean }> {
     // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
@@ -6143,7 +6164,7 @@ export class SecurityPlugin implements Plugin {
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
     };
-    return computeQueryGuardFieldPerms.call(host, objectName, secMeta, permissionSets, delegatorSets);
+    return computeQueryGuardFieldPerms.call(host, objectName, secMeta, permissionSets, delegatorSets, hopWithheld);
   }
 
   /**
@@ -6239,6 +6260,34 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * The computed fields of an object a caller may not read for what they
+   * read THROUGH a reference: field-level security covers what a value is
+   * computed from, on the referenced record too. A computed field reading
+   * `record.ref.leaf` is withheld when the caller may not read `leaf` on the
+   * object `ref` points at — judged by that object's own read projection
+   * ({@link computeReadableFields}, which folds that object's computed fields
+   * in turn), or not determinable there (fail closed). The engine serves one
+   * hop, so the target's projection is asked without hops of its own.
+   *
+   * Every reader of the field map takes this set beside the posture: the
+   * result masker (step 4), the query guard (steps 2.5b and 2.9,
+   * {@link getQueryableFields}), the read projection and the explain `fls`
+   * layer.
+   */
+  private resolveHopWithheldFields(
+    secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
+    context: any,
+    options: { fallbackOnEmptySets: boolean },
+  ): Promise<Set<string>> {
+    if (!postureHasComputedHops(secMeta)) return Promise.resolve(new Set());
+    return resolveHopWithheldFields.call(
+      { readLocalReadableFields: (object: string, ctx: unknown) => this.computeReadableFields(object, ctx, { ...options, hops: false }) },
+      secMeta,
+      context,
+    );
+  }
+
+  /**
    * Step 4 of the engine middleware — the RESULT masker: mask the fields this
    * caller may not read in the records an operation returns (reads, and the
    * record a write echoes back), deleting a field the caller's field map
@@ -6259,6 +6308,7 @@ export class SecurityPlugin implements Plugin {
     permissionSets: PermissionSet[],
     secMeta: ObjectSecurityMeta,
     delegatorSets: PermissionSet[] | null,
+    hopWithheld: Iterable<string> = [],
   ): void {
     // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
     const readFieldMasker = () => this.fieldMasker;
@@ -6269,7 +6319,7 @@ export class SecurityPlugin implements Plugin {
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
     };
-    maskOperationResult.call(host, opCtx, permissionSets, secMeta, delegatorSets);
+    maskOperationResult.call(host, opCtx, permissionSets, secMeta, delegatorSets, hopWithheld);
   }
 
   private foldFieldRequiredPermissions(
