@@ -13,6 +13,15 @@
   - **Inline edit conflict.** When a save that changed several fields meets a newer version (409 `CONCURRENT_UPDATE`), the dialog lists each field with its label, your edit and the current value, instead of printing both as raw JSON. A one-field conflict looks as before.
   - **Share-link page.** The landing page lists the record's fields the way the record page does: the framework's system columns and the audit columns (`created_at`, `created_by`, `updated_at`, `updated_by`) are not listed, and only fields the object declares are shown when the server sends the field labels.
   - **Studio editor error box.** A refusal that is one unbroken token (a field-type enum list such as `"text"|"textarea"|…`) now wraps inside the box instead of running past the right edge of the window, so the whole message stays readable.
+- fbe349f: fix(console): a related list keyed by a parent lookup no longer blanks the record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `record:related_list` may name the parent field its `relationshipField` stores (`relationshipValueField`), for example an order's `selected_plan` lookup keying the plan's lines. On a record page such a list made the whole page fail with "Couldn't load this record" (「无法加载此记录」): the Console put it into the one-request record page call, which only answers lists keyed by the record's own id and refuses the whole request otherwise (400 `invalid_relationship`).
+  
+  - The record page call now leaves out every related list it cannot answer, by the same rule the related-count prefetch already used: a list keyed by a parent field other than `id`, or bound to a `dataSource` / `parentDataSource` of its own. Those lists read their rows themselves, as before the one-request page. Lists keyed by the record's id still come with the page call.
+  - A related list keyed by a parent lookup now filters by the lookup's stored id. The page record (and a `parentDataSource` parent) is read with its lookups expanded, so the list used to filter by the related record object, which the filter refused, and drew no rows.
 - Updated dependencies [f229dfd]
 - Updated dependencies [322ded7]
 - Updated dependencies [f4cafd5]
