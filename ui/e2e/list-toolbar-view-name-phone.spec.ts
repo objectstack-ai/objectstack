@@ -242,8 +242,8 @@ test.describe('list toolbar keeps the view name readable on a phone (objectstack
     }
   }
 
-  test('375px with three filter chips: the name is whole, the chips stay in the row', async ({ page }) => {
-    const r = await measure(page, fixture('全部客户', { chips: 3 }), 375);
+  test('375px with five filter chips, wider than the row: the name is whole, the chips scroll inside the row', async ({ page }) => {
+    const r = await measure(page, fixture('全部客户', { chips: 5 }), 375);
     expect(r.labelClipped, `label ${r.labelWidth.toFixed(2)}px of ${r.labelScrollWidth}px`).toBe(false);
     expect(r.overflowX).toBe(0);
     expect(within(r.chips!, r.row), 'chips leave the row').toBe(true);
