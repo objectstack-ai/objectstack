@@ -46,7 +46,7 @@ import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
-import { newUnitCommitQueue, openTrioCommitQueue, runOutsideOpenUnitsOnCommit, settleTrioCommitQueue, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
+import { newUnitCommitQueue, openTrioCommitQueue, runOutsideOpenUnits, runOutsideOpenUnitsOnCommit, settleTrioCommitQueue, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { scopedContextHost } from './engine-scoped-hosts.js';
@@ -168,11 +168,14 @@ export class ScopedContextFacet {
   }
 
   /** The body of `ScopedContext#[DETACHED_HOOK_RUN]`; the method's docblock there is its contract. */
-  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => Promise<T>): Promise<T | typeof UNIT_ROLLED_BACK> {
+  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK> {
     // The engine's ambient store and its published units, reached the `as any`
     // way `transaction` below reaches them.
     const engine = this.engine as any;
-    return runOutsideOpenUnitsOnCommit(engine?.txStore, engine?.openedUnits, this.executionContext?.transaction, body);
+    const threaded = this.executionContext?.transaction;
+    return waitForCommit
+      ? runOutsideOpenUnitsOnCommit(engine?.txStore, engine?.openedUnits, threaded, body)
+      : runOutsideOpenUnits(engine?.txStore, threaded, body);
   }
 
   /** The body of `ScopedContext#transaction`; the method's docblock there is its contract. */

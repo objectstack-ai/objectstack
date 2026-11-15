@@ -24,7 +24,7 @@ import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
 import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, seedHookUnreadMembership, type HookRunAs } from './hook-run-as.js';
-import { runDetachedHook, UNIT_ROLLED_BACK } from './unit-detach.js';
+import { runDetachedHook, UNIT_ROLLED_BACK, waitsForUnitCommit } from './unit-detach.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -534,8 +534,10 @@ export function wrapDeclarativeHook(
         // caller's: nothing awaits it, so a unit it joined would commit under
         // its writes ("Transaction query already complete"). [#33760] Once
         // that unit commits, and not at all when it rolls back — the unit read
-        // off `engineApi`, whatever api the handler itself runs on. `unit-detach.ts`.
-        void runDetachedHook(engineApi, () => runWithErrorPolicy(dispatching ? detached : atDispatch))
+        // off `engineApi`, whatever api the handler itself runs on. Only for a
+        // write event: a rollback does not undo a read, so an `afterFind` run
+        // starts now. `unit-detach.ts`.
+        void runDetachedHook(engineApi, () => runWithErrorPolicy(dispatching ? detached : atDispatch), waitsForUnitCommit(ctx.event))
           .then((ran) => {
             if (ran !== UNIT_ROLLED_BACK) { recordOutcome(); return; }
             logger.debug('[hook] async handler not run: the unit of work it was fired in rolled back', {

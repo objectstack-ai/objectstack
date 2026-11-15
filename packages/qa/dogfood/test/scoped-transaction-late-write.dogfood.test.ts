@@ -32,6 +32,8 @@ const NOTE = 'stl_note';
 /** The commit-dispatch describe's objects: `UNIT` is written inside units, `DOOR` opens the door's own. */
 const UNIT = 'stl_unit';
 const DOOR = 'stl_door';
+/** Read inside units: its `async` `afterFind` hook is not the unit's to hold or drop (#33760 review#2). */
+const READ = 'stl_read';
 
 /** Names whose `async` hook has STARTED (set synchronously, at the first line of its body). */
 const started = new Set<string>();
@@ -63,7 +65,7 @@ const stlStack = defineStack({
     name: 'Scoped transaction late-write fixture',
     description: 'A handler that writes inside ctx.api.transaction, and an async hook that writes after the unit commits.',
   },
-  objects: [named(TRIGGER), named(REC), named(NOTE), named(UNIT), named(DOOR)],
+  objects: [named(TRIGGER), named(REC), named(NOTE), named(UNIT), named(DOOR), named(READ)],
   hooks: [
     // The handler of the card's measurement. A `before*` hook, so the write
     // door opens no unit of its own (#22782) and `ctx.api.transaction` really
@@ -106,6 +108,14 @@ const stlStack = defineStack({
     // makes the write door open one. It runs after the `async` hook is
     // dispatched (priority 400 > 100), records whether that hook had already
     // started, and vetoes a `veto-` name, which rolls the door's unit back.
+    // A read's `async` hook: per row read, mark the start and write a note.
+    { name: 'stl_read_async', object: READ, events: ['afterFind'], async: true, onError: 'log',
+      handler: async (ctx: any) => {
+        const names = (Array.isArray(ctx.result) ? ctx.result : []).map((r: any) => String(r.name));
+        for (const name of names) started.add(name);
+        for (const name of names) await ctx.api.object(NOTE).insert({ name: 'after-read', rec_name: name });
+        for (const name of names) finished.set(name, 1);
+      } },
     { name: 'stl_door_async', object: DOOR, events: ['afterInsert'], async: true, onError: 'log', handler: commitProbe(DOOR) },
     { name: 'stl_door_gate', object: DOOR, events: ['afterInsert'], priority: 400,
       handler: (ctx: any) => {
@@ -256,6 +266,49 @@ describe('an async after-hook fired inside a unit runs on its commit, not on its
     expect(await stack.rows(DOOR, { name })).toHaveLength(0);
     expect(startedAtGate.get(name)).toBe(false);
     expect(await settled(name)).toEqual([false, 0]);
+  });
+
+  const readNotesOf = async (name: string) => (await stack.rows(NOTE, { rec_name: name, name: 'after-read' })).length;
+  /** Inside the unit: has `name`'s read hook started within 500 ms? A run held for the commit has not. */
+  const startedWhileOpen = async (name: string) => {
+    for (let i = 0; i < 10 && !started.has(name); i++) await new Promise((r) => setTimeout(r, 50));
+    return started.has(name);
+  };
+  const readRan = async (name: string) => {
+    for (let i = 0; i < 40 && !finished.has(name); i++) await new Promise((r) => setTimeout(r, 50));
+    return readNotesOf(name);
+  };
+
+  it('afterFind inside engine.transaction() that commits: the read\'s async hook starts in the unit\'s lifetime, not after the commit', async () => {
+    const name = uniq('read-commit');
+    await ql.insert(READ, { name }, { context: { isSystem: true } });
+    let startedInUnit: boolean | undefined;
+    await ql.transaction(async (trx: any) => {
+      await ql.find(READ, { where: { name } }, sys(trx));
+      startedInUnit = await startedWhileOpen(name);
+    });
+    expect(startedInUnit).toBe(true);
+    expect(await readRan(name)).toBe(1);
+  });
+
+  it('afterFind inside engine.transaction() that rolls back: the read\'s async hook still runs, and its own write stands', async () => {
+    const name = uniq('read-rollback');
+    await ql.insert(READ, { name }, { context: { isSystem: true } });
+    let startedInUnit: boolean | undefined;
+    await expect(ql.transaction(async (trx: any) => {
+      await ql.find(READ, { where: { name } }, sys(trx));
+      startedInUnit = await startedWhileOpen(name);
+      throw new Error('rolled back by the probe');
+    })).rejects.toThrow('rolled back by the probe');
+    expect(startedInUnit).toBe(true);
+    expect(await readRan(name)).toBe(1);
+  });
+
+  it('CONTROL afterFind outside any unit: the read\'s async hook runs, unchanged', async () => {
+    const name = uniq('read-plain');
+    await ql.insert(READ, { name }, { context: { isSystem: true } });
+    await ql.find(READ, { where: { name } }, { context: { isSystem: true } });
+    expect(await readRan(name)).toBe(1);
   });
 
   it('CONTROL outside any unit: the hook runs and sees its row, unchanged', async () => {

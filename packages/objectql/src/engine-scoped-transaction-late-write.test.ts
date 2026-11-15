@@ -364,9 +364,15 @@ async function makeCommitEngine() {
   let dropped!: (hook: string) => void;
   const drops: string[] = [];
   const quiet = () => {};
+  // A deferred run's failure reaches the wrapper's error line (fire-and-forget).
+  let errored!: (hook: string) => void;
+  const erroredRun = new Promise<string>((r) => { errored = r; });
   const logger = {
     debug: (msg: string, meta?: any) => { if (/rolled back/.test(msg)) { drops.push(meta?.hook); dropped?.(meta?.hook); } },
-    info: quiet, warn: quiet, error: quiet,
+    info: quiet, warn: quiet,
+    error: (msg: string, _err?: unknown, meta?: any) => {
+      if (/fire-and-forget/.test(msg)) { events.push(`error logged:${meta?.hook}`); errored(meta?.hook); }
+    },
   };
   const engine = new ObjectQL({ logger } as any);
   const driver = makeDriver();
@@ -417,16 +423,39 @@ async function makeCommitEngine() {
       settle[name]!(0);
     },
   } as unknown as Hook;
-  const bind = (withGate: boolean, opts: { userPin?: boolean } = {}) => bindHooksToEngine(
+  // [#33760 review#2] A read's `async` hook: a rollback does not undo the read,
+  // so its run is not the unit's to hold or drop. It writes a note of its own.
+  const readNote = {
+    name: 'read_note', object: 'rec', events: ['afterFind'], async: true, onError: 'log',
+    handler: async (ctx: any) => {
+      events.push('read-hook started');
+      runOf('read');
+      await ctx.api.object('note').insert({ name: 'note:read' });
+      settle.read!(0);
+    },
+  } as unknown as Hook;
+  // A deferred run that throws once it starts, after the commit. The default
+  // `onError` ('abort'), so the throw reaches the fire-and-forget catch.
+  const thrower = {
+    name: 'thrower', object: 'rec', events: ['afterInsert'], async: true,
+    handler: async () => { events.push('thrower started'); throw new Error('the deferred run fails'); },
+  } as unknown as Hook;
+  const bind = (withGate: boolean, opts: { userPin?: boolean; read?: boolean; thrower?: boolean } = {}) => bindHooksToEngine(
     engine,
-    opts.userPin ? [userPin] : withGate ? [asyncNote, gate] : [asyncNote],
+    opts.read ? [readNote] : opts.thrower ? [thrower] : opts.userPin ? [userPin] : withGate ? [asyncNote, gate] : [asyncNote],
     { packageId: 'app:t', logger: logger as any },
   );
   const api = new ScopedContext({ isSystem: true } as any, engine as any);
   const droppedRun = () => new Promise<string>((r) => { dropped = r; });
   const notes = () => driver.rowsOf('note').map((r: any) => r.name);
-  return { engine, driver, api, events, drops, bind, runOf, droppedRun, notes, apiKinds };
+  return { engine, driver, api, events, drops, bind, runOf, droppedRun, notes, apiKinds, erroredRun };
 }
+
+/** Did the read's hook start while the unit is still open? Bounded, so a run held for the commit reads as `not started`. */
+const startedInUnit = (started: Promise<unknown>) => Promise.race([
+  started.then(() => 'started in the unit'),
+  new Promise<string>((r) => setTimeout(() => r('not started in the unit'), 200)),
+]);
 
 describe('#33760 — an async after-hook fired inside a unit runs on its commit, never on its rollback', () => {
   it('engine.transaction() commits: the hook starts after the commit, sees its row, and writes outside the unit', async () => {
@@ -573,6 +602,63 @@ describe('#33760 — an async after-hook fired inside a unit runs on its commit,
     expect(await drop).toBe('user_pin');
     expect(events).toEqual(['rollback']);
     expect(drops).toEqual(['user_pin']);
+  });
+
+  it('a deferred run that throws after the commit: transaction() still resolves and the failure is logged', async () => {
+    const { engine, events, bind, erroredRun } = await makeCommitEngine();
+    bind(false, { thrower: true });
+    await expect(engine.transaction(async (trx: any) => {
+      await engine.insert('rec', { name: 'r1' }, { context: { ...trx, isSystem: true } });
+      events.push('callback returns');
+      return 'resolved';
+    })).resolves.toBe('resolved');
+    expect(await erroredRun).toBe('thrower');
+    expect(events).toEqual(['callback returns', 'commit', 'thrower started', 'error logged:thrower']);
+  });
+
+  it('afterFind inside engine.transaction() that commits: a read\'s async hook starts at dispatch, in the unit\'s lifetime, not after the commit', async () => {
+    const { engine, driver, events, bind, runOf, notes } = await makeCommitEngine();
+    await engine.insert('rec', { name: 'r0' }, { context: { isSystem: true } });
+    bind(false, { read: true });
+    await engine.transaction(async (trx: any) => {
+      await engine.find('rec', {}, { context: { ...trx, isSystem: true } } as any);
+      events.push(await startedInUnit(runOf('read')));
+    });
+    await runOf('read');
+    expect(events).toEqual(['read-hook started', 'started in the unit', 'commit']);
+    expect(notes()).toEqual(['note:read']);
+    // Outside the unit, as under #33651: its write enrolled in nothing.
+    expect(unenrolled(driver).filter(([o]) => o === 'note')).toEqual([['note', true]]);
+  });
+
+  it('afterFind inside engine.transaction() that rolls back: the read\'s async hook still runs, outside the unit', async () => {
+    const { engine, driver, events, drops, bind, runOf } = await makeCommitEngine();
+    await engine.insert('rec', { name: 'r0' }, { context: { isSystem: true } });
+    bind(false, { read: true });
+    await expect(engine.transaction(async (trx: any) => {
+      await engine.find('rec', {}, { context: { ...trx, isSystem: true } } as any);
+      events.push(await startedInUnit(runOf('read')));
+      throw new Error('the caller rolls back');
+    })).rejects.toThrow('the caller rolls back');
+    await runOf('read');
+    expect(events).toEqual(['read-hook started', 'started in the unit', 'rollback']);
+    expect(drops).toEqual([]);
+    // Its write enrolled in nothing. (This double's rollback restores a whole
+    // store snapshot, so the row itself is not read here; the dogfood twin
+    // reads it standing on SQLite.)
+    expect(unenrolled(driver).filter(([o]) => o === 'note')).toEqual([['note', true]]);
+  });
+
+  it('CONTROL afterFind outside any unit: the read\'s async hook starts at dispatch, unchanged', async () => {
+    const { driver, api, events, bind, runOf, notes } = await makeCommitEngine();
+    await api.object('rec').insert({ name: 'r0' });
+    bind(false, { read: true });
+    await api.object('rec').find({});
+    events.push('find returns');
+    await runOf('read');
+    expect(events).toEqual(['read-hook started', 'find returns']);
+    expect(driver.begun).toHaveLength(0);
+    expect(notes()).toEqual(['note:read']);
   });
 
   it('CONTROL outside any unit: the hook starts at dispatch, before the write returns, unchanged', async () => {

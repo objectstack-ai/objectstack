@@ -53,6 +53,18 @@
  * sandbox runner's `ctx.api.transaction(fn)` — opens one per handle it owns
  * ({@link openTrioCommitQueue}). Outside any unit, or where no unit opened
  * (a driver without transactions), the run starts at dispatch, as before.
+ *
+ * Only a WRITE event's run waits ({@link waitsForUnitCommit}). A rollback
+ * undoes the write that fired `afterInsert` / `afterUpdate` / `afterDelete`,
+ * so a run that announces it must not outlive it. It does not undo a read:
+ * the rows `afterFind` saw were already returned to the caller, so an `async`
+ * `afterFind` run starts at dispatch, outside the units, as under #33651,
+ * whatever the unit it was read in does next.
+ *
+ * Every run a unit queued starts in one synchronous pass once it commits, in
+ * dispatch order: a bulk write with a per-row `async` hook holds one context
+ * copy per row until then, bounded by the per-row hook budget
+ * (`resolveBulkPerRowHookBudget`), and then starts every handler at once.
  */
 
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
@@ -82,6 +94,18 @@ export function runOutsideOpenUnits<T>(
   if (threaded != null) handles.add(threaded);
   const run = () => detachedHandles.run(handles, body);
   return typeof txStore?.exit === 'function' ? txStore.exit(run) : run();
+}
+
+/**
+ * The events whose `async` run waits for the commit of the unit it was
+ * dispatched in, and is dropped when that unit rolls back: the `after*`
+ * events of a write. Any other event (`afterFind`) starts at dispatch.
+ */
+const UNIT_SETTLED_EVENTS: ReadonlySet<string> = new Set(['afterInsert', 'afterUpdate', 'afterDelete']);
+
+/** Does an `async` run dispatched for `event` wait for its unit's commit? */
+export function waitsForUnitCommit(event: unknown): boolean {
+  return typeof event === 'string' && UNIT_SETTLED_EVENTS.has(event);
 }
 
 /** What a detached run answers when the unit it waited for rolled back: the body never ran. */
@@ -193,8 +217,8 @@ export function runOutsideOpenUnitsOnCommit<T>(
 
 /**
  * The key of `ScopedContext#[DETACHED_HOOK_RUN]`, which runs a body outside
- * the units open for that api, once the unit it was dispatched in commits
- * ({@link runOutsideOpenUnitsOnCommit}). A symbol, and ⛔
+ * the units open for that api, at once or once the unit it was dispatched in
+ * commits ({@link runOutsideOpenUnitsOnCommit}). A symbol, and ⛔
  * not re-exported from the package entry, for the reason `SEED_USER_GRANTS`
  * gives (`hook-run-as.ts`): it is no nameable member of the class's published
  * face.
@@ -202,17 +226,18 @@ export function runOutsideOpenUnitsOnCommit<T>(
 export const DETACHED_HOOK_RUN: unique symbol = Symbol('objectstack.objectql.detachedHookRun');
 
 interface DetachableHookApi {
-  [DETACHED_HOOK_RUN]<T>(body: () => Promise<T>): Promise<T | typeof UNIT_ROLLED_BACK>;
+  [DETACHED_HOOK_RUN]<T>(body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK>;
 }
 
 /**
  * Run an `async` hook's `body` detached from the units open for `api`, the
- * hook's `ctx.api`, once the unit it was dispatched in commits; answers
- * {@link UNIT_ROLLED_BACK} when that unit rolls back instead. An api that
- * cannot detach (a hook context assembled by hand) runs `body` as is.
+ * hook's `ctx.api`. With `waitForCommit` ({@link waitsForUnitCommit}), once the
+ * unit it was dispatched in commits, answering {@link UNIT_ROLLED_BACK} when
+ * that unit rolls back instead; without it, at once. An api that cannot
+ * detach (a hook context assembled by hand) runs `body` as is.
  */
-export function runDetachedHook<T>(api: unknown, body: () => Promise<T>): Promise<T | typeof UNIT_ROLLED_BACK> {
+export function runDetachedHook<T>(api: unknown, body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK> {
   const detachable = api as Partial<DetachableHookApi> | undefined;
   if (!detachable || typeof detachable[DETACHED_HOOK_RUN] !== 'function') return body();
-  return detachable[DETACHED_HOOK_RUN](body);
+  return detachable[DETACHED_HOOK_RUN](body, waitForCommit);
 }

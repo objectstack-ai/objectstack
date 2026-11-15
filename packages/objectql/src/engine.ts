@@ -6540,15 +6540,17 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * and the one this api carries treated as closed for the run
    * (`runOutsideOpenUnits`, `unit-detach.ts`). Called by `wrapDeclarativeHook`
    * when such a hook detaches, so its writes never enrol in a unit that
-   * commits under them. [#33760] Started once the unit it was dispatched in
+   * commits under them. [#33760] With `waitForCommit` (a write event's run,
+   * `waitsForUnitCommit`), started once the unit it was dispatched in
    * commits, and answering `UNIT_ROLLED_BACK` without running when that unit
-   * rolls back (`runOutsideOpenUnitsOnCommit`); at once outside any unit.
+   * rolls back (`runOutsideOpenUnitsOnCommit`); at once outside any unit, and
+   * at once for any other event (`afterFind`).
    *
    * Keyed on {@link DETACHED_HOOK_RUN}, a symbol the package entry does not
    * export, so it is no nameable member of this class's published face.
    */
-  [DETACHED_HOOK_RUN]<T>(body: () => Promise<T>): Promise<T | typeof UNIT_ROLLED_BACK> {
-    return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body);
+  [DETACHED_HOOK_RUN]<T>(body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK> {
+    return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body, waitForCommit);
   }
 
   /**
