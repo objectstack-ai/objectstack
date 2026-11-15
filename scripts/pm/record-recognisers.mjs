@@ -3636,7 +3636,7 @@ export async function selfTest() {
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
       + 'doorbell — `To: <seat>` then each of the table\'s keys read, the table named both ways in the protocol text and printed by `--mailbox-keys`, and a key with no `To:`, a `To:` naming a login, free text, an acknowledgement, '
-      + 'a key outside the table, a second line and an over-long line refused; the knock signature — verified only for a session the seat it names lists on its held post (`Successor-of:` included) or its open mailbox opening, a maintainer's knock exempt, everything else `unverified seat signature` and failing closed; the review claim line — read signed and unsigned, '
+      + 'a key outside the table, a second line and an over-long line refused; the knock signature — verified only for a session the seat it names lists on its held post (`Successor-of:` included) or its open mailbox opening, a maintainer\'s knock exempt, everything else `unverified seat signature` and failing closed; the review claim line — read signed and unsigned, '
       + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the earliest live claim holding; the review hold '
       + 'line — read signed and unsigned, spelled verbatim in the rule text, per head and cleared only by a new head, an unreadable '
       + 'line listed and voiding nothing, its 24-hour age a reading '
