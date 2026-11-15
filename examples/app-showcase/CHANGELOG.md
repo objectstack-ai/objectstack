@@ -1,5 +1,103 @@
 # @objectstack/example-showcase
 
+## 0.3.27
+
+### Patch Changes
+
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [66919b6]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [6718884]
+- Updated dependencies [d3ceb1d]
+- Updated dependencies [16e3486]
+- Updated dependencies [5e250a6]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [c05c0c7]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [0c2aeb9]
+- Updated dependencies [01d206d]
+- Updated dependencies [01d206d]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a752057]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [218b012]
+- Updated dependencies [df9fe94]
+- Updated dependencies [467ec26]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [e3f0cfd]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [67725f1]
+- Updated dependencies [06b5669]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [c43bffd]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [c94a4da]
+- Updated dependencies [e997113]
+- Updated dependencies [1e358cc]
+- Updated dependencies [3eac63a]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/driver-sql@18.5.0
+  - @objectstack/cloud-connection@18.5.0
+  - @objectstack/connector-openapi@18.5.0
+  - @objectstack/connector-mcp@18.5.0
+  - @objectstack/connector-rest@18.5.0
+  - @objectstack/connector-slack@18.5.0
+  - @objectstack/organizations@18.5.0
+  - @objectstack/service-datasource@18.5.0
+  - @objectstack/service-i18n@18.5.0
+  - @objectstack/service-print@18.5.0
+
 ## 0.3.26
 
 ### Patch Changes

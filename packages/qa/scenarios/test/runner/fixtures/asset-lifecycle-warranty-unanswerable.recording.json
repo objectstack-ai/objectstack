@@ -1,0 +1,28 @@
+{
+  "driver": {
+    "driver": "claude-code-cli",
+    "authMethod": "oauth_token",
+    "apiBilled": false
+  },
+  "turns": {
+    "asset_lifecycle/scratch/run/laptop_warranty_expiring/-": {
+      "replyText": "I can't answer this from the app, because it doesn't store warranty dates: no asset, category or other object has a warranty, warranty end date or vendor contract field.\n\nThe closest thing it records is depreciation. The Laptop category gives a 36-month useful life, which is an accounting life, not a warranty.\n\nIf it helps, I can list the laptops whose 36-month depreciation life ends by 31 Dec instead.\n\nSource: demoasset_asset_category",
+      "toolCalls": [
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": {
+            "objectName": "demoasset_asset_category"
+          },
+          "output": "{\n  \"records\": [\n    {\n      \"id\": \"cat_chair\",\n      \"name\": \"Office chair\",\n      \"useful_life_months\": 120,\n      \"depreciation_method\": \"straight_line\"\n    },\n    {\n      \"id\": \"cat_laptop\",\n      \"name\": \"Laptop\",\n      \"useful_life_months\": 36,\n      \"depreciation_method\": \"straight_line\"\n    },\n    {\n      \"id\": \"cat_monitor\",\n      \"name\": \"Monitor\",\n      \"useful_life_months\": 60,\n      \"depreciation_method\": \"straight_line\"\n    },\n    {\n      \"id\": \"cat_phone\",\n      \"name\": \"Mobile phone\",\n      \"useful_life_months\": 24,\n      \"depreciation_method\": \"straight_line\"\n    }\n  ],\n  \"total\": 4\n}"
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 3
+      }
+    }
+  },
+  "files": {}
+}

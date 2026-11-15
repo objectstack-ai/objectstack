@@ -1,5 +1,156 @@
 # @objectstack/cloud-connection
 
+## 18.5.0
+
+### Patch Changes
+
+- ea67b26: fix(cloud-connection, runtime, objectql)!: an install-local uninstall withdraws the package's action handlers and body hooks from the running engine, so a call that names no package is served by the one remaining holder at once instead of after a restart
+  
+  Clause-②: yes (narrowing) — `ObjectQL#removeActionsByPackage` now hands a key it empties in the slot a call that names no package reads back to the entry another owner still holds under it in its own slot. On `ObjectQL#removePackage`, on the binder's re-bind that drops a package body of a multi-package artifact, and on the authored-action resync's teardown (`removeActionsByPackage('metadata-service')`), the action doors (`POST /api/v1/actions/OBJECT/NAME/ID`, MCP `run_action`) now reach that handed-back entry. Before, they reached the next entry their handler-key rotation held (`OBJECT`, then `global`, then `*`, per handler-key candidate), and answered "not found" only when none was held. The owner gates of the reached entry move with it, so a call that was served can now be refused `403 PERMISSION_DENIED`, `409 ACTION_DISABLED` or `503`. The install-local uninstall the card reports is widening only: a bare call that answered `409 RESOURCE_CONFLICT`, naming the uninstalled package as one of two owners, now answers with the one remaining holder's handler. `@objectstack/runtime` gains the export `unbindAppArtifactHandlers` and the type `AppArtifactHandlerUnbinding`.
+  Metadata-protocol: none
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row changes: what moves is which in-memory handler entry a call that names no package reaches after a live removal, which is the entry a restart already reaches, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for a call that names no package, on a key that `removePackage`, a re-bind that drops a body, or the authored-action resync empties while another owner (host code, a plugin, a package or the environment) still holds a handler under it. The emptied key now resolves to that remaining holder's entry, so the call runs that handler, and that entry's owners' gates (403 / 409 `ACTION_DISABLED` / 503) can answer where the door's rotation used to fall through to a later entry and serve it. This is what a restart of the same process already answers. No data migration or heal is needed: nothing persisted changes. The install-local uninstall the card reports is unaffected, because the uninstalled package's handler stayed bound there and the key never emptied.
+  
+  **The defect.** `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the package from the registry and left every handler its install had bound on the engine under `app:<manifestId>`: script-action handlers, body hooks and bundle functions. With two packages each holding an action of one name on one object, a call that names no package kept being refused as ambiguous until the runtime restarted, and the uninstalled package's body hooks kept firing.
+  
+  **The fix.**
+  
+  - `@objectstack/runtime`: `unbindAppArtifactHandlers(ql, appId, { logger, source })` is the inverse of `bindAppArtifactHandlers`. It removes the actions, hooks and functions of the package's owner and of every owner the package's last bind on that engine recorded (a multi-package artifact's bodies), releases those owners' bare-name function claims, and forgets the bind record, so a later install binds as a first bind. Another package's handlers, host code and the environment's authored-action handlers are untouched. Jobs keep leaving through the `runtime.package-jobs` uninstall cleanup.
+  - `@objectstack/cloud-connection`: the uninstall door calls it right after the registry withdrawal, and not when the registry refuses the withdrawal (the package stays loaded then). A runtime that has no such export is warned with the remedy, as the install door already warns for a runtime with no binder.
+  - `@objectstack/objectql`: `removeActionsByPackage` hands a key back to the owner that still holds a handler for it. Each owner keeps its handler in its own package slot, but the slot a call that names no package runs held only the last registration. Removing that registration emptied the key, so the engine's bare `executeAction` answered "not found" while another owner still held a handler. The key now takes back the entry another coordinate's slot holds: the last coordinate holding the key in the order the slots were created, which is not always the last registration of this key. That choice matters where the bare-call rule runs one owner while others hold the key: host code or a plugin beside one package on an object-bound key, and two shared owners with no package (host code beside a plugin, or two plugins). When the earlier-created slot registered this key last, the hand-back runs the other holder's handler where a restart runs the last registration. While two or more packages still hold the key, the bare call is refused naming them as before.
+  
+  **Not changed.** `PATCH /api/v1/packages/:id/disable` leaves a disabled package's handlers in place, and the bare-call rule already counts no disabled package as an owner. `DELETE /api/v1/packages/:id` (the protocol's `deletePackage`) does not call this unbind, so it is unchanged.
+- Updated dependencies [f229dfd]
+- Updated dependencies [0b89b33]
+- Updated dependencies [322ded7]
+- Updated dependencies [2399e39]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [66919b6]
+- Updated dependencies [605d712]
+- Updated dependencies [3269cab]
+- Updated dependencies [02f55c5]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [128b657]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [8403725]
+- Updated dependencies [a1e0402]
+- Updated dependencies [548f8ff]
+- Updated dependencies [6718884]
+- Updated dependencies [d3ceb1d]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [4bba8b8]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [5e250a6]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [9673030]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [c05c0c7]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [534e115]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [0c2aeb9]
+- Updated dependencies [bd439f1]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a752057]
+- Updated dependencies [6e28797]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [26b5994]
+- Updated dependencies [505a239]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [47a3b95]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [218b012]
+- Updated dependencies [df9fe94]
+- Updated dependencies [467ec26]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [b95d915]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [e3f0cfd]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [67725f1]
+- Updated dependencies [06b5669]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [c92ae14]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [c43bffd]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [1e358cc]
+- Updated dependencies [3eac63a]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+- Updated dependencies [1e889b1]
+- Updated dependencies [d7e1a5a]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/metadata-protocol@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/observability@18.5.0
+  - @objectstack/service-cluster@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

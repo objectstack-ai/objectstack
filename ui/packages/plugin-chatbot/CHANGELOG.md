@@ -1,5 +1,108 @@
 # @object-ui/plugin-chatbot
 
+## 18.5.0
+
+### Patch Changes
+
+- ba32e79: fix(plugin-chatbot, app-shell, i18n): the AI build chat says what really happened — the plan card follows the build, a message typed during a reply waits instead of being lost, the draft preview of an unpublished object is an empty list, build issues read in the customer's words, and the change card names objects and fields by label
+  
+  Clause-②: yes (widening) — `ChatbotEnhancedProps` (published by `@object-ui/plugin-chatbot`) gains three optional props, `resolveObjectLabel`, `resolveFieldLabel` and `resolveFieldTypeLabel`; the `@object-ui/i18n` packs gain the keys `chatbot.plan.confirmed`, `chatbot.plan.buildFailed`, `chatbot.build.issuesCount`, `chatbot.build.issuesSummary`, `chatbot.build.warningsSummary`, `chatbot.build.issuesDetails`, the count family `chatbot.build.needsAttention` (each locale's plural slots), `chatbot.composer.queued`, `chatbot.composer.queuedCancel`, `preview.unpublishedList.title` and `preview.unpublishedList.message` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **The plan card follows the build.** It read 「已搭建」 (Built) as soon as any `apply_blueprint` call appeared after it, before anything was built. It now reads Confirmed once "Build it" is clicked, Building while that build call runs, Built only when the call's result says `drafted` or `published`, and "Not built — nothing was created" (with Build it and Adjust offered again) when the call was refused, errored, or ended with the turn and no result. An `awaiting_confirmation` answer still leaves the card pending (objectui#8343), and a build that ran is still never offered a second Build it (#432).
+  - **A message typed while a reply runs is kept.** The composer used to be disabled while the assistant answered. It stays usable: a message sent during a reply waits in a strip above the box ("Sends when the current reply finishes") and is sent, oldest first, as soon as the reply ends. Each waiting message can be cancelled, which puts its text back in the box. On a new conversation, a second message sent while the first send is still creating the conversation used to be dropped without a word; it now joins that first message, which has not left the browser yet, so both reach the agent in the first turn.
+  - **The draft preview of an unpublished object is an empty list.** In `?preview=draft`, the list read of an object that was only drafted answered `404 OBJECT_NOT_FOUND` and the list printed it. In the draft preview, a list read that the engine answers that way, for any object it has not registered (a lookup into another drafted object included), now answers an empty page, and the listed object's own empty state says records appear after publish. Any other failure, and every read outside the preview, is shown as before.
+  - **Build issues read in the customer's words.** The build card's chip reads "N to fix", and the issues block leads with one sentence saying what to do; the verification messages written for the agent sit in a closed "Technical details" section. The published badge's failed-item count ("· 2 need attention") was English in every locale; it now comes from the pack and agrees with its number.
+  - **The edit confirmation card names objects and fields by label.** The Console passes resolvers from its metadata; the card shows `Customer · Phone` and the field type's localized name, keeping the machine name in the tooltip. A name not yet in the metadata (a field the change adds) keeps its machine name.
+- 020ce3d: fix(plugin-chatbot, i18n): the AI build chat's plan card says what its 「· 补充」 (`· suggested`) field mark means
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` packs gain the key `chatbot.plan.suggestedFieldLegend` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - On the plan card, a field the user's words did not name is drawn as a dashed chip ending in 「· 补充」 (en `· suggested`), and nothing on the card said what that meant: the chip's tooltip is the field's machine name. When at least one field on the card is suggested, the card now draws one line under its field rows: "Fields marked “suggested” were added by the AI; you didn’t ask for them." (zh-Hans 「标「补充」的字段是 AI 自行补充的，你没有要求。」). A card with no suggested field draws no such line, and the chip's tooltip still shows the machine name.
+- 030ce02: fix(plugin-chatbot, console): a failed AI chat conversation create gives back every message sent while it waited, not only the last one
+  
+  Clause-②: yes (widening) — `ChatbotEnhanced` (`@object-ui/plugin-chatbot`) takes a new optional prop, `unsentText`: the text a not-sent `error` gives back to the composer when the host holds what was not sent. Nothing is removed or narrowed; a host that passes nothing keeps today's restore.
+  Metadata-protocol: none
+  
+  - **Two messages, then a failed create.** On a new AI chat conversation the first message waits for `POST /conversations`, and a second message sent during that wait joins it. When the create then failed, the message box got back only the second message, and the first was lost. The box now gets both, first part first, with the "Couldn't send your message" notice as before, and sending again sends the joined text once. This holds on the full-page AI chat, in the console's chat dock and in the Studio copilot.
+  - **`ChatbotEnhanced`.** The not-sent restore puts the host's `unsentText` back in an empty box when the host passes one, and the text the composer last submitted when it does not (unchanged).
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

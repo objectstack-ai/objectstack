@@ -4056,6 +4056,14 @@ const fr = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Il vous reste {{left}} de votre quota d’IA. Un modèle marqué ×N le consomme N fois plus vite que le modèle par défaut.',
+      confirmTitle: 'Passer à {{model}} ?',
+      confirmBody: 'Chaque message avec ce modèle consomme {{multiplier}} fois plus de quota d’IA qu’un message avec le modèle par défaut.',
+      confirmAllowance: 'Il en reste {{left}}, et avec ce modèle il s’épuise {{multiplier}} fois plus vite.',
+      confirmCancel: 'Annuler',
+      confirmAction: 'Changer de modèle',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Envoyer le message',
     scrollToBottom: 'Aller au dernier message',
@@ -4083,7 +4091,9 @@ const fr = {
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
+      list_datasets: "Consulter les indicateurs disponibles",
       query_data: "Interroger les données nécessaires",
+      query_dataset: "Interroger un indicateur",
       query_records: "Rechercher les enregistrements",
       read_package_doc: "Lire le guide de l’application",
       search_knowledge: "Consulter la base de connaissances",

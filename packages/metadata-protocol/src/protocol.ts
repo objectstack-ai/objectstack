@@ -10854,6 +10854,25 @@ export class ObjectStackProtocolImplementation implements
      * {@link rollbackToPackageCommit} inherited it, so a whole-package
      * rollback could report success and change nothing the process could see.
      *
+     * [#33563] …and an item whose row was written but whose next step did not
+     * land is reported in `failed[]`, not `reverted[]`: the registry refused
+     * the restored object, its storage did not follow the restored body (the
+     * advisory stays on `advisories`), its mutation projector failed, or a
+     * step after the row write threw. The entry names the row state (removed,
+     * or restored to the body of version N) beside the step that failed, and
+     * the revert's own commit still records the row change. A write-through
+     * fault the registry helper only logs (every type but `object`) is not
+     * seen here.
+     *
+     * [#33564, ADR-0067 D3] The revert's own commit records, per row it
+     * changed, the version that row held before the revert (`prevVersion`),
+     * and `existedBefore` true exactly when the row was there, so reverting
+     * the revert restores what it replaced: the restored body's predecessor,
+     * or the removed row, written again. An item recorded as existing before
+     * the commit but with no version to restore (the shape revert commits
+     * recorded before this) is named in `failed[]`, with nothing written,
+     * never skipped.
+     *
      * [#9174] An item whose STORED `type` is non-canonical
      * ({@link isNonCanonicalStoredType}) is REFUSED on the restore limb, into
      * `failed[]` with `code: 'STORED_TYPE_NOT_CANONICAL'` — the same wire-visible
@@ -10924,11 +10943,16 @@ export class ObjectStackProtocolImplementation implements
      * `failed[]` carries both kinds of failure a step can have: a step that
      * THREW (one entry for the commit), and every item a step REFUSED and
      * reported in its own returned `failed[]` (one entry per item, its `error`
-     * naming the item and quoting the step's client-facing text). Either makes
-     * `success` false — the declared answer's "true exactly when nothing
-     * failed". A refused item stops neither its commit nor the rollback: the
-     * step still reverts the item's neighbours and records its revert commit,
-     * so that commit is also listed in `revertedCommits`.
+     * naming the item and quoting the step's client-facing text) — an item
+     * whose row the step wrote but whose registry, storage or projection step
+     * failed among them, its row state named. Either makes `success` false —
+     * the declared answer's "true exactly when nothing failed". A refused item
+     * stops neither its commit nor the rollback: the step still reverts the
+     * item's neighbours and attempts its own revert commit, so that commit is
+     * also listed in `revertedCommits`. [#33486] That record is best effort:
+     * when the commit store is unprovisioned or the write fails, nothing is
+     * recorded and the step's answer omits `revertCommitId`, so the step is on
+     * no package-commit timeline and cannot itself be reverted as a commit.
      *
      * [#32700] `advisories` carries every step's own `advisories` (its storage
      * sync refusals and stored-expression fill notices), in step order;

@@ -27,6 +27,12 @@
  *     marked `⚠`: `asked for sonnet` on the author row, `⚠ N not sonnet` on a
  *     Run row. Each turn in the record's `cardRun` carries `model`,
  *     `requestedModel` and `modelMismatch`.
+ *   - Effort: the effort level each turn ASKED for (`--effort`,
+ *     `--author-effort`, `--ask-effort`; `TurnSummary.requestedEffort`), shown
+ *     beside the served model — `· effort high` on the author row and on the
+ *     `Run · model` rows. No stream reports the effort a turn was served, so
+ *     this is the asked-for level, never a reading; a turn that asked for none
+ *     ran at the CLI's default and shows no effort.
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
@@ -69,7 +75,7 @@ export interface HalfScores {
     /** The authoring turn did not finish (`BuildHalf.notMeasured`): 0 of 0, never degraded. */
     notMeasuredReason?: string;
     /** The authoring turn: how it ended, the turns it took of the cap it ran under, its wall-clock time, and the model it was served of the one it asked for. */
-    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number; model?: string; requestedModel?: string; modelMismatch?: true };
+    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number; model?: string; requestedModel?: string; modelMismatch?: true; requestedEffort?: string };
   };
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
@@ -95,6 +101,8 @@ export interface ModelTally {
   requested: string[];
   /** Turns served a model other than the one they asked for (`TurnSummary.modelMismatch`). */
   mismatched: number;
+  /** Every effort level the turns asked for (`--effort` / `--ask-effort`, `TurnSummary.requestedEffort`); empty ⇒ the CLI's default. */
+  requestedEfforts: string[];
 }
 
 export const MODEL_NOT_REPORTED = '(not reported)';
@@ -157,6 +165,7 @@ export function buildTally(b: BuildHalf | undefined, expectCount: number): HalfS
         ...(b.author.model ? { model: b.author.model } : {}),
         ...(b.author.requestedModel ? { requestedModel: b.author.requestedModel } : {}),
         ...(b.author.modelMismatch ? { modelMismatch: true as const } : {}),
+        ...(b.author.requestedEffort ? { requestedEffort: b.author.requestedEffort } : {}),
       }
     : undefined;
   if (b.notMeasured) return { passed: 0, total: 0, degraded: false, failedCommands: [], notMeasuredReason: b.notMeasured, ...(author ? { author } : {}) };
@@ -236,7 +245,8 @@ export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
   const served: Record<string, number> = {};
   for (const t of turns) served[t.model ?? MODEL_NOT_REPORTED] = (served[t.model ?? MODEL_NOT_REPORTED] ?? 0) + 1;
   const requested = [...new Set(turns.flatMap((t) => (t.requestedModel ? [t.requestedModel] : [])))];
-  return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length };
+  const requestedEfforts = [...new Set(turns.flatMap((t) => (t.requestedEffort ? [t.requestedEffort] : [])))];
+  return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length, requestedEfforts };
 }
 
 /** Sum USD figures without float noise (`0.1 + 0.2`): to the millionth of a dollar. */
@@ -378,18 +388,31 @@ const servedText = (a: { model?: string; requestedModel?: string; modelMismatch?
     : a.requestedModel
       ? `model not reported (asked for ${a.requestedModel})`
       : undefined;
+/** `effort high`; `effort low / high` when a half's turns asked for more than one; nothing when none asked for any. */
+const effortText = (efforts: readonly string[]): string | undefined => (efforts.length ? `effort ${efforts.join(' / ')}` : undefined);
 const authorCell = (b: HalfScores['build']) =>
   b?.author
-    ? [b.author.resultSubtype ?? '(no result)', turnsText(b.author), b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded', servedText(b.author)]
+    ? [
+        b.author.resultSubtype ?? '(no result)',
+        turnsText(b.author),
+        b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded',
+        servedText(b.author),
+        effortText(b.author.requestedEffort ? [b.author.requestedEffort] : []),
+      ]
         .filter(Boolean)
         .join(' · ')
     : '—';
-/** `claude-sonnet-4-5 ×20, claude-opus-5-5 ×4 ⚠ 4 not sonnet`; `—` when no turn named a model and none was asked for. */
+/**
+ * `claude-sonnet-4-5 ×20, claude-opus-5-5 ×4 ⚠ 4 not sonnet · effort medium`;
+ * `—` when no turn named a model and none asked for a model or an effort.
+ */
 const modelCell = (t: ModelTally | undefined): string => {
   if (!t) return '—';
+  const efforts = t.requestedEfforts;
   const served = Object.entries(t.served).sort(([an, a], [bn, b]) => b - a || an.localeCompare(bn));
-  if (t.requested.length === 0 && served.every(([name]) => name === MODEL_NOT_REPORTED)) return '—';
-  return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}`;
+  if (t.requested.length === 0 && efforts.length === 0 && served.every(([name]) => name === MODEL_NOT_REPORTED)) return '—';
+  const effort = effortText(efforts);
+  return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}${effort ? ` · ${effort}` : ''}`;
 };
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
