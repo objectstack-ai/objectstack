@@ -18,6 +18,7 @@ import { z } from 'zod';
  *   engine.find('account', { context: { userId: '...', tenantId: '...' } })
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { requiredOneOf } from '../shared/refinement-projection';
 import { AuthzPostureSchema } from '../security/explain.zod';
 
 /**
@@ -389,10 +390,9 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
      * operation needed no confirmation.
      */
     confirmationId: z.string().optional().describe('The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Absent when the operation needed no confirmation.'),
-  }).refine(
-    (p) => typeof p.clientId === 'string' || typeof p.agentId === 'string',
-    { message: 'performedBy names its performer: clientId (the /mcp OAuth door) or agentId (the in-product AI path)' },
-  ).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names exactly one performer, clientId or agentId. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
+  }).refine(requiredOneOf(['clientId', 'agentId']), {
+    message: 'performedBy names its performer: clientId (the /mcp OAuth door) or agentId (the in-product AI path)',
+  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names exactly one performer, clientId or agentId. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
 
   /**
    * [#27908 — ruling 6513869839 on #27681, parameter 3] WHICH DOOR an action
