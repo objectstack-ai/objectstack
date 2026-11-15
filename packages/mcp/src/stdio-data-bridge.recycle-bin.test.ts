@@ -35,7 +35,8 @@ import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { ObjectQL } from '@objectstack/objectql';
+// The lean engine entry, aliased to the source in this package's vitest config.
+import { ObjectQL } from '@objectstack/objectql/core';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
