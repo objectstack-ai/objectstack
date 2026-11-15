@@ -4175,6 +4175,7 @@ const es = {
       objectsAndFields: "Objetos y campos",
       views: "Vistas",
       suggestedField: "sugerido",
+      suggestedFieldLegend: "Los campos marcados como «{{mark}}» los añadió la IA; usted no los pidió.",
       nameField: "Nombre: {{field}}",
     },
     build: {

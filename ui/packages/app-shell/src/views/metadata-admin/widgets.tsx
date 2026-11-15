@@ -228,6 +228,14 @@ export interface WidgetContext {
   /** Names of all object metadata records (for `ref:object`, `object-selector`). */
   objectNames?: LoadState<string[]>;
   /**
+   * The authored label of each object in `objectNames`, keyed by name and read
+   * off the SAME list response, so the two never come from different reads.
+   * `ref:object` draws an option as its label with the name after it in
+   * secondary monospace text, the face the Studio `ObjectPicker` draws. A name absent here declares no label
+   * and is drawn as itself, once. Display only: the value written is the name.
+   */
+  objectLabels?: ReadonlyMap<string, string>;
+  /**
    * Field catalog of the bound object. Drives the `field-ref` / `field-multi`
    * pickers so View config props that reference a field (kanban.groupByField,
    * calendar.startDateField, chart.xAxisField, …) render as dropdowns of the
@@ -571,11 +579,28 @@ function RefObjectWidget({
         <SelectValue placeholder={t('engine.form.selectObject', locale)} />
       </SelectTrigger>
       <SelectContent>
-        {names.map((n) => (
-          <SelectItem key={n} value={n}>
-            {n}
-          </SelectItem>
-        ))}
+        {names.map((n) => {
+          const label = context?.objectLabels?.get(n);
+          return (
+            <SelectItem key={n} value={n} data-object-name={n}>
+              {label ? (
+                // Label first, the name after it as secondary monospace text:
+                // the face `ObjectPicker` draws for an option, kept on one line
+                // because the selected item's text also fills the one-line
+                // trigger. The explicit space keeps the accessible name two
+                // words, not one run-on word.
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate">{label}</span>{' '}
+                  <span data-object-name-line="" className="truncate font-mono text-[11px] text-muted-foreground">
+                    {n}
+                  </span>
+                </span>
+              ) : (
+                n
+              )}
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );

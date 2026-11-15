@@ -6154,7 +6154,8 @@ function BlueprintProgressPanel({
  * objectui#12724 — the plan card's object rows from `planCard.objects` (the
  * AiBuild artboard): the object's label, one chip per field with the format its
  * sample data is held to in mono type (`format.label`), a dashed 「补充」 chip for
- * a field the user's words did not name (`suggested`), the stage field's
+ * a field the user's words did not name (`suggested`, with one legend line
+ * under the rows saying what the mark means, #33419), the stage field's
  * lifecycle beside its label (`lifecycle.label`, objectui#12994), and
  * 「名称：FIELD」 under the chips when the object declares its name field
  * (`nameField`). Each of those four is drawn only when its key is present. When
@@ -6170,6 +6171,9 @@ function PlanCardObjectRows({
 }) {
   const { t } = useObjectTranslation();
   const suggestedMark = t('chatbot.plan.suggestedField', { defaultValue: 'suggested' });
+  // #33419 — the mark alone does not say what it means, so a card with any
+  // suggested field draws one legend line under its rows.
+  const anySuggested = objects.some((o) => o.fields.some((f) => f.suggested));
   return (
     <div className="flex flex-col" data-testid="proposed-plan-objects">
       <span className="text-[11px] font-medium text-foreground/70">{heading}</span>
@@ -6232,6 +6236,14 @@ function PlanCardObjectRows({
           </div>
         </div>
       ))}
+      {anySuggested ? (
+        <span className="pt-1 text-[11px] text-muted-foreground" data-testid="proposed-plan-suggested-legend">
+          {t('chatbot.plan.suggestedFieldLegend', {
+            mark: suggestedMark,
+            defaultValue: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
+          })}
+        </span>
+      ) : null}
     </div>
   );
 }

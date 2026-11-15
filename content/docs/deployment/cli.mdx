@@ -1732,8 +1732,9 @@ by: `3` as `"3"`, `true` as `"true"`. Rows written before that rule keep the
 form the database stored: the raw number or boolean on driver-memory with
 persistence, the text `"3.0"`, `"1.0"` or `"0.0"` on SQLite, and raw elements
 inside a multi-value array on every driver. A filter on `"3"` does not find
-those rows, a read hands back the old form, and a unique field admits a new
-`"3"` beside an old `"3.0"`.
+those rows, nor does a filter on `3`, which a filter reads as `"3"` (a number or
+boolean compared with an option field compares as its string); a read hands
+back the old form, and a unique field admits a new `"3"` beside an old `"3.0"`.
 
 ```bash
 os migrate option-codes                  # Dry run: counts per object and field, writes no rows
@@ -1758,9 +1759,10 @@ A number or a boolean written to a text field (`text`, `textarea`, `email`,
 `signature`, `qrcode`) is stored as its string: `42` as `"42"`, `true` as
 `"true"`. Rows written before that rule keep the form the database stored: the
 raw number or boolean on driver-memory with persistence, the text `"42.0"`,
-`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, a
-read hands back the old form, and a unique field admits a new `"42"` beside an
-old `42` or `"42.0"`.
+`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, nor
+does a filter on `42`, which a filter reads as `"42"` (a number or boolean
+compared with a text field compares as its string); a read hands back the old
+form, and a unique field admits a new `"42"` beside an old `42` or `"42.0"`.
 
 ```bash
 os migrate text-scalars                  # Dry run: counts per object and field, writes no rows
