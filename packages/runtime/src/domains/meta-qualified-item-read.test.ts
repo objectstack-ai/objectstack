@@ -872,8 +872,10 @@ describe('#32183 × #32310 — the caller arm judges the served holders', () => 
  * two packages register answers the read's `409 RESOURCE_CONFLICT` naming both
  * holders as `details.candidates`, as the item read does. The refusal leaves
  * through `errorFromThrown`, which composes `details` from
- * `resolveThrownHttpError`. Only this cell of #32622 is covered here: a stored
- * row's layered refusal, and the REST `/layers` door, are not.
+ * `resolveThrownHttpError`. This is the dispatcher's registry-holder cell; the
+ * stored-row cells and the REST `/layers` door are pinned beside the #28337
+ * and #32354 pins (`meta-layers-ambiguous-package.test.ts`,
+ * `meta-disabled-holder-served-stack.test.ts` and their REST twins).
  */
 describe('#32250 — the dispatcher /layers 409 names the holders', () => {
     it('a name two packages register: 409 RESOURCE_CONFLICT with both as details.candidates', async () => {

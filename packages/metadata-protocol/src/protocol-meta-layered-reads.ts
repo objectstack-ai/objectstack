@@ -103,8 +103,42 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'de
     if (judged !== undefined) return undefined;
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
     return address.candidates.length > 1
-        ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
+        ? withPackageCandidates(
+            packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates),
+            PLURAL_TO_SINGULAR[type] ?? type, name, address.candidates,
+        )
         : undefined;
+}
+
+/**
+ * [#32622, ADR-0150 D5] The package-less writes' refusal, as the layered door
+ * answers it (#28337: its sentence, code, status and `?package=` remedy,
+ * unchanged), with the holders it names carried as a package-scoped refusal's
+ * `refusal.candidates` (`[{ kind: 'package', packageId }, …]`, the `/actions`
+ * shape), so each transport answers them as `details.candidates`, as for every
+ * other `/layers` refusal. Carried by SHAPE (`refusal.status: 'refused'`),
+ * which the one recogniser reads (`packageScopedRefusalCandidates` in
+ * `@objectstack/types`), because the type this refusal judges need not be one
+ * the package-scoped resolver covers. The save and delete doors' answer of
+ * the same rows does not move.
+ */
+function withPackageCandidates(
+    error: Error & { code: 'RESOURCE_CONFLICT'; status: 409 },
+    type: string,
+    name: string,
+    packageIds: readonly string[],
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+    return Object.assign(error, {
+        refusal: {
+            status: 'refused' as const,
+            reason: 'ambiguous-in-environment' as const,
+            type,
+            name,
+            callerPackageId: null,
+            candidates: packageIds.map((packageId) => ({ kind: 'package' as const, packageId })),
+            message: error.message,
+        },
+    });
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */

@@ -45,8 +45,11 @@ const matchesWhere = (row: Record<string, unknown>, where: Record<string, unknow
         return whereValueMatches(row[k], v);
     });
 
-/** In-memory `sys_metadata` carrying a REAL `SchemaRegistry`. */
-function makeHarness() {
+/**
+ * In-memory `sys_metadata` carrying a REAL `SchemaRegistry`. `services`: the
+ * kernel services the protocol reads (a `metadata` service copy), none by default.
+ */
+function makeHarness(services?: Map<string, unknown>) {
     const registry = new SchemaRegistry({ multiTenant: false });
     (registry as any).logLevel = 'silent';
     const rows = new Map<string, any>();
@@ -93,7 +96,7 @@ function makeHarness() {
         },
         async syncObjectSchema() { /* no physical storage in this double */ },
     };
-    const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
+    const protocol = new ObjectStackProtocolImplementation(engine, services ? () => services as Map<string, any> : undefined, 'env_test');
     return { protocol, registry, rows };
 }
 
@@ -173,8 +176,14 @@ describe('[#28337] RestServer: the layered view of a name two packages hold, nam
         for (const read of [host.layers, host.layersFlag]) {
             const refused = await read('twin_dash');
             expect({ status: refused.status, code: codeOf(refused) }).toEqual({ status: save.status, code: codeOf(save) });
-            // One envelope shape for the read and the writes on this transport.
-            expect(Object.keys(refused.body ?? {}).sort()).toEqual(Object.keys(save.body ?? {}).sort());
+            // One envelope shape for the read and the writes on this transport, and
+            // [#32622, ADR-0150 D5] the read's holders as `details.candidates` beside it.
+            expect(Object.keys(refused.body ?? {}).sort()).toEqual([...Object.keys(save.body ?? {}), 'details'].sort());
+            expect(refused.body?.details?.candidates).toEqual([
+                { kind: 'package', packageId: PKG_A },
+                { kind: 'package', packageId: PKG_B },
+            ]);
+            expect(save.body?.details, 'the writes\' answer does not move').toBeUndefined();
             const message = messageOf(refused);
             expect(message.startsWith('Name the package this layered read is for, then send it again')).toBe(true);
             expect(message).toContain('?package=');
@@ -211,3 +220,4 @@ describe('[#28337] RestServer: the layered view of a name two packages hold, nam
         }
     }, 60_000);
 });
+
