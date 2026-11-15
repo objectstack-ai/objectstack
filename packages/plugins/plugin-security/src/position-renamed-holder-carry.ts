@@ -132,7 +132,10 @@
  * A reload heard before the boot run is ignored: during the boot the catalog
  * is still being filled, and an old name whose holding package has not
  * registered yet would read as no position at all (condition 2). The boot run
- * judges it once the catalog is complete. A hot upgrade over a version the
+ * judges it once the catalog is complete. A hot install-local install or
+ * upgrade is carried at once for the package the door announces; the other
+ * packages of a multi-package artifact are carried at the next restart (the
+ * door names only the artifact's own id). A hot upgrade over a version the
  * running kernel still serves is carried at once: the re-register withdraws
  * the position the new version no longer ships (#33050), so the old name is
  * no current position when the announcement is heard. The runtime's package
