@@ -61,6 +61,24 @@
  * carries a clash is refused until the clash is fixed. Nothing on the boot or
  * registration path runs the author-time rules, so an app that is already
  * installed keeps loading and serving.
+ *
+ * ## The `object_extension` door
+ *
+ * An extension published at runtime (Studio's add-field on a `.custom` pair,
+ * the `/meta` doors, an MCP or AI author) adds fields to an object it does not
+ * own, so it can add one under a label the target already shows, `owner_id`
+ * included. The door hands the gate the written entry as the stack's only
+ * `objectExtensions` member and the live objects as the registry serves them,
+ * the target without the written package's own stored extension (which the
+ * write replaces), so the fold below judges the target as it will be served
+ * after the write. Two inputs make that the build's fold: the target's OTHER
+ * packages' extensions with their priorities (`storedObjectExtensions`), so a
+ * field two packages tie on is left out as the build leaves it out, and the
+ * injected columns read back to the platform's own definitions
+ * (`stripInjectedSystemColumns`, as the expression rule reads the served
+ * objects there), so `owner_id` is named as the platform's column. The gate's
+ * differential charges the write only with a clash its entry creates: a clash
+ * the target already carried is in the baseline too, with the same message.
  */
 
 import {
@@ -69,7 +87,13 @@ import {
   type ObjectLike,
   type TranslationBundle,
 } from '@objectstack/spec/system';
-import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
+import {
+  objectsAsServed,
+  objectsWithoutTiedFields,
+  recordsOf,
+  type StoredObjectExtension,
+} from './object-graph.js';
 import { injectedColumnDefsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
@@ -160,15 +184,36 @@ function quoteList(names: readonly string[]): string {
   return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
 }
 
+/** What the `object_extension` publish door states beyond the stack (see the module note). */
+export interface DuplicateFieldLabelOptions {
+  /**
+   * The written extension's target's other packages' published extensions,
+   * folded among the written entry by priority. Stated by the door only.
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
+  /**
+   * The objects are the registry's SERVED definitions, carrying the injected
+   * columns as declared fields: read them back to the authored shape first.
+   * Set by the door on an `object_extension` write only.
+   */
+  servedObjects?: boolean;
+}
+
 /**
  * Report every object that serves two or more visible fields under one label.
  * Returns a (possibly empty) list of findings; never throws.
  */
-export function lintDuplicateFieldLabels(stack: AnyRec): DuplicateFieldLabelFinding[] {
+export function lintDuplicateFieldLabels(
+  stack: AnyRec,
+  options: DuplicateFieldLabelOptions = {},
+): DuplicateFieldLabelFinding[] {
   const findings: DuplicateFieldLabelFinding[] = [];
   if (!isRec(stack)) return findings;
+  if (options.servedObjects === true) {
+    stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
+  }
   const declared = recordsOf(stack.objects);
-  const served = objectsWithoutTiedFields(objectsAsServed(stack));
+  const served = objectsWithoutTiedFields(objectsAsServed(stack, options.storedObjectExtensions ?? []));
 
   declared.forEach((obj, i) => {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;

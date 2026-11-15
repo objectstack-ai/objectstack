@@ -356,15 +356,23 @@ export interface AuthoringRuleContext {
    * so a name it does not carry is refused there; on the CLI commands they are
    * one app's declaration, and the object-reference ladder (sibling packages,
    * platform names, a platform-prefixed name advised at `warning`) applies.
+   *
+   * [#33644] `lintDuplicateFieldLabels` reads `object_extension` only, on the
+   * argument `validateStackExpressions` gives for the same write: there the
+   * snapshot's objects are the registry's served definitions, carrying the
+   * injected columns as declared fields, so the rule reads them back to the
+   * authored shape the build judges (`stripInjectedSystemColumns`).
    */
   runtimeWriteType?: string;
   /**
    * [#33494] Set by the runtime gate on an `object_extension` write only: the
    * written entry's target's other packages' published extensions, as the
-   * host's registry holds them. Read by one rule, `validateStackExpressions`,
-   * whose extension walk folds the written entry among them by priority (the
-   * build's own fold, `objectsAsServed`), so the door judges the definition
-   * the build judges (`StackExpressionOptions.storedObjectExtensions`).
+   * host's registry holds them. Read by two rules, each folding the written
+   * entry among them by priority (the build's own fold, `objectsAsServed`), so
+   * the door judges the definition the build judges:
+   * `validateStackExpressions`' extension walk
+   * (`StackExpressionOptions.storedObjectExtensions`) and (#33644)
+   * `lintDuplicateFieldLabels` (`DuplicateFieldLabelOptions`).
    */
   storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
@@ -2370,6 +2378,19 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // another object; a re-save of that object is judged on its own body, as
   // for every gating rule at this door. No boot or registration path runs
   // this table, so an app already installed keeps loading.
+  //
+  // [#33644] `object_extension` joins: an extension adds fields to an object
+  // it does not own, and the registry folds them onto it, so one can add a
+  // field under a label the target already shows (`owner_id` included). The
+  // door hands the written entry and the target as served without the written
+  // package's own extension; the rule folds the entry among the target's other
+  // packages' extensions by priority (`storedObjectExtensions`, the build's
+  // fold) and reads the served objects back to their authored shape
+  // (`runtimeWriteType`, the expression rule's argument for the same input).
+  // The differential charges the write with the clash its entry creates and
+  // nothing the target already carried. MEASURED first: the one first-party
+  // `objectExtensions` entry (app-showcase's `showcase_account` overlay) adds
+  // no clash, as written or in any locale.
   {
     name: 'lintDuplicateFieldLabels',
     tier: 'gating',
@@ -2377,9 +2398,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/lint-duplicate-field-labels.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
-    run: (stack) =>
-      lintDuplicateFieldLabels(stack).map((f) => ({
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack, ctx) =>
+      lintDuplicateFieldLabels(stack, {
+        ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
+        ...(ctx.runtimeWriteType === 'object_extension' ? { servedObjects: true } : {}),
+      }).map((f) => ({
         severity: f.severity,
         rule: f.rule,
         where: f.where,
