@@ -938,6 +938,16 @@ export function recordAuthorTrusted(row, trusted) {
   return typeof login === 'string' && login !== '' && Array.isArray(trusted) && trusted.includes(login);
 }
 
+/**
+ * The authors the record leg trusts (card #33541): the relay's identity `bot` plus `GOVERNED_APPROVERS`,
+ * frozen, or `null` when `bot` is no login. ONE assembly of that set: `loadRecordRecognisers` builds the
+ * leg's with it, and the owed-review list and the H43 patrol read through it with `recordAuthorTrusted`
+ * (card #33705), ⛔ never a second login list. Pure.
+ */
+export function recordTrustedAuthors(bot) {
+  return typeof bot === 'string' && bot !== '' ? Object.freeze([bot, ...GOVERNED_APPROVERS]) : null;
+}
+
 /** The informational line naming the comments the author binding dropped from a record's threads, or none. Pure. */
 export function ignoredAuthorLines(record) {
   const logins = Array.isArray(record?.ignoredAuthors) ? record.ignoredAuthors : [];
@@ -990,7 +1000,7 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       // must-fix / should-fix grades — a Tier S entry lands on one PASS line, no FAIL, no open grade.
       reading: tier?.contractReviewRecordReading,
       // Who may post a record (#33541): the relay's identity and the authorized approvers, nobody else.
-      trustedAuthors: typeof bot === 'string' && bot !== '' ? Object.freeze([bot, ...GOVERNED_APPROVERS]) : null,
+      trustedAuthors: recordTrustedAuthors(bot),
     };
     const missing = [
       ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'reading'].filter((key) => typeof found[key] !== 'function'),
