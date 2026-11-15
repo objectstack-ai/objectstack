@@ -6250,7 +6250,7 @@ export async function selfTest() {
     // `diff-tree --raw` names the status; `diff-tree -p` the commit's diff of the one ADR path; anything else throws, as git does.
     const adrGit = (patch = NOTE, raw = rawOf([['M', '100644', ADR]])) => (args) => {
       if (args[0] === 'diff-tree' && args.includes('--raw')) return raw;
-      if (args[0] === 'diff-tree' && args.includes('-p') && args[args.length - 1] === ADR && args[args.length - 2] === '--') {
+      if (args[0] === 'diff-tree' && args.includes('-p') && args[args.length - 1] === `:(literal)${ADR}` && args[args.length - 2] === '--') {
         if (patch === null) throw new Error('fatal: bad object');
         return patch;
       }

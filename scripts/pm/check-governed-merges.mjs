@@ -1180,7 +1180,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
-  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 25,
+  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 34,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2301,53 +2301,67 @@ export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals
 // ── the ADR leg of the arm: add-only notes (card #33539, same ruling) ────────
 
 /**
- * The file SHAPE an add-only row (`lowRisk.addOnly`, the `adr` row) may change:
- * a Markdown record or index, nothing else. An image, a JSON or any other file
- * under `docs/adr/**` keeps the PR H.
+ * The file SHAPE an add-only row (`lowRisk.addOnly`, the `adr` row) may change: a numbered record directly under
+ * the row (`docs/adr/NNNN-slug.md`). The generated index (`README.md`, which also states the registry's
+ * conventions), a subfolder, an image or any other file under `docs/adr/**` keeps the PR H.
  */
-export const LOW_RISK_ADD_ONLY_FILE_PATTERNS = Object.freeze([/\.md$/]);
+export const LOW_RISK_ADD_ONLY_FILE_PATTERNS = Object.freeze([/^docs\/adr\/\d{4}-[^/]+\.md$/]);
 
 /**
  * The context the add-only diff is read at: enough lines that ONE hunk carries
- * the whole file, so the heading every added line sits under is read off the
- * diff itself rather than a second read of the head. A file longer than this
- * reads as several hunks, which the reader refuses (H).
+ * the whole file, so every line's heading is read off the diff itself, on both
+ * sides, rather than off a second read. A file longer than this reads as
+ * several hunks, which the reader refuses (H).
  */
 export const LOW_RISK_ADD_ONLY_CONTEXT = 1000000;
 
-/** A heading whose text names the decision or the status: every line under it is the record's ruling or its state. */
-export const LOW_RISK_ADD_ONLY_RULED_HEADING = /decision|\bstatus\b/i;
+/**
+ * A heading whose text names the decision or the status, in the spellings the registry uses (English and
+ * Chinese): every line under it is the record's ruling or its state.
+ */
+export const LOW_RISK_ADD_ONLY_RULED_HEADING = /decision|\bstatus\b|\bdecided\b|\bruling\b|\bresolution\b|决策|决定|裁决|状态/i;
 
-/** A status line, after its quote markers, list bullet, table bar and emphasis are stripped: `Status:` or `| Status |`. */
-export const LOW_RISK_ADD_ONLY_STATUS_LINE = /^status\b[ \t]*[:|]/i;
+/**
+ * A status line, after its quote markers, list bullet, table bar, emphasis, HTML tags, link brackets and
+ * zero-width characters are stripped: `Status:`, `| Status |`, `Status —`, `Superseded by …`, `Deprecated:`.
+ */
+export const LOW_RISK_ADD_ONLY_STATUS_LINE = /^(?:status|superseded|deprecated|withdrawn|replaced)\b[ \t]*(?:[:|—–-]|by\b)/i;
+
+/** Characters a hunk line may not carry: a bare CR, VT, FF and the Unicode line and paragraph separators end a line to a renderer. */
+const ADD_ONLY_LINE_BREAKERS = /[\r\v\f\u2028\u2029]/;
 
 /**
  * The git argv that reads one add-only file's diff at full context: `head` the subcommand and its own flags
- * (`['diff']`, or `['diff-tree', '-p', …]` at the queue), `revs` the two ends or the one commit. Pure.
+ * (`['diff']`, or `['diff-tree', '-p', …]` at the queue), `revs` the two ends or the one commit. The path is a
+ * literal pathspec, so a name with glob characters names that one file. Pure.
  */
 export function addOnlyDiffArgv(head, revs, path) {
-  return [...head, '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', `--unified=${LOW_RISK_ADD_ONLY_CONTEXT}`, ...revs, '--', path];
+  return [...head, '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', `--unified=${LOW_RISK_ADD_ONLY_CONTEXT}`, ...revs, '--', `:(literal)${path}`];
 }
 
-/** One Markdown line with its blockquote markers, list bullet, table bar and emphasis stripped. Pure. */
+/** One Markdown line stripped to its words: quote markers, list bullet, table bar, HTML tags, link brackets, emphasis, zero-width characters. Pure. */
 function addOnlyBareLine(line) {
   return String(line)
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    .replace(/<[^>]*>/g, '')
     .replace(/^[ \t]*(?:>[ \t]?)*/, '')
     .replace(/^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?/, '')
     .replace(/^\|[ \t]*/, '')
-    .replace(/\*\*|__|[`*_]/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*|__|[`*_[\]]/g, '')
     .trim();
 }
 
 /**
- * Each new-side line's heading reading: `{ heading: null | { level, text }, under: [{ level, text }] }` —
- * `under` the headings the line sits beneath (its own excluded). ATX headings and setext underlines, inside a
- * blockquote too; never inside a ``` or ~~~ fence or a leading frontmatter block. The FIRST level-1 heading is
- * the record's title and scopes nothing; every other heading does, at any level. Pure.
+ * Each line's heading reading: `{ heading: null | { level, text }, under: [{ level, text }] }` — `under` the
+ * headings the line sits beneath (its own excluded). ATX headings (up to three SPACES of indent; a tab is
+ * code) and setext underlines, inside a blockquote or a list item too; never inside a fenced block (closed only
+ * by the opener's character at least as long, with nothing after it) or a leading frontmatter block. The FIRST
+ * level-1 heading is the record's title and scopes nothing; every other heading does, at any level. Pure.
  */
 export function addOnlyHeadingReading(lines) {
   const list = Array.isArray(lines) ? lines.map(String) : [];
-  const unquote = (l) => l.replace(/^[ \t]{0,3}(?:>[ \t]?)*/, '');
+  const unquote = (l) => l.replace(/^ {0,3}(?:>[ ]?)*/, '').replace(/^ {0,3}(?:[-*+]|\d+[.)])[ ]+(?=#)/, '');
   const out = list.map(() => ({ heading: null, under: [] }));
   const kinds = list.map(() => null);
   let fence = null;
@@ -2358,19 +2372,23 @@ export function addOnlyHeadingReading(lines) {
   }
   for (let i = start; i < list.length; i += 1) {
     const bare = unquote(list[i]);
-    const marker = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(bare);
-    if (marker) {
-      fence = fence === null ? marker[1][0] : marker[1][0] === fence ? null : fence;
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (fence === null && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
+      fence = marker[1];
       kinds[i] = 'fence';
       continue;
     }
-    if (fence !== null) continue;
-    const atx = /^[ \t]{0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(bare);
+    if (fence !== null) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && marker[2].trim() === '') fence = null;
+      kinds[i] = 'fence';
+      continue;
+    }
+    const atx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(bare);
     if (atx) {
       kinds[i] = { level: atx[1].length, text: String(atx[2] ?? '').trim() };
       continue;
     }
-    const underline = /^[ \t]{0,3}(=+|-+)[ \t]*$/.exec(bare);
+    const underline = /^ {0,3}(=+|-+)[ \t]*$/.exec(bare);
     const prev = i - 1 >= start ? unquote(list[i - 1]) : '';
     if (underline && i - 1 >= start && kinds[i - 1] === null && prev.trim() !== '') {
       kinds[i - 1] = { level: underline[1][0] === '=' ? 1 : 2, text: prev.trim() };
@@ -2383,13 +2401,13 @@ export function addOnlyHeadingReading(lines) {
     const kind = kinds[i];
     if (kind && typeof kind.level === 'number') {
       while (stack.length > 0 && stack[stack.length - 1].level >= kind.level) stack.pop();
-      out[i] = { heading: kind, under: [...stack] };
+      out[i] = { heading: kind, under: [...stack], title: kind.level === 1 && !titled };
       if (kind.level === 1 && !titled) titled = true;
       else stack.push(kind);
       continue;
     }
     // A setext underline belongs to the heading above it.
-    out[i] = { heading: kind?.underline ? out[i - 1].heading : null, under: kind?.underline ? out[i - 1].under : [...stack] };
+    out[i] = { heading: kind?.underline ? out[i - 1].heading : null, under: kind?.underline ? out[i - 1].under : [...stack], title: kind?.underline ? out[i - 1].title : false };
   }
   return out;
 }
@@ -2397,12 +2415,21 @@ export function addOnlyHeadingReading(lines) {
 /**
  * Why one ADR file's diff is not an add-only note, or [] when it is. `patch` is the file's unified diff read at
  * `LOW_RISK_ADD_ONLY_CONTEXT` (merge base to head on `--pr` and the relay, each commit against its first parent at
- * the queue), so ONE hunk carries the whole file. Pure.
+ * the queue), so ONE hunk, starting at line 1, carries the whole file — both sides are read off it. Pure.
  *
- * Add-only: the hunk removes no line and adds at least one; its counts match the header; no added line is a status
- * line (`LOW_RISK_ADD_ONLY_STATUS_LINE`, quoted, bulleted, tabled or bold), a heading that names the decision or the
- * status (`LOW_RISK_ADD_ONLY_RULED_HEADING`), or a line under such a heading (`addOnlyHeadingReading`). A diff that
- * does not parse as exactly one text hunk of one existing file is a reason too: ⛔ fail closed.
+ * Add-only, every one of:
+ *   - the hunk removes no line, adds at least one, and its counts match its header; no hunk line carries a bare
+ *     CR, VT, FF or a Unicode line separator (each ends a line to a renderer);
+ *   - every EXISTING line reads the same heading and the same section before and after (`addOnlyHeadingReading`
+ *     on both sides): an added line never turns an existing line into a heading, opens a fence or frontmatter
+ *     over one, or re-scopes existing text under a new heading;
+ *   - the record names a decision or status heading (`LOW_RISK_ADD_ONLY_RULED_HEADING`), so a note's place can be
+ *     judged at all;
+ *   - no run of added lines sits in the header block (above the first section heading), and a run inserted inside
+ *     a ruled section opens, at its first non-blank line, a heading at or above that section's level;
+ *   - no added non-blank line is a status line (`LOW_RISK_ADD_ONLY_STATUS_LINE`), an HTML heading, a ruled
+ *     heading, or a line under one.
+ * A diff that does not parse as exactly one text hunk of one existing file is a reason too: ⛔ fail closed.
  */
 export function addOnlyNoteReasons(file) {
   const path = String(file?.path ?? '(unnamed)');
@@ -2419,38 +2446,77 @@ export function addOnlyNoteReasons(file) {
   const oldCount = counts[2] === undefined ? 1 : Number(counts[2]);
   const newCount = counts[4] === undefined ? 1 : Number(counts[4]);
   if (oldCount === 0) return [`\`${path}\` was empty or absent at the base, so the diff creates it`];
-  const newLines = [];
-  const added = [];
-  let removed = 0;
-  let context = 0;
+  if (counts[1] !== '1' || counts[3] !== '1') return [`the hunk of \`${path}\` starts at line ${counts[1]}/${counts[3]}, not 1, so it is not the whole file`];
+  const ops = [];
+  let noNewline = false;
   const body = lines.slice(at + 1);
   while (body.length > 0 && body[body.length - 1] === '') body.pop();
   for (const line of body) {
-    if (line.startsWith('\\')) continue;
+    if (line.startsWith('\\')) {
+      noNewline = true;
+      continue;
+    }
     const mark = line[0];
-    if (mark === '+') {
-      added.push(newLines.length);
-      newLines.push(line.slice(1));
-    } else if (mark === ' ') {
-      context += 1;
-      newLines.push(line.slice(1));
-    } else if (mark === '-') removed += 1;
-    else return [`the diff of \`${path}\` carries a line that is no hunk line (${quoteLine(line, 60)})`];
+    if (mark !== '+' && mark !== ' ' && mark !== '-') return [`the diff of \`${path}\` carries a line that is no hunk line (${quoteLine(line, 60)})`];
+    if (ADD_ONLY_LINE_BREAKERS.test(line.slice(1))) return [`the diff of \`${path}\` carries a bare CR, VT, FF or Unicode line separator inside a line, which a renderer reads as a line break`];
+    ops.push({ mark, text: line.slice(1) });
   }
+  const oldLines = [];
+  const newLines = [];
+  for (const op of ops) {
+    if (op.mark !== '+') { op.old = oldLines.length; oldLines.push(op.text); }
+    if (op.mark !== '-') { op.new = newLines.length; newLines.push(op.text); }
+  }
+  const added = ops.filter((op) => op.mark === '+');
+  const removed = ops.filter((op) => op.mark === '-').length;
   const reasons = [];
-  if (context + removed !== oldCount || context + added.length !== newCount) reasons.push(`the hunk of \`${path}\` reads ${context + removed} old and ${context + added.length} new line(s), where its header says ${oldCount} and ${newCount}`);
-  if (removed > 0) reasons.push(`\`${path}\` removes ${removed} line(s) — an add-only note changes no existing line`);
+  if (oldLines.length !== oldCount || newLines.length !== newCount) reasons.push(`the hunk of \`${path}\` reads ${oldLines.length} old and ${newLines.length} new line(s), where its header says ${oldCount} and ${newCount}`);
+  if (removed > 0) reasons.push(`\`${path}\` removes ${removed} line(s) — an add-only note changes no existing line${noNewline ? ' (a record with no newline at its end shows its last line removed and re-added: end it with one first)' : ''}`);
   if (added.length === 0) reasons.push(`\`${path}\` adds no line`);
-  const headings = addOnlyHeadingReading(newLines);
-  const ruled = (h) => LOW_RISK_ADD_ONLY_RULED_HEADING.test(h.text);
-  const statusLines = added.filter((i) => LOW_RISK_ADD_ONLY_STATUS_LINE.test(addOnlyBareLine(newLines[i])));
-  const ruledHeadings = added.filter((i) => headings[i].heading && ruled(headings[i].heading));
-  const underRuled = added.filter((i) => !ruledHeadings.includes(i) && headings[i].under.some(ruled));
-  const at1 = (list) => list.slice(0, 3).map((i) => `${i + 1}`).join(', ') + (list.length > 3 ? ` (+${list.length - 3} more)` : '');
-  if (statusLines.length > 0) reasons.push(`\`${path}\` adds a \`Status:\` line at line ${at1(statusLines)}`);
+  if (reasons.length > 0) return reasons;
+
+  const before = addOnlyHeadingReading(oldLines);
+  const after = addOnlyHeadingReading(newLines);
+  const ruled = (h) => Boolean(h) && LOW_RISK_ADD_ONLY_RULED_HEADING.test(h.text);
+  const at1 = (list) => list.slice(0, 3).map((n) => `${n + 1}`).join(', ') + (list.length > 3 ? ` (+${list.length - 3} more)` : '');
+  const sig = (r) => JSON.stringify([r.heading ? [r.heading.level, r.heading.text] : null, r.under.map((h) => [h.level, h.text])]);
+  // Existing lines read as they read before: the added lines changed no heading and re-scoped nothing.
+  const moved = ops.filter((op) => op.mark === ' ' && sig(before[op.old]) !== sig(after[op.new])).map((op) => op.new);
+  if (moved.length > 0) reasons.push(`\`${path}\`'s added lines change the heading or the section of existing line ${at1(moved)} (a new heading, fence, frontmatter or setext underline over existing text)`);
+  if (!before.some((r) => !r.title && ruled(r.heading))) reasons.push(`\`${path}\` names no decision or status heading, so where a note sits cannot be judged`);
+  const firstSection = before.findIndex((r) => r.heading && !r.title);
+  // Runs of consecutive added lines, each with the existing line it follows (-1: the top of the file).
+  const runs = [];
+  let prevOld = -1;
+  for (const op of ops) {
+    if (op.mark === ' ') { prevOld = op.old; continue; }
+    const last = runs[runs.length - 1];
+    if (last && last.after === prevOld && last.end === op.new - 1) { last.lines.push(op.new); last.end = op.new; } else runs.push({ after: prevOld, lines: [op.new], end: op.new });
+  }
+  const inHeader = [];
+  const inside = [];
+  for (const run of runs) {
+    if (firstSection < 0 || run.after < firstSection) { inHeader.push(run.lines[0]); continue; }
+    const r = before[run.after];
+    const scope = r.heading && !r.title ? [...r.under, r.heading] : r.under;
+    const ruledLevels = scope.filter(ruled).map((h) => h.level);
+    if (ruledLevels.length === 0) continue;
+    const lead = run.lines.find((n) => newLines[n].trim() !== '');
+    const opens = lead !== undefined && after[lead].heading && !after[lead].title && after[lead].heading.level <= Math.min(...ruledLevels);
+    if (!opens) inside.push(run.lines[0]);
+  }
+  if (inHeader.length > 0) reasons.push(`\`${path}\` adds line ${at1(inHeader)} in the record's header block, above its first section heading`);
+  if (inside.length > 0) reasons.push(`\`${path}\` adds line ${at1(inside)} inside a section that names the decision or the status, without opening a heading of that section's level first`);
+  const words = added.filter((op) => op.text.trim() !== '');
+  const statusLines = words.filter((op) => LOW_RISK_ADD_ONLY_STATUS_LINE.test(addOnlyBareLine(op.text))).map((op) => op.new);
+  const htmlHeadings = words.filter((op) => /<h[1-6]\b/i.test(op.text)).map((op) => op.new);
+  const ruledHeadings = words.filter((op) => ruled(after[op.new].heading)).map((op) => op.new);
+  const underRuled = words.filter((op) => !ruledHeadings.includes(op.new) && after[op.new].under.some(ruled)).map((op) => op.new);
+  if (statusLines.length > 0) reasons.push(`\`${path}\` adds a status line at line ${at1(statusLines)}`);
+  if (htmlHeadings.length > 0) reasons.push(`\`${path}\` adds an HTML heading at line ${at1(htmlHeadings)}`);
   if (ruledHeadings.length > 0) reasons.push(`\`${path}\` adds a heading that names the decision or the status at line ${at1(ruledHeadings)}`);
   if (underRuled.length > 0) {
-    const names = [...new Set(underRuled.map((i) => headings[i].under.filter(ruled).pop().text))].slice(0, 2);
+    const names = [...new Set(underRuled.map((n) => after[n].under.filter(ruled).pop().text))].slice(0, 2);
     reasons.push(`\`${path}\` adds line ${at1(underRuled)} under ${names.map((n) => quoteLine(n, 50)).join(', ')}, a heading that names the decision or the status`);
   }
   return reasons;
@@ -9288,9 +9354,11 @@ async function selfTest() {
     assert('⛔ ROW-2-a-removed-or-edited-line-stays-H', tier([ADR], read([ADR], [adrRow(edited)])) === GOVERNED_TIER_H && /removes 1 line/.test(why([ADR], read([ADR], [adrRow(edited)]))) && tier([ADR], read([ADR], [adrRow(patchOf([...keep(RECORD.slice(0, 16)), ['-', 'Some.']]))])) === GOVERNED_TIER_H);
     // ⛔ Row 3: a changed Status — and an ADDED status line in any spelling, with no removal at all.
     const restatus = patchOf([...keep(RECORD.slice(0, 2)), ['-', RECORD[2]], ['+', '**Status**: Superseded by ADR-0200'], ...keep(RECORD.slice(3))]);
-    assert('⛔ ROW-3-a-changed-Status-line-stays-H', tier([ADR], read([ADR], [adrRow(restatus)])) === GOVERNED_TIER_H && /adds a `Status:` line at line 3/.test(why([ADR], read([ADR], [adrRow(restatus)]))));
+    assert('⛔ ROW-3-a-changed-Status-line-stays-H', tier([ADR], read([ADR], [adrRow(restatus)])) === GOVERNED_TIER_H && /removes 1 line/.test(why([ADR], read([ADR], [adrRow(restatus)]))));
     assert('⛔ an-added-Status-line-bold-bulleted-quoted-tabled-or-in-frontmatter-spelling-stays-H-even-with-no-removal',
-      ['**Status**: Amended (2026-11-15)', '- **Status:** Accepted', '> Status: Superseded', '| **Status** | Deprecated |', 'status: superseded'].every((l) => tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(3, l)))])) === GOVERNED_TIER_H));
+      ['**Status**: Amended (2026-11-15)', '- **Status:** Accepted', '> Status: Superseded', '| **Status** | Deprecated |', 'status: superseded'].every((l) => tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(3, l)))])) === GOVERNED_TIER_H) &&
+      // In a section that rules nothing too, every spelling the review found: a dash, a link, HTML, a zero-width lead, `Superseded by`.
+      ['**Status** — Superseded', '[Status](#x): Superseded', '<b>Status</b>: Superseded', '\u200bStatus: Superseded', '**Superseded by**: ADR-0200', 'Deprecated: yes'].every((l) => /adds a status line/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(16, '', l)))])))));
     // ⛔ Row 4: a line under a Decision heading — nested sub-headings, a blank line and a Decision heading of one's own included.
     assert('⛔ ROW-4-a-line-under-a-Decision-heading-stays-H', tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(12, '', '> **Note.** D1 now also logs.')))])) === GOVERNED_TIER_H && /under `?D1 — refuse`?|under .*Decision/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(12, '', '> **Note.** D1 now also logs.')))]))));
     assert('⛔ a-blank-line-under-Decision-a-new-Decision-heading-or-a-Status-section-stays-H',
@@ -9325,12 +9393,27 @@ async function selfTest() {
       tier(['ui/docs/adr/0001-x.md'], read(['ui/docs/adr/0001-x.md'], [adrRow(patchOf(NOTE), { path: 'ui/docs/adr/0001-x.md' })])) === GOVERNED_TIER_H);
     assert('⛔ a-skills-change-beside-an-ADR-note-still-owes-its-changeset', tier([ADR, SK], read([ADR, SK], [adrRow(patchOf(NOTE)), { path: SK, status: 'modified', oldMode: '100644', mode: '100644' }])) === GOVERNED_TIER_H && /no changeset/.test(why([ADR, SK], read([ADR, SK], [adrRow(patchOf(NOTE)), { path: SK, status: 'modified', oldMode: '100644', mode: '100644' }]))));
 
+    // ⛔ Review round 1 (fail-open shapes): what an added line does to EXISTING lines is read on both sides.
+    const H_ = (ops, path = ADR) => tier([path], read([path], [adrRow(patchOf(ops, path), { path })])) === GOVERNED_TIER_H;
+    assert('⛔ R1-a-heading-added-inside-Decision-that-re-scopes-existing-decision-text-stays-H', H_(insertAfter(12, '', '## Exception', '', 'Except when Y, allow it.')) && H_(insertAfter(8, '', '## Scope note', 'Narrower.')) && /change the heading or the section of existing line/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(8, '', '## Scope note', 'Narrower.')))]))));
+    assert('⛔ R1-a-setext-underline-or-a-tab-indented-heading-under-decision-text-stays-H', H_(insertAfter(12, '---', '', 'Except when Y.')) && H_(insertAfter(12, '\t## except on Tuesdays', 'Allowed then.')) && H_(insertAfter(12, '- ## Decision', 'Allowed.')) && H_(insertAfter(16, '', '<h2>Decision</h2>', 'Allowed.')));
+    // A fence is closed only by its opener's character at least as long: `````/```/````` is ONE balanced block (S), a lone ``` hides the rest (H).
+    assert('⛔ R1-a-fence-or-frontmatter-added-above-the-Decision-heading-stays-H-a-balanced-code-block-in-Context-does-not', !H_(insertAfter(6, '', '````', '```', '````', '')) && H_([['+', '---'], ...keep(RECORD.slice(0, 7)), ['+', '---'], ...keep(RECORD.slice(7))]) && H_(insertAfter(6, '```')));
+    assert('⛔ R1-a-bare-CR-VT-FF-or-line-separator-inside-an-added-line-stays-H', ['Tracking: #1\rStatus: Superseded', 'note\r\r## Decision\r\rWe now allow X.', 'a\vb', 'a\fb', 'a b', 'a b'].every((l) => H_([...keep(), ['+', ''], ['+', '## Notes'], ['+', l]])) && /bare CR/.test(why([ADR], read([ADR], [adrRow(patchOf([...keep(), ['+', 'x\ry']]))]))));
+    const ZH = ['# ADR-0121: 记录', '', '**Status**: Accepted', '', '## 背景', '', '缘由。', '', '## 决定', '', '### D1', '', '拒绝。', '', '## 后果', '', '若干。'];
+    assert('⛔ R1-a-Chinese-decision-heading-rules-too-and-a-record-with-none-cannot-take-a-note', H_([...keep(ZH.slice(0, 13)), ['+', '也记日志。'], ...keep(ZH.slice(13))]) && !H_([...keep(ZH), ['+', ''], ['+', '## 修订注记'], ['+', '注记。']]) &&
+      H_([...keep(['# ADR-0043: x', '', '**Status**: Accepted', '', '## Mechanics', '', 'Tokens expire.']), ['+', 'Tokens may be reused within 5 minutes.']]) && /names no decision or status heading/.test(why([ADR], read([ADR], [adrRow(patchOf([...keep(['# t', '', '## Mechanics', '', 'x']), ['+', 'y']]))]))));
+    assert('⛔ R1-the-generated-index-a-subfolder-and-a-hunk-not-at-line-1-stay-H', H_(NOTE, 'docs/adr/README.md') && H_(NOTE, 'docs/adr/sub/0001-x.md') && tier([ADR], read([ADR], [adrRow(patchOf(NOTE).replace('@@ -1,', '@@ -500,'))])) === GOVERNED_TIER_H);
+    assert('⭐ R1-a-new-section-opened-at-the-Decision-level-between-Decision-and-Consequences-is-S-a-deeper-one-is-H', !H_(insertAfter(13, '## Notes', '', '> **Note.** D1 now logs.', '')) && H_(insertAfter(13, '### Notes', '', '> **Note.** D1 now logs.', '')));
+    assert('a-record-with-no-final-newline-says-why-its-appended-note-reads-H', /no newline at its end/.test(why([ADR], read([ADR], [adrRow(`${patchOf([...keep(RECORD.slice(0, 16)), ['-', 'Some.']])}\\ No newline at end of file\n+Some.\n+\n+## Notes\n`)]))));
+    assert('addOnlyDiffArgv-passes-the-path-as-a-literal-pathspec', addOnlyDiffArgv(['diff'], ['a', 'b'], 'docs/adr/x[1].md').slice(-2).join(' ') === '-- :(literal)docs/adr/x[1].md');
+
     // The heading reader: the title scopes nothing; fences and frontmatter hide headings; setext and quoted headings count.
     const h = addOnlyHeadingReading(['---', 'title: x', '---', '# ADR: a decision record', 'top', '```', '## Decision', '```', 'after fence', 'Decision', '========', 'under setext', '> ## Status', 'under quoted']);
     assert('addOnlyHeadingReading-the-title-scopes-nothing-fences-and-frontmatter-hide-headings-setext-and-quoted-ones-count',
       h[4].under.length === 0 && h[6].heading === null && h[8].under.length === 0 && h[9].heading?.text === 'Decision' && h[10].heading?.text === 'Decision' &&
       h[11].under.map((x) => x.text).join() === 'Decision' && h[12].heading?.text === 'Status' && h[13].under.map((x) => x.text).join() === 'Decision,Status', JSON.stringify(h));
-    assert('a-title-naming-a-decision-does-not-make-every-note-H-and-CRLF-reads-the-same', tier([ADR], read([ADR], [adrRow(patchOf([[' ', '# ADR-0099: one axis for tier decisions'], [' ', ''], [' ', 'Body.'], ['+', ''], ['+', '> Note.']]))])) === GOVERNED_TIER_S &&
+    assert('a-title-naming-a-decision-does-not-make-every-note-H-and-CRLF-reads-the-same', tier([ADR], read([ADR], [adrRow(patchOf([[' ', '# ADR-0099: one axis for tier decisions'], [' ', ''], ...keep(RECORD.slice(1)), ['+', ''], ['+', '> Note.']]))])) === GOVERNED_TIER_S &&
       tier([ADR], read([ADR], [adrRow(patchOf(NOTE).replace(/\n/g, '\r\n'))])) === GOVERNED_TIER_S);
     assert('the-ADR-constants-are-frozen-and-read-as-the-card-says', Object.isFrozen(LOW_RISK_ADD_ONLY_FILE_PATTERNS) && LOW_RISK_ADD_ONLY_FILE_PATTERNS.length === 1 && LOW_RISK_ADD_ONLY_RULED_HEADING.test('2. Decision') && LOW_RISK_ADD_ONLY_RULED_HEADING.test('Current status') && !LOW_RISK_ADD_ONLY_RULED_HEADING.test('Consequences') && !LOW_RISK_ADD_ONLY_RULED_HEADING.test('Statuses'));
     assert('the-H-words-name-the-ADR-reason', /low-risk skills arm .*Tier H/.test(renderTestVerdict(testVerdict([ADR], { repo: REPO, lowRisk: read([ADR], [adrRow(edited)]) }))) && /not an add-only note/.test(renderTestVerdict(testVerdict([ADR], { repo: REPO, lowRisk: read([ADR], [adrRow(edited)]) }))));
@@ -9368,12 +9451,13 @@ async function selfTest() {
       fg(adrFx, 'commit', '-qm', 'seed');
       const base = fg(adrFx, 'rev-parse', 'HEAD').trim();
       const at = (lines) => { writeFileSync(join(adrFx, ADR), `${lines.join('\n')}\n`); fg(adrFx, 'commit', '-qam', 'x'); return fg(adrFx, 'rev-parse', 'HEAD').trim(); };
-      const noted = at([...long.slice(0, 3), '', '> Note (2026-11-15): seen.', ...long.slice(3), '', '> **Note.** And at the end.']);
-      const underD = at([...long.slice(0, 12), 'Also log.', ...long.slice(12)]);
+      const notedLines = [...long.slice(0, 7), '', '> Note (2026-11-15): seen.', ...long.slice(7), '', '> **Note.** And at the end.'];
+      const noted = at(notedLines);
+      const underD = at([...notedLines.slice(0, 15), 'Also log.', ...notedLines.slice(15)]);
       const viaGit = (from, to) => addOnlyNoteReasons({ path: ADR, patch: tryGit(adrFx, addOnlyDiffArgv(['diff'], [from, to], ADR)).out });
       const viaTree = (sha) => addOnlyNoteReasons({ path: ADR, patch: git(adrFx, addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], [sha], ADR)) });
       assert('⭐ REAL-git-an-add-only-note-far-apart-from-another-reads-as-ONE-hunk-and-passes-by-diff-and-by-diff-tree', viaGit(base, noted).length === 0 && viaTree(noted).length === 0, JSON.stringify([viaGit(base, noted), viaTree(noted)]));
-      assert('⛔ REAL-git-a-line-under-Decision-a-status-edit-and-the-two-commits-read-together-stay-reasons', viaTree(underD).some((r) => /under/.test(r)) && viaGit(noted, underD).some((r) => /removes/.test(r)) && viaGit(base, underD).some((r) => /under/.test(r)));
+      assert('⛔ REAL-git-a-line-under-Decision-reads-H-by-its-own-commit-and-by-the-whole-range', viaTree(underD).some((r) => /under/.test(r)) && viaGit(noted, underD).some((r) => /under/.test(r)) && viaGit(base, underD).some((r) => /under/.test(r)), JSON.stringify([viaTree(underD), viaGit(base, underD)]));
     } catch (error) {
       assert('the-ADR-leg-real-git-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
     } finally {
