@@ -61,8 +61,8 @@ ObjectStack provides lifecycle events organized by operation type:
 | **Purpose** | Validation, enrichment, transformation | Side effects, notifications, logging |
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
-| **Transaction** | Within transaction | **Within the transaction** (unless `async: true` — in the background, not deferred to commit: may see pre-commit state, not cancelled on rollback) |
-| **Error handling** | Aborts by default (`onError: 'abort'`) | `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
+| **Transaction** | Within transaction | **Within the transaction** (unless `async: true` — then in the background, after commit) |
+| **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
 
 ---
 

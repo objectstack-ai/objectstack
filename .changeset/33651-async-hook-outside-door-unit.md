@@ -1,6 +1,5 @@
 ---
 '@objectstack/objectql': patch
-'@objectstack/skills': patch
 ---
 
 fix(objectql): an `async: true` after-hook writes outside the write's unit of work, also when a blocking after-hook beside it makes the write door open one
@@ -22,5 +21,3 @@ What changes for a hook author:
 - On a database with a single connection (SQLite), an async hook's write waits until the triggering write's unit releases the connection. Nothing waits for the async hook, so the triggering write is not delayed.
 
 Blocking hooks are unchanged: their `ctx.api` writes join the unit and roll back with it. An async hook with no unit open is unchanged too.
-
-The `objectstack-data` skill's hooks reference (`references/data-hooks.md`) no longer says an async after-hook runs "after commit"; it now says the hook runs in the background but is not deferred to commit: it may see pre-commit state and is not cancelled if the triggering write rolls back.
