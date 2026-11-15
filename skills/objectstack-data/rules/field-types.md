@@ -93,7 +93,7 @@ options: [
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
-| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
+| `user` | Person picker — a lookup specialized to `sys_user` (reviewer, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
 **`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
 `master_detail`): a pick copies the picked record's `source` into this object's

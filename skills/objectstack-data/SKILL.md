@@ -66,7 +66,7 @@ database table and exposes automatic CRUD APIs.
 |:---------|:-------|:-----------|:------------|
 | `name`   | string | `snake_case` | Immutable machine identifier (`/^[a-z_][a-z0-9_]*$/`) |
 | `fields` | map    | keys in `snake_case` | Field definitions |
-| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision (maintainer ruling 2026-08-13). Author it on every object |
+| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
 
 **`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
 removed). A *custom* object that omits it resolves to `private` at runtime, but
@@ -106,8 +106,6 @@ all (Relationship Patterns below).
 
 ### Object Capabilities (`enable`)
 
-Toggle system behaviours per object:
-
 | Flag | Default | Purpose |
 |:-----|:--------|:--------|
 | `trackHistory` | `false` | Field-level audit trail |
@@ -123,7 +121,7 @@ Toggle system behaviours per object:
 
 ## Search Fields (`searchableFields`)
 
-`searchableFields` on the object is the canonical set `$search` scans (ADR-0061).
+`searchableFields` on the object is the canonical set `$search` scans.
 Leave it unset and search auto-defaults to the `nameField` plus the object's
 short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
 `textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
@@ -253,7 +251,7 @@ schema, and the **database column wins at write time**:
 | rename a field | `renamedFrom: ['old_key']` on the new key: the sync carries the column's values |
 | declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
 
-**`required` is not the `NOT NULL` dial (ADR-0113).** `required` is the
+**`required` is not the `NOT NULL` dial.** `required` is the
 **write contract** — the engine refuses an insert that omits the value — and it
 implies nothing about the column. The physical constraint is a separate explicit
 opt-in, `storage: { notNull: true }`, and it is what drift detection compares
@@ -292,7 +290,7 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
   accepted" (terms, a confirmation) is a `validations[]` rule, not `required`.
   The default also lands seeded or imported rows that omit the column on a real
   `false` instead of a null that only looks unchecked.
-- A person on the record (assignee, approver, reviewer) is `type: 'user'` with
+- A person on the record (approver, reviewer) is `type: 'user'` with
   no `reference`, and optional unless the request says otherwise — the platform
   already stamps the owner and `created_by`.
 - A dynamic default (`defaultValue: 'current_user'`, `'NOW()'`, a CEL envelope)
@@ -311,7 +309,7 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
 | Hierarchical | `tree` field (self-reference) |
 | Record status / lifecycle | a `select` on the business object (plus a `state_machine` validation) — never a separate status / stage / step table |
 | Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
-| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default) — never a hand-added "owner" / "person in charge" lookup, a second owner that owner-scoped visibility and "My records" views never read; `ownership: 'none'` only for a shared catalog or a pure junction table |
+| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default), also when the request says assignee, 负责人 or 处理人 — never a hand-added owner field, a second owner that owner-scoped visibility and "My records" views never read. A handler the request names apart from the owner is a `user` field that grants no access, with a label no other visible field carries, injected ones included: `owner_id` (Owner, 负责人), `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at` (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
 > (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
