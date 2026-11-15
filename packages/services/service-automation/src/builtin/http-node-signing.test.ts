@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
@@ -321,6 +321,106 @@ describe('http node signing — durable arm with the outbox wired', () => {
         expect(await outbox.list()).toHaveLength(0);
         await dispatcher.tick();
         expect(received).toHaveLength(0);
+    });
+});
+
+/**
+ * A durable node that authors no `method` sends ONE verb, whether or not an
+ * outbox is wired. The descriptor says "Default GET; POST when durable is
+ * true", and the outbox enqueues POST; the no-outbox fallback used to resolve
+ * its own default (`GET`), so the same flow sent POST in one environment and a
+ * bodyless GET — counted as a read, `acted: 0` — in another.
+ *
+ * The outbox arm is the reference: it is driven end to end and its request, as
+ * the receiver got it, is what every fallback must reproduce byte for byte —
+ * the verb, the body and the signature over it.
+ */
+describe('http node verb — durable with no method sends what the outbox sends, on every arm', () => {
+    const config = () => ({
+        url: `${baseUrl}/hook`,
+        durable: true,
+        signingSecret: SECRET,
+        body: { order: 42, lines: ['a', 'b'] },
+    });
+
+    /** The request the outbox delivers for {@link config}, as the receiver got it. */
+    async function outboxReference(): Promise<Received> {
+        const outbox = new MemoryHttpOutbox();
+        const messaging = new MessagingService({ logger: silentLogger() });
+        messaging.setHttpOutbox(outbox);
+        const dispatcher = new HttpDispatcher({
+            nodeId: 'node-verb-test',
+            outbox,
+            partitionCount: 1,
+            intervalMs: 10_000, // ticked by hand
+            logger: silentLogger(),
+        });
+        const result = await run(engineWith(messaging), config());
+        expect(result.success).toBe(true);
+        await dispatcher.tick();
+        const req = only();
+        received.length = 0;
+        return req;
+    }
+
+    function expectSameRequest(req: Received, reference: Received): void {
+        expect(reference.method).toBe('POST');
+        expect(req.method).toBe(reference.method);
+        expect(req.body).toBe(reference.body);
+        expect(req.headers[SIGNATURE_HEADER_LC]).toBe(reference.headers[SIGNATURE_HEADER_LC]);
+        expectVerifies(req, SECRET);
+    }
+
+    it.each([
+        { arm: 'no messaging service', messaging: () => undefined },
+        { arm: 'messaging with no HTTP outbox', messaging: () => new MessagingService({ logger: silentLogger() }) },
+    ])('awaited fallback ($arm): POSTs the signed bytes the outbox sends, and counts the accepted POST as an act', async ({ messaging }) => {
+        const reference = await outboxReference();
+
+        const result = await run(engineWith(messaging()), config());
+
+        expect(result.success).toBe(true);
+        expectSameRequest(only(), reference);
+        // A POST the receiver accepted is one effect, not a read's measured zero.
+        expect(result.summary).toMatchObject({ acted: 1, unmeasured: 0 });
+    });
+
+    it('background fallback on the save path: POSTs the signed bytes the outbox sends', async () => {
+        const reference = await outboxReference();
+        const engine = engineWith();
+        engine.registerFlow('signed_callout', flow(config()));
+
+        const result = await engine.execute('signed_callout', {
+            event: 'afterUpdate',
+            object: 'lead',
+            record: { id: 'l1' },
+        } as any);
+
+        expect(result.success).toBe(true);
+        await vi.waitFor(() => expect(received).toHaveLength(1));
+        expectSameRequest(only(), reference);
+    });
+
+    it('awaited fallback with no body: still a POST, and counted as an act — never a read\'s measured zero', async () => {
+        // Before the fix this arm sent a bodyless GET and reported `acted: 0`,
+        // a run claiming it changed nothing. (With a body it did not send at
+        // all: `fetch` refuses a GET that carries one.)
+        const result = await run(engineWith(), { url: `${baseUrl}/hook`, durable: true });
+
+        expect(result.success).toBe(true);
+        expect(only().method).toBe('POST');
+        expect(result.summary).toMatchObject({ acted: 1, unmeasured: 0 });
+    });
+
+    it('CONTROL: a request/response node with no method still GETs, and counts it as a read', async () => {
+        const result = await run(engineWith(), { url: `${baseUrl}/hook`, signingSecret: SECRET });
+
+        expect(result.success).toBe(true);
+        const req = only();
+        expect(req.method).toBe('GET');
+        expect(req.body).toBe('');
+        expect(req.headers[SIGNATURE_HEADER_LC]).toBe(EMPTY_BODY_SIGNATURE);
+        expect(result.summary).toMatchObject({ acted: 0, unmeasured: 0 });
     });
 });
 

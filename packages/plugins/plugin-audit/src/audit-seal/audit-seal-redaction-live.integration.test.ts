@@ -10,6 +10,7 @@ import { installDefaultOrganization } from '../default-organization.testkit.js';
 import { migrateKeyMaterialCopies } from '../key-material-copy-migration.js';
 import { migrateArchivedMailLogBodyCopies, migrateMailLogBodyCopies, planMailLogBodyAuditRowPatch } from '../mail-log-body-migration.js';
 import { SysAuditLog } from '../objects/sys-audit-log.object.js';
+import { migrateSideCopies } from '../side-copy-migration.js';
 import { migrateStoredMetadataBodyCopies } from '../stored-metadata-body-migration.js';
 import { RedactionAmender, type AuditRedactionSeal } from './amendment-writer.js';
 import { canonicalValue, commitValue } from './canonical.js';
@@ -22,7 +23,7 @@ import { SigningKeyTrust } from './verifier.js';
 
 /**
  * ADR-0154 D7 on a live engine over SQLite, with an `archive` datasource:
- * `sys_audit_log` sealed, the plugin's own sealer seals it, and the three real
+ * `sys_audit_log` sealed, the plugin's own sealer seals it, and the four real
  * rewrite migrations rewrite its copies through the one amendment writer. The
  * live check then reads each rewritten sealed row `redacted`, with the
  * amendment the writer signed. A run with no crypto provider refuses the
@@ -36,6 +37,7 @@ const SYS = { isSystem: true } as const;
 const LOG = 'sys_audit_log';
 const MAIL_BODY = 'mail-body-sentinel';
 const KEY_MATERIAL = 'key-material-sentinel';
+const SIDE_COPY = 'side-copy-sentinel';
 
 type Row = Record<string, unknown>;
 interface Driver {
@@ -98,6 +100,7 @@ describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => 
     // Copies at rest in a settled window, one copy per migration, and one row nothing rewrites.
     await hot().create(LOG, copy('mail', past + 60_000, 'sys_email', { id: 'em_1', subject: 'kept', body_text: MAIL_BODY }));
     await hot().create(LOG, copy('key', past + 120_000, 'sys_secret', { id: 'sec_1', namespace: 'n', ciphertext: KEY_MATERIAL }));
+    await hot().create(LOG, copy('side', past + 130_000, 'sys_approval_request', { id: 'ar_1', status: 'kept', payload_json: SIDE_COPY }));
     await hot().create(LOG, copy('meta', past + 150_000, 'sys_metadata', { id: 'md_1', name: 'kept', checksum: `sha256:${'a'.repeat(64)}` }));
     await hot().create(LOG, copy('tampered', past + 160_000, 'sys_email', { id: 'em_2', body_text: MAIL_BODY }));
     await hot().create(LOG, copy('moved', past + 170_000, 'sys_email', { id: 'em_3', body_text: MAIL_BODY }));
@@ -173,18 +176,23 @@ describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => 
     expect(result.dangling).toEqual([]);
   });
 
-  it('the key-material and the metadata-body rewrites amend their sealed copies the same way', async () => {
+  it('the key-material, the side-copy and the metadata-body rewrites amend their sealed copies the same way', async () => {
     const keys = await migrateKeyMaterialCopies(engine as never, recordingLogger(), { apply: true, seal: seal(), objects: ['sys_audit_log'] });
     expect(keys).toMatchObject({ rewritten: 1, refused: 0 });
+    const side = await migrateSideCopies(engine as never, recordingLogger(), { apply: true, seal: seal(), objects: ['sys_audit_log'] });
+    expect(side).toMatchObject({ rewritten: 1, refused: 0 });
     const meta = await migrateStoredMetadataBodyCopies(engine as never, recordingLogger(), { apply: true, seal: seal() });
     expect(meta.byObject.sys_audit_log).toEqual({ scanned: 1, rewritten: 1, refused: 0 });
     expect(String((await stored('key'))!.new_value)).not.toContain(KEY_MATERIAL);
     expect(String((await stored('meta'))!.new_value)).not.toContain('sha256:');
-    expect((await amendments()).filter((a) => a.row_id === 'key' || a.row_id === 'meta').map((a) => a.rewritten_by).sort()).toEqual([
+    expect(String((await stored('side'))!.new_value)).not.toContain(SIDE_COPY);
+    // Each amendment names the command that rewrote the row (#33155: the side-copy rewrite's name).
+    expect((await amendments()).filter((a) => ['key', 'side', 'meta'].includes(String(a.row_id))).map((a) => a.rewritten_by).sort()).toEqual([
       'os migrate audit-key-material',
       'os migrate audit-metadata-bodies',
+      'os migrate audit-side-copies',
     ]);
-    expect(verdicts(await verify())).toEqual({ mail: 'redacted', key: 'redacted', meta: 'redacted', tampered: 'modified' });
+    expect(verdicts(await verify())).toEqual({ mail: 'redacted', key: 'redacted', side: 'redacted', meta: 'redacted', tampered: 'modified' });
   });
 
   it('amends a sealed copy in the archive datasource through the archive run', async () => {

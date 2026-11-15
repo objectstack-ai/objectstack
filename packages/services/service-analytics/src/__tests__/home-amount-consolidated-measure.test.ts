@@ -21,7 +21,10 @@
  *   still refused `INVALID_FIELD` / 400 before anything is read, and its
  *   message now names both remedies: the declared home field by name, or the
  *   grouping over the code field. An amount that declares no `homeAmount`
- *   reads the declaration to add instead.
+ *   reads the declaration to add instead. An amount following its parent's
+ *   code (a `MASTER_DETAIL.CODE` pointer) names the home field alone: no
+ *   grouping makes it one currency, so none is advised. Over a relationship
+ *   path, the advised grouping is served.
  *
  * ## The axes
  *
@@ -119,6 +122,47 @@ const LINE_CUBE = {
   },
   dimensions: {
     invoice_code: { type: 'string', sql: 'invoice.currency_code', label: 'Invoice currency' },
+  },
+};
+
+/**
+ * A child whose amount follows its parent invoice's currency (`currencyField`
+ * is the `MASTER_DETAIL.CODE` path, ADR-0144 D2 as amended). No grouping makes
+ * an aggregate over it one currency: a dimension over the parent path groups
+ * by the PARENT's column, never this object's code field, and the engine door
+ * admits no grouping for it either (`record-currency-aggregate-door.ts`).
+ */
+const CHILD = 'os27195_fx_child';
+const CHILD_OBJECT = {
+  name: CHILD,
+  label: 'FX invoice charge',
+  fields: {
+    invoice: { name: 'invoice', type: 'master_detail' as const, reference: OBJECT },
+    charge_date: { name: 'charge_date', type: 'date' as const },
+    amount: {
+      name: 'amount',
+      type: 'currency' as const,
+      currencyConfig: {
+        currencyMode: 'record' as const,
+        currencyField: 'invoice.currency_code',
+        homeAmount: { field: 'amount_home', rateDate: 'charge_date', rateField: 'amount_rate' },
+      },
+    },
+    amount_home: { name: 'amount_home', type: 'currency' as const, readonly: true },
+    amount_rate: { name: 'amount_rate', type: 'number' as const, readonly: true },
+  },
+};
+const CHILD_CUBE = {
+  name: 'os27195_child_cube',
+  title: 'Charges in their parent invoice currency',
+  sql: CHILD,
+  public: true,
+  joins: { invoice: { name: OBJECT } },
+  measures: {
+    child_raw: { type: 'sum', sql: 'amount', label: 'Charge amount (parent currency)' },
+  },
+  dimensions: {
+    parent_code: { type: 'string', sql: 'invoice.currency_code', label: 'Parent invoice currency' },
   },
 };
 
@@ -237,7 +281,7 @@ for (const cell of CELLS) {
         engine = new ObjectQL({ logger: quiet } as never);
         engine.registerDriver(driver as never, true);
         await engine.init();
-        for (const object of [RATE_OBJECT, INVOICE, BARE_INVOICE, LINE_OBJECT]) engine.registry.registerObject(object as never);
+        for (const object of [RATE_OBJECT, INVOICE, BARE_INVOICE, LINE_OBJECT, CHILD_OBJECT]) engine.registry.registerObject(object as never);
         await engine.syncSchemas();
         await installDefaultOrganization(engine as never);
         engine.setHomeLocalizationResolver(async () => ({ currency: HOME }));
@@ -253,12 +297,12 @@ for (const cell of CELLS) {
 
         const realExecute = (engine as any).execute.bind(engine);
         (engine as any).execute = (sql: unknown, opts?: { object?: string }) => {
-          if (opts?.object === OBJECT || opts?.object === BARE || opts?.object === LINE) reads.rawSql += 1;
+          if (opts?.object === OBJECT || opts?.object === BARE || opts?.object === LINE || opts?.object === CHILD) reads.rawSql += 1;
           return realExecute(sql, opts);
         };
         const realAggregate = engine.aggregate.bind(engine);
         (engine as any).aggregate = (object: string, ...rest: unknown[]) => {
-          if (object === OBJECT || object === BARE || object === LINE) reads.aggregate += 1;
+          if (object === OBJECT || object === BARE || object === LINE || object === CHILD) reads.aggregate += 1;
           return (realAggregate as any)(object, ...rest);
         };
 
@@ -274,7 +318,7 @@ for (const cell of CELLS) {
         ] as const) {
           const registered: Record<string, unknown> = {};
           const provided: Record<string, unknown> = { data: engine, protocol: pendingSeedProtocol };
-          await new AnalyticsServicePlugin({ cubes: [LINE_CUBE], ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+          await new AnalyticsServicePlugin({ cubes: [LINE_CUBE, CHILD_CUBE], ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
             getService: (name: string) => provided[name] ?? registered[name],
             registerService: (name: string, svc: unknown) => { registered[name] = svc; },
             replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
@@ -383,12 +427,41 @@ for (const cell of CELLS) {
             expect(reads.rawSql - before.rawSql).toBe(0);
             expect(reads.aggregate - before.aggregate).toBe(0);
           });
+
+          it('an amount following its parent\'s code reads the home-field remedy and no grouping remedy, grouped over the parent path or not', async () => {
+            for (const dimensions of [[], ['parent_code']]) {
+              const before = { ...reads };
+              const err = await refusalOf(
+                services[face]!.query({ cube: CHILD_CUBE.name, dimensions, measures: ['child_raw'] } as never, CTX),
+              );
+              expect(err.code, err.message).toBe('INVALID_FIELD');
+              expect(err.status).toBe(400);
+              expect(err.member).toBe('child_raw');
+              expect(err.field).toBe('amount');
+              expect(err.object).toBe(CHILD);
+              expect(err.message).toContain(`point the measure at 'amount_home', the home-currency amount object '${CHILD}' declares for 'amount'`);
+              expect(err.message).not.toContain('add the dimension');
+              expect(reads.rawSql - before.rawSql).toBe(0);
+              expect(reads.aggregate - before.aggregate).toBe(0);
+            }
+          });
         });
       }
 
       it('over a relationship path, a sum over the joined home field is served: the home-currency total (native strategy)', async () => {
         const served = await services.native!.query({ cube: LINE_CUBE.name, measures: ['invoice_home'] } as never, CTX);
         expect(Number((served.rows[0] as Record<string, unknown>).invoice_home)).toBe(HOME_TOTAL);
+      });
+
+      it('over a relationship path, the refusal\'s grouping remedy works: grouped over the joined code field, the raw amount is served per currency (native strategy)', async () => {
+        const served = await services.native!.query(
+          { cube: LINE_CUBE.name, dimensions: ['invoice_code'], measures: ['invoice_raw'] } as never,
+          CTX,
+        );
+        const byInvoiceCode = Object.fromEntries(
+          (served.rows as Array<Record<string, unknown>>).map((r) => [String(r.invoice_code), Number(r.invoice_raw)]),
+        );
+        expect(byInvoiceCode).toEqual({ USD: 120, EUR: 100, CNY: 50 });
       });
 
       describe('the draft preview (the in-memory evaluator, over the stored rows)', () => {

@@ -127,25 +127,3 @@ export function checkManagedApiMethodAffordances(schema: unknown): ManagedApiMet
   }
   return out;
 }
-
-/**
- * The one sentence both consumers say about a conflict, so an operator who
- * greps a stripped verb out of a boot log and an author reading the lint
- * finding are told the same thing in the same words.
- *
- * States the CONTRADICTION only. Each consumer appends its own remedy, because
- * the honest remedy differs by where you are standing: at registration the verb
- * has already been taken away and the operator's next move is to find the
- * author, while at authoring time both doors — open the affordance, or drop the
- * verb — are still open.
- */
-export function describeManagedApiMethodConflicts(
-  conflicts: readonly ManagedApiMethodConflict[],
-): string {
-  const verbs = conflicts.map((c) => c.verb).join(', ');
-  const flags = [...new Set(conflicts.map((c) => c.needs))].join('/');
-  return (
-    `advertises generic write verb(s) [${verbs}] in enable.apiMethods that its resolved ` +
-    `affordances do not permit (needs userActions ${flags}) — see ADR-0092 / ADR-0103.`
-  );
-}

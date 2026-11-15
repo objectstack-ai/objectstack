@@ -82,7 +82,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
   (`scopeFigures`) equals it, and a hidden field leaks when a tool answer's keys carry it, not
-  when a call only asked for it.
+  when a call only asked for it. A number inside an identifier (`INV-003`, `i3`; a digit after a
+  Latin letter, `isIdentifierToken`) is no figure for the answer or the leak scan; `3k`, `3 days`
+  and `USD3,000` still are.
 
 ### The closed capability-tag table
 
