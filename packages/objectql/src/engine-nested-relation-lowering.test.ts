@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { isComposedReadableIds } from '@objectstack/spec/data';
 import type { EngineAggregateOptions, EngineQueryOptions, FilterCondition } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
@@ -103,6 +104,18 @@ const INVALID_FILTER = { code: 'INVALID_FILTER', status: 400 };
 
 const idRows = (...ids: string[]) => ids.map((id) => ({ id }));
 
+/**
+ * `where` with every composed semi-join leaf respelled `{ SEMI_JOIN: object,
+ * scope }`, so a driver input can be compared with a literal (the composed
+ * leaf itself is branded and cannot be written by hand).
+ */
+const normalized = (v: any): any => {
+  if (isComposedReadableIds(v)) return { SEMI_JOIN: v.object, scope: normalized(v.scope) };
+  if (Array.isArray(v)) return v.map(normalized);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, normalized(x)]));
+  return v;
+};
+
 describe('[#20802] the nested-relation form is lowered at the engine\'s where seam', () => {
   let engine: ObjectQL;
   let rec: ReturnType<typeof makeRecordingDriver>;
@@ -136,19 +149,20 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
     return outer[outer.length - 1]?.ast?.where;
   };
 
-  it('every single-valued relation type: the related object is read as the condition says, then $in on its ids', async () => {
+  it('every single-valued relation type on a read verb: the related read is PLANNED, never run, and the outer read carries one semi-join leaf scoped by it', async () => {
     for (const [field, , target, condition] of SINGLE) {
       rec.answers.clear();
       rec.answers.set(target, idRows('r1', 'r3'));
       rec.reads.length = 0;
       await engine.find(OBJECT, { where: { [field]: condition } as FilterCondition });
-      const related = rec.reads.filter((r) => r.object === target && r.ast?.limit === RELATION_FILTER_ID_CAP + 1);
-      expect(related, field).toHaveLength(1);
-      expect(related[0].ast.where, field).toEqual(condition);
-      expect(related[0].ast.fields, field).toEqual(['id']);
-      const outer = rec.reads[rec.reads.length - 1];
+      // One driver call: the outer read. The related read reached its driver
+      // call and was planned, so no id list was read.
+      expect(rec.reads, field).toHaveLength(1);
+      const outer = rec.reads[0];
       expect(outer.object, field).toBe(OBJECT);
-      expect(outer.ast.where, field).toEqual({ [field]: { $in: ['r1', 'r3'] } });
+      const leaf = outer.ast.where?.[field]?.$in;
+      expect(isComposedReadableIds(leaf), field).toBe(true);
+      expect(normalized(outer.ast.where), field).toEqual({ [field]: { $in: { SEMI_JOIN: target, scope: condition } } });
     }
   });
 
@@ -163,33 +177,44 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
     });
   });
 
-  it('no related record matches: $in [] / $or [] — FALSE, never an absent predicate', async () => {
+  it('no related record matches: an empty subquery / $or [] — FALSE, never an absent predicate', async () => {
     rec.answers.set(OWNER, []);
-    expect(await outerWhereOf({ owner: { region: 'APAC' } })).toEqual({ owner: { $in: [] } });
+    // Single-valued: the subquery decides in the database — an empty one is FALSE there.
+    expect(normalized(await outerWhereOf({ owner: { region: 'APAC' } }))).toEqual({
+      owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'APAC' } } },
+    });
     expect(await outerWhereOf({ owners: { region: 'APAC' } })).toEqual({ $and: [{ $or: [] }] });
   });
 
-  it('composes as written inside $and / $or / $not, and the FilterArray sugar alike — exactly the two-step route\'s driver input', async () => {
+  it('composes as written inside $and / $or / $not, and the FilterArray sugar alike', async () => {
     rec.answers.set(OWNER, idRows('u1'));
-    const cases: ReadonlyArray<readonly [unknown, FilterCondition]> = [
-      [{ $or: [{ owner: { region: 'NA' } }, { title: 'a' }] }, { $or: [{ owner: { $in: ['u1'] } }, { title: 'a' }] }],
-      [{ $and: [{ title: 'c' }, { boss: { region: 'NA' } }] }, { $and: [{ title: 'c' }, { boss: { $in: ['u1'] } }] }],
-      [{ title: 'c', owner: { region: 'NA' } }, { title: 'c', owner: { $in: ['u1'] } }],
-      // `$not`: the lowered leaf takes the shared lowering's NULL-safe negation,
-      // so a row whose relation is empty satisfies it — the two-step route's reading.
-      [{ $not: { owner: { region: 'NA' } } }, { $not: { owner: { $in: ['u1'] } } }],
-      [{ $not: { owners: { region: 'NA' } } }, { $not: { $and: [{ $or: [{ owners: { $contains: 'u1' } }] }] } }],
-      [[['owner', '=', { region: 'NA' }]], { owner: { $in: ['u1'] } }],
+    const NA = { SEMI_JOIN: OWNER, scope: { region: 'NA' } };
+    const cases: ReadonlyArray<readonly [unknown, unknown]> = [
+      [{ $or: [{ owner: { region: 'NA' } }, { title: 'a' }] }, { $or: [{ owner: { $in: NA } }, { title: 'a' }] }],
+      [{ $and: [{ title: 'c' }, { boss: { region: 'NA' } }] }, { $and: [{ title: 'c' }, { boss: { $in: NA } }] }],
+      [{ title: 'c', owner: { region: 'NA' } }, { title: 'c', owner: { $in: NA } }],
+      [[['owner', '=', { region: 'NA' }]], { owner: { $in: NA } }],
     ];
-    for (const [nested, twoStep] of cases) {
-      const reference = await twoStepWhereOf(twoStep);
-      expect(await outerWhereOf(nested), JSON.stringify(nested)).toEqual(reference);
+    for (const [nested, expected] of cases) {
+      expect(normalized(await outerWhereOf(nested)), JSON.stringify(nested)).toEqual(expected);
     }
+    // `$not` over a single-valued relation: the shared lowering's NULL-safe
+    // negation applies to the semi-join leaf exactly as it does to a list —
+    // the same driver input as the hand-written `$not` over a ReadableIds leaf.
+    const negated = normalized(await outerWhereOf({ $not: { owner: { region: 'NA' } } }));
+    expect(JSON.stringify(negated)).toContain('"SEMI_JOIN":"nested_rel_owner"');
+    // A multi-valued relation keeps the id route.
+    const reference = await twoStepWhereOf({ $not: { $and: [{ $or: [{ owners: { $contains: 'u1' } }] }] } });
+    expect(await outerWhereOf({ $not: { owners: { region: 'NA' } } })).toEqual(reference);
   });
 
   it('covers every verb that takes a where — the driver never receives the nested form — and the judge admits it', async () => {
     rec.answers.set(OWNER, idRows('u1'));
     const where = { owner: { region: 'NA' } } as FilterCondition;
+    // Read verbs: the semi-join leaf. Write verbs (`update`, `delete`) keep
+    // the id read — their `where` never reaches the executor boundary that
+    // composes the leaf.
+    const semiJoin = { owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } } };
     const lowered = { owner: { $in: ['u1'] } };
     for (const [verb, call] of [
       ['find', () => engine.find(OBJECT, { where })],
@@ -201,7 +226,7 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       await call();
       const outer = rec.reads.filter((r) => r.object === OBJECT);
       expect(outer.length, verb).toBeGreaterThan(0);
-      for (const read of outer) expect(read.ast.where, verb).toEqual(lowered);
+      for (const read of outer) expect(normalized(read.ast.where), verb).toEqual(semiJoin);
     }
     rec.writes.length = 0;
     await engine.update(OBJECT, { title: 'x' }, { where, multi: true });
@@ -222,12 +247,12 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
     expect(engine.judgeFilter(OBJECT, { owners: { region: 'NA' } })).toEqual({ ok: true });
   });
 
-  it('placeholders in the condition resolve against the caller before the related read', async () => {
+  it('placeholders in the condition resolve against the caller before the related read is planned', async () => {
     rec.answers.set(OWNER, idRows('u9'));
     rec.reads.length = 0;
     await engine.find(OBJECT, { where: { owner: { id: '{current_user_id}' } }, context: { userId: 'u9' } } as EngineQueryOptions);
-    const related = rec.reads.find((r) => r.object === OWNER);
-    expect(related?.ast.where).toEqual({ id: 'u9' });
+    expect(rec.reads.find((r) => r.object === OWNER), 'no related read ran').toBeUndefined();
+    expect(normalized(rec.reads[0]?.ast.where)).toEqual({ owner: { $in: { SEMI_JOIN: OWNER, scope: { id: 'u9' } } } });
   });
 
   it('the related read runs AS THE CALLER, through the middleware chain, and its refusal is the answer — loudly, no outer read', async () => {
@@ -264,25 +289,24 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
 
   // ── the cap ──────────────────────────────────────────────────────────────
 
-  it('the cap: past it the filter is REFUSED with the two-step route, never run over a cut-off list; at it, served whole', async () => {
+  it('the cap: a single-valued relation on a read verb has none (the semi-join reads no id list); a multi-valued one and a write verb are REFUSED past it, never run over a cut-off list', async () => {
     const many = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `u${i}` }));
     rec.answers.set(OWNER, many(RELATION_FILTER_ID_CAP + 1));
-    rec.reads.length = 0;
-    const err = await refusalOf(engine.find(OBJECT, { where: { owner: { region: 'NA' } } }));
-    expect(envelopeOf(err)).toEqual(INVALID_FILTER);
-    expect(err!.message).toMatch(/^find\('nested_rel_ledger'\): /);
-    expect(err!.message).toContain(`matched more than ${RELATION_FILTER_ID_CAP} records of the related object '${OWNER}'`);
-    expect(err!.message).toContain('the filter was NOT applied: a cut-off id list would silently drop matching rows');
-    expect(err!.message).toContain('{ "owner": { "$in": [ID, …] } }');
-    expect(rec.reads.filter((r) => r.object === OBJECT), 'no outer read').toHaveLength(0);
+    expect(normalized(await outerWhereOf({ owner: { region: 'NA' } }))).toEqual({
+      owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } },
+    });
 
+    rec.reads.length = 0;
     const multi = await refusalOf(engine.find(OBJECT, { where: { owners: { region: 'NA' } } }));
     expect(envelopeOf(multi)).toEqual(INVALID_FILTER);
+    expect(multi!.message).toMatch(/^find\('nested_rel_ledger'\): /);
+    expect(multi!.message).toContain(`matched more than ${RELATION_FILTER_ID_CAP} records of the related object '${OWNER}'`);
     expect(multi!.message).toContain('{ "owners": { "$contains": ID } }');
+    expect(rec.reads.filter((r) => r.object === OBJECT), 'no outer read').toHaveLength(0);
 
-    rec.answers.set(OWNER, many(RELATION_FILTER_ID_CAP));
-    const where = await outerWhereOf({ owner: { region: 'NA' } });
-    expect((where as any).owner.$in).toHaveLength(RELATION_FILTER_ID_CAP);
+    const write = await refusalOf(engine.update(OBJECT, { title: 'x' }, { where: { owner: { region: 'NA' } }, multi: true }));
+    expect(envelopeOf(write)).toEqual(INVALID_FILTER);
+    expect(write!.message).toContain('{ "owner": { "$in": [ID, …] } }');
   });
 
   // ── what the first cut keeps refusing ────────────────────────────────────
