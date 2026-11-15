@@ -117,8 +117,17 @@ export interface TurnSummary {
    * turn was served, so there is no served effort to compare it with.
    */
   requestedEffort?: string;
-  /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
+  /**
+   * Wall-clock time of the turn's process, spawn to exit, by the runner's own
+   * clock (`meta.process`): every live driver runs one (`claude`, `codex`,
+   * `external:`). Absent ⇒ no process was recorded (a replay of a recording
+   * made before the runner kept it): the turn was not timed, never a zero.
+   */
   elapsedMs?: number;
+  /** The turn's duration as the CLI stated it (`meta.reportedDurationMs`, the `claude` result line's `duration_ms`); absent ⇒ none stated. */
+  reportedDurationMs?: number;
+  /** The part of it the CLI spent on the model API (`meta.reportedApiDurationMs`, `duration_api_ms`); absent ⇒ none stated. */
+  reportedApiDurationMs?: number;
   /**
    * The turn's cost in US dollars as its driver reported it (`meta.reportedCostUsd`:
    * the `claude` CLI's estimate, or an external command's report). Absent ⇒
@@ -270,6 +279,8 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(p?.requestedEffort ? { requestedEffort: p.requestedEffort } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
+    ...(t.meta.reportedDurationMs !== undefined ? { reportedDurationMs: t.meta.reportedDurationMs } : {}),
+    ...(t.meta.reportedApiDurationMs !== undefined ? { reportedApiDurationMs: t.meta.reportedApiDurationMs } : {}),
     ...(t.meta.reportedCostUsd !== undefined ? { reportedCostUsd: t.meta.reportedCostUsd } : {}),
     ...(t.meta.inputTokens !== undefined ? { inputTokens: t.meta.inputTokens } : {}),
     ...(t.meta.outputTokens !== undefined ? { outputTokens: t.meta.outputTokens } : {}),
