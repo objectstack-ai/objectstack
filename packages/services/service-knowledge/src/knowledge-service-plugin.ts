@@ -10,7 +10,6 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
-import { SETTINGS_PLUGIN_ID } from '@objectstack/service-settings';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
 
 /**
@@ -76,7 +75,9 @@ export class KnowledgeServicePlugin implements Plugin {
    * knowledge settings to its `settings` service (`contributeKnowledgeSettings`),
    * so its absence there is a fact about the composition, never a guess.
    */
-  optionalDependencies = ['com.objectstack.engine.objectql', SETTINGS_PLUGIN_ID];
+  // Literal ids: the boot-order gates read this array statically. The second
+  // is `SETTINGS_PLUGIN_ID` from `@objectstack/service-settings`.
+  optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.settings'];
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;

@@ -3088,6 +3088,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
