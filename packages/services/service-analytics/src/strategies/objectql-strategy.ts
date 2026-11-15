@@ -647,7 +647,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     // #3654 — classify cross-object references. A cross-object DIMENSION within
     // the supported envelope is served by an FK-expand (`executeCrossObject`);
-    // a one-hop cross-object `where` leaf already reached `filter` as the
+    // a cross-object `where` leaf of up to three hops (and the dataset's own
+    // `filter`'s, #33626) already reached `filter` as the
     // engine's nested-relation condition (`servedWhere`, above); everything the
     // engine cannot serve (cross-object measures, a `where` leaf `servedWhere`
     // left dotted, multi-hop, non-recombinable measures) is REJECTED by `planCrossObject` —
