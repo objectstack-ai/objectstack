@@ -445,17 +445,10 @@ create/update payload.
 - **get_record({ objectName, recordId })** — fetch one record by id.
 - **create_record({ objectName, data })** — create a record.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
-- **delete_record({ objectName, recordId, confirm })** — delete a record.
-  The server REFUSES a call without \`confirm: true\`
+- **delete_record({ objectName, recordId, confirm })** — delete a record,
+  permanently. The server REFUSES a call without \`confirm: true\`
   (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted. Ask your human
-  first; the flag asserts an approval, it does not obtain one. A deleted
-  business record goes to the recycle bin and can be restored there until the
-  deployment's retention ends (30 days by default); the answer names the entry
-  as \`recycleBinEntryId\`. An answer without one was a permanent delete: a
-  platform object's record (\`sys_\`, \`cloud_\`, \`ai_\`), or any record on a
-  deployment with no recycle bin. No MCP tool restores: tell your human the
-  record can be restored from the recycle bin (the console, or the REST
-  recycle-bin restore route).
+  first; the flag asserts an approval, it does not obtain one.
 - **delete_records({ objectName, where | recordIds, confirm })** — delete many
   records of one object in one call, instead of one \`delete_record\` per row.
   Without \`confirm: true\` it deletes nothing and is REFUSED
@@ -466,10 +459,8 @@ create/update payload.
   and the object's delete rules (no one bypasses them); refused records stay
   and come back grouped by reason with their ids, and \`remaining\` says how
   many still match. Call again to continue. A fault (not a rule's refusal)
-  stops the call and names the record it stopped at. \`recycleBinEntries\`
-  lists each deleted record the recycle bin kept, with its
-  \`recycleBinEntryId\`; a deleted record not listed was deleted permanently.
-  Over OAuth it needs both \`data:read\` and \`data:write\`.
+  stops the call and names the record it stopped at. Over OAuth it needs both
+  \`data:read\` and \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
   the app author exposed to AI and your permissions allow), with each
   action's declared parameters, whether it operates on a record, and whether
