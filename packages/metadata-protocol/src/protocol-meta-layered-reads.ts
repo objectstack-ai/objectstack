@@ -250,6 +250,21 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         ? await judgeBareActionRead(host, request.name)
         : undefined;
     const exactAddress = await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
+    // [ADR-0150 D3, #32914] …and, naming no package, a type addressed by
+    // package is judged by the registry's package-scoped resolver, as the
+    // plain read judges it ({@link getMetaItem}, its `packagelessScopedRead`):
+    // a name two or more served packages hold is refused naming each
+    // (`PackageScopedNameRefusedError`, `409 RESOURCE_CONFLICT` with its
+    // candidates), before any layer is read and whatever the metadata service
+    // holds. The code layer below otherwise fell back to the artifact lookup's
+    // first composite, so the read answered the holder that registered first.
+    // Asked for the judgment only: a name one holder holds keeps the layers
+    // below as they were. [contract review S1] Stored-row holders are not
+    // this judgment's: the door refuses them through
+    // {@link packagelessLayeredReadRefusal}, its step 1c.
+    if (!request.packageId && host.engine?.registry?.readsByPackage?.(request.type) === true) {
+        host.engine.registry.resolveItem(request.type, request.name, null, member);
+    }
 
     // [ADR-0131 D6] Environment → code: the overlay layer is the
     // environment's stored row; no organization's row is read.
