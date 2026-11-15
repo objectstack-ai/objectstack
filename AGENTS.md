@@ -198,8 +198,8 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
    - REST endpoints → plural (`/api/v1/ai/agents`)
 4. **Imports:** Use `@objectstack/spec` namespaces or subpaths. Never relative `../../packages/spec`.
 5. **No workarounds.** Adopt sustainable, well-architected solutions — not temporary patches. **SQL first:** build
-   a query capability at its fastest SQL shape (JOIN or semi-join, aggregates in the database); memory and mongo
-   refuse what they cannot run with a stable code — ⛔ never a slower path kept only for parity (ruling record 6888468549).
+   a query capability at its fastest SQL shape (JOIN or semi-join, aggregates in the database); memory and mongo refuse
+   what they cannot run with a stable code; ⛔ never a slower path kept only for parity (ruling record 6888468549).
 6. **Object name = table name.** The object `name` is the canonical id everywhere (API, ObjectQL, REST, SDK, DB table).
    **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name
    (`sys_user`, `ai_conversations`).
