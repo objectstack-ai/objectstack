@@ -698,6 +698,17 @@ describe('[#33905] a flow whose only holder\'s package is disabled: the bare doo
         expect(automation.listRunsPage).not.toHaveBeenCalled();
     });
 
+    it('the clone door with the flow as its source answers 404 as its namespaced address does; nothing is registered (FROM: the source was copied)', async () => {
+        const { call, automation } = dispatcherOver(registryHolding(true), false);
+        const registerFlow = vi.fn();
+        (automation as Record<string, unknown>).registerFlow = registerFlow;
+        const viaAddress = await call('/crm/solo/clone', 'POST', { name: 'solo_copy', label: 'Solo copy' });
+        const viaBare = await call('/solo/clone', 'POST', { name: 'solo_copy', label: 'Solo copy' });
+        expect([viaBare.status, codeOf(viaBare)]).toEqual([404, codeOf(viaAddress)]);
+        expect(viaAddress.status).toBe(404);
+        expect(registerFlow).not.toHaveBeenCalled();
+    });
+
     it('CONTROL — the package enabled: the address is its bare path, and both serve the flow', async () => {
         const { call } = dispatcherOver(registryHolding(false), true);
         for (const [bare, addressed, method, body] of DOORS) {

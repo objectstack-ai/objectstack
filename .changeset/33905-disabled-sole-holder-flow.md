@@ -18,6 +18,12 @@ What moves, for such a flow, while its package is disabled:
 - `getFlow(name)` answered the flow. It now answers `null`, so the bare HTTP doors that ask it first (`GET /automation/NAME`, `POST /automation/NAME/trigger`, `POST /automation/trigger/NAME`, `POST /automation/NAME/toggle`, `POST /automation/NAME/clone`, `GET /automation/NAME/runs`) answer `404`, which is what the namespaced address `/automation/NAMESPACE/NAME…` already answered.
 - `toggleFlow(name, …)` switched the flow. It now rejects with `Flow 'NAME' not found`.
 
+Three HTTP write doors ask `getFlow` whether the name is held, and move with it for such a flow. These answers were read from the runtime source; the engine's half of the clone answer was measured. Each holds only where the door's earlier checks, such as the packaged-base and authoring rules, let the request through.
+
+- `POST /automation/SOURCE/clone`, with the flow's name as the new name: the taken-name probe refused the copy with `409`. It now finds no flow and lets the copy through. The engine files the copy's body in the disabled package's slot of the name, and once the package is enabled again its trigger runs the copy's body until the next re-sync. This may widen what the door accepts.
+- A definition write (`POST /automation`, `PUT /automation/NAME`) or a clone that the engine accepts and that is then refused (an unknown `notify` channel, a refused landing, a refused save) put back the definition the engine held. It now has nothing to put back, so it removes the name's registration. A `PUT` body that leaves out a stored credential no longer keeps the one the engine held.
+- `DELETE /automation/NAME` answered a deletion. It still removes the engine's registration, but now answers `404` unless a stored row was removed.
+
 Remedy: enable the package. Its flow runs on its trigger again with no re-arm, and the bare entries serve it again.
 
 An event that fires while the package is disabled is dropped, not replayed when the package is enabled again.
