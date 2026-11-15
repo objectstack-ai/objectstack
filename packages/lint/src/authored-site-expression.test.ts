@@ -120,6 +120,7 @@ const SITE_MEMBER_CALLS: Record<ObjectSite, Record<string, string>> = {
 const WALK_PUSHES: Record<string, string> = {
   bulkConfirmTextIssues: "a list view's bulk `confirmText` template slots: no rule or field expression",
   actionCopyTemplateIssues: "an action's copy template slots: no rule or field expression",
+  hookRefusalTemplateIssues: "a hook refusal's template sentences over its declared params: no rule or field expression",
 };
 
 /** The passes the walk pushes whole from INSIDE a site's regions: classified with that site's calls, in `SITE_CALLS`. */

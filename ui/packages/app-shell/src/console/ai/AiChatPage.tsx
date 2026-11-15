@@ -1122,6 +1122,100 @@ export function useDeferredFirstSend(opts: {
   );
 }
 
+/** Composer text a `…:pending` pane hands to the pane that replaces it. */
+interface ComposerDraftHandoff {
+  text: string;
+  /** The chat endpoint the text was typed for. */
+  chatApi: string | undefined;
+  /** The conversation the host was asking for when the text was last typed. */
+  requestedConversationId: string | undefined;
+  /** The replaced box had focus, so typing goes on in the new one. */
+  focused: boolean;
+}
+
+/**
+ * Keyed by the host's page-owned first-message stash: the one object a host
+ * keeps across the pane's id-keyed remount, and its own, so two hosts never
+ * trade drafts. An entry lives for one commit only (see
+ * {@link useComposerDraftHandoff}).
+ */
+const composerDraftHandoffs = new WeakMap<object, ComposerDraftHandoff>();
+
+/**
+ * objectstack#33674 — the text typed (and not sent) into the composer of a
+ * pane that does not know its conversation yet survives the remount that
+ * follows when the id lands: the conversation GET of a deep link answering, or
+ * the create of a new conversation answering. `<ChatPane>` stays keyed on the
+ * id, because everything else in it (the chat runtime, its messages) belongs
+ * to one conversation; only the composer's text is carried.
+ *
+ * The replaced pane writes the text as it unmounts and the new pane reads it
+ * as it mounts. React runs both in the same commit, so the hand-off is never
+ * read later: a microtask drops an entry no pane took. Only a pending pane
+ * hands text on, and only to a pane on the same endpoint whose host still asks
+ * for the conversation it asked for when the text was last typed, so opening
+ * another conversation leaves the draft behind, as before. The new box gets
+ * the same text with the cursor at its end, and focus when the old box had it.
+ * Nothing is sent.
+ *
+ * Returns the composer's `onInputChange`, which records what the host was
+ * asking for when the user typed.
+ */
+export function useComposerDraftHandoff(opts: {
+  /** The host's page-owned stash (`pendingFirstMessageRef`), the hand-off's key. */
+  hostStash: object;
+  /** The pane's root element; the composer is the `message` textarea inside it. */
+  containerRef: React.RefObject<HTMLElement | null>;
+  chatApi: string | undefined;
+  conversationId: string | undefined;
+  /** The conversation the host asks `useChatConversation` for (its `activeId`). */
+  requestedConversationId: string | undefined;
+}): () => void {
+  const { hostStash, containerRef, chatApi, conversationId, requestedConversationId } = opts;
+  const requestedRef = useRef(requestedConversationId);
+  const typedForRef = useRef(requestedConversationId);
+  useLayoutEffect(() => {
+    requestedRef.current = requestedConversationId;
+  }, [requestedConversationId]);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const composerBox = () => container?.querySelector<HTMLTextAreaElement>('textarea[name="message"]') ?? null;
+    const handoff = composerDraftHandoffs.get(hostStash);
+    composerDraftHandoffs.delete(hostStash);
+    if (
+      handoff &&
+      conversationId &&
+      handoff.chatApi === chatApi &&
+      handoff.requestedConversationId === requestedRef.current
+    ) {
+      const box = composerBox();
+      if (box && box.value === '') {
+        box.value = handoff.text;
+        box.setSelectionRange(handoff.text.length, handoff.text.length);
+        if (handoff.focused) box.focus();
+      }
+    }
+    return () => {
+      if (conversationId) return;
+      const box = composerBox();
+      if (!box || box.value.trim() === '') return;
+      const entry: ComposerDraftHandoff = {
+        text: box.value,
+        chatApi,
+        requestedConversationId: typedForRef.current,
+        focused: box.ownerDocument.activeElement === box,
+      };
+      composerDraftHandoffs.set(hostStash, entry);
+      queueMicrotask(() => {
+        if (composerDraftHandoffs.get(hostStash) === entry) composerDraftHandoffs.delete(hostStash);
+      });
+    };
+  }, [hostStash, containerRef, chatApi, conversationId]);
+  return useCallback(() => {
+    typedForRef.current = requestedRef.current;
+  }, []);
+}
+
 export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentProp }: AiChatPageProps = {}) {
   const { user } = useAuth();
   const { t } = useObjectTranslation();
@@ -1752,6 +1846,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             chatApi={chatApi}
             apiBase={apiBase}
             conversationId={paneConversationId}
+            requestedConversationId={urlConversationId ?? legacyConversationId}
             editPackageId={editPackageId}
             onPackageBound={handlePackageBound}
             canBind={Boolean(urlConversationId)}
@@ -1803,6 +1898,11 @@ interface ChatPaneProps {
   chatApi: string | undefined;
   apiBase: string;
   conversationId: string | undefined;
+  /** objectstack#33674 — the conversation the host asks `useChatConversation`
+   *  for (its `activeId`: the deep link's id); absent when the host asks for
+   *  none. A draft typed before this pane knew its id is carried into the
+   *  replacing pane only while this is unchanged. See {@link useComposerDraftHandoff}. */
+  requestedConversationId?: string;
   /** ADR-0070 "Edit with AI": the package the user opened to edit (from `?package=`),
    *  forwarded to the build agent as `context.packageId` to scope it to that app. */
   editPackageId?: string;
@@ -1869,6 +1969,7 @@ export function ChatPane({
   chatApi,
   apiBase,
   conversationId,
+  requestedConversationId,
   editPackageId,
   activeAppPackageId,
   surfaceContext,
@@ -2068,6 +2169,15 @@ export function ChatPane({
   }, [canvasOpen, onCanvasOpenChange]);
   // Draggable chat ↔ preview split (active only while the preview is open).
   const split = useResizableChatPane(canvasOpen);
+  // objectstack#33674 — what is typed into the composer before this pane knows
+  // its conversation outlives the id-keyed remount. See useComposerDraftHandoff.
+  const noteComposerInput = useComposerDraftHandoff({
+    hostStash: pendingFirstMessageRef,
+    containerRef: split.containerRef,
+    chatApi,
+    conversationId,
+    requestedConversationId,
+  });
   // A pane too narrow for the split (the console dock at a laptop width, the
   // Studio copilot's slot) previews the way a phone does: full-width chat, the
   // pill, the full-surface overlay. Every phone switch below reads this.
@@ -2934,6 +3044,7 @@ export function ChatPane({
             : undefined
         }
         onOpenBuilder={openBuilder}
+        onInputChange={noteComposerInput}
         // objectui#11667 — the ADR-0057 P4 handoff card's three strings. Left
         // unset, the component's English defaults rendered in every locale.
         builderHandoffTitleLabel={t('console.ai.builderHandoffTitle')}

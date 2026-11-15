@@ -112,7 +112,7 @@ a `{token}` in one is refused.
 ```ts
 import type { FlowNode } from '@objectstack/spec/automation';
 const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
+    recipients: { dialect: 'cel', source: 'record.owner_id' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
     title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
