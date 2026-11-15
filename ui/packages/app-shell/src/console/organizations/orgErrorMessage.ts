@@ -45,6 +45,7 @@
  * `console/organizations/` can actually provoke — the three the card measured,
  * plus siblings on the same three call paths (the role-cap refusal that
  * `invitableOrgRoles` narrows for but the server re-checks; a duplicate invite;
+ * an invite to someone already in the organization (objectstack#33650);
  * the slug collision that is the create dialog's other outcome; the
  * multi-org-disabled refusal `CreateWorkspaceDialog` already comments about; and
  * the expired link `AcceptInvitationPage` already has a hand-written fallback
@@ -75,6 +76,13 @@ export interface OrgErrorEntry {
   defaultValue: string;
 }
 
+/** The not-found sentence, shared by the code row and the invitation lookup below. */
+const INVITATION_NOT_FOUND_ENTRY: OrgErrorEntry = {
+  key: 'organization.errors.invitationNotFound',
+  defaultValue:
+    'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
+};
+
 /**
  * Organization error code (better-auth's, or an objectstack registered code)
  * -> the console's own i18n key.
@@ -97,6 +105,13 @@ export const ORG_ERROR_MESSAGE_KEYS: Record<string, OrgErrorEntry> = {
   USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION: {
     key: 'organization.errors.alreadyInvited',
     defaultValue: 'This user has already been invited to this organization',
+  },
+  // Inviting an address that already holds a membership: better-auth 1.7.12
+  // `create-invitation` (`crud-invites.mjs`) refuses it with this code before
+  // it looks for a pending invitation (objectstack#33650).
+  USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION: {
+    key: 'organization.errors.alreadyMember',
+    defaultValue: 'This user is already a member of this organization',
   },
 
   // --- create-workspace path (CreateWorkspaceDialog) ---
@@ -138,9 +153,14 @@ export const ORG_ERROR_MESSAGE_KEYS: Record<string, OrgErrorEntry> = {
     key: 'organization.errors.notTheRecipient',
     defaultValue: 'You are not the recipient of the invitation',
   },
+  // One sentence for every state the server folds into "not found": an
+  // unknown id, an invitation already accepted, declined or cancelled, and one
+  // past its expiry. The server answers all of them alike, so the sentence
+  // names them all, and tells the invitee who already accepted where the
+  // organization is (objectstack#33650).
   INVITATION_NOT_FOUND: {
-    key: 'organization.errors.invitationNotFound',
-    defaultValue: 'This invitation no longer exists or has expired',
+    key: INVITATION_NOT_FOUND_ENTRY.key,
+    defaultValue: INVITATION_NOT_FOUND_ENTRY.defaultValue,
   },
 };
 
@@ -191,6 +211,44 @@ export function resolveOrgErrorMessage(
   if (typeof message === 'string' && message.trim()) return message;
   if (fallback) return t(fallback.key, { defaultValue: fallback.defaultValue });
   return t(UNKNOWN_ERROR.key, { defaultValue: UNKNOWN_ERROR.defaultValue });
+}
+
+/** Read the HTTP status off a thrown value, if it carries one. */
+function errorStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const status = (err as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * Resolve a rejected invitation LOOKUP (`getInvitation`, better-auth's
+ * `GET /organization/get-invitation`) into the message to show the invitee.
+ *
+ * That route is the one organization route whose not-found answer carries no
+ * code: better-auth 1.7.12 (`crud-invites.mjs`, `getInvitation`) throws
+ * `APIError.fromStatus("BAD_REQUEST", { message: "Invitation not found!" })`
+ * for an unknown id and for an invitation that is accepted, rejected,
+ * canceled or expired, where `accept-invitation` throws the coded
+ * `INVITATION_NOT_FOUND` for the same states. Every other 400 the route can
+ * answer names its code (`ORGANIZATION_NOT_FOUND`,
+ * `INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION`, better-call's
+ * `VALIDATION_ERROR`). So a 400 with NO code, from this route only, is that
+ * answer, and it reads as the not-found sentence. The English text is never
+ * read, for the reason the header gives.
+ *
+ * Everything else goes through {@link resolveOrgErrorMessage} unchanged: a
+ * coded refusal maps by its code, and a code-less answer with another status
+ * (a 401 from a session that ended, a 5xx) keeps its own message.
+ *
+ * Only the caller knows which route it called, so this is a separate entry
+ * point rather than a status rule inside {@link resolveOrgErrorMessage}: a
+ * code-less 400 from any other organization route is not a not-found.
+ */
+export function resolveInvitationLookupMessage(err: unknown, t: OrgTranslate): string {
+  if (errorCode(err) === undefined && errorStatus(err) === 400) {
+    return t(INVITATION_NOT_FOUND_ENTRY.key, { defaultValue: INVITATION_NOT_FOUND_ENTRY.defaultValue });
+  }
+  return resolveOrgErrorMessage(err, t, INVITATION_NOT_FOUND_ENTRY);
 }
 
 // ---------------------------------------------------------------------------

@@ -2047,7 +2047,8 @@ const appTranslationDataShape = () => ({
    * Hook translations keyed by hook name (`Hook.name`) — #26170, maintainer
    * ruling 6431311681 letter A.
    *
-   *   hooks.<hook_name>.refusals.<CODE>.message   (a declared refusal, `HookSchema.refusals`)
+   *   hooks.<hook_name>.refusals.<CODE>.message                      (a declared refusal, `HookSchema.refusals`)
+   *   hooks.<hook_name>.refusals.<CODE>.reasons.<REASON>.message     (a declared reason under it, #33214)
    *
    * A hook's business refusal ("A current clean version is required before
    * signing.") is the sentence a user reads most often when an app says "not
@@ -2063,16 +2064,21 @@ const appTranslationDataShape = () => ({
    * `'*'` (`HookSchema.object`); one catalogue per hook means one translation
    * per code, whatever the hook is bound to.
    *
-   * **Picked before it is served, by the body runner.** The sandboxed body
-   * runner answers a throw of a declared code with `hookRefusalMessageKey(hook,
-   * code)` (`system/i18n-resolver.ts`), read through the `i18n` service in the
-   * caller's `HookContext.session.locale` negotiated by `resolveBundleLocale`;
-   * with no locale, or no entry, the declared message is served. The message
-   * is plain text like the validation-rule message it sits beside: no `{{ }}`
-   * hole is filled, the translation replaces it whole.
+   * **Picked before it is served, by the runtime.** The hook runtime — the
+   * sandboxed body runner, and the in-process seam a `handler` runs through
+   * (#33214) — answers a throw of a declared code with
+   * `hookRefusalMessageKey(hook, code, reason?)` (`system/i18n-resolver.ts`),
+   * read through the `i18n` service in the caller's `HookContext.session.locale`
+   * negotiated by `resolveBundleLocale`; with no locale, or no entry, the
+   * declared sentence is served. The translation replaces the declared sentence
+   * whole. A sentence whose entry declares `params` is a template: the
+   * translation keeps the declared `{{ NAME }}` holes, and the runtime fills
+   * them from the throw's `params` after picking it — the flow `end` refusal's
+   * posture (translated before it is rendered). A sentence whose entry declares
+   * no `params` is plain text and nothing in it is filled.
    *
-   * `objectstack validate` refuses a key over an unknown hook, or a code the
-   * hook's `refusals` does not declare.
+   * `objectstack validate` refuses a key over an unknown hook, a code the hook's
+   * `refusals` does not declare, or a reason that code does not declare.
    */
   hooks: z.record(z.string(), strictObject({
     surface: 'this hook translation',
@@ -2087,16 +2093,27 @@ const appTranslationDataShape = () => ({
     refusals: z.record(z.string(), strictObject({
       surface: 'this hook refusal translation',
       history: TRANSLATION_HISTORY,
-      // The spellings `HookRefusalSchema` renames onto its own `message`.
-      aliases: { text: 'message', reason: 'message', description: 'message' },
+      // The spellings `HookRefusalSchema` renames onto its own `message` and `reasons`.
+      aliases: { text: 'message', reason: 'message', description: 'message', variants: 'reasons', messages: 'reasons' },
     }, {
-      // Plain text, like the declared message it translates; an empty string
-      // is the untranslated skeleton slot `os i18n extract` writes (the
-      // declared message is served).
+      // The declared message's own form — plain text, or a template over the
+      // entry's declared `params`; an empty string is the untranslated
+      // skeleton slot `os i18n extract` writes (the declared message is served).
       message: z.string().optional().describe(
         "Translated refusal message of a hook's declared refusal code — served whole in the caller's locale in "
-        + 'place of the declared message',
+        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
       ),
+      // [#33214] A declared reason's sentence under the same code.
+      reasons: z.record(z.string(), strictObject({
+        surface: 'this hook refusal reason translation',
+        history: TRANSLATION_HISTORY,
+        aliases: { text: 'message', description: 'message' },
+      }, {
+        message: z.string().optional().describe(
+          "Translated sentence of a declared reason under a hook's refusal code — served in place of the declared "
+          + 'reason message, its {{ }} holes filled after',
+        ),
+      })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
     })).optional().describe("Refusal translations keyed by the code the hook's `refusals` declares"),
   })).optional().describe('Hook translations keyed by hook name'),
 
@@ -2626,7 +2643,7 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   history:
     'Until this shape was closed an unknown key was dropped silently — the stack still '
     + 'built, with the setting the author wrote never reaching any runtime.',
-  aliases: { locale: 'defaultLocale', defaultLanguage: 'defaultLocale', locales: 'supportedLocales', languages: 'supportedLocales', fallback: 'fallbackLocale', fallbackLanguage: 'fallbackLocale' },
+  aliases: { locale: 'defaultLocale', defaultLanguage: 'defaultLocale', locales: 'supportedLocales', languages: 'supportedLocales', fallback: 'fallbackLocale', fallbackLanguage: 'fallbackLocale', sourceLanguage: 'sourceLocale', authoringLocale: 'sourceLocale', authoringLanguage: 'sourceLocale' },
   // #3494 removed these four. They were the exemplar the liveness audit
   // (#1878/#1893) was built to find — declared, authored, and read by nothing —
   // and removing them made a config that was *already* a no-op into a config
@@ -2645,6 +2662,35 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   supportedLocales: z.array(LocaleSchema).describe('Supported BCP-47 locale codes'),
   /** Fallback locale when translation is not found */
   fallbackLocale: LocaleSchema.optional().describe('Fallback locale code'),
+  /**
+   * The language the stack's inline metadata text is written in — the locale
+   * a plain-string `label:` IS the text of.
+   *
+   * `defaultLocale` answers a different question: which language a user who
+   * has not chosen one gets. The two coincide for most stacks, so this key is
+   * optional and, absent, reads as `defaultLocale` — a stack that declares
+   * nothing here reads exactly as before. They differ for an app authored in
+   * one language and sold into another market: English inline labels with
+   * `defaultLocale: 'zh-CN'` declare `sourceLocale: 'en'`.
+   *
+   * Read by the authoring tools: `os lint` and `os i18n check` count the
+   * inline text as this locale's translation (so they never ask for a bundle
+   * row that restates it), and they gate every locale in `supportedLocales`
+   * plus `defaultLocale`, even when `supportedLocales` omits it; `os i18n
+   * extract` fills this locale's bundle from the inline text and scaffolds
+   * `defaultLocale`'s. Their `--default-locale` flag overrides it.
+   * Like `defaultLocale`, it need not appear in `supportedLocales`.
+   *
+   * ⚠️ Not yet read by the serving layer: the runtime label resolvers still
+   * treat `defaultLocale` as the authored label's language when they decide
+   * whether a request walks the fallback chain.
+   */
+  sourceLocale: LocaleSchema.optional().describe(
+    'Language the inline metadata text (a plain-string label) is written in, when it differs from defaultLocale '
+    + '(e.g. "en" for an English-authored app whose users default to "zh-CN"). Absent, it is defaultLocale. '
+    + 'Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it. '
+    + 'Not yet read by the serving layer: the runtime label resolvers still treat defaultLocale as the authored label\'s language.',
+  ),
 }).describe('Internationalization configuration'));
 
 export type TranslationConfig = z.input<typeof TranslationConfigSchema>;

@@ -138,6 +138,7 @@
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
+ *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
@@ -2385,10 +2386,11 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
  * catalogue declares (#26170, maintainer ruling 6431311681 letter A), seeded
  * with the declared message.
  *
- * The sandboxed body runner reads exactly that key (`hookRefusalMessageKey`)
- * in the caller's locale when the body throws the entry's code, so each
- * declared entry is one demand, counted by the coverage gate under its own
- * `hook` bucket. Keyed by hook name, not by the objects the hook binds, so a
+ * The hook runtime reads exactly that key (`hookRefusalMessageKey`) in the
+ * caller's locale when the hook throws the entry's code, so each declared
+ * entry is one demand, counted by the coverage gate under its own `hook`
+ * bucket — and so is each reason the entry declares (#33214),
+ * `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`. Keyed by hook name, not by the objects the hook binds, so a
  * hook bound to several objects or to `'*'` is asked for one translation per
  * code. A hook that declares no `refusals` has no key here: its throws carry
  * no address a bundle could reach.
@@ -2402,6 +2404,17 @@ function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
     if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) continue;
     for (const [code, entry] of Object.entries<any>(refusals)) {
       pushOptional(out, ['hooks', hookName, 'refusals', code, 'message'], inlineText(entry?.message), 'hook');
+      // [#33214] Each declared reason under the code is one more demand.
+      const reasons = entry?.reasons;
+      if (!reasons || typeof reasons !== 'object' || Array.isArray(reasons)) continue;
+      for (const [reason, sentence] of Object.entries<any>(reasons)) {
+        pushOptional(
+          out,
+          ['hooks', hookName, 'refusals', code, 'reasons', reason, 'message'],
+          inlineText(sentence?.message),
+          'hook',
+        );
+      }
     }
   }
 }

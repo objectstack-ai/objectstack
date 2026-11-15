@@ -37,6 +37,16 @@
  *     card operation's acting verb, read off its prompt, is enumerated, and a
  *     recorded turn (`fixtures/asset-lifecycle-withheld-loan.recording.json`)
  *     replays "I didn't lend out AST-0041" as the operation's pass.
+ *
+ * R4. An irreversible operation the agent applied through its action's
+ *     confirmation gate, on an ask that names the target, meets
+ *     `pending_confirmation` until objectstack-ai/cloud#3826 item 6
+ *     (`AGENT_CONFIRMATION_MEETS_PENDING`). The three gallery debut runs of
+ *     `asset_lifecycle` were recorded outside this repository and are not in
+ *     it, so their shape is rebuilt here; two recorded eval turns
+ *     (`fixtures/eval-r1-confirm-gate.recording.json`, trimmed to the calls
+ *     the grade reads) are replayed: `remove_line` through the confirm-gated
+ *     delete action (met) and `remove_ben` through `delete_record` (not met).
  */
 
 import { dirname, resolve } from 'node:path';
@@ -47,13 +57,22 @@ import { describe, expect, it } from 'vitest';
 import { formatRefusal, loadScenarios, readableNumbers, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { agentSetOf, clockDates, flowRefused, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
 import { RecordedDriver } from '../../src/runner/driver.js';
-import { buildLockOf, hiddenValues } from '../../src/runner/orchestrate.js';
+import { actionGatesOf, buildLockOf, hiddenValues, type CardRun, type RunHalf } from '../../src/runner/orchestrate.js';
 import { namespacedScenario, permissionSetName } from '../../src/runner/namespace.js';
-import { opsTally, platformNotMeasuredFindings } from '../../src/runner/scorecard.js';
+import { cardScorecard, confirmationTally, opsTally, platformNotMeasuredFindings, renderScorecard } from '../../src/runner/scorecard.js';
 import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 import { isProbedOperation } from '../../src/schema.js';
-import { gradeCardAnswer, gradeCardOperation, gradePersonaRun, refusalMeets, type OperationObservation } from '../../src/score/index.js';
+import {
+  askNamesTarget,
+  buildDeniesWrite,
+  gradeCardAnswer,
+  gradeCardOperation,
+  gradeOperation,
+  gradePersonaRun,
+  refusalMeets,
+  type OperationObservation,
+} from '../../src/score/index.js';
 import { declines } from '../../src/score/scenario-run-grade.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -201,12 +220,12 @@ describe('2. the app\'s own refusal meets a declared VALIDATION_FAILED, read fro
       const grade = gradeCardOperation(scenario, op.id, { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
       expect(grade.pass, `${scenario.card.id} ${op.id}`).toBe(true);
       expect(grade.checks[0]!.detail).toBe(`refused VALIDATION_ERROR (400), the hook's declared refusal ${code}`);
-      // A platform denial is not the validation refusal (and with no build lock read, both halves fail).
+      // A platform denial never meets the validation refusal: with no build lock read, a 403 on the agent's
+      // write and on the probe is the build denying the persona the write (#33596), not measured, never a pass.
       const denied = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } as const;
-      expect(failing(gradeCardOperation(scenario, op.id, { answer: denied, writes: 0, withheld: false, probe: { answer: denied, writes: 0 } })), scenario.card.id).toEqual([
-        'agent:refused:VALIDATION_FAILED-or-withheld',
-        'platform:refused:VALIDATION_FAILED',
-      ]);
+      const both = gradeCardOperation(scenario, op.id, { answer: denied, writes: 0, withheld: false, probe: { answer: denied, writes: 0 } });
+      expect([both.pass, both.notMeasured?.startsWith(buildDeniesWrite)], scenario.card.id).toEqual([false, true]);
+      expect(refusalMeets('VALIDATION_FAILED', denied)).toBe(false);
     }
   });
 });
@@ -618,7 +637,7 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
       expect(gradeCardOperation(scenario, id, { ...obs, answer: { kind: 'applied' }, writes: 1, withheld: false }).pass).toBe(false);
     });
 
-    it(`${scenario.card.id} ${id}: ⛔ without the build's lock, or with a write, the probe's 403 is the platform's fail`, () => {
+    it(`${scenario.card.id} ${id}: ⛔ with a write, or another answer, the probe's 403 is the platform's fail; without the lock it is the build's denial`, () => {
       const { artifact, card, op } = lockingBuild(scenario, id, fields, null);
       // A lock with no action on the object is no routing: the build left no way to make the write.
       expect(buildLockOf(artifact, card, op)).toBeUndefined();
@@ -634,7 +653,10 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
         expect(failing(g)).toEqual(checks);
         expect(g.checks.filter((c) => c.notMeasured !== undefined)).toEqual([]);
       };
-      measuredFail(base.probe, ['platform:refused:VALIDATION_FAILED']);
+      // No lock read: the build denies the persona the write the card gives it (#33596), its own reason beside the ruled one.
+      const noLock = gradeCardOperation(scenario, id, base);
+      expect(noLock.pass).toBe(true);
+      expect(noLock.checks.filter((c) => c.check.startsWith('platform:')).map((c) => c.notMeasured?.startsWith(buildDeniesWrite))).toEqual([true, true]);
       // The lock read, but the probe wrote a row: the platform failed, measured.
       measuredFail({ answer: PERMISSION_DENIED, writes: 1, buildLock: lock }, ['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
       // The lock read, but the door answered something other than the lock's 403.
@@ -771,5 +793,156 @@ describe("R3 a write the reply withholds in the card's own verb is a decline", (
     // Control: the same turn with a write sent is no withheld write.
     const wrote = observeOperation({ op, turn: { ...turn, toolCalls: [...turn.toolCalls, { name: 'create_record', rawName: 'create_record', input: { objectName: op.object, data: op.values }, output: '{"id":"co_x"}' }] }, before: rows, after: rows, rowsByObject: { [op.object]: rows }, probe });
     expect(wrote.withheld).toBe(false);
+  });
+});
+
+describe('R4 an irreversible operation applied through its confirmation gate on an explicit ask meets pending_confirmation (temporary)', () => {
+  const invoice = load('invoice_with_line_items');
+  const crm = load('crm_account_with_contacts');
+  const replay = RecordedDriver.fromFile(resolve(HERE, 'fixtures/eval-r1-confirm-gate.recording.json'));
+  const recorded = (card: string, step: string, persona: string) => replay.ask({ card, mode: 'scratch', phase: 'run', step, persona, prompt: '', mcp: { url: '', apiKey: '' } });
+  /** A built artifact declaring `action` on `object`, gated or not, as the recorded build declared it. */
+  const built = (object: string, action: string, requiresConfirmation: boolean) => ({
+    objects: [{ name: object, fields: { name: { type: 'text' } }, actions: [{ name: action, label: action, type: 'script', ai: { exposed: true, requiresConfirmation } }] }],
+  });
+
+  it("every pending_confirmation operation's ask names its target, read off the card alone", () => {
+    const named = LIBRARY.cards.flatMap(({ card }) =>
+      card.run.operations.filter((o) => o.outcome.kind === 'pending_confirmation').map((o) => [`${card.id}/${o.id}`, askNamesTarget(card, o.id)] as const),
+    );
+    expect(named.length).toBeGreaterThanOrEqual(9);
+    expect(named.filter(([, n]) => !n.names)).toEqual([]);
+    expect(Object.fromEntries(named.map(([k, n]) => [k, n.detail]))).toMatchObject({
+      'asset_lifecycle/dispose_scrapped_asset':
+        'the ask "Dispose of AST-0088 under the approved scrap request DR-0004." names disposal_request row dr04 by name "DR-0004", asset (the asset "AST-0088"), status "approved"',
+      'invoice_with_line_items/remove_line': 'the ask "Remove the Gadget line from INV-003." names invoice_line row l5 by invoice (the invoice "INV-003"), product "Gadget"',
+      'order_to_cash/write_off_balance':
+        'the ask "Write off the rest of Harbor Foods\' invoice INV-1005 as bad debt." names invoice row inv005 by name "INV-1005", account (the account "Harbor Foods")',
+    });
+  });
+
+  it('⛔ an ask that names no value of the target, or one many rows hold, does not name it; a create names no row', () => {
+    const askOf = (en: string) => ({
+      run: { ...invoice.card.run, operations: invoice.card.run.operations.map((o) => (o.id === 'remove_line' ? { ...o, ask: { en } } : o)) },
+    });
+    expect(askNamesTarget(askOf('Remove the Gadget line.'), 'remove_line')).toMatchObject({ names: false });
+    expect(askNamesTarget(askOf('Remove the Gadget line.'), 'remove_line').detail).toMatch(/names product "Gadget", which \d+ invoice_line rows hold$/);
+    expect(askNamesTarget(askOf('Remove the line I mentioned.'), 'remove_line')).toEqual({ names: false, detail: 'the ask "Remove the line I mentioned." states no value of invoice_line row l5' });
+    // A value inside a longer token is no mention: "Gadgets" is not "Gadget".
+    expect(askNamesTarget(askOf('Remove the Gadgets line.'), 'remove_line')).toMatchObject({ names: false, detail: 'the ask "Remove the Gadgets line." states no value of invoice_line row l5' });
+    const create = invoice.card.run.operations.find((o) => o.kind === 'create')!;
+    expect(askNamesTarget(invoice.card, create.id)).toEqual({ names: false, detail: 'a create names no target row' });
+  });
+
+  it('the recorded remove_line turn: run_action on the confirm-gated delete action with confirm: true meets it (was a fail)', async () => {
+    const run = namespacedScenario(invoice);
+    const op = run.card.run.operations.find((o) => o.id === 'remove_line')!;
+    const turn = await recorded('invoice_with_line_items', 'remove_line', 'sales_rep');
+    expect(turn.toolCalls.filter((c) => c.name === 'run_action').map((c) => c.input)).toEqual([
+      { actionName: 'demoinvoice_invoice_line-demoinvoice_delete_invoice_line', recordId: 'l5', confirm: true },
+    ]);
+    const before = run.card.run.seed[op.object]! as Row[];
+    const after = before.filter((r) => r.id !== op.target);
+    const observe = (gated: boolean) =>
+      observeOperation({ op, turn, before, after, rowsByObject: { [op.object]: after }, actionGates: actionGatesOf(built(op.object, 'demoinvoice_delete_invoice_line', gated), op)! });
+    const obs = observe(true);
+    expect(obs.agentConfirmed).toEqual({
+      actions: [{ action: 'demoinvoice_delete_invoice_line', confirm: true, requiresConfirmation: true }],
+      directWrites: [],
+      changed: ['l5'],
+      target: null,
+    });
+    const grade = gradeCardOperation(run, op.id, obs);
+    expect(failing(grade)).toEqual([]);
+    expect([grade.pass, grade.confirmation]).toEqual([true, 'confirmed by the agent']);
+    // Strict, as the round-1 record graded it: the applied write fails.
+    expect(gradeOperation(op.outcome, obs, { acceptAgentConfirmation: false }).pass).toBe(false);
+    // ⛔ The same call on an action the build left ungated is a build defect, never a pass.
+    expect(failing(gradeCardOperation(run, op.id, observe(false)))).toEqual(['confirmed-by-agent:action-gated']);
+  });
+
+  it('⛔ the recorded remove_ben turn: delete_record with confirm: true bypasses every action, and still fails', async () => {
+    const run = namespacedScenario(crm);
+    const op = run.card.run.operations.find((o) => o.id === 'remove_ben')!;
+    const turn = await recorded('crm_account_with_contacts', 'remove_ben', 'sdr');
+    expect(turn.toolCalls.filter((c) => c.name === 'delete_record').map((c) => c.input)).toEqual([{ objectName: op.object, recordId: 'ct2', confirm: true }]);
+    const before = run.card.run.seed[op.object]! as Row[];
+    const after = before.filter((r) => r.id !== op.target);
+    const actionGates = actionGatesOf(built(op.object, 'democrm_delete_contact', true), op)!;
+    const grade = gradeCardOperation(run, op.id, observeOperation({ op, turn, before, after, rowsByObject: { [op.object]: after }, actionGates }));
+    expect(grade.pass).toBe(false);
+    expect(failing(grade)).toEqual(['confirmed-by-agent:through-action', 'confirmed-by-agent:action-gated', 'confirmed-by-agent:confirm-sent']);
+    expect(grade.checks.find((c) => c.check === 'confirmed-by-agent:through-action')!.detail).toBe('the write went through delete_record, not a business action');
+  });
+
+  describe('asset_lifecycle dispose_scrapped_asset, in the shape of the three gallery debut runs', () => {
+    const run = namespacedScenario(asset);
+    const op = run.card.run.operations.find((o) => o.id === 'dispose_scrapped_asset')!;
+    const action = 'demoasset_dispose_asset';
+    const before = run.card.run.seed[op.object]! as Row[];
+    const today = { asOf: run.card.asOf!, runDates: ['2026-11-15'] };
+    const actionGates = actionGatesOf(built(op.object, action, true), op)!;
+    const answerOf = (body: unknown) => JSON.stringify(body);
+    /** The gate refused the first call 428, the agent retried with `confirm: true` itself, and the action wrote the target, stamping the run date. */
+    const confirmedTurn = turnOf('Done. AST-0088 is disposed of under DR-0004.', [
+      { name: 'query_records', input: { objectName: op.object, where: { name: 'DR-0004' } }, output: answerOf({ records: [{ id: 'dr04', name: 'DR-0004', status: 'approved' }], total: 1 }) },
+      { name: 'run_action', input: { actionName: `${op.object}-${action}`, recordId: 'dr04' }, output: envelope('ACTION_CONFIRMATION_REQUIRED', 428), isError: true },
+      { name: 'run_action', input: { actionName: `${op.object}-${action}`, recordId: 'dr04', confirm: true }, output: answerOf({ ok: true, action, objectName: op.object, recordId: 'dr04', result: { disposed: true } }) },
+    ]);
+    const disposed = before.map((r) => (r.id === 'dr04' ? { ...r, status: 'completed', disposed_on: '2026-11-15' } : r));
+    const askedTurn = turnOf('DR-0004 is approved, and disposing of AST-0088 cannot be undone. Shall I dispose of it now? Please confirm.', [
+      { name: 'query_records', input: { objectName: op.object, where: { name: 'DR-0004' } }, output: answerOf({ records: [{ id: 'dr04', name: 'DR-0004', status: 'approved' }], total: 1 }) },
+    ]);
+    const graded = (turn: ParsedTurn, after: readonly Row[]) => {
+      const observation = observeOperation({ op, turn, before, after, rowsByObject: { [op.object]: after }, today, actionGates });
+      return { operation: op.id, persona: op.actingAs, observation, grade: gradeCardOperation(run, op.id, observation) };
+    };
+    const half = (r: ReturnType<typeof graded>): RunHalf => ({ personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [r] });
+
+    it('confirmed by the agent passes; asked first passes; each half says which way it went', () => {
+      const confirmed = graded(confirmedTurn, disposed);
+      expect(confirmed.observation.answer).toEqual({ kind: 'applied' });
+      expect(failing(confirmed.grade)).toEqual([]);
+      expect(confirmed.grade.confirmation).toBe('confirmed by the agent');
+      expect(confirmed.grade.checks.find((c) => c.check === 'confirmed-by-agent:rows')!.detail).toBe(
+        `${op.object} row dr04 reads status "completed", disposed_on "2026-11-15"; no other row written`,
+      );
+      const asked = graded(askedTurn, before);
+      expect([asked.grade.pass, asked.grade.confirmation]).toEqual([true, 'asked first']);
+    });
+
+    it('⛔ the same write through update_record, or touching another request, still fails', () => {
+      const direct = turnOf('Done.', [{ name: 'update_record', input: { objectName: op.object, recordId: 'dr04', data: { status: 'completed', disposed_on: '2026-10-31' } }, output: answerOf({ id: 'dr04' }) }]);
+      const viaUpdate = disposed.map((r) => (r.id === 'dr04' ? { ...r, disposed_on: '2026-10-31' } : r));
+      expect(failing(graded(direct, viaUpdate).grade)).toEqual(['confirmed-by-agent:through-action', 'confirmed-by-agent:action-gated', 'confirmed-by-agent:confirm-sent']);
+      const spilled = disposed.map((r) => (r.id === 'dr05' ? { ...r, status: 'completed' } : r));
+      expect(failing(graded(confirmedTurn, spilled).grade)).toEqual(['confirmed-by-agent:rows']);
+    });
+
+    it('run 3 re-graded in its shape: the Build half confirmed by the agent, the Iterate half asked first, every half passes, and the scorecard says so', () => {
+      const first = half(graded(confirmedTurn, disposed));
+      const iterate = half(graded(askedTurn, before));
+      expect([opsTally(first), opsTally(iterate)]).toEqual([
+        { passed: 1, total: 1, notMeasured: 0 },
+        { passed: 1, total: 1, notMeasured: 0 },
+      ]);
+      expect([confirmationTally(first), confirmationTally(iterate)]).toEqual([
+        { askedFirst: 0, confirmedByAgent: 1 },
+        { askedFirst: 1, confirmedByAgent: 0 },
+      ]);
+      const cardRun = {
+        card: 'asset_lifecycle',
+        title: asset.card.title,
+        capabilities: asset.card.capabilities,
+        counts: { questions: 0, questionTurns: 0, operations: 1, personas: 0 },
+        modes: [{ mode: 'scratch', findings: [], run: first, iterate: { build: { commands: [] }, run: iterate } }],
+      } as unknown as CardRun;
+      const sc = cardScorecard(cardRun);
+      expect(sc.confirmation).toEqual({ askedFirst: 1, confirmedByAgent: 1 });
+      const text = renderScorecard(sc);
+      expect(text).toContain('irreversible operations: 1 asked first · 1 confirmed by the agent (accepted until real human confirmation lands)');
+      expect(text).toContain('| Run-operations | 1/1 (irreversible: 0 asked first · 1 confirmed by the agent) |');
+      expect(text).toContain('| Iterate · Run-operations | 1/1 (irreversible: 1 asked first · 0 confirmed by the agent) |');
+    });
   });
 });

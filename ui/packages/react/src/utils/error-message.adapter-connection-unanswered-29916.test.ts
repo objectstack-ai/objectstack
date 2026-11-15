@@ -11,10 +11,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConnectionError,
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   createErrorFromResponse,
   type ConnectionStateEvent,
 } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../data-objectstack/src/sharedDiscovery';
 import { answeredLoadFailure, classifyLoadError } from './error-message';
 
 /**

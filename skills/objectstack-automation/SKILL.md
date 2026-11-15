@@ -112,7 +112,7 @@ a `{token}` in one is refused.
 ```ts
 import type { FlowNode } from '@objectstack/spec/automation';
 const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
+    recipients: { dialect: 'cel', source: 'record.owner_id' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
     title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
@@ -260,23 +260,23 @@ Most are caught by `objectstack build`:
 
 3. **`script` nodes call a registered function — nothing else.** `config.function`
    (**required**: an empty node refuses at execute, an unregistered name fails
-   loudly) names one registered in `defineStack({ functions })` (below).
+   loudly) names one registered in `defineStack({ functions })`.
 
    **The name resolves from the flow's package, as `subflow`'s `flowName`
-   does**, the platform's function (registered under no package) in every
-   flow's reach; a `.custom` override reads as a package-less flow. Packages of
-   two `namespace`s each run their own `normalize_phone` (one namespace, or
-   none: refused at install; a boot warns `Bare-name conflict at boot`). If the
-   flow's package holds none, two holders in reach or one only outside its
-   `dependencies` closure fail the step as a guard (no `fault` edge;
-   `$error.code: 'RESOURCE_CONFLICT'` in a `try_catch`); a flow door answers
-   `400 FLOW_FAILED`, `error.details.innerRefusal` naming each holder. Fix:
-   declare the dependency, or rename.
+   does**, the platform's ownerless function in every flow's reach; a
+   `.custom` override reads as a package-less flow. Packages of two
+   `namespace`s each run their own `normalize_phone`. One namespace (or
+   none): both held at boot warn `Bare-name conflict at boot`; a later one
+   installs but binds NONE of its functions or hooks (error `Failed to bind
+   declarative hooks`): rename, or another namespace. If the flow's package
+   holds none, two holders in reach or one only outside its `dependencies`
+   closure fail the step as a guard (no `fault` edge; `$error.code:
+   'RESOURCE_CONFLICT'` in a `try_catch`); a flow door's `innerRefusal` names
+   each holder. Fix: declare the dependency, or rename.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
-   database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
-   exposes that value as a flow variable, and a later **declarative** node persists
-   it:
+   database.** It receives `ctx.input` and **returns** a value; a later
+   **declarative** node persists its `outputVariable`:
 
    ```ts
    { id: 'ai', type: 'script', config: {

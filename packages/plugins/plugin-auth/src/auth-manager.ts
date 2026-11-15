@@ -5994,8 +5994,11 @@ export class AuthManager {
    * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
    * mounted, a provider signs nobody in until its listed domains are verified,
-   * and a provider creates an account only for an email address at a domain it
-   * has proven (`sso-account-at-proven-domain.ts`, which asks this method).
+   * and an account a provider reaches holds an email address only at a domain
+   * it has proven: a provider creates an account only for such an address
+   * (`sso-account-at-proven-domain.ts`), links to an existing account only
+   * with one, and changes a linked account's stored address only to one
+   * (`implicit-account-linking.ts`, rule 4). All three ask this method.
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
    * `domainVerification.enabled` option, so the bridge can return a clear
    * "not enabled for this environment" instead of a bare 404 when off.
@@ -6588,11 +6591,12 @@ export class AuthManager {
     // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
     const readConfig = () => this.config;
     const readIdpLocale = () => this.idpLocale;
-    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'enforceConcurrentCap' | 'isAdminPluginMounted' | 'isCreatedInThisRequest' | 'judgeSessionScoping' | 'judgeSessionSwitch' | 'linkingContext' | 'resolveUserAuthGates' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       get idpLocale() { return readIdpLocale(); },
       isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
+      isAdminPluginMounted: () => this.isAdminPluginMounted(),
       enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
       judgeSessionScoping: (...a) => this.judgeSessionScoping(...a),
       judgeSessionSwitch: (...a) => this.judgeSessionSwitch(...a),
@@ -7723,6 +7727,19 @@ export class AuthManager {
    */
   public isScimWired(): boolean {
     return resolveScimEnabled(this.config.plugins);
+  }
+
+  /**
+   * Is better-auth's admin plugin mounted on the built instance? Asked of the
+   * instance itself (its `banUser` endpoint, the seam `admin/create-user` and
+   * `admin/ban-user` have always tested), never of the configuration, so a
+   * plugin that failed to mount reads as absent. Where it is absent the
+   * platform enforces a ban itself (`user-session-admission.ts`) and writes
+   * one through the data engine (`user-ban-write.ts`).
+   */
+  public async isAdminPluginMounted(): Promise<boolean> {
+    const api = (await this.getApi()) as { banUser?: unknown } | undefined;
+    return typeof api?.banUser === 'function';
   }
 
   /**

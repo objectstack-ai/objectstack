@@ -19,7 +19,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, AnalyticsForbiddenError, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter, AnalyticsForbiddenError } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 const DENIED_MESSAGE = '[Analytics] Access denied: reading "y8bc_customer" is not permitted for this user.';
 

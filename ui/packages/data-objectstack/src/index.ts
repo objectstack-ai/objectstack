@@ -95,6 +95,7 @@ import { MetadataCache } from './cache/MetadataCache';
 import { AppBundleStore, indexAppBundle, type AppBundleAnswer, type AppBundlePeek } from './app-bundle';
 import { MetadataClient } from './metadata-client';
 import { formatMetadataError } from './metadata-error';
+import { getSharedDiscovery } from './sharedDiscovery';
 import {
   ObjectStackError,
   MetadataNotFoundError,
@@ -994,8 +995,6 @@ function cacheKeyNamesBundledItem(key: string, bundles: AppBundleStore): boolean
   return bundles.holds(head, rest.join(':'));
 }
 
-const discoveryCache = new Map<string, Promise<unknown>>();
-
 /**
  * The server ORIGIN a `baseUrl` names: no trailing slash, and no trailing
  * `/api/vN`. The adapter, the `ObjectStackClient` it wraps and
@@ -1009,31 +1008,11 @@ function serverOriginOf(baseUrl: string): string {
   return (baseUrl || '').replace(/\/$/, '').replace(/\/api\/v\d+$/i, '');
 }
 
-/**
- * Fetch the server `discovery` document once per (baseUrl) and reuse the
- * resulting Promise. Used by `ObjectStackAdapter.connect()` (and any caller
- * that wants the discovery payload without spinning up a new client).
- */
-export async function getSharedDiscovery(
-  baseUrl: string,
-  fetcher: () => Promise<unknown>,
-): Promise<unknown> {
-  const key = baseUrl || '<default>';
-  const cached = discoveryCache.get(key);
-  if (cached) return cached;
-  const p = fetcher().catch((err) => {
-    // Allow retry on failure
-    discoveryCache.delete(key);
-    throw err;
-  });
-  discoveryCache.set(key, p);
-  return p;
-}
-
-/** Test/dev helper to drop the cache (e.g. on logout or origin change). */
-export function clearSharedDiscoveryCache(): void {
-  discoveryCache.clear();
-}
+export {
+  getSharedDiscovery,
+  // `clearSharedDiscoveryCache` is test-only and stays off the barrel
+  // (#25921); tests import it from `sharedDiscovery` directly.
+} from './sharedDiscovery';
 
 /**
  * Read the cross-object atomic-batch capability from a `discovery` document

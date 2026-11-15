@@ -2483,6 +2483,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #31998: the role-word extension walk's finding path (`….fieldPatches.${fieldName}.label`), a template
       // segment and not a receiver.
       'fieldPatches',
+      // #33494: the fold's `stored` parameter, the host's list of other packages' published extensions
+      // (`StoredObjectExtension[]`) — `.forEach`, a JS Array method; each entry is read by `collect` as `ext`.
+      'stored',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

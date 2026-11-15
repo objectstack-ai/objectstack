@@ -163,12 +163,17 @@ export const PositionSchema = lazySchema(() => strictObject(
    * `metadata:reloaded` after that over the claims of what the announcement
    * names as registered: `app/ID` while the registry holds package `ID`, and
    * `position/NAME`, whichever door announces them. So a hot install-local
-   * install, a per-item publish of a position and the positions of a
-   * publish-drafts are carried at once; a hot upgrade over a version the
-   * running kernel still serves (its old position still reads as declared),
-   * the runtime `POST /packages` install and enable routes (they do not
-   * announce) and an artifact reload that names only its file are carried at
-   * the next restart. As the system, in every organization, it moves each
+   * install or upgrade, for the package the door announces (the re-register
+   * withdraws the position the new version no longer ships, so the old name
+   * no longer reads as declared), the runtime `POST /packages` install, a `PATCH /packages/:id/enable` that
+   * switches a disabled package on, a per-item publish of a position and the
+   * positions of a publish-drafts are carried at once. A package still
+   * disabled when its announcement is heard is refused (`claimant-disabled`)
+   * until the enable that switches it on announces it again. The other
+   * packages of a multi-package artifact, which install-local does not
+   * announce, and an artifact reload that names only its file are carried at
+   * the next restart. As the
+   * system, in every organization, it moves each
    * holder row of an old name to this one, idempotently. It moves HOLDERS
    * only; every other stored reference to the old name (sharing-rule,
    * queue-member and record-share recipients, pending approvers, pending
@@ -178,7 +183,7 @@ export const PositionSchema = lazySchema(() => strictObject(
    */
   renamedFrom: z.array(SnakeCaseIdentifierSchema).optional().describe(
     'Earlier names of THIS position, in the position-name grammar (lowercase snake_case), e.g. `renamedFrom: [\'sales_rep\']` on a position now named `crm_sales_rep`. '
-    + 'The platform moves every holder of an old name (`sys_user_position`) to this position, in every organization, as the system: at boot, and again when a running kernel announces this position or its package as registered (a hot install, a per-item publish, a publish of drafts). A hot upgrade over a version the kernel still serves, an install or enable that does not announce, and an artifact reload that names only its file are carried at the next restart. A second run moves nothing. '
+    + 'The platform moves every holder of an old name (`sys_user_position`) to this position, in every organization, as the system: at boot, and again when a running kernel announces this position or its package as registered (an install or hot upgrade of the package the door announces, the enable of a disabled package, a per-item publish, a publish of drafts). A package still disabled then is carried when it is enabled. The other packages of a multi-package artifact, and an artifact reload that names only its file, are carried at the next restart. A second run moves nothing. '
     + 'A position renamed twice lists both earlier names. Each entry once; never this position\'s own name; never a name another position still declares; never an old name another position also claims; never a name another package or the environment holds or is recorded as owning. '
     + 'Holders only: sharing rules, queue members, record shares, pending approvals and invitations that name the old position are listed in the log for an administrator, not rewritten. An old name switched off in the activation ledger is not carried, so its holders do not come back active.',
   ),

@@ -993,6 +993,8 @@ export function useDeferredFirstSend(opts: {
    * `createError`). A new one drops the user's held message: it was never
    * sent, and the composer puts its text back in the box (the not-sent
    * rollback), so keeping it would send it twice with the next attempt.
+   * objectstack#33562 — the box gets the whole held message, joined parts
+   * included: the pane hands it to the composer as its `unsentText`.
    */
   createError?: Error;
 }): (content: string, files?: File[]) => void {
@@ -3068,6 +3070,11 @@ export function ChatPane({
         // objectstack#33420 — a failed create is a send that never left the
         // client: the composer's not-sent notice and text restore answer it.
         error={conversationCreateError ?? (errorSuppressed ? undefined : error)}
+        // objectstack#33562 — what that failed create held back is the whole
+        // held first message: a second send made during the wait joined it, and
+        // the composer only knows the part it last submitted. Read in the
+        // render the error arrives in, before the held message is dropped.
+        unsentText={conversationCreateError ? heldFirstMessage?.content : undefined}
         enableMarkdown
         onToolApprove={hitl.decide}
         toolDecisions={hitl.decisions}
