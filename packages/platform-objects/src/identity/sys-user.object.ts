@@ -174,14 +174,26 @@ export const SysUser = ObjectSchema.create({
       },
     },
 
-    // ── Platform admin operations (require better-auth `admin` plugin) ─
+    // ── Platform admin operations ───────────────────────────────────────
     //
-    // These actions hit /api/v1/auth/admin/* endpoints that are only
-    // wired when `auth.plugins.admin` is enabled, so each one is gated on
-    // `requiresFeature: 'admin'` (#2874) — when the plugin is off the UI
-    // hides them instead of rendering buttons that 404. SCIM deployments
-    // keep them: SCIM forces the admin plugin (and `features.admin`) on
-    // (ADR-0134). UI surfaces them under the row menu AND the
+    // `unlock_user`, `create_user` and the actions further down that carry
+    // `requiresFeature: 'admin'` (#2874) are gated on the better-auth `admin`
+    // plugin: when `features.admin` is off the UI hides them instead of
+    // rendering buttons that 404. SCIM deployments keep them: SCIM forces the
+    // admin plugin (and `features.admin`) on (ADR-0134).
+    //
+    // Ban / Unban carry NO `requiresFeature: 'admin'`, deliberately. Their
+    // doors, plugin-auth's `admin/ban-user` / `admin/unban-user`, are
+    // ObjectStack mounts registered whether or not the vendor plugin is on
+    // (`admin-ban-endpoints.ts`): without it the ban is written through the
+    // data engine and the session refusal answers `403 BANNED_USER`
+    // (`user-session-admission.ts`). So `features.admin == true` would hide a
+    // working Deactivate / Reactivate on every kernel that runs without the
+    // plugin, managed environments included. Pinned in
+    // `action-state-visibility.test.ts` (the offer) and plugin-auth's
+    // `pending-sso-users.test.ts` (the declared targets, driven live).
+    //
+    // UI surfaces them under the row menu AND the
     // record-detail header (`record_header`, overflowing into the ⋯
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or
@@ -222,7 +234,6 @@ export const SysUser = ObjectSchema.create({
       // Platform-admin standing (ADR-0068 D4), then a user not banned yet —
       // see the block header above. A null `banned` reads as not banned.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned != true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User banned',
       refreshAfter: true,
@@ -261,7 +272,6 @@ export const SysUser = ObjectSchema.create({
       // Platform-admin standing (ADR-0068 D4), then a banned user — see the
       // block header above.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned == true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User unbanned',
       refreshAfter: true,
