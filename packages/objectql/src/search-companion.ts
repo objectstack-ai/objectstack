@@ -40,16 +40,17 @@
  * the same column.
  */
 
-import { resolveDisplayField, TITLE_ELIGIBLE_TYPES } from '@objectstack/spec/data';
+import { resolveDisplayField, SEARCH_COMPANION_FIELD, TITLE_ELIGIBLE_TYPES } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { isFederatedObject } from './federated-object.js';
 
 /**
- * Name of the hidden companion column. Double-underscore prefixed so it can
- * never collide with an author-declared field (machine names are snake_case
- * words) and reads as platform plumbing in raw rows.
+ * Name of the hidden companion column. The name is the protocol's
+ * (`@objectstack/spec/data`), re-exported here so engine callers keep
+ * importing it from the engine; see the declaration there for why it lives in
+ * the spec.
  */
-export const SEARCH_COMPANION_FIELD = '__search';
+export { SEARCH_COMPANION_FIELD };
 
 /**
  * Normalizers applied to the companion column. Generalization seam: pinyin is

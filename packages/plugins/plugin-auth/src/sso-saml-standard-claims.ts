@@ -94,12 +94,21 @@ const SSO_SAML_CONFIG_FIELD = 'saml_config';
  */
 export const SAML_NAMES_MAX_RESPONSE_BYTES = 262_144;
 
-/** The parser options the vendor reads SAML XML with: no namespace prefixes, attributes kept, no entity expansion. */
+/**
+ * The parser options the vendor reads SAML XML with (no namespace prefixes,
+ * attributes kept, no entity expansion), plus three for reading a text value
+ * as written (`sso-saml-account-key.ts`): no number coercion, and comments and
+ * CDATA kept apart from the text, so a value written with either reads as
+ * unreadable rather than as a part of itself.
+ */
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   removeNSPrefix: true,
   processEntities: false,
+  parseTagValue: false,
+  commentPropName: '#comment',
+  cdataPropName: '#cdata',
 });
 
 type Node = Record<string, unknown>;
@@ -122,37 +131,112 @@ function countElements(node: unknown, name: string): number {
 }
 
 /**
- * The attribute names (`Attribute/@Name`) the one assertion of a posted
- * `SAMLResponse` carries, each once, in document order. Empty when the value
- * is too large, is not base64 XML, is not a `Response`, holds an encrypted
- * assertion, or holds anything but exactly one `Assertion`. Pure: no
- * cryptography, no decision; see the module header for why only names are
- * read.
+ * What the one assertion of a posted `SAMLResponse` carries, as posted:
+ * read before the vendor verified anything, so a caller uses it only to
+ * decide what to read, never as a verified value (the module header, and
+ * `sso-saml-account-key.ts` for how that one confirms what it read).
  */
-export function samlAssertionAttributeNames(samlResponse: string): string[] {
-  if (typeof samlResponse !== 'string' || samlResponse.length > SAML_NAMES_MAX_RESPONSE_BYTES) return [];
+export interface SamlAssertionPreview {
+  /** The attribute names (`Attribute/@Name`), each once, in document order. */
+  readonly attributeNames: readonly string[];
+  /** The subject's `NameID` text, or `null` when it is not exactly one plain text value. */
+  readonly nameId: string | null;
+  /**
+   * The first value of the attribute named `name`, or `null` when the
+   * assertion does not carry exactly one attribute of that name, or its first
+   * value is not one plain text value (empty, or written with a comment,
+   * CDATA, an entity reference or a child element).
+   */
+  singleValueOf(name: string): string | null;
+}
+
+/**
+ * The text an element carries when it is exactly one plain text value: no
+ * child element, comment or CDATA section, no entity reference (which the
+ * vendor's verifier decodes and this read does not), and not empty.
+ */
+function plainTextOf(node: unknown): string | null {
+  let text: unknown = node;
+  if (isNode(node)) {
+    for (const key of Object.keys(node)) if (key !== '#text' && !key.startsWith('@_')) return null;
+    text = node['#text'];
+  }
+  return typeof text === 'string' && text !== '' && !text.includes('&') ? text : null;
+}
+
+/** The one element `name` under `node`, or `undefined` when there is none or more than one. */
+function onlyChild(node: Node, name: string): unknown {
+  const all = listOf(node[name]);
+  return all.length === 1 ? all[0] : undefined;
+}
+
+/**
+ * The preview of the one assertion of a posted `SAMLResponse`
+ * ({@link SamlAssertionPreview}), or `null` when the value is too large, is
+ * not base64 XML, is not a `Response`, holds an encrypted assertion, or holds
+ * anything but exactly one `Assertion`. Pure: no cryptography, no decision.
+ */
+export function samlAssertionPreview(samlResponse: string): SamlAssertionPreview | null {
+  if (typeof samlResponse !== 'string' || samlResponse.length > SAML_NAMES_MAX_RESPONSE_BYTES) return null;
   const xml = responseXmlOf(samlResponse);
-  if (!xml) return [];
+  if (!xml) return null;
   let parsed: Node;
   try {
     parsed = parser.parse(xml) as Node;
   } catch {
-    return [];
+    return null;
   }
   const response = parsed.Response;
-  if (!isNode(response)) return [];
-  if (countElements(response, 'EncryptedAssertion') > 0 || countElements(response, 'Assertion') !== 1) return [];
+  if (!isNode(response)) return null;
+  if (countElements(response, 'EncryptedAssertion') > 0 || countElements(response, 'Assertion') !== 1) return null;
   const assertion = response.Assertion;
-  if (!isNode(assertion)) return [];
+  if (!isNode(assertion)) return null;
   const names = new Set<string>();
+  const byName = new Map<string, unknown[]>();
   for (const statement of listOf(assertion.AttributeStatement)) {
     if (!isNode(statement)) continue;
     for (const attribute of listOf(statement.Attribute)) {
       const name = isNode(attribute) ? attribute['@_Name'] : undefined;
-      if (typeof name === 'string' && name) names.add(name);
+      if (typeof name !== 'string' || !name) continue;
+      names.add(name);
+      byName.set(name, [...(byName.get(name) ?? []), attribute]);
     }
   }
-  return [...names];
+  const subject = onlyChild(assertion, 'Subject');
+  const nameId = isNode(subject) ? plainTextOf(onlyChild(subject, 'NameID')) : null;
+  return {
+    attributeNames: [...names],
+    nameId,
+    singleValueOf: (name) => {
+      const attributes = byName.get(name) ?? [];
+      if (attributes.length !== 1 || !isNode(attributes[0])) return null;
+      return plainTextOf(listOf(attributes[0].AttributeValue)[0]);
+    },
+  };
+}
+
+/**
+ * The attribute names (`Attribute/@Name`) the one assertion of a posted
+ * `SAMLResponse` carries, each once, in document order
+ * ({@link samlAssertionPreview}); empty when it reads none. See the module
+ * header for why only names are taken from this read.
+ */
+export function samlAssertionAttributeNames(samlResponse: string): string[] {
+  return [...(samlAssertionPreview(samlResponse)?.attributeNames ?? [])];
+}
+
+/**
+ * The preview of the assertion posted to a SAML ACS request
+ * ({@link samlAssertionPreview}), read from a clone so the vendor still reads
+ * the body. `null` on any failure.
+ */
+export async function readSamlAssertionPreview(request: Request): Promise<SamlAssertionPreview | null> {
+  try {
+    const samlResponse = await postedSamlResponseOf(request.clone());
+    return samlResponse ? samlAssertionPreview(samlResponse) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -161,12 +245,7 @@ export function samlAssertionAttributeNames(samlResponse: string): string[] {
  * still reads the body. Empty on any failure.
  */
 export async function readSamlAssertionAttributeNames(request: Request): Promise<string[]> {
-  try {
-    const samlResponse = await postedSamlResponseOf(request.clone());
-    return samlResponse ? samlAssertionAttributeNames(samlResponse) : [];
-  } catch {
-    return [];
-  }
+  return [...((await readSamlAssertionPreview(request))?.attributeNames ?? [])];
 }
 
 /**

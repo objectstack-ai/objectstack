@@ -162,6 +162,58 @@ function refuse(code: string, message: string): ArtifactPackageError {
   return err;
 }
 
+/** The part of one entry-parse issue the advice below is chosen from. */
+interface EntryIssue {
+  code: string;
+  path: readonly PropertyKey[];
+}
+
+/** Said to an entry that is not the wrapper `ArtifactPackageSchema` declares. */
+const WRAPPER_SHAPE_ADVICE =
+  'Each entry is a WRAPPER object carrying its package under `manifest:` — '
+  + 'wrap an inlined body as `{ manifest: { … } }`. The key position is reserved '
+  + 'so a future external-segment form is an additive key rather than a reshape.';
+
+/** Said to an entry whose body carries authoring-time glob patterns. */
+const ASSEMBLED_BODY_ADVICE =
+  'The body under `manifest:` is the ASSEMBLED package body '
+  + '(`AssembledPackageBodySchema`): its `objects` / `datasources` are '
+  + 'DEFINITIONS, not the authoring manifest\'s glob patterns — a compiled '
+  + 'artifact has no files left to glob.';
+
+/**
+ * An issue with the entry's WRAPPER: the entry itself is not an object or
+ * carries keys beside `manifest` / `source` (an inlined body lands here), or
+ * its `manifest` is missing or not an object. An issue INSIDE the body —
+ * `manifest.<key>`, or an undeclared key reported at `manifest` — is not.
+ */
+function isWrapperShapeIssue(issue: EntryIssue): boolean {
+  if (issue.path.length === 0) return true;
+  return issue.path.length === 1 && issue.path[0] === 'manifest' && issue.code === 'invalid_type';
+}
+
+/**
+ * An issue on `manifest.objects` / `manifest.datasources` (the collection or
+ * one element of it) where the entry holds a STRING: an authoring manifest's
+ * glob pattern carried into an artifact whose body must hold definitions.
+ */
+function isGlobPatternIssue(entry: unknown, issue: EntryIssue): boolean {
+  const [head, collection, element, ...rest] = issue.path;
+  if (head !== 'manifest' || (collection !== 'objects' && collection !== 'datasources')) return false;
+  if (rest.length > 0 || (element !== undefined && typeof element !== 'number')) return false;
+  let value: unknown = entry;
+  for (const key of issue.path) {
+    if (value === null || typeof value !== 'object') return false;
+    value = (value as Record<PropertyKey, unknown>)[key];
+  }
+  return typeof value === 'string';
+}
+
+/** Closes a sentence with a period unless it already ends on terminal punctuation. */
+function endSentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
 /**
  * The id one artifact package is keyed by.
  *
@@ -299,18 +351,26 @@ export function resolveArtifactPackageEntries(artifact: unknown): ArtifactPackag
       // acts on. The count says how many were withheld rather than trailing off.
       const issues = verdict.error.issues;
       const shown = issues.slice(0, MAX_REPORTED_ENTRY_ISSUES);
+      // The shape advice is said only to an entry whose SHAPE is wrong. An
+      // entry wrapped correctly whose content is refused — a page the page
+      // parse refuses, an invalid id, an undeclared body key — ends on that
+      // refusal: advice about the wrapper or about glob patterns would point
+      // its author away from the one thing to fix. Judged over EVERY issue,
+      // withheld ones included, because the advice is about the entry.
+      const advice = [
+        issues.some(isWrapperShapeIssue) ? WRAPPER_SHAPE_ADVICE : '',
+        issues.some((i) => isGlobPatternIssue(entry, i)) ? ASSEMBLED_BODY_ADVICE : '',
+      ].filter(Boolean);
       throw refuse(
         'INVALID_ARTIFACT_PACKAGE_ENTRY',
-        `Release artifact \`packages[${index}]\` is not a package entry (ADR-0130 D4): `
-        + shown.map((i) => `${i.path.join('.') || '<entry>'}: ${i.message}`).join('; ')
-        + (issues.length > shown.length ? ` (+${issues.length - shown.length} more)` : '')
-        + '. Each entry is a WRAPPER object carrying its package under `manifest:` — '
-        + 'wrap an inlined body as `{ manifest: { … } }`. The key position is reserved '
-        + 'so a future external-segment form is an additive key rather than a reshape. '
-        + 'The body under `manifest:` is the ASSEMBLED package body '
-        + '(`AssembledPackageBodySchema`): its `objects` / `datasources` are '
-        + 'DEFINITIONS, not the authoring manifest\'s glob patterns — a compiled '
-        + 'artifact has no files left to glob.',
+        [
+          endSentence(
+            `Release artifact \`packages[${index}]\` is not a package entry (ADR-0130 D4): `
+            + shown.map((i) => `${i.path.join('.') || '<entry>'}: ${i.message}`).join('; ')
+            + (issues.length > shown.length ? ` (+${issues.length - shown.length} more)` : ''),
+          ),
+          ...advice,
+        ].join(' '),
       );
     }
 

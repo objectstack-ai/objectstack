@@ -17,7 +17,7 @@
 
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // The values below (`MAX_CONSUMED_SUSPENSIONS`, `MAX_RESTORE_CHAIN_HOPS`,
-// `buildRunTrigger`, `chainEntryOf` and `nestedChildRunId`) are read only
+// `buildRunTrigger`, `chainEntryOf`, `nestedChildRunId` and `waitOfPausedRun`) are read only
 // inside the function bodies, at call time, never while a module is
 // evaluating, so the import cycle with ./engine.js is safe under ESM live
 // bindings; the tsup bundle is one file and has no cycle.
@@ -27,6 +27,7 @@ import {
     buildRunTrigger,
     chainEntryOf,
     nestedChildRunId,
+    waitOfPausedRun,
     type AutomationEngine,
     type ChainRestoreEntry,
     type ConsumedSuspension,
@@ -457,13 +458,22 @@ export async function restoreOneConsumedSuspension(
         // row: `ExecutionStatus` carries no such member, so a durable
         // status that survives the restart is a spec-vocabulary decision
         // nobody has taken — the row's discriminator stays the snapshot.
+        //
+        // [#32284] `waitMs` from the SNAPSHOT's clock: the restore re-arms the
+        // pause the failed resume consumed, so the run reads as never having
+        // left it — the attempt that failed, the time it sat stranded and the
+        // wait from here to its next resume are all one pause, and its active
+        // time is still what it had executed when it first parked. That is
+        // also what its step log says: the snapshot's steps end at the pause.
+        const durationMs = Date.now() - consumed.run.startTime;
         this.recordLog({
             id: runId,
             flowName: consumed.run.flowName,
             flowVersion: consumed.run.flowVersion,
             status: 'paused',
             startedAt: consumed.run.startedAt,
-            durationMs: Date.now() - consumed.run.startTime,
+            durationMs,
+            waitMs: waitOfPausedRun(consumed.run, durationMs),
             trigger: buildRunTrigger(consumed.run.context),
             steps: consumed.run.steps,
             variables: consumed.run.variables,

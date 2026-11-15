@@ -35,7 +35,7 @@ type QueryInputs = ReturnType<typeof useObjectGridQueryInputs>;
 export function useObjectGridGenerateColumns({
   schema, dataSource, data, dataConfig, hasInlineData, objectName, objectSchema, objectFields,
   objectTypesPending, schemaFields, schemaColumns, perms, navigation, executeAction, predicateScope,
-  resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment,
+  resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment, rowOpensRecord,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -57,6 +57,8 @@ export function useObjectGridGenerateColumns({
   uiLanguage: ReturnType<typeof useGridTranslation>['language'];
   /** objectstack#26681 — the host's node beside a row's record link (`ObjectGrid`'s prop). */
   recordLinkAdornment?: (record: any) => React.ReactNode;
+  /** objectstack#33317 — `false` ⇒ the host's row click opens nothing (`ObjectGrid`'s prop). */
+  rowOpensRecord?: boolean;
 }) {
   const generateColumns = useCallback((): ObjectGridColumnDraft[] => {
     // objectui#11815 — the host's verdict on a declared deadline's
@@ -416,6 +418,7 @@ export function useObjectGridGenerateColumns({
                   <LinkCell
                     testId={isPrimaryField ? 'primary-field-link' : 'link-cell'}
                     onActivate={() => navigation.handleClick(row)}
+                    opens={rowOpensRecord}
                     objectName={schema.objectName}
                     recordId={rowRecordId(row)}
                     wrap={col.wrap}
@@ -435,6 +438,7 @@ export function useObjectGridGenerateColumns({
                   <LinkCell
                     testId={isPrimaryField ? 'primary-field-link' : 'link-cell'}
                     onActivate={() => navigation.handleClick(row)}
+                    opens={rowOpensRecord}
                     objectName={schema.objectName}
                     recordId={rowRecordId(row)}
                     wrap={col.wrap}
@@ -668,6 +672,7 @@ export function useObjectGridGenerateColumns({
                 <LinkCell
                   testId="primary-field-link"
                   onActivate={() => navigation.handleClick(row)}
+                  opens={rowOpensRecord}
                   objectName={schema.objectName}
                   recordId={rowRecordId(row)}
                   trailing={recordLinkAdornment?.(row)}
@@ -681,6 +686,7 @@ export function useObjectGridGenerateColumns({
               <LinkCell
                 testId="primary-field-link"
                 onActivate={() => navigation.handleClick(row)}
+                opens={rowOpensRecord}
                 objectName={schema.objectName}
                 recordId={rowRecordId(row)}
                 trailing={recordLinkAdornment?.(row)}
@@ -972,7 +978,7 @@ export function useObjectGridGenerateColumns({
     });
 
     return generatedColumns;
-  }, [objectSchema, objectFields, objectTypesPending, schemaFields, schemaColumns, dataConfig, hasInlineData, objectName, navigation.handleClick, executeAction, data, resolveFieldLabel, translateOptions, schema.objectName, perms, uiLanguage, dataSource, predicateScope, recordLinkAdornment]);
+  }, [objectSchema, objectFields, objectTypesPending, schemaFields, schemaColumns, dataConfig, hasInlineData, objectName, navigation.handleClick, executeAction, data, resolveFieldLabel, translateOptions, schema.objectName, perms, uiLanguage, dataSource, predicateScope, recordLinkAdornment, rowOpensRecord]);
 
   return { generateColumns };
 }

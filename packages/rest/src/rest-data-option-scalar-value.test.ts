@@ -25,8 +25,9 @@
  * The first two rows are the narrowing; the third is SQLite's widening (base
  * stored `true` and `1` both as `'1.0'`), the same pair #29241 moved on text.
  *
- * Filter face, recorded and NOT changed here (the number comparand on a
- * string-stored field waits on #29486's decision): see the last block.
+ * Filter face: since #29486 (maintainer ruling A) a number or boolean
+ * comparand on an option field compares as its string reading, the code the
+ * write stored — see the last block.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -179,21 +180,36 @@ describe('a unique select compares the stored string (#29562, Clause-② narrowi
 });
 
 /**
- * The filter face, RECORDED, not changed: the number comparand on a
- * string-stored field is #29486's decision box. This pins today's answer so a
- * change there is seen here; it is not this card's contract.
+ * [#29486] The filter face: a number or boolean comparand on an option field
+ * compares as `String(value)`, the code the write door stored (maintainer
+ * ruling A). The engine's declared-type door narrows it before the driver, so
+ * `{ stage: 3 }` selects both rows the write stored as `"3"`. Before the
+ * ruling this block pinned `{ stage: 3 }` → no row (both rows hold the string
+ * `"3"`, and the number matched neither on SQLite or driver-memory).
  */
-describe('filter face on SQLite: a number comparand against a select written 3 (#29486 decides, recorded only)', () => {
-  it('{ stage: 3 } and { stage: "3" } against a row written 3 and a row written "3"', async () => {
+describe('filter face on SQLite: a number or boolean comparand against a select matches the code the write stored (#29486)', () => {
+  it('{ stage: 3 } and { stage: "3" } select the same rows — the one written 3 and the one written "3"', async () => {
     const ctx = await boot();
     await ctx.engine.insert('option_rest', { id: 'n', stage: 3 });
     await ctx.engine.insert('option_rest', { id: 's', stage: '3' });
+    await ctx.engine.insert('option_rest', { id: 't', stage: true });
     const ids = async (where: Record<string, unknown>) =>
       ((await ctx.engine.find('option_rest', { where })) as Array<{ id: string }>).map((r) => r.id).sort();
     expect(await ids({ stage: '3' })).toEqual(['n', 's']);
-    // Both rows now hold the string "3", and the number comparand matches
-    // neither (driver-memory answers the same). Base matched the row written
-    // 3 (stored "3.0") and not the row written "3".
-    expect(await ids({ stage: 3 })).toEqual([]);
+    expect(await ids({ stage: 3 })).toEqual(['n', 's']);
+    expect(await ids({ stage: true })).toEqual(['t']);
+    expect(await ids({ stage: { $in: [3, true] } })).toEqual(['n', 's', 't']);
+    expect(await ids({ stage: { $ne: 3 } })).toEqual(['t']);
+  });
+
+  it('the REST query door answers the same — POST …/query with a number comparand', async () => {
+    const ctx = await boot();
+    await ctx.engine.insert('option_rest', { id: 'n', stage: 3 });
+    await ctx.engine.insert('option_rest', { id: 'x', stage: 'other' });
+    const route = '/api/v1/data/:object/query';
+    const res = await ctx.call('POST', route, { object: 'option_rest' }, { where: { stage: 3 } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rows = (res.body?.records ?? res.body?.data ?? res.body?.value ?? res.body) as Array<{ id: string }>;
+    expect(Array.isArray(rows) ? rows.map((r) => r.id) : rows, JSON.stringify(res.body)).toEqual(['n']);
   });
 });

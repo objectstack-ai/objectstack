@@ -3304,8 +3304,13 @@ export class ObjectStackClient {
      * Nameable at the type level only since #9406, which declared
      * `PublishPackageDraftsResponseSchema` — the batch sibling of #7294's
      * single-item declaration; this method resolved to `any` before that.
-     * The batch is all-or-nothing (ADR-0067 D2): `success: false` on a 200
-     * means NOTHING landed — read `failed[]`. Each `published[]` element's
+     * The batch is all-or-nothing (ADR-0067 D2), but `success: false` on a
+     * 200 does not by itself mean nothing landed — read `outcome`: `refused`
+     * means NOTHING landed (read `failed[]`), `nothing_to_publish` means there
+     * was nothing to promote, and `published_unregistered` (#33277) means the
+     * drafts landed but the runtime registry refused the objects
+     * `unregistered[]` names, which are not served until registered: publish
+     * them again or restart before seeding or reading them. Each `published[]` element's
      * `version` is the ADR-0008 OCC token (pass to `saveItem` as
      * `options.ifMatch`, which sends it as `If-Match`), and the
      * conditional receipts (`seedApplied` / `materializeApplied` /

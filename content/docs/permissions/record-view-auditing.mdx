@@ -272,6 +272,44 @@ datasource whenever one is registered, and `os dev` provisions one by default as
 a sibling SQLite file.
 </Callout>
 
+## Dataset queries
+
+A report or a dashboard reads its data through the analytics dataset door,
+`POST /analytics/dataset/query` (and its batch door), one query per block or
+widget. The same plugin can record each of those queries as a `dataset_query`
+row: **who** ran it, **which dataset** (its base object in `object_name`), the
+**dimensions and measures** selected, the **filtered field names and
+operators** (never the values), the **row count** and the **outcome**. It is
+opted in per saved dataset and off by default:
+
+```typescript
+new AuditPlugin({
+  datasetQueryAudit: {
+    datasets: ['sales_pipeline', 'support_backlog'],
+    // maxBatchSize: 50,       // flush once this many rows are buffered
+    // flushIntervalMs: 2000,  // flush this long after a batch's first row
+  },
+});
+```
+
+The rows are written in batches off the request path, stamped with the query's
+own instant, by the same batcher as record views. The edges:
+
+- **Saved datasets only.** A query that posts an inline definition (the Studio
+  preview) writes no row: the opt-in names a saved dataset, and an inline
+  definition's name is the caller's own text.
+- **A refused query writes no row.** A request the door refuses before the
+  read (sign-in, a malformed body or selection, a dataset it cannot find or
+  parse) is not a read. A query that fails after the read started writes one
+  row with outcome `failed`, the HTTP status and the error's machine code.
+- **A name covers every holder.** Two packages can each hold a dataset of the
+  same name. A name in `datasets` audits every one of them, and each row names
+  the package it read in `metadata.dataset_package` (`null` for the
+  environment's own definition). A query that read a draft definition carries
+  `preview: true`.
+- **No report name.** A report is composed in the browser, so the server sees
+  its queries, not the report: one opened report can write one row per block.
+
 ## Not this
 
 - **[`services.audit`](/docs/kernel/runtime-services/audit-service)** is the

@@ -94,7 +94,9 @@ describe('PackageServicePlugin boot hydration (ADR-0033 consolidation)', () => {
   // refused with the structured diagnostic (and boot continues), instead of
   // loading and crashing later deep in a schema parse.
   it('refuses to rehydrate a protocol-incompatible package, with the structured diagnostic', async () => {
-    const stale = { ...SEEDED, id: 'app.stale', engines: { protocol: '^10' } };
+    // ^16 is the migrate-meta support floor: a range below it is refused with no
+    // migrateCommand (#33031), so the floor is the lowest major that still names one.
+    const stale = { ...SEEDED, id: 'app.stale', engines: { protocol: '^16' } };
     const registry = {
       installPackage: vi.fn(),
       getPackage: vi.fn(() => undefined),
@@ -108,7 +110,7 @@ describe('PackageServicePlugin boot hydration (ADR-0033 consolidation)', () => {
     const refusal = errors.find((e: string) => e.includes('OS_PROTOCOL_INCOMPATIBLE'));
     expect(refusal).toBeDefined();
     expect(refusal).toContain('app.stale');
-    expect(refusal).toContain('objectstack migrate meta --from 10');
+    expect(refusal).toContain('objectstack migrate meta --from 16');
   });
 
   it('rehydrates a package with no engines range (grandfathered) with a protocol warning', async () => {

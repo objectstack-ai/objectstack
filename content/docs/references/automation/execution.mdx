@@ -113,6 +113,7 @@ const result = CheckpointSchema.parse(data);
 | **startedAt** | `string` | ✅ | Execution start timestamp |
 | **completedAt** | `string` | optional | Execution completion timestamp |
 | **durationMs** | `integer` | optional | Total execution duration in milliseconds |
+| **waitMs** | `integer` | optional | Total time the run spent suspended (waiting at a `screen`, `approval`, `wait` or other pausing node), summed over all its pauses, in milliseconds. Included in `durationMs`, which stays the total wall time, so the time spent executing is `durationMs - waitMs`. `0` on a run that never paused; on a `paused` entry, the wait up to the moment the entry was written. Absent when not recorded — a `missed` entry, or a run paused before this was tracked — which is not the same as zero. |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution context identity |
 | **tenantId** | `string` | optional | Tenant ID for multi-tenant isolation |
 

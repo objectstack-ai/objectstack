@@ -104,10 +104,27 @@ const PAGE = {
   ],
 };
 
-/** The object registry: with the reaction object (the records store), or without it (the column store). */
+/**
+ * `sys_comment` as a framework without `sys_comment_reaction` serves it: it
+ * still declares the `reactions` column the column store writes.
+ */
+const COLUMN_ERA_COMMENT = {
+  name: COMMENT,
+  label: 'Comment',
+  fields: { body: { type: 'textarea', label: 'Body' }, reactions: { type: 'textarea', label: 'Reactions' } },
+};
+/** `sys_comment` as a framework with `sys_comment_reaction` serves it: the column is retired. */
+const RECORDS_ERA_COMMENT = { name: COMMENT, label: 'Comment', fields: { body: { type: 'textarea', label: 'Body' } } };
+
+/**
+ * The object registry: with the reaction object (the records store); without
+ * it, on a framework that predates it (the column store); or a framework that
+ * has it, as a caller refused it is served, without it (objectstack#33521).
+ */
 const REGISTRY = {
   records: [...OBJECTS, { name: REACTION, label: 'Comment Reaction' }],
-  column: OBJECTS,
+  column: [...OBJECTS, COLUMN_ERA_COMMENT],
+  refused: [...OBJECTS, RECORDS_ERA_COMMENT],
 };
 
 /** The four grant shapes of the map's enumeration pin, as `/me/permissions` carries them. */
@@ -424,5 +441,130 @@ describe('on the column store the reaction control reads feedReactionColumn: upd
   ] as const)('under a %s grant on sys_comment the control is offered exactly when update is held', async (_shape, bits, offered) => {
     const { view } = await mount(answer({ [COMMENT]: bits }), makeDataSource(), REGISTRY.column);
     expect(!!addReaction(view)).toBe(offered);
+  });
+});
+
+/**
+ * Which store the chatter uses is asked of the object registry only by a
+ * caller who may read `sys_comment_reaction` (objectstack#33343). The metadata
+ * door serves an object's definition only to a caller its read check admits,
+ * so a caller whose grants hold no read on the object was answered 404 on every
+ * record page; that answer took the column store. Here the registry is the
+ * by-name scope reader, which records each name the page asks.
+ */
+describe('the reaction store is asked of the registry only by a caller who may read sys_comment_reaction (objectstack#33343)', () => {
+  /** Mounts the page over a by-name registry; returns the object names it was asked. */
+  async function mountAsking(perms: MePermissionsResponse | null, registry: unknown[], dataSource = makeDataSource()) {
+    const asked: string[] = [];
+    const pages = [PAGE];
+    const readObjectScope = (scope: { packageId?: string; names?: readonly string[] }) => {
+      asked.push(...(scope.names ?? []).filter((name) => typeof name === 'string' && name !== ''));
+      const served = scope.names
+        ? registry.filter((o) => scope.names!.includes((o as { name: string }).name))
+        : registry;
+      return { objects: served, served, missing: [], settled: true, failed: [], refused: {}, answers: {}, views: [] };
+    };
+    const metadata = {
+      ...metadataFor(registry),
+      readObjectScope,
+      getTypeStatus: (type: string) => (type === 'object' ? 'idle' : 'ready'),
+      ensureType: async () => pages,
+    } as any;
+    const page = (
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={dataSource}
+            objects={OBJECTS}
+            onEdit={() => {}}
+            objectNameOverride={OBJECT_NAME}
+            recordIdOverride={RECORD_ID}
+            embedded
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>
+    );
+    const view = render(perms ? <MePermissionsProvider initialPermissions={perms}>{page}</MePermissionsProvider> : page);
+    await within(view.container).findByText(COMMENT_BODY);
+    await act(async () => {});
+    const reactionReads = dataSource.find.mock.calls.filter(([objectName]: [string]) => objectName === REACTION);
+    return { asked, reactionReads };
+  }
+
+  it('a caller whose grants hold no read on sys_comment_reaction is not asked about it, and takes the column store its absence took', async () => {
+    const { asked, reactionReads } = await mountAsking(answer({ [COMMENT]: SHAPE.full }), REGISTRY.column);
+    expect(asked).not.toContain(REACTION);
+    expect(reactionReads).toEqual([]);
+  });
+
+  it('CONTROL — a caller who may read it asks the registry, and the records store reads its rows', async () => {
+    const { asked, reactionReads } = await mountAsking(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.readOnly }), REGISTRY.records);
+    expect(asked).toContain(REACTION);
+    expect(reactionReads).toHaveLength(1);
+  });
+
+  it('CONTROL — with no permission provider every grant reads open: the registry is asked, as before', async () => {
+    const { asked } = await mountAsking(null, REGISTRY.records);
+    expect(asked).toContain(REACTION);
+  });
+});
+
+/**
+ * The column store is taken only where `sys_comment_reaction` is not deployed,
+ * never where the caller is refused it (objectstack#33521). Both answers read
+ * alike: the metadata door answers a refused caller's definition read as
+ * absent, and a caller's grants name neither. The column left `sys_comment` in
+ * the release that added the object, so `sys_comment`'s own served definition
+ * tells them apart. On a framework that has the object, a caller refused it was
+ * offered the column control, and its click was a
+ * `PATCH /api/v1/data/sys_comment/:id` naming the retired `reactions` column,
+ * which the data door answers `400 INVALID_FIELD`.
+ */
+describe('a caller refused sys_comment_reaction is offered no column write where the column is retired (objectstack#33521)', () => {
+  /** The writes that named the reactions column. */
+  const columnWrites = (dataSource: ReturnType<typeof makeDataSource>) =>
+    dataSource.update.mock.calls.filter(([o, , patch]: [string, string, any]) => o === COMMENT && 'reactions' in (patch ?? {}));
+  const reactionReads = (dataSource: ReturnType<typeof makeDataSource>) =>
+    dataSource.find.mock.calls.filter(([objectName]: [string]) => objectName === REACTION);
+
+  it('a caller whose grants hold no read on it is offered no reaction control and sends no reaction request', async () => {
+    const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.full }), makeDataSource(), REGISTRY.refused);
+    expect(addReaction(view)).toBeNull();
+    // The stored chip is not read off the retired column either: a comment
+    // read on this framework never returns it.
+    expect(thumbsChip(view)).toBeUndefined();
+    expect(columnWrites(dataSource)).toEqual([]);
+    expect(reactionReads(dataSource)).toEqual([]);
+    expect(dataSource.create).not.toHaveBeenCalled();
+  });
+
+  it('with no permission provider, a registry that answers the object absent is read the same way: no control', async () => {
+    const { view, dataSource } = await mount(null, makeDataSource(), REGISTRY.refused);
+    expect(addReaction(view)).toBeNull();
+    expect(thumbsChip(view)).toBeUndefined();
+    expect(columnWrites(dataSource)).toEqual([]);
+  });
+
+  it('CONTROL — where the object is not deployed (sys_comment declares the column) the column path is still used', async () => {
+    const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.full }), makeDataSource('u2'), REGISTRY.column);
+    expect(addReaction(view)).not.toBeNull();
+    expect(reactionReads(dataSource)).toEqual([]);
+    fireEvent.click(thumbsChip(view)!);
+    await act(async () => {});
+    expect(columnWrites(dataSource)).toHaveLength(1);
+    const [, id, patch] = columnWrites(dataSource)[0];
+    expect(id).toBe(COMMENT_ID);
+    expect(JSON.parse(patch.reactions)).toEqual({ '👍': ['u2', 'u1'] });
+    expect(dataSource.create).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — a caller who holds the grant takes the records store: its rows are read and a click creates its own row', async () => {
+    const { view, dataSource } = await mount(answer({ [COMMENT]: SHAPE.full, [REACTION]: SHAPE.full }), makeDataSource('u2'), REGISTRY.records);
+    expect(addReaction(view)).not.toBeNull();
+    expect(reactionReads(dataSource)).toHaveLength(1);
+    fireEvent.click(thumbsChip(view)!);
+    await act(async () => {});
+    expect(dataSource.create.mock.calls).toEqual([[REACTION, { comment_id: COMMENT_ID, emoji: '👍' }]]);
+    expect(columnWrites(dataSource)).toEqual([]);
   });
 });

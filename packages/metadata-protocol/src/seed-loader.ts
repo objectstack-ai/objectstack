@@ -486,23 +486,32 @@ type SoleOrganizationReading =
   | { kind: 'no-organization-object' };
 
 /**
- * [ADR-0131 D9] Does a seed row of this object need an organization?
+ * [ADR-0131 D9] The column a seed row of this object carries its organization
+ * in, or `null` when a row of it carries none.
  *
- * The object carries an `organization_id` column on its REGISTERED schema —
- * authored, or injected by the system-column pass — and has not opted out of
- * tenancy. The injected half is `resolveInjectedSystemColumns`, the single
- * source `applySystemFields` itself consumes, so this answers what the engine
- * will register, not what the author happened to type. `organization_id` and
- * only it, because that is the column this loader stamps.
+ * The object is tenant-scoped on its REGISTERED schema and has not opted out
+ * of tenancy. The column is the one the tenant wall scopes it by: a declared
+ * `tenancy.tenantField` the object really has, else `organization_id` —
+ * authored, or injected by the system-column pass. Both halves are the shared
+ * readings, never a third: `resolveTenantFieldName` (`@objectstack/core`) is
+ * the predicate the engine and the driver wall by, and
+ * `resolveInjectedSystemColumns` is the single source `applySystemFields`
+ * itself consumes, so this answers what the engine will register, not what
+ * the author happened to type. It is the column this loader stamps with the
+ * load's organization, the one a per-organization replay matches existing
+ * rows on, and the one a row's own organization is read from.
  */
+function seedRowTenantColumn(definition: unknown): string | null {
+  if (!definition || typeof definition !== 'object') return null;
+  if (isTenancyDisabled(definition)) return null;
+  const resolved = resolveTenantFieldName(definition);
+  if (resolved !== null) return resolved;
+  return resolveInjectedSystemColumns(definition).tenant ? DEFAULT_TENANT_FIELD : null;
+}
+
+/** [ADR-0131 D9] Does a seed row of this object need an organization? See {@link seedRowTenantColumn}. */
 function seedRowNeedsOrganization(definition: unknown): boolean {
-  if (!definition || typeof definition !== 'object') return false;
-  if (isTenancyDisabled(definition)) return false;
-  const fields = (definition as { fields?: unknown }).fields;
-  if (fields && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, 'organization_id')) {
-    return true;
-  }
-  return resolveInjectedSystemColumns(definition).tenant;
+  return seedRowTenantColumn(definition) !== null;
 }
 
 /**
@@ -1682,6 +1691,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     // judge, and nothing here refuses a row for an owner it cannot prove.
     const objectDefinition = await this.resolveObjectDefinition(objectName);
     const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
+    // The column a row of this dataset holds its organization in: the one the
+    // stamp below writes, a refusal names, and a row's own organization is
+    // read from (`seedRowTenantColumn`). A declared `tenancy.tenantField` is
+    // that column for an object walled by it; an unresolved definition keeps
+    // `organization_id`, as it keeps the stamp.
+    const organizationColumn = seedRowTenantColumn(objectDefinition) ?? DEFAULT_TENANT_FIELD;
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
@@ -1832,28 +1847,31 @@ export class SeedLoaderService implements ISeedLoaderService {
       // `config.organizationId`, or (when none was pinned) the install's sole
       // organization. [ADR-0131 D3] `sys_` / `cloud_` / `ai_` seeds take it
       // too: their exemption ("intentionally global") is withdrawn, since no
-      // platform-global seeds remain. A record that supplies its own
-      // `organization_id` always wins. An object with no organization column
-      // gets no stamp (`rowsCarryOrganization` above): the engine refuses an
-      // undeclared field, so a stamp there would drop the row.
+      // platform-global seeds remain. The stamp lands in `organizationColumn`:
+      // `organization_id`, or the declared `tenancy.tenantField` of an object
+      // walled by another column, which the wall reads as the organization
+      // the same way. A record that supplies its own value there always wins.
+      // An object with no organization column gets no stamp
+      // (`rowsCarryOrganization` above): the engine refuses an undeclared
+      // field, so a stamp there would drop the row.
       const tenantOrg = rowsCarryOrganization ? (config.organizationId ?? this.fallbackOrgId) : undefined;
-      if (refuseUnownedRows && tenantOrg === undefined && record['organization_id'] == null) {
+      if (refuseUnownedRows && tenantOrg === undefined && record[organizationColumn] == null) {
         // [ADR-0131 D9] No owner to stamp — refuse the row, loudly, by name.
         errored++;
         const count = this.unownedOrganizationCount ?? 0;
         const error: ReferenceResolutionError = {
           sourceObject: objectName,
-          field: 'organization_id',
+          field: organizationColumn,
           targetObject: 'sys_organization',
           targetField: 'id',
           attemptedValue: null,
           recordIndex: i,
           message:
-            `Seed record #${i} of '${objectName}' was REFUSED: '${objectName}' carries an organization_id ` +
-            `column, this seed load names no organization (config.organizationId) and none can be derived — ` +
+            `Seed record #${i} of '${objectName}' was REFUSED: '${objectName}' carries its organization in ` +
+            `${organizationColumn}, this seed load names no organization (config.organizationId) and none can be derived — ` +
             `the install holds ${count === 0 ? 'no organization at all' : 'several organizations'}. Every seed ` +
             `row of an organization-owned object is stamped with its organization or refused; writing it would ` +
-            `store a row no organization owns. Fix it by setting organization_id on the record — a seed ` +
+            `store a row no organization owns. Fix it by setting ${organizationColumn} on the record — a seed ` +
             `published through a package carries no caller organization (ADR-0131 D12), so the record is ` +
             `where its owner is named; a direct SeedLoader caller may instead pass config.organizationId. ` +
             `Under the 'single' tenancy ` +
@@ -1893,8 +1911,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       // survived: see `apps/ee-tenant-crm-showcase` in the cloud repo, which
       // reproduces it end-to-end.
       let stampedTenantOrg = false;
-      if (tenantOrg && record['organization_id'] == null) {
-        record['organization_id'] = tenantOrg;
+      if (tenantOrg && record[organizationColumn] == null) {
+        record[organizationColumn] = tenantOrg;
         stampedTenantOrg = true;
       }
 
@@ -2041,7 +2059,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         // Never re-resolve the tenant stamp we just wrote (see above). A seed
         // that authors `organization_id` ITSELF still goes through resolution,
         // so naming an org by its natural key keeps working.
-        if (stampedTenantOrg && ref.field === 'organization_id') continue;
+        if (stampedTenantOrg && ref.field === organizationColumn) continue;
         // [#25761] A create-only reference on a row the load matched is no
         // part of that row's write: not resolved, not dropped for failing to
         // resolve, and not deferred — pass 2's back-fill would write it after
@@ -2337,8 +2355,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (datasetFiles) {
         const matched = existingRecords?.get(this.externalIdKey(record, externalId));
         const organizationOfRow =
-          typeof record['organization_id'] === 'string' && record['organization_id'] !== ''
-            ? (record['organization_id'] as string)
+          typeof record[organizationColumn] === 'string' && record[organizationColumn] !== ''
+            ? (record[organizationColumn] as string)
             : null;
         const outcome = await datasetFiles.prepareRow({
           record,
@@ -2428,14 +2446,14 @@ export class SeedLoaderService implements ISeedLoaderService {
 
       // Insert/upsert the record
       if (!config.dryRun) {
-        rowOrganizationByRecordIndex.set(i, record['organization_id']); // [#33206]
+        rowOrganizationByRecordIndex.set(i, record[organizationColumn]); // [#33206]
         if (hasSelfRef) {
           // Self-referencing dataset: keep the historical sequential
           // per-record write so a later record can resolve its self-ref
           // against an earlier one via `insertedRecords` — see `hasSelfRef`.
           try {
             const result = await this.writeRecord(
-              objectName, record, mode, externalId, existingRecords, comparands
+              objectName, record, mode, externalId, existingRecords, comparands, record[organizationColumn],
             );
 
             if (result.action === 'inserted') written.inserted++;
@@ -2502,7 +2520,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
             try {
-              const rowOpts = this.writeOptionsFor(record['organization_id']) as any; // [#33206]
+              const rowOpts = this.writeOptionsFor(record[organizationColumn]) as any; // [#33206]
               await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, rowOpts)));
               written.updated++;
               await settleSeedFiles(i, decision.id); // [#25779]
@@ -2525,7 +2543,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           } else {
             // Insert: buffer for the batched flush rather than writing now.
             // [#33206] A row written as another organization starts its own batch.
-            const rowOpts = this.writeOptionsFor(record['organization_id']);
+            const rowOpts = this.writeOptionsFor(record[organizationColumn]);
             if (pendingInserts.length > 0 && rowOpts !== batchOpts) await flushPendingInserts();
             batchOpts = rowOpts;
             pendingInserts.push({ recordIndex: i, externalIdValue, record });
@@ -3574,9 +3592,11 @@ export class SeedLoaderService implements ISeedLoaderService {
     externalId: string | string[],
     existingRecords: Map<string, any> | undefined,
     comparands: ReplayComparands,
+    rowOrganization: unknown,
   ): Promise<{ action: 'inserted' | 'updated' | 'skipped'; id?: string; uncompared?: readonly string[] }> {
     const existing = existingRecords?.get(this.externalIdKey(record, externalId));
-    const opts = this.writeOptionsFor(record['organization_id']) as any; // [#33206]
+    // [#33206] The organization the row carries, read from its tenant column by the caller.
+    const opts = this.writeOptionsFor(rowOrganization) as any;
 
     switch (mode) {
       case 'insert': {
@@ -4286,6 +4306,22 @@ export class SeedLoaderService implements ISeedLoaderService {
    * is certified (D10), and a new write without an organization is stamped or
    * refused (D9).
    */
+  /**
+   * The column `objectName`'s rows are walled per organization by:
+   * `resolveTenantFieldName` on its definition, `organization_id` when that
+   * resolves none or the definition cannot be read — the one reading
+   * {@link probeScopeOf} scopes a reference target by.
+   */
+  private async organizationColumnOf(objectName: string): Promise<string> {
+    let definition: unknown;
+    try {
+      definition = await this.resolveObjectDefinition(objectName);
+    } catch {
+      // The registry could not answer: keep the organization filter.
+    }
+    return resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;
+  }
+
   private async loadExistingRecords(
     objectName: string,
     externalId: string | string[],
@@ -4303,7 +4339,12 @@ export class SeedLoaderService implements ISeedLoaderService {
       // Per-tenant replay: restrict to the target tenant's own rows
       // so upsert key matching never returns another tenant's record
       // (would silently steal/overwrite rows across orgs).
-      if (organizationId) findArgs.where = { organization_id: organizationId };
+      // The match runs on the column the object is walled by — a declared
+      // `tenancy.tenantField`, else `organization_id` — the same reading the
+      // reference probe scopes a target by (`probeScopeOf`). An object walled
+      // by another column may carry no `organization_id` at all, and a filter
+      // on it is refused by the driver.
+      if (organizationId) findArgs.where = { [await this.organizationColumnOf(objectName)]: organizationId };
       const records = await this.engine.find(objectName, findArgs as any);
       for (const record of records || []) {
         const key = this.externalIdKey(record, externalId);

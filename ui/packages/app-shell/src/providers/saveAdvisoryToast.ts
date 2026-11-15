@@ -26,13 +26,21 @@
  * finding is a 422 and never reaches a 2xx body), which is why nothing here
  * branches on it.
  *
- * ## Why the finding text is not translated
+ * ## Why the finding text is not translated here
  *
- * `message` and `hint` are SERVER data — composed by the gate's rules, which
- * name the offending node, object and field. They are rendered verbatim. Only
- * the frame around them (the title, and the "rule — message" scaffolding) is
- * i18n copy. Putting server prose through `t()` would need a key per rule and
- * would go stale the moment a rule's wording changed upstream.
+ * The finding's prose is SERVER data — composed by the gate's rules, which
+ * name the offending node, object and field — and is rendered verbatim. Only
+ * the frame around it (the title, and the "rule — text" scaffolding) is i18n
+ * copy. Putting server prose through `t()` would need a key per rule and would
+ * go stale the moment a rule's wording changed upstream.
+ *
+ * Which prose: the finding's `userMessage` when the producer sent one
+ * (`RuntimeAuthoringIssueSchema.userMessage` — the rule's sentence for the
+ * person who saved, composed in the request's language, the workspace default,
+ * else `en`), in place of the developer-facing English `message` and `hint`.
+ * A finding the producer wrote no sentence for carries no `userMessage` and
+ * keeps the `message` + `hint` face. The rule id and `where` are locators, not
+ * prose, and frame both faces alike.
  *
  * @module providers/saveAdvisoryToast
  */
@@ -91,9 +99,15 @@ const ADVISORY_TOAST_MS = 10_000;
  * needs to go fix it. `path` is deliberately NOT rendered: it is a document
  * pointer (`flows[0].nodes[2].config…`) meant for tooling, and next to a
  * human-readable `where` it reads as noise.
+ *
+ * The text after the dash is the producer's localized `userMessage` when the
+ * finding carries one, else its `message` and `hint` (module header).
  */
 function formatFinding(f: MetadataSaveAdvisoryEvent['advisories'][number]): string {
   const head = f.where ? `[${f.rule}] ${f.where}` : `[${f.rule}]`;
+  if (typeof f.userMessage === 'string' && f.userMessage.trim() !== '') {
+    return `${head} — ${f.userMessage}`;
+  }
   const hint = f.hint ? ` ${f.hint}` : '';
   return `${head} — ${f.message}${hint}`;
 }

@@ -527,6 +527,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.currency.rateField': 'Rate field',
   'designer.field.currency.rateFieldNone': '— Pick a number field —',
   'designer.field.currency.homeAmountHint': "When a record is saved, the server converts this amount into the organization's home currency at the exchange rate in force on the document date, and stores the result and the rate it used. Lists the read-only fields that can hold them: a dynamic-mode currency field for the amount, a number field for the rate.",
+  'designer.field.currency.homeAmountHeld': 'Not saved yet: a home currency amount needs all three fields, or none. Still to pick: {missing}.',
   // Object basics (no-selection default inspector)
   'designer.object.kind': 'Object',
   'designer.object.section.basic': 'Basic info',

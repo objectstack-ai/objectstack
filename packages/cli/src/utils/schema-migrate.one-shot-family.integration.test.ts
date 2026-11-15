@@ -77,6 +77,7 @@ import MigrateActivityChangedFields from '../commands/migrate/activity-changed-f
 import MigrateCommentParentPair from '../commands/migrate/comment-parent-pair.js';
 import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditKeyMaterial from '../commands/migrate/audit-key-material.js';
+import MigrateAuditSideCopies from '../commands/migrate/audit-side-copies.js';
 import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
 import MigrateBlankMultiValues from '../commands/migrate/blank-multi-values.js';
@@ -252,6 +253,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateAuditKeyMaterial),
     noWrite: [{ label: 'migrate audit-key-material', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate audit-key-material --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/audit-side-copies.ts': {
+    run: invoke(MigrateAuditSideCopies),
+    noWrite: [{ label: 'migrate audit-side-copies', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate audit-side-copies --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/audit-mail-bodies.ts': {
     run: invoke(MigrateAuditMailBodies),
