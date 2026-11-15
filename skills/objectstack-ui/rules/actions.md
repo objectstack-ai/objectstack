@@ -204,6 +204,7 @@ export const AddInvoiceLineAction = defineAction({
     language: 'js',
     source: `
       const product = await ctx.api.object('product').findOne({ where: { id: input.product } });
+      if (!product) throw new Error('Product not found.');
       await ctx.api.object('invoice_line').insert({
         invoice: ctx.recordId, product: input.product, quantity: input.quantity,
         unit_price: product.list_price,
@@ -211,11 +212,13 @@ export const AddInvoiceLineAction = defineAction({
     `,
     capabilities: ['api.read', 'api.write'],
   },
+  refreshAfter: true,
 });
 ```
 
-Lines also written past the action (API, import, an agent) get the price from
-a `beforeInsert` hook on the line instead (objectstack-data → Lifecycle Hooks),
-`runAs: 'system'` when the writer cannot read it.
+Lines also written past the action (API, an agent, an import — one with
+automations off skips hooks) get the price from a `beforeInsert` hook on the
+line instead (objectstack-data → Lifecycle Hooks), `runAs: 'system'` when the
+writer cannot read it.
 
 > Set `refreshAfter: true` whenever the action mutates the current record.

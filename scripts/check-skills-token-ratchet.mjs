@@ -814,8 +814,16 @@ export const CEILINGS = new Map([
   // measurement, zero headroom. Authority: the ruling of record that orders this text into
   // the published skills, objectstack-ai/cloud#3659 letter A (ruling comment 6682024726), via
   // the standing 2026-10-27 ruling (record 6513306068), quoted verbatim in the PR body.
-  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15256 / 4)
-  ['skills/objectstack-ui/SKILL.md', 3814],
+  // 3814 -> 3833: one clause in the line-item grid paragraph — "never add an 'Add line'
+  // button" is about the grid, and a record-header action that inserts a priced line is
+  // `rules/actions.md` — so the paragraph does not read as forbidding the action that file
+  // teaches. No passage of this file restates it or was found restating another, so nothing
+  // is cut first; the standing ruling's second half carries the raise, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). The file was 15253
+  // bytes (15233 priced, 3809 tokens, headroom 5) -> 15349 (15329 priced) -> 3833 tokens,
+  // the 5 absorbed, ceiling +19, pinned AT the measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15329 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3833],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1151,8 +1159,14 @@ export const CEILINGS = new Map([
   // The file is 9807 -> 11106 bytes -> 2777 tokens, the row's 1 token of headroom absorbed,
   // ceiling +324, pinned AT the measurement. Same ruling as the lines above (2026-10-27,
   // tap A): 「A:先削重复,余额按实测提高」.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11106 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2777],
+  // 2777 -> 2808: that example gains `refreshAfter: true` (the line moves the invoice's
+  // roll-up) and a guard for a product `findOne` does not return, and the closing sentence
+  // says an import with automations off skips the hook. Nothing further in the file restates
+  // another passage (the 85 bytes above were what there was), so the same ruling's second
+  // half carries it: the file is 11106 -> 11231 bytes -> 2808 tokens, zero headroom before,
+  // ceiling +31, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11231 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2808],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
