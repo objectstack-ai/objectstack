@@ -31,13 +31,13 @@ So a sensible create form is: *editable, required-or-core fields, in declaration
 
 `field.group` on its own does not create a section. The **authorization source is the object's `fieldGroups` declaration**: `deriveFieldGroupLayout` (ADR-0085 §5) — the single derivation every renderer and the i18n walker consume — sections only those fields whose `group` matches a declared `fieldGroups[].key`.
 
-- An **undeclared** `group` renders **exactly like no `group` at all**: the field drops into a trailing untitled bucket.
+- An **undeclared** `group` renders **exactly like no `group` at all**: the field drops into the trailing bucket of ungrouped fields, which the form and the record page draw under their own **Other** heading (translated per locale) after the declared groups.
 - Declare **no** `fieldGroups` at all and grouping does not apply — the derivation yields nothing and you get a flat form.
 - Either way, `os lint` (and `os build` / `os validate`) reports every unmatched reference as **`field-group-undeclared`**.
 
 So tag the fields **and** declare the groups — [`contact.object.ts`](#runnable-example) does both. With both halves present, the full edit form materialises each declared group into a section, and you can omit the `form` view entirely and let the platform derive the grouped form. Two ways the derived form still differs from the hand-written one below:
 
-- fields the platform injects and you never grouped (`owner_id`, under `sharingModel: 'private'`) surface in that trailing untitled section;
+- fields the platform injects and you never grouped (`owner_id`, under `sharingModel: 'private'`) surface in that trailing **Other** section;
 - `columns` is a **form-view** knob, and the group declaration has no column count to give — a derived section carries only `key` / `label` / `icon` / `description` / `collapse` and its member fields — so a hand-written `columns: 2` is not part of what derivation gives back.
 
 When you do write the form, list fields as **bare strings** so each one inherits its type / validation / FLS / default from the object — the form carries layout only, never data semantics.

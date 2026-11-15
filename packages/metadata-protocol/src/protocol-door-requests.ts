@@ -28,6 +28,12 @@ type SaveMetaItemRequest = {
      * already holds. Set by server code only; no HTTP door forwards it.
      */
     inheritedGrantObjects?: readonly string[],
+    /**
+     * [#32656] The locales the findings' user sentences are composed in, in
+     * ladder order: the request's locale, then the workspace default
+     * (`SaveMetaItemRequestSchema.userTextLocales`). Stated by the door.
+     */
+    userTextLocales?: readonly (string | undefined)[],
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.publishMetaItem}. */
@@ -86,6 +92,8 @@ type PublishMetaItemRequest = {
     _skipSeedApply?: boolean;
     /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
     member?: string;
+    /** [#32656] The locales the findings' user sentences are composed in (`PublishMetaItemRequestSchema.userTextLocales`). */
+    userTextLocales?: readonly (string | undefined)[];
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.rollbackMetaItem}. */
@@ -101,6 +109,19 @@ type RollbackMetaItemRequest = {
      * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
      */
     member?: string;
+    /**
+     * [ADR-0150 D3/D4, #32905] The package whose row this rollback restores,
+     * as the `/layers` read names its package (`?package=` on the REST door).
+     * Read for a type stored per `(package, name)` only (refused `400` on
+     * any other type): its own row, its `.custom` pair's declared override,
+     * or the package-less row its read falls back to; the version must be
+     * that holder's — one attributed to no package, or to the environment,
+     * only while it is the name's sole slot. Absent, a name two row slots
+     * hold, or one the bare plain read refuses, is refused `409` naming every
+     * holder, before anything is written; a name one holder holds restores
+     * any of its versions, as before.
+     */
+    packageId?: string;
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.deleteMetaItem}. */

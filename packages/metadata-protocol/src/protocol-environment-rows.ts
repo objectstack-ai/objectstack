@@ -51,6 +51,7 @@ import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { rowMatchesOverlayWhere, servedOverlayRowCandidates } from './protocol.js';
 import { holdsServedOverlayCandidate } from './protocol-overlay-merge.js';
+import type { ShipsName } from './suite-moved-overlay.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /**
@@ -122,10 +123,13 @@ export async function findServedOverlayRow(
     const installed = installedManifestsOfEngine(this.engine);
     // [#31593] The code packages that ship the item, read once, when a
     // moved edit of it can be a candidate (`suite-moved-overlay.ts`).
+    // [#32606] Two grains: the item (its member) for the address's package,
+    // the name (any member) for the former owner ({@link ShipsName}).
     let shippers: ReadonlySet<string> | undefined;
-    const ships = (packageId: string): boolean => {
-        shippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name, undefined, args.member));
-        return shippers.has(packageId);
+    let nameShippers: ReadonlySet<string> | undefined;
+    const ships: ShipsName = {
+        item: (packageId) => (shippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name, undefined, args.member))).has(packageId),
+        name: (packageId) => (nameShippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name))).has(packageId),
     };
     for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride, installed, ships })) {
         const type = candidate.spelling === 'canonical' ? args.type : other;

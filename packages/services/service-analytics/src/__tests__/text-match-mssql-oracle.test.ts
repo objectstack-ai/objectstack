@@ -135,9 +135,13 @@ function driverPredicate(sql: string, column: string, placeholder: RegExp): stri
   return unwrapNullSafe(where.split(column).join('COL').replace(placeholder, 'P'));
 }
 
-/** A face's predicate, column `COL`, every placeholder `P`. */
+/**
+ * A face's predicate, column `COL`, every placeholder `P`. The native compiler
+ * writes the column quoted (`"name"`, #33138) and the echo writes it bare; both
+ * read as `COL`.
+ */
 function facePredicate(where: string, column: string, placeholder: RegExp): string {
-  return unwrapNullSafe(where.split(column).join('COL').replace(placeholder, 'P'));
+  return unwrapNullSafe(where.split(`"${column}"`).join('COL').split(column).join('COL').replace(placeholder, 'P'));
 }
 
 /** The `WHERE` clause of a statement the native compiler or the echo builds. */

@@ -81,6 +81,7 @@ import {
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
+import { servesRecordRead } from '../utils/recordReadServed.js';
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */
 const USER_FILTER_TYPES = new Set(['select', 'multiselect', 'radio', 'enum', 'boolean']);
@@ -324,7 +325,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   }, [objectDef, canRead]);
 
   // Record open behavior — URL-driven drawer, same convention as ObjectView
-  // and InterfaceListPage (`?recordId=…` is shareable and refresh-safe).
+  // and InterfaceListPage (`?recordId=…` is shareable and refresh-safe). An
+  // object the server does not read one record of (`servesRecordRead`, a
+  // list-only object) has no record surface: its rows open nothing.
+  const recordServed = servesRecordRead(objectName, perms);
   const recordUrl = React.useCallback(
     (id: string | number) =>
       `/apps/${appName}/${objectName}/record/${encodeURIComponent(String(id))}`,
@@ -338,6 +342,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const drawerRecordId = searchParams.get('recordId');
   const handleRecordClick = React.useCallback(
     (record: any, event?: any) => {
+      if (!recordServed) return;
       const id = record?.id ?? record?._id;
       const isMod = !!(event && (event.metaKey || event.ctrlKey || event.button === 1));
       if (isMod && id != null) { window.open(recordUrl(id), '_blank'); return; }
@@ -345,16 +350,17 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('recordId', String(id)); return n; });
       }
     },
-    [recordUrl, setSearchParams],
+    [recordServed, recordUrl, setSearchParams],
   );
   const closeRecordDrawer = React.useCallback(() => {
     setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('recordId'); return n; });
   }, [setSearchParams]);
+  const openedRecordId = recordServed ? drawerRecordId : null;
   React.useEffect(() => {
-    if (drawerRecordId && !navOverlay.isOpen) navOverlay.open({ id: drawerRecordId });
-    else if (!drawerRecordId && navOverlay.isOpen) navOverlay.close();
+    if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
+    else if (!openedRecordId && navOverlay.isOpen) navOverlay.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawerRecordId]);
+  }, [openedRecordId]);
 
   // Visualization whitelist: grid always; others only when a field binding
   // resolves from the object. The switcher is ListView-internal, so switching

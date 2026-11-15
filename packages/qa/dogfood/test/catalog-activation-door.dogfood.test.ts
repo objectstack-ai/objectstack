@@ -13,7 +13,8 @@
 //     (a declared position, a declared permission set, a name nobody declares);
 //   - the write goes through the engine, so the last-admin guard's ledger hook
 //     really judges switching `admin_full_access` off: refused when no
-//     administrator would be left, landing when one stands;
+//     administrator would be left, and refused when no PLATFORM administrator
+//     would be left even with the organization owner standing (#33082);
 //   - the resolver over the booted engine stops granting through a position
 //     the door switched off, for a holder of that position;
 //   - a position and a permission set saved through the metadata door — no
@@ -137,15 +138,19 @@ describe('the catalog activation door, on a booted showcase', () => {
         expect(rows[0].active === true || rows[0].active === 1).toBe(true);
     });
 
-    // [ADR-0135 D5.2] The last-administrator guard refuses a ledger switch-off
-    // of `admin_full_access` only when it would leave nobody who can sign in as
-    // an administrator. Standing here is the seeded admin's unscoped
+    // [ADR-0135 D5.2, #33082] The last-administrator guard refuses a ledger
+    // switch-off of `admin_full_access` when it would leave nobody who can sign
+    // in as an administrator, AND when it would leave no platform administrator,
+    // the only population that can switch the set back on (that needs
+    // `manage_metadata`). Standing here is the seeded admin's
     // `admin_full_access` grant (the `single` posture declares no owner email)
     // plus the default organization's owner membership, which the same admin
-    // holds. So the pair: with the owner membership demoted the grant is the
-    // last standing and the switch-off is refused; with it standing the
-    // switch-off lands. Every change is undone in `finally`, so a failed
-    // assertion leaves the shared boot as it found it.
+    // holds. So the pair: with the owner membership demoted nobody is left and
+    // the switch-off is refused; with it standing the owner can sign in but
+    // could not switch the set back on, so the switch-off is refused too (it
+    // landed before #33082, and the deployment was stuck). Every change is
+    // undone in `finally`, so a failed assertion leaves the shared boot as it
+    // found it.
     it('switching `admin_full_access` off with no administrator left standing is refused 403, and no row lands', async () => {
         const owners = await ql.find('sys_member', { where: { role: 'owner' }, context: SYSTEM_CTX });
         // Anti-vacuity: the boot really has an owner to demote.
@@ -164,25 +169,25 @@ describe('the catalog activation door, on a booted showcase', () => {
         }
     });
 
-    it('CONTROL: switching `admin_full_access` off with the organization owner still standing lands 200', async () => {
+    it('#33082: switching `admin_full_access` off with the organization owner still standing is refused 403 too, and no row lands', async () => {
+        const owners = await ql.find('sys_member', { where: { role: 'owner' }, context: SYSTEM_CTX });
+        // Anti-vacuity: the owner the old CONTROL relied on is really standing.
+        expect(owners.length, 'no owner membership on this boot').toBeGreaterThan(0);
         try {
             const res = await flip('permission', 'admin_full_access', { enabled: false });
-            const text = await res.clone().text();
+            const body = await res.json() as { error?: { code?: string; message?: string } };
 
-            expect(res.status, text).toBe(200);
-            const rows = await rowsOf('permission', 'admin_full_access');
-            expect(rows).toHaveLength(1);
-            expect(rows[0].active === false || rows[0].active === 0).toBe(true);
+            expect(res.status).toBe(403);
+            expect(body.error?.code).toBe('PERMISSION_DENIED');
+            expect(body.error?.message ?? '').toContain('last platform administrator');
+            expect(await rowsOf('permission', 'admin_full_access')).toEqual([]);
         } finally {
-            // Restored through the engine, not the door: with the set off the
-            // caller may no longer hold `manage_metadata`. Switching it back on
-            // is never refused by the guard.
+            // Nothing should have landed; undo through the engine if it did, so
+            // a failed assertion leaves the shared boot as it found it.
             for (const row of await rowsOf('permission', 'admin_full_access')) {
                 await ql.update(LEDGER, { id: row.id, active: true }, { context: SYSTEM_CTX });
             }
         }
-        const restored = await rowsOf('permission', 'admin_full_access');
-        expect(restored.every((r) => r.active === true || r.active === 1)).toBe(true);
     });
 
     // [#22621 → A] An item the environment authored has no package, and the

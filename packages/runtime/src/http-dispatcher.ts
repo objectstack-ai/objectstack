@@ -30,6 +30,7 @@ import type { ServiceInfo } from '@objectstack/spec/api';
 import { metaCallerOrganizationId } from '@objectstack/rest';
 import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
+import { readSeedReadiness, type SeedReadiness } from './seed-readiness.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 // `import * as actionExec from './action-execution.js'` was dropped in #4936:
@@ -391,6 +392,24 @@ function withClusterReading<T extends { status: string }>(
 }
 
 /**
+ * A `/ready` 200 body with the boot seed's state folded in (#33233).
+ *
+ * With no reading — no seed pipeline on this kernel — the body is returned AS
+ * GIVEN, the same object and no key added, so a deployment that seeds nothing
+ * answers byte-identically to before. With one, the body gains `seed`:
+ * `'pending'` while a source is still writing, then `'settled'` or `'failed'`
+ * (see `./seed-readiness.ts`). The status code is not touched: a seed still
+ * writing does not take a replica out of rotation.
+ */
+function withSeedReading<T extends { status: string }>(
+    body: T,
+    seed: SeedReadiness | undefined,
+): T | (T & { seed: SeedReadiness }) {
+    if (seed === undefined) return body;
+    return { ...body, seed };
+}
+
+/**
  * [#16402] What {@link HttpDispatcher.classifyService} answers — the classified
  * service lookup's three non-fault outcomes.
  *
@@ -409,6 +428,34 @@ type ClassifiedServiceLookup =
     | { readonly outcome: 'resolved'; readonly value: any }
     | { readonly outcome: 'never-registered' }
     | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
+
+/**
+ * [#32887] The environment a host's {@link KernelResolver} placed each request
+ * in, kept beside the request and readable only through
+ * {@link resolverPlacedEnvironmentOf}.
+ *
+ * A same-origin `type: 'api'` action forwards into the host's raw app, which
+ * places the forwarded request as it places any request it receives. The
+ * forward needs the placement's answer, not the signal that produced it: a
+ * request placed by its bound hostname or its `X-Environment-Id` carries that
+ * signal across, but one placed only by its scoped URL
+ * (`/environments/:id/…`) does not — the forward targets the action's own
+ * path — so on a shared origin it was placed in no environment. Kept off
+ * {@link HttpProtocolContext} on purpose: a caller builds that object, and the
+ * forward's routing identity must be the resolver's answer, never a field a
+ * caller could pre-write.
+ */
+const resolverPlacements = new WeakMap<HttpProtocolContext, string>();
+
+/**
+ * The environment the host's {@link KernelResolver} placed this request in, as
+ * the placement step left it: `undefined` when no resolver is wired (a single
+ * kernel), when it placed the request in no environment, or in `platform` (the
+ * control plane, not an environment).
+ */
+export function resolverPlacedEnvironmentOf(context: HttpProtocolContext | undefined): string | undefined {
+    return context ? resolverPlacements.get(context) : undefined;
+}
 
 /**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
@@ -784,6 +831,13 @@ export class HttpDispatcher {
         // request onto the second one's environment.
         if (this.kernelResolver) {
             context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
+            // [#32887] What the resolver answered, kept for the api forward
+            // ({@link resolverPlacedEnvironmentOf}). Read here, before any door
+            // writes a fallback environment, so a request nothing placed
+            // routes nothing.
+            const placed = context.environmentId;
+            if (typeof placed === 'string' && placed !== '' && placed !== 'platform') resolverPlacements.set(context, placed);
+            else resolverPlacements.delete(context);
         } else {
             context.kernel = this.defaultKernel;
         }
@@ -881,6 +935,11 @@ export class HttpDispatcher {
         // ⛔ The rejected fourth option stays rejected: a failed driver is
         // never filtered OUT of this response to make it green. It is named in
         // `degraded.drivers` on the 200 precisely so alerting still sees it.
+        //
+        // [#33233] Both 200 bodies also say whether the boot seed has landed
+        // (`seed: 'pending' | 'settled' | 'failed'`, see `withSeedReading`),
+        // so a process that does not hold the `os serve` IPC channel can wait
+        // for it. It never changes the status code.
         this.domainRegistry.register({
             prefix: '/ready', match: 'exact', methods: ['GET'],
             handler: async () => {
@@ -897,7 +956,8 @@ export class HttpDispatcher {
                 const { unhealthy, primary } = await this.driverReadiness();
                 if (unhealthy.length === 0) {
                     const cluster = await this.clusterReadiness();
-                    return { handled: true, response: this.success(withClusterReading({ status: 'ready', state }, cluster)) };
+                    const body = withSeedReading({ status: 'ready', state }, readSeedReadiness(host));
+                    return { handled: true, response: this.success(withClusterReading(body, cluster)) };
                 }
                 // #13408: drain only when the PRIMARY datasource is the one
                 // that is down — or when we could not establish which
@@ -914,11 +974,11 @@ export class HttpDispatcher {
                         // only on this branch, so a probe consumer that never
                         // sees a degraded secondary sees exactly what it saw
                         // before #13408.
-                        response: this.success(withClusterReading({
+                        response: this.success(withClusterReading(withSeedReading({
                             status: 'ready',
                             state,
                             degraded: { drivers: unhealthy, primaryDatasource: primary.datasource },
-                        }, cluster)),
+                        }, readSeedReadiness(host)), cluster)),
                     };
                 }
                 // Byte-identical to the pre-#13408 envelope, deliberately: this

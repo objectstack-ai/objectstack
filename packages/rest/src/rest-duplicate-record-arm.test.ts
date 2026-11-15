@@ -527,3 +527,54 @@ describe('#14389 §5 — a producer that merely SPEAKS `DUPLICATE_RECORD` is not
         expect(r.body).not.toHaveProperty('field');
     });
 });
+
+/* --------------------------------------------------------------------------
+ * A declared composite unique index, named by its fields' labels in the
+ * writer's locale — the same real engine on real better-sqlite3 as §2, so the
+ * driver's composite text is the one SQLite actually prints, not a fixture.
+ * ----------------------------------------------------------------------- */
+
+describe('a declared composite unique index: its fields named by label, in the writer\'s locale (real driver)', () => {
+    const DECLARED = {
+        ...COMPOSITE,
+        name: 'duly_pair_declared',
+        indexes: [{ name: 'idx_duly_pair_declared', fields: ['tenant', 'email'], unique: 'global' }],
+    };
+
+    async function conflictIn(locale?: string) {
+        const engine = new ObjectQL();
+        liveEngines.push(engine);
+        engine.registerDriver(
+            new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+            true,
+        );
+        await engine.init();
+        engine.registry.registerObject(DECLARED as any);
+        await engine.syncSchemas();
+        const row = { tenant: 'acme', email: VALUE };
+        await engine.insert(DECLARED.name, { id: 'r1', ...row });
+        return refusalOf(() =>
+            engine.insert(DECLARED.name, { id: 'r2', ...row }, (locale ? { context: { locale } } : {}) as any),
+        );
+    }
+
+    it.each([
+        ['en (no locale named)', undefined, 'A record with the same “Tenant”, “Email” already exists'],
+        ['zh-CN', 'zh-CN', '已存在「Tenant」、「Email」均相同的记录'],
+    ])('%s: 409 UNIQUE_VIOLATION, the fields named, still NO `field` key and no value', async (_label, locale, sentence) => {
+        const env = await conflictIn(locale);
+
+        expect(env).toBeInstanceOf(DuplicateRecordError);
+        expect(env.field).toBeUndefined();
+        const r = mapDataError(env, 'duly_pair_declared');
+        expect(r.status).toBe(409);
+        expect(r.body).toEqual({
+            error: sentence,
+            code: 'UNIQUE_VIOLATION',
+            developerMessage: env.message,
+            object: 'duly_pair_declared',
+        });
+        expect(JSON.stringify(r.body)).not.toContain(VALUE);
+        expect(JSON.stringify(r.body)).not.toContain('acme');
+    }, 60_000);
+});

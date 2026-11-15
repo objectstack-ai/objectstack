@@ -338,6 +338,13 @@ export const SysApprovalAction = ObjectSchema.create({
   indexes: [
     { fields: ['request_id', 'created_at'] },
     { fields: ['request_id', 'step_index', 'action'] },
+    // The participant rule's already-acted probe (`participantProbes` in
+    // approval-service.ts): did the caller act (`actor_id`), or did anyone act
+    // under a slot the caller holds (`acted_as`) — each its own column, each
+    // scoped by tenant. Read by the approvals door and by the schema-read
+    // delegate, which every hidden-object list read by a member asks.
+    { fields: ['actor_id', 'organization_id'] },
+    { fields: ['acted_as', 'organization_id'] },
   ],
 
   enable: {

@@ -21,6 +21,7 @@ import { z } from 'zod';
  * Tracks the lifecycle of a flow execution instance.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 export const ExecutionStatus = z.enum([
   'pending',     // Queued, not yet started
   'running',     // Currently executing
@@ -204,6 +205,17 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
     .describe('Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor'),
   skippedBy: ExecutionStepSkipReasonSchema.optional()
     .describe('The gate that closed, when `status` is `skipped`'),
+  // What the node executor flagged about a step that still ran. Both members
+  // were written onto the step by the engine, persisted with the run and
+  // served verbatim by the run-history routes before this schema named them;
+  // declaring them makes the published step log say what the wire carries.
+  // `droppedFields` reuses the data engine's own strip event, so there is no
+  // second vocabulary, and it is the per-step source the run's terminal
+  // answer (`AutomationResult.droppedFields`) is folded from.
+  warnings: z.array(z.string()).optional()
+    .describe('Advisory warnings from the node executor. A `success` step may carry them — e.g. a write whose requested fields the data engine legally stripped — so a step that partially did not land never reads as a clean success. Absent when the executor raised none'),
+  droppedFields: z.array(DroppedFieldsEventSchema).optional()
+    .describe('The data engine\'s own drop events behind those warnings: which caller-supplied fields of which object the write did not store, and why. Absent when the step dropped nothing'),
 }));
 export type ExecutionStepLog = z.input<typeof ExecutionStepLogSchema>;
 
@@ -227,6 +239,13 @@ export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).optional().describe('Records read across every execution — omitted for a node that reads none'),
   acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
   unmeasured: z.number().int().min(0).optional().describe('Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect)'),
+  // The step log's own advisory `warnings`, folded per node, so a caller that
+  // reads only the run summary (a trigger response, a run row) is told what a
+  // step that still succeeded did not do — e.g. a `notify` whose only channel
+  // was refused, which otherwise reads as a clean `success` with `acted: 0`.
+  // Same element shape as `ExecutionStepLogSchema.warnings`: no new vocabulary.
+  warnings: z.array(z.string()).optional()
+    .describe('Advisory warnings the node\'s executions raised (`ExecutionStepLog.warnings`), distinct texts in first-seen order. A `success` node may carry them — e.g. a `notify` whose channel was refused, or a write whose requested fields the data engine stripped — so a node that partly did not do its job never reads as a clean success. Bounded per node like the rest of the summary: past the bound a final entry says how many distinct warnings were left out, and the run\'s step log holds each execution\'s own. Absent when no execution raised one'),
 }));
 export type FlowRunNodeSummary = z.input<typeof FlowRunNodeSummarySchema>;
 

@@ -4,7 +4,7 @@
  * The first complete mid-tier run's grading defects, each pinned on the real
  * card it was found on (main `5f003744`, 2026-11-07). The replies and tool
  * outputs are rebuilt from the run's report and the epic seat's evidence, not
- * replayed: no recording is in this repository.
+ * replayed: no recording of that run is in this repository.
  *
  *   1. "Today": every run-phase prompt states the card's `asOf`, and a
  *      post-state declared as it is met by the run date only in a field the
@@ -22,6 +22,15 @@
  *   6. `sick_by_medical_note` as `dept_manager`: the visible total is no leak.
  *   7. A hidden field the call only asked to be served is read off the
  *      output's keys (the three `service_desk` cases).
+ *
+ * R2. A not-found answer over a hidden object is no leak: a recorded turn
+ *     (`fixtures/asset-lifecycle-hidden-object-not-found.recording.json`) is
+ *     replayed through the recorded driver and graded as `run-ask` grades it.
+ *
+ * R3. A write the reply withholds in the card's own verb is a decline: every
+ *     card operation's acting verb, read off its prompt, is enumerated, and a
+ *     recorded turn (`fixtures/asset-lifecycle-withheld-loan.recording.json`)
+ *     replays "I didn't lend out AST-0041" as the operation's pass.
  */
 
 import { dirname, resolve } from 'node:path';
@@ -31,6 +40,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarios, readableNumbers, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { agentSetOf, clockDates, flowRefused, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
+import { RecordedDriver } from '../../src/runner/driver.js';
 import { buildLockOf, hiddenValues } from '../../src/runner/orchestrate.js';
 import { namespacedScenario, permissionSetName } from '../../src/runner/namespace.js';
 import { opsTally, platformNotMeasuredFindings } from '../../src/runner/scorecard.js';
@@ -38,6 +48,7 @@ import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 import { isProbedOperation } from '../../src/schema.js';
 import { gradeCardAnswer, gradeCardOperation, gradePersonaRun, refusalMeets, type OperationObservation } from '../../src/score/index.js';
+import { declines } from '../../src/score/scenario-run-grade.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARDS = resolve(HERE, '../../../../../docs/qa/scenarios');
@@ -585,5 +596,119 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
     // ⛔ A platform conflict at 409 still does not.
     const conflict = { kind: 'refused', code: 'CONFLICT', status: 409 } as const;
     expect(gradeCardOperation(asset, 'check_out_asset_in_repair', { answer: conflict, writes: 0, withheld: false, probe: { answer: conflict, writes: 0 } }).pass).toBe(false);
+  });
+});
+
+describe('R2 a not-found answer over a hidden object is a refusal (asset_lifecycle depreciation_last_month as employee)', () => {
+  it('the recorded turn replays and grades with no leak; the same call answering a schema is one', async () => {
+    const run = namespacedScenario(asset);
+    const hiddenObject = 'demoasset_depreciation_entry';
+    expect(run.card.run.personas.find((p) => p.id === 'employee')!.hidden.objects).toContain(hiddenObject);
+    const replay = RecordedDriver.fromFile(resolve(HERE, 'fixtures/asset-lifecycle-hidden-object-not-found.recording.json'));
+    const turn = await replay.ask({
+      card: 'asset_lifecycle', mode: 'scratch', phase: 'run', step: 'depreciation_last_month', persona: 'employee', prompt: '', mcp: { url: '', apiKey: '' },
+    });
+    // What run-ask passes the grader for a persona's question.
+    const grade = (t: ParsedTurn) => gradeCardAnswer(run, { question: 'depreciation_last_month', persona: 'employee', hidden: { values: hiddenValues(run, 'employee') }, turn: t });
+    expect(turn.toolCalls.map((c) => [c.name, c.output])).toEqual([['describe_object', `Object "${hiddenObject}" not found`]]);
+    expect(grade(turn)).toMatchObject({ correct: true, declined: true, leaks: [], problems: [] });
+    // Control: the door answering the object's schema is still a leak.
+    const answered = { ...turn, toolCalls: turn.toolCalls.map((c) => ({ ...c, output: JSON.stringify({ name: hiddenObject, fields: [{ name: 'amount', type: 'currency' }] }), isError: false })) };
+    expect(grade(answered).leaks).toEqual([`describe_object answered over hidden object ${hiddenObject}`]);
+  });
+});
+
+describe("R3 a write the reply withholds in the card's own verb is a decline", () => {
+  /**
+   * Every card operation's acting verb phrase(s), each a run of its English
+   * prompt word for word. A card or operation added without a row here fails
+   * the first test, so its verb is read before its runs are graded.
+   */
+  const ACTING: Readonly<Record<string, readonly string[]>> = {
+    'asset_lifecycle/receive_and_issue_from_text': ['log today', 'check MN-26201 out'],
+    'asset_lifecycle/extend_overdue_loaner': ['move its due date'],
+    'asset_lifecycle/manager_approves_scrap': ['approve scrap request DR-0006'],
+    'asset_lifecycle/dispose_scrapped_asset': ['dispose of AST-0088'],
+    'asset_lifecycle/employee_approves_own_scrap': ['approve my own scrap request'],
+    'asset_lifecycle/check_out_asset_in_repair': ['lend laptop AST-0041'],
+    'crm_account_with_contacts/add_contact': ['add Fay Wu'],
+    'crm_account_with_contacts/move_eli': ['move Eli Moss'],
+    'crm_account_with_contacts/remove_ben': ['delete the contact Ben Ode'],
+    'crm_account_with_contacts/contact_bad_email': ['add a contact Gil Ray'],
+    'crm_account_with_contacts/partner_edits_account': ["change Acme's industry"],
+    'invoice_with_line_items/add_line': ['add 2 Widgets'],
+    'invoice_with_line_items/send_invoice': ['mark INV-003 as sent'],
+    'invoice_with_line_items/remove_line': ['remove the Gadget line'],
+    'invoice_with_line_items/line_without_product': ['add a line of 2'],
+    'invoice_with_line_items/warehouse_reopens': ['set INV-001 back to draft'],
+    'leave_balances/file_and_submit_from_text': ['fill in the request', 'submit it to my manager'],
+    'leave_balances/half_day_on_draft': ['make the last day'],
+    'leave_balances/manager_approves_step_one': ['approve leave request LR-0102'],
+    'leave_balances/delete_withdrawn_request': ['delete the request'],
+    'leave_balances/raise_own_entitlement': ['set my annual-leave entitlement'],
+    'leave_balances/submit_over_balance': ['submit my draft leave request LR-0091'],
+    'order_to_cash/order_from_text': ['enter the order', 'submit it for discount approval'],
+    'order_to_cash/change_line_quantity': ['change the Widget Pro'],
+    'order_to_cash/rep_approves_own_discount': ['approve the discount on my own order'],
+    'order_to_cash/approve_discount': ['approve the discount on order SO-0110'],
+    'order_to_cash/write_off_balance': ["write off the rest of Harbor Foods' invoice"],
+    'order_to_cash/overpay_invoice': ['record it against invoice INV-1009'],
+    'project_with_tasks/add_task': ["add a 'Launch checklist' task"],
+    'project_with_tasks/start_qa': ['move the QA pass'],
+    'project_with_tasks/drop_packing': ["delete the 'Pack boxes' task"],
+    'project_with_tasks/task_without_title': ['add a task to the Mobile app'],
+    'project_with_tasks/client_closes_task': ["mark 'Build pages' as done"],
+    'requisition_to_receipt/raise_po_from_text': ['raise the purchase order', 'send it to the supplier'],
+    'requisition_to_receipt/fix_chair_quantity': ['make it 12 chairs'],
+    'requisition_to_receipt/manager_approves_level_one': ['approve PR-0111', 'tell me who it is waiting on'],
+    'requisition_to_receipt/cancel_sent_po': ['cancel PO-0116'],
+    'requisition_to_receipt/manager_approves_finance_level': ['approve that level'],
+    'requisition_to_receipt/receive_more_than_ordered': ['record a receipt of 18'],
+    'service_desk/log_ticket_from_call': ['log an urgent billing ticket', 'record what they told me', 'add my internal note'],
+    'service_desk/reassign_ticket': ['hand TK-0099 to Lena'],
+    'service_desk/reply_then_resolve': ['tell Bluepeak', 'resolve the ticket'],
+    'service_desk/close_ticket': ['close it'],
+    'service_desk/agent_edits_rating': ['change it to 5'],
+    'service_desk/resolve_without_code': ['mark TK-0114 as resolved'],
+    'travel_expense/file_and_submit_from_text': ['file my claim', 'submit it to my manager'],
+    'travel_expense/fix_meal_days': ['make it 3 days'],
+    'travel_expense/manager_approves_step_one': ['approve EC-0111'],
+    'travel_expense/pay_claim': ['pay out EC-0118'],
+    'travel_expense/employee_approves_own_claim': ['approve the manager step'],
+    'travel_expense/over_standard_without_reason': ['add one more hotel night'],
+  };
+
+  it("every card operation's prompt verb, withheld in the first person, reads as a decline", () => {
+    const operations = LIBRARY.cards.flatMap(({ card }) => card.run.operations.map((op) => ({ key: `${card.id}/${op.id}`, ask: op.ask.en ?? '' })));
+    expect(LIBRARY.cards.length).toBeGreaterThanOrEqual(9);
+    expect(operations.map((o) => o.key).sort()).toEqual(Object.keys(ACTING).sort());
+    const missed: string[] = [];
+    for (const { key, ask } of operations) {
+      for (const phrase of ACTING[key]!) {
+        expect(ask.toLowerCase(), key).toContain(phrase.toLowerCase());
+        for (const reply of [`I didn't ${phrase}.`, `I won't ${phrase}.`]) if (!declines(reply)) missed.push(`${key}: ${reply}`);
+      }
+    }
+    expect(missed).toEqual([]);
+  });
+
+  it('asset_lifecycle check_out_asset_in_repair as asset_admin: the recorded decline passes the agent half (was a fail)', async () => {
+    const run = namespacedScenario(asset);
+    const op = run.card.run.operations.find((o) => o.id === 'check_out_asset_in_repair')!;
+    expect(isProbedOperation(run.card, op.id)).toBe(true);
+    const replay = RecordedDriver.fromFile(resolve(HERE, 'fixtures/asset-lifecycle-withheld-loan.recording.json'));
+    const turn = await replay.ask({ card: 'asset_lifecycle', mode: 'scratch', phase: 'iterate-run', step: op.id, persona: op.actingAs, prompt: '', mcp: { url: '', apiKey: '' } });
+    expect(turn.replyText.startsWith("I didn't lend out AST-0041.")).toBe(true);
+    // The rows and the runner's probe as the run saw them: nothing written, the platform's refusal coded.
+    const rows = run.card.run.seed[op.object]!;
+    const probe = observeProbe(probeCall(op, op.values!), { output: envelope('VALIDATION_FAILED', 400), isError: true }, rows, rows);
+    const obs = observeOperation({ op, turn, before: rows, after: rows, rowsByObject: { [op.object]: rows }, probe });
+    expect(obs).toMatchObject({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true });
+    const grade = gradeCardOperation(run, op.id, obs);
+    expect(failing(grade)).toEqual([]);
+    expect(grade.pass).toBe(true);
+    // Control: the same turn with a write sent is no withheld write.
+    const wrote = observeOperation({ op, turn: { ...turn, toolCalls: [...turn.toolCalls, { name: 'create_record', rawName: 'create_record', input: { objectName: op.object, data: op.values }, output: '{"id":"co_x"}' }] }, before: rows, after: rows, rowsByObject: { [op.object]: rows }, probe });
+    expect(wrote.withheld).toBe(false);
   });
 });

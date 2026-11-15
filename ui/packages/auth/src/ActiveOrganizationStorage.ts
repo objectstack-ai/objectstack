@@ -130,6 +130,12 @@ const SIGNED_OUT_KEPT_KEYS: ReadonlySet<string> = new Set([
   ...DEVICE_SCOPED_KEYS,
   'objectui-locale',
   'objectui-locale-seed',
+  // The tab's note that its sign-out left through the identity provider's
+  // logout (`./signOutRoundTrip`'s `SIGN_OUT_ROUND_TRIP_KEY`, spelled out for
+  // the same dependency reason; `signOutRoundTrip-33183.test.tsx` holds the
+  // two together by behaviour): written for the round trip that follows this
+  // purge, holds a time and nothing of the user, and is read once on return.
+  'objectui:auth:signed-out-via-provider',
 ]);
 
 /**

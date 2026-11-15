@@ -13,12 +13,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { EMAIL_DOMAIN_NOT_ALLOWED } from './audience-posture.js';
 import {
   SSO_ACCOUNT_DOMAIN_REFUSAL_DESCRIPTION,
+  SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION,
   refuseSsoAccountOutsideProvenDomain,
+  refuseSsoAccountWithoutAddress,
+  ssoValueIsAddress,
   ssoAddressAtProvenDomain,
   ssoAddressDomain,
+  ssoDomainEntryHosts,
+  ssoDomainEntryNotBare,
   ssoProviderProvenDomains,
   type SsoAccountDomainRuleDeps,
 } from './sso-account-at-proven-domain.js';
+import { judgeScimSsoAdoption, type ScimSsoAdoptionEngine } from './scim-sso-adoption.js';
+import { providerDomains } from './sso-provider-lifecycle.js';
 
 const PROVIDER = 'acme-okta';
 
@@ -213,5 +220,140 @@ describe('with SSO domain verification on, a provider creates an account only at
     expect(await refuseSsoAccountOutsideProvenDomain({ ...creation(outside), source: { action: 'create-user', method: 'scim' } }, d)).toBeUndefined();
     expect(await refuseSsoAccountOutsideProvenDomain(undefined, d)).toBeUndefined();
     expect(reader.find).not.toHaveBeenCalled();
+  });
+});
+
+// ── [#32975] [#32960] One parse for every rule that reads the domain list ──────
+
+/**
+ * Entry spellings: bare hosts in several spellings, and shapes that are not a
+ * bare host (a URL, a port, a path, a user part, an escape, full-width
+ * letters, a dot run).
+ */
+const ENTRY_SPELLINGS = [
+  'acme.com',
+  'ACME.com',
+  ' acme.com ',
+  'acme.com.',
+  'bücher.de',
+  'xn--bcher-kva.de',
+  'https://acme.com',
+  'https://acme.com/',
+  'acme.com:443',
+  'acme.com/x',
+  'u@acme.com',
+  'acme%2ecom',
+  '\uff41\uff43\uff4d\uff45.com',
+  'acme.com..',
+];
+const ADDRESSES = ['bob@acme.com', 'bob@ACME.com', 'bob@xn--bcher-kva.de', 'bob@bücher.de', 'bob@\uff41\uff43\uff4d\uff45.com'];
+
+/** The SCIM adoption rule over one provider row: every condition but the domain holds. */
+async function scimAdopts(entry: string, email: string): Promise<boolean> {
+  const tables: Record<string, unknown[]> = {
+    sys_user: [{ id: 'usr_1', email: email.toLowerCase(), source: 'idp_provisioned' }],
+    sys_account: [{ provider_id: PROVIDER }],
+    sys_scim_subject: [],
+    sys_sso_provider: [{ provider_id: PROVIDER, organization_id: 'org_1', domain: entry, domain_verified: 1 }],
+  };
+  const engine: ScimSsoAdoptionEngine = { find: async (object) => tables[object] ?? [] };
+  const verdict = await judgeScimSsoAdoption(engine, { email, organizationId: 'org_1' });
+  return verdict.adopt;
+}
+
+describe('[#32975] every rule that reads a provider domain list reads each entry the same way', () => {
+  it('the account rule and the SCIM adoption rule judge every entry spelling and address identically', async () => {
+    const disagreements: string[] = [];
+    for (const entry of ENTRY_SPELLINGS) {
+      for (const email of ADDRESSES) {
+        const account = ssoAddressAtProvenDomain(email, ssoProviderProvenDomains(row({ domain: entry }), PROVIDER));
+        const scim = await scimAdopts(entry, email);
+        if (account !== scim) disagreements.push(`${JSON.stringify(entry)} × ${email}: account ${account}, scim ${scim}`);
+      }
+    }
+    expect(disagreements).toEqual([]);
+  });
+
+  it('an entry the shared parse does not accept names no domain for SCIM either', async () => {
+    for (const entry of ['https://acme.com', 'acme.com:443', 'acme.com/x', 'u@acme.com']) {
+      expect(ssoDomainEntryHosts(entry), entry).toEqual([]);
+      expect(await scimAdopts(entry, 'bob@acme.com'), entry).toBe(false);
+    }
+  });
+
+  it('SCIM reads an entry and an address in their one spelling: a root dot and the punycode form are the same domain', async () => {
+    expect(await scimAdopts('acme.com.', 'bob@acme.com')).toBe(true);
+    expect(await scimAdopts('bücher.de', 'bob@xn--bcher-kva.de')).toBe(true);
+    expect(await scimAdopts('xn--bcher-kva.de', 'bob@bücher.de')).toBe(true);
+  });
+
+  it('CONTROL: a bare host name names its domain under the claim rule, the account rule and the SCIM rule', async () => {
+    expect(providerDomains('acme.com')).toEqual(['acme.com']);
+    expect(ssoProviderProvenDomains(row({ domain: 'acme.com' }), PROVIDER)).toEqual(['acme.com']);
+    expect(await scimAdopts('acme.com', 'bob@acme.com')).toBe(true);
+  });
+
+  it('[#32960] every entry register and edit accept names the same domains under the claim rule as under the shared parse', () => {
+    for (const entry of ENTRY_SPELLINGS) {
+      const refusal = ssoDomainEntryNotBare(entry);
+      if (refusal === undefined) {
+        expect(providerDomains(entry), JSON.stringify(entry)).toEqual(ssoDomainEntryHosts(entry));
+      } else {
+        expect(ssoDomainEntryHosts(entry), JSON.stringify(entry)).toEqual([]);
+      }
+    }
+  });
+});
+
+describe('[#32960] a requested domain entry that is not a bare host name is refused', () => {
+  it('names the entry, on domain, with VALIDATION_FAILED / invalid_value', () => {
+    for (const entry of ['https://acme.com', 'acme.com:443', 'acme.com/x', 'u@acme.com', 'acme%2ecom', 'acme.com..']) {
+      const refusal = ssoDomainEntryNotBare(`good.example, ${entry}`);
+      expect(refusal, entry).toMatchObject({
+        status: 'BAD_REQUEST',
+        code: 'VALIDATION_FAILED',
+        field: 'domain',
+        fields: [{ field: 'domain', code: 'invalid_value' }],
+      });
+      expect(refusal!.message, entry).toContain(`'${entry}'`);
+    }
+  });
+
+  it('CONTROL: bare host names pass, in any case, with a root dot, internationalised, and with blank entries', () => {
+    for (const domain of ['acme.com', 'ACME.com, eng.acme.com', 'acme.com.', 'bücher.de', 'xn--bcher-kva.de', 'acme.com, , globex.io', '']) {
+      expect(ssoDomainEntryNotBare(domain), domain).toBeUndefined();
+    }
+    expect(ssoDomainEntryNotBare(undefined)).toBeUndefined();
+  });
+});
+
+describe('verification on or off, an SSO provider creates an account only for an email address', () => {
+  const NOT_AN_ADDRESS = { error: 'INVALID_EMAIL', errorDescription: SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION };
+
+  it('refuses INVALID_EMAIL for a value that is not an address, SAML and OIDC alike, naming no value', () => {
+    for (const email of ['pov4hy2mt2-opaque-id', '', '@acme.com', 'mia chen@acme.com', 'mia@', 'mia@acme.com:443', 'mia@acme.com.', undefined, 42]) {
+      for (const method of ['sso-saml', 'sso-oidc']) {
+        const info = vi.fn();
+        expect(refuseSsoAccountWithoutAddress(creation(email, method), { info }), `${method} ${String(email)}`).toEqual(NOT_AN_ADDRESS);
+        expect(JSON.stringify(info.mock.calls)).not.toContain('pov4hy2mt2');
+      }
+    }
+    expect(SSO_ACCOUNT_NOT_AN_ADDRESS_DESCRIPTION).not.toMatch(/#\d/);
+  });
+
+  it('admits an address, at any domain', () => {
+    for (const email of ['mia.chen@acme.com', 'Mia@ACME.com', 'bob@other.example', 'bob@xn--bcher-kva.de', 'a@b']) {
+      expect(ssoValueIsAddress(email), email).toBe(true);
+      expect(refuseSsoAccountWithoutAddress(creation(email, 'sso-saml'))).toBeUndefined();
+    }
+  });
+
+  it('CONTROL: judges only a creation from an SSO provider', () => {
+    const opaque = 'pov4hy2mt2-opaque-id';
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'sign-in', method: 'sso-saml', sso: { providerId: PROVIDER } } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'link-account', method: 'sso-saml', sso: { providerId: PROVIDER } } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'create-user', method: 'oauth', oauth: { providerId: 'github' } } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress({ user: { email: opaque }, source: { action: 'create-user', method: 'scim' } })).toBeUndefined();
+    expect(refuseSsoAccountWithoutAddress(undefined)).toBeUndefined();
   });
 });

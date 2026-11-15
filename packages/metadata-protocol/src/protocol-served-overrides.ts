@@ -80,7 +80,7 @@ import { storedRowDocument } from './item-lock.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { holdsServedOverlayCandidate, servedOverlayRowCandidates } from './protocol-overlay-merge.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
-import { isMovedOverrideRowOf } from './suite-moved-overlay.js';
+import { isMovedOverrideRowOf, type ShipsName } from './suite-moved-overlay.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /** The class members {@link listServedOverrides} reads, typed as the class declares them. */
@@ -160,9 +160,15 @@ export async function listServedOverrides(
         // The code packages that ship the item, read once per item and only
         // when a moved edit is in question (the by-name read's own reading).
         let shippers: ReadonlySet<string> | undefined;
+        let nameShippers: ReadonlySet<string> | undefined;
         const shippersOf = (): ReadonlySet<string> =>
             (shippers ??= shippingPackageIds(this.shippedArtifactsOf(type, name, undefined, member)));
-        const ships = (packageId: string): boolean => shippersOf().has(packageId);
+        // [#32606] The item's grain for the address's package, the name's for
+        // a former owner (`ShipsName`).
+        const ships: ShipsName = {
+            item: (packageId) => shippersOf().has(packageId),
+            name: (packageId) => (nameShippers ??= shippingPackageIds(this.shippedArtifactsOf(type, name))).has(packageId),
+        };
         let served: any;
         for (const candidate of servedOverlayRowCandidates({ packageId: base, servedOverride: true, installed, ships })) {
             // Only the pair's candidates: the base's own row, the
@@ -176,7 +182,7 @@ export async function listServedOverrides(
             // A declared override the base no longer ships, which a package
             // shipping the item now holds as its moved edit, is that
             // package's: listed there, never also here.
-            if (candidate.moved === undefined && !ships(base)
+            if (candidate.moved === undefined && !ships.item(base)
                 && [...shippersOf()].some((now) => now !== base && isMovedOverrideRowOf(served, now, installed, ships))) {
                 served = undefined;
             }

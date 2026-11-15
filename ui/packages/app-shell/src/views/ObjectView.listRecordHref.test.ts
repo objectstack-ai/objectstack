@@ -34,6 +34,9 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { listRecordDetailUrl, listRecordActionsValue, type ListRecordRoutes } from './ObjectView';
 
 describe('listRecordDetailUrl — one record-route shape for the list surface (#4490)', () => {
@@ -184,5 +187,48 @@ describe('listRecordActionsValue — any routable object, through the record pag
     value.openRecord!('crm_lead', 'r1');
     expect(openPage).toHaveBeenCalledWith('r1');
     expect(r.navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('listRecordActionsValue — an object the server reads no single record of has no record page (objectstack#33219)', () => {
+  const pathname = () => '/_console/apps/setup/demo_credential/view/all';
+  /** `/me/permissions` `apiOperations`: `demo_credential` is list-only (`enable.apiMethods: ['list']`). */
+  const SERVED: Record<string, readonly string[]> = {
+    demo_credential: ['list', 'aggregate', 'export', 'search'],
+  };
+  const perms = { getObjectApiOperations: (object: string) => SERVED[object] };
+  const routes = (over: Partial<ListRecordRoutes> = {}): ListRecordRoutes => ({
+    appName: 'setup',
+    objects: [{ name: 'demo_credential' }, { name: 'sys_user' }],
+    navigate: vi.fn(),
+    routerRootHref: '/_console/',
+    perms,
+    ...over,
+  });
+
+  it('the listed list-only object: no href for its own record, and openRecord does nothing', () => {
+    const r = routes();
+    const openPage = vi.fn();
+    const value = listRecordActionsValue('demo_credential', openPage, pathname, r);
+    expect(value.recordHref!('demo_credential', 'c1')).toBeNull();
+    value.openRecord!('demo_credential', 'c1');
+    expect(openPage).not.toHaveBeenCalled();
+  });
+
+  it('a list-only object linked from another list: no href, and openRecord does nothing', () => {
+    const r = routes();
+    const value = listRecordActionsValue('sys_user', vi.fn(), () => '/_console/apps/setup/sys_user', r);
+    expect(value.recordHref!('demo_credential', 'c1')).toBeNull();
+    value.openRecord!('demo_credential', 'c1');
+    expect(r.navigate).not.toHaveBeenCalled();
+  });
+
+  it('an object with no served set, or one that serves `get`, keeps its record page (control)', () => {
+    const r = routes();
+    const value = listRecordActionsValue('demo_credential', vi.fn(), pathname, r);
+    expect(value.recordHref!('sys_user', 'u1')).toBe('/_console/apps/setup/sys_user/record/u1');
+    const served = routes({ perms: { getObjectApiOperations: () => ['get', 'list'] } });
+    expect(listRecordActionsValue('demo_credential', vi.fn(), pathname, served).recordHref!('demo_credential', 'c1'))
+      .toBe('/_console/apps/setup/demo_credential/record/c1');
   });
 });

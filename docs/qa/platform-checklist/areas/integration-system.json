@@ -9,7 +9,7 @@
       "title": "Provider-bound declarative connectors materialize at boot for every installed provider kind (rest/openapi/mcp), list with origin:'declarative' state:'ready', and dispatch end-to-end from connector_action",
       "since": "v15.1",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -27,7 +27,7 @@
         "no provider — catalog descriptor (showcase_erp_catalog): registered as metadata only, NEVER in the runtime registry (#2612)"
       ],
       "steps": [
-        "boot the showcase; capture the boot log lines 'Connector registered: <name> (… origin: declarative)'",
+        "boot the showcase at --log-level info (os dev defaults to warn, and the line is info-level: packages/services/service-automation/src/plugin-extension-api.ts); capture the boot log lines 'Connector registered: <name> (… origin: declarative)'",
         "GET /api/v1/automation/connectors (route ledger: automation.listConnectors); the body is { connectors, total }",
         "for each of the three instances, record its descriptor: origin, state, and the actions[] array (key/label/inputSchema/outputSchema/effect)",
         "confirm showcase_erp_catalog is ABSENT from the runtime listing (it has no provider — descriptor only)",
@@ -128,6 +128,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the two pins below acceptance[3]–[5] and negative[1] instead of saying no pin exists. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored those clauses partial from connector-provider.test.ts and connector-materialization.test.ts, neither in the ref. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "steps[0]: the 'Connector registered: … origin: declarative' lines are info-level (packages/services/service-automation/src/plugin-extension-api.ts), so the boot runs at --log-level info. No clause changed. Read from source at base 87330e89. Source record: QA record #33081 (comment 6850173588) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -136,7 +142,7 @@
       "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
       "since": "v15.1",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -175,9 +181,9 @@
           "evidence": "the failed run record"
         },
         {
-          "clause": "retries back off from DECLARATIVE_RETRY_BASE_MS (5s) doubling to the 300s ceiling — no hot loop against the dead upstream",
+          "clause": "retries back off on the DECLARATIVE_RETRY_BASE_MS (5s) doubling ladder to the 300s ceiling — no hot loop against the dead upstream",
           "oracle": "log",
-          "verify": "observed retry intervals ≈ 5s/10s/20s… (service-automation/src/plugin.ts constants). A metadata:reloaded reconcile retries IMMEDIATELY but does not reset the backoff: the attempt count keeps climbing and the next delay keeps doubling (QA run #24575 read attempt 6 with a 160 s next delay after a reload). Only a config edit, a changed materialization signature, resets it (packages/services/service-automation/src/plugin.ts#degradeConnectorInstance restarts attempts at 1 only when the signature differs)",
+          "verify": "observed retry intervals: one early retry at kernel-ready, about 3 s after the boot's degrade (the host's crypto provider registers after the boot reconcile, and a degraded instance retries at once then, #27237), then ≈ 10 s / 20 s / 40 s … — the delay is base · 2^(attempts−1), and the early retry has already spent the 5 s rung (packages/services/service-automation/src/plugin.ts#DECLARATIVE_RETRY_BASE_MS). A metadata:reloaded reconcile retries IMMEDIATELY but does not reset the backoff: the attempt count keeps climbing and the next delay keeps doubling (QA run #24575 read attempt 6 with a 160 s next delay after a reload). Only a config edit, a changed materialization signature, resets it (packages/services/service-automation/src/plugin.ts#degradeConnectorInstance restarts attempts at 1 only when the signature differs)",
           "evidence": "timestamped log excerpt"
         },
         {
@@ -243,6 +249,12 @@
           "date": "2026-11-10",
           "change": "fixtures.requires[0] and [1] name the one command that makes each scratch copy (`node scripts/qa/qa-fixture.mjs broken-upstream-app`, `--variant config-fault` for the twin) and the one that restores the upstream for steps[4] (`restore-upstream --dir DIR`). QA run #32135 scored this item BLOCKED (fixture: needs a broken-upstream scratch app) and listed the scratch app among the recurring fixture debt (#32168 ask C). Proved on a copy outside the tree: the boot logged the connector registered DEGRADED, and the restore put the script back. No clause changed",
           "ref": "#32168"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "acceptance[3]: the observed ladder is an early retry at kernel-ready (about 3 s, when the host's crypto provider registers: packages/services/service-automation/src/plugin.ts, the onCryptoProviderChange retry of #27237), then about 10 s / 20 s / 40 s, not 5 s / 10 s / 20 s; the 5 s base and the 300 s ceiling are unchanged, and the reload arm is unchanged. Read from source at base 87330e89. Source records: QA records #33025 (comment 6844741021) and #33081 (comment 6850173588) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -494,7 +506,7 @@
       "title": "The flow designer's connector picker mirrors GET /automation/connectors: same instances, declarative ones annotated, actions and their input schemas offered per pick",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -504,7 +516,7 @@
         "app": "showcase",
         "requires": [
           "the stock showcase connector registry: three declarative instances + the plugin-registered rest/slack connectors from objectstack.config.ts (so the picker has BOTH origins to distinguish)",
-          "a flow that is EDITABLE in Studio — use a shipped one (showcase_declarative_connector_ping) or create it from the console's own create page; see the knownGap before authoring one over the metadata API"
+          "a flow that is EDITABLE in Studio — use a shipped one (showcase_declarative_connector_ping) or create it from the console's own create page; see the knownGap before authoring one over the metadata API. A flow authored through POST /api/v1/automation for this item gives its connector_action node a `connectorConfig` block ({ connectorId, actionId, input }) naming a REAL connector: a node carrying config: { connectorId … } instead is refused 422 INVALID_METADATA 'a `connector_action` node requires a `connectorConfig` block …' (packages/spec/src/automation/flow.zod.ts), and a blank connectorId is refused 400 VALIDATION_FAILED"
         ],
         "knownGaps": [
           "A FLOW AUTHORED OVER THE METADATA API IS NOT EDITABLE IN STUDIO (run #7690, cross-observed by run #7695 / #7753 item 3) — with or without `?package=`, it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', so a run that provisions its fixture flow via PUT /api/v1/meta/flows/... cannot then drive the picker on it. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'`, and `flow` declares allowEnvironmentOverlay:false — so for THIS type the banner is arguably telling the truth (the server would refuse the overlay write anyway). The editable path is the console's own create page. MEASURED AGAIN (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243): an ENV-WIDE flow authored through POST /api/v1/automation opened EDITABLE in Studio with no lock banner, and the picker was driven on it — so that door is a working way to provision the fixture flow. Whether a flow written through PUT /api/v1/meta/flow/… still opens behind the banner was not re-measured Recorded, not filed: the polarity-reversed case, where the same heuristic locks a WRITABLE-package object it should not, is the real defect and lives at objectui#4308"
@@ -533,7 +545,7 @@
         {
           "clause": "picking an instance offers its DERIVED actions with their input schemas (echo_upper for the mcp instance) — the ADR-0022 descriptor pipeline reaches the designer end-to-end",
           "oracle": "dom",
-          "verify": "action list + input fields match the descriptor's actions[].inputSchema, read only after the screenshot confirmed render",
+          "verify": "action list + input fields match the descriptor's actions[].inputSchema, read only after the screenshot confirmed render. Two schema facets the typed form leaves out by design, never a finding: JSON Schema `required` (echo_upper's text shows no asterisk; the engine reads `required` at dispatch) and an array with no `items` (slack's blocks), left to the Input / Advanced JSON editor (ui/packages/app-shell/src/views/metadata-admin/inspectors/connector-input-fields.ts, header)",
           "evidence": "screenshot + DOM excerpt"
         }
       ],
@@ -580,6 +592,12 @@
           "date": "2026-10-16",
           "change": "steps[2] and acceptance[0] (verify, evidence) corrected (checklist-accuracy finding of QA run #23922, wave #23878). The connector picker is a native datalist input; a headless screenshot cannot show its open list, so the name-by-name diff #23922 scored was read from the DOM after a screenshot confirmed the field. The step and clause now say so. Not loosened: the listed names must still equal the API's, no extras and none missing",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "fixture-text correction, no clause change. fixtures.requires[1]: a fixture flow authored through POST /api/v1/automation carries a connectorConfig block and a real connectorId (packages/spec/src/automation/flow.zod.ts refuses the config-only node 422; a blank connectorId answers 400). acceptance[2].verify: the typed form's two by-design omissions (no required asterisk, no editor for an items-less array) are named so they are not scored as gaps (connector-input-fields.ts header). Read from source at base 87330e89. Source records: QA records #33058 (comment 6846283471), #33093 (comment 6850899929) and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -588,7 +606,7 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -618,7 +636,7 @@
         "switch the shipped declared showcase_task_changed on as the admin: POST /api/v1/security/_activation/webhook/showcase_task_changed with { enabled: true } — 200 { type: 'webhook', name, enabled: true }, and one sys_metadata_activation row of metadata_type 'webhook' whose `active` column is true (the door's body and answer spell it `enabled`, the row's column is `active`); an undeclared name answers 404. A declared webhook is read-only: pointing it at the receiver means a copy under a new name (the scratch webhook below). This switch is the subject of acceptance[6] ONLY: switched on, the declaration delivers under `single` (one sys_http_delivery row with ref_id declared:com.example.showcase/showcase_task_changed — the declaring package's id, then the name, packages/plugins/plugin-webhooks/src/declared-webhooks.ts#declaredWebhookRefId — stamped with the Default Organization, per task change), but only to its placeholder url (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
         "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when the row's `signing_secret` is set, body incl. recordId). The create needs showcase_task's required `project` lookup — pass an existing showcase_project id, or the create answers 400 VALIDATION_FAILED 'Project is required' and no create event fires",
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
-        "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object): one row per delivery with status/attempts/response_code",
+        "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object; project with `select=`, since a single-row GET takes only expand and select and answers `fields=` 400 VALIDATION_ERROR): one row per delivery with status/attempts/response_code, its failure text in `error` and its schedule in next_retry_at / last_attempted_at (packages/services/service-messaging/src/objects/http-delivery.object.ts)",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
         "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the body key is camelCase `deliveryId`, which webhook-outbox-plugin.ts reads; a `delivery_id` or `id` key is read as no deliveryId at all and answers 400 MISSING_REQUIRED_FIELD) (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
         "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there with `active` true, and the switch is still in force. No public door reads a declared webhook's switch: GET /api/v1/meta/webhook/showcase_task_changed serves the declaration, which answers isActive:false by design (the activation ledger is separate, ADR-0126 §4), so the in-force half is read off a fresh sys_http_delivery row for a task change made after the reboot (the switch is deployment state; the declaration is code)"
@@ -776,6 +794,12 @@
           "date": "2026-11-14",
           "change": "steps[1]'s delivery reference follows the per-holder slot a declared webhook is dispatched under since its ref_id names the declaring package: ref_id declared:com.example.showcase/showcase_task_changed, as packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts pins (packages/plugins/plugin-webhooks/src/declared-webhooks.ts#declaredWebhookRefId). The bare declared:showcase_task_changed failed a correct product. No clause weakened; read from source at base 4c152685",
           "ref": "#33016"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-14",
+          "change": "steps[4]: names the projection parameter (select; fields= on a single-row GET answers 400) and the sys_http_delivery columns a runner reads beside status/attempts/response_code: error, next_retry_at and last_attempted_at (packages/services/service-messaging/src/objects/http-delivery.object.ts). No clause changed. Read from source at base 87330e89. Source record: QA record #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ],
       "enumSource": {
@@ -789,14 +813,14 @@
       "title": "Job metadata schedules through every ScheduleSchema variant, executes with retry/timeout enforced, records sys_job/sys_job_run truth, and refuses the closed doors (id key, runtime create, missing handler)",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the shipped cron fixture: showcase_health_sweep (schedule cron '0 1 * * *' UTC, handler 'sweepProjectHealth' registered in defineStack({ functions }), retryPolicy { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 }, timeoutMs 300000 — examples/app-showcase/src/automation/jobs/index.ts; the handler-missing regression here was #4774/#4888)",
-          "scratch jobs for the interval / once / cron / failing / timing-out probes (near-term schedules so the run observes real executions), authored in a WRITABLE copy of the app: QA run #24575's recipe copies examples/app-showcase, symlinks its node_modules, deletes the copy's dist/ so the boot recompiles with the scratch jobs, and boots the copy. The shipped cron fixture fires only at 01:00 UTC, so the cron variant rests on a scratch near-term cron with a timezone",
+          "scratch jobs for the interval / once / cron / failing / timing-out probes (near-term schedules so the run observes real executions), authored in a WRITABLE copy of the app: QA run #24575's recipe copies examples/app-showcase, replaces the copy's node_modules with an ABSOLUTE symlink to the tree's examples/app-showcase/node_modules (a plain `cp -a` carries pnpm's RELATIVE links, ../../../../packages/…, which break under /tmp), deletes the copy's dist/ so the boot recompiles with the scratch jobs, and boots the copy. The shipped cron fixture fires only at 01:00 UTC, so the cron variant rests on a scratch near-term cron with a timezone: pin the hour in a non-UTC zone (e.g. 'M H * * *' with timezone 'Asia/Shanghai', H that zone's current hour), since an every-minute cron fires the same in every zone and cannot prove the timezone",
           "OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported on every boot of this item: by default a stock boot leaves package-authored scheduled work OFF by deployment policy — the boot banner says so ('… package-authored scheduled work is off on this deployment (OS_AUTOMATION_SCHEDULED_WORK_ENABLED is unset or not truthy), so no time trigger arms and no packaged `defineJob` is scheduled'), and at info level AppPlugin logs '[AppPlugin] declarative jobs NOT scheduled — …' (packages/runtime/src/app-artifact-handlers.ts, the reason text in packages/types/src/env.ts#SCHEDULED_WORK_DISABLED_REASON) — so without the switch neither showcase_health_sweep nor any scratch job is scheduled (sys_job holds no showcase_health_sweep row) and every firing clause is unprovable"
         ]
       },
@@ -813,7 +837,7 @@
         "read sys_job over /api/v1/data: the row is keyed by NAME (the adapter mints its own row id) with the schedule persisted",
         "author three scratch jobs (interval ~5s, once at now+1min, and a cron) with observable side effects; boot; let each fire; read sys_job_run rows and sys_job.last_run_at/last_status/run_count",
         "author a deliberately-throwing job with retryPolicy { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 }; let it exhaust; capture run rows + failure_count",
-        "author a job whose handler sleeps past a small `timeoutMs`; capture the run's status. Then author a SECOND timing-out job that also carries a retryPolicy and capture its attempts: only the second can show a timeout counting as a failure for the retry loop (QA run #24575: attempt 2 followed at +1.5 s)",
+        "author a job whose handler sleeps past a small `timeoutMs` — a `handler` compiled into the writable copy (defineStack({ functions })), not a sandboxed `body`: the body sandbox has no setTimeout (packages/cli/src/utils/detect-free-identifiers.ts#NODE_ONLY_GLOBALS); capture the run's status. Then author a SECOND timing-out job that also carries a retryPolicy and capture its attempts: only the second can show a timeout counting as a failure for the retry loop (QA run #24575: attempt 2 followed at +1.5 s)",
         "author a job with enabled:false and one whose handler string names NO registered function; boot; capture how each is skipped",
         "author a job carrying `id: 'x'` and one with a stray key; build EACH on its own (a build stops at the first refused job, so two bad jobs in one build print one error — QA run #24575); capture both errors",
         "attempt to create a job at runtime through the meta door and capture the refusal (allowRuntimeCreate:false, #4509)"
@@ -840,7 +864,7 @@
         {
           "clause": "an over-`timeoutMs` run is recorded with execution status 'timeout' (the in-flight handler is abandoned, not force-cancelled — as documented), and timeouts COUNT as failures for the retry loop (#3494)",
           "oracle": "api",
-          "verify": "the first timeout probe's run row status ('timeout'), and the retry-policy timeout probe's attempt rows, a second attempt after the backoff (packages/services/service-job/src/run-with-policy.ts#runWithPolicy)",
+          "verify": "the first timeout probe's run row status ('timeout'). A sandboxed `body` that overruns may record 'failed' instead (the sandbox's own CPU budget can fire first: 4 of 6 overruns in QA run #33096), so score this clause on the handler probe of steps[4], and the retry-policy timeout probe's attempt rows, a second attempt after the backoff (packages/services/service-job/src/run-with-policy.ts#runWithPolicy)",
           "evidence": "the run rows of both timeout probes"
         },
         {
@@ -907,6 +931,12 @@
           "date": "2026-10-31",
           "change": "acceptance[5] quoted the job.id prescription as ending 'os migrate meta --from 16'. QA run #27441 found the live message no longer contains it. job.zod.ts JOB_ID_RETIRED now closes with the house aged-out sentence: the edit left `os migrate meta` with the protocol-16.x conversions, so apply it by hand. The quote now matches. The clause is unchanged: authoring `id` still errors with that prescription. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27441"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "fixture- and step-text correction, no clause change. fixtures.requires[1]: the writable copy's node_modules is an absolute symlink (cp -a keeps pnpm's relative links, which break under /tmp), and the cron variant pins its hour in a non-UTC zone. steps[4]: the sleeping probe is a compiled handler, since the body sandbox has no setTimeout (detect-free-identifiers.ts NODE_ONLY_GLOBALS). acceptance[3].verify: a body overrun may record 'failed' (sandbox CPU budget), so the clause is scored on the handler probe. Read from source at base 87330e89. Source records: QA records #33048 (comment 6846028996) and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -915,7 +945,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, requires manage_platform_settings, bounds sentBy, from, headers, organizationId and identityMail, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 17,
+      "revision": 18,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -928,7 +958,7 @@
         ],
         "knownGaps": [
           "no stock example exercises an email template end-to-end; needs a small fixture flow with a notify/email step",
-          "refinement of the gap above: the TEMPLATE fixture exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate. The workable door, measured by QA run #23922 and corrected by QA run #28656 at 6e11a929: a SCRATCH flow authored through POST /api/v1/automation (a runtime flow registers on stock showcase) of type 'api', whose start node's config is { triggerType: 'api', hookId, secret } — an api flow needs a non-blank config.secret or a config.secretRef, and without one its registration is refused (service-automation flow-registration-checks.ts validateApiTriggerSecret; 400 when #28656 met it) — and whose notify node names channels ['email'], template 'showcase_task_done_email' and templateData (CEL value envelopes for title / project) and carries NO inline title or message: template and inline title/message are mutually exclusive (NotifyConfigSchema, packages/spec/src/automation/io-node-config.zod.ts; 400). Fire it as the admin with POST /api/v1/automation/NAME/trigger. Not type 'autolaunched': #28656's autolaunched flow was refused at that door, 403 (the door refuses an elevated, runAs: 'system', self-triggered type with PERMISSION_DENIED, packages/runtime/src/flow-start-admission.ts) — the email channel calls sendTemplate per recipient, and each delivery lands in sys_email (admin GET /api/v1/data/sys_email) with the rendered subject and body. On the dev `log` transport the email channel is suppressed (skipped as transport_not_configured, CHANNEL_UNAVAILABLE_REASONS in packages/services/service-messaging/src/channel.ts), so arm the SMTP sink first, as identity-auth.email-verification-loop fixtures.requires[2] does: plugin-email's fake-smtp.testkit.ts under tsx, then PUT /api/settings/mail {provider: 'smtp', smtp_host: '127.0.0.1', smtp_port: PORT, smtp_secure: false, from_email, from_name}"
+          "refinement of the gap above: the TEMPLATE fixture exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate. The workable door, measured by QA run #23922 and corrected by QA run #28656 at 6e11a929: a SCRATCH flow authored through POST /api/v1/automation (a runtime flow registers on stock showcase) of type 'api', whose start node's config is { triggerType: 'api', hookId, secret } — an api flow needs a non-blank config.secret or a config.secretRef, and without one its registration is refused (service-automation flow-registration-checks.ts validateApiTriggerSecret; 400 when #28656 met it) — and whose notify node names channels ['email'], template 'showcase_task_done_email' and templateData (CEL value envelopes for title / project) and carries NO inline title or message: template and inline title/message are mutually exclusive (NotifyConfigSchema, packages/spec/src/automation/io-node-config.zod.ts; 400). Fire it as the admin with POST /api/v1/automation/NAME/trigger. Not type 'autolaunched': #28656's autolaunched flow was refused at that door, 403 (the door refuses an elevated, runAs: 'system', self-triggered type with PERMISSION_DENIED, packages/runtime/src/flow-start-admission.ts) — the email channel calls sendTemplate per recipient, and each delivery lands in sys_email (admin GET /api/v1/data/sys_email) with the rendered subject and body. Address it to a USER: the email channel sends to the recipient's sys_user address, so a recipient that is not a user (a bare outside address) fails the notify step by design — the resolver passes an unmatched email through as an id (packages/services/service-messaging/src/recipient-resolver.ts#RecipientResolver) and the channel reports a recipient with no resolvable address as a failure (packages/services/service-messaging/src/email-channel.ts#createEmailChannel). On the dev `log` transport the email channel is suppressed (skipped as transport_not_configured, CHANNEL_UNAVAILABLE_REASONS in packages/services/service-messaging/src/channel.ts), so arm the SMTP sink first, as identity-auth.email-verification-loop fixtures.requires[2] does: plugin-email's fake-smtp.testkit.ts under tsx, then PUT /api/settings/mail {provider: 'smtp', smtp_host: '127.0.0.1', smtp_port: PORT, smtp_secure: false, from_email, from_name}"
         ]
       },
       "variants": [
@@ -947,8 +977,8 @@
         "author the zh-CN twin; send to a zh-CN-locale recipient, to a zh-locale recipient (a tag the bundle folds) and to a recipient whose language the bundle lacks (e.g. ja-JP); capture which row rendered each. The showcase declares i18n fallbackLocale 'en' (examples/app-showcase/objectstack.config.ts), which folds to the en-US row. To read one member back by name, select it with ?member= (GET /api/v1/meta/email_template/NAME?member=zh-CN): on that read ?locale= is the response's translation locale and selects no member (META_ITEM_MEMBER_PARAM, packages/rest/src/meta-item-read-gate.ts)",
         "author a template with fromOverride + replyTo and verify both on the outbound message. fromOverride is an object { name?, address } with address an email (EmailAddressInlineSchema, packages/spec/src/system/email-template.zod.ts) and replyTo a plain address string; a string fromOverride is refused at save, 422 INVALID_METADATA 'expected object'",
         "edit the template wording as an admin in Studio, redeploy/reboot, and re-read the served item over GET /api/v1/meta/email_template/showcase_task_done_email — the admin's wording must still be served. On the read-only showcase Studio's Customize saves the edit into the pair com.example.showcase.custom; over HTTP the same write is POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/email_template/showcase_task_done_email?package=com.example.showcase.custom with overrides: {package:'com.example.showcase', basedOn:'0.1.0'}. A package-less PUT of the shipped name answers 403 NOT_OVERRIDABLE since ADR-0146 D11 (packagelessOverlayWriteRefusal, packages/metadata-protocol/src/protocol-packaged-base-refusal.ts)",
-        "on the WRITABLE showcase copy (fixtures.requires[3]), edit the DECLARED source template and metadata-reload WITHOUT a reboot, then GET /api/v1/meta/email_template/<name> — the registry serves the edited item (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes). Keep the reboot out of it: under os dev's default watcher a declared-source save recompiles AND restarts the server (packages/cli/src/commands/dev.ts, --restart defaults on), which proves nothing about a reload. Compile into the running copy's artifact with objectstack compile --output COPY/dist/objectstack.json, or boot the copy with os dev --no-restart (the watcher then only rebuilds the artifact), and read the listener's PID before and after (lsof -ti tcp:PORT): an unchanged PID is part of the evidence, and a changed one means this half was not driven. On the stock read-only showcase this half is not drivable: record it partial, as QA run #23166 did",
-        "build the two rejection probes (stray key `body`; name 'BadName') and capture the errors",
+        "on the WRITABLE showcase copy (fixtures.requires[3]), edit the DECLARED source template and metadata-reload WITHOUT a reboot, then GET /api/v1/meta/email_template/<name> — the registry serves the edited item (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes). Keep the reboot out of it: under os dev's default watcher a declared-source save recompiles AND restarts the server (packages/cli/src/commands/dev.ts, --restart defaults on), which proves nothing about a reload. Boot the copy with --no-watch and compile into its artifact with objectstack compile --output COPY/dist/objectstack.json: the server reloads by watching its own dist/objectstack.json (packages/metadata/src/plugin.ts, the artifact-file watcher). ⛔ Not os dev --no-restart: with it the watcher only rebuilds the artifact and the running server keeps the build it booted with (packages/cli/src/commands/dev.ts), so nothing reloads. Read the listener's PID before and after (lsof -ti tcp:PORT): an unchanged PID is part of the evidence, and a changed one means this half was not driven. On the stock read-only showcase this half is not drivable: record it partial, as QA run #23166 did",
+        "build the two rejection probes (stray key `content`, which the schema answers with the rename to `bodyHtml` — a stray `body` is offered no alias, packages/spec/src/system/email-template.zod.ts; name 'BadName') and capture the errors",
         "drive the raw send door POST /api/v1/email/send four ways: (a) as an admin (holding manage_platform_settings) with a well-formed message { to, subject, html } (or `text`; SendEmailInput's body keys are `html`/`text` — `bodyHtml`/`bodyText` are the TEMPLATE authoring fields, not wire keys) → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope, and a recipient whose display name is not a string (e.g. to: {name: 42, address: 'a@example.com'}) → capture the 400 VALIDATION_FAILED naming the display name (since #29891); after each 400 VALIDATION_FAILED read sys_email for the 'failed' row it leaves; (d) as a member WITHOUT manage_platform_settings (mint one through admin create-user), and as the admin with a `from` other than the configured sender, with a `sentBy` naming another user, with a `headers` value that is not a plain object of single-line strings (a list of entries, say), with an `organizationId` other than the admin's active organization, and with `identityMail: true` → capture each refusal and confirm no new sys_email or sys_identity_email row; then send once more as the admin with no `organizationId` and confirm the new sys_email row's organization_id is the admin's active organization",
         "while you are at the raw door, send the wrong-vocabulary body { to, subject, bodyHtml } deliberately and capture the refusal — 400 VALIDATION_FAILED 'at least one of text or html is required'. This is the shape the checklist itself used to name (run #7690); keeping the probe pins the two vocabularies apart"
       ],
@@ -1126,6 +1156,12 @@
           "date": "2026-11-08",
           "change": "fixtures.knownGaps[1]: on the dev log transport the email channel is suppressed (transport_not_configured), so the scratch flow's delivery needs the same SMTP-sink recipe as identity-auth.email-verification-loop. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 18,
+          "date": "2026-11-14",
+          "change": "fixture- and step-text correction, no clause change. knownGaps[1]: the scratch notify flow addresses a user, since a non-user recipient fails the step by design (recipient-resolver.ts passes an unmatched email through as an id; email-channel.ts reports a recipient with no address as a failure). steps[7]: the declared-source reload is a compile into a --no-watch copy's dist/objectstack.json, which the metadata plugin watches; os dev --no-restart reloads nothing (dev.ts: the running server keeps the build it booted with). steps[8]: the stray-key probe uses `content`, the alias acceptance[6] names (email-template.zod.ts maps content/html/text; body has no alias). Read from source at base 87330e89. Source records: QA records #32949 and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -1134,7 +1170,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1198,7 +1234,7 @@
         {
           "clause": "an unimplemented channel never fakes delivery: the ['push'] probe produces NO inbox row and NO delivery row — emit refuses the delivery up front and says so in a WARN naming the channel ('[messaging] emit: channel 'push' is not registered; refused N delivery row(s) the dispatcher could only dead-letter …', packages/services/service-messaging/src/messaging-service.ts) — declared-but-unimplemented channels must stay visible failures (#3197)",
           "oracle": "log",
-          "verify": "no sys_inbox_message row and no sys_notification_delivery row for the probe run — read as a before/after count of each table, or filtered on the probe's notification id, never as 'the table is empty': inbox deliveries DO write sys_notification_delivery rows (emit enqueues one per registered channel × recipient, packages/services/service-messaging/src/messaging-service.ts, QA run #24575) — and the WARN refusal naming channel 'push' in the server log. A delivery row for the probe reported success, or an inbox row, is the FAIL",
+          "verify": "no sys_inbox_message row and no sys_notification_delivery row for the probe run — read as a before/after count of each table AS THE ADMIN (a member's read of sys_notification_delivery answers 403), or filtered on the probe's notification id, never as 'the table is empty'. sys_notification and sys_notification_delivery are telemetry-class objects, so on a file-DB dev boot they live in the telemetry file beside the primary (trigger.db → trigger.telemetry.db, packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath): a count read from a DB file reads that file, not the primary: inbox deliveries DO write sys_notification_delivery rows (emit enqueues one per registered channel × recipient, packages/services/service-messaging/src/messaging-service.ts, QA run #24575) — and the WARN refusal naming channel 'push' in the server log. A delivery row for the probe reported success, or an inbox row, is the FAIL",
           "evidence": "absence check + log excerpt"
         }
       ],
@@ -1259,6 +1295,12 @@
           "date": "2026-10-31",
           "change": "steps[0] did not say what to write into showcase_task.assignee. QA run #27441 noted it is an email text field. task.object.ts declares it Field.text; the flow's notify recipient is that value, and recipient-resolver.ts resolves an email-shaped recipient against sys_user. The step now says to write the persona's email. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27441"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "acceptance[4].verify: count sys_notification_delivery as the admin (a member's read answers 403), and read sys_notification / sys_notification_delivery from the telemetry DB file when counting from a file (both declare lifecycle class 'telemetry': packages/services/service-messaging/src/objects/notification-delivery.object.ts, packages/platform-objects/src/audit/sys-notification.object.ts; the file name from packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath). No clause changed. Read from source at base 87330e89. Source records: QA records #32949 and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -1335,7 +1377,7 @@
       "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1356,7 +1398,7 @@
       "steps": [
         "boot showcase via os dev (serve.ts mounts /api/v1/datasources by default on a non-memory engine); sign in as the admin holding manage_platform_settings; also mint an authenticated session holding NO capability and keep an anonymous client",
         "probe the uniform floor: GET /api/v1/datasources, GET /api/v1/datasources/drivers and one write (POST /api/v1/datasources) each anonymous (expect 401 UNAUTHENTICATED — do NOT misread the drivers 401 as 'catalog gone': the route is static but gated since #9391) and as the no-capability session (expect 403 PERMISSION_DENIED naming manage_platform_settings) — requireDatasourceAdmin runs on all 11 routes BEFORE any service resolution",
-        "GET /api/v1/datasources/drivers as the admin; confirm the static catalog (memory/sqlite/postgres/mysql/mongodb, each with a configSchema) — the route has NO service dependency (it answers even when the datasource-admin service is unwired), but it is NOT anonymous-available",
+        "GET /api/v1/datasources/drivers as the admin; confirm the static catalog (seven drivers: memory/sqlite/postgres/mysql/mongodb/oracle/mssql, each with a configSchema) — the route has NO service dependency (it answers even when the datasource-admin service is unwired), but it is NOT anonymous-available",
         "POST /api/v1/datasources/test with an UNSAVED sqlite draft { name: 'qa_ds_probe', driver: 'sqlite', config: { filename: '<writable path>' }, secret: '...' } — the wizard's pre-Save probe; capture the result AND confirm nothing persisted (the subsequent list is unchanged); the literal 'test' segment is never captured as a datasource name because no POST route takes a bare :name (the POST :name routes all carry a suffix: /:name/test, /:name/migrate-credential, /:name/object-draft), NOT because of registration order: POST /test is registered AFTER every :name route, whatever the comment above it in admin-routes.ts says. A GET /api/v1/datasources/test IS captured as a name (404 'Datasource \"test\" does not exist.', QA run #24615). The sqlite key is `filename`; `file` is an alias authoring refuses with a rename hint (packages/spec/src/data/driver/sqlite.zod.ts#SqliteConfigSchema)",
         "POST /api/v1/datasources with a sqlite-file draft { name: 'qa_ds_probe', driver: 'sqlite', config: { filename: '<writable path>' }, secret?: '...' }; capture status + the returned datasource",
         "GET /api/v1/datasources; confirm qa_ds_probe appears with origin:'runtime' and its health in `status` ('ok' | 'error' | 'blocked' | 'unvalidated', with `statusReason` beside 'error' and 'blocked' — packages/services/service-datasource/src/contracts/datasource-admin-service.ts#DatasourceSummary)",
@@ -1368,7 +1410,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the driver catalog is static but NOT anonymous: to the entitled admin GET /api/v1/datasources/drivers returns the curated driver set (memory/sqlite/postgres/mysql/mongodb) each with a projected configSchema, with NO datasource-admin service dependency — while an unauthenticated probe gets the floor's 401, deliberately (the family's floor is uniform on purpose: 'a family whose floor has one hole is a family whose floor has to be read route by route', admin-routes.ts). A 401 here is the floor working, never 'catalog broken'",
+          "clause": "the driver catalog is static but NOT anonymous: to the entitled admin GET /api/v1/datasources/drivers returns the curated driver set (seven: memory/sqlite/postgres/mysql/mongodb/oracle/mssql) each with a projected configSchema, with NO datasource-admin service dependency — while an unauthenticated probe gets the floor's 401, deliberately (the family's floor is uniform on purpose: 'a family whose floor has one hole is a family whose floor has to be read route by route', admin-routes.ts). A 401 here is the floor working, never 'catalog broken'",
           "oracle": "api",
           "verify": "the admin's drivers body against DRIVER_CATALOG (driver-catalog.ts); the anonymous 401 on the same route; route needs no service (admin-routes.ts)",
           "evidence": "the two drivers responses (admin 200, anonymous 401)"
@@ -1495,6 +1537,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names four corroborating pins, among them the capability-floor pin the revision-6 row said this ref did not name. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored acceptance[0], [1] and [3]–[5] and negatives[0]–[3] partial from admin-routes-auth-guard.test.ts, datasource-meta-door-reaches-admin-door.dogfood.test.ts, datasource-admin-plugin.test.ts and datasource-config-redaction.test.ts, none in the ref, while the ref said nothing drives the capability floor. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "steps[2] and acceptance[0]: DRIVER_CATALOG holds seven drivers, oracle and mssql beside the five the text named (packages/services/service-datasource/src/driver-catalog.ts). No clause weakened. Read from source at base 87330e89. Source record: QA record #33081 (comment 6850173588) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -1503,7 +1551,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1545,7 +1593,7 @@
           "evidence": "the test run output + the live ?schema= responses"
         },
         {
-          "clause": "object-draft returns a reviewable, compilable draft: 200 with draft.definition (name, label, datasource, external.remoteName, fields — each { type } only: fields.<f>.primaryKey is not an authorable field key and is never emitted) and draft.source — a *.object.ts module whose FIRST line is exactly '// Generated by `os datasource introspect` (ADR-0015). Review before committing.' (external-datasource-service.ts), which imports ObjectSchema as a VALUE (import { ObjectSchema } from '@objectstack/spec/data', not import type) and exports ObjectSchema.create({ … }), which renders the introspected remote PK as a '// Remote primary key: <cols>' comment (REMOTE_PRIMARY_KEY_COMMENT) and which typechecks — plus a draft.review[] array whose entries flag unrecognised/lossy type mappings (may be empty on the clean fixture)",
+          "clause": "object-draft returns a reviewable, compilable draft: 200 with draft.definition (name, label, datasource, external.remoteName, fields — each { type, label }, the label derived from the column name, plus reference on a lookup: fields.<f>.primaryKey is not an authorable field key and is never emitted) and draft.source — a *.object.ts module whose FIRST line is exactly '// Generated by `os datasource introspect` (ADR-0015). Review before committing.' (external-datasource-service.ts), which imports ObjectSchema as a VALUE (import { ObjectSchema } from '@objectstack/spec/data', not import type) and exports ObjectSchema.create({ … }), which renders the introspected remote PK as a '// Remote primary key: <cols>' comment (REMOTE_PRIMARY_KEY_COMMENT) and which typechecks — plus a draft.review[] array whose entries flag unrecognised/lossy type mappings (may be empty on the clean fixture)",
           "oracle": "api",
           "verify": "the draft body fields (no primaryKey on any definition field) + the source header string + the value import line + the '// Remote primary key: id' comment line + a scratch typecheck of draft.source; review[] present as an array",
           "evidence": "the draft response + the typecheck output"
@@ -1639,6 +1687,12 @@
           "date": "2026-11-03",
           "change": "acceptance[4]: the family's writes (import, refresh-catalog) sit on BOTH capabilities now, not on FEDERATION_WRITE_CAPABILITY alone. Seeing a datasource's remote structure needs the read capability on every route, writes included (maintainer ruling 2026-11-03, verbatim: 「两个写接口同时要求读权限 (Recommended)」); the rule is federationCapabilityRefusal in external-datasource-routes.ts. This item's own probes (the two read twins) are unchanged",
           "ref": "claude/sec-hardening-d"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "acceptance[2]: a draft field carries { type, label } (and reference on a lookup), not { type } only (packages/services/service-datasource/src/external-datasource-service.ts, DraftField and toLabel). The primaryKey exclusion is unchanged. Read from source at base 87330e89. Source records: QA records #33025 (comment 6844741021) and #33081 (comment 6850173588) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -1788,7 +1842,7 @@
       "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1813,8 +1867,8 @@
         "re-fire the notify flow (reassign the task to the same assignee again); GET /api/v1/notifications as the assignee and confirm NO new inbox row landed",
         "read the messaging outbox / dead-letter surface and confirm there is no dead-letter row for the muted (recipient, 'inbox') — a deliberate mute is a DROP by the preference filter, not a dead-letter (dead-letter is reserved for unimplemented channels, #3197)",
         "flip the row enabled:true (or delete it); re-fire; confirm the inbox row is delivered again",
-        "probe the resolution order: a user_id='*' admin-global default OFF with a user-specific row ON delivers (user row overrides global); a mandatoryTopics-configured topic bypasses the matrix entirely (cannot be muted)",
-        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale"
+        "probe the resolution order: an admin-global default OFF (the row whose user_id is EMPTY: omit it — since ADR-0118 D1 user_id is a sys_user reference, a '*' answers 400 VALIDATION_FAILED reference_not_found, and legacy '*' rows are rewritten at boot by packages/services/service-messaging/src/preference-user-conversion.ts#convertWildcardPreferenceUsers) with a user-specific row ON delivers (user row overrides global); a mandatoryTopics-configured topic bypasses the matrix entirely (cannot be muted)",
+        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale. The template's holes read the notification's top-level title, body and topic plus payload.*: the notify node's message reaches a template as {{ body }}, never {{ message }}, which renders '' (an unknown path renders empty by design; packages/services/service-messaging/src/template-renderer.ts)"
       ],
       "acceptance": [
         {
@@ -1836,7 +1890,7 @@
           "evidence": "the before/after listings around the flip"
         },
         {
-          "clause": "resolution is most-specific-wins: a user-specific row overrides the user_id='*' admin-global default, and a mandatoryTopics-configured topic bypasses the matrix (cannot be muted) — the ADR-0030 Layer-3 precedence holds on the live pipeline",
+          "clause": "resolution is most-specific-wins: a user-specific row overrides the admin-global default (the row whose user_id is empty, ADR-0118 D1), and a mandatoryTopics-configured topic bypasses the matrix (cannot be muted) — the ADR-0030 Layer-3 precedence holds on the live pipeline",
           "oracle": "api",
           "verify": "the global-OFF + user-ON probe delivers; a mandatory-topic fire delivers despite an enabled:false row",
           "evidence": "the two probe outcomes"
@@ -1858,7 +1912,7 @@
         "stale-dist"
       ],
       "source": [
-        "packages/services/service-messaging/src/objects/notification-preference.object.ts#user_id (sys_notification_preference: user_id × topic × channel × enabled; '*' wildcards + admin-global default; unique (user_id,topic,channel) index)",
+        "packages/services/service-messaging/src/objects/notification-preference.object.ts#user_id (sys_notification_preference: user_id × topic × channel × enabled; the topic '*' wildcard + the admin-global default, the row whose user_id is empty (ADR-0118 D1); unique (user_id,topic,channel) index)",
         "packages/services/service-messaging/src/preference-resolver.ts#PreferenceResolver (PreferenceResolver.filter — most-specific-wins, mandatory-topic bypass, fail-open; drops recipients left with no accepted channel)",
         "packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver (emit() consults the PreferenceResolver before fan-out)",
         "packages/services/service-messaging/src/messaging-service-plugin.ts#sys_notification_template (email/sms channels render sys_notification_template; shared retry/dead-letter substrate)",
@@ -1889,6 +1943,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "steps[5], acceptance[3] and source[0]: the admin-global default is the row whose user_id is EMPTY since ADR-0118 D1 (user_id is a sys_user reference; a '*' answers 400 reference_not_found, and packages/services/service-messaging/src/preference-user-conversion.ts#convertWildcardPreferenceUsers rewrites legacy '*' rows at boot), not user_id='*'. steps[6]: the notify message reaches a template as {{ body }} (template-renderer.ts RenderInput). The precedence the clause asserts is unchanged. Read from source at base 87330e89. Source record: QA record #33058 (comment 6846283471) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -2537,25 +2597,26 @@
       "title": "Two packages may each declare a job of one name: the first holder keeps the bare job key, the second is armed under PACKAGE_ID:NAME, and both keys survive a restart unchanged",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the seeded admin)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each declares a scheduled job qa_nightly (job has no one-holder rule, and the two namespaces differ). The boot runs on a file DB so the arming survives a restart"
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each declares a scheduled job qa_nightly (job has no one-holder rule, and the two namespaces differ) with a sandboxed `body` ({ language: 'js', source, capabilities }), never a `handler`: `os package install` refuses an enabled job with no `body` 422 VALIDATION_ERROR ('… has no `body`, so this install door cannot run it…', packages/cloud-connection/src/marketplace-install-local-plugin.ts#describeUnrunnable), because a handler names a defineStack({ functions }) entry that travels in the artifact's runtime module, never in the package JSON this door installs. The boot runs on a file DB so the arming survives a restart",
+          "OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported on every boot of this item: unset (the default), no packaged job is scheduled, so sys_job holds neither key and both clauses are unprovable (integration-system.job-scheduled-run fixtures.requires[2] names the boot line that says so)"
         ]
       },
       "steps": [
-        "install qa_a, then qa_b; GET /api/v1/data/sys_job and record each row's name, the key the adapter arms it by",
-        "restart the server against the same DB and read the keys again"
+        "boot at --log-level info (os dev defaults to warn); install qa_a, then qa_b; GET /api/v1/data/sys_job and record each row's name, the key the adapter arms it by. sys_job carries no package column, so which package holds the bare key is read from the binder's info line for the second holder: \"job 'qa_nightly' is also declared by package 'com.qa.addr-a', which holds that name on the job service — scheduled under its package-scoped identity 'com.qa.addr-b:qa_nightly' …\" (packages/runtime/src/app-artifact-handlers.ts, the binder's info line after jobKeyFor)",
+        "restart the server against the same DB and read the keys again; on the restart the second holder's info line reads \"job 'qa_nightly' keeps its package-scoped identity 'com.qa.addr-b:qa_nightly': the job catalogue holds it active under that name …\""
       ],
       "acceptance": [
         {
           "clause": "the first holder's job is keyed by its bare name and the second by PACKAGE_ID:NAME",
           "oracle": "api",
-          "verify": "one job is keyed qa_nightly and the other com.qa.addr-b:qa_nightly (packages/runtime/src/app-artifact-handlers.ts#jobKeyFor)",
+          "verify": "one job is keyed qa_nightly and the other com.qa.addr-b:qa_nightly (packages/runtime/src/app-artifact-handlers.ts#jobKeyFor), with the holder of each read from the info line of steps[0]",
           "evidence": "the two keys"
         },
         {
@@ -2584,6 +2645,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures and acceptance), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixture-text correction, no clause change. fixtures.requires[0]: the scratch jobs are sandboxed `body` jobs, because the install door refuses a `handler` job 422 (packages/cloud-connection/src/marketplace-install-local-plugin.ts#describeUnrunnable); fixtures.requires[1] added: OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1, without which no packaged job is scheduled. steps[0], steps[1] and acceptance[0].verify: sys_job has no package column (packages/platform-objects/src/audit/sys-job.object.ts), so the holder is read from the binder's info-level lines (app-artifact-handlers.ts), on a --log-level info boot. Read from source at base 87330e89. Source records: QA records #33048 (comment 6846028996) and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     },
@@ -2972,7 +3039,7 @@
       "title": "Mobile push: a device registers under the caller's session with its server origin, the push service boots on the hosted relay only where requires names push, and an air-gapped or unrequested push key says why at boot",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2999,7 +3066,7 @@
         "POST { token: 't', platform: 'web' } (no vendor), then { token: 't', platform: 'ios', origin: 'http://my_svc:3000' }, then { token: 't', platform: 'ios', origin: 'http://localhost:3000/' }; count the rows again",
         "as the org member, DELETE /api/v1/notifications/devices/DID; then as the admin DELETE it, and once more",
         "leg 2: boot the scratch copy with 'push' in requires and OS_CLOUD_URL unset; read the boot log through the ready banner",
-        "leg 3: boot it again with OS_CLOUD_URL=off; read the exit code and the error",
+        "leg 3: boot it again with OS_CLOUD_URL=off; read the exit code and the error from a FOREGROUND run: a wrapper that forks (e.g. `setsid timeout …`) reports its own exit 0, not the server's",
         "leg 4: boot the copy that sets `push: {}` with no 'push' in requires; read the boot log"
       ],
       "acceptance": [
@@ -3024,7 +3091,7 @@
         {
           "clause": "with 'push' in requires the push service boots on the hosted relay, and an unbound server is told once at ready that nothing is delivered yet",
           "oracle": "log",
-          "verify": "the boot log reads 'PushServicePlugin: push service registered (apns, fcm through the hosted push relay)', and after kernel:ready the warning 'PushServicePlugin: this server is not bound to the cloud, so the hosted push relay delivers nothing until it is. …'; the server stays up (packages/services/service-push/src/push-plugin.ts#PushServicePlugin). The push channel mounts lazily, on the first delivery that needs it, so its own '[messaging] push channel registered …' line is not expected at boot",
+          "verify": "the boot log reads 'PushServicePlugin: push service registered (apns, fcm through the hosted push relay)', and after kernel:ready the warning 'PushServicePlugin: this server is not bound to the cloud, so the hosted push relay delivers nothing until it is. …'; the server stays up (packages/services/service-push/src/push-plugin.ts#PushServicePlugin). The push channel mounts lazily, on the first delivery that needs it, so its own '[messaging] push channel registered …' line is not expected at boot. Every info-level boot also prints '[messaging] channel provider registered: push (resolved per lookup)', push requested or not: service-messaging registers the lazy push provider at kernel:ready (packages/services/service-messaging/src/messaging-service-plugin.ts; the line is packages/services/service-messaging/src/messaging-service.ts#registerChannelProvider). It is not the push channel's mount announcement and is evidence of nothing here",
           "evidence": "the two log lines"
         },
         {
@@ -3036,7 +3103,7 @@
         {
           "clause": "a push key with no 'push' in requires is named at boot, and nothing push mounts",
           "oracle": "log",
-          "verify": "the boot prints \"⚠ The stack definition sets a push key, but requires does not name 'push', so the push service is not started and the key is not read. Add 'push' to requires to turn mobile push on.\" (packages/cli/src/commands/serve.ts#formatUnrequestedPushKeyWarning), and no PushServicePlugin or push-channel line follows",
+          "verify": "the boot prints \"⚠ The stack definition sets a push key, but requires does not name 'push', so the push service is not started and the key is not read. Add 'push' to requires to turn mobile push on.\" (packages/cli/src/commands/serve.ts#formatUnrequestedPushKeyWarning), and no PushServicePlugin line and no '[messaging] push channel registered …' line follows ('[messaging] channel provider registered: push (resolved per lookup)' still prints, as on every info-level boot: acceptance[3])",
           "evidence": "the boot log"
         }
       ],
@@ -3069,6 +3136,12 @@
           "date": "2026-11-10",
           "change": "initial — the push device registry, the hosted-relay boot and its two boot refusals (#29794, #29968, #30534, #30705, #30749). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
           "ref": "#32270"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixture-text correction, no clause change. acceptance[3] and acceptance[5] name the '[messaging] channel provider registered: push (resolved per lookup)' line that every info-level boot prints (packages/services/service-messaging/src/messaging-service-plugin.ts registers the lazy push provider at kernel:ready, unconditionally), so a runner grepping for 'push' does not read it as the push channel mounting; steps[5] reads leg 3's exit code from a foreground run (a forking wrapper reported 0, the server exits 1). Read from source at base 87330e89. Source records: QA records #32940 and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
+          "ref": "#33331"
         }
       ]
     }
