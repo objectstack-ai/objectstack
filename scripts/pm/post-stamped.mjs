@@ -5788,7 +5788,7 @@ export function selfTest() {
       t('⛔ a transcript with one turn served off the tier is refused', !off.ok && off.text.includes('REFUSED'));
       t('⛔ an empty transcript is refused', !judged(REC(CONTRACT_REVIEW_TIER_NAME), empty).ok);
       t('⛔ a transcript path that cannot be read is refused, never thrown', !judged(REC(CONTRACT_REVIEW_TIER_NAME), join(dir, 'missing.output')).ok);
-      t('⛔ no refusal text carries a model identifier or the evidence path', [none, off, judged(REC(CONTRACT_REVIEW_TIER_NAME), join(dir, 'missing.output'))].every((r) => !r.text.includes(CONTRACT_REVIEW_TIER) && !r.text.includes(OTHER) && !r.text.includes(dir)));
+      t('⛔ no refusal text carries a model identifier or the evidence path', [none, off, judged(REC(CONTRACT_REVIEW_TIER_NAME), join(dir, 'missing.output'))].every((r) => !r.ok && !String(r.text).includes(CONTRACT_REVIEW_TIER) && !String(r.text).includes(OTHER) && !String(r.text).includes(dir)));
       t('⭐ a record naming TIER_DEFAULT is untouched, with no evidence', judged(REC('TIER_DEFAULT'), null).ok);
       t('⭐ a comment that is not a record is untouched, with no evidence', judged(`${SIG}\nThe seat's own note: Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\` is what records carry.`, null).ok);
       t('⭐ a card BODY is untouched — the check is a record\'s, and a record is a comment', judgeBody(REC(CONTRACT_REVIEW_TIER_NAME), { mode: 'body' }, NOW_MS).ok);
