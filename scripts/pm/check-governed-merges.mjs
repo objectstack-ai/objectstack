@@ -501,7 +501,9 @@
  *     (`LOW_RISK_SECURITY_NAME`, any segment below the row, any case) — the label
  *     OR the name sends the PR to H; security teaching the name cannot see is the
  *     contract reviewer's to label `security`;
- *   - the head lives in the base repository (`forkVerdict`).
+ *   - the head lives in the base repository (`forkVerdict`);
+ *   - every catalog path is a MODIFIED regular file — an added, deleted or renamed
+ *     skill or eval, a symlink or a status not read is H (`catalogFiles`).
  *
  * Then the landing is Tier S's: a `## Contract review` record for the current
  * head at `CONTRACT_REVIEW_TIER` (the record recognisers' `rules` face — no
@@ -1150,7 +1152,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 61,
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 70,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2274,6 +2276,12 @@ export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals
  */
 export const LOW_RISK_SECURITY_NAME = /security|auth|permission/i;
 
+/**
+ * The file modes a catalog path may carry: a regular file. A symlink (`120000`)
+ * or a submodule (`160000`) under a catalog row keeps the PR H.
+ */
+export const LOW_RISK_REGULAR_MODES = Object.freeze(['100644', '100755']);
+
 /** A changeset path, as the rider allowlist spells it. */
 export const LOW_RISK_CHANGESET_PATH = /^\.changeset\/[^/]+\.md$/;
 
@@ -2383,6 +2391,31 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
     return prefix !== undefined && LOW_RISK_SECURITY_NAME.test(p.slice(prefix.length));
   });
   if (securityNamed.length > 0) reasons.push(`a catalog path that names security, auth or permission: ${more(securityNamed, 4)}`);
+  // ⭐ Only a MODIFIED regular catalog file is wording: adding, deleting or renaming a skill or an eval
+  // changes what the catalog teaches, not how it words it. Status and mode come from `catalogFiles`
+  // (`{ measured, reason, files: [{ path, status, mode }] }`), one row per commit that touched the path.
+  const armPaths = paths.filter(underArm);
+  if (armPaths.length > 0) {
+    const catalog = reading.catalogFiles;
+    if (!catalog || catalog.measured !== true || !Array.isArray(catalog.files)) {
+      reasons.push(`the status and mode of its catalog files were not read (${catalog?.reason ?? 'no reading'})`);
+    } else {
+      const unread = [];
+      const notModified = new Set();
+      const notRegular = new Set();
+      for (const p of armPaths) {
+        const rows = catalog.files.filter((f) => f?.path === p);
+        if (rows.length === 0) unread.push(p);
+        for (const r of rows) {
+          if (r?.status !== 'modified') notModified.add(`${p} (${r?.status || 'no status'})`);
+          else if (!LOW_RISK_REGULAR_MODES.includes(String(r?.mode ?? ''))) notRegular.add(`${p} (${r?.mode ?? 'mode not read'})`);
+        }
+      }
+      if (unread.length > 0) reasons.push(`no status was read for ${more(unread, 4)}`);
+      if (notModified.size > 0) reasons.push(`a catalog file added, deleted or renamed rather than modified: ${more([...notModified], 4)}`);
+      if (notRegular.size > 0) reasons.push(`a catalog path that is not a regular file: ${more([...notRegular], 4)}`);
+    }
+  }
   const listed = new Set(paths);
   const unlisted = rows.flatMap((s) => s.files ?? []).filter((f) => !listed.has(f));
   if (paths.length > 0 && unlisted.length > 0) reasons.push(`the reading's path list does not hold ${unlisted.slice(0, 2).join(', ')}`);
@@ -2437,7 +2470,7 @@ export function renderLowRiskLines(matched) {
     );
   }
   if (v.tier === GOVERNED_TIER_S) {
-    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — skills wording and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever and no catalog path named for it, no fork.\n`;
+    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — modified skill files and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever and no catalog path named for it, no fork.\n`;
   }
   return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
@@ -4171,6 +4204,8 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
   }
   const { paths, renames, entries } = pullPathsFrom(files);
   return {
+    // Each file's status (#33501's arm: only a MODIFIED catalog file is wording); `--pr` adds the modes.
+    catalogStatuses: pullCatalogStatuses(files),
     ok: true,
     paths,
     size,
@@ -4206,7 +4241,7 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
  * read off the same object; the timeline and the changesets arrive as their own
  * readings, and one not handed in is NOT MEASURED, so H.
  */
-export function pullLowRiskReading(head, paths, { timeline = null, changesets = null } = {}) {
+export function pullLowRiskReading(head, paths, { timeline = null, changesets = null, catalogFiles = null } = {}) {
   const labels = Array.isArray(head?.labels) ? head.labels.map((l) => (typeof l === 'string' ? l : String(l?.name ?? ''))) : null;
   return {
     measured: true,
@@ -4217,7 +4252,45 @@ export function pullLowRiskReading(head, paths, { timeline = null, changesets = 
     fork: forkVerdict(head),
     timeline: timeline ?? { measured: false, reason: 'the timeline was not read', events: null },
     changesets: changesets ?? { measured: false, reason: 'the changesets were not read at the head', files: [] },
+    catalogFiles: catalogFiles ?? { measured: false, reason: 'the status and mode of the changed files were not read', files: [] },
   };
+}
+
+/**
+ * Each changed file's STATUS off the API's file walk (`added`, `removed`,
+ * `modified`, `renamed`, ...), a rename's old name carried as `renamed` too.
+ * Pure; the mode is not on the API row, so `pullCatalogReading` reads it.
+ */
+export function pullCatalogStatuses(files) {
+  const out = [];
+  for (const file of Array.isArray(files) ? files : []) {
+    const status = typeof file?.status === 'string' ? file.status : '';
+    if (typeof file?.filename === 'string' && file.filename !== '') out.push({ path: file.filename, status });
+    if (typeof file?.previous_filename === 'string' && file.previous_filename !== '') out.push({ path: file.previous_filename, status: 'renamed' });
+  }
+  return out;
+}
+
+/**
+ * `--pr`'s status-and-mode reading for the arm: the API's status per path, and
+ * the mode of each modified catalog path at the PR's head from THIS checkout
+ * (`git ls-tree`). No statuses, or a head not here, is NOT MEASURED (Tier H).
+ */
+export function pullCatalogReading({ derivation, statuses, paths, sameCheckout, run }) {
+  const unmeasured = (reason) => ({ measured: false, reason, files: [] });
+  if (!Array.isArray(statuses)) return unmeasured('the file walk carried no status per file');
+  const headSha = derivation?.headSha;
+  if (!sameCheckout) return unmeasured('the PR is not in the repository this checkout holds, so its file modes cannot be read here');
+  if (!isObjectId(headSha)) return unmeasured('the PR object named no head commit');
+  if (!run(['cat-file', '-e', `${headSha}^{commit}`]).ok) return unmeasured(`${headSha.slice(0, 10)} is not in this checkout — \`git fetch origin pull/${derivation.pull}/head\``);
+  const wanted = new Set((Array.isArray(paths) ? paths : []).filter((p) => GOVERNED_SURFACES.some((s) => s.lowRisk && p.startsWith(s.prefix))));
+  const files = statuses.filter((f) => wanted.has(f.path)).map((f) => {
+    if (f.status !== 'modified') return { ...f, mode: null };
+    const tree = run(['ls-tree', headSha, '--', f.path]);
+    const mode = tree.ok ? (/^(\d{6}) /.exec(tree.out)?.[1] ?? null) : null;
+    return { ...f, mode };
+  });
+  return { measured: true, reason: null, files };
 }
 
 /** Does any of these paths sit under a register row that carries the low-risk arm? Pure. */
@@ -4867,7 +4940,11 @@ async function runPullMode(args) {
     : null;
   // The arm's changesets, read at the PR's head from this checkout, as the workflow split reads its trees.
   const lowRisk = derived.lowRisk && lowRiskRowHit(derived.paths)
-    ? { ...derived.lowRisk, changesets: pullChangesetReading({ derivation: derived.derivation, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv) }) }
+    ? {
+        ...derived.lowRisk,
+        changesets: pullChangesetReading({ derivation: derived.derivation, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv) }),
+        catalogFiles: pullCatalogReading({ derivation: derived.derivation, statuses: derived.catalogStatuses, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv) }),
+      }
     : derived.lowRisk ?? null;
   return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff, lowRisk);
 }
@@ -5744,12 +5821,15 @@ async function selfTest() {
     const UISK = 'ui/skills/objectui-views/SKILL.md';
     const CS = '.changeset/33501-skills-wording.md';
     const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
+    // Every catalog path a MODIFIED regular file — the shape a wording PR has.
+    const catFiles = (paths, status = 'modified', mode = '100644') => paths.filter((p) => /^(?:ui\/)?skills\//.test(p)).map((path) => ({ path, status, mode }));
     const csFiles = (paths, text = CS_TEXT) => paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => ({ path, text }));
     const read = (paths, over = {}) => ({
       measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [],
       timeline: { measured: true, reason: null, events: [] },
       fork: { measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' },
       changesets: { measured: true, reason: null, files: csFiles(paths) },
+      catalogFiles: { measured: true, reason: null, files: catFiles(paths) },
       ...over,
     });
     const tier = (paths, reading, repo = REPO) => governedTierFor(paths, repo, GOVERNED_SURFACES, null, reading);
@@ -5815,7 +5895,7 @@ async function selfTest() {
         },
       });
       const walked = await walk([SK, CS], []);
-      const withCs = (r) => ({ ...r, changesets: { measured: true, reason: null, files: csFiles([SK, CS]) } });
+      const withCs = (r) => ({ ...r, changesets: { measured: true, reason: null, files: csFiles([SK, CS]) }, catalogFiles: { measured: true, reason: null, files: catFiles([SK]) } });
       assert('⭐ --pr-carries-the-arm-reading-off-the-same-GET-file-walk-and-timeline-and-with-its-changesets-read-it-answers-Tier-S', walked.ok === true && walked.lowRisk?.measured === true && walked.lowRisk.paths.join() === `${SK},${CS}` && walked.lowRisk.timeline.measured === true && urls.some((u) => /\/issues\/2\/timeline\?per_page=100$/.test(u)) && tier(walked.paths, withCs(walked.lowRisk)) === GOVERNED_TIER_S, JSON.stringify(walked.lowRisk ?? walked.reason));
       const removed = await walk([SK, CS], [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }]);
       assert('⛔ S1-a-security-label-REMOVED-in-the-timeline-the-pull-object-no-longer-shows-is-H', tier(removed.paths, withCs(removed.lowRisk)) === GOVERNED_TIER_H && /`security` label removed/.test(lowRiskArmVerdict(governedPathsIn(removed.paths, REPO), REPO, withCs(removed.lowRisk)).reasons.join()));
@@ -5873,6 +5953,29 @@ async function selfTest() {
     assert('⛔ SEC-a-rename-INTO-a-security-name-is-H-both-paths-are-read', tier(['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS], read(['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS])) === GOVERNED_TIER_H);
     assert('⛔ SEC-a-rename-OUT-OF-a-security-name-is-H-both-paths-are-read', tier(['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS], read(['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS])) === GOVERNED_TIER_H);
     assert('SEC-CONTROL-the-name-test-reads-below-the-catalog-row-only-a-security-word-in-a-rider-path-stays-S', tier([SK, CS, 'docs/agents/security-notes.md'], read([SK, CS, 'docs/agents/security-notes.md'])) === GOVERNED_TIER_S && tier(['skills/objectstack-data/rules/hooks.md', CS], read(['skills/objectstack-data/rules/hooks.md', CS])) === GOVERNED_TIER_S);
+    // ⛔ Only a MODIFIED regular catalog file is wording: add, delete, rename, a symlink, or no status is H.
+    const cat = (paths, files) => read(paths, { catalogFiles: { measured: true, reason: null, files } });
+    assert('⛔ STATUS-adding-a-new-skill-file-is-H', tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'added', mode: '100644' }])) === GOVERNED_TIER_H && /added, deleted or renamed rather than modified: skills\/objectstack-data\/SKILL\.md \(added\)/.test(reasons([SK, CS], cat([SK, CS], [{ path: SK, status: 'added', mode: '100644' }]))));
+    assert('⛔ STATUS-deleting-a-skill-is-H-on-either-spelling', ['removed', 'deleted'].every((st) => tier([SK, CS], cat([SK, CS], [{ path: SK, status: st, mode: null }])) === GOVERNED_TIER_H));
+    assert('⛔ STATUS-a-rename-inside-the-catalog-is-H-both-sides', tier(['skills/a/x.md', 'skills/a/y.md', CS], cat(['skills/a/x.md', 'skills/a/y.md', CS], [{ path: 'skills/a/y.md', status: 'renamed', mode: '100644' }, { path: 'skills/a/x.md', status: 'renamed', mode: null }])) === GOVERNED_TIER_H);
+    assert('⛔ STATUS-an-eval-added-in-one-commit-and-modified-in-the-next-is-H', tier(['skills/a/evals/e.json', CS], cat(['skills/a/evals/e.json', CS], [{ path: 'skills/a/evals/e.json', status: 'added', mode: '100644' }, { path: 'skills/a/evals/e.json', status: 'modified', mode: '100644' }])) === GOVERNED_TIER_H);
+    assert('⛔ STATUS-a-symlink-or-a-mode-not-read-is-H-an-executable-regular-file-is-not', tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '120000' }])) === GOVERNED_TIER_H && /not a regular file: skills\/objectstack-data\/SKILL\.md \(120000\)/.test(reasons([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '120000' }]))) && tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: null }])) === GOVERNED_TIER_H && tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '100755' }])) === GOVERNED_TIER_S);
+    assert('⛔ STATUS-a-catalog-path-with-no-status-row-or-no-status-reading-is-H', tier([SK, CS], cat([SK, CS], [])) === GOVERNED_TIER_H && /no status was read for/.test(reasons([SK, CS], cat([SK, CS], []))) && tier([SK, CS], read([SK, CS], { catalogFiles: { measured: false, reason: 'not here', files: [] } })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { catalogFiles: undefined })) === GOVERNED_TIER_H && tier([SK, CS], cat([SK, CS], [{ path: SK, status: '', mode: '100644' }])) === GOVERNED_TIER_H);
+    assert('STATUS-a-changeset-or-docs-rider-ADDED-beside-a-modified-skill-stays-S-the-status-test-reads-catalog-paths-only', tier([SK, CS, 'docs/agents/new.md'], read([SK, CS, 'docs/agents/new.md'])) === GOVERNED_TIER_S);
+    assert('pullCatalogStatuses-reads-each-status-and-a-renames-old-name', (() => {
+      const st = pullCatalogStatuses([{ filename: 'a.md', status: 'modified' }, { filename: 'b.md', status: 'renamed', previous_filename: 'c.md' }, { filename: 'd.md' }]);
+      return JSON.stringify(st) === JSON.stringify([{ path: 'a.md', status: 'modified' }, { path: 'b.md', status: 'renamed' }, { path: 'c.md', status: 'renamed' }, { path: 'd.md', status: '' }]);
+    })());
+    assert('pullCatalogReading-reads-the-mode-of-each-modified-catalog-file-at-the-head-or-is-NOT-MEASURED', (() => {
+      const Hd = 'a'.repeat(40);
+      const run = (argv) => (argv[0] === 'cat-file' ? { ok: true, out: '' } : argv[0] === 'ls-tree' ? { ok: true, out: `${argv[3] === SK ? '120000' : '100644'} blob ${'f'.repeat(40)}\t${argv[3]}` } : { ok: false, out: '' });
+      const statuses = [{ path: SK, status: 'modified' }, { path: UISK, status: 'modified' }, { path: 'skills/a/new.md', status: 'added' }, { path: CS, status: 'added' }];
+      const r = pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK, UISK, 'skills/a/new.md', CS], sameCheckout: true, run });
+      return r.measured === true && r.files.length === 3 && r.files[0].mode === '120000' && r.files[1].mode === '100644' && r.files[2].mode === null &&
+        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK], sameCheckout: false, run }).measured === false &&
+        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses: null, paths: [SK], sameCheckout: true, run }).measured === false &&
+        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK], sameCheckout: true, run: () => ({ ok: false, out: '' }) }).measured === false;
+    })());
     assert('LOW_RISK_ARM_FILE_PATTERNS-are-frozen-and-two', Object.isFrozen(LOW_RISK_ARM_FILE_PATTERNS) && LOW_RISK_ARM_FILE_PATTERNS.length === 2);
     assert('pullChangesetReading-reads-each-changeset-at-the-head-or-is-NOT-MEASURED', (() => {
       const H = 'a'.repeat(40);

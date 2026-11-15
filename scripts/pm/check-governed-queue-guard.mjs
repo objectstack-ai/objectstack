@@ -349,7 +349,9 @@
  * `readLowRiskTier` re-reads the tier with the body, label names and fork
  * predicate of the pull object it already fetched for the head, the timeline the
  * enqueue leg already read, and each changeset at the commit that touched it
- * (`git show`) — through the register's `governedTierFor`. An unread pull,
+ * (`git show`), and each governed commit's status and mode per path
+ * (`catalogFilesOf`, `diff-tree --raw --no-renames`) — through the register's
+ * `governedTierFor`. An unread pull,
  * timeline or changeset stays Tier H. An entry the arm puts at Tier S clears on
  * a same-head record that READS PASS (`lowRiskRecordVerdict`, the fleet's
  * `contractReviewVerdictOf`), and a record carried from an older head stands for it
@@ -670,7 +672,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 46,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1952,6 +1954,7 @@ export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = n
     ? {
         measured: true,
         reason: null,
+        catalogFiles: catalogFilesOf(entry, runGit),
         paths: entry.allPaths ?? entry.paths,
         body: String(pull.body ?? ''),
         labels: Array.isArray(pull.labels) ? pull.labels : null,
@@ -1963,6 +1966,38 @@ export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = n
   entry.surfaces = applyLowRiskArm(applyWorkflowSplit(governedPathsIn(entry.paths, repo), repo, entry.workflowDiff ?? null), repo, reading);
   entry.tier = governedTierFor(entry.paths, repo, GOVERNED_SURFACES, entry.workflowDiff ?? null, reading);
   return entry;
+}
+
+/** `git diff-tree --raw` status letters, spelled as the arm reads them. */
+const RAW_STATUS = Object.freeze({ M: 'modified', A: 'added', D: 'deleted', T: 'type-changed', R: 'renamed', C: 'copied' });
+
+/**
+ * The status and mode of every path each governed commit of the entry touched,
+ * read with `git diff-tree -r --raw -z --no-renames` against the commit's first
+ * parent (the same comparison `enumerateRows` lists the paths from). One row per
+ * commit per path, so an add in one commit and an edit in the next reads `added`.
+ * No git reader, a commit with no sha, or a read that throws is NOT MEASURED.
+ */
+export function catalogFilesOf(entry, runGit) {
+  if (typeof runGit !== 'function') return { measured: false, reason: 'no git reader was handed to the queue leg', files: [] };
+  const shas = Array.isArray(entry?.shas) ? entry.shas : [];
+  if (shas.length === 0) return { measured: false, reason: 'the entry names no commit to read the status from', files: [] };
+  const files = [];
+  for (const sha of shas) {
+    let out;
+    try {
+      out = String(runGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--raw', '-z', '-m', '--first-parent', sha]));
+    } catch (error) {
+      return { measured: false, reason: `the status of ${String(sha).slice(0, 12)} could not be read (${String(error?.message ?? error).split('\n')[0]})`, files: [] };
+    }
+    const tokens = out.split('\0');
+    for (let i = 0; i + 1 < tokens.length; i += 2) {
+      const meta = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z])/.exec(tokens[i].trim());
+      if (!meta || tokens[i + 1] === '') continue;
+      files.push({ path: tokens[i + 1], status: RAW_STATUS[meta[3]] ?? meta[3], mode: meta[2] });
+    }
+  }
+  return { measured: true, reason: null, files };
 }
 
 /** Did the low-risk skills arm put this entry at Tier S? */
@@ -5738,8 +5773,15 @@ export async function selfTest() {
     const LOW = `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: none\n`;
     const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
     // The committed changeset text, by `git show <sha>:<path>`; any other read throws, as git does.
-    const csGit = (text = CS_TEXT) => (args) => {
+    // `diff-tree --raw -z` rows: every path the fixtures touch, a MODIFIED regular file unless a case says otherwise.
+    const rawOf = (rows) => rows.map(([st, mode, p]) => `:100644 ${mode} ${'1'.repeat(40)} ${'2'.repeat(40)} ${st}\0${p}\0`).join('');
+    const MODIFIED = rawOf([SK, 'skills/objectstack-data/evals/evals.json', 'skills/objectstack-data/rules/security.md', 'skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', 'skills/a/rules/security.md', 'skills/objectstack-data/hook.mjs'].map((p) => ['M', '100644', p]).concat([['A', '100644', CS]]));
+    const csGit = (text = CS_TEXT, raw = MODIFIED) => (args) => {
       if (args[0] === 'show' && /^[0-9a-f]{40}:\.changeset\//.test(args[1]) && text !== null) return text;
+      if (args[0] === 'diff-tree' && args.includes('--raw')) {
+        if (raw === null) throw new Error('fatal: bad object');
+        return raw;
+      }
       throw new Error(`fatal: path not in tree (${args.join(' ')})`);
     };
     const arm = { files: [SK, CS], prBody: LOW, comments: [recordComment()], timeline: [], runGit: csGit() };
@@ -5784,6 +5826,7 @@ export async function selfTest() {
       const tree = qgit({ moved, attrs: '', own: { [REF_HEAD]: moved } });
       return (args) => {
         if (args[0] === 'show') return CS_TEXT;
+        if (args[0] === 'diff-tree' && args.includes('--raw')) return MODIFIED;
         if (args.includes('--no-renames')) armDiffArgs.push(args.join(' '));
         return tree(args.filter((a) => a !== '--no-renames'));
       };
@@ -5886,6 +5929,20 @@ export async function selfTest() {
     // ⛔ The security NAME test at the queue (ruling 「标签和路径都读」): the label OR the path; a rename read as both paths.
     assert('⛔ SEC-a-security-named-skill-file-stays-H-with-a-PASS-record-and-no-label', JSON.stringify(await hCase({ files: ['skills/objectstack-data/rules/security.md', CS] })) === H);
     assert('⛔ SEC-a-rename-into-or-out-of-a-security-name-in-one-commit-stays-H', JSON.stringify(await hCase({ files: ['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS] })) === H && JSON.stringify(await hCase({ files: ['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS] })) === H);
+    // ⛔ Only a MODIFIED regular catalog file is wording (read off `diff-tree --raw` on each governed commit).
+    assert('⛔ STATUS-a-skill-ADDED-in-the-group-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['A', '100644', SK], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-skill-DELETED-in-the-group-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['D', '000000', SK], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-rename-read-as-delete-plus-add-under-no-renames-stays-H', JSON.stringify(await hCase({ files: ['skills/a/rules/guide.md', 'skills/a/rules/howto.md', CS], runGit: csGit(CS_TEXT, rawOf([['D', '000000', 'skills/a/rules/guide.md'], ['A', '100644', 'skills/a/rules/howto.md'], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-SYMLINK-under-the-catalog-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '120000', SK], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-status-read-that-throws-or-misses-the-path-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, null) })) === H && JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['A', '100644', CS]])) })) === H);
+    assert('catalogFilesOf-reads-status-and-mode-per-commit-and-fails-closed', (() => {
+      const e = { shas: ['a'.repeat(40), 'b'.repeat(40)] };
+      const per = { ['a'.repeat(40)]: rawOf([['A', '100644', SK]]), ['b'.repeat(40)]: rawOf([['M', '100644', SK]]) };
+      const r = catalogFilesOf(e, (args) => per[args[args.length - 1]]);
+      return r.measured === true && r.files.map((f) => `${f.status}:${f.mode}`).join() === 'added:100644,modified:100644' &&
+        catalogFilesOf(e, null).measured === false && catalogFilesOf({ shas: [] }, () => '').measured === false &&
+        catalogFilesOf(e, () => { throw new Error('x'); }).measured === false;
+    })());
     // ⛔ S4: under the catalog only Markdown and `evals/*.json`.
     assert('⛔ S4-a-script-under-skills-stays-H-an-evals-json-does-not', JSON.stringify(await hCase({ files: [SK, CS, 'skills/objectstack-data/hook.mjs'] })) === H && (await tierRun({ ...arm, files: [SK, CS, 'skills/objectstack-data/evals/evals.json'] })).exitCode === EXIT_CLEAR);
 
