@@ -522,7 +522,7 @@ export const zhCN: PlatformTranslationData = {
         siliconflow_model: { label: '模型', help: '示例:Qwen/Qwen2.5-72B-Instruct、deepseek-ai/DeepSeek-V3、meta-llama/Meta-Llama-3.1-8B-Instruct。' },
         openrouter_api_key: { label: 'OpenRouter API Key' },
         openrouter_model: { label: '模型', help: '格式:provider/model(例如 anthropic/claude-3.5-sonnet、deepseek/deepseek-chat)。' },
-        title_generation_enabled: { label: '自动为会话生成摘要标题' },
+        title_generation_enabled: { label: '自动为会话生成摘要标题', help: '开启后，助手首次回复后会让 LLM 生成一个简短标题。关闭可节省 tokens，或将标题留空，由用户手动为会话命名。' },
         title_max_length: { label: '标题最大长度(字符)', help: '生成标题的硬上限,超出部分在服务端截断。' },
         temperature: { label: '温度', help: '0 = 确定性,2 = 高度发散。' },
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },

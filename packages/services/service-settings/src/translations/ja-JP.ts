@@ -481,7 +481,7 @@ export const jaJP: PlatformTranslationData = {
         siliconflow_model: { label: 'モデル', help: '例:Qwen/Qwen2.5-72B-Instruct、deepseek-ai/DeepSeek-V3、meta-llama/Meta-Llama-3.1-8B-Instruct。' },
         openrouter_api_key: { label: 'OpenRouter API キー', help: 'sk-or-…' },
         openrouter_model: { label: 'モデル', help: '形式:provider/model（例:anthropic/claude-3.5-sonnet、deepseek/deepseek-chat）。' },
-        title_generation_enabled: { label: '会話タイトルを自動要約' },
+        title_generation_enabled: { label: '会話タイトルを自動要約', help: 'オンにすると、アシスタントの最初の返信の後に LLM へ短いタイトルの生成を依頼します。トークンを節約するにはオフにします。タイトルを空のままにすると、ユーザーが会話に手動で名前を付けられます。' },
         title_max_length: { label: 'タイトルの最大長（文字）', help: '生成タイトルの上限。超過分はサーバー側で切り詰められます。' },
         temperature: { label: 'Temperature',
           help: '0 = 決定的、2 = 非常に創造的。' },

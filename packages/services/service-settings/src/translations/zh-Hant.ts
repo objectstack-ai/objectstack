@@ -405,7 +405,7 @@ export const zhHant: PlatformTranslationData = {
           label: '模型',
           help: '格式：provider/model（例如 anthropic/claude-3.5-sonnet、deepseek/deepseek-chat）。',
         },
-        title_generation_enabled: { label: '自動為對話產生摘要標題' },
+        title_generation_enabled: { label: '自動為對話產生摘要標題', help: '開啟後，助理首次回覆後會讓 LLM 產生一個簡短標題。關閉可節省 token，或將標題留空，由使用者手動為對話命名。' },
         title_max_length: { label: '標題最大長度（字元）', help: '產生標題的硬性上限。超過的部分會在伺服器端截斷。' },
         temperature: { label: '溫度', help: '0 = 確定性，2 = 高度發散。' },
         max_tokens: { label: '最大輸出 token 數', help: '每次回應產生 token 數的硬性上限。' },

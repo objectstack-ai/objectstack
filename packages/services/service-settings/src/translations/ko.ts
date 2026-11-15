@@ -460,7 +460,7 @@ export const ko: PlatformTranslationData = {
           label: '모델',
           help: '형식: provider/model(예: anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: '대화 제목 자동 요약' },
+        title_generation_enabled: { label: '대화 제목 자동 요약', help: '켜면 어시스턴트의 첫 응답 후 LLM에 짧은 제목 생성을 요청합니다. 토큰을 절약하려면 끄고, 사용자가 대화 이름을 직접 지정하게 하려면 제목을 비워 두세요.' },
         title_max_length: { label: '제목 최대 길이(자)', help: '생성된 제목의 하드 상한입니다. 더 긴 부분은 서버에서 잘립니다.' },
         temperature: { label: '온도', help: '0 = 결정적, 2 = 매우 창의적.' },
         max_tokens: { label: '최대 출력 토큰', help: '응답 하나당 생성되는 토큰의 하드 상한입니다.' },

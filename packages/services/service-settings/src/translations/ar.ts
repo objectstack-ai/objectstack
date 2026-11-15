@@ -560,7 +560,10 @@ export const ar: PlatformTranslationData = {
           label: 'النموذج',
           help: 'الصيغة: provider/model (مثل anthropic/claude-3.5-sonnet وdeepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: 'تلخيص عناوين المحادثات تلقائيًا' },
+        title_generation_enabled: {
+          label: 'تلخيص عناوين المحادثات تلقائيًا',
+          help: 'عند التفعيل، يُطلب من نموذج LLM إنشاء عنوان قصير بعد أول رد من المساعد. عطّله لتوفير الرموز المميزة، أو اترك العنوان فارغًا ليُسمّي المستخدمون المحادثات يدويًا.',
+        },
         title_max_length: {
           label: 'الحد الأقصى لطول العنوان (أحرف)',
           help: 'حد صارم لطول العنوان المُنشأ. أي زيادة تُقتطع على الخادم.',

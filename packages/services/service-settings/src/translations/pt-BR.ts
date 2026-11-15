@@ -592,7 +592,10 @@ export const ptBR: PlatformTranslationData = {
           label: 'Modelo',
           help: 'Formato: provider/model (por exemplo anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: 'Resumir automaticamente os títulos das conversas' },
+        title_generation_enabled: {
+          label: 'Resumir automaticamente os títulos das conversas',
+          help: 'Ativado, o LLM é solicitado a gerar um título curto após a primeira resposta do assistente. Desative para economizar tokens ou deixe o título em branco para que os usuários nomeiem as conversas manualmente.',
+        },
         title_max_length: {
           label: 'Tamanho máximo do título (caracteres)',
           help: 'Limite rígido do título gerado. O que passar disso é truncado no servidor.',

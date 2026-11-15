@@ -483,7 +483,7 @@ export const esES: PlatformTranslationData = {
         siliconflow_model: { label: 'Modelo', help: 'Ejemplos: Qwen/Qwen2.5-72B-Instruct, deepseek-ai/DeepSeek-V3, meta-llama/Meta-Llama-3.1-8B-Instruct.' },
         openrouter_api_key: { label: 'Clave de API de OpenRouter', help: 'sk-or-…' },
         openrouter_model: { label: 'Modelo', help: 'Formato: provider/model (p. ej. anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).' },
-        title_generation_enabled: { label: 'Resumir automáticamente los títulos de conversación' },
+        title_generation_enabled: { label: 'Resumir automáticamente los títulos de conversación', help: 'Activado, se pide al LLM un título breve tras la primera respuesta del asistente. Desactívelo para ahorrar tokens o deje el título en blanco para que los usuarios nombren las conversaciones a mano.' },
         title_max_length: { label: 'Longitud máx. del título (caracteres)', help: 'Tope estricto del título generado. Todo lo que exceda se trunca en el servidor.' },
         temperature: { label: 'Temperatura',
           help: '0 = determinista, 2 = muy creativo.' },
