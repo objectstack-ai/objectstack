@@ -195,10 +195,13 @@ export function issueRefusal(e: unknown, locale: string, locate?: IssueLocator):
     const path = String(issue.path ?? '').split('.').filter((seg) => seg !== '');
     const at = locate?.(path);
     if (!at) continue;
-    const sentence = tFormat('engine.studio.refusal.issue', locale, {
-      where: at.where,
-      problem: translateValidationMessage(issue.message, locale),
-    });
+    // The producer's own sentence, already in the request's language, when it
+    // sent one (`RuntimeAuthoringIssueSchema.userMessage`); only an issue
+    // without one has its English `message` read through the console's table.
+    const problem = typeof issue.userMessage === 'string' && issue.userMessage.trim() !== ''
+      ? issue.userMessage
+      : translateValidationMessage(issue.message, locale);
+    const sentence = tFormat('engine.studio.refusal.issue', locale, { where: at.where, problem });
     return located(sentence, issues.length, at, detail, locale);
   }
   return { message: t('engine.studio.refusal.unlocated', locale), detail };
