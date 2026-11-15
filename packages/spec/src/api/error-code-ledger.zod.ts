@@ -837,7 +837,8 @@ export const ERROR_CODE_LEDGER = {
     // upgrade, which is a deployment change, not environment state. It
     // matches this package's own METADATA_SCHEMA_INVALID. It is not 409,
     // which this ledger keeps for refusals from environment state
-    // (CONCURRENT_UPDATE). The two HTTP doors that reach the throw, `POST /api/v1/packages` and (since #21805)
+    // (CONCURRENT_UPDATE). The two HTTP doors that reach the throw,
+    // `POST /api/v1/packages` and (since #21805)
     // `POST /api/v1/marketplace/install-local`, answer the same bytes through
     // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,
     // `rangeSource`, `protocolVersion` and `targetMajor` in `error.details`
