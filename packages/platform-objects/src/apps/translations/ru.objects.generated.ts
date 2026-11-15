@@ -449,7 +449,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "Сеанс",
     pluralLabel: "Сеансы",
-    description: "Активные сеансы пользователей",
+    description: "Сеансы пользователей",
     fields: {
       user_id: {
         label: "Пользователь"
