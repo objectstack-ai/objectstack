@@ -51,11 +51,11 @@ const ticket = ObjectSchema.create({
   actions: [
     {
       name: GATED, label: 'Close Ticket', objectName: OBJECT, operation: 'update', patch: { status: 'closed' },
-      ai: { exposed: true, description: 'Close the ticket for good.', requiresConfirmation: true },
+      ai: { exposed: true, description: 'Close the ticket for good, so no further work is taken on it.', requiresConfirmation: true },
     },
     {
       name: PLAIN, label: 'Flag Ticket', objectName: OBJECT, operation: 'update', patch: { status: 'flagged' },
-      ai: { exposed: true, description: 'Flag the ticket.' },
+      ai: { exposed: true, description: 'Flag the ticket so a person looks at it during the next review.' },
     },
   ],
 } as never);
