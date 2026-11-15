@@ -8,13 +8,15 @@ fix(metadata-protocol,rest,runtime)!: a name only disabled packages hold answers
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
+Skills-docs: updated here — content/docs/data-modeling/import-mappings.mdx (no `skills/**` file teaches an `_env` answer)
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads under a reversible package state: no stored row is changed or deleted, so there is nothing for a migration to rewrite and no tombstone. -->
 
 **BREAKING** for a read of an environment customization of a name whose every holding package is disabled. Such a customization is a row saved without a package, for a name an installed package holds. It belongs to that package (ADR-0150 D4), and a disabled package holds no name (ADR-0150 D3).
 
 - **The read that names no package (`GET /meta/:type/:name`, and the execution read).** When every package holding the name is disabled, this read now answers as if the customization were not saved: `404`, where it served the row. That includes a translation the package never shipped, such as an email template's `fr-FR` that only the environment wrote. A customization at a member the package ships was already hidden.
-- **`GET /meta/:type/_env/:name`.** When every package holding the name is disabled, the environment address now answers `404`, as for a name no package holds, on both the REST server and the runtime dispatcher. It used to refuse `409 RESOURCE_CONFLICT` naming the disabled packages. It still refuses `409` in two cases: an enabled package holds the name, or a package holds it through a saved metadata row that the read of the name serves.
+- **`GET /meta/:type/_env/:name`.** When every package holding the name is disabled, the environment address now answers `404`, as for a name no package holds, on both the REST server and the runtime dispatcher. It used to refuse `409 RESOURCE_CONFLICT` naming the disabled packages. It still refuses `409` in three cases: an enabled package holds the name; a package holds it through a saved metadata row that the read of the name serves; or the read carries `?state=draft`, `?preview=draft` or `?layers=`, which read other rows than the plain read.
+- **The import door's `mappingName: "_env/NAME"`.** The same move, as `GET /meta/mapping/_env/NAME` answers it: `404 MAPPING_NOT_FOUND`, naming no package, where it was refused `409` naming the disabled package.
 
 **Not moved.** With an enabled holder, every answer is unchanged. A customization of a name no installed package holds is the environment's own item and is still served.
 
