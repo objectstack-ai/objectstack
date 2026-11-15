@@ -45,6 +45,9 @@ import {
   resolveRecordPointer,
   RECORD_POINTER_CARD_TYPE,
   coerceToSafeValue,
+  FormulaCellRenderer,
+  FormulaField,
+  SummaryField,
   TextAreaField,
   TextCellRenderer,
   TextField,
@@ -114,8 +117,9 @@ export function getResponsiveSpanClass(span: number | undefined, columns: number
 
 /**
  * The `onChange` a read display is handed. The `readonly` branches of
- * `TextAreaField` and `TextField` render no control and never call it; the
- * widget contract requires the slot.
+ * `TextAreaField` and `TextField`, and the read-only `FormulaField` and
+ * `SummaryField`, render no control and never call it; the widget contract
+ * requires the slot.
  */
 const ignoreReadOnlyChange = (): void => {};
 
@@ -669,6 +673,33 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
               field={enrichedField as unknown as FieldMetadata}
               value={String(coerceToSafeValue(value))}
               onChange={ignoreReadOnlyChange}
+              readonly
+            />
+          );
+        }
+        // A computed value the table draws with the formula cell reads through
+        // its own field widget's read display, the face the record form draws
+        // (objectstack#34148), the same move the two branches above make. The
+        // cell's text face is `TextCellRenderer`, one line and an ellipsis, so
+        // a long text formula (an explanation sentence) or a text roll-up was
+        // cut, its whole value only in a hover `title`. `FormulaField` and
+        // `SummaryField` read the value by the rule the cell reads it by, and
+        // their tests compare the two faces' text for every type, so a number,
+        // money, date or boolean result reads the same words here; their text
+        // face wraps. The grid row keeps the cell. Matched by renderer
+        // identity, so a host that registered its own `formula` or `summary`
+        // face keeps it; the widget is picked by the type the table mapped.
+        // The raw value goes in: both widgets coerce it as the cell does, and
+        // read a JS number as a number. The row is the widgets' record, as it
+        // is the cell's below, for a currency that a sibling field names.
+        if (CellRenderer === FormulaCellRenderer && (resolvedType === 'formula' || resolvedType === 'summary')) {
+          const ReadDisplay = resolvedType === 'summary' ? SummaryField : FormulaField;
+          return (
+            <ReadDisplay
+              field={enrichedField as unknown as FieldMetadata}
+              value={value}
+              onChange={ignoreReadOnlyChange}
+              dependentValues={data}
               readonly
             />
           );
