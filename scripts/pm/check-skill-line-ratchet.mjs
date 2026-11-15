@@ -1381,7 +1381,15 @@ export const CEILINGS = new Map([
   // GitHub and the ownership split. Ordered by the same ruling of record as the two
   // raises above. A NEW file, so this is an added row and no other row moves for it;
   // set at the landed line count, headroom 0, same convention as every entry above.
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 60],
+  // Raised 60 → 68 by the area-mode rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer, 2026-11-15, verbatim: 「写仓库」, approving the coordinator's proposal to
+  // write the day's area-mode rules into the repo; quoted in the body of card #33907
+  // (filing gate ③), claim comment 6895484790): the pre-claim three checks recorded in
+  // the claim, the declaration self-check, p3 fill behind p1/p2, analysed cross-lane cards
+  // staying in lane, four devs per area with re-splitting, contract-tier review of batched
+  // Chinese decisions, landing within ten minutes. The dated eight-area example was
+  // deleted to pay part of it. Measured delta +8; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 68],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
