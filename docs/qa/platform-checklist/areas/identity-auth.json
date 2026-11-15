@@ -3529,7 +3529,7 @@
       "title": "Sign-out leaves none of the signed-out user's browser state and no return link, while a session that ended on the server sends the next in-app navigation to sign-in with its return link",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3554,8 +3554,8 @@
         {
           "clause": "sign-out sweeps both stores down to the device keys before the sign-in page shows",
           "oracle": "dom",
-          "verify": "after sign-out both stores hold only keys from the kept set: auth-session-token, auth-session-user-id, vite-ui-theme, objectui-locale and objectui-locale-seed; qa-probe-<run> and every objectui:metadata:* key are gone from both (ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState, run by ui/packages/auth/src/AuthProvider.tsx#AuthProvider on every sign-out path)",
-          "evidence": "the two key lists before and after"
+          "verify": "after sign-out no key the signed-out user's session wrote survives in either store (the same test as negative[1]): every key left is in the kept set (SIGNED_OUT_KEPT_KEYS: auth-session-token, auth-session-user-id, vite-ui-theme, objectui-locale, objectui-locale-seed and objectui:auth:signed-out-via-provider) or is anonymous-shell state that a never-signed-in visit to /_console/login writes too, which today is exactly flow-palette-recents holding [] (the unscoped key ui/packages/app-shell/src/context/FlowPaletteRecentsProvider.tsx#FlowPaletteRecentsProvider writes when it re-hydrates with no user after the sweep); qa-probe-<run>, every objectui:metadata:* key and every user-scoped :u:<id> key are gone from both, and flow-palette-recents holding anything but [] is the signed-out user's. A key outside both lists is judged against a fresh never-signed-in context opening /_console/login: written there with the same value, it is anonymous-shell state to name in the run record for this verify to list; otherwise it is a FAIL (ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState, run by ui/packages/auth/src/AuthProvider.tsx#AuthProvider on every sign-out path)",
+          "evidence": "the two key lists before and after, with the value of every key outside the kept set"
         },
         {
           "clause": "an explicit sign-out carries no return link, so the next person lands on their own home",
@@ -3603,6 +3603,12 @@
           "date": "2026-11-14",
           "change": "acceptance[1].verify re-pointed (stale spec, QA run #32953, card body of #32908; ledger row 41). After sign-in without a redirect the console resolves the root landing (RootLandingRedirect.tsx), which on the showcase is the member's app, not /home. What the clause tests, no carry-over of the admin's record, is unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify re-pointed (stale spec, QA run #33853, card #33859). The verify listed the kept keys as the only keys allowed after sign-out, but the anonymous login page writes its own flow-palette-recents = [] (FlowPaletteRecentsProvider re-hydrates with no user after the purge and saves the unscoped key); a never-signed-in visit writes the same. The verify now judges keys the signed-out user's session wrote, as negative[1] does, names that anonymous-shell key with its value, adds objectui:auth:signed-out-via-provider to the kept list as SIGNED_OUT_KEPT_KEYS has it, and has the runner diff any other unlisted key against a fresh anonymous visit. What the clause tests, no signed-out user's state left behind, is unchanged. Read at base 895783a1",
+          "ref": "#PENDING-33859"
         }
       ]
     }
