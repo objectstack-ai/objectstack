@@ -839,7 +839,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "fixtures.requires[2] names the scratch package body POST /api/v1/packages takes ({id, name, version, type}; 'label' is refused) and the filterBindings a scratch dashboard needs before its first save (else 422 dashboard-filter-field-unknown) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 71). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -1163,7 +1163,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "steps[0] says the absent-slot arm has no stock door: analytics is always on (PLATFORM_ALWAYS_ON_CAPABILITIES) unless a boot uses --preset minimal, so QA could not reach negative[1] and the step did not say how to record that (QA run #33829, negative[1] skipped; ledger 6896511848 of #33761 row 66). Whether the showcase boots under --preset minimal is not measured here. No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -1369,7 +1369,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "steps[1] names the filter key, `where` (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 29). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },

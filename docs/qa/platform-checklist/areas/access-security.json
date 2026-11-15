@@ -150,7 +150,7 @@
           "ref": "#27409"
         },
         { "revision": 11, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" },
-        { "revision": 12, "date": "2026-11-15", "change": "acceptance[4].verify re-pointed: it named showcase_account as the one adopted-row object, and QA read showcase_invoice adopted too and showcase_invoice_line no longer adopted (QA run #33784, comment 6893243542; ledger 6896511848 of #33761 row 3). The verify now says to read the set from the report lines. The clause is unchanged and summary.holes must still be 0. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
+        { "revision": 12, "date": "2026-11-15", "change": "acceptance[4].verify re-pointed: it named showcase_account as the one adopted-row object, and QA read showcase_invoice adopted too and showcase_invoice_line no longer adopted (QA run #33784, comment 6893243542; ledger 6896511848 of #33761 row 3). The verify now says to read the set from the report lines. The clause is unchanged and summary.holes must still be 0. Read at base bc6b7ffd", "ref": "#34016" }
       ]
     },
     {
@@ -2106,7 +2106,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "steps[6], acceptance[4]'s record-gone leg, says the admin deletes the shared record: the minter persona (showcase_client_liaison) gets 403 deleting a brief (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 46). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3632,7 +3632,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "steps[0] names the JSON filter form for the sys_audit_log read: the OData text $filter=action eq 'read' answers 400 INVALID_FILTER (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 25). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -4320,7 +4320,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[1].verify and fixtures.requires[1] re-pointed: a permission set is one name per namespace since ADR-0150 D2/D9, so a manifest with its own namespace redeclaring a showcase set is admitted for the set and the 422 names only the position (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 67). The fixture now asks for a manifest with no namespace or the holder's. The clause is unchanged. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -5079,7 +5079,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "fixtures.requires[2] says the qa_a_ticket record is owned by M: on a private scratch object a row the admin owns reads 0 rows for M, which hides the grant the item reads (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 24). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },

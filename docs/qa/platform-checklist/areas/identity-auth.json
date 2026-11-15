@@ -74,7 +74,7 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-17", "change": "steps[4] and acceptance[2].verify and [3].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The step's 'IdP that never redirects back' is outside the console's watchdog, which covers only the hung sign-in request (20 s) — the console is not on the page while the browser sits at the IdP — so the step now hangs the request itself. And the sign-up half of clause 2 cannot discriminate on the invite_only showcase, where the register link is withheld regardless of enforcement. Not loosened: the break-glass link and the retry path are still required", "ref": "#24036" },
-        { "revision": 4, "date": "2026-11-15", "change": "fixtures.requires[1] no longer calls this a bespoke-env item: a stock showcase boot with OS_SSO_ENABLED, OS_AUTH_SSO_ONLY and a runtime-registered provider satisfies it (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 104). No clause changed. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
+        { "revision": 4, "date": "2026-11-15", "change": "fixtures.requires[1] no longer calls this a bespoke-env item: a stock showcase boot with OS_SSO_ENABLED, OS_AUTH_SSO_ONLY and a runtime-registered provider satisfies it (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 104). No clause changed. Read at base bc6b7ffd", "ref": "#34016" }
       ]
     },
     {
@@ -288,7 +288,7 @@
         { "revision": 10, "date": "2026-10-31", "change": "knownGaps[3] said registering an enterprise SSO provider 'needs a reachable external IdP'. The precise rule, measured by QA run #27438: the register door re-dispatches into @better-auth/sso's /sso/register, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL with 400 discovery_private_host unless its origin is in trustedOrigins. So the localhost IdP that unblocks generic OIDC does not unblock features.sso. The gap now says so, and names the two environments that would lift it. Verdicts are unchanged: device and features.sso stay blocked(environment). Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310", "ref": "#27438" },
         { "revision": 11, "date": "2026-11-14", "change": "steps[0], steps[7] and acceptance[9].verify re-pointed (stale spec, QA runs #32949 and #33093, comment 6850899929; ledger row 54 of #32908). /auth/config answers { success: true, data } (auth-plugin.ts), so the flags sit under data. The delete-user callback needs ?token= or its query schema answers 400 before the disabled branch (change-email-delete-user-wiring.test.ts sends ?token=whatever). The /api/v1/auth/.well-known/ copies answering 200 are recorded as not a defect. No clause changed. Read at base 82838e83", "ref": "#33328" },
         { "revision": 12, "date": "2026-11-14", "change": "split (coverage, card #33353 row 8; ledger row 8 of #32908, QA runs #32949 and #33093, comment 6850899929). The SSO and device variants were recorded blocked(environment), which kept acceptance[0], [4] and [5] (per variant) from ever scoring whole. Re-measured on main: device authorization still has no stock switch (serve.ts injects only the env-mapped plugins; auth-manager-plugin-list.ts reads plugins.deviceAuthorization from config alone), so the variant, steps[5], knownGaps[1] (its spec-path divergence) and the device half of knownGaps[3] moved to a new item, identity-auth.device-authorization-grant, which keeps the blocked(environment) marker and the same three clauses for that variant. The enterprise SSO half stays here and is no longer recorded blocked: OS_SSO_ENABLED arms it and OS_TRUSTED_ORIGINS lifts the register door's loopback refusal (fixtures.requires[2], new; the road QA runs #33092 and #33093 used). The rule followed is the README's Lifecycle 'Append' and 'Change' (an item is never deleted; a semantic edit bumps revision and records history), with the new item's history naming this parent. No clause changed and none is narrowed: every clause still reads per variant, over the variants this item now lists. Read from source at base bd439f17", "ref": "#33353" },
-        { "revision": 13, "date": "2026-11-15", "change": "fixtures.requires[0] names the boot for the generic OIDC variant, which has no env switch: identity-auth.linked-accounts-social's scratch-copy OIDC boot (ledger 6896511848 of #33761 row 92). steps[3] names the production leg's boot, `objectstack serve` with OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY (row 94) (QA run #33853, comment 6894307378). Found while doing #33967, from the #33968 report 6897030673: fixtures.requires[2] says a dev boot already trusts http://localhost:*, so OS_TRUSTED_ORIGINS is needed only on a production boot or another private origin. No clause changed. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
+        { "revision": 13, "date": "2026-11-15", "change": "fixtures.requires[0] names the boot for the generic OIDC variant, which has no env switch: identity-auth.linked-accounts-social's scratch-copy OIDC boot (ledger 6896511848 of #33761 row 92). steps[3] names the production leg's boot, `objectstack serve` with OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY (row 94) (QA run #33853, comment 6894307378). Found while doing #33967, from the #33968 report 6897030673: fixtures.requires[2] says a dev boot already trusts http://localhost:*, so OS_TRUSTED_ORIGINS is needed only on a production boot or another private origin. No clause changed. Read at base bc6b7ffd", "ref": "#34016" }
       ]
     },
     {
@@ -1426,7 +1426,7 @@
         { "revision": 5, "date": "2026-10-17", "change": "steps[1] and [5] and acceptance[3].verify and [4].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The slice read sys_account's live methods as [get, list, aggregate, export]; the re-run on #24036 found the meta read still serving ['get','list'] while the aggregate and export routes pass the method gate (400 VALIDATION_ERROR / 403 EXPORT_NOT_PERMITTED, never 405), so the step now says both — reads only either way, and writes still 405; link_social is retired, so a provider-less boot's missing link action is the same absence every boot shows and clause 3 cannot discriminate on it; and the link callback lands on the 'All' tab. Not loosened: a forged write must still answer 405", "ref": "#24036" },
         { "revision": 6, "date": "2026-11-14", "change": "steps[3], acceptance[2].verify and fixtures.requires[0] re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 168 of #32908). The console's unlink is a declared api action, so it posts the action door, which forwards to /auth/unlink-account (apiActionDoor.ts); both doors are named. A social provider can be switched on from env or settings (auth-plugin.ts), but no real client credentials exist for a run, so the local OIDC fixture stays. The clause is unchanged. Read at base 82838e83", "ref": "#33328" },
         { "revision": 7, "date": "2026-11-14", "change": "fixtures.knownGaps[1] added (environment, ledger row 154 of #32908): a real social provider needs client credentials no QA runner holds; the link clauses stay on the local OIDC provider", "ref": "#33351" },
-        { "revision": 8, "date": "2026-11-15", "change": "fixtures.requires[1] says the local IdP's test identity carries the caller's email, since link-social refuses another email (error=email_does_not_match) (row 97); steps[5] drops the aggregate route, which the data door does not serve: GET …/aggregate answers 404 RECORD_NOT_FOUND and POST 405 (row 98) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761). No clause changed. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
+        { "revision": 8, "date": "2026-11-15", "change": "fixtures.requires[1] says the local IdP's test identity carries the caller's email, since link-social refuses another email (error=email_does_not_match) (row 97); steps[5] drops the aggregate route, which the data door does not serve: GET …/aggregate answers 404 RECORD_NOT_FOUND and POST 405 (row 98) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761). No clause changed. Read at base bc6b7ffd", "ref": "#34016" }
       ]
     },
     {
@@ -2403,7 +2403,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "acceptance[3] names a role-neutral /meta read: GET /api/v1/meta/app differed across the switch because it filters apps by the caller's per-org grade, not because metadata is org-scoped; QA scored the meta half on /meta/object/showcase_task (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 105). The clause's requirement is unchanged: metadata is deployment-level. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -2637,7 +2637,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "fixtures.requires[1] warns that saving mfa_required=everyone with grace 0 through PUT /api/settings/auth also holds the admin who saved it (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 32). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3069,7 +3069,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "fixtures.requires[1] adds the OS_SSO_DOMAIN_VERIFICATION note: with it true the SSO leg's sign-in is refused 'Provider domain has not been verified' (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 30). Found while doing #33967, from the #33968 report 6897030673: the local IdP's origin needs OS_TRUSTED_ORIGINS only on a production boot, since a dev boot trusts http://localhost:* (serve.ts). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3148,7 +3148,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] re-pointed (found while doing #33967, from the #33968 report 6897030673): it said a local IdP's origin must be in OS_TRUSTED_ORIGINS, but a dev boot (`os dev`) already trusts http://localhost:* (packages/cli/src/commands/serve.ts), so the setting is needed only on a production boot or another private origin. No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3553,7 +3553,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[3].verify quotes the rendered wrong-password text without the period (the period-ended literal is the client's no-token fallback, createAuthClient.ts) (row 95), and fixtures.requires[2] says to read the code from the log line's body field, since a six-digit grep catches the messageId digits (row 96) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761). The clause is unchanged. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },

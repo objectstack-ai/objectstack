@@ -1084,7 +1084,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] adds the third scratch package qa_c that stages negative[2] live (a standalone escalate on qa_a_ticket derives qa_a's face qa_a_ticket-escalate), and automated.ref says a run drives it (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 23). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },

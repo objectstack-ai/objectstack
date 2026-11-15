@@ -830,7 +830,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "steps[1] adds the watermark rule to its trigger: since #29918 a restart sweeps at the first tick only when sys_lifecycle_state 'lifecycle' last_swept_at is older than one interval (1 h), so the step ages it before each restart (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 27). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -951,7 +951,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "steps[3], the sweep leg, names the watermark rule: a restart sweeps at the first tick only when sys_lifecycle_state 'lifecycle' last_swept_at is older than 1 h (#29918) (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 28). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },

@@ -582,7 +582,7 @@
         },
         { "revision": 8, "date": "2026-10-31", "change": "steps[1] names the prefix-form compound AST and steps[2] the case contract of the substring operators. Checklist-accuracy findings of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the infix compound [cond, 'and', cond] answered 400 while the step showed only the single-condition form, and the substring operators matched case-exactly on the SQL driver while the step gave no case note. Re-read at base 488b3ed0: packages/spec/src/data/filter.zod.ts lowerFilterAST and the CONTAINS / NOT_CONTAINS / STARTS_WITH / ENDS_WITH / ICONTAINS descriptions. No clause changed", "ref": "#27409" },
         { "revision": 9, "date": "2026-11-01", "change": "QA run #28545 (W3-C1R) finding: the #26644 contract (an empty projection or an unrecognised $count answers 400) had no acceptance or negative row, so its recheck rested on a dispatcher note. negative[1] adds it, spelled from source: protocol.ts projectionFieldsValue / countFlagValue (400 VALIDATION_ERROR naming the spelling) and the body schema's 400 VALIDATION_FAILED, with the probe set of data-empty-projection-count-door.test.ts. #28545 observed the #26644 fix holding. A negative is added; nothing is removed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054", "ref": "#28545" },
-        { "revision": 10, "date": "2026-11-15", "change": "acceptance[8].verify states the variant count. The clause said only \"every variant below\"; `variants` lists 22 operators and 8 params, 30 rows (QA runs #33784 and #33909, comments 6893243542 and 6895587997; ledger 6896511848 of #33761 rows 2 and 184, one edit). The clause is unchanged. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
+        { "revision": 10, "date": "2026-11-15", "change": "acceptance[8].verify states the variant count. The clause said only \"every variant below\"; `variants` lists 22 operators and 8 params, 30 rows (QA runs #33784 and #33909, comments 6893243542 and 6895587997; ledger 6896511848 of #33761 rows 2 and 184, one edit). The clause is unchanged. Read at base bc6b7ffd", "ref": "#34016" }
       ]
     },
     {
@@ -1044,7 +1044,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "title, fixtures.requires[1] and steps[3] re-counted: the tree holds SEVENTEEN *route-ledger.ts files at bc6b7ffd, not sixteen; the seventeenth is packages/services/service-storage/src/attachment-removal-route-ledger.ts (one row, DELETE /api/v1/attachments/:id, #33322). steps[3] samples it with an unknown id, which the own-row delete door answers 404 RECORD_NOT_FOUND (packages/core/src/security/own-row-delete-routes.ts) (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 45). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -2077,7 +2077,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "automated.ref re-pointed: it said the dogfood pin reads the 4-segment 404 as byte-identical to an unmounted path, but the pin (action-activation-door-live.dogfood.test.ts, the acceptance[1] case) asserts code ROUTE_NOT_FOUND, the dispatcher's no-route answer, while an unmounted path answers ENDPOINT_NOT_FOUND (plugin-hono-server adapter.ts). acceptance[1] already said so (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 19). The same stale words in that test file's header comment are code and stay out of this edit. No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3591,7 +3591,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] says qa_b's stack is defineStack(…, { strict: false }): its standalone escalate binds qa_a's object, which the default strict parse refuses as an undefined object (stack.zod.ts) (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 21). negative[2] names the door that removes qa_b, DELETE /api/v1/marketplace/install-local/com.qa.addr-b, since DELETE /api/v1/packages/ID answers 422 WRITABLE_PACKAGE_REQUIRED for an install-local package (found while doing #33967, from the #33968 report 6897030673). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3845,7 +3845,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "fixtures.knownGaps[0] and negative[3] re-pointed (stale spec, QA runs #33829 and #33910, comment 6895587997; ledger 6896511848 of #33761 rows 58 and 193, one edit). Since #31696 flow (and connector) is one holder per namespace (NAMESPACE_SCOPED_BARE_NAME_TYPES), so install admits a second namespace's holder: the gap no longer says install refuses it, and negative[3] no longer says neither address is served; QA read showcase/… and the second namespace's address each serving their own flow (200) and the bare path, _env and a third namespace answering 409 naming both. The gap names the install-local removal door (found while doing #33967, from the #33968 report 6897030673). The clauses are unchanged. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
@@ -3978,7 +3978,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "fixtures.knownGaps[0] re-pointed: it said the /actions 409 with candidates is not reachable, and QA reached it live with the family's two-package action fixture (api-backend.actions-namespace-address). The gap now says this item's own fixture does not stage it and names the fixture that does (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 20). No clause changed. Read at base bc6b7ffd",
-          "ref": "#PENDING-33967"
+          "ref": "#34016"
         }
       ]
     },
