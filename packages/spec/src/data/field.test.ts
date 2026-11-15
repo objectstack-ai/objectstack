@@ -2940,6 +2940,14 @@ describe('FieldSchema.lookupFilters — { $record } comparand and orEmpty', () =
     }
   });
 
+  it('refuses a { $record } as a member of an in or notIn list, at that member', () => {
+    for (const operator of ['in', 'notIn']) {
+      const r = priceBookLookup([{ field: 'cb_market', operator, value: ['domestic', { $record: 'account.cb_market' }] }]);
+      expect(issuesOf(r).map((i) => i.path)).toEqual(['lookupFilters.0.value.1']);
+      expect(issuesOf(r)[0].message).toContain('never a member of a list');
+    }
+  });
+
   it('refuses orEmpty on in, notIn or contains, at orEmpty, and accepts it on the six comparisons', () => {
     for (const operator of ['in', 'notIn', 'contains']) {
       const value = operator === 'contains' ? 'gold' : ['gold'];
@@ -2979,6 +2987,18 @@ describe('FieldSchema.lookupFilters — { $record } comparand and orEmpty', () =
       try { parseFilterAST({ valid_from: { [operator]: { $record: 'date' } } }); } catch (e) { envelope = e; }
       expect(envelope).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
     }
+  });
+
+  it('lets the eq shorthand the picker sends through the shared door unchanged (refused later, by the driver)', () => {
+    // The card's market entry: the picker lowers `eq` to the shorthand
+    // { field: value }, so an unresolved { $record } arrives as
+    // { cb_market: { $record } }. The door reads that object as filter
+    // structure and passes it through as it is; a driver then meets `$record`
+    // as an operator it does not know and refuses the query (INVALID_FILTER).
+    // A refusal by name at the door is the server follow-up's: when it lands,
+    // this pin turns into a refusal and moves with it.
+    const shorthand = { cb_market: { $record: 'account.cb_market' } };
+    expect(parseFilterAST(shorthand)).toEqual(shorthand);
   });
 
   /**

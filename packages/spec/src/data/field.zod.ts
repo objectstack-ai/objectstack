@@ -1313,16 +1313,22 @@ const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/
  *   from it (`account.cb_market`: the `account` lookup on the edited record,
  *   then `cb_market` on the account it points at). Two hops are refused.
  * - **Operator.** Only the six scalar comparisons
- *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}).
+ *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
+ *   value: never a member of an `in` / `notIn` list.
  * - **An empty value.** When the referenced value is empty (null, unset, an
  *   empty string, or a hop whose lookup is unset), the entry is left out of
- *   the candidate query — the rule `dependsOn` already applies to an unset
- *   parent. An author who wants the picker to wait for the value lists that
- *   field in `dependsOn` as well, which gates the picker until it is set.
+ *   the candidate query, so a quote whose account has no market is offered
+ *   every book the other entries admit. A picker with no single record being
+ *   edited (a bulk-action selection bar, a filter panel) has no value to read
+ *   and leaves every `{ $record }` entry out by the same rule.
  * - **Re-query.** The picker re-queries its candidates whenever a referenced
  *   field changes — the first segment of the path (`quote_date`, `account`).
- *   Those fields are implied by the `$record` paths and need not be listed in
- *   `dependsOn`; listing one there adds only its gating.
+ *   Those fields are implied by the `$record` paths. Do NOT list them in
+ *   `dependsOn` for this: a `dependsOn` entry also scopes the candidate query
+ *   by equality (`param = value`, `param` defaulting to the field's own
+ *   name), so `dependsOn: ['quote_date']` would add `quote_date = …` to the
+ *   query over the referenced object and gate the picker while the date is
+ *   unset.
  * - **Unresolved on a server.** No server path knows which record a form is
  *   editing, so a `$record` that reaches a server filter is a picker defect:
  *   it is refused, never read as null and never compared as a literal object.
@@ -1363,13 +1369,26 @@ function isLookupFilterRecordReferenceShape(value: unknown): value is Record<str
 
 /**
  * [#34009] The cross-key rules of one `lookupFilters` entry: a `{ $record }`
- * value is well formed and pairs with a scalar comparison; `orEmpty` pairs
- * with a scalar comparison. Issues sit at the offending key.
+ * value is well formed, pairs with a scalar comparison and is never a list
+ * member; `orEmpty` pairs with a scalar comparison. Issues sit at the
+ * offending key.
  */
 function refuseMalformedLookupFilterEntry(
   entry: { operator: string; value?: unknown; orEmpty?: boolean },
   ctx: z.RefinementCtx,
 ): void {
+  if (Array.isArray(entry.value)) {
+    entry.value.forEach((member, index) => {
+      if (isLookupFilterRecordReferenceShape(member)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value', index],
+          message: 'A { $record } reference is the whole value of an entry, never a member of a list: it stands for ONE value of the record being edited. '
+            + 'Write it as the value of its own entry with eq, ne, gt, lt, gte or lte; a list holds literal values only.',
+        });
+      }
+    });
+  }
   if (isLookupFilterRecordReferenceShape(entry.value)) {
     const parsed = LookupFilterRecordReferenceSchema.safeParse(entry.value);
     if (!parsed.success) {
@@ -2242,9 +2261,11 @@ export const FieldSchema = lazySchema(() => {
     'Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. '
     + 'Each entry compares a column of the CANDIDATE record (`field`, on the referenced object) with `value`. A value may '
     + 'read the record being edited as { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup '
-    + 'hop): the picker sends that value in its place, re-queries whenever a referenced field changes (those fields are '
-    + 'implied — list one in `dependsOn` only to gate the picker until it is set), and leaves the entry out while the '
-    + 'value is empty. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
+    + 'hop): the picker sends that value in its place and re-queries whenever a referenced field changes. Those fields '
+    + 'are implied: do not list them in `dependsOn`, which also scopes the candidate query by equality '
+    + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
+    + 'empty, and on a picker with no single record being edited (a bulk-action bar, a filter panel), the entry is left '
+    + 'out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
     + 'server unresolved is refused, never read as null. The picker narrows the choice only: a rule the save must '
     + 'enforce belongs on the server too. [PLANNED — not enforced] { $record } and orEmpty are declared ahead of the '
     + 'picker that resolves them.',
