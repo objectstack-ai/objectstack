@@ -195,7 +195,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
   it('a before-delete hook counting remaining siblings now sees them all present', async () => {
     const { engine } = await makeEngine();
     const remaining: number[] = [];
-    engine.on('beforeDelete', 'line', async (ctx: any) => {
+    engine.on('beforeDelete', 'line', async () => {
       remaining.push((await engine.find('line', { where: { acct: 'a1' } } as any)).length);
     });
     await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
