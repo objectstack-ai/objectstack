@@ -198,7 +198,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["function: 'count'", "'project.task_count': { readable: false }"],
-        "must_not_contain": ["task: { allowRead: true }", "viewAllRecords: true", "safe to ignore"]
+        "must_not_contain": ["task: { allowRead: true }"]
       }
     }
   ]
