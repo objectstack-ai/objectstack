@@ -4,7 +4,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { signHttpBody, verifyHttpSignature } from '@objectstack/core';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { MemoryHttpOutbox } from './memory-http-outbox.js';
+import { SqlHttpOutbox } from './sql-http-outbox.js';
+import { HttpDelivery } from './objects/http-delivery.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { deliveryBody, type FetchImpl } from './http-sender.js';
 
@@ -155,5 +160,46 @@ describe('HTTP outbox — a GET or HEAD delivery reaches a real receiver through
             valid: true,
             scheme: 'body-only',
         });
+    });
+});
+
+describe('SqlHttpOutbox — the production outbox signs a GET or HEAD over what it sends', () => {
+    let engine: ObjectQL | undefined;
+
+    afterAll(async () => {
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    it.each(['GET', 'HEAD'])('%s on sqlite: stored signature covers the empty body, fetch gets no body, the row succeeds', async (method) => {
+        engine = new ObjectQL();
+        engine.registerDriver(
+            new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+            true,
+        );
+        await engine.init();
+        engine.registry.registerObject(HttpDelivery as any, '@objectstack/service-messaging');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        const outbox = new SqlHttpOutbox(engine as any, { partitionCount: 1 });
+        await outbox.enqueue({
+            source: 'flow',
+            refId: 'node_1',
+            dedupKey: `sql-${method}`,
+            url: 'https://receiver.test/hook',
+            method,
+            signingSecret: SECRET,
+            payload: {},
+        });
+
+        const { impl, calls } = recordingFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0]!.hasBodyKey).toBe(false);
+        expect(calls[0]!.headers['X-Objectstack-Signature']).toBe(EMPTY_BODY_SIGNATURE);
+        const [row] = await outbox.list();
+        expect(row!.status).toBe('success');
+        await engine.destroy();
+        engine = undefined;
     });
 });
