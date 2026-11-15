@@ -32,12 +32,21 @@
  *   check reads the deployment's configured trusted origins alone and never
  *   sees it, and no other endpoint does.
  *
- * The origins the register body names travel the same way, for the same
- * reason: an origin taken from a register or update body is trusted only for
- * the server-side discovery fetch and validation of that provider, and never
- * becomes an accepted `Origin` for the request's own origin check. An update
- * needs none of them: `/sso/update-provider` validates each endpoint it is
- * given with no discovery fetch, and admits any public host on its own.
+ * The origins a register or update body names follow the same rule: an
+ * origin taken from that body is trusted only for the server-side discovery
+ * fetch and validation of that provider, and never becomes an accepted
+ * `Origin` for the request's own origin check. Two readers take them:
+ *
+ * - the vendor's `/sso/register` discovery and endpoint validation, through
+ *   the same per-endpoint context change as a companion origin;
+ * - the sign-out capability check on `/sso/register` and
+ *   `/sso/update-provider` (`AuthManager.assertSsoSignOutOfIdpSupported`),
+ *   which reads the provider's discovery document for its logout endpoint,
+ *   through {@link trustingBodyNamedOrigins}.
+ *
+ * The vendor's `/sso/update-provider` itself fetches no discovery document,
+ * and its endpoint validation admits any public host on its own, so it reads
+ * none of them.
  *
  * ⛔ An origin a fetched discovery document names is never trusted because the
  * document names it: an unknown issuer whose discovery points at a foreign
@@ -103,6 +112,31 @@ export function ssoDiscoveryCompanionContext(
   const trustedOrigins = [...current];
   for (const origin of companions) if (!trustedOrigins.includes(origin)) trustedOrigins.push(origin);
   return { context: { context: { trustedOrigins } } };
+}
+
+/**
+ * A trusted-origin predicate for a server-side discovery read of the provider
+ * a register or update body names: the request's own predicate, and also the
+ * origins that body names (`AuthManager.ssoDiscoveryTrustedOrigins`), matched
+ * exactly, as the vendor matches a plain origin. ⛔ Only for such a read: the
+ * request's origin check never takes it.
+ */
+export function trustingBodyNamedOrigins(
+  isTrustedOrigin: (url: string) => boolean,
+  bodyOrigins: readonly string[],
+): (url: string) => boolean {
+  if (bodyOrigins.length === 0) return isTrustedOrigin;
+  return (url) => {
+    if (isTrustedOrigin(url)) return true;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    return bodyOrigins.includes(parsed.origin);
+  };
 }
 
 // ── The refusal: name the endpoint, and say how to name it explicitly ───────

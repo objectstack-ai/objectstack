@@ -955,10 +955,10 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // ── ADR-0135 D6: runtime self-service external-IdP registration ───────
       // The request's own origin check reads exactly this list, the
       // deployment's configured trusted origins, on every POST: nothing a
-      // request carries is added to it. An origin a `/sso/register` body
-      // names (its issuer and any explicit `oidcConfig` endpoint) is trusted
-      // only for that provider's discovery fetch and validation — the global
-      // before-hook hands it to the register endpoint alone
+      // request carries is added to it. An origin a `/sso/register` or
+      // `/sso/update-provider` body names (its issuer and any explicit
+      // `oidcConfig` endpoint) is trusted only for that provider's server-side
+      // discovery fetch and validation, which take it separately
       // (`AuthManager.ssoDiscoveryTrustedOrigins`,
       // `sso-discovery-companion-origins.ts`).
       return origins.length ? { trustedOrigins: origins } : {};

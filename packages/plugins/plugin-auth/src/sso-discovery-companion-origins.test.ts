@@ -25,6 +25,7 @@ import {
   SSO_DISCOVERY_COMPANION_ORIGINS,
   explainUntrustedDiscoveryEndpoint,
   ssoDiscoveryCompanionOrigins,
+  trustingBodyNamedOrigins,
 } from './sso-discovery-companion-origins';
 import { runRegisterSsoProviderFromForm } from './register-sso-provider';
 // better-auth's first module load is paid at module load, not inside the first
@@ -303,6 +304,17 @@ describe('the companion-origin table', () => {
       expect(ssoDiscoveryCompanionOrigins(issuer), String(issuer)).toEqual([]);
     }
     expect(Object.isFrozen(SSO_DISCOVERY_COMPANION_ORIGINS)).toBe(true);
+  });
+
+  it('a discovery read trusts a body-named origin by exact origin, beside the request\'s own predicate', () => {
+    const configured = (url: string) => url.startsWith(BASE);
+    const trusted = trustingBodyNamedOrigins(configured, ['https://idp.example']);
+    expect(trusted(`${BASE}/x`)).toBe(true);
+    expect(trusted('https://idp.example/logout')).toBe(true);
+    for (const url of ['https://idp.example:8443/logout', 'http://idp.example/logout', 'https://sub.idp.example/logout', 'ftp://idp.example/x', 'not a url']) {
+      expect(trusted(url), url).toBe(false);
+    }
+    expect(trustingBodyNamedOrigins(configured, [])).toBe(configured);
   });
 
   it('the remedy names the registration member for each endpoint a registration can name, and says when it cannot', () => {

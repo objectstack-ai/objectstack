@@ -300,6 +300,7 @@ import {
   type SignOutAuthContext,
   type SsoSignOutDeps,
 } from './sso-sign-out-of-idp.js';
+import { trustingBodyNamedOrigins } from './sso-discovery-companion-origins.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 import {
@@ -4450,6 +4451,11 @@ export class AuthManager {
    * (`judgeSignOutOfIdpCapability`, ruling record 6866334319). An OIDC
    * endpoint it read is kept for the after-hook, which stores it once the
    * vendor's write landed.
+   *
+   * This is a server-side discovery read of the provider the body names, so
+   * it trusts the origins that body names (`ssoDiscoveryTrustedOrigins`) beside
+   * the configured ones, on both doors — for this read only; the request's own
+   * origin check never sees them (`sso-discovery-companion-origins.ts`).
    */
   private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
     const path = ctx?.path;
@@ -4475,7 +4481,10 @@ export class AuthManager {
       issuer,
       stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
       body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
-      isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+      isTrustedOrigin: trustingBodyNamedOrigins(
+        (url) => context.isTrustedOrigin(url),
+        await this.ssoDiscoveryTrustedOrigins(ctx.body),
+      ),
     });
     if (!verdict.ok) {
       const { APIError } = await import('better-auth/api');
@@ -6113,9 +6122,12 @@ export class AuthManager {
    * `[]`.
    *
    * ⛔ Never an accepted `Origin`: the request's own origin check reads the
-   * deployment's configured trusted origins alone. The global before-hook
-   * hands this list to the register endpoint's context, after that check has
-   * run (`sso-discovery-companion-origins.ts`).
+   * deployment's configured trusted origins alone. This list reaches the two
+   * server-side discovery reads of that provider only: the vendor's register
+   * endpoint (the global before-hook hands it to that endpoint's context,
+   * after the origin check has run) and the sign-out capability check on
+   * register and update (`assertSsoSignOutOfIdpSupported`); see
+   * `sso-discovery-companion-origins.ts`.
    */
   private async ssoDiscoveryTrustedOrigins(body: unknown): Promise<string[]> {
     try {
