@@ -1773,16 +1773,38 @@ function composeAnd(existing: unknown, addition: unknown): unknown {
   return { $and: [existing, addition] };
 }
 
-function inferTargetId(data: any, options: any): string | number | undefined {
-  if (data && typeof data === 'object' && data.id != null) return data.id;
+/**
+ * The ONE row a write addresses, or `undefined` when it addresses a predicate.
+ *
+ * Only a SCALAR id (string, number, bigint) names a row, the engine's own rule
+ * for picking the by-id route (`scalarDeleteId` / `scalarUpdateId` in
+ * `@objectstack/metadata-core`). An operator object (`{ $in: [...] }`,
+ * `{ $nin: [...] }`, `{ $eq: ... }`), an array or `null` in an id slot is a
+ * predicate over rows, which the engine dispatches to `deleteMany` /
+ * `updateMany` with the composed AST, so it takes the bulk branch of the write
+ * gate: the `buildWriteFilter` scope ANDed into that AST, the answer a bulk
+ * write has always had (fewer rows, no error). It is never stringified into a
+ * row id: `String({ $in: [...] })` is the row "[object Object]", which no
+ * caller owns, so every such write was refused whatever rows it named. A
+ * non-scalar slot does not shadow a later scalar one, as in the engine.
+ */
+function inferTargetId(data: any, options: any): string | number | bigint | undefined {
+  const slots: unknown[] = [];
+  if (data && typeof data === 'object') slots.push(data.id);
   if (options && typeof options === 'object') {
-    if (options.id != null) return options.id;
-    if (options.where && typeof options.where === 'object' && options.where.id != null) {
-      return options.where.id;
-    }
-    if (options.filter && typeof options.filter === 'object' && options.filter.id != null) {
-      return options.filter.id;
-    }
+    slots.push(options.id);
+    if (options.where && typeof options.where === 'object') slots.push(options.where.id);
+    if (options.filter && typeof options.filter === 'object') slots.push(options.filter.id);
+  }
+  for (const slot of slots) {
+    const id = scalarIdOf(slot);
+    if (id !== undefined) return id;
   }
   return undefined;
+}
+
+/** `value` when it is a scalar row id, `undefined` for an operator object, an array or anything else. */
+function scalarIdOf(value: unknown): string | number | bigint | undefined {
+  const t = typeof value;
+  return t === 'string' || t === 'number' || t === 'bigint' ? (value as string | number | bigint) : undefined;
 }
