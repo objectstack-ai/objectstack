@@ -9,8 +9,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 describe('Connection State Monitoring', () => {
   let adapter: ObjectStackAdapter;

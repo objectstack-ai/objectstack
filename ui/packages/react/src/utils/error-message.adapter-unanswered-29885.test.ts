@@ -8,7 +8,8 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../data-objectstack/src/sharedDiscovery';
 import { answeredLoadFailure, classifyLoadError } from './error-message';
 
 /**

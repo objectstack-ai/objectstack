@@ -118,7 +118,11 @@ rows of its `object`:
 
 - `kind` is closed: `count | sum | avg | min | max | topN`.
 - `kind` `unanswerable` (with a `reason`) states the seed cannot answer: a correct reply
-  says so rather than inventing a figure.
+  says so rather than inventing a figure. It may show what it did read: every number it
+  states must be one some tool output of its turn carries (an identifier such as `INV-002`
+  or an ISO date is no number). A reply that declines and adds a figure no tool output
+  carries ("probably 13%") is not correct: `stated a figure the data cannot support`. An
+  invented figure that happens to equal a number in a tool output is not caught.
 - `filter` is a list of `{ field, op, value }`, all of which must hold. `op` is
   `eq | ne | gt | gte | lt | lte | in | in_window`; `gt`…`lte` compare two numbers or two
   strings (so ISO dates compare by date), `in` takes a list, and `eq null` matches an empty
@@ -280,6 +284,15 @@ for not guessing a name.
   minimum option counts, dashboards and app navigation targets. The iterate prompt does the
   same for `iterate.expectDelta`. A card therefore picks its dashboard names knowing the build
   is told them.
+- **Grants.** The Build half checks each persona's permission set for what the card has that
+  persona do (`persona-grant:<persona>:<object>:<verb>`): `read` on the object of each question
+  it answers, the kind of each write it applies or confirms, and a refusal of each write the card
+  refuses it with `PERMISSION_DENIED` (no grant, or a field it may not edit). A write the card
+  has wait on confirmation may instead go through the card's confirm-gated agent action: when
+  the set withholds the verb and the build declares that action, the check is not measured. The prompt names
+  the set and the persona's role; the questions and operations stay out of it, so the role the
+  card's prose gives a persona must already imply its reads and writes. A grant it does not imply
+  is a card fix, never a sentence added to the prompt.
 - **Tags.** A capability tag whose check reads something the seed does not show is asked for
   in the card's prose: `records-forms.master-detail-inline-edit` names the detail edited inline
   on its master, in every language the prompt carries.

@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache, ConnectionError, MetadataNotFoundError, ObjectStackError } from './index';
+import { ObjectStackAdapter, ConnectionError, MetadataNotFoundError, ObjectStackError } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /**
  * A fetch mock that answers discovery + records the `GET /meta/object/:name`
