@@ -619,6 +619,7 @@ import {
   repoIdForSlug,
   testVerdict,
 } from './check-governed-merges.mjs';
+import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -1979,8 +1980,9 @@ export function landsOnLowRiskArm(entry) {
  *
  * ⛔ A record CARRIED from an older head (the regeneration and prose-only hops)
  * stands for this arm only when nothing it reads moved after the PASS: the hops
- * (`git diff -z --name-only --no-renames <reviewed head> <this head>`, through
- * `pair.runGit`: a rename lists BOTH paths, so a skill moved out of the catalog counts)
+ * (`git diff -z --name-only --no-renames <reviewed head> <this head>` through
+ * `pair.runGit`; a rename lists BOTH paths, so a skill moved out of the catalog
+ * counts)
  * may touch no `.changeset/` path and no path under a catalog row. A changeset,
  * the body's partner, and catalog text such as a skill's `CHANGELOG.md` are
  * prose faces the carry admits, yet they are exactly what the arm's tier was
@@ -5776,6 +5778,7 @@ export async function selfTest() {
       return lowRiskRecordVerdict(absent, pair, live) === absent && lowRiskRecordVerdict({ state: 'stands', id: 5 }, pair, live).verdict === 'PASS' && lowRiskRecordVerdict({ state: 'stands', id: 6 }, pair, live).state === 'not-pass' && lowRiskRecordVerdict({ state: 'stands', id: null }, pair, live).state === 'not-pass';
     })());
     // ⛔ A record CARRIED over prose-only hops stands for the arm only when the hops moved no changeset and no catalog path.
+    const armDiffArgs = [];
     const armCarry = (moved) => {
       const tree = qgit({ moved, attrs: '', own: { [REF_HEAD]: moved } });
       return (args) => {
@@ -5784,7 +5787,6 @@ export async function selfTest() {
         return tree(args.filter((a) => a !== '--no-renames'));
       };
     };
-    const armDiffArgs = [];
     const carriedDocs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry('content/docs/guides/x.mdx\0'), baseRef: QBASE });
     assert('SF1-CONTROL-a-PASS-record-carried-over-a-docs-only-hop-still-clears-the-arm', carriedDocs.exitCode === EXIT_CLEAR && carriedDocs.entries[0].record.carriedHops === 1 && carriedDocs.entries[0].record.verdict === 'PASS', JSON.stringify(carriedDocs.entries[0].record));
     const carriedCs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry(`${CS}\0`), baseRef: QBASE });
@@ -5802,10 +5804,15 @@ export async function selfTest() {
     assert('⛔ SF2-on-REAL-git-a-skill-renamed-out-of-the-catalog-into-docs-refuses-the-carried-record', (() => {
       const dir = mkdtempSync(join(tmpdir(), 'lowrisk-rename-'));
       try {
-        const g = (args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+        // `gitFreeEnv` (GIT_ENV_ISOLATION_RULE): an inherited GIT_DIR or GIT_INDEX_FILE never reaches the real checkout.
+        const g = (args) =>
+          execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], {
+            cwd: dir,
+            encoding: 'utf8',
+            env: gitFreeEnv(),
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
         g(['init', '-q']);
-        g(['config', 'user.email', 'selftest@example.invalid']);
-        g(['config', 'user.name', 'selftest']);
         mkdirSync(join(dir, 'skills/a/rules'), { recursive: true });
         writeFileSync(join(dir, 'skills/a/rules/security.md'), 'Never echo a token back.\n'.repeat(20));
         g(['add', '-A']);

@@ -503,8 +503,9 @@
  * Then the landing is Tier S's: a `## Contract review` record for the current
  * head at `CONTRACT_REVIEW_TIER` (the record recognisers' `rules` face — no
  * lower tier stands on a governed path) that READS PASS — the queue guard reads
- * the verdict for this arm — and every check green; the owning seat enqueues. ⛔ Fail closed: no reading or an unmeasured one is H. `--pr` reads
- * it off the same pull object and file walk; the queue guard's `merge_group` leg
+ * the verdict for this arm — and every check green; the owning seat enqueues.
+ * ⛔ Fail closed: no reading or an unmeasured one is H. `--pr` reads it off the
+ * same pull object and file walk; the queue guard's `merge_group` leg
  * off the pull it already reads, over every commit of the PR in the group.
  *
  * NOT moved: `docs/adr/**` stays Tier H. The ruling names ADR notes, but a path
@@ -2254,9 +2255,9 @@ function lowRiskArmIn(surface, repo) {
 }
 
 /**
- * The file SHAPES a low-risk row may change: skill
- * wording and its evals, nothing else. A script, a JSON or YAML outside an
- * `evals/` folder, an image or any other file under `skills/**` keeps the PR H.
+ * The file SHAPES a low-risk row may change: skill wording and its evals,
+ * nothing else. A script, a JSON or YAML outside an `evals/` folder, an image or
+ * any other file under `skills/**` keeps the PR H.
  */
 export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals\/[^/]+\.json$/]);
 
