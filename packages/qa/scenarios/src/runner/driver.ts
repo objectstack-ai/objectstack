@@ -49,8 +49,12 @@ import { parseStreamJson, refusalCodeOf, type ParsedTurn, type RunnerToolCall } 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
   card: string;
-  /** `scratch` (from nothing) or `template` (from a verified build installed unmanaged). */
-  mode: 'scratch' | 'template';
+  /**
+   * `scratch` (from nothing), `template` (from a verified build installed
+   * unmanaged, then changed) or `ask` (the Run half alone, on a verified build
+   * installed unmanaged; its turns are `run` questions and operations only).
+   */
+  mode: 'scratch' | 'template' | 'ask';
   /** `build`, `iterate`, `run` (the first Run half) or `iterate-run` (the Run half after the iterate). */
   phase: 'build' | 'iterate' | 'run' | 'iterate-run';
   /** A question or operation id; `author` for an authoring turn. */

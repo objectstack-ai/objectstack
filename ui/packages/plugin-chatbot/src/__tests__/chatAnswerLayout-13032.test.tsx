@@ -28,6 +28,7 @@ import {
   ConversationScrollButton,
 } from '../elements/conversation';
 import { ChatbotEnhanced } from '../ChatbotEnhanced';
+import { Reasoning, ReasoningContent } from '../elements/reasoning';
 import type { ChatbotEnhancedMessage } from '../ChatbotEnhanced';
 
 /** Geometry the component reads, set per test. */
@@ -254,5 +255,82 @@ describe('an assistant answer in the side panel (objectui#13032)', () => {
     expect(list.nextElementSibling).toBe(row);
     expect(list.parentElement).toHaveClass('flex', 'flex-col');
     expect(list).toHaveClass('min-h-0', 'flex-1');
+  });
+});
+
+/**
+ * objectstack#33723 — `**` beside CJK full-width punctuation. CommonMark's
+ * flanking rule reads full-width punctuation as punctuation, so a run with a
+ * CJK letter on one side and full-width punctuation on the other never opens
+ * or closes, and the asterisks show. Every chat markdown surface renders with
+ * `CHAT_MARKDOWN_PLUGINS` (remark-cjk-friendly in streamdown's `cjk` slot).
+ */
+describe('bold next to CJK full-width punctuation (objectstack#33723)', () => {
+  /** The text of every strong run in the rendered answer. */
+  async function strongRuns(markdown: string): Promise<string[]> {
+    const { container } = render(<MessageResponse>{markdown}</MessageResponse>);
+    await waitFor(() => expect(container.querySelector('p, pre')).not.toBeNull());
+    return Array.from(container.querySelectorAll('[data-streamdown="strong"]')).map((el) => el.textContent ?? '');
+  }
+
+  it.each([
+    ['an opener after a CJK letter, before a book-title mark', '借书人是**《书名》**的作者', '《书名》'],
+    ['an opener after a CJK letter, before a corner bracket', '他说**「引文」**之后', '「引文」'],
+    ['a closer after a full-width comma, before a CJK letter', '他说**你好，**我们走', '你好，'],
+    ['a closer after a full-width full stop, before a CJK letter', '看**这个。**然后', '这个。'],
+    ['a closer after a full-width exclamation mark, before a CJK letter', '真**好！**再来', '好！'],
+    ['a closer after a full-width question mark, before a CJK letter', '是**谁？**不知道', '谁？'],
+    ['a closer after an enumeration comma, before a CJK letter', '有**甲、**乙两种', '甲、'],
+    ['a closer after a closing corner bracket, before a CJK letter', '他说**「好」**然后走', '「好」'],
+  ])('renders %s bold', async (_name, markdown, bold) => {
+    expect(await strongRuns(markdown)).toEqual([bold]);
+  });
+
+  it.each([
+    ['the card example, opener after a corner bracket', '「**《书名》，借书人**」', '《书名》，借书人'],
+    ['bold ending before a full-width comma', '**借书人**，下一位', '借书人'],
+    ['bold ending before a full-width full stop', '是**借书人**。', '借书人'],
+    ['bold ending before a full-width exclamation mark', '是**借书人**！', '借书人'],
+    ['bold ending before a full-width question mark', '是**借书人**？', '借书人'],
+    ['bold ending before an enumeration comma', '**甲**、乙', '甲'],
+    ['bold ending before a closing corner bracket', '「**开头**」再', '开头'],
+    ['bold starting after an opening corner bracket', '说「**开头**」', '开头'],
+  ])('control: %s stays bold', async (_name, markdown, bold) => {
+    expect(await strongRuns(markdown)).toEqual([bold]);
+  });
+
+  it.each([
+    ['ASCII emphasis', 'This is **bold** text and foo**bar**baz', ['bold', 'bar'], 'This is bold text and foobarbaz'],
+    ['ASCII punctuation inside the run beside letters (CommonMark: literal)', 'a**"b"**c', [], 'a**"b"**c'],
+    ['escaped asterisks', '\\*\\*《书名》\\*\\*', [], '**《书名》**'],
+  ])('control: %s keeps its CommonMark meaning', async (_name, markdown, bold, text) => {
+    const { container } = render(<MessageResponse>{markdown}</MessageResponse>);
+    await waitFor(() => expect(container.querySelector('p')).not.toBeNull());
+    const runs = Array.from(container.querySelectorAll('[data-streamdown="strong"]')).map((el) => el.textContent);
+    expect(runs).toEqual(bold);
+    expect(container.querySelector('p')!.textContent).toBe(text);
+  });
+
+  it('control: `**` inside an inline code span stays literal', async () => {
+    const { container } = render(<MessageResponse>{'书名是`**《书名》**`的写法'}</MessageResponse>);
+    await waitFor(() => expect(container.querySelector('code')).not.toBeNull());
+    expect(container.querySelector('code')!.textContent).toBe('**《书名》**');
+    expect(container.querySelector('[data-streamdown="strong"]')).toBeNull();
+  });
+
+  it('a caller\'s own plugins keep the CJK rule', async () => {
+    const { container } = render(<MessageResponse plugins={{}}>{'借书人是**《书名》**的作者'}</MessageResponse>);
+    await waitFor(() => expect(container.querySelector('p')).not.toBeNull());
+    expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('《书名》');
+  });
+
+  it('the reasoning panel renders with the same rule', async () => {
+    const { container } = render(
+      <Reasoning defaultOpen>
+        <ReasoningContent>{'借书人是**《书名》**的作者'}</ReasoningContent>
+      </Reasoning>,
+    );
+    await waitFor(() => expect(container.querySelector('p')).not.toBeNull());
+    expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('《书名》');
   });
 });
