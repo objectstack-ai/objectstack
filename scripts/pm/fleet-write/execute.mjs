@@ -211,7 +211,7 @@
  * read answered (no second read between the comment and the mutation); then
  * the queue re-read every `DEQUEUE_POLL_MS` for up to `DEQUEUE_WINDOW_MS`
  * until it no longer lists the pull, and the pull's own GET read open with
- * `merged` false (`dequeuePullAfter`). GraphQL errors are FAILED naming the
+ * `merged` false (`dequeuePullAfter`) twice, one `DEQUEUE_POLL_MS` apart. GraphQL errors are FAILED naming the
  * grant when the platform says "not accessible by integration"; a pull that
  * merged, or closed, inside the window is FAILED naming it; a read-back that
  * still lists the pull after the window is FAILED, UNCONFIRMED. Every failure after the comment names the
@@ -1452,10 +1452,17 @@ export async function dequeueAction(req, { payload, api, t, sleep, now, windowMs
       const v = dequeueReadBack({ pull, queue: q.queue });
       if (!v.ok) last = v.why;
       else {
-        // Out of the queue is half the landing: the pull's own GET must read it still open and unmerged (header).
-        const after = dequeuePullAfter(await rest(api, `/repos/${payload.repo}/pulls/${pull}`, {}, t));
-        if (after.ok) return { ok: true, call: mutation, status: r.status, result: dequeueLandedText({ pull, total: q.queue.entries.length, auditId }) };
-        if (!after.pending) return { ok: false, call: mutation, status: r.status, why: `HTTP 200 accepted and the queue no longer lists #${pull}, but ${after.why}; audit comment ${auditId} stands — ⛔ do not re-send, read the pull and report to the maintainer` };
+        // Out of the queue is half the landing: the pull's own GET must read it still open and unmerged, TWICE, one
+        // poll apart — the queue's removal and `merged` arrive seconds apart in either order (header).
+        const readPull = async () => dequeuePullAfter(await rest(api, `/repos/${payload.repo}/pulls/${pull}`, {}, t));
+        const merged = (after) => ({ ok: false, call: mutation, status: r.status, why: `HTTP 200 accepted and the queue no longer lists #${pull}, but ${after.why}; audit comment ${auditId} stands — ⛔ do not re-send, read the pull and report to the maintainer` });
+        let after = await readPull();
+        if (after.ok) {
+          await sleep(pollMs);
+          after = await readPull();
+          if (after.ok) return { ok: true, call: mutation, status: r.status, result: dequeueLandedText({ pull, total: q.queue.entries.length, auditId }) };
+        }
+        if (!after.pending) return merged(after);
         last = after.why;
       }
     }
@@ -2551,8 +2558,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 9 → 12 with a carrying comment that opens with a seat signature refused, its other way, and no reader carrying nothing.
   "the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere, a comment naming another head or pull or opening with a seat signature refused with the mutation not sent": 12,
   // 16 → 27 with seat-asks bound to the landing seat (another seat, the relay's own audit, no trailer, the pure match),
-  // the pull read back open and unmerged (merged, closed, a late read, the pure reading) and the node id from the first read.
-  "the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged, a merge or close inside the window FAILED, UNCONFIRMED after the window": 27,
+  // the pull read back open and unmerged (merged, closed, a late read, the pure reading) and the node id from the first read;
+  // 27 → 28 with the second pull read one interval later, a merge that shows only there refused.
+  "the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged on two reads one interval apart, a merge or close inside the window FAILED, UNCONFIRMED after the window": 28,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
@@ -3426,7 +3434,7 @@ export async function selfTest() {
     }
 
     // ── the dequeue ─────────────────────────────────────────────────────────
-    battery("the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged, a merge or close inside the window FAILED, UNCONFIRMED after the window");
+    battery("the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged on two reads one interval apart, a merge or close inside the window FAILED, UNCONFIRMED after the window");
     {
       const PULL = 3591;
       const HEAD = '5c1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
@@ -3452,7 +3460,7 @@ export async function selfTest() {
       const mutations = (seen) => seen.filter((x) => x.call === GQL && x.body?.query?.startsWith('mutation'));
       const audits = (seen) => seen.filter((x) => x.call === AUDIT);
       const ok = await run(stroke(), happy, timing);
-      t('⭐ conflict: the sender gate, the pull, its queue — then ONE audit comment, ONE mutation on the node id the first pull read answered (no second read between the comment and the mutation), the queue read back, the pull read back; exit 0', [ok.exit, ok.seen.map((x) => x.call)], [EXIT_OK, [PERM, PULL_GET, GQL, AUDIT, GQL, GQL, PULL_GET]], ok.logs.join(' | '));
+      t('⭐ conflict: the sender gate, the pull, its queue — then ONE audit comment, ONE mutation on the node id the first pull read answered (no second read between the comment and the mutation), the queue read back, the pull read back twice; exit 0', [ok.exit, ok.seen.map((x) => x.call)], [EXIT_OK, [PERM, PULL_GET, GQL, AUDIT, GQL, GQL, PULL_GET, PULL_GET]], ok.logs.join(' | '));
       t('…the queue read selects each entry\'s merge-group rollup, the mutation sends the pull\'s node id to dequeuePullRequest', [ok.seen[2].body.query.includes('statusCheckRollup { state }'), mutations(ok.seen).map((m) => [m.body.query.includes('dequeuePullRequest(input: { id: $id })'), m.body.variables])], [true, [[true, { id: 'PR_kwDOout' }]]]);
       const body = audits(ok.seen)[0]?.body?.body ?? '';
       t('…the ONE audit comment names the session, the request, the cause, what the relay read and the seat\'s reason', [SESSION, 'fw-test-1', 'cause `conflict`', 'mergeable_state dirty', 'conflicts with main at the shared changeset'].map((w) => body.includes(w)), [true, true, true, true, true]);
@@ -3491,7 +3499,7 @@ export async function selfTest() {
       t('⛔ a read-back that still lists the pull is FAILED, UNCONFIRMED, after the window — a 200 is never trusted alone', [still.exit, still.rows[0]?.result.includes('UNCONFIRMED'), still.rows[0]?.result.includes('still lists'), clock], [EXIT_ACTION_FAILED, true, true, DEQUEUE_WINDOW_MS]);
       clock = 0;
       const late = await run(stroke(), { ...happy, [GQL]: [before, dequeued, before, after] }, timing);
-      t('an entry gone on a later read lands, read again at the interval', [late.exit, clock], [EXIT_OK, DEQUEUE_POLL_MS]);
+      t('an entry gone on a later read lands, read again at the interval, then the pull read twice one interval apart', [late.exit, clock], [EXIT_OK, 2 * DEQUEUE_POLL_MS]);
       clock = 0;
       const merged = await run(stroke({ cause: 'seat-asks' }), { ...happy, ...asks(signed(RELAY_COMMENT_AUTHOR, SESSION)), [PULL_GET]: [pullAt({ mergeable: true, mergeable_state: 'clean' }), pullAt({ state: 'closed', merged: true, merged_at: '2026-11-15T08:40:12Z' })] }, timing);
       t('⛔ a pull that MERGES inside the window left the queue by landing: FAILED naming the merge, never a landed dequeue, never UNCONFIRMED or re-read', [merged.exit, merged.rows[0]?.result.includes('MERGED at 2026-11-15T08:40:12Z'), merged.rows[0]?.result.includes('UNCONFIRMED'), clock], [EXIT_ACTION_FAILED, true, false, 0]);
@@ -3499,7 +3507,12 @@ export async function selfTest() {
       t('⛔ a pull read back closed unmerged is FAILED too — out of the queue and not open is no dequeue landing', [closed.exit, closed.rows[0]?.result.includes('state closed')], [EXIT_ACTION_FAILED, true]);
       clock = 0;
       const pullLate = await run(stroke(), { ...happy, [PULL_GET]: [pullAt(), { status: 502, json: { message: 'Bad Gateway' } }, pullAt()] }, timing);
-      t('a pull read that fails after the queue reads it gone is read again at the interval, and lands when it reads open and unmerged', [pullLate.exit, clock], [EXIT_OK, DEQUEUE_POLL_MS]);
+      t('a pull read that fails after the queue reads it gone is read again at the interval, and lands when it reads open and unmerged', [pullLate.exit, clock], [EXIT_OK, 2 * DEQUEUE_POLL_MS]);
+      clock = 0;
+      const mergedLate = await run(stroke(), { ...happy, [PULL_GET]: [pullAt(), pullAt(), pullAt({ state: 'closed', merged: true, merged_at: '2026-11-15T08:40:15Z' })] }, timing);
+      const mergedLateClock = clock;
+      const mergedAtOnly = await run(stroke(), { ...happy, [PULL_GET]: [pullAt(), pullAt(), pullAt({ merged: false, merged_at: '2026-11-15T08:40:15Z' })] }, timing);
+      t('⛔ a merge that shows only on the SECOND pull read, one interval after the first read it open and unmerged, is FAILED naming the merge — the queue\'s removal and `merged` arrive in either order; `merged_at` beside a false `merged` reads as merged too', [mergedLate.exit, mergedLate.rows[0]?.result.includes('MERGED at 2026-11-15T08:40:15Z'), mergedLateClock, mergedAtOnly.exit, mergedAtOnly.rows[0]?.result.includes('MERGED')], [EXIT_ACTION_FAILED, true, DEQUEUE_POLL_MS, EXIT_ACTION_FAILED, true]);
       t('dequeuePullAfter: open and merged false lands; merged, closed or an unread merged flag does not', [dequeuePullAfter({ status: 200, json: { state: 'open', merged: false } }).ok, dequeuePullAfter({ status: 200, json: { state: 'closed', merged: true } }).pending, dequeuePullAfter({ status: 200, json: { state: 'closed', merged: false } }).pending, dequeuePullAfter({ status: 200, json: { state: 'open' } }).pending, dequeuePullAfter({ status: 404, json: {} }).pending], [true, false, false, true, true]);
       t('dequeueReadBack: a truncated list is pending, a base with no queue lists nothing', [dequeueReadBack({ pull: 1, queue: { present: true, complete: false, entries: [] } }).pending, dequeueReadBack({ pull: 1, queue: { present: false, complete: true, entries: [] } }).ok], [true, true]);
       const beside = await run(base([stroke().actions[0], { op: 'comment', issue: 1, body: 'x' }]), happy);
