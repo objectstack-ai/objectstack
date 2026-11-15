@@ -1480,18 +1480,23 @@ export interface FlowDryRunOptions extends Pick<AutomationContext, 'record' | 'p
  *    {@link FlowDryRunStopStep}); that node is the last step.
  *  - `'failed'`: the dry run could not continue past a step, or could not
  *    evaluate the start condition. A node failed, or met a refusal, that no
- *    `fault` edge or `try_catch` region contains; that node is the last step. It is the dry run's own answer, not a prediction:
- *    a dry run can fail where the live run would not (a later node reads an
- *    outbound node's output, which a dry run leaves unset; a `runAs: 'system'`
- *    draft, which a dry run never elevates, meets a refusal; a filtered read
- *    misses a simulated write), and pass where the live run would fail (a
- *    validation rule, a uniqueness constraint, a required field, or any refusal
- *    a dry run does not judge).
+ *    `fault` edge or `try_catch` region contains; that node is the last
+ *    step. It is the dry run's own answer, not a prediction: a dry run can
+ *    fail where the live run would not (a later node reads an outbound
+ *    node's output, which a dry run leaves unset; a `runAs: 'system'` draft,
+ *    which a dry run never elevates, meets a refusal; a filtered read misses
+ *    a simulated write), and pass where the live run would fail (a
+ *    validation rule, a uniqueness constraint, a required field, or any
+ *    refusal a dry run does not judge).
  *    A start node whose `condition` throws when it is evaluated against the
  *    supplied `record` / `previous` fails before any node runs: there are no
  *    steps, and {@link FlowDryRunResult.startCondition} carries the condition
- *    and the fault. This one follows the live run, whose `execute` answers the
- *    same throw `status: 'failed'`.
+ *    and the fault. On the default error strategy this one follows the live
+ *    run, whose `execute` answers the same throw `status: 'failed'`. Under
+ *    `errorHandling.strategy: 'retry'` it is the dry run's own answer, not a
+ *    prediction: the live run hands the throw to `retryExecution`, whose
+ *    attempts (`executeWithoutRetry`) do not evaluate the start condition and
+ *    run the nodes (#33935, the engine card; this clause goes when it lands).
  *  - `'refused'`: the run never started (see {@link FlowDryRunResult.refusal}).
  *    ⛔ Not {@link AutomationResult.status}'s `'refused'`, which is an `end`
  *    node's outcome; here that case is `'completed'`.
@@ -1687,8 +1692,11 @@ export interface FlowDryRunResult {
      *  - with `result: false` when `status` is `'condition_not_met'`: it did not
      *    hold against the supplied `record` / `previous`;
      *  - with `fault` when `status` is `'failed'` and there are no steps: its
-     *    evaluation threw. `fault` is the thrown message, the text `execute`
-     *    answers as `error` for that throw, and `error` carries the same text.
+     *    evaluation threw. `fault` is the thrown message, and `error` carries
+     *    the same text. On the default error strategy it is the text `execute`
+     *    answers as `error` for that throw. Under
+     *    `errorHandling.strategy: 'retry'` the live run does not answer it: its
+     *    retry attempts do not evaluate the start condition (#33935).
      */
     startCondition?:
         | { expression: string; result: false; fault?: never }
@@ -1807,8 +1815,14 @@ export interface IAutomationService {
      *    supplied `record` / `previous`, for instance) answers
      *    `status: 'failed'` and no steps, the condition and the thrown message
      *    in `startCondition` (`fault`) and the same message in `error`, also
-     *    before the input-schema check: `execute`'s catch answers that throw
+     *    before the input-schema check. On the default error strategy that is
+     *    the live run's answer: `execute`'s catch answers that throw
      *    `status: 'failed'` with the message as `error`, before any node runs.
+     *    Under `errorHandling.strategy: 'retry'` the answer is the dry run's
+     *    own: `execute` hands the throw to `retryExecution`, whose attempts
+     *    (`executeWithoutRetry`) do not evaluate the start condition, and the
+     *    live run goes on to run the nodes (#33935, the engine card; this
+     *    clause goes when it lands).
      *  - `execute`'s re-entrancy guard (`reentrancy_loop_guard`), which sits
      *    between the two checks, cannot fire for a dry run: a dry run holds no
      *    active-run key and writes nothing.

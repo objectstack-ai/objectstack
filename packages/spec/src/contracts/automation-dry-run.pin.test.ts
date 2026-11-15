@@ -228,9 +228,30 @@ describe('IAutomationService.dryRun — the contract (#33757)', () => {
             "A `condition` whose evaluation throws",
             "`status: 'failed'` and no steps, the condition and the thrown message\n     *    in `startCondition` (`fault`)",
             'cannot fire for a dry run: a dry run holds no\n     *    active-run key and writes nothing.',
+            "On the default error strategy that is\n     *    the live run's answer",
+            "Under `errorHandling.strategy: 'retry'` the answer is the dry run's\n     *    own",
         ]) {
             expect(doc, sentence).toContain(sentence);
         }
+    });
+
+    it('a faulting start condition follows the live run only on the default error strategy (#33935)', () => {
+        const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
+        const statusEnd = source.indexOf('export type FlowDryRunStatus =');
+        const resultStart = source.indexOf('export interface FlowDryRunResult {');
+        const methodEnd = source.indexOf('dryRun?(definition: unknown, options: FlowDryRunOptions)');
+        const docs = {
+            "the 'failed' status doc": source.slice(source.lastIndexOf('/**', statusEnd), statusEnd),
+            'the startCondition doc': source.slice(resultStart, source.indexOf('startCondition?:', resultStart)),
+            'the dryRun doc block': source.slice(source.lastIndexOf('/**', methodEnd), methodEnd),
+        };
+        for (const [where, doc] of Object.entries(docs)) {
+            expect(doc, where).toContain('On the default error strategy');
+            expect(doc, where).toContain("`errorHandling.strategy: 'retry'`");
+            expect(doc, where).toContain('#33935');
+        }
+        expect(docs["the 'failed' status doc"]).toContain("Under\n *    `errorHandling.strategy: 'retry'` it is the dry run's own answer, not a\n *    prediction");
+        expect(source).not.toContain('This one follows the live run, whose');
     });
 
     it('answers in the live run\'s order: admission, then the start condition (unmet, then faulted), then the input-schema check', () => {
