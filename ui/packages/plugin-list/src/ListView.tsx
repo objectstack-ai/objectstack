@@ -478,6 +478,18 @@ export interface ListViewProps {
    */
   recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
+   * Whether a click on a row opens anything, as the host that owns the row
+   * click (`onRowClick`) knows it (objectstack#33317), handed to `ObjectGrid`'s
+   * `rowOpensRecord`. `false` ⇒ the grid draws its record-link cells as plain
+   * text and its row context menu offers no Open; the row click still reaches
+   * `onRowClick`. The console's object list passes `false` for a view authored
+   * `navigation.mode: 'none'` and for a list-only object.
+   *
+   * A HOST prop, never a schema key, for the reason `rowAdornment` is one.
+   * Only the grid is handed it. Absent ⇒ every row is exactly what it was.
+   */
+  rowOpensRecord?: boolean;
+  /**
    * The VIEW'S OWN hidden fields, row height and sort, for a host that lays
    * the user's own preference over them in `schema` (objectui#12949). The
    * Display control's trigger count and its "Reset to view default" compare
@@ -1883,6 +1895,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   defaultRowNumbers = true,
   rowAdornment,
   recordLinkAdornment,
+  rowOpensRecord,
   compact = false,
   capped = false,
   onTotalChange,
@@ -7599,6 +7612,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#26681 — the host's node beside each row's record
               // link, on the grid's host channel (a React prop, never a node key).
               ? { recordLinkAdornment }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid' && rowOpensRecord !== undefined
+              // objectstack#33317 — whether the host's row click opens
+              // anything, on the grid's host channel (a React prop, never a
+              // node key).
+              ? { rowOpensRecord }
               : {})}
             // [objectui#12081] A windowed calendar keeps drawing while the
             // next window loads (the refresh bar above says so), and shows its

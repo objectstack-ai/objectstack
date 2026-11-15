@@ -387,13 +387,13 @@ describe('[#31842] a dotted filter member whose tail names a declared member', (
     // Native joins the supplier: d1 and d2 point at the APAC supplier.
     const native = await filterDataset('native', INCLUDES, { 'supplier.region': 'apac' });
     expect(rowsOf(native.rows)).toEqual([{ region: 'emea', total: 11 }]);
-    // The engine-aggregate face cannot join, and says so for this member as it
-    // does for every related filter.
-    const err = await refusalOf(filterDataset('objectql', INCLUDES, { 'supplier.region': 'apac' }));
-    expect(err.code, err.message).toBe('INVALID_FIELD');
-    expect(err.status).toBe(400);
-    expect(err.param).toBe('where');
-    expect(err.member).toBe('supplier.region');
+    // [#33335] The engine-aggregate face cannot join; it hands the engine the
+    // nested-relation condition `{ supplier: { region: 'apac' } }`, which reads
+    // the supplier and matches the deal's `supplier` against the ids — the
+    // same rows, and still never the deal's own region. (It refused every
+    // related filter before.)
+    const objectql = await filterDataset('objectql', INCLUDES, { 'supplier.region': 'apac' });
+    expect(rowsOf(objectql.rows)).toEqual(rowsOf(native.rows));
   });
 
   it("CONTROL: '<dataset>.region' and '<object>.region' still filter the deal's own region on both strategies", async () => {

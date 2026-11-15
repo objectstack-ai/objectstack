@@ -126,7 +126,7 @@ import {
   type PackageScopedResolvableType,
 } from '@objectstack/core';
 import { ITEM_KEY_DISCRIMINATORS, SysMetadataObject, itemDiscriminator } from '@objectstack/metadata-core';
-import { peelStoredEnvelope } from './stored-envelope.js';
+import { peelStoredEnvelope, STORED_BODY_KEY } from './stored-envelope.js';
 import { PACKAGE_SLOTTED_METADATA_TYPES } from '@objectstack/spec/api';
 
 /**
@@ -139,7 +139,8 @@ import { PACKAGE_SLOTTED_METADATA_TYPES } from '@objectstack/spec/api';
  * picklist family's `picklist`, `mapping` and `dataset` (#31700); then
  * `webhook` (#31699 PR 2), so a host with no registry lists each package's
  * declaration of one name; then `tool` (#31985, ADR-0150 child B), likewise
- * in the change that narrows it. The list itself is `@objectstack/spec`'s
+ * in the change that narrows it; and last `connector` (#31699 PR 3), in the
+ * change that narrows it. The list itself is `@objectstack/spec`'s
  * `PACKAGE_SLOTTED_METADATA_TYPES` (#32905), so a client that names a package
  * on the history and rollback doors reads the same one; a type joins there.
  */
@@ -416,6 +417,37 @@ export function storedItemPackageId(item: unknown): string | undefined {
     if (typeof candidate === 'string' && candidate !== '' && candidate !== OVERLAY_SENTINEL) return candidate;
   }
   return undefined;
+}
+
+/**
+ * [#32717, ADR-0150 D3/D4] `item`, a body a by-package rollback writes into
+ * the row slot of `slotPackage` (`undefined`: the environment's package-less
+ * row), with each package stamp {@link storedItemPackageId} reads (the
+ * envelope's `packageId`, the body's `_packageId`) that names another package
+ * replaced by the slot's: re-stamped with `slotPackage`, or removed from a
+ * body the environment's row stores. The slot is who the row is, and a stamp
+ * in the body would say otherwise: a `sys_metadata` row whose column names no
+ * package is keyed by the package its body names, so a foreign stamp written
+ * into the environment's row hands the row to that package, and one written
+ * into a package's row is served as another package's item. A body naming no
+ * package, or the slot's own, is returned unchanged (the same object), so a
+ * version's snapshot is restored byte for byte whenever it already agrees.
+ */
+export function stampedForSlot(item: unknown, slotPackage: string | undefined): unknown {
+  const restamp = (holder: Record<string, unknown>, key: string): Record<string, unknown> => {
+    if (!isPackageCaller(holder[key] as string | undefined) || holder[key] === slotPackage) return holder;
+    if (slotPackage !== undefined) return { ...holder, [key]: slotPackage };
+    const { [key]: _foreign, ...rest } = holder;
+    return rest;
+  };
+  if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
+  const peeled = peelStoredEnvelope(item);
+  const outer = restamp(item as Record<string, unknown>, 'packageId');
+  if (!peeled.wrapped) return restamp(outer, '_packageId');
+  const body = peeled.body;
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return outer;
+  const inner = restamp(body as Record<string, unknown>, '_packageId');
+  return inner === body ? outer : { ...outer, [STORED_BODY_KEY]: inner };
 }
 
 /**

@@ -287,7 +287,8 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlProviderScope } from './sso-sign-in-options.js';
-import { readSamlAssertionAttributeNames } from './sso-saml-standard-claims.js';
+import { readSamlAssertionPreview } from './sso-saml-standard-claims.js';
+import { samlAccountKeyAttributeOf, samlAccountKeyReadingOf } from './sso-saml-account-key.js';
 import {
   judgeSignOutOfIdpCapability,
   parkOidcEndSessionEndpoint,
@@ -4312,12 +4313,24 @@ export class AuthManager {
             // An unmapped member reads the standard claim the assertion
             // carries, before the NameID (`sso-saml-standard-claims.ts`): the
             // attribute names, read before the vendor consumes the body.
-            const assertionAttributeNames = await readSamlAssertionAttributeNames(callback.request);
+            const preview = await readSamlAssertionPreview(callback.request);
+            // A provider keyed on a stable attribute (named, or Entra's object
+            // id) finds and makes its account by that value, not the NameID
+            // (`sso-saml-account-key.ts`): the provider's key attribute, and
+            // the NameID and value the posted assertion carries.
+            const accountKeyAttribute = preview
+              ? samlAccountKeyAttributeOf(
+                  await createEngineSsoProviderConfigReader(() => this.config.dataEngine as SsoProviderConfigEngine | undefined)(
+                    callback.providerId,
+                  ).catch(() => null),
+                )
+              : null;
             return runWithSamlProviderScope({
               allowIdpInitiated: options.allowIdpInitiated,
               singleLogout: options.signOutOfIdp,
               providerId: callback.providerId,
-              assertionAttributeNames,
+              assertionAttributeNames: preview?.attributeNames ?? [],
+              accountKey: samlAccountKeyReadingOf(preview, accountKeyAttribute),
             }, () =>
               runSsoSamlRefusalCauseScope(callback, this.config.logger, readSamlConfig, run),
             );

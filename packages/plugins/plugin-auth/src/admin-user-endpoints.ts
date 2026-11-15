@@ -467,13 +467,18 @@ async function stampMustChangePassword(
  * endpoint created the user" as a determinant — an admin-created account is
  * not an implicit invitation.
  *
- * Returns the shape the response/audit consumed pre-ADR-0093:
- * `membershipCreated` is true only when THIS call inserted the row (a `bound`
- * outcome); a `yielded` outcome (the hook or a race already bound it) reports
- * the org with `membershipCreated: false`. Under `invite-only` the reconciler
- * answers `policy-skip` before it looks at any org, so the caller reports no
- * organization and `membershipCreated: false` — the account is created, the
- * membership is not.
+ * Returns what the response and the audit row report: `membershipCreated`
+ * says the store holds a membership for the new account after this call,
+ * whichever writer made the row. The account did not exist before this call,
+ * so any membership it holds was created by this creation — a `bound` outcome
+ * (this call inserted it) and a `yielded` outcome (the `user.create.after`
+ * reconciler or a host hook bound it moments earlier, during the same
+ * `createUser`) both answer `true`. Reporting `yielded` as `false` told the
+ * administrator a member-less account had been made while `sys_member` held
+ * the row. Under `invite-only` the reconciler answers `policy-skip` before it
+ * looks at any org, so the caller reports no organization and
+ * `membershipCreated: false` — the account is created, the membership is not.
+ * A `failed` / `no-target-org` / `agent-account` outcome reports `false`.
  */
 export async function bindUserToSoleOrganization(
   deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'getMembershipPolicy' | 'getTenancy' | 'logger'>,
@@ -498,7 +503,7 @@ export async function bindUserToSoleOrganization(
   });
   return {
     organizationId: result.organizationId ?? null,
-    membershipCreated: result.outcome === 'bound',
+    membershipCreated: result.outcome === 'bound' || result.outcome === 'yielded',
   };
 }
 
@@ -513,7 +518,8 @@ export async function bindUserToSoleOrganization(
  * - `placeholderEmail` — the admin created a phone-only identity, so the
  *   address on the account is a generated placeholder. The decision, never
  *   the address.
- * - `membershipCreated` — this call bound the membership (ADR-0093 D2).
+ * - `membershipCreated` — the new account holds a membership after this call
+ *   (ADR-0093 D2), whichever writer made the row during this creation.
  * - `organizationId` — a reference to the organization bound to, a record of
  *   its own; present only when one was resolved.
  *
@@ -974,8 +980,11 @@ export class CreationRefused extends Error {
  * `membershipPolicy: 'invite-only'` admits (D1). The role is `member`, the D1
  * default: elevation stays the separate, audited `update-member-role`.
  *
- * A membership already there is respected and reported as
- * `membershipCreated: false`, exactly as the reconciler reports it.
+ * A membership already there is respected (no second `addMember`) and
+ * reported as `membershipCreated: true`: the account was created by this call,
+ * so a row in the current organization was written during this creation (a
+ * host's `user.create.after` hook, say) — the same rule the single-org bind
+ * answers by.
  */
 export async function joinCurrentOrganization(
   deps: Pick<AdminUserEndpointDeps, 'getDataEngine'>,
@@ -990,7 +999,7 @@ export async function joinCurrentOrganization(
       { where: { organization_id: organizationId, user_id: userId }, limit: 1 },
       { context: SYSTEM_CTX },
     );
-    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: false };
+    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: true };
   }
   try {
     await addMember({ body: { userId, role: 'member', organizationId } });

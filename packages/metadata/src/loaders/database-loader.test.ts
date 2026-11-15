@@ -2124,7 +2124,7 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
-  /** [#31699 PR 2] The unbundled slotted types the boot pass reads: every one but `webhook`, which the registry the pass walks does not list. */
+  /** [#31699 PR 2, PR 3] The unbundled slotted types the boot pass reads: every one but `webhook` and `connector`, which the registry the pass walks does not list. */
   const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
@@ -2488,28 +2488,29 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
 
   /**
    * [#31699 PR 2] `webhook` is slotted, but the pass registers none of its
-   * rows (`DEFAULT_METADATA_TYPE_REGISTRY` lists no `webhook`), so the case
+   * rows (`DEFAULT_METADATA_TYPE_REGISTRY` lists no `webhook`; nor any
+   * `connector`, slotted since #31699 PR 3), so the case
    * above, which asks for the row the pass registered, does not hold for it.
    * Its bare read is the loader's own: the package's row, in either save
    * order, on every host. FROM (`webhook` out of `PACKAGE_SLOTTED_STORE_TYPES`,
    * as on main): the row saved first, so `ALPHA` when the package-less row
    * was saved last and the package-less row when it was saved first.
    */
-  it('CONTROL webhook, slotted but not a type the pass reads, one package\'s row and a package-less row: the pass registers neither, and the bare read answers the package\'s row in either save order on every host (FROM the row saved first)', async () => {
-    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+  it.each(['webhook', 'connector'] as const)('CONTROL %s, slotted but not a type the pass reads, one package\'s row and a package-less row: the pass registers neither, and the bare read answers the package\'s row in either save order on every host (FROM the row saved first)', async (slotted) => {
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook' && type !== 'connector'));
     const seen: unknown[] = [];
     for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
       for (const hostPackage of [undefined, ALPHA, HOST]) {
         driver = createMockDriver();
         if (order === 'package-less row saved last') {
-          await seed('webhook', ALPHA, 1);
-          await seed('webhook', null, 2);
+          await seed(slotted, ALPHA, 1);
+          await seed(slotted, null, 2);
         } else {
-          await seed('webhook', null, 1);
-          await seed('webhook', ALPHA, 2);
+          await seed(slotted, null, 1);
+          await seed(slotted, ALPHA, 2);
         }
         const m = await bootPass(hostPackage);
-        seen.push([order, hostPackage ?? 'no host package', registryKeys(m, 'webhook'), await answer(m, 'webhook')]);
+        seen.push([order, hostPackage ?? 'no host package', registryKeys(m, slotted), await answer(m, slotted)]);
       }
     }
     expect(seen).toEqual(['package-less row saved last', 'package-less row saved first'].flatMap((order) =>
@@ -2801,9 +2802,9 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   });
 
   it('the types are taken from the tree', () => {
-    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook']));
+    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook', 'connector']));
     expect(UNBUNDLED).not.toContain('email_template');
-    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook' && type !== 'connector'));
   });
 
   it('CONTROL — webhook: the boot pass registers none of its rows, so a read stays the loader\'s, as before it was slotted', async () => {

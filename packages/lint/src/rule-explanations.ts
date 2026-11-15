@@ -5516,6 +5516,9 @@ const MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION: RuleExplanation = {
       'one edit. The fix line offers both ways out: drop the verbs, or open the affordance, and only ' +
       'for a write a user context may really perform, once the guard that enforces it exists ' +
       '(ADR-0092 D4: an affordance never ships ahead of its guard).',
+    'On a `synced` object `userActions` cannot open a write at all (ADR-0153 D4: the parse refuses ' +
+      'it), so the fix line offers only the removal, and a write goes through a declared action ' +
+      '(ADR-0153 D5).',
   ],
 };
 

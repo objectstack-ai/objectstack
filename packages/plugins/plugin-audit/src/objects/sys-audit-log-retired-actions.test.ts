@@ -137,6 +137,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'plugin-audit/src/audit-seal/signer.ts (LocalCheckpointSigner.createKey, which the audit sealer '
       + 'reaches on its first signature) once per deployment signing key created, before the key row (#31908)',
   ],
+  [
+    'dataset_query',
+    'plugin-audit/src/dataset-query-audit.ts — createDatasetQueryAuditWriter; recordDatasetQuery on the '
+      + '`audit` slot, called by rest/src/analytics-routes.ts (POST /analytics/dataset/query and each query of '
+      + 'its batch door) once per saved-dataset query that reached the read, for the opted-in datasets (#31797)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */
