@@ -8,7 +8,8 @@
  * "Response failed / Retry" banner (which would regenerate the rolled-back turn).
  * A streamed-response error still shows the banner. A clean submit clears the box.
  * A host that held the message itself names the text to restore (`unsentText`,
- * objectstack#33562); absent, the composer restores its own last submit.
+ * objectstack#33562), a held suggestion chip included; absent, the composer
+ * restores its own last typed submit and no chip text.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -116,6 +117,38 @@ describe('ChatbotEnhanced send-failure UX', () => {
 
     await waitFor(() => expect(textarea.value).toBe('first part\n\nsecond part'));
     expect(screen.getByTestId('chat-send-error')).toHaveTextContent('GENERIC_MSG');
+  });
+
+  it('a suggestion chip the host held comes back through unsentText; without it a chip restores nothing (objectstack#33562)', async () => {
+    const onSendMessage = vi.fn();
+    const chip = 'Build a CRM';
+    const { rerender } = render(
+      <ChatbotEnhanced placeholder="Ask…" onSendMessage={onSendMessage} labels={LABELS} suggestions={[chip]} />,
+    );
+    fireEvent.click(screen.getByText(chip));
+    await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith(chip));
+    const textarea = screen.getByPlaceholderText('Ask…') as HTMLTextAreaElement;
+
+    // CONTROL: the composer alone restores no chip text (objectui#7253).
+    const first = notSentError(503);
+    rerender(
+      <ChatbotEnhanced placeholder="Ask…" onSendMessage={onSendMessage} labels={LABELS} suggestions={[chip]} error={first} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('chat-send-error')).toBeInTheDocument());
+    expect(textarea.value).toBe('');
+
+    // The host held the chip's message and names it: that is what was not sent.
+    rerender(
+      <ChatbotEnhanced
+        placeholder="Ask…"
+        onSendMessage={onSendMessage}
+        labels={LABELS}
+        suggestions={[chip]}
+        error={notSentError(503)}
+        unsentText={chip}
+      />,
+    );
+    await waitFor(() => expect(textarea.value).toBe(chip));
   });
 
   it('shows the Response-failed banner (not the send notice) for a streamed-response error', async () => {
