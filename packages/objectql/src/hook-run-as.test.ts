@@ -446,7 +446,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect(Object.getOwnPropertyNames(ScopedContext.prototype)).not.toContain('withUserGrantsSeeded');
       // [#25653] The app-authored hook api's derivation is the other symbol-keyed member, unexported too.
       expect('APP_AUTHORED_HOOK_API' in entry).toBe(false);
-      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(2);
+      // [#33651] The detached run of an async hook (`unit-detach.ts`) is the third, unexported too.
+      expect('DETACHED_HOOK_RUN' in entry).toBe(false);
+      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(3);
     });
 
     it('a resolver failure keeps the UNSEEDED pin — narrower, never elevated — and says so once at warn', async () => {

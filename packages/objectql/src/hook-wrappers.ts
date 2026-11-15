@@ -24,6 +24,7 @@ import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
 import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, seedHookUnreadMembership, type HookRunAs } from './hook-run-as.js';
+import { runDetachedHook } from './unit-detach.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -514,7 +515,11 @@ export function wrapDeclarativeHook(
         // as before this key existed — unless the hook is app-authored, whose
         // derived api (#25653) the same restore would take away.
         const detached = restoreApi === noRestore ? ctx : { ...ctx };
-        void runWithErrorPolicy(detached)
+        // [#33651] And it runs outside every unit of work open at dispatch —
+        // the door's own unit for a blocking `after*` beside it (#22782), or a
+        // caller's: nothing awaits it, so a unit it joined would commit under
+        // its writes ("Transaction query already complete"). `unit-detach.ts`.
+        void runDetachedHook(detached.api, () => runWithErrorPolicy(detached))
           .then(() => recordOutcome())
           .catch((err) => {
             recordOutcome(err);

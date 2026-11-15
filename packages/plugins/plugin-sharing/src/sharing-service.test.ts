@@ -1358,6 +1358,54 @@ describe('[ADR-0111 D7] no inert grants', () => {
     const rule = engine._tables.sys_record_share.find(r => r.id === 'shr_rule');
     expect(rule?.source).toBe('rule'); // untouched
   });
+
+  it('a second rule reaching the same user writes its own row; the first rule\'s row keeps its level and id', async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_rule', object_name: 'account', record_id: 'a1',
+      recipient_type: 'user', recipient_id: 'bob', access_level: 'edit',
+      source: 'rule', source_id: 'srule_1',
+    }];
+    const second = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'read', source: 'rule', sourceId: 'srule_2' } as any,
+      { isSystem: true } as any,
+    );
+    expect(second.id).not.toBe('shr_rule');
+    const rows = engine._tables.sys_record_share.map(r => `${r.source_id}:${r.access_level}`).sort();
+    expect(rows).toEqual(['srule_1:edit', 'srule_2:read']);
+
+    // The same rule granting again upserts its own row, never the other's.
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit', source: 'rule', sourceId: 'srule_2' } as any,
+      { isSystem: true } as any,
+    );
+    expect(engine._tables.sys_record_share.map(r => `${r.source_id}:${r.access_level}`).sort())
+      .toEqual(['srule_1:edit', 'srule_2:edit']);
+  });
+
+  it('a manual grant keeps one row per recipient whatever `sourceId` the caller sends', async () => {
+    const a = await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob', sourceId: 'x' } as any, { userId: 'alice' });
+    const b = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit', sourceId: 'y' } as any,
+      { userId: 'alice' },
+    );
+    expect(engine._tables.sys_record_share.length).toBe(1);
+    expect(b.id).toBe(a.id);
+    expect(b.access_level).toBe('edit');
+  });
+
+  it('a direct (non-system) grant keeps one row per recipient whatever non-manual `source` and `sourceId` it sends', async () => {
+    const a = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', source: 'rule', sourceId: 'srule_x' } as any,
+      { userId: 'alice' },
+    );
+    const b = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit', source: 'rule', sourceId: 'srule_y' } as any,
+      { userId: 'alice' },
+    );
+    expect(engine._tables.sys_record_share.length).toBe(1);
+    expect(b.id).toBe(a.id);
+    expect(b.access_level).toBe('edit');
+  });
 });
 
 describe('[ADR-0111 D5] sys_record_share read self-scope (middleware)', () => {

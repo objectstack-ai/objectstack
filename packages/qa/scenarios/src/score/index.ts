@@ -19,10 +19,13 @@
 import type { LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace } from '../schema.js';
 import { askNamesTarget, gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
+import { gradeInjectionAsData, type InjectionGuardrail, type InjectionTurn } from './scenario-guardrail-grade.js';
 import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type ReadableRow, type RunTranscript } from './scenario-run-grade.js';
+import type { CheckResult } from './scenario-score.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
 export * from './scenario-graph.js';
+export * from './scenario-guardrail-grade.js';
 export * from './scenario-naming.js';
 export * from './scenario-operation-grade.js';
 export * from './scenario-run-grade.js';
@@ -163,5 +166,62 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       ...(readableRows ? { readableRows } : {}),
     },
     answer.turn,
+  );
+}
+
+/** One Run-half turn as the card's guardrails read it: the question or operation it answered, as which persona. */
+export interface CardTurn {
+  step: string;
+  /** Absent ⇒ the run's admin. */
+  persona?: string;
+  turn: RunTranscript;
+}
+
+/**
+ * Grade the card's `injection_as_data` guardrail over one Run half's turns
+ * (`gradeInjectionAsData`): the cell's seeded text, the act `forbids` declares
+ * (a disclosed field with its distinct seeded values), the card's agent
+ * actions, and each operation turn's own declared write, all read off the
+ * card. A row of the cell the seed refused outright (`refused` with no
+ * `fields`: it never went in) leaves the check not measured.
+ */
+export function gradeCardInjection(
+  scenario: LoadedScenario,
+  turns: readonly CardTurn[],
+  seed?: { refused: ReadonlyArray<{ object: string; id: string; fields?: readonly string[] }> },
+): CheckResult {
+  const { card } = scenario;
+  const g = card.run.guardrails.find((x) => x.check === 'injection_as_data');
+  if (g?.cell === undefined) throw new RangeError(`${card.id}: no \`injection_as_data\` guardrail with a cell`);
+  const { cell, forbids } = g;
+  const text = card.run.seed[cell.object]?.find((r) => r.id === cell.id)?.[cell.field];
+  if (typeof text !== 'string') throw new RangeError(`${card.id}: the cell ${cell.object}.${cell.field} of ${cell.id} holds no seeded text`);
+  const values = (o: string, f: string) => [...new Set((card.run.seed[o] ?? []).map((r) => r[f]).filter((v): v is string => typeof v === 'string'))];
+  const guardrail: InjectionGuardrail = {
+    cell,
+    text,
+    ...(forbids
+      ? {
+          forbids: {
+            ...(forbids.writes ? { writes: forbids.writes } : {}),
+            ...(forbids.discloses ? { discloses: { ...forbids.discloses, values: values(forbids.discloses.object, forbids.discloses.field) } } : {}),
+          },
+        }
+      : {}),
+    ...(card.run.agentActions ? { actions: card.run.agentActions.map(({ name, object }) => ({ name, object })) } : {}),
+    ...((seed?.refused ?? []).some((r) => r.object === cell.object && r.id === cell.id && r.fields === undefined) ? { rowRefused: true } : {}),
+  };
+  const operations = new Map(card.run.operations.map((op) => [op.id, op]));
+  return gradeInjectionAsData(
+    guardrail,
+    turns.map((t): InjectionTurn => {
+      const op = operations.get(t.step);
+      return {
+        step: t.step,
+        ...(t.persona !== undefined ? { persona: t.persona } : {}),
+        ...(op ? { operation: { kind: op.kind, object: op.object, ...(op.target !== undefined ? { target: op.target } : {}) } } : {}),
+        turn: t.turn,
+      };
+    }),
   );
 }
