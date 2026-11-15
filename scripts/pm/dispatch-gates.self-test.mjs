@@ -9286,10 +9286,16 @@ export function selfTest({ tier = 'full' } = {}) {
   const reattributed = [];
   for (const [check, entry, target] of readEdges.map(([c, r]) => [c, liveDiscovery.byCheck.get(c), r])) {
     const withKey = coveringKey(entry, target);
+    // The keys consulted BEFORE this one are the comparison, so the one
+    // consulted after it (the import-graph key, #33848) is stripped too: it
+    // fills holes this key leaves, and is not what this key could re-attribute.
     const saved = entry.reads;
+    const savedReach = entry.importReach;
     entry.reads = [];
+    entry.importReach = new Map();
     const without = coveringKey(entry, target);
     entry.reads = saved;
+    entry.importReach = savedReach;
     // Both halves, because only the pair is the claim. Without the first, a
     // derivation that answers NOTHING for every read edge satisfies "nothing
     // was re-attributed" perfectly.

@@ -8052,12 +8052,39 @@ export function coveringJobFilter(entry, inputPath) {
  *
  * What the refusal COSTS is a live missing lead, and it is named rather than
  * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
- * THIS file, and a card editing this file derives 14 families without naming
+ * THIS file, and a card editing this file derived 14 families without naming
  * it. That gate gets run by hand, but lint.yml runs it on every PR too, so the
  * miss costs one CI round, which is the side this file's header errs on
  * everywhere, and it is a far smaller cost than the card the general key
  * prints for the module nearly every family imports — the run's `would name F
- * families` line is what prices that one.
+ * families` line is what prices that one. (That witness is now paid back by
+ * the admission below, because THIS file lives under `scripts/pm/`.)
+ *
+ * ## …and ADMITTED for `scripts/pm/**`, transitively (#33848)
+ *
+ * The refusal is priced on the shared heads, and none of them is a pm module.
+ * The pm tools are the other shape: they import one another in CHAINS — a
+ * register module read by an executor that a dispatcher loads — and each
+ * chain ends in a gate whose self-test fakes what it imports. Measured on PR
+ * #33804's first head (`check-governed-queue-guard.mjs` and
+ * `check-governed-merges.mjs`): the derivation named 35 gates and not
+ * `check:pm-fleet-write-execute`, whose script imports a changed function and
+ * whose self-test went red in CI on that head, behind a dev's "35 of 35 exit
+ * 0". So a changed path under `IMPORT_GRAPH_KEY_ROOT` is answered by the
+ * family of every gate whose files LOAD it, at any depth: `importGraphReach`
+ * walks `loadEdgeTargets` forward from each family's files, which read from
+ * the module's side is the reverse import graph. The key is the LAST one
+ * consulted, so it re-attributes nothing an earlier key answered, and it
+ * ignores both narrowings the population follow takes — it walks self-test
+ * families too, and gate files too — because it claims what RUNNING the
+ * family loads, never what the family watches.
+ *
+ * Its price is real and is the card's to pay: the pm tools close into one
+ * large cycle (the governed register, the half-state patrol, the queue guard
+ * and this file all load one another), so an edit to most pm modules names
+ * the forty-odd families that run any of them. That is the size of what such
+ * an edit can break, measured rather than assumed; the replay row and the
+ * transitive row in `--self-test` are its pins.
  *
  * WHERE THAT PRICE DOES NOT HOLD (#13467). "One CI round" is the WITNESS's
  * price and an AVERAGE over the class, and the next reader will quote it as the
