@@ -91,6 +91,7 @@ import {
   declines,
   flowRefusalOf,
   flowRefused,
+  WRITE_TOOLS,
   type AgentConfirmedObservation,
   type ObservedAnswer,
   type OperationObservation,
@@ -102,8 +103,8 @@ import { refusalCodeOf, refusalOf, type ParsedTurn, type RunnerToolCall } from '
 export type CardOperation = ScenarioCard['run']['operations'][number];
 export type Row = Readonly<Record<string, unknown>>;
 
-/** The write tools of the MCP data surface, and the business-action door. */
-export const WRITE_TOOLS = ['create_record', 'update_record', 'delete_record', 'run_action'] as const;
+/** The write tools of the MCP data surface, and the business-action door. Owned by the grader, which reads them too (the `injection_as_data` guardrail). */
+export { WRITE_TOOLS };
 
 export const noWriteAttempted = '(no write attempted)';
 export const uncodedToolError = '(tool error without a code)';

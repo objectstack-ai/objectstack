@@ -3,8 +3,10 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
- * sys_audit_checkpoint — one Merkle root per chain per window, chained and
- * signed (ADR-0154 D4).
+ * sys_audit_checkpoint — one Merkle root per checkpoint, chained and signed
+ * (ADR-0154 D4, amended 2026-11-14: a chain's window seals into consecutive
+ * checkpoints of at most 10,000 rows, each carrying its `part_index` and
+ * `final_part` under the signature).
  *
  * A checkpoint seals one chain's rows of one window of a sealed object: the
  * chain is that object × one organization, or × the deployment for rows about
@@ -91,6 +93,18 @@ export const SysAuditCheckpoint = ObjectSchema.create({
         description: 'A window sealed on time, or rows that arrived after their window was sealed',
       },
     ),
+    // Not required: a checkpoint written before ADR-0154's 2026-11-14 amendment holds NULL in both and reads as
+    // one part, final — its signed body never carried them.
+    part_index: Field.number({
+      label: 'Part',
+      readonly: true,
+      description: 'Place among the consecutive checkpoints of at most 10,000 rows its window (or late sealing) is cut into, from 0',
+    }),
+    final_part: Field.boolean({
+      label: 'Final Part',
+      readonly: true,
+      description: 'Whether this is the last part of its window (or late sealing)',
+    }),
     window_start: Field.datetime({ label: 'Window Start', required: true, readonly: true }),
     window_end: Field.datetime({ label: 'Window End', required: true, readonly: true }),
     sealed_through: Field.datetime({

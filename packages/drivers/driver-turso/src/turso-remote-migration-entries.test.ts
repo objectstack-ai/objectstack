@@ -312,6 +312,26 @@ describe('what this transport cannot perform, and convergence', () => {
   });
 });
 
+describe('the install\'s declared NOT NULL relax (#33724)', () => {
+  it('a declared `storage: { notNull: false }` over a NOT NULL column is skipped with the face\'s reason, and the column stays', async () => {
+    const file = nextFile();
+    const remote = await remoteOver(file);
+    const V1 = { name: 'p', fields: { price: { type: 'number', storage: { notNull: true } } } };
+    const V2 = { name: 'p', fields: { price: { type: 'number', storage: { notNull: false } } } };
+    await remote.syncSchemasBatch([{ object: 'p', schema: V1 }]);
+    const notNullOf = async () =>
+      (await secondConnection(file, `SELECT "notnull" AS nn FROM pragma_table_info('p') WHERE name = 'price'`))[0]?.nn;
+    expect(Number(await notNullOf())).toBe(1);
+    remote.registerObjectMetadata([V2] as Objects);
+
+    const report = await remote.relaxDeclaredNotNull(V2, ['price'], { packageId: 'com.acme.crm' });
+
+    expect(report.applied).toEqual([]);
+    expect(report.skipped.map((e) => `${e.op.type}:${e.column}`)).toEqual(['relax_not_null:price']);
+    expect(Number(await notNullOf())).toBe(1);
+  });
+});
+
 describe('the database a migration names', () => {
   // `SqlDriver` keeps the DECLARED target in `config` for
   // `describeDriverConnection`, the CLI's "which database" label, which the

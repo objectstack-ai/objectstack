@@ -4154,6 +4154,14 @@ const ru = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Осталось {{left}} лимита ИИ. Модель с пометкой ×N расходует его в N раз быстрее, чем модель по умолчанию.',
+      confirmTitle: 'Переключиться на {{model}}?',
+      confirmBody: 'Каждое сообщение этой модели расходует в {{multiplier}} раз больше лимита ИИ, чем сообщение модели по умолчанию.',
+      confirmAllowance: 'Осталось {{left}}, и с этой моделью лимит закончится в {{multiplier}} раз быстрее.',
+      confirmCancel: 'Отмена',
+      confirmAction: 'Сменить модель',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Отправить сообщение',
     scrollToBottom: 'Перейти к последнему сообщению',
@@ -4181,7 +4189,9 @@ const ru = {
     tool: {
       aggregate_data: "Агрегировать данные",
       get_record: "Прочитать запись",
+      list_datasets: "Посмотреть доступные метрики",
       query_data: "Запросить нужные данные",
+      query_dataset: "Запросить данные по метрике",
       query_records: "Найти нужные записи",
       read_package_doc: "Прочитать руководство приложения",
       search_knowledge: "Поискать в базе знаний",

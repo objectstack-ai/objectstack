@@ -4900,6 +4900,15 @@ const en = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
+    modelPicker: {
+      allowanceNote: '{{left}} of your AI allowance is left. A model marked ×N uses it N times as fast as the default model.',
+      confirmTitle: 'Switch to {{model}}?',
+      confirmBody: 'Each message on this model uses {{multiplier}} times as much of your AI allowance as one on the default model.',
+      confirmAllowance: '{{left}} of it is left, and on this model it runs out {{multiplier}} times as fast.',
+      confirmCancel: 'Cancel',
+      confirmAction: 'Switch model',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Send message',
     scrollToBottom: 'Scroll to the latest message',
@@ -4927,7 +4936,9 @@ const en = {
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
+      query_dataset: 'Query by a metric',
       query_records: 'Look up the records',
       read_package_doc: 'Read the app guide',
       search_knowledge: 'Search the knowledge base',

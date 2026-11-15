@@ -1,5 +1,186 @@
 # @objectstack/skills
 
+## 18.5.0
+
+### Patch Changes
+
+- d683e6f: skills(objectstack-api): a flow door's `FLOW_FAILED` `details.innerRefusal` is the refusal any node met, not only a write's
+  
+  The flow-door paragraph described `innerRefusal` as the refusal "a node's write was refused with" and listed three codes as if they were the set. On `main` it is filled by a data node's refused read or write (any declared 4xx, its code the `ErrorCode` member a record save of the same call answers) and by a `script` node whose function name is ambiguous or outside its package's reach (`RESOURCE_CONFLICT`). The paragraph now says so and gives the codes as examples. The "Choosing between `apis:` and a code handler" table now links the `script` node row to objectstack-automation's package rule (silently-wrong item 3) for which function runs, without restating it.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6e23180: docs(skills): the dashboards rule says a parent-path record-currency amount admits no grouping, and the data evals measure the parent-path `currencyField`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-ui`'s dashboards rule said a `currencyMode: 'record'` amount refuses `sum` / `avg` / `min` / `max` "unless grouped by its code field". For a `master_detail` child amount whose `currencyField` is the parent path (`'invoice.currency_code'`), no grouping is admitted: the engine's aggregate door refuses it whatever it groups by, and the analytics cube door never matches a dimension to a dotted code field. A dashboard author who grouped by the path was refused. The rule now says so in one parenthesis, points to `objectstack-data` → Field Types → Currency for the declaration, and names the two single-currency shapes to measure instead: the amount's `homeAmount` field or the parent's `summary`. To pay for it, two clauses whose home is the package source are deleted from the same comment: what a result column carries (`AnalyticsResult.fields` in `@objectstack/spec/contracts`) and the "not judged" list of the measure-currency check. `objectstack-data`'s `objects-fields-relationships` evals gain a case for an invoice whose line amounts follow the invoice's currency, with the `lookup` path refused. No schema or runtime change.
+- 34c0522: docs(skills): the `manifest.namespace` paragraph lists `runs` among the namespaces a package may never declare
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-platform` named `actions`, `connectors`, `global`, `hooks`, `oauth` and `trigger` as the route literals a package namespace may never spell, but the address grammar's refused set (`NAMESPACE_REFUSED_LITERALS`, derived from `NAMESPACE_POSITION_LITERALS` in `@objectstack/spec/kernel`) also holds `runs`, the literal in the inbound hook's namespace position. An AI author who picked `runs` met the refusal only at `os validate`, build or the install door. The list now names all seven, in the set's sorted order. No schema or runtime change.
+- 7e61983: docs(skills): the automation skill says what two packages shipping one flow function name now get, since function names are held per namespace
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Since engine `function` joined `NAMESPACE_SCOPED_BARE_NAME_TYPES` (ADR-0150 D2/D9), two packages declaring two different `namespace`s may each bind a function of one name, each flow's `script` node running its own package's, and the cold boot no longer warns for that pair. `objectstack-automation` still said every two-package pair makes the boot warn `Bare-name conflict at boot`. Item 3 of "Valid-but-silently-wrong" now says: packages of two namespaces each run their own; within one namespace, or where a package declares none, the later bind is refused at install, and a boot holding such a pair warns `Bare-name conflict at boot`. The guard refusal for a flow whose package holds none (two holders in reach, or one only outside its `dependencies` closure: `RESOURCE_CONFLICT`) is unchanged. No schema, accept set or behaviour changes.
+- 4c5c93d: docs(skills): the automation skill says a flow that runs after a record change may not retry an inline outbound call
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The platform refuses a flow whose start node runs it after a record change (`record-after-create`, `-update`, `-delete`, `-insert`, `-write`) when a retry reaches an `http` node without `durable: true` or a `connector_action` node (`flow-after-save-inline-retry`), because the save waits for the run. The published automation skill now says so, so an author following it is not refused at the save door first.
+  
+  - **`@objectstack/skills`** (`objectstack-automation`, `SKILL.md`): the `try_catch` row says that in a `record-after-*` flow neither its `retry` nor the flow's `errorHandling.strategy: 'retry'` may reach an inline `http` or `connector_action` node, since the save would wait out every attempt. The `http` row gives the fix: `durable: true`, which queues the request on the messaging HTTP outbox, or where none is wired sends it once in the background, unretried, so the run gets no response. The `connector_action` row gives its fix: drop the retry, or run the flow on demand or on a schedule. A credential still never goes in an `http` node's `url` or `headers`, as the `http` row already says.
+  - To pay for those words, three sentences that restate text with another home are cut: the screen row's `progress` field list (home: `content/docs/automation/flows.mdx`, the screen progress table), the trigger note's "unless you must modify or reject the record" (home: the trigger table's before rows), and Verify your work's bare-reference sentence and command block (home: **objectstack-formula** § Verify your work and its flow-condition note). No schema, runtime or behaviour changes.
+- 25febd3: docs(skills): a stored computed field reads only its own row; the skills name the cross-record and volatile-input warnings
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The three places the published skills tell an agent to move a `formula`'s `expression` onto a stored field now say what that field may read. `objectstack-data` → Relationships → Computed column owns the sentence: a stored computed field reads only its own row; a related record's value (`record.product.unit_price`) keeps what it held at the row's last write and draws the `stored-expression-cross-record-input` warning, so it stays a `formula` (read time, not totallable) or becomes a snapshot a flow on the related object writes, and a field left stored is repaired by `os migrate stored-expressions --object OBJECT --field FIELD --changed --apply`; the clock (`now()`, `today()`, `daysFromNow()`, `daysAgo()`), the acting user, `can()` and `hasCapability()` are fixed at the write and draw `stored-expression-volatile-input`; a `formula` keeps them current, and for the clock a scheduled flow does too. The `formula` row in `rules/field-types.md` and the total-over-a-computed-value bullet in `objectstack-ui` `rules/dashboards.md` point to it. The dashboards bullet also stops saying existing rows have no backfill: rows a publish did not fill are filled by `os migrate stored-expressions --apply`. Both rules are warnings, not refusals; no schema or runtime change.
+- 6c5d31f: docs(spec,skills): `SkillSchema.tools` is described as what it now does on an MCP server, not as inert in the open framework
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Since 18.4.0 the prompt surface `registerSkillPrompts` (`@objectstack/mcp`) installs offers a skill on `prompts/list` and `prompts/get` only when the server it is installed on lists every tool the skill binds. The published texts still said the binding was authored for the cloud runtime and inert in the open framework, or that every skill with instructions is served to any connected client. They now state the rule; no schema, accept set or behaviour changes.
+  
+  - **`@objectstack/spec`**: the `SkillSchema` class JSDoc, the `tools` JSDoc and its describe text (so the generated JSON Schema description and the skill reference page), plus one clause on the `instructions` JSDoc. `tools` is bound by the cloud agent runtime and read by MCP: a plain name is served by a tool of that name, a trailing wildcard by any listed tool it matches, and an `action_<name>` entry (or `action_*`) also by `run_action`. A skill that binds no tool is offered as before, and `prompts/get` answers a withheld skill as it answers a prompt name no skill derives. The rule reaches every server `registerSkillPrompts` is installed on, `MCPServerRuntime`'s HTTP door and a host's own `McpServer` alike, stdio included; `MCPServerRuntime.bridgePrompts`, which projects skills onto the long-lived server without it, applies no such filter. `surface` and `triggerConditions` stay cloud-runtime-only.
+  - **`@objectstack/skills`** (`objectstack-ai`): the built-in-skills note says the same, and the `instructions` row calls it the one field the open edition serves, since the open edition now reads `tools` as well.
+  - **`@objectstack/spec`**, liveness ledger (`liveness/skill.json`): the `tools` entry cites its in-repo reader, `skillBindingServed` in `packages/mcp/src/skill-prompts.ts`, beside the cloud readers, and its note no longer calls the key cloud-runtime-only.
+  - **`@objectstack/mcp`**: the README's Prompts section says which servers apply the rule. `bridgePrompts` lists every skill that carries instructions on the long-lived server; the HTTP door and any server a host installs `registerSkillPrompts` on offer a skill only when that server lists every tool it binds.
+  - The agents guide (`content/docs/ai/agents.mdx`) carries the rule under its two-halves table and advises binding a skill only to tools its intended connections serve. The MCP connection guide (`content/docs/ai/connect-mcp.mdx`) says a skill is offered only where its tools are: its example skill, bound to `query_records` and `action_resolve_case`, is not offered to a token without the `actions:execute` scope, which lists no `run_action`.
+- 0f6439d: docs(skills): the `notify` selectors say when `org:members` reaches nobody, and show the computed `owner_of:` form
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-automation` § `notify` said `org:members` reaches every member of the run's organization, else that of the record the notification is about, and was silent on a run with neither. There the resolver warns in the server log and returns nobody while the node still succeeds: under the `single` posture, a `schedule` flow that declares no start-node `organization` and has no record hits it (under `group` the notification write itself is refused and the node fails). The line now says so, matching `content/docs/automation/flows.mdx`, and says the warning for an unrecognised `org:` value is a server-log one too. The `owner_of:OBJECT:ID` line now shows the form a flow needs, an envelope that builds the string from a computed id (`source: "'owner_of:crm_case:' + record.case_id"`). Paid for in the same file, no ceiling moved: the `NotifyConfigSchema` `strictObject` clause that restated "an undeclared key is a named parse error", three ADR asides, and the pointer that sends side effects to an object hook, which the skill's own description and objectstack-data already carry. No schema or runtime change.
+- 426bf65: docs(skills): the object `enable` capability table names `aiReadable`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/SKILL.md` gains one row in the Object Capabilities (`enable`) table: `aiReadable` opens read-only AI access (query, get one, aggregate, describe, list; never a write) on a platform `sys_*` object, never on the stored-metadata family (`sys_metadata`, `sys_metadata_history`). An app object never declares it: any declared value, `false` included, is refused at parse (`aiReadExposureRefusal` in `@objectstack/spec/data`). No schema or runtime change.
+- 539f2d1: docs(skills): a suite composes under `manifest: 'preserve'`; a flat composition with two or more apps under one app or module package id is refused
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-platform` `references/bootstrap.md` § Multi-App Composition said no app in this repo uses `composeStacks()` and gave no strategy for a suite. It now says that a suite (an app package plus module packages, one app each) composes with `composeStacks(stacks, { manifest: 'preserve' })`, which keeps each package's own id, as `examples/app-multi-package` does, and that a flat `manifest` (`'last'`, the default, `'first'` or an index) keeps one manifest, so two or more apps under one `app` or `module` package id are refused with `STACK_SINGLE_APP_VIOLATION` (422). `objectstack-ui` `SKILL.md` § App Navigation names the same remedy for a suite's further apps. Both files pay for the new text by deleting restatements in the same file; their token counts stay under their ceilings. No schema or runtime change.
+- b5f2f51: docs(skills): a vetted hook template refuses two records of one owner over overlapping time
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The platform has no declarative way to say "two leave requests of one person may not overlap": a validation rule sees one record and a unique index compares equal values only. That rule stays in a hook script for now, and the published data skill now carries the form to copy.
+  
+  - **`@objectstack/skills`** (`objectstack-data`, `references/data-hooks.md`): Common Patterns gains pattern 5, a `beforeInsert` + `beforeUpdate` hook with a sandboxed `body`. On update it merges the stored row under the patch and leaves the record itself out of the count; it names the ignored statuses with `$nin`, so a status added later, or a row with no status, still counts; `datetime` ranges are half-open, so 18:00–21:30 and 21:30–23:00 do not overlap, and for `date` fields the author sets `DATE_ONLY`, which counts the end day as booked; it declares `runAs: 'system'`, so the count also sees rows the saver cannot read; and it refuses through a declared `refusals` entry (`OVERLAP`, `409`). Its known limits are stated next to it: two concurrent saves can both pass, a recycle-bin restore runs no insert hook, an import with automations off skips hooks, rows of one bulk insert or update do not see each other, and a row with no start or end is neither checked nor counted. The `object`, `events`, `priority`, `async` and `onError` subsections under Key Properties, and the `previous` example and the Cross-Object API note under Hook Context API, are removed: each restated the comments of the `defineHook` example, the sandbox `ctx` table, the `ctx.api.object(name)` section, the Before vs After table or Best Practices. No schema, runtime or behaviour changes.
+  - The record hooks page (`content/docs/automation/hooks.mdx`) carries the same template with the reason for each line and the same limits.
+- f588614: docs(skills): the formula skill's Want/Write table names the hours-between form
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-formula/SKILL.md` gains one row, "Hours between" → `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0`, beside `daysBetween` (whole days), and the date-arithmetic note names that form as the hours exception. It is the same form the date-subtraction refusals now name (#32980's fix); no authorable surface changes.
+- 8e63ed8: docs(skills): the security rules teach a position rename through `renamedFrom`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/rules/security.md` § Renaming or removing a shipped access item gains one paragraph: a renamed position declares its earlier names in `renamedFrom: ['old_name']` and is never deleted and re-added, since holders name a position by its bare name and a deleted one leaves them granted nothing. At boot the security plugin moves the old name's holders (`sys_user_position`) to the new name in every organization, idempotently. It moves holders only: sharing-rule, queue and record-share recipients, pending approvers and invitations that name the old name are listed in the boot log for an administrator. The paragraph names the claims it does not carry: an old name still a position anywhere, claimed twice, recorded under another package in the activation ledger, switched off, or claimed by a disabled package. The file pays for the paragraph in place (no ceiling change): it drops the illustrative `com.acme` and `hr` / `ops` package examples, two of the three example wildcard sets, the `sys_secret` storage sentence (encryption at rest is taught in `rules/field-types.md`), the adapter-written-rows aside, and three short asides. No schema or runtime change.
+- 6a28a27: docs(skills): the navigation rule teaches the approvals inbox entry the way the platform's Account app writes it, gated on the approvals service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-ui`'s navigation rule taught the approvals entry as a `type: 'object'` item on `sys_approval_request` gated by `requiresObject: 'sys_approval_request'`. An app that copied it hid the entry from every non-administrator approver until some approval request already involved them: the object metadata read answers 404 to them until then, and the console prunes a `requiresObject` entry against the objects it is served. The rule now teaches the inbox component, `{ type: 'component', componentRef: 'approvals:inbox', requiresService: 'approvals' }` (the shape of `nav_account_approvals` in `@objectstack/platform-objects`), which the server keeps in the served navigation whenever plugin-approvals registers its `approvals` service, and says in one line why `requiresObject` is wrong here. The matching eval expects the same shape. No schema or runtime change.
+- 6d14603: docs(skills): a hook that enforces a business rule declares `refusals` and refuses by code, not with a free-text throw answered `HOOK_ABORTED`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-data/references/data-hooks.md` § Declared refusals now opens with the rule: a hook that enforces a business rule declares a `refusals` catalogue, one code per rule, and its body throws the code; a throw with no code is answered with the platform's `HOOK_ABORTED`, which is for failures nobody planned. The section's example is now a cross-object state guard (only an in-stock asset can be checked out, `ASSET_NOT_IN_STOCK` at 409). It also says which hook form can declare `refusals` today: only a sandboxed `js` `body`; a `handler` hook, an inline TS one included, is refused at save. It says how the refusal reaches the wire: the status's `code` (default 400), with the hook's code as `declaredCode`. Best Practices and the Error Handling intro point to it. Common Patterns' delete guard (`crm_protect_strategic_accounts`) declares `STRATEGIC_ACCOUNT` and `OPEN_OPPORTUNITIES` and throws them instead of two free-text errors; the second message no longer carries the count, since a catalogue message takes no parameters. `objectstack-data/rules/validation.md` § External / Custom Validation now teaches the same thing: its tax-ID hook declares `TAX_ID_BLOCKED` and throws it instead of `new Error('Tax ID is blocked')`. Both files pay for the new lines by deleting restatements in the same file. No schema, accept set or behaviour changes.
+- 3968a57: docs(skills): the `controlled_by_parent` authoring guidance teaches `sharing.controlledByParent.writeRequiresMasterRead`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The data skill's relationship rules said every write of a `controlled_by_parent` detail needs edit on its master, with `ownerMayEdit` as the only opt-in. They now teach the second opt-in as well: with `writeRequiresMasterRead: true` on the detail, whoever can read the master inserts, updates and deletes detail rows under the detail's own object permissions, row-level security and field-level security, on re-points and on each opted-in chain hop too; an on-behalf-of write needs both users to read the master, and the platform ownership floor still binds predicate and on-behalf-of updates and deletes. The rules name its parse refusals (beside `ownerMayEdit: true`, off a `controlled_by_parent` object, one level up) and that `security-controlled-by-parent-owner-policy-without-opt-in` stays silent on such a detail. Without the key every write still needs edit on the master. The optional-master paragraph says setting or emptying a master asks read under the opt-in. One eval prompt covers the opt-in. The lookup and junction examples drop their boilerplate parent objects to pay for the new text inside the file's token ceiling.
+- ccf2899: docs(skills): `objectstack-data` evals 11, 12 and 14 carry their own `must_contain` literals in the reference answer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In `objects-fields-relationships.json`, three evals listed `must_contain` literals that their own `expected_output` described only in prose, so the reference answer failed its own grader: eval 11 (`type: 'select'`, `type: 'state_machine'`), eval 12 (`type: 'summary'`, `type: 'formula'`) and eval 14 (`label: '公司名称'`, `value: 'active'`). Every literal is the spelling the data skill teaches on `main`, so the reference answers now spell them; eval 14's options are written in the skill's `{ label, value }` shape. No assertion, schema or runtime change.
+- d4e3dcc: docs(skills): an owner, assignee or 负责人 in a request is the injected `owner_id`, never a second same-label field
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  objectstack-data teaches that a request's owner, assignee, 负责人 or 处理人 is the platform's injected `owner_id`, not a second person field beside it. A handler the request names apart from the owner is a `user` field that grants no access, with a label no other visible field carries, the injected `owner_id` (Owner, 负责人), `created_by`, `updated_by`, `created_at` and `updated_at` included. To pay for the text inside the file's token ceiling, SKILL.md drops a ruling date, four ADR asides, two zod pointers that `references/_index.md` already carries, an internal constant name, a sentence restating its heading and a link the Quick Reference list already gives. The Quick-Start Template's support case no longer declares an `assigned_to` user field, and a new eval asks for a ticket app with a 负责人.
+- b070e1c: fix(core): a data import resolves a lookup cell naming a detail record within the master the same row names (#33523)
+  
+  Clause-②: yes (narrowing) — widening: a row whose master identifies one of several same-named details now resolves it, where it was refused `reference_ambiguous`; `@objectstack/core` exports `referenceScopeSources` and the types `ReferenceMaster` and `ReferenceScopeSource`, `RefResolver` and `coerceFieldValue` take an optional scope, `coerceRow` an optional source row, `CoerceContext` an optional `referenceMasters`, and `ExportFieldMeta` an optional `dependsOn`. Narrowing: a row that names a master and a detail only another master carries is refused `reference_not_found`, where the detail was linked across masters; and a caller who cannot read the target's master field (or a `dependsOn` `param` field) is refused `reference_not_found` for a scoped lookup cell that the unscoped lookup resolved, because the scope puts that field into the caller's own filter and a filter on a field the caller cannot read is refused.
+  Metadata-protocol: none
+  Skills-docs: `content/docs/data-modeling/import-mappings.mdx` gains "A lookup cell is resolved within the row's own master"; `skills/objectstack-data/rules/relationships.md` names the scoping under `master_detail`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. `master_detail` and `dependsOn` are read as declared; the change is in how the import runtime resolves a cell, and no stored row is rewritten. -->
+  
+  **What changes.** A detail's name is often unique only inside its master: two contracts can each carry an "Advance 30%" billing milestone. The import resolved a lookup cell across every record of the target, so a row naming contract B and "Advance 30%" failed with `reference_ambiguous`. A lookup cell is now resolved within the row's own master when either:
+  
+  - the lookup's target declares a `master_detail` field, and exactly one other single-value reference column of the row points at that master object and is filled in; or
+  - the lookup field declares `dependsOn`, and the row fills in the sibling field it names (the string form compares the target field of the same name; `{ field, param }` compares `param`). This is the filter the record form's picker applies; the `master_detail` inference above has no counterpart in the picker, so for a lookup without `dependsOn` the import is stricter than the form.
+  
+  Inside that scope a tie is `reference_ambiguous`, and a name that only another master carries is `reference_not_found`; it never resolves to another master's record. The same holds for the match-key pass of an update or upsert import, so a key column naming a detail is grouped by the value the row's own pass resolves, for one level of master: a master column outside the key columns is resolved unscoped in that pass, so in a chain such as account → contract → milestone the two passes can differ.
+  
+  **What stays.** A row that leaves the master blank is resolved across the whole target as before, `reference_ambiguous` on a tie. Two columns of the row pointing at the master object (a bill-to and a ship-to account) do not say which one is the master, so neither scopes; `dependsOn` says it. A master cell that fails its own lookup scopes nothing. Every lookup still reads as the importing caller: the scope only adds conditions to the same read, so a record the caller cannot read never matches.
+  
+  **Field permissions.** Because the scope is part of the caller's own filter, a caller who cannot read the target's master field, or the field a `dependsOn` entry names as `param`, has every scoped candidate refused, and the cell answers `reference_not_found` even for a detail the caller can read and whose name is unique. The same row resolved before this change. It fails closed and discloses nothing.
+  
+  **Remedy for a narrowed row.** A pasted id is scoped too, so a row that means another master's detail has no way through in one import. Correct the master cell; or, when the cross-master link is intended, leave the master column out of the import and set it in a second update. For the field-permission case, grant the importing caller read access to that field, or leave the master column (or the `dependsOn` sibling) out in the same way.
+  
+  **Docs.** `content/docs/data-modeling/import-mappings.mdx` describes the scoping under cell coercion; the data skill's relationships rule names it under `master_detail`.
+- 412fbf7: skills(objectstack-ui, query, automation): examples name the injected `owner_id` as the record owner, not an `assigned_to` / `assignee` field
+  
+  objectstack-data teaches that a request's owner, assignee, 负责人 or 处理人 is the platform's injected `owner_id`. The other skills still taught a separate `assigned_to` / `assignee` field as the owner, so an agent loading both got conflicting teaching. Now the objectstack-ui list-view columns, the "mine" filter, the kanban and gantt columns, the reassign action's param and the dashboard metric filter use `owner_id`. The column that relabelled `assigned_to` as "Owner" is gone. The "mine" filter links to objectstack-data § Relationship Patterns. The objectstack-query `expand` example and the objectstack-automation `notify` recipients do the same. Evals: objectstack-ui views evals 1 and 12 and objectstack-query eval 4 now expect `owner_id`. Views eval 2's reference answer no longer spells the `requiresObject` literal its own assertion forbids.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- b4698f7: docs(skills): the automation skill says what a clashing flow function name really does: the later package installs, and none of its functions or hooks bind
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Item 3 of "Valid-but-silently-wrong" in `objectstack-automation` said a second package holding a function name of the same namespace (or of none) is "refused at install". No install door judges a function. The hook binder's bind refuses it (`claimBareNameFunctions`), the runtime binder logs `Failed to bind declarative hooks` at `error`, and the package installs anyway with every function and hook of that owner unbound, the names that do not clash included. The skill now says that, keeps the remedy (rename, or another namespace), and splits the two moments it used to merge: a pair both held at boot warns `Bare-name conflict at boot`; a holder bound after the boot is the one left unbound. This corrects the "refused at install" sentence of the `32522-skills-automation-function-name-per-namespace` entry. To stay within the file's token budget, two restatements are shortened: the flow door's `400 FLOW_FAILED` answer (taught in `objectstack-api`) and the `outputVariable` explanation (shown by the example under it). No schema, accept set or behaviour changes.
+- 5abcad0: docs(skills): four automation, query and ui evals spell their own `must_contain` literals in the reference answer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Four evals listed a `must_contain` literal that their own `expected_output` did not contain, so the reference answer failed its own grader and the eval could not tell a right answer from a wrong one. In each the literal is what the skill teaches and the reference answer named it in prose, so the reference answer now spells it: `objectstack-automation` `flows-triggers-approvals` case 20 writes the node as `type: 'subflow'`; `integrations-declared` case 2 writes the two `update_record` fields as `{ dialect: 'cel', source: … }` envelopes, as the Stripe recipe in `references/integration-recipes.md` does; `objectstack-query` `filters-pagination-search` case 2 says `keyset` in lower case; `objectstack-ui` `analytics-inline-vs-dataset` case 1 says each widget names the dataset in `dataset`. No assertion, prompt, schema or runtime change.
+- 3be1347: docs(skills): the platform Driver Selection Guide says Memory and MongoDB may refuse a query capability SQL serves
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-platform`'s Driver Selection Guide now opens with one sentence: Memory and MongoDB may loudly refuse a query capability the SQL drivers serve. Query capabilities are built for the SQL drivers first, at their fastest shape, and no slower path is built only to keep the other drivers in step. To pay for the sentence, the same section drops the replaced lead "Drivers are the storage layer:", the SQL row's "Knex.js under the hood" aside, and the "no example app does" aside on keeping drivers out of `plugins:`. No schema or runtime change.
+- 8b6c145: docs(skills): the data-hooks query example filters on the injected `owner_id`, not a hand-named `owner`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `ctx.api.object(name)` query-shape example in objectstack-data's `references/data-hooks.md` now filters `task` on `{ owner_id: uid }`. The old `{ owner: uid }` named a field the object does not have unless an author hand-adds a second owner beside the injected one; on an object without it the query is refused with `400 INVALID_FILTER`. The objectstack-data eval about a required `user` field with `deleteBehavior: 'restrict'` now names that field `reviewer`, a role apart from the record owner, instead of an `owner` field that holds the ticket.
+- b440ffb: The data-hooks reference names the two body doors, `ctx.email.send` (`email.send`) and `ctx.activity.append` (`activity.append`), in its sandbox `ctx` table and capability list. A hook body cannot send mail; mail on a record change goes through an action, a job or a flow. An activity entry's `type` is the app's own value, never a platform type, and the call stays outside `ctx.api.transaction`.
+  
+  Clause-②: no
+  Metadata-protocol: none
+
 ## 18.4.0
 
 ### Minor Changes
