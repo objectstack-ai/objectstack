@@ -13,7 +13,7 @@ import { deriveColumnSummary } from '@objectstack/spec/ui';
 import type { CurrencyConfig } from '@objectstack/spec/data';
 import { resolveFieldScale } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
-import { formatCurrency, formatPercent, percentCellScale } from '@object-ui/fields';
+import { formatCurrency, formatPercent, percentCellScale, summaryDeclaresCurrency } from '@object-ui/fields';
 import { temporalCellFaceOf, temporalCellText, temporalExtreme, temporalInstant } from './temporalCellFace';
 
 /**
@@ -362,6 +362,20 @@ function joinSummaryLabel(type: string, formatted: string, t: SummaryTranslate, 
   return t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted });
 }
 
+/**
+ * The arm a roll-up (`summary`) column's total is formatted by: the value type
+ * the list cell draws the same field as (`FormulaCellRenderer`), so the footer
+ * and the cells above it agree by reference. Money when the summary declares
+ * its currency (`summaryDeclaresCurrency`, the cell's own test; the spec gives a
+ * summary no currency otherwise, whatever its source field is), else a number
+ * at the width `resolveFieldScale` answers. A summary with neither keeps the
+ * plain default arm.
+ */
+function summaryValueType(column: { currencyConfig?: unknown; scale?: number | null }): string {
+  if (summaryDeclaresCurrency(column)) return 'currency';
+  return resolveFieldScale(column) === undefined ? 'summary' : 'number';
+}
+
 function formatSummaryLabel(
   type: string,
   value: number | null,
@@ -405,7 +419,7 @@ function formatSummaryLabel(
     return join(value.toLocaleString(displayLocale));
   }
 
-  const colType = column?.type;
+  const colType = column?.type === 'summary' ? summaryValueType(column) : column?.type;
   let formatted: string;
   if (colType === 'currency') {
     // objectui#10221 — a currency's decimal places are the currency's, not a
