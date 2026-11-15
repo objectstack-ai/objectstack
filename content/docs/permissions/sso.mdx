@@ -714,12 +714,16 @@ OAuth client's hand-off and when no provider can be started. It changes the
 form only: `POST /api/v1/auth/sign-in/email` still accepts a password, and the
 `/register` and `/forgot-password` pages are not changed by it.
 
-Because the form then offers no email and password, the checks that keep a
-way to sign in do not count it under `off`, even while it is switched on:
-Setup's **Delete SSO Provider** on the last identity provider is refused
-`409 DELETE_RESTRICTED` with nothing deleted, and a boot with no identity
-provider reports at **error** under the grep token `no_sign_in_method_at_boot`.
-Recover by setting `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden` and restarting.
+Because the form then offers no email and password and no phone sign-in, two
+checks that keep a way to sign in do not count them under `off`, even while
+they are switched on: Setup's **Delete SSO Provider** on the last identity
+provider is refused `409 DELETE_RESTRICTED` with nothing deleted, and a boot
+with no identity provider reports at **error** under the grep token
+`no_sign_in_method_at_boot`. Recover by setting
+`OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden`, and
+`OS_AUTH_EMAIL_PASSWORD_ENABLED=true` too when email and password sign-in is
+off, then restarting. The auth settings save still counts email and password
+under `off`; that check is still open.
 
 **What a visit does.** The Console sign-in page reads `features.directSignIn`
 from `GET /api/v1/auth/config`. That is `true` only while a provider can be

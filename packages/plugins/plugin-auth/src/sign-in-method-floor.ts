@@ -285,7 +285,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'This is the last enterprise SSO identity provider, and the sign-in page offers no local sign-in (the local ' +
       'sign-in path behind direct sign-in is off), so nothing else signs anyone in: deleting it would lock everyone ' +
       'out, administrators included. First register another identity provider, set up another sign-in method, or set ' +
-      'the local sign-in path back to hidden, then delete this one.',
+      'the local sign-in path back to hidden with email and password sign-in on, then delete this one.',
     enterpriseSsoUnverified:
       'The identity provider was not deleted: the list of identity providers could not be read to confirm that ' +
       'another way to sign in remains, and with email and password off this one may be the last. Try again once ' +
@@ -303,7 +303,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '请先重新开启邮箱/密码登录，或登记另一个身份提供方、配置另一种登录方式，然后再删除它。',
     enterpriseSsoLocalOff:
       '这是最后一个企业 SSO 身份提供方，而登录页不提供本地登录（直接登录的本地登录路径已关闭），没有其他登录方式，' +
-      '删除后所有人（包括管理员）都将无法登录。请先登记另一个身份提供方、配置另一种登录方式，或把本地登录路径改回 hidden，' +
+      '删除后所有人（包括管理员）都将无法登录。请先登记另一个身份提供方、配置另一种登录方式，或把本地登录路径改回 hidden 并开启邮箱/密码登录，' +
       '然后再删除它。',
     enterpriseSsoUnverified:
       '身份提供方未删除：无法读取身份提供方列表来确认仍有其他登录方式，而邮箱/密码登录已关闭，它可能是最后一种。' +
@@ -326,8 +326,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
     enterpriseSsoLocalOff:
       'これは最後のエンタープライズ SSO の ID プロバイダーで、ログインページはローカルログインを表示しません（ダイレクト' +
       'サインインのローカルログインパスがオフ）。他にログイン方法がないため、削除すると管理者を含む全員がログインできなく' +
-      'なります。先に別の ID プロバイダーを登録するか、別のログイン方法を設定するか、ローカルログインパスを hidden に' +
-      '戻してから削除してください。',
+      'なります。先に別の ID プロバイダーを登録するか、別のログイン方法を設定するか、ローカルログインパスを hidden に戻してメール/パスワードログインをオンにしてから' +
+      '削除してください。',
     enterpriseSsoUnverified:
       'ID プロバイダーは削除されませんでした。ID プロバイダーの一覧を読み取れず、他のログイン方法が残ることを確認できません' +
       'でした。メール/パスワードログインがオフのため、これが最後のログイン方法かもしれません。データベースに接続できる' +
@@ -353,7 +353,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Este es el último proveedor de identidad de SSO empresarial y la página de inicio de sesión no ofrece el ' +
       'inicio de sesión local (la ruta local del inicio de sesión directo está desactivada), así que nada más permite ' +
       'iniciar sesión: eliminarlo dejaría fuera a todo el mundo, incluidos los administradores. Primero registre otro ' +
-      'proveedor de identidad, configure otro método de inicio de sesión o vuelva a poner la ruta local en hidden, y ' +
+      'proveedor de identidad, configure otro método de inicio de sesión o vuelva a poner la ruta local en hidden con el correo y la contraseña activados, y ' +
       'después elimine este.',
     enterpriseSsoUnverified:
       'El proveedor de identidad no se ha eliminado: no se pudo leer la lista de proveedores de identidad para ' +
@@ -372,7 +372,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '請先重新開啟電子郵件/密碼登入，或登記另一個身分提供者、設定另一種登入方式，然後再刪除它。',
     enterpriseSsoLocalOff:
       '這是最後一個企業 SSO 身分提供者，而登入頁不提供本機登入（直接登入的本機登入路徑已關閉），沒有其他登入方式，' +
-      '刪除後所有人（包括管理員）都將無法登入。請先登記另一個身分提供者、設定另一種登入方式，或把本機登入路徑改回 hidden，' +
+      '刪除後所有人（包括管理員）都將無法登入。請先登記另一個身分提供者、設定另一種登入方式，或把本機登入路徑改回 hidden 並開啟電子郵件/密碼登入，' +
       '然後再刪除它。',
     enterpriseSsoUnverified:
       '身分提供者未刪除：無法讀取身分提供者清單來確認仍有其他登入方式，而電子郵件/密碼登入已關閉，它可能是最後一種。' +
@@ -394,7 +394,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
     enterpriseSsoLocalOff:
       'هذا آخر موفّر هوية للدخول الموحّد المؤسسي، وصفحة تسجيل الدخول لا تعرض تسجيل الدخول المحلي (مسار تسجيل الدخول ' +
       'المحلي خلف تسجيل الدخول المباشر متوقف)، فلا شيء آخر يتيح تسجيل الدخول: حذفه سيمنع الجميع من الدخول، بمن فيهم ' +
-      'المسؤولون. سجّل أولًا موفّر هوية آخر، أو أعدّ طريقة تسجيل دخول أخرى، أو أعد مسار تسجيل الدخول المحلي إلى hidden، ' +
+      'المسؤولون. سجّل أولًا موفّر هوية آخر، أو أعدّ طريقة تسجيل دخول أخرى، أو أعد مسار تسجيل الدخول المحلي إلى hidden مع تشغيل تسجيل الدخول بالبريد الإلكتروني وكلمة المرور، ' +
       'ثم احذف هذا الموفّر.',
     enterpriseSsoUnverified:
       'لم يُحذف موفّر الهوية: تعذّرت قراءة قائمة موفّري الهوية للتأكد من بقاء طريقة أخرى لتسجيل الدخول، ومع إيقاف ' +
@@ -420,7 +420,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'connexion locale (le chemin de connexion locale derrière la connexion directe est désactivé) : rien d\'autre ne ' +
       'permet de se connecter, et le supprimer bloquerait tout le monde, administrateurs compris. Enregistrez d\'abord ' +
       'un autre fournisseur d\'identité, configurez une autre méthode de connexion ou remettez le chemin de connexion ' +
-      'locale à hidden, puis supprimez celui-ci.',
+      'locale à hidden avec la connexion par e-mail et mot de passe activée, puis supprimez celui-ci.',
     enterpriseSsoUnverified:
       'Le fournisseur d’identité n’a pas été supprimé : la liste des fournisseurs d’identité n’a pas pu être lue ' +
       'pour vérifier qu’un autre moyen de connexion subsiste et, avec l’e-mail et le mot de passe désactivés, ' +
@@ -445,7 +445,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Este é o último provedor de identidade de SSO empresarial, e a página de login não oferece login local (o ' +
       'caminho de login local por trás do login direto está desativado), então nada mais permite entrar: excluí-lo ' +
       'deixaria todos de fora, incluindo os administradores. Primeiro registre outro provedor de identidade, configure ' +
-      'outro método de login ou volte o caminho de login local para hidden, e depois exclua este.',
+      'outro método de login ou volte o caminho de login local para hidden com o login por e-mail e senha ativado, e depois exclua este.',
     enterpriseSsoUnverified:
       'O provedor de identidade não foi excluído: não foi possível ler a lista de provedores de identidade para ' +
       'confirmar que resta outra forma de entrar e, com o e-mail e a senha desativados, este pode ser o último. ' +
@@ -470,7 +470,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Это последний поставщик удостоверений корпоративного SSO, а страница входа не предлагает локальный вход ' +
       '(локальный путь входа за прямым входом отключён), поэтому войти иначе невозможно: его удаление заблокирует всех, ' +
       'включая администраторов. Сначала зарегистрируйте другого поставщика удостоверений, настройте другой способ входа ' +
-      'или верните локальному пути входа значение hidden, а затем удалите этого.',
+      'или верните локальному пути входа значение hidden с включённым входом по почте и паролю, а затем удалите этого.',
     enterpriseSsoUnverified:
       'Поставщик удостоверений не удалён: не удалось прочитать список поставщиков удостоверений, чтобы убедиться, ' +
       'что останется другой способ входа, а при отключённом входе по электронной почте и паролю этот может быть ' +
@@ -496,7 +496,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'an (der lokale Anmeldepfad hinter der Direktanmeldung ist aus), sodass sich niemand anders anmelden kann: Ihn zu ' +
       'löschen würde alle aussperren, Administratoren eingeschlossen. Registrieren Sie zuerst einen anderen ' +
       'Identitätsanbieter, richten Sie eine andere Anmeldemethode ein oder setzen Sie den lokalen Anmeldepfad wieder ' +
-      'auf hidden, und löschen Sie diesen dann.',
+      'auf hidden mit eingeschalteter Anmeldung per E-Mail und Passwort, und löschen Sie diesen dann.',
     enterpriseSsoUnverified:
       'Der Identitätsanbieter wurde nicht gelöscht: Die Liste der Identitätsanbieter konnte nicht gelesen werden, ' +
       'um zu bestätigen, dass eine andere Anmeldemöglichkeit bleibt, und bei ausgeschalteter Anmeldung mit E-Mail ' +
@@ -518,7 +518,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
     enterpriseSsoLocalOff:
       '이것은 마지막 엔터프라이즈 SSO ID 공급자이며, 로그인 페이지는 로컬 로그인을 제공하지 않습니다(직접 로그인의 로컬 ' +
       '로그인 경로가 꺼져 있음). 다른 로그인 방법이 없으므로 삭제하면 관리자를 포함한 모든 사람이 로그인할 수 없게 ' +
-      '됩니다. 먼저 다른 ID 공급자를 등록하거나, 다른 로그인 방법을 설정하거나, 로컬 로그인 경로를 hidden으로 되돌린 ' +
+      '됩니다. 먼저 다른 ID 공급자를 등록하거나, 다른 로그인 방법을 설정하거나, 로컬 로그인 경로를 hidden으로 되돌리고 이메일/비밀번호 로그인을 켠 ' +
       '다음 이 공급자를 삭제하세요.',
     enterpriseSsoUnverified:
       'ID 공급자를 삭제하지 않았습니다. 다른 로그인 방법이 남아 있는지 확인하기 위해 ID 공급자 목록을 읽을 수 없었고, ' +
@@ -759,8 +759,8 @@ export async function ssoProviderDeleteRefusal(
   return {
     status: 'CONFLICT',
     code: 'DELETE_RESTRICTED',
-    // Email and password on but not drawn: turning it "back on" is no remedy.
-    message: config.emailPassword?.enabled !== false ? copy.enterpriseSsoLocalOff : copy.enterpriseSso,
+    // The page draws no local way in: turning email and password "back on" alone is no remedy.
+    message: pageOffersLocalSignIn(config) ? copy.enterpriseSso : copy.enterpriseSsoLocalOff,
     lastSignInMethod: 'enterprise_sso',
   };
 }
@@ -784,16 +784,20 @@ export async function resolveNoSignInMethodReport(deps: SignInMethodFloorDeps): 
   if (pageOffersEmailPassword(config)) return null;
   if ((await otherSignInMethods(deps, { withoutEnterpriseSso: true, asThePageOffers: true })).length > 0) return null;
   if (config.features?.sso === true && (await probeSsoProvidersPresence(deps.engine())) !== 'absent') return null;
-  if (config.emailPassword?.enabled !== false) {
-    // Email and password is on, but the sign-in page does not draw it.
+  if (!pageOffersLocalSignIn(config)) {
+    // The sign-in page draws no local way in, whatever email and password says.
     return (
       `[auth] ${NO_SIGN_IN_METHOD_AT_BOOT}: this deployment serves NO way to sign in on its sign-in page, so nobody ` +
       'can sign in there, administrators included, while it keeps looking healthy. The local sign-in path behind ' +
       `direct sign-in is off (${DIRECT_SIGN_IN_ENV.localSignIn} or directSignIn.localSignIn), so the page offers no ` +
       'email and password and no phone sign-in, and no other sign-in method is in force: no social or OIDC provider ' +
       'with a client ID and secret, no enterprise SSO identity provider and no host sign-in handoff. Recover: set ' +
-      `${DIRECT_SIGN_IN_ENV.localSignIn}=hidden and restart (the page then offers email and password at ` +
-      '/login?local=1), or restore the identity provider this configuration no longer declares. The boot continues.'
+      `${DIRECT_SIGN_IN_ENV.localSignIn}=hidden` +
+      (config.emailPassword?.enabled === false
+        ? ' and OS_AUTH_EMAIL_PASSWORD_ENABLED=true (email and password sign-in is off too)'
+        : '') +
+      ' and restart (the page then offers email and password at /login?local=1), or restore the identity provider ' +
+      'this configuration no longer declares. The boot continues.'
     );
   }
   return (

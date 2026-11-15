@@ -306,16 +306,14 @@ describe('runDirectSignIn: the start door', () => {
     expect(res.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_RATE_LIMITED}`);
   });
 
-  it('drops a ?redirect= that is not a same-origin path, the return path\'s own rule, and still lands on the page', async () => {
-    for (const foreign of ['//evil.example/x', 'https://evil.example/', '/%2F%2Fevil.example']) {
-      const page = `/_console/login?redirect=${encodeURIComponent(foreign)}&direct=returned`;
-      const { host, dispatched } = fakeHost();
-      await runDirectSignIn(door(`?callbackURL=${encodeURIComponent(page)}`), host);
-      expect(dispatched[0].body.errorCallbackURL).toBe(`${ORIGIN}/_console/login`);
-      const limited = fakeHost({ dispatch: async () => new Response('{}', { status: 429 }) });
-      const res = await runDirectSignIn(door(`?callbackURL=${encodeURIComponent(page)}`), limited.host);
-      expect(res.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_RATE_LIMITED}`);
-    }
+  it.each(FOREIGN_RETURN_PATHS)('drops the foreign ?redirect= %j, the return path\'s own rule, and still lands on the page', async (foreign) => {
+    const page = `/_console/login?redirect=${encodeURIComponent(foreign)}&direct=returned`;
+    const { host, dispatched } = fakeHost();
+    await runDirectSignIn(door(`?callbackURL=${encodeURIComponent(page)}`), host);
+    expect(dispatched[0].body.errorCallbackURL).toBe(`${ORIGIN}/_console/login`);
+    const limited = fakeHost({ dispatch: async () => new Response('{}', { status: 429 }) });
+    const res = await runDirectSignIn(door(`?callbackURL=${encodeURIComponent(page)}`), limited.host);
+    expect(res.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_RATE_LIMITED}`);
   });
 
   it('lands on the sign-in page with an error, never a retry, when no provider resolves or the start is refused', async () => {
