@@ -147,7 +147,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
     for (const f of persona.hidden.fields ?? []) (fields[f.object] ??= []).push(f.field);
     hidden.fields = fields;
     inScopeFigures = scenario.scopeFigures[q.id]?.[persona.id];
-    readableRows = scenario.readableRows[persona.id];
+    readableRows = scenario.readableRows?.[persona.id];
   }
 
   return gradePersonaRun(

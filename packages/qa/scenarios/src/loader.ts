@@ -84,9 +84,11 @@ export interface LoadedScenario {
    * neither is left out. A withheld count tied to the question's object on a
    * line that names one of these rows is that row's own figure ("Website
    * relaunch: 3 tasks" read off a project's readable task count), not the
-   * withheld one (`gradePersonaRun`'s `readableRows`).
+   * withheld one (`gradePersonaRun`'s `readableRows`). The loader always
+   * sets it; a card built without it attributes no number to a row, and the
+   * tie alone decides.
    */
-  readableRows: Record<string, ReadableRow[]>;
+  readableRows?: Record<string, ReadableRow[]>;
 }
 
 export interface LoadResult {

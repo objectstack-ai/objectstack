@@ -652,6 +652,10 @@ describe('eval#1 records (2026-11-15): a withheld count leaks only where the rep
     expect(asClient('  - Website relaunch: project status Active, 3 tasks').leaks).toEqual([]);
     // Control: Mobile app holds no 3 in any field the client may read, so the tie decides.
     expect(asClient('- Mobile app (planned): 3 tasks not done').leaks).toEqual(LEAK);
+    // A card built without readable rows grades without throwing; the tie alone decides.
+    const bare = { ...project, readableRows: undefined };
+    const g = gradeCardAnswer(bare, { question: 'open_tasks', persona: 'client_viewer', turn: turn('- Website relaunch (active): 3 tasks') });
+    expect(g.leaks).toEqual(LEAK);
   });
 
   it("the withheld count stated as the question's own is a leak, in each way a reply ties it", () => {
