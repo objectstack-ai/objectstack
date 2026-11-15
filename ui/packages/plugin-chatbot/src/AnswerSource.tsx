@@ -9,12 +9,14 @@
 /**
  * "How this was computed": one collapsed block per answer turn that draws the
  * `source` block each data tool answered beside its result (object, filter,
- * grouping, aggregations, how many records, and whose records were read), so
- * a reader can check an answer's number.
+ * grouping, aggregations, how many records, and whose records were read), or
+ * the `provenance` block `query_dataset` answered (the dataset, each metric,
+ * the grouping and the caller's filter; ADR-0149 D3), so a reader can check
+ * an answer's number.
  *
- * The block receives only the lifted `ObjectQuerySource` copies
- * (`detectAnswerSource`), never a tool's `result` or `args`, so nothing else
- * of a tool payload can reach this face in any visibility mode.
+ * The block receives only the lifted copies (`detectAnswerSource`), never a
+ * tool's `result` or `args`, so nothing else of a tool payload can reach this
+ * face in any visibility mode.
  */
 import * as React from 'react';
 import {
@@ -25,7 +27,8 @@ import {
 } from '@object-ui/components';
 import { builtinAggregateLabels, useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 import { CalculatorIcon, ChevronDownIcon } from 'lucide-react';
-import type { ObjectQuerySource } from '@objectstack/spec/ai';
+import type { DatasetProvenance, ObjectQuerySource } from '@objectstack/spec/ai';
+import type { AnswerSource } from './mapMessages';
 
 /** The scope value the block states in words; any other value draws nothing. */
 const SCOPE_VISIBLE_TO_YOU = 'visible_to_you';
@@ -210,10 +213,14 @@ function AnswerSourceRow({ label, children }: { label: string; children: React.R
   );
 }
 
-function AnswerSourceSection({ source }: { source: ObjectQuerySource }) {
+/**
+ * A filter in the query dialect as flat rows (field, operator words,
+ * comparands), or as served when it does not lower. Shared by the object-query
+ * `filter` and the dataset `runtimeFilter`.
+ */
+function AnswerSourceFilter({ filter }: { filter: Record<string, unknown> }) {
   const { t } = useObjectTranslation();
   const tt = useSafeTranslate();
-  const aggregateWords = builtinAggregateLabels(tt) as Record<string, string>;
   const word = (v: FilterScalar): string =>
     typeof v === 'boolean'
       ? v
@@ -221,10 +228,42 @@ function AnswerSourceSection({ source }: { source: ObjectQuerySource }) {
         : t('filterBuilder.falseLabel', { defaultValue: 'False' })
       : String(v);
 
-  const lowered = source.filter !== undefined ? lowerSourceFilter(source.filter) : null;
+  const lowered = lowerSourceFilter(filter);
   const joiner = lowered?.logic === 'or'
     ? t('filterBuilder.or', { defaultValue: 'OR' })
     : t('filterBuilder.and', { defaultValue: 'AND' });
+
+  return lowered ? (
+    <ul className="space-y-0.5" data-testid="answer-source-filter">
+      {lowered.rows.map((row, i) => (
+        <li key={`${row.field}-${i}`}>
+          {i > 0 ? <span className="text-muted-foreground">{joiner} </span> : null}
+          <span className="font-medium">{row.field}</span>{' '}
+          <span className="text-muted-foreground">
+            {tt(`filterBuilder.operators.${row.operator}`, OPERATOR_WORDS_EN[row.operator])}
+          </span>
+          {row.values.length > 0 ? (
+            <>
+              {' '}
+              {row.range
+                ? `${word(row.values[0])} – ${word(row.values[1])}`
+                : row.values.map(word).join(', ')}
+            </>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <code className="font-mono text-[11px]" data-testid="answer-source-filter-served">
+      {servedFilterText(filter)}
+    </code>
+  );
+}
+
+function AnswerSourceSection({ source }: { source: ObjectQuerySource }) {
+  const { t } = useObjectTranslation();
+  const tt = useSafeTranslate();
+  const aggregateWords = builtinAggregateLabels(tt) as Record<string, string>;
 
   return (
     <dl className="space-y-1.5" data-testid="answer-source-section" data-object={source.object}>
@@ -234,30 +273,8 @@ function AnswerSourceSection({ source }: { source: ObjectQuerySource }) {
       <AnswerSourceRow label={t('chatbot.answerSource.filter', { defaultValue: 'Filter' })}>
         {source.filter === undefined ? (
           t('chatbot.answerSource.allRecords', { defaultValue: 'All records' })
-        ) : lowered ? (
-          <ul className="space-y-0.5" data-testid="answer-source-filter">
-            {lowered.rows.map((row, i) => (
-              <li key={`${row.field}-${i}`}>
-                {i > 0 ? <span className="text-muted-foreground">{joiner} </span> : null}
-                <span className="font-medium">{row.field}</span>{' '}
-                <span className="text-muted-foreground">
-                  {tt(`filterBuilder.operators.${row.operator}`, OPERATOR_WORDS_EN[row.operator])}
-                </span>
-                {row.values.length > 0 ? (
-                  <>
-                    {' '}
-                    {row.range
-                      ? `${word(row.values[0])} – ${word(row.values[1])}`
-                      : row.values.map(word).join(', ')}
-                  </>
-                ) : null}
-              </li>
-            ))}
-          </ul>
         ) : (
-          <code className="font-mono text-[11px]" data-testid="answer-source-filter-served">
-            {servedFilterText(source.filter)}
-          </code>
+          <AnswerSourceFilter filter={source.filter} />
         )}
       </AnswerSourceRow>
       {source.groupBy?.length ? (
@@ -293,9 +310,83 @@ function AnswerSourceSection({ source }: { source: ObjectQuerySource }) {
   );
 }
 
+/** A member's label, or its name where the dataset sends an empty label. */
+const memberLabel = (m: { name: string; label: string }): string => m.label || m.name;
+
+/**
+ * A `query_dataset` answer's provenance (ADR-0149 D3): the dataset, each
+ * metric by its label with its name beside it (and its business definition
+ * when it declares one), the grouping, and the caller's filter. The dataset's
+ * own filter is never served, so "no filter" here means none was added to it.
+ */
+function DatasetSourceSection({ source }: { source: DatasetProvenance }) {
+  const { t } = useObjectTranslation();
+
+  return (
+    <dl
+      className="space-y-1.5"
+      data-testid="answer-source-dataset-section"
+      data-dataset={source.dataset.name}
+    >
+      <AnswerSourceRow label={t('chatbot.answerSource.dataset', { defaultValue: 'Dataset' })}>
+        <span data-testid="answer-source-dataset">{memberLabel(source.dataset)}</span>
+      </AnswerSourceRow>
+      {source.measures.length > 0 ? (
+        <AnswerSourceRow label={t('chatbot.answerSource.metrics', { defaultValue: 'Metrics' })}>
+          <ul className="space-y-0.5" data-testid="answer-source-metrics">
+            {source.measures.map((m, i) => (
+              <li key={`${m.name}-${i}`}>
+                <span className="font-medium" data-testid="answer-source-metric-label">
+                  {memberLabel(m)}
+                </span>
+                {m.label && m.label !== m.name ? (
+                  <>
+                    {' '}
+                    <code
+                      className="font-mono text-[11px] text-muted-foreground"
+                      data-testid="answer-source-metric-name"
+                    >
+                      {m.name}
+                    </code>
+                  </>
+                ) : null}
+                {m.description ? (
+                  <p className="text-muted-foreground">{m.description}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </AnswerSourceRow>
+      ) : null}
+      {source.dimensions.length > 0 ? (
+        <AnswerSourceRow label={t('chatbot.answerSource.groupedBy', { defaultValue: 'Grouped by' })}>
+          {source.dimensions.map(memberLabel).join(', ')}
+        </AnswerSourceRow>
+      ) : null}
+      <AnswerSourceRow label={t('chatbot.answerSource.filter', { defaultValue: 'Filter' })}>
+        {source.runtimeFilter === undefined ? (
+          <span data-testid="answer-source-no-added-filter">
+            {t('chatbot.answerSource.noAddedFilter', {
+              defaultValue: 'No filter added to the dataset definition',
+            })}
+          </span>
+        ) : (
+          <AnswerSourceFilter filter={source.runtimeFilter} />
+        )}
+      </AnswerSourceRow>
+    </dl>
+  );
+}
+
+const isDatasetProvenance = (source: AnswerSource): source is DatasetProvenance =>
+  'kind' in source && source.kind === 'dataset';
+
 export interface AnswerSourceBlockProps {
-  /** The turn's lifted sources, one per tool that answered one, in call order. */
-  sources: ReadonlyArray<{ key: string; source: ObjectQuerySource }>;
+  /**
+   * The turn's lifted sources, one per tool that answered one, in call order:
+   * an object query's `source` or `query_dataset`'s `provenance`.
+   */
+  sources: ReadonlyArray<{ key: string; source: AnswerSource }>;
   className?: string;
 }
 
@@ -322,7 +413,11 @@ export function AnswerSourceBlock({ sources, className }: AnswerSourceBlockProps
         {sources.map(({ key, source }, i) => (
           <React.Fragment key={key}>
             {i > 0 ? <hr className="border-border/60" /> : null}
-            <AnswerSourceSection source={source} />
+            {isDatasetProvenance(source) ? (
+              <DatasetSourceSection source={source} />
+            ) : (
+              <AnswerSourceSection source={source} />
+            )}
           </React.Fragment>
         ))}
       </CollapsibleContent>

@@ -58,6 +58,12 @@ const DIRECT_SIGN_IN_RATE_LIMITED: RefusalCopy = {
   defaultValue: 'Too many sign-ins were started from this network just now. Wait a few seconds, then try again.',
 };
 
+const NETWORK_NOT_ALLOWED: RefusalCopy = {
+  key: 'auth.login.errors.networkNotAllowed',
+  defaultValue:
+    "This system does not allow sign-in from your network. Connect from an allowed network (for example your organization's office network or VPN), or ask your administrator.",
+};
+
 const ACCESS_DENIED: RefusalCopy = {
   key: 'auth.login.errors.ssoAccessDenied',
   defaultValue:
@@ -101,6 +107,12 @@ const GENERIC: RefusalCopy = {
  *  - `direct_sign_in_unavailable`: the direct sign-in door found no single
  *    identity provider to start, or the provider's start was refused
  *    (`./directSignIn`);
+ *  - `IP_NOT_ALLOWED`: the deployment's IP allow-list refused this client at
+ *    the direct sign-in door, which sends a browser here instead of answering
+ *    the raw `403` body (plugin-auth `direct-sign-in.ts`
+ *    `directSignInNetworkRefusal`). Nothing was started, and every sign-in
+ *    this page offers is refused the same way from this network, so the
+ *    sentence names the network and the administrator, not a retry;
  *  - `access_denied` (RFC 6749 §4.1.2.1): the identity provider refused the
  *    signed-in account for this relying party. The ObjectStack provider sends
  *    it when its environment-access gate refuses an account that is not a
@@ -134,6 +146,7 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   state_not_found: START_FROM_LOGIN_PAGE,
   direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
   direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
+  IP_NOT_ALLOWED: NETWORK_NOT_ALLOWED,
   access_denied: ACCESS_DENIED,
   EMAIL_DOMAIN_NOT_ALLOWED: EMAIL_DOMAIN_NOT_ALLOWED,
   INVALID_EMAIL: EMAIL_NOT_AN_ADDRESS,
