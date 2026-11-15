@@ -967,7 +967,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "Отказы",
-        helpText: "Каталог отказов с ключами — кодами SCREAMING_SNAKE, которые выбрасывает тело (например, CLEAN_VERSION_REQUIRED). Вызывающий получает объявленное сообщение в переводе на свой язык и с объявленным статусом. Только для тел JavaScript (L2)"
+        helpText: "Каталог отказов с ключами — кодами SCREAMING_SNAKE, которые выбрасывает хук (например, CLEAN_VERSION_REQUIRED). Вызывающий получает объявленное сообщение в переводе на свой язык и с объявленным статусом. Для тела JavaScript (L2) или обработчика; для тела-выражения отклоняется"
       },
       "refusals.message": {
         label: "Сообщение",
