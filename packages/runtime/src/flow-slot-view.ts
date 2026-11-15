@@ -30,15 +30,19 @@
  * ⛔ No slot entries, no view: a door then keeps the bare service, whose bare
  * entries refuse the shared name. Never a guess at which holder was meant.
  *
- * [#32183, ADR-0150 D3; epic ruling R4-G] Every answer here is judged over
- * EVERY holder of the name, a disabled package's included, so each is the
- * answer `main` gives: a disable moves none of them. The engine keeps a
- * disabled package's slot armed (a runtime disable unregisters nothing from
- * it), so a read over the served holders alone would move these doors both
- * ways: an enabled holder's own flow action would reach the bare entries,
- * which still refuse the name two slots hold, and a closure holding both
- * would run the enabled holder's flow. The served judgment of the send and
- * run doors is #32670's.
+ * [ADR-0150 D3, #33386; seat ruling 6884403301] A name two packages hold is
+ * judged over the SERVED holders (a disabled package holds no name), as the
+ * engine's bare entries judge it: a caller reaches its own flow, else the one
+ * served holder in its closure (two or more: refused naming the served
+ * holders only, `ambiguous-in-closure`); a caller with no package reaches the
+ * name's one served holder. A caller whose own holding is the disabled one
+ * gets no flow ({@link absentFlowView}), never a closure holder's
+ * (amendment 4). A slot is `(package, name)` and is never re-pointed: the
+ * engine keeps a disabled package's slot armed and keyed (amendment 7), and
+ * a disable only moves which slot a caller reaches. A name one package holds,
+ * or none, is judged over every holder, unchanged. {@link endpointPackageOf}
+ * stays judged over every holder: it names the package an endpoint item
+ * belongs to, the caller the flow is then resolved for.
  */
 
 import { PackageScopedNameRefusedError } from '@objectstack/core';
@@ -46,10 +50,31 @@ import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectsta
 import type { FlowWalkReads } from './flow-start-admission.js';
 
 /**
- * [#32183, R4-G] Every resolution in this module reads every holder, a
- * disabled package's included (see the module note).
+ * [#32183] The read over every holder, a disabled package's included: whether
+ * a name is held by two packages at all (the engine's slot table reads the
+ * same), and the endpoint's package (see the module note).
  */
 const EVERY_HOLDER = { includeDisabledPackages: true } as const;
+
+/**
+ * [ADR-0150 D3, #33386] The flow `name` resolves to for `callerPackageId`
+ * (`null`: none) over the served holders. The served holder read keeps a
+ * caller's own holding even when its package is disabled; such a caller
+ * reaches no flow (amendment 4): `not-found`, never a closure holder's.
+ */
+function servedFlowResolution(registry: PackageScopedRegistry, name: string, callerPackageId: string | null): ReturnType<typeof resolvePackageScopedName> {
+    const resolution = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
+    if (callerPackageId !== null && resolution.status === 'resolved' && resolution.via === 'own') {
+        const disabled = (registry as { isPackageDisabled?: (id: string) => boolean }).isPackageDisabled;
+        if (typeof disabled === 'function' && disabled.call(registry, callerPackageId) === true) return { status: 'not-found' };
+    }
+    return resolution;
+}
+
+/** Is `name` held by two or more packages over every holder (each holder's flow is then its own engine slot)? */
+function heldByMany(registry: PackageScopedRegistry, name: string): boolean {
+    return resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: null, ...EVERY_HOLDER }).status === 'refused';
+}
 
 /** The engine-local slot entries (service-automation's `AutomationEngine`). */
 interface FlowSlotEntries {
@@ -88,7 +113,30 @@ function slotEntriesOf(service: unknown): FlowSlotEntries | undefined {
  */
 export function flowSlotView<T extends object>(service: T, packageId: string, name: string): T | undefined {
     const slots = slotEntriesOf(service);
-    if (!slots) return undefined;
+    return slots ? boundView(service, slots, { packageId, name }) : undefined;
+}
+
+/**
+ * [ADR-0150 D3, #33386] `service` with its by-name members for `name` bound to
+ * NO flow: the answer a name gets that no served holder reaches for its
+ * caller (seat ruling 6884403301: no flow). It reads as a flow the engine
+ * does not hold — `getFlow` `null`, `execute` not found, no runs — and never
+ * as another slot's. `undefined` when the service has no slot entries.
+ */
+export function absentFlowView<T extends object>(service: T, name: string): T | undefined {
+    if (!slotEntriesOf(service)) return undefined;
+    const none: FlowSlotEntries = {
+        executeSlot: async () => ({ success: false, error: `Flow '${name}' not found` }),
+        getFlowSlot: () => null,
+        toggleFlowSlot: async () => { throw new Error(`Flow '${name}' not found`); },
+        flowSlotKey: () => undefined,
+    };
+    return boundView(service, none, { name });
+}
+
+function boundView<T extends object>(service: T, slots: FlowSlotEntries, slot: { packageId?: string; name: string }): T {
+    const { name } = slot;
+    const packageId = slot.packageId ?? '';
     const target = service as Record<string, any>;
     const key = (): string | undefined => slots.flowSlotKey(packageId, name);
     // A run of this slot reads as a run of the name the door addressed. A run
@@ -128,7 +176,7 @@ export function flowSlotView<T extends object>(service: T, packageId: string, na
     };
     return new Proxy(service, {
         get(held, prop) {
-            if (prop === BOUND_SLOT) return { packageId, name };
+            if (prop === BOUND_SLOT) return slot.packageId === undefined ? undefined : { packageId, name };
             const value = Reflect.get(held, prop, held);
             if (typeof value !== 'function') return value;
             return typeof prop === 'string' && Object.prototype.hasOwnProperty.call(bound, prop) ? bound[prop] : value.bind(held);
@@ -154,12 +202,13 @@ function canResolveForCaller(registry: Partial<PackageScopedRegistry>): registry
  *
  *  - A name a caller with no package reaches (one holder, or none) is the
  *    service itself, as before: its bare entries serve it.
- *  - A name two packages hold, which the bare entries refuse, resolves for the
- *    caller's package: its own flow, else the one holder in its closure,
- *    served from that holder's slot ({@link flowSlotView}). A name the
- *    resolver refuses for that package throws its refusal
- *    (`PackageScopedNameRefusedError`, 409, every candidate named), before
- *    anything is read or run.
+ *  - A name two packages hold resolves for the caller's package over the
+ *    served holders (#33386): its own flow, else the one served holder in its
+ *    closure, served from that holder's slot ({@link flowSlotView}). A name
+ *    the resolver refuses for that package throws its refusal
+ *    (`PackageScopedNameRefusedError`, 409, every served candidate named),
+ *    before anything is read or run. A caller whose own holding is disabled,
+ *    or that no served holder answers, gets no flow ({@link absentFlowView}).
  *  - No caller package, a registry that cannot answer, or an engine with no
  *    slot entries: the service itself, whose bare entries refuse the shared
  *    name, naming both (fail closed).
@@ -171,10 +220,10 @@ export function flowServiceForCaller<T extends object>(
     callerPackageId: string | undefined,
 ): T {
     if (!callerPackageId || typeof name !== 'string' || name === '' || !registry || !canResolveForCaller(registry)) return service;
-    const bare = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: null, ...EVERY_HOLDER });
-    if (bare.status !== 'refused') return service;
-    const own = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId, ...EVERY_HOLDER });
+    if (!heldByMany(registry, name)) return service;
+    const own = servedFlowResolution(registry, name, callerPackageId);
     if (own.status === 'refused') throw new PackageScopedNameRefusedError(own);
+    if (own.status === 'not-found') return absentFlowView(service, name) ?? service;
     if (own.status !== 'resolved' || own.holder.kind !== 'package') return service;
     return flowSlotView(service, own.holder.packageId, name) ?? service;
 }
@@ -199,12 +248,15 @@ export function endpointPackageOf(registry: Partial<PackageScopedRegistry> | und
  *  - the started flow's package: the slot `service` is bound to when it is a
  *    {@link flowSlotView} of that flow, else the one holder the bare name
  *    resolves to (`null` for the environment's own flow, or none);
- *  - a `subflow` / `map` callee: a name a caller with no package reaches is
- *    the bare read, as before; a name two packages hold resolves from the
- *    CALLING flow's package (its own flow, else the one holder in its
- *    closure), read from that holder's slot, and a name that resolver refuses
- *    throws its refusal (`409`, every candidate named), as the run's call
- *    would answer.
+ *  - a `subflow` / `map` callee: a name one package holds, or none, is the
+ *    bare read, as before; a name two packages hold resolves from the CALLING
+ *    flow's package over the served holders (#33386; its own flow, else the
+ *    one served holder in its closure; no package: the one served holder),
+ *    read from that holder's slot, and a name that resolver refuses throws
+ *    its refusal (`409`, every served candidate named), as the run's call
+ *    would answer. No served holder for the caller, or a caller whose own
+ *    holding is disabled: no flow (`null`), never another slot's
+ *    (amendments 4 and 8: the walk reads the slot the run executes).
  *
  * ⛔ A registry that cannot answer, or an engine with no slot entries, reads
  * every callee bare, whose read refuses a shared name (fail closed).
@@ -226,7 +278,9 @@ export function flowWalkReads(
             const bound = boundSlotOf(service);
             if (bound && bound.name === flowName) return bound.packageId;
             const table = await resolver();
-            return table ? packageOf(resolvePackageScopedName(table, { type: 'flow', name: flowName, callerPackageId: null, ...EVERY_HOLDER })) : null;
+            if (!table) return null;
+            const every = resolvePackageScopedName(table, { type: 'flow', name: flowName, callerPackageId: null, ...EVERY_HOLDER });
+            return packageOf(every.status === 'refused' ? servedFlowResolution(table, flowName, null) : every);
         },
         async callee(name, callerPackageId) {
             const table = await resolver();
@@ -234,8 +288,9 @@ export function flowWalkReads(
             if (!table || !slots) return { flow: await bareRead(name), packageId: null };
             const bare = resolvePackageScopedName(table, { type: 'flow', name, callerPackageId: null, ...EVERY_HOLDER });
             if (bare.status !== 'refused') return { flow: await bareRead(name), packageId: packageOf(bare) };
-            const own = resolvePackageScopedName(table, { type: 'flow', name, callerPackageId, ...EVERY_HOLDER });
+            const own = servedFlowResolution(table, name, callerPackageId);
             if (own.status === 'refused') throw new PackageScopedNameRefusedError(own);
+            if (own.status === 'not-found') return { flow: null, packageId: null };
             const holder = packageOf(own);
             if (holder === null) return { flow: await bareRead(name), packageId: null };
             return { flow: slots.getFlowSlot(holder, name) ?? null, packageId: holder };
@@ -271,22 +326,29 @@ export function flowHolderForCaller(
     callerPackageId: string | undefined,
 ): string | undefined {
     if (!registry || !canResolveForCaller(registry)) return undefined;
-    const resolution = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: callerPackageId ?? null, ...EVERY_HOLDER });
+    const every = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: callerPackageId ?? null, ...EVERY_HOLDER });
+    // [#33386] A name two packages hold: over the served holders, as the run does.
+    const resolution = heldByMany(registry, name) ? servedFlowResolution(registry, name, callerPackageId ?? null) : every;
     return resolution.status === 'resolved' && resolution.holder.kind === 'package' ? resolution.holder.packageId : undefined;
 }
 
 /**
  * [ADR-0150 D4, #31696] The package whose slot of `name` the engine files
  * under the run key `key`: the key's own package for `PACKAGE/name`; for any
- * other key, the one package of `holders` (every holder the registry names)
- * whose slot is filed under it. `undefined` when no holder's is, or two or
+ * other key, the one package of `holders` (the holders the caller judges by)
+ * whose slot is filed under it; a key's own package outside `holders` is no
+ * answer (#33386). `undefined` when no holder's is, or two or
  * more are: the run is then no one holder's.
  */
 export function runSlotPackage(service: unknown, name: string, key: unknown, holders: readonly string[]): string | undefined {
     const slots = slotEntriesOf(service);
     const flow = runFlowOf(key);
     if (!slots || !flow || flow.name !== name) return undefined;
-    const filed = (flow.packageId === undefined ? holders : [flow.packageId]).filter((packageId) => slots.flowSlotKey(packageId, name) === key);
+    // [#33386] A key's own package counts only while it is one of `holders`:
+    // a run of a disabled holder's slot is no served holder's (seat ruling
+    // 6884403301, amendment 3), never substituted.
+    const filed = (flow.packageId === undefined ? holders : [flow.packageId])
+        .filter((packageId) => holders.includes(packageId) && slots.flowSlotKey(packageId, name) === key);
     return filed.length === 1 ? filed[0] : undefined;
 }
 

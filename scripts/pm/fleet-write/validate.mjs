@@ -188,6 +188,10 @@ import {
   RERUN_FAILED_PATH_SHAPE,
   ENQUEUE_FRONT_FENCES,
   ENQUEUE_FRONT_MUTATION,
+  DEQUEUE_CAUSES,
+  DEQUEUE_FENCES,
+  DEQUEUE_MUTATION,
+  MAX_DEQUEUE_REASON_BYTES,
   RERUN_FAILED_RERUN_STATES,
   RERUN_FAILED_STATUS,
   RERUN_FAILED_WORKFLOWS,
@@ -1116,6 +1120,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the workflow table keyed by repository: cloud's deploy-staging.yml dispatchable on cloud alone with apps affected alone, on main alone; a file judged against the stroke's own repository, so a name one repository lists is refused on every other and a repository with no entry starts nothing; the token minted for that ONE repository; and this repository's entries unchanged": 18,
   "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused": 36,
   "the pr_enqueue_front row: pull and expected_head_sha, a full sha, and nothing that widens them; ONE enqueuePullRequest mutation with jump true and the expected head, the pull's node id read first; a stroke of exactly that one action; merge-queues write minted for that stroke and EMPTY for every other, through the workflow's own input; contents and workflows its literal alsoSpends; the fences on the pull and its queue named and left to the executor": 10,
+  "the pr_dequeue row: pull, expected_head_sha, a cause from the closed three and a bounded reason, and nothing that widens them; ONE dequeuePullRequest mutation behind the pull's node id; a stroke of exactly that one action; merge-queues write minted for that stroke, EMPTY for every other; contents and issues its literal alsoSpends; the fences on the pull, its queue and the cause named and left to the executor": 11,
   "the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id": 23,
   "the event file: the workflow carries client_payload in no step's env, and the payload is read from GITHUB_EVENT_PATH": 6,
   "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts": 77,
@@ -1126,8 +1131,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
 // 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
-// table's repository key; 20 → 21 with advisory_note's.
-const SELF_TEST_BATTERY_FLOOR = 21;
+// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's.
+const SELF_TEST_BATTERY_FLOOR = 22;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1276,7 +1281,7 @@ export async function selfTest() {
       pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 },
       automerge_disable: { pull: 1 },
-      pr_enqueue_front: { pull: 1, expected_head_sha: SHA },
+      pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' },
       mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' },
       transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 },
@@ -1346,7 +1351,7 @@ export async function selfTest() {
     t('…and neither is the FIRST request of its action — the answer they read exists before either is sent', OP_NAMES.filter((op) => { const a = { op }; for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = sample[k]; return OPS[op].requests(a, 'o/r')[0].fromAnswer !== undefined; }), []);
     t('…every such leg is a POST to the one additive issue endpoint for its list — never a PATCH or PUT, the whole-set replaces', legs.map((r) => [r.verb, /\/(assignees|labels)$/.test(r.path)]), [['POST', true], ['POST', true]]);
     t('…their placeholder is the one spelling the executor fills, spelled once, and no path without fromAnswer carries a brace', [answerPlaceholder('number'), everyRequest.filter((r) => r.fromAnswer === undefined && /[{}]/.test(r.path)).map((r) => `${r.op} ${r.path}`)], ['{number}', []]);
-    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write (its assignees and labels legs), pr_ready\'s (the governed-review assignee fallback), automerge_enable\'s workflows write and pr_enqueue_front\'s contents and workflows write (the two literal grants an enqueue spends) are the four such rows', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']], ['pr_ready', ['issues']], ['automerge_enable', ['workflows']], ['pr_enqueue_front', ['contents', 'workflows']]]]);
+    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write (its assignees and labels legs), pr_ready\'s (the governed-review assignee fallback), automerge_enable\'s workflows write, pr_enqueue_front\'s contents and workflows write (the two literal grants an enqueue spends) and pr_dequeue\'s contents and issues write (the auto-merge rows\' grant and its ONE audit comment) are the five such rows', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']], ['pr_ready', ['issues']], ['automerge_enable', ['workflows']], ['pr_enqueue_front', ['contents', 'workflows']], ['pr_dequeue', ['contents', 'issues']]]]);
     t('pr_create without assignees or labels is the one create request it always was — no later leg', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, 1);
     t('…with labels alone, the create then the labels leg; with assignees alone, the create then the assignees leg', [OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b', labels: ['skip-changeset'] }, 'o/r').map((r) => r.labelled ?? r.assigned ?? 'create'), OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b', assignees: ['u'] }, 'o/r').map((r) => r.labelled ?? r.assigned ?? 'create')], [['create', ['skip-changeset']], ['create', ['u']]]);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
@@ -1479,7 +1484,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
       run_rerun_failed: { run_id: 1 }, sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
@@ -1527,7 +1532,7 @@ export async function selfTest() {
     t('an inputs key on a file whose entry is null is refused BY NAME — the relay sends none there', refuses(one(start({ inputs: { reason: true } })), `actions[0].inputs: ${FILE} declares no inputs`));
     t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
-    t('the only rows that travel alone or widen the token: pr_enqueue_front, workflow_dispatch, run_rerun_failed and the eight advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'], ['transfer']]);
+    t('the only rows that travel alone or widen the token: pr_enqueue_front, pr_dequeue, workflow_dispatch, run_rerun_failed and the eight advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'pr_dequeue', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'], ['transfer']]);
     t('…and actions is spent by the workflow_dispatch and run_rerun_failed rows and NOTHING else — each of them alone in its stroke', [OP_NAMES.filter((op) => OPS[op].permission === 'actions'), OP_NAMES.filter((op) => OPS[op].permission === 'actions').every((op) => OPS[op].alone === true)], [['workflow_dispatch', 'run_rerun_failed'], true]);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
@@ -1686,7 +1691,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
@@ -1780,9 +1785,9 @@ export async function selfTest() {
     const spec = OPS.pr_enqueue_front;
     const jump = (extra = {}) => ({ op: 'pr_enqueue_front', pull: 3686, expected_head_sha: SHA, ...extra });
     const one = (action) => fixturePayload({ actions: [action] });
-    t('the row: pull and expected_head_sha required, nothing optional, spending merge-queues, contents and workflows its alsoSpends, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.permission, spec.alsoSpends, spec.alone, spec.secondRepo ?? null], [['pull', 'expected_head_sha'], [], 'merge-queues', ['contents', 'workflows'], true, null]);
+    t('the row: pull and expected_head_sha required, approval_comment the one optional key (the SIZE lift\'s carried approval), spending merge-queues, contents and workflows its alsoSpends, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.permission, spec.alsoSpends, spec.alone, spec.secondRepo ?? null], [['pull', 'expected_head_sha'], ['approval_comment'], 'merge-queues', ['contents', 'workflows'], true, null]);
     const req = spec.requests(jump(), REPO);
-    t('its one request is the enqueuePullRequest mutation with jump true and expectedHeadOid, behind the pull\'s node id, carrying the pull and head the executor fences and reads back — and no landed state, since the answer is a queue entry', [req.length, req[0].verb, req[0].path, req[0].graphql.mutation, req[0].graphql.query === ENQUEUE_FRONT_MUTATION, ENQUEUE_FRONT_MUTATION.includes('jump: true'), ENQUEUE_FRONT_MUTATION.includes('expectedHeadOid: $head'), req[0].graphql.pull, req[0].graphql.landed ?? null, req[0].enqueueFront], [1, 'POST', '/graphql', 'enqueuePullRequest', true, true, true, 3686, null, { pull: 3686, expectedHeadSha: SHA }]);
+    t('its one request is the enqueuePullRequest mutation with jump true and expectedHeadOid, behind the pull\'s node id, carrying the pull and head the executor fences and reads back — and no landed state, since the answer is a queue entry', [req.length, req[0].verb, req[0].path, req[0].graphql.mutation, req[0].graphql.query === ENQUEUE_FRONT_MUTATION, ENQUEUE_FRONT_MUTATION.includes('jump: true'), ENQUEUE_FRONT_MUTATION.includes('expectedHeadOid: $head'), req[0].graphql.pull, req[0].graphql.landed ?? null, req[0].enqueueFront, spec.requests(jump({ approval_comment: 77 }), REPO)[0].enqueueFront.approvalComment], [1, 'POST', '/graphql', 'enqueuePullRequest', true, true, true, 3686, null, { pull: 3686, expectedHeadSha: SHA, approvalComment: null }, 77]);
     const ok = validatePayload(one(jump()));
     t('accepted: the minimal stroke, whose normalised action is op, pull and expected_head_sha alone', [ok.ok, ok.payload?.actions[0]], [true, { op: 'pr_enqueue_front', pull: 3686, expected_head_sha: SHA }], ok.errors.join(' | '));
     t('⛔ refused: a missing expected_head_sha or pull — the head the seat accepted is named on every request, never defaulted', [refuses(one({ op: 'pr_enqueue_front', pull: 1 }), 'actions[0].expected_head_sha is required by `pr_enqueue_front`'), refuses(one({ op: 'pr_enqueue_front', expected_head_sha: SHA }), 'actions[0].pull is required by `pr_enqueue_front`')], [true, true]);
@@ -1797,11 +1802,38 @@ export async function selfTest() {
     t('fence grant, accepted side: its stroke mints the five literal grants plus merge-queues write, for ONE repository, and the GitHub output says so', stroke ? [tokenPermissionsOf(stroke), tokenRepositoriesOf(stroke), outputLine(stroke, 'permission_merge_queues'), outputLine(stroke, 'permission_actions')] : 'refused', [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', 'merge-queues': 'write' }, [REPO], 'permission_merge_queues=write', 'permission_actions=']);
     const plain = validatePayload(fixturePayload()).payload;
     const landing = validatePayload(fixturePayload({ actions: [{ op: 'pr_ready', pull: 1 }, { op: 'automerge_enable', pull: 1 }] })).payload;
-    t('⛔ fence grant, refused side: a comment stroke and the back-of-queue landing pair write an EMPTY permission_merge_queues — the grant is this row\'s alone', [outputLine(plain, 'permission_merge_queues'), outputLine(landing, 'permission_merge_queues'), OP_NAMES.filter((op) => OPS[op].permission === 'merge-queues')], ['permission_merge_queues=', 'permission_merge_queues=', ['pr_enqueue_front']]);
+    t('⛔ fence grant, refused side: a comment stroke and the back-of-queue landing pair write an EMPTY permission_merge_queues — the grant is this row\'s and the dequeue\'s alone', [outputLine(plain, 'permission_merge_queues'), outputLine(landing, 'permission_merge_queues'), OP_NAMES.filter((op) => OPS[op].permission === 'merge-queues')], ['permission_merge_queues=', 'permission_merge_queues=', ['pr_enqueue_front', 'pr_dequeue']]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
     t('fleet-write.yml mints permission-merge-queues from the validator\'s permission_merge_queues output, once, and never as a literal', [[...workflowText.matchAll(/^\s+permission-merge-queues:\s*\$\{\{\s*steps\.validate\.outputs\.permission_merge_queues\s*\}\}\s*$/gm)].length, /^\s+permission-merge-queues:\s*write\s*$/m.test(workflowText)], [1, false]);
     t('the fences this file cannot see are the executor\'s, named once in the op table: open, ready, head, release, governed, size, queue, one-jump', ENQUEUE_FRONT_FENCES.map((f) => f.fence), ['open', 'ready', 'head', 'release', 'governed', 'size', 'queue', 'one-jump']);
+  }
+
+  // ── the pr_dequeue row ────────────────────────────────────────────────────
+  battery("the pr_dequeue row: pull, expected_head_sha, a cause from the closed three and a bounded reason, and nothing that widens them; ONE dequeuePullRequest mutation behind the pull's node id; a stroke of exactly that one action; merge-queues write minted for that stroke, EMPTY for every other; contents and issues its literal alsoSpends; the fences on the pull, its queue and the cause named and left to the executor");
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const spec = OPS.pr_dequeue;
+    const out = (extra = {}) => ({ op: 'pr_dequeue', pull: 3591, expected_head_sha: SHA, cause: 'conflict', reason: 'conflicts with main at the shared changeset', ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    t('the row: pull, expected_head_sha, cause and reason required, nothing optional, spending merge-queues, contents and issues its alsoSpends, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.permission, spec.alsoSpends, spec.alone, spec.secondRepo ?? null], [['pull', 'expected_head_sha', 'cause', 'reason'], [], 'merge-queues', ['contents', 'issues'], true, null]);
+    const req = spec.requests(out(), REPO);
+    t('its one request is the dequeuePullRequest mutation behind the pull\'s node id, carrying the pull, head, cause and reason the executor fences, writes into the audit comment and reads back — no landed state, the answer is a queue entry', [req.length, req[0].verb, req[0].path, req[0].graphql.mutation, req[0].graphql.query === DEQUEUE_MUTATION, DEQUEUE_MUTATION.includes('dequeuePullRequest(input: { id: $id })'), req[0].graphql.pull, req[0].graphql.landed ?? null, req[0].dequeue], [1, 'POST', '/graphql', 'dequeuePullRequest', true, true, 3591, null, { pull: 3591, expectedHeadSha: SHA, cause: 'conflict', reason: 'conflicts with main at the shared changeset' }]);
+    const ok = validatePayload(one(out()));
+    t('accepted: each of the three causes, the normalised action carrying exactly the four keys', [...DEQUEUE_CAUSES.map((cause) => validatePayload(one(out({ cause }))).ok), Object.keys(ok.payload?.actions[0] ?? {})], [true, true, true, ['op', 'pull', 'expected_head_sha', 'cause', 'reason']], ok.errors.join(' | '));
+    t('the causes are the queue card\'s three, closed', [...DEQUEUE_CAUSES], ['conflict', 'own-failure', 'seat-asks']);
+    t('⛔ refused: a cause outside the three — a flake, a speed-up or a free word never dequeues', ['flake', 'faster', 'other', ''].map((cause) => refuses(one(out({ cause })), 'actions[0].cause')), [true, true, true, true]);
+    t('⛔ refused: a missing cause, reason, head or pull — each named', ['cause', 'reason', 'expected_head_sha', 'pull'].map((key) => { const a = out(); delete a[key]; return refuses(one(a), `actions[0].${key} is required by \`pr_dequeue\``); }), [true, true, true, true]);
+    t('⛔ refused: a reason over its bound, a short head', [refuses(one(out({ reason: 'x'.repeat(MAX_DEQUEUE_REASON_BYTES + 1) })), 'actions[0].reason'), refuses(one(out({ expected_head_sha: SHA.slice(0, 7) })), 'actions[0].expected_head_sha')], [true, true]);
+    t('⛔ refused BY NAME: jump, branch, body or a second pull — no request-time key widens the fences', ['jump', 'branch', 'body', 'pulls'].map((key) => refuses(one(out({ [key]: 1 })), `actions[0].${key} is not a key \`pr_dequeue\` takes`)), [true, true, true, true]);
+    t('⛔ alone, refused: beside a comment, beside the jump and two of them', [
+      refuses(fixturePayload({ actions: [{ op: 'comment', issue: 3591, body: 'x' }, out()] }), 'actions[0] is `comment` in a stroke that carries a `pr_dequeue`'),
+      refuses(fixturePayload({ actions: [out(), { op: 'pr_enqueue_front', pull: 3591, expected_head_sha: SHA }] }), 'pr_enqueue_front'),
+      refuses(fixturePayload({ actions: [out(), out({ pull: 3592 })] }), 'a stroke carries exactly ONE `pr_dequeue` and nothing else'),
+    ], [true, true, true]);
+    const stroke = ok.payload;
+    t('grant, accepted side: its stroke mints the five literal grants plus merge-queues write, for ONE repository', stroke ? [tokenPermissionsOf(stroke), tokenRepositoriesOf(stroke), outputLine(stroke, 'permission_merge_queues')] : 'refused', [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', 'merge-queues': 'write' }, [REPO], 'permission_merge_queues=write']);
+    t('the fences this file cannot see are the executor\'s, named once in the op table: open, head, release, queue, queued, cause', DEQUEUE_FENCES.map((f) => f.fence), ['open', 'head', 'release', 'queue', 'queued', 'cause']);
   }
 
   // ── the hierarchy rows ────────────────────────────────────────────────────
@@ -2006,7 +2038,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF }, run_rerun_failed: { run_id: 1 },
     };

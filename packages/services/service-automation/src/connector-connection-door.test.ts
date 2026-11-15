@@ -1074,6 +1074,22 @@ describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by
         expect(await rowsOf(ql)).toHaveLength(1);
     });
 
+    it('[#33386] the same state read through the served holder\'s package (what the runtime door now passes for the bare name, and passed already for that holder\'s address): the same 409, and the row stays', async () => {
+        const registry = registryHolding('com.example.crm');
+        const { engine, ql } = await boot([crm()], { registry });
+        await packagelessRow(ql, 'conn_a', 'org_a');
+        hold(registry, OTHER);
+        registry.disablePackage(OTHER);
+        for (const leg of [
+            () => engine.getConnectorConnection({ connector: 'crm', package: 'com.example.crm', context: ADMIN_A as never }),
+            () => engine.revokeConnectorConnection({ connector: 'crm', package: 'com.example.crm', context: ADMIN_A as never }),
+        ]) {
+            const err = (await leg().catch((e: unknown) => e)) as Record<string, unknown>;
+            expect(err).toMatchObject({ status: 409, message: expect.stringContaining('stored-references bind') });
+        }
+        expect(await rowsOf(ql)).toHaveLength(1);
+    });
+
     it('an entry with no package stamp, or the compatibility default, is the instance of the package the name resolves to: its row stays its own once the backfill binds it', async () => {
         for (const stamp of [undefined, '__runtime__']) {
             const { connect, call, engine, ql } = await boot([crm({ _packageId: stamp })], { registry: registryHolding('com.example.crm') });
