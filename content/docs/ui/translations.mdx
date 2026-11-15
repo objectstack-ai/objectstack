@@ -188,9 +188,10 @@ the next best text.
 
 Two rules keep the declaration honest (#14882, #15711):
 
-- **The authored label is the default locale's text.** A request for
-  `defaultLocale` consults that locale's own bundle and then answers with the
-  inline `label:` — it never walks the fallback chain. A stack declaring
+- **The authored label is the source locale's text.** A request for the
+  language the inline labels are written in — `sourceLocale` when declared,
+  else `defaultLocale` (#33634) — consults that locale's own bundle and then
+  answers with the inline `label:`; it never walks the fallback chain. A stack declaring
   `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` and only an `en` bundle
   serves its authored Chinese to a `zh-CN` request, and its `en` bundle to
   everyone else. Shipping a `zh-CN` bundle (`os i18n extract --locales=zh-CN`)
@@ -372,9 +373,9 @@ default one, and your inline `label:` is already that locale's text — so there
 is no gap to report and no need to reach for `--skip-i18n`. The same holds if
 your source language isn't English: declare `defaultLocale: 'zh-CN'` and the
 tooling stops asking for English you never promised. The runtime reads the
-declaration the same way (#15711): a request for the default locale answers
-with the authored label, so what the gate counts as covered is what gets
-served.
+declaration the same way (#15711, #33634): a request for the source locale
+answers with the authored label, so what the gate counts as covered is what
+gets served.
 
 #### When users default to a language you did not author in
 
@@ -400,12 +401,12 @@ language every user without a preference is served. Declare `defaultLocale: 'zh-
 reads your English labels as Chinese: it reports every key missing in `en` and
 never reports a `zh-CN` gap.
 
-`sourceLocale` is read by the authoring tools only. The runtime's
-authored-label rule above still keys on `defaultLocale`, so in this setup it is
-the `zh-CN` request that skips the fallback chain, and an `en` request walks
-the declared fallback (`fallbackLocale`, else `defaultLocale`) before it
-reaches the English inline label. Declare `fallbackLocale: 'en'` to keep an
-`en` request on the authored text.
+The runtime reads `sourceLocale` too (#33634): its authored-label rule above
+keys on it, so in this setup an `en` request answers the English inline label
+without walking the fallback chain, a `zh-CN` request is served the `zh-CN`
+rows, and any other locale walks the declared fallback (`fallbackLocale`, else
+`defaultLocale`) before it reaches the inline text. No `fallbackLocale: 'en'`
+is needed to keep an `en` request on the authored text.
 
 Translating is therefore opt-in, but once you opt in it covers the **whole**
 declared surface — every row of the table above, including action labels
