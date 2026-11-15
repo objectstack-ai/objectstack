@@ -518,14 +518,18 @@ at all: its administrators are the accounts declared in
 `OS_PLATFORM_OWNER_EMAIL` and the organization owners and admins it holds.
 
 **Switching the break-glass set off is refused while it would leave no
-administrator.** A ledger row switching `admin_full_access` off un-makes every
-platform admin who holds it *through a grant row*, in one write — and
-switching it back on needs the permission just lost. The last-administrator
-guard judges such a ledger write like every other write that can take
-standing away (ADR-0135 D5.2): it is refused only when nobody who can sign in
-would still administer the environment. A configured administrator or an
-organization owner or admin still standing permits it. A ledger read that
-fails refuses the write. Switching it back on is never refused.
+platform administrator.** A ledger row switching `admin_full_access` off
+un-makes every platform admin who holds it *through a grant row*, in one write —
+and switching it back on needs `manage_metadata`, the permission just lost. The
+last-administrator guard judges such a ledger write like every other write that
+can take standing away (ADR-0135 D5.2), refusing it when nobody who can sign in
+would still administer the environment, and it also refuses it when no unbanned
+**platform** administrator would remain (#33082). An organization owner or admin
+can sign in but cannot switch the set back on, so they do not make the
+switch-off safe, and neither does a second grant holder, who loses the set in
+the same write. A configured, verified administrator (`OS_PLATFORM_OWNER_EMAIL`)
+keeps `manage_metadata` and permits it. A ledger read that fails refuses the
+write. Switching it back on is never refused.
 
 Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated

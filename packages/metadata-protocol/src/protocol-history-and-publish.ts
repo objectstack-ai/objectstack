@@ -62,6 +62,8 @@ import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-q
 import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
+import type { HistoryVersionOwner } from './sys-metadata-repository.js';
+import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 
@@ -193,13 +195,15 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
-    static async historyMetaItem(host: Pick<ProtocolHost, 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'resolveRowlessExpandedView' | 'storedHashDigest'>, request: {
+    static async historyMetaItem(host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
             type: string;
             name: string;
             sinceSeq?: number;
             limit?: number;
             /** [#22877] The bundle member whose lineage to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
             member?: string;
+            /** [ADR-0150 D3/D4, #32905] The package whose versions to read — {@link historySlotOf}; omitted, the name's. */
+            packageId?: string;
         }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
         // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
         // and the twin comment on {@link auditMetaItem}; #9180 step ① routes all
@@ -241,6 +245,10 @@ export class ProtocolHistoryAndPublishFacet {
         const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularType = request.type;
+        // [#32905] `?package=` addresses a holder of a type stored per
+        // `(package, name)` only; on any other type it is refused, before the
+        // early answer below, never accepted and dropped.
+        refusePackageSelectorOutsideSlottedTypes(singularType, request.packageId);
         if (!host.isOverlayAllowed(singularType)
             && !host.isRuntimeCreateAllowed(singularType)) {
             return { events: [] };
@@ -258,6 +266,15 @@ export class ProtocolHistoryAndPublishFacet {
         if (expandedFrom !== undefined) {
             return host.historyMetaItem({ ...request, name: expandedFrom.container.name });
         }
+        // [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`,
+        // the name's log interleaves every holder's versions: a name two
+        // holders' rows hold is refused naming both when no package is named,
+        // and `?package=` reads that holder's versions alone. A name one slot
+        // holds, named bare, reads its whole log as before.
+        const slot = await historySlotOf(host, {
+            type: singularType, name: request.name, ...memberOption(member),
+            ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+        });
         // [ADR-0131 D6] The environment's change log; a legacy
         // organization-scoped history row is not read.
         const repo = host.getOverlayRepo();
@@ -268,7 +285,10 @@ export class ProtocolHistoryAndPublishFacet {
         } as Parameters<typeof repo.history>[0];
 
         const events: import('@objectstack/metadata-core').MetadataEvent[] = [];
-        const opts: { sinceSeq?: number; limit?: number; member?: string } = { ...memberOption(member) };
+        const opts: { sinceSeq?: number; limit?: number; member?: string; versionsOf?: HistoryVersionOwner } = {
+            ...memberOption(member),
+            ...(slot?.addressed ? { versionsOf: slot.owner } : {}),
+        };
         if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
         if (request.limit !== undefined) opts.limit = request.limit;
         // [#21207] Each event's hash and parent hash are served in keyed form —
@@ -696,6 +716,8 @@ export class ProtocolHistoryAndPublishFacet {
              * all address it, so the body judged is the body that goes live.
              */
             member?: string;
+            /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
+            userTextLocales?: readonly (string | undefined)[];
             /**
              * [ADR-0144 D2 and D6, amended] The registry question this
              * promotion asks before the row goes live, stated by every producer
@@ -1198,6 +1220,9 @@ export class ProtocolHistoryAndPublishFacet {
                 // different narrowings, both needed for a package to be
                 // judged as a self-consistent unit.
                 ...(request.pending !== undefined ? { pending: request.pending } : {}),
+                // [#32656] The locales the publish door stated for the
+                // findings' user sentences (`advisories[].userMessage`).
+                ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
                 // [#20790] The publish gate's restored-credential read. The
                 // stored draft holds no credential the write-only channel
                 // holds — the draft's own save moved it there — so the gate is
@@ -1480,6 +1505,8 @@ export class ProtocolHistoryAndPublishFacet {
          * the package.
          */
         message?: string;
+        /** [#32656] The locales the door states for the findings' user sentences (stated by the door, never read from the body; see `SaveMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly (string | undefined)[];
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
         /**
@@ -2082,6 +2109,9 @@ export class ProtocolHistoryAndPublishFacet {
             // universe as it stood before the publish started.
             ...(pendingDeclarations !== undefined
                 ? { pending: pendingDeclarations } : {}),
+            // [#32656] The door's locales for the findings' user sentences.
+            ...(request.userTextLocales !== undefined
+                ? { userTextLocales: request.userTextLocales } : {}),
             // [#26724] …and the datasources it drafts, which
             // an object draft beside them may name.
             batchDatasources,

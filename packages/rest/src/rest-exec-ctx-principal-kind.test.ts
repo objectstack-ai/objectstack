@@ -297,6 +297,9 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             'positions', 'permissions', 'systemPermissions', 'isSystem', 'principalKind',
             'userId', 'email', 'posture', 'org_user_ids', 'accessible_org_ids',
             'timezone', 'locale',
+            // [#32656] The workspace default locale on its own, beside the
+            // folded `locale`: the user-text ladder's second rung.
+            'workspaceLocale',
             // [ADR-0150 D3] The (package, name) each granted set resolved to,
             // beside `permissions`: the assembler fills it whenever a set is
             // granted (#31970's field, filled by #31971).

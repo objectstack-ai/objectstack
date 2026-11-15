@@ -55,9 +55,12 @@
  *    the other, and `/meta/webhook/NAME` served the same one (both since
  *    narrowed to the namespace: "The narrowing");
  *  - `connector` — `/meta/connector/NAME` (the by-name door the designer's
- *    connector picker reads) serves the FIRST-registered package's
- *    declaration; a provider-bound instance is the engine's one connector
- *    per name, and a second one at boot already refuses the boot (ADR-0097);
+ *    connector picker reads) served the FIRST-registered package's
+ *    declaration, and a provider-bound instance was the engine's one
+ *    connector per name, a second one at boot refusing the boot (ADR-0097)
+ *    (since narrowed to the namespace: "The narrowing", #31699 — the engine
+ *    holds an instance per `(package, name)`, and a flow, a pull and the
+ *    connection door address one by package);
  *  - `email_template` — a send's `template: NAME` resolved the
  *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
  *    served the same one (both since narrowed to the namespace: "The
@@ -207,6 +210,18 @@
  * D3) and refuses two holders, naming them (`packages/spec/liveness/tool.json`
  * records that precondition).
  *
+ * `connector` followed last (#31699 PR 3), so every covered type has now
+ * narrowed. The automation engine holds a connector instance per
+ * `(package, name)`, and the declared-connector reconcile materializes each
+ * package's entry under its package; an entry with no package of its own
+ * is the instance of the package the name resolves to, and under two holders
+ * it is refused naming both, never materialized as either. A flow's
+ * `connector_action` resolves its connector from the flow's package, a
+ * connector pull from the package that holds its mapping, and the
+ * connection door connects the instance its namespace address names
+ * (`/automation/connectors/NS/NAME/connection`); `/meta/connector/NAME` and
+ * the bare connection door refuse a name two packages hold, naming both.
+ *
  * Two holdings still meet under a narrowed type, whatever the namespaces:
  *
  *  - a name the platform requests by its bare spelling
@@ -239,8 +254,10 @@
  *    (ADR-0146 D9): a stored row bound to its pair, hydrated into the bare
  *    slot — the environment catalog, never a package holder.
  *  - A provider-bound connector instance two packages of ONE boot declare:
- *    the automation service's own duplicate refusal (ADR-0097) stops that boot
- *    before the seal; the doors here judge the install that follows a boot.
+ *    the automation service materializes each package's under its package
+ *    (ADR-0150 D9, #31699), and refuses an entry with no package of its own
+ *    under such a name, and a name declared twice within one package
+ *    (ADR-0097); the doors here judge the install that follows a boot.
  *  - Every type not in {@link BARE_NAME_ONE_HOLDER_TYPES}: §3.4's coexistence
  *    stands for them (package-scoped resolution, a key that carries the object,
  *    the job key `appId:jobName`).

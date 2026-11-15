@@ -127,6 +127,7 @@ import type { CounterStore } from './rate-limit-storage.js';
 import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
+import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
 import type { DirectSignInOptions } from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
@@ -1271,6 +1272,20 @@ export class AuthPlugin implements Plugin {
       }
       if (!ql) return;
       scheduleLegacySsoSecretMigration(ql, ctx.logger);
+    });
+
+    // A provider saved before register and edit refused a `domain` entry that
+    // is not a bare host name may still hold one; it is not rewritten, and it
+    // names no domain to the account rule or SCIM adoption. Said once per
+    // boot, per provider, naming the entry and the fix
+    // (`sso-stored-domain-entries.ts`). Reads only; never throws into boot.
+    ctx.hook('kernel:ready', async () => {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      if (!ql) {
+        try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
+      }
+      await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);
     });
 
     // [#23367, ruling A] Record when this deployment started enforcing the

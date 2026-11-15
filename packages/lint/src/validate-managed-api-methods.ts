@@ -34,7 +34,7 @@
 // error would stop the parse, and the predicate reads only authored keys
 // (`managedBy`, `userActions`, `enable.apiMethods`) — no parse-time defaults.
 
-import { checkManagedApiMethodAffordances } from '@objectstack/spec/data';
+import { checkManagedApiMethodAffordances, MANAGED_BY_WRITE_LOCKED_BUCKETS } from '@objectstack/spec/data';
 
 /**
  * Stable diagnostic id. Named for the CONTRADICTION rather than for the strip,
@@ -96,6 +96,12 @@ export function validateManagedApiMethods(stack: unknown): ManagedApiMethodFindi
 
     const verbs = conflicts.map((c) => c.verb).join(', ');
     const flags = [...new Set(conflicts.map((c) => c.needs))];
+    const bucket = String(obj.def.managedBy);
+    // [ADR-0153 D4] On a write-locked bucket (`synced`) `userActions` cannot
+    // open a write — the parse refuses it — so the only way out is removal,
+    // and writes go through a declared action (D5). Every other bucket keeps
+    // both ways out.
+    const writeLocked = MANAGED_BY_WRITE_LOCKED_BUCKETS.has(bucket);
     out.push({
       severity: 'error',
       rule: MANAGED_API_METHOD_UNAFFORDABLE,
@@ -106,12 +112,15 @@ export function validateManagedApiMethods(stack: unknown): ManagedApiMethodFindi
       // why this refuses, and that an affordance opens only for a write a user
       // context may really perform (ADR-0092 D4) are
       // `os explain object/managed-api-method-unaffordable`.
-      message:
-        `\`enable.apiMethods\` advertises [${verbs}], which \`managedBy: '${String(obj.def.managedBy)}'\` ` +
-        `affordances refuse (needs userActions ${flags.join('/')}), so the registry strips them`,
-      hint:
-        `Remove [${verbs}] from \`enable.apiMethods\`, or add ` +
-        `\`userActions: { ${flags.map((f) => `${f}: true`).join(', ')} }\` once a guard enforces the write`,
+      message: writeLocked
+        ? `\`enable.apiMethods\` advertises [${verbs}], which \`managedBy: '${bucket}'\` refuses, and ` +
+          `\`userActions\` cannot open a write there, so the registry strips them`
+        : `\`enable.apiMethods\` advertises [${verbs}], which \`managedBy: '${bucket}'\` ` +
+          `affordances refuse (needs userActions ${flags.join('/')}), so the registry strips them`,
+      hint: writeLocked
+        ? `Remove [${verbs}] from \`enable.apiMethods\`, and send writes through a declared action`
+        : `Remove [${verbs}] from \`enable.apiMethods\`, or add ` +
+          `\`userActions: { ${flags.map((f) => `${f}: true`).join(', ')} }\` once a guard enforces the write`,
     });
   }
 

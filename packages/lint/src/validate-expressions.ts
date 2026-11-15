@@ -168,7 +168,7 @@ import type { NullGuardFinding, NullGuardOptions, NullGuardOutcome } from './val
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
-import { formulaCycleIssues } from './formula-cycle-issues.js';
+import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -4288,6 +4288,33 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         });
       }
     }
+    // [#33153] The formula-cycle pass, over the target as served
+    // (`fieldDefs`: on a declared target its served body, every kept entry's
+    // fields folded in and a field two packages tie on left out; on an
+    // undeclared one the entries' own fields, the later entry's definition of
+    // a shared name), so a formula an entry adds that reads itself, or two that
+    // read each other, are refused as the object's own are (#33100). Each
+    // member an entry adds is located at that entry
+    // ({@link extensionFormulaLoci}).
+    //
+    // In the build `base` is the authored object, and a member it declares is
+    // the object walk's, located at the object: a cycle closing through a
+    // declared formula keeps that location and is named once. On the door's
+    // one pass `base` is the target as served BEFORE the write (other
+    // packages' published extension fields included, carried as plain fields
+    // with no priority) and the object walk does not run, while the written
+    // entry, its sole extension, is folded over it. So the door judges the
+    // written entry's own definition of every name it adds, a name the target
+    // already serves included, and none is left out there. Where a sibling
+    // package adds the same name at the same priority (a tie, which the build
+    // drops on a declared target) or at a higher one (the build serves the
+    // sibling's), the door can refuse a cycle the build lets through; making
+    // the door read the build's winner is #33494. A member the target or a
+    // sibling package stored is never a name the entry adds, so the target's
+    // own cycle, a sibling's, and a formula that only reads a cycle are not
+    // this write's to answer for.
+    const ownNames = new Set(base && !extensionWrite ? fieldEntries(base).map(([n]) => n) : []);
+    issues.push(...formulaCycleIssues(target, fieldDefs, extensionFormulaLoci(target, entries, ownNames)));
   }
 
   // [#33072] An extension write's one pass ends here.

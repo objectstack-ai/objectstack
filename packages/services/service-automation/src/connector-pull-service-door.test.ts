@@ -74,3 +74,19 @@ describe('#20281 stage ③: IAutomationService.pullConnectorSource, served by th
         }
     });
 });
+
+describe('[#31699] the provider a pull reads is the instance the pull resolved', () => {
+    it('by package; with no package addressed, the one materialized instance of the name, never one of two', () => {
+        const plugin = new AutomationServicePlugin({ suspendedRunStore: 'memory' });
+        const materialized = (plugin as any).materializedConnectors as Map<string, unknown>;
+        const providerOf = (name: string, packageId?: string | null) => (plugin as any).materializedProviderOf(name, packageId);
+        materialized.set('com.acme.alpha/crm_api', { name: 'crm_api', packageId: 'com.acme.alpha', signature: '', provider: 'rest' });
+        materialized.set('com.acme.beta/crm_api', { name: 'crm_api', packageId: 'com.acme.beta', signature: '', provider: 'openapi' });
+        expect(providerOf('crm_api', 'com.acme.alpha')).toBe('rest');
+        expect(providerOf('crm_api', 'com.acme.beta')).toBe('openapi');
+        expect(providerOf('crm_api', null)).toBeUndefined();
+        expect(providerOf('crm_api')).toBeUndefined();
+        materialized.delete('com.acme.beta/crm_api');
+        expect(providerOf('crm_api')).toBe('rest');
+    });
+});

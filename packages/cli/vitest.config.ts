@@ -963,6 +963,16 @@ export default defineConfig({
         find: /^@objectstack\/plugin-audit$/,
         replacement: path.resolve(__dirname, '../plugins/plugin-audit/src/index.ts'),
       },
+      // [#33224] `test/setup-landing-audience.pin.test.ts` asks a Setup nav
+      // entry's `visible` (`current_user.can(...)`) with `@objectstack/formula`'s
+      // CEL engine, as the console does. Resolved to source for the reason its
+      // neighbours give. Anchored (the bare entry is the one imported).
+      // `check:test-source-alias` names this import and is the gate that fails
+      // without the entry.
+      {
+        find: /^@objectstack\/formula$/,
+        replacement: path.resolve(__dirname, '../formula/src/index.ts'),
+      },
       // [ADR-0131 C3 stage 9] `utils/organization-ownership-apply.ts` asks
       // `@objectstack/plugin-sharing`'s own `translateDeclaredSharingRule`
       // which declared sharing rules are served before the ceremony renames a

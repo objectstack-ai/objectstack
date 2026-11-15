@@ -3,6 +3,9 @@ import { AppPlugin } from './app-plugin';
 import { PluginContext } from '@objectstack/core';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { ProtocolIncompatibleError, isProtocolIncompatibleError } from '@objectstack/metadata-core';
+// Paid at collection, not inside a clocked case: app-plugin.ts loads it lazily
+// (check-test-source-alias).
+import '@objectstack/metadata';
 
 describe('AppPlugin', () => {
     let mockContext: PluginContext;
@@ -494,7 +497,7 @@ describe('AppPlugin', () => {
                 code: 'OS_PROTOCOL_INCOMPATIBLE',
                 diagnostic: expect.objectContaining({
                     packageId: 'com.test.stale',
-                    migrateCommand: `objectstack migrate meta --from ${PROTOCOL_MAJOR - 5}`,
+                    targetMajor: PROTOCOL_MAJOR - 5,
                 }),
             });
             expect(mockManifest.register).not.toHaveBeenCalled();
