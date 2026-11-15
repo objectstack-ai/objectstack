@@ -51,7 +51,7 @@ import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator, OWNERSHIP_QUEUE_SOURCE_S
 import type { AssignmentQueueService } from './assignment-rules.js';
 import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
-import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs } from './validation/record-currency-code.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs } from './validation/record-currency-code.js';
 import { planHomeAmounts, projectHomeAmounts } from './home-amount-projection.js';
 import { stripSearchCompanion } from './search-companion.js';
 import type { EvalPermissions } from '@objectstack/formula';
@@ -1337,7 +1337,7 @@ export class InsertFacet {
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
-            assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i] && typeof rows[i] === 'object' ? followCodes(rows[i]) : rows[i], 'insert', undefined, undefined, msgCtx);
+            assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i] && typeof rows[i] === 'object' ? followCodes(rows[i]) : rows[i], 'insert', undefined, undefined, msgCtx, parentCodeFieldServingOf(this._registry));
             // [#29029] A write that is not a system write has its references
             // checked BEFORE the record's validation rules: a reference the
             // caller cannot read answers `reference_not_found`, whatever a rule
