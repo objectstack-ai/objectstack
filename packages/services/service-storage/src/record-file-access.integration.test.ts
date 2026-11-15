@@ -2189,25 +2189,52 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       }
     });
 
-    it('with no max_upload_mb, a host size refusal is not taken as the door\'s own: it is relayed with its own words, as before', async () => {
+    it('with no max_upload_mb the door states the built-in 100 MB bound, so a read refused past it is the door\'s own 413, the link unspent', async () => {
       const grant = await files.createUploadLinkAs('claim', await newClaim('bound-host'), { field: 'policy' }, OWNER as never);
       const token = tokenOf(grant.path);
-      const hostSizeRefusal = vi.fn(async () => {
-        throw Object.assign(new Error('the host refused this body for size'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+      const asked: Array<number | undefined> = [];
+      const refusedPastBound = vi.fn(async (options?: { maxBytes?: number }) => {
+        asked.push(options?.maxBytes);
+        throw Object.assign(new Error('refused past the bound'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
       });
-      const answer = await putLink(token, hostSizeRefusal);
+      const answer = await putLink(token, refusedPastBound);
       expect(answer._status, JSON.stringify(answer._json)).toBe(413);
       expect(answer._json.error.code).toBe('PAYLOAD_TOO_LARGE');
-      expect(answer._json.error.message).toBe('the host refused this body for size');
+      expect(answer._json.error.message).toBe(uploadSizeRefusal(100 * MIB + 1, 100 * MIB, () => `The upload body is more than ${100 * MIB} bytes`));
+      expect(asked).toEqual([100 * MIB]);
       // CONTROL — the link was not spent.
       expect((await putLink(token, boundedRawBody(Buffer.from('%PDF-1.4 after host')).rawBody))._status).toBe(200);
     });
 
-    it('CONTROL · with no max_upload_mb the door states no bound and reads the whole body, as before', async () => {
+    it('with no max_upload_mb a body within the built-in bound is read whole under it', async () => {
       const grant = await files.createUploadLinkAs('claim', await newClaim('bound-none'), { field: 'policy' }, OWNER as never);
-      const read = boundedRawBody(Buffer.from('%PDF-1.4 unbounded'));
+      const read = boundedRawBody(Buffer.from('%PDF-1.4 within'));
       expect((await putLink(tokenOf(grant.path), read.rawBody))._status).toBe(200);
-      expect(read.asked).toEqual([undefined]);
+      expect(read.asked).toEqual([100 * MIB]);
+    });
+
+    it('with no max_upload_mb a 101 MB file inside a several-file form within its form limit is refused by the link verb, the link unspent', async () => {
+      const id = await newClaim('bound-form-file');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'scans' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const big = new ArrayBuffer(101 * MIB);
+      const answer = await call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...sessionOf(OWNER.userId) },
+        body: { count: '1', file0: { name: 'big.pdf', type: 'application/pdf', arrayBuffer: async () => big } },
+        rawBody: async () => Buffer.from('------os--\r\n'),
+      });
+      expect(answer._status, JSON.stringify(answer._json)).toBe(413);
+      expect(answer._json.error.code).toBe('PAYLOAD_TOO_LARGE');
+      // CONTROL — the link was not spent: a small file lands through it.
+      const small = new File([new Uint8Array(Buffer.from('%PDF-1.4 small'))], 'small.pdf', { type: 'application/pdf' });
+      const landed = await call('PUT', `${BASE}/upload-links/:token`, {
+        params: { token },
+        headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...sessionOf(OWNER.userId) },
+        body: { count: '1', file0: small },
+        rawBody: async () => Buffer.from('------os--\r\n'),
+      });
+      expect(landed._status, JSON.stringify(landed._json)).toBe(200);
     });
   });
 });
