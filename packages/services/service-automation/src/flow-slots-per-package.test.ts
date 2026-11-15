@@ -1078,8 +1078,8 @@ describe('[#33386] a run of a name two slots hold judges the served holders', ()
  * dispatches it again with no re-arm. A boot disable arms nothing of the
  * disabled package; the re-sync that arms it on enable makes it dispatch.
  * The slot keys, the bindings and the dispatch holder do not move
- * (amendment 7). A name one package holds: its trigger answers as on `main`
- * today (CONTROL).
+ * (amendment 7). [#33905] A name one package holds is judged the same way
+ * (ADR-0150 D3: a disabled package holds no name).
  */
 describe('[#33748] a trigger binding does not dispatch a slot whose package is disabled', () => {
     const tagOf = (packageId: string) => packageId.split('.').pop()!;
@@ -1186,12 +1186,96 @@ describe('[#33748] a trigger binding does not dispatch a slot whose package is d
         expect(skipSaid()).toEqual([]);
     });
 
-    it('CONTROL — a name one package holds: its trigger answers as on `main` today, disabled or not', async () => {
+    it('[#33905] a name one package holds, disabled at runtime with its slot left armed: not dispatched, said once; re-enabled, it dispatches with no re-arm (FROM: dispatched while disabled)', async () => {
         ship(P1, triggered('solo', 'alpha'));
         expect([...armed.keys()]).toEqual(['solo']);
         expect(await fireAll()).toEqual(['alpha']);
+        const bindings = engine.getActiveTriggerBindings();
+        const startedBefore = [...started];
+
         registry.disablePackage(P1);
+        expect(await fireAll()).toEqual([]);
+        expect(await fireAll()).toEqual([]);
+        expect(skipSaid()).toHaveLength(1);
+        expect(skipSaid()[0][1]).toMatchObject({ flow: 'solo', package: P1, slot: 'solo' });
+        expect(engineLogger.error).not.toHaveBeenCalled();
+        // Amendment 7: the slot stays armed under its key, nothing released.
+        expect(engine.flowSlotKey(P1, 'solo')).toBe('solo');
+        expect(engine.getActiveTriggerBindings()).toEqual(bindings);
+
+        registry.enablePackage(P1);
         expect(await fireAll()).toEqual(['alpha']);
-        expect(skipSaid()).toEqual([]);
+        expect(started).toEqual(startedBefore);
+        registry.disablePackage(P1);
+        expect(await fireAll()).toEqual([]);
+        expect(skipSaid()).toHaveLength(2);
+    });
+});
+
+/**
+ * [ADR-0150 D3, #33905; #28117 ruling A] A flow whose only holder's package
+ * is disabled, while the engine still holds its slot (a disable whose re-sync
+ * failed or did not run): the engine's bare entries that read or run a flow
+ * (`execute`, `getFlow`, `toggleFlow`) answer as for a flow this engine does
+ * not hold, which is what the namespaced address answers (404). The durable
+ * reads stay judged over every holder (amendment 7): the slot key, the
+ * dispatch holder and the version history do not move. A package-less flow,
+ * and an engine with no resolver attached, are CONTROLs.
+ */
+describe('[#33905] the bare entries of a flow whose only holder\'s package is disabled', () => {
+    const unheld = async (name: string) => ({
+        run: await engine.execute(name),
+        read: await engine.getFlow(name),
+        toggle: await engine.toggleFlow(name, false).then(() => 'switched', (err: Error) => err.message),
+    });
+
+    it('execute, getFlow and toggleFlow answer as for a name the engine does not hold (FROM: served); re-enabled, they serve it again', async () => {
+        ship(P1, leaf('solo', 'p1'));
+        registry.disablePackage(P1);
+        const answers = await unheld('solo');
+        const nothing = await unheld('nope');
+        expect(answers).toEqual({ ...nothing, run: { ...nothing.run, error: "Flow 'solo' not found" }, toggle: "Flow 'solo' not found" });
+        expect(answers.read).toBeNull();
+        expect(answers.run.success).toBe(false);
+        expect(ran).toEqual([]);
+        // Amendment 7: the durable reads are judged over every holder, unmoved.
+        expect(engine.flowSlotKey(P1, 'solo')).toBe('solo');
+        expect(engine.flowDispatchHolder('solo')).toEqual({ packageId: P1, claimBare: true });
+        expect(engine.getFlowVersionHistory('solo')).toHaveLength(1);
+
+        registry.enablePackage(P1);
+        expect((await engine.execute('solo')).success).toBe(true);
+        expect(ran).toEqual(['p1']);
+        expect(await engine.getFlow('solo')).toMatchObject({ name: 'solo' });
+        await expect(engine.toggleFlow('solo', false)).resolves.toBeUndefined();
+    });
+
+    it('a subflow call by the bare name reaches no flow while the package is disabled (FROM: ran)', async () => {
+        ship(P1, leaf('solo', 'p1'));
+        engine.registerFlow('go', caller('go', 'solo'));
+        registry.disablePackage(P1);
+        expect((await engine.execute('go')).success).toBe(false);
+        expect(ran).toEqual([]);
+        registry.enablePackage(P1);
+        expect((await engine.execute('go')).success).toBe(true);
+        expect(ran).toEqual(['p1']);
+    });
+
+    it('CONTROL — a package-less flow (the environment\'s own, registered straight into the engine) is no package\'s: served while a package is disabled', async () => {
+        ship(P1, leaf('solo', 'p1'));
+        engine.registerFlow('env_flow', leaf('env_flow', 'env'));
+        registry.disablePackage(P1);
+        expect((await engine.execute('env_flow')).success).toBe(true);
+        expect(await engine.getFlow('env_flow')).toMatchObject({ name: 'env_flow' });
+        expect(ran).toEqual(['env']);
+    });
+
+    it('CONTROL — with no resolver attached nothing is disabled: the flow is served as before', async () => {
+        ship(P1, leaf('solo', 'p1'));
+        engine.setFlowNameResolver(undefined);
+        registry.disablePackage(P1);
+        expect((await engine.execute('solo')).success).toBe(true);
+        expect(await engine.getFlow('solo')).toMatchObject({ name: 'solo' });
+        expect(ran).toEqual(['p1']);
     });
 });

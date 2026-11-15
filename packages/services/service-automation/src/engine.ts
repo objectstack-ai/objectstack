@@ -4421,12 +4421,15 @@ export class AutomationEngine implements IAutomationService {
      * nothing (`undefined`): the binding under its new key fires it once. A
      * slot of an unshared name runs through {@link execute}, as before.
      *
-     * [ADR-0150 D3, #33748; seat ruling 6884403301, amendment 3] A slot of a
-     * name two packages hold whose package is disabled is not dispatched: no
-     * flow, no run, never another slot's. Asked when the trigger fires, not
-     * when it was armed: a runtime disable leaves the slot armed (a disable is
-     * reversible and moves no key, amendment 7), so the slot dispatches again
-     * the moment its package is enabled, with no re-arm.
+     * [ADR-0150 D3, #33748; seat ruling 6884403301, amendment 3] A slot whose
+     * package is disabled is not dispatched: no flow, no run, never another
+     * slot's. Asked when the trigger fires, not when it was armed: a runtime
+     * disable leaves the slot armed (a disable is reversible and moves no key,
+     * amendment 7), so the slot dispatches again the moment its package is
+     * enabled, with no re-arm. [#33905] The same for the slot of a name one
+     * package holds (ADR-0150 D3: a disabled package holds no name), which the
+     * re-sync of the disable withdraws on the normal path; a package-less slot
+     * is no package's, and runs as before.
      */
     private triggerRun(armedKey: string): (ctx: AutomationContext) => Promise<AutomationResult | undefined> {
         const slot = this.flowSlots.slot(armedKey);
@@ -4437,8 +4440,7 @@ export class AutomationEngine implements IAutomationService {
                 this.logger.debug(`Trigger fired flow '${armedKey}' after it moved or left and was released: not run.`);
                 return undefined;
             }
-            if (!slot || !this.flowSlots.isShared(slot.name)) return this.execute(key, ctx);
-            if (slot.packageId !== null) {
+            if (slot && slot.packageId !== null) {
                 const said = qualifiedFlowKey(slot.packageId, slot.name);
                 if (this.isDisabledHolderSlot(slot.name, slot.packageId)) {
                     // Said once per slot while its package stays disabled, at
@@ -4458,6 +4460,7 @@ export class AutomationEngine implements IAutomationService {
                 }
                 this.disabledHolderDispatchSaid.delete(said);
             }
+            if (!slot || !this.flowSlots.isShared(slot.name)) return this.execute(key, ctx);
             // A trigger seeds `params.flowName` with the key it was armed
             // under; the run reads its flow's name there, never a slot key.
             const params = ctx.params as Record<string, unknown> | undefined;
@@ -5273,7 +5276,11 @@ export class AutomationEngine implements IAutomationService {
         if (isSlotKeySpelling(name)) return { key: unfiledFlowKey(name) };
         if (!this.flowSlots.isShared(name)) {
             const refusal = this.flowNameRefusal(name, callerPackageId);
-            return refusal ? { refusal } : { key: name };
+            if (refusal) return { refusal };
+            // [#33905] Its one holder's package is disabled: no flow, as for a
+            // name two packages hold that no served holder reaches.
+            if (options?.durable !== true && this.isDisabledSoleHolder(name)) return { absent: true };
+            return { key: name };
         }
         const resolution = this.flowNameResolver?.(name, callerPackageId,
             options?.durable === true ? { includeDisabledPackages: true } : { servedCaller: true });
@@ -5312,11 +5319,14 @@ export class AutomationEngine implements IAutomationService {
      * a name two slots hold is its one served holder's slot, refused naming
      * the served holders when two or more serve it, and `undefined` (no flow)
      * when none does. Seat ruling 6884403301, amendment 9: these entries move
-     * with the doors.
+     * with the doors. [#33905] A name one package holds whose package is
+     * disabled is no flow here either ({@link isDisabledSoleHolder}): the
+     * entries answer as for a flow this engine does not hold, which is the
+     * namespaced address's answer.
      */
     private servedBareFlowKey(name: string): string | undefined {
         if (isSlotKeySpelling(name)) return undefined;
-        if (!this.flowSlots.isShared(name)) return name;
+        if (!this.flowSlots.isShared(name)) return this.isDisabledSoleHolder(name) ? undefined : name;
         const resolved = this.resolveFlowKey(name, null);
         if ('refusal' in resolved) throw new PackageScopedNameRefusedError(resolved.refusal);
         return 'key' in resolved ? resolved.key : undefined;
@@ -5339,6 +5349,20 @@ export class AutomationEngine implements IAutomationService {
         const held = resolver(name, packageId);
         if (held?.status !== 'resolved' || held.via !== 'own') return false;
         return resolver(name, packageId, { servedCaller: true })?.status === 'not-found';
+    }
+
+    /**
+     * [ADR-0150 D3, #33905; #28117 ruling A] Is the one slot of the unshared
+     * name `name` held by a package that is disabled now
+     * ({@link isDisabledHolderSlot})? A package-less slot, or none, is not:
+     * a flow registered straight into the engine, or the environment's own,
+     * is no package's to disable. Only the entries that read or run a flow
+     * ask it; the durable reads (slot and run keys, {@link flowDispatchHolder},
+     * credentials, history) stay judged over every holder (amendment 7).
+     */
+    private isDisabledSoleHolder(name: string): boolean {
+        const packageId = this.flowSlotPackage(name);
+        return packageId !== undefined && this.isDisabledHolderSlot(name, packageId);
     }
 
     /** [#31696] The package of the slot `key` files, or `undefined` (a package-less slot, or none). */
@@ -5826,6 +5850,8 @@ export class AutomationEngine implements IAutomationService {
      * [#31696] Refused (409, naming both) for a name two packages serve: see
      * {@link getFlowSlot}. [#33386] Judged over the served holders
      * ({@link servedBareFlowKey}): one served holder's flow, `null` when none.
+     * [#33905] `null` too for a name one package holds whose package is
+     * disabled.
      */
     async getFlow(name: string): Promise<FlowParsed | null> {
         const key = this.servedBareFlowKey(name);
@@ -7651,6 +7677,7 @@ export class AutomationEngine implements IAutomationService {
         const resolved = this.resolveFlowKey(flowName, this.flowCallerPackage(context));
         if ('refusal' in resolved) return { success: false, error: resolved.refusal.message };
         // [#33386] No served holder reaches the name: as for a flow this engine does not hold.
+        // [#33905] Nor does a disabled package's flow of a name it holds alone.
         if ('absent' in resolved) return { success: false, error: `Flow '${flowName}' not found` };
         return this.executeKey(resolved.key, context, startTime);
     }
