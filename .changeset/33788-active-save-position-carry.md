@@ -15,4 +15,5 @@ What it does not change:
 
 - Position only. An active save of any other type announces nothing new.
 - The per-item publish and `POST /packages/:id/publish-drafts` still announce once each; neither passes through the save door.
-- A restore or revert that saves a position through `saveMetaItem` announces too, so it carries that position's holders at once as well.
+- `duplicatePackage` and the unmanaged package import, which save every copied item through the save door, announce nothing per position: what they carry stays as it was, at the next restart.
+- The package-commit restore and revert doors do not save through the save door, so they announce nothing new either.
