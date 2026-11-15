@@ -415,7 +415,7 @@ export const jaJP: PlatformTranslationData = {
     ai: {
       title: 'AI と Embedder',
       description:
-        'プラットフォームの AI およびナレッジサービスが使用する LLM プロバイダー、モデル、認証情報、Embedder 設定。',
+        'プラットフォームの AI サービスが使用する LLM プロバイダー、モデル、認証情報。',
       groups: {
         provider: { title: 'プロバイダー',
           description: 'LLM バックエンドを選択します。' },

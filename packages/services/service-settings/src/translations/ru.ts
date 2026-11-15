@@ -486,7 +486,7 @@ export const ru: PlatformTranslationData = {
     },
     ai: {
       title: 'ИИ и Embedder',
-      description: 'Провайдер LLM, модель, учётные данные и настройка Embedder для служб ИИ и знаний платформы.',
+      description: 'Провайдер LLM, модель и учётные данные для службы ИИ платформы.',
       groups: {
         provider: {
           title: 'Провайдер',

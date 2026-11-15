@@ -473,7 +473,7 @@ export const ptBR: PlatformTranslationData = {
     },
     ai: {
       title: 'IA e Embedder',
-      description: 'Provedor de LLM, modelo, credenciais e configuração do Embedder usados pelos serviços de IA e de conhecimento da plataforma.',
+      description: 'Provedor de LLM, modelo e credenciais usados pelo serviço de IA da plataforma.',
       groups: {
         provider: {
           title: 'Provedor',

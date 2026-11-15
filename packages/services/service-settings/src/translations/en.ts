@@ -291,8 +291,7 @@ export const en: PlatformTranslationData = {
     ai: {
       title: 'AI & Embedder',
       description:
-        'LLM provider, model, credentials, and embedder configuration used by ' +
-        'the platform AI and knowledge services.',
+        'LLM provider, model and credentials used by the platform AI service.',
       groups: {
         provider: { title: 'Provider',
           description: 'Choose the LLM backend.' },

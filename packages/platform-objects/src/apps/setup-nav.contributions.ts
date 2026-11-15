@@ -174,7 +174,9 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_settings_sms', type: 'url', label: 'SMS Delivery', url: '/apps/setup/system/settings/sms', icon: 'message-square', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
+      // `nav_settings_knowledge` is contributed by `@objectstack/service-knowledge`
+      // with the `knowledge` namespace, which is offered only where that
+      // service is mounted — so the entry lives and dies with it.
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered
       // wherever a settings service is mounted, like the entries above.
       { id: 'nav_settings_lifecycle', type: 'url', label: 'Data Lifecycle', url: '/apps/setup/system/settings/lifecycle', icon: 'timer', requiredPermissions: ['manage_platform_settings'] },

@@ -469,7 +469,7 @@ export const zhCN: PlatformTranslationData = {
 
     ai: {
       title: 'AI 与向量化',
-      description: '平台 AI 与知识库服务使用的 LLM 提供商、模型、凭据与向量化配置。',
+      description: '平台 AI 服务使用的 LLM 提供商、模型与凭据。',
       groups: {
         provider: { title: '提供商', description: '选择 LLM 后端。' },
         gateway: { title: 'Vercel AI Gateway', description: '多提供商路由器。模型写作 provider/model,例如 openai/gpt-4o。' },

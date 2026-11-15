@@ -18,6 +18,11 @@
  * package are plugin-email (`mail`), service-sms (`sms`) and service-storage
  * (`storage`).
  *
+ * Since #33933 neither of those two buttons is in the bundled slate: the
+ * knowledge service contributes both, with their handlers, when it is mounted
+ * (`@objectstack/service-knowledge`, `knowledge-settings-contribution.test.ts`),
+ * so this default composition declares neither and registers neither.
+ *
  * ## What is pinned
  *
  * The CLASS, not the two instances: each bundled manifest's `http`-kind
