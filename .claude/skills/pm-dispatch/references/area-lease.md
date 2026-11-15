@@ -8,7 +8,7 @@
 - 坐席、每次交接或换班时席位重判三件:分不分、分几区、边界;⛔ 不沿用上一班的表。
 - 分区阈值(经验):可认领 p1/p2 ≥15 张且跨 ≥3 个互不相干的模块簇;不足即照常按卡认领。
 - 边界按卡触及的文件与包聚类,让两区极少改同一函数;⛔ 不按卡标题或词汇分。
-- 排空的区并入邻区,积压的区再拆(「比如增加分区」)⛔ 不抬每区 dev 数;拆并即改租约表。
+- 排空的区并入邻区,积压即再拆(「比如增加分区」),⛔ 不抬每区 dev 数;拆并即改租约表。
 - 租约表(区→路径→线程会话→复核席)住座位贴,任一列变或线程轮换即重写,为唯一记录。
 - 复核席约每 3 活跃区一席,由他账号坐(`lanes/review.md`);同账号坐须维护者本线程亲字。
 - 队列值守只照 `lanes/queue.md`(含其无席时的兜底),⛔ 不在此另派。
@@ -38,14 +38,14 @@
 - 认领照 `execution-duties.md` 派发原子对,同笔加 `lease:<区>`;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
-- 派发令要 dev 开 PR 前照 os-dev.md〈Definition of done〉自查申报行,并对 `dispatch-gates.mjs --tier`。
+- dev 开 PR 前自查申报:os-dev.md〈Definition of done〉,BREAKING/ADR-0087 照 AGENTS.md Post-Task 第 3 条。
 - 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
-- 每区恒 4 个 dev 在开发(`batch` 内,额度墙照 `execution-duties.md`),席每轮逐区查;先落建成的 PR。
-- 空槽可补 p3,新可认领 p1/p2 占下一空槽;p3 ⛔ 不改任一区 p1/p2 在改或将改的热文件。
+- 每区恒 4 dev 在开发:裁定例外,超默认 `batch` 3 而在天花板内;额度墙照 `execution-duties.md`。
+- 席每轮逐区查;先落建成 PR,空槽补 p3,新 p1/p2 先占;p3 ⛔ 改 p1/p2 在改或将改的热文件。
 - 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门。
-- 留道:已分析、修法清楚的卡碰 `ui/**`、`packages/spec/**` 仍留本车道开发,送本席复核线程,档
-  照 `contract-review.md`;他道席在线只通知(「如果车道有人在线，只需要通知他就可以。」)。
-- 仅两种交出:他道在线席已认领该段代码;规则要求(cloud 路由、`security-findings.md`、ADR)。
+- 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席复审;他道席在线只通知
+  「如果车道有人在线，只需要通知他就可以。」本条先于条款②行(`execution-duties.md`)、
+  移道的 `lanes/spec.md` 与 `--tier` 提示;交出闭集:他道在线席已认领、cloud 路由、安全、ADR。
 - 送审:欠不欠、档、谁跑只照 `contract-review.md`;四面皆不碰 ⇒ ⛔ 不送复核、不起 agent。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
