@@ -6095,12 +6095,19 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         });
         if (census !== undefined) return census;
         const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+        // [ADR-0150 D4] The bare read names no object, so of the name's
+        // package-less actions — one per owner key — it answers one: the
+        // route's is the one on its own key, bound first, then object-less.
+        const onRoute = packagelessActionOnRouteBeside(ql, objectName, actionName, item);
+        if (onRoute !== undefined) return { action: onRoute, obj };
         const declared = item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item);
         return { action: declared ? item : undefined, obj };
     }
 
     try {
         const fromRegistry: any = ql?.registry?.getItem?.('action', actionName);
+        const onRoute = packagelessActionOnRouteBeside(ql, objectName, actionName, fromRegistry);
+        if (onRoute !== undefined) return { action: onRoute, obj };
         if (fromRegistry && ownsRoute(fromRegistry)) return { action: fromRegistry, obj };
     } catch {
         /* registry without an item lookup → fall through to the metadata service */
@@ -6269,11 +6276,53 @@ type RouteHolderReading =
         owners: RouteHolders;
         /** The rung the router reaches first: bound to the routed object, else object-less. */
         rung: RouteHolders;
+        /** [ADR-0150 D4] Is {@link rung} the bound one (some holder's item is bound to the routed object)? */
+        boundRung: boolean;
     };
 
 /** [ADR-0150 D4] Is a registry item a package's (`_packageId`), not package-less? */
 function packagedItem(item: any): boolean {
     return typeof item?._packageId === 'string' && item._packageId !== '';
+}
+
+/** [ADR-0150 D4] Is an item package-less: no package stamp, or the stored-row sentinel? */
+function packagelessItem(item: any): boolean {
+    return !packagedItem(item) || item._packageId === 'sys_metadata';
+}
+
+/**
+ * [ADR-0150 D4] The package-less action of `actionName` that answers the route
+ * of `objectName`, when the read the route took (`answered`) is a package-less
+ * action of ANOTHER owner key. An action is identified by `(owner, owning
+ * object, name)`, and the registry keeps the name's package-less actions one
+ * per owner key (the platform's bound to `lead` beside the environment's
+ * object-less one), while a read that names no object answers only one of
+ * them. Binding first, then owner: the route's is the package-less action
+ * bound to the routed object, else the object-less one — the order the
+ * engine reaches a handler in ({@link actionHandlerObjectKeys}), so the
+ * declaration the route judges and the handler it runs are one item's.
+ *
+ * `undefined` — the read's answer stands — when the answer is no
+ * package-less action, already the one on the route's key, or the host's
+ * registry cannot list the name's items; and when no package-less action is
+ * on the route's key.
+ */
+function packagelessActionOnRouteBeside(ql: any, objectName: string, actionName: string, answered: any): any | undefined {
+    if (answered === null || typeof answered !== 'object' || answered.name !== actionName || !packagelessItem(answered)) return undefined;
+    const registry: any = ql?.registry;
+    if (typeof registry?.listItems !== 'function') return undefined;
+    let packageless: any[];
+    try {
+        packageless = (registry.listItems('action', undefined, { includeDisabledPackages: true }) ?? [])
+            .filter((item: any) => item?.name === actionName && packagelessItem(item));
+    } catch {
+        return undefined;
+    }
+    const bound = isObjectLessActionKey(objectName) ? [] : packageless.filter((item) => standaloneActionOwnerKey(item) === objectName);
+    const rung = bound.length > 0 ? bound : packageless.filter((item) => isObjectLessActionKey(standaloneActionOwnerKey(item)));
+    if (rung.length !== 1) return undefined;
+    const ownerKey = (item: any) => (isObjectLessActionKey(standaloneActionOwnerKey(item)) ? GLOBAL_ACTION_OBJECT_KEY : standaloneActionOwnerKey(item));
+    return ownerKey(rung[0]) === ownerKey(answered) ? undefined : rung[0];
 }
 
 async function readRouteHolders(
@@ -6329,6 +6378,7 @@ async function readRouteHolders(
         isDisabled,
         owners: file(ownerItems),
         rung: file(bound.length > 0 ? bound : ownerItems.filter(isObjectLess)),
+        boundRung: bound.length > 0,
     };
 }
 
@@ -6361,6 +6411,21 @@ async function environmentOwnerOfUnheldRoute(
     if (reading.degraded) return { action: undefined, obj, degraded: true, reason: reading.reason };
     if (reading.owners.served.length > 0 || reading.owners.disabled.length > 0) return none;
     return reading.rung.environment.length === 1 ? { action: reading.rung.environment[0], obj } : none;
+}
+
+/**
+ * [ADR-0150 D4] The platform's item bound to the routed object, when it is
+ * the only item on the route's bound rung: binding first, then owner, so it
+ * answers that route whatever package-less action of another key the name
+ * has (the environment's object-less one included), and the declaration the
+ * route judges is the item whose handler the engine reaches first there.
+ * `undefined` on the object-less rung, and beside any other item on the
+ * bound one: those compositions keep their answers.
+ */
+function platformItemOnBoundRung(reading: Extract<RouteHolderReading, { degraded?: undefined }>): any | undefined {
+    const { rung, boundRung } = reading;
+    if (!boundRung || rung.platform.length !== 1) return undefined;
+    return rung.served.length === 0 && rung.disabled.length === 0 && rung.environment.length === 0 ? rung.platform[0] : undefined;
 }
 
 /**
@@ -6415,6 +6480,10 @@ async function routeHolderCensus(
     const { owners, rung } = reading;
     if (owners.served.length === 0 && owners.disabled.length > 0) return { action: undefined, obj };
     if (rung.environment.length === 1) return { action: rung.environment[0], obj };
+    // [ADR-0150 D4] …the platform's item bound to the routed object, alone on
+    // that rung: the route's own key, binding first, then owner.
+    const platform = platformItemOnBoundRung(reading);
+    if (platform !== undefined) return { action: platform, obj };
     if (rung.served.length !== 1 || rung.platform.length > 0) return undefined;
     let envelope: unknown;
     try {
@@ -6520,6 +6589,13 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
             : await deps.resolveService(requestContext, 'metadata', envId);
         const resolved = await resolveActionByName(deps, meta, actionName, objectName, objects, actions, qualifier);
         if (!resolved) return { action: undefined, obj };
+        // [ADR-0150 D4] Binding first, then owner: the environment's
+        // object-less item does not reach a route another package-less
+        // action of its name is bound to — that route's key is the other
+        // item's, and so is the handler the dispatch reaches there.
+        if ('environment' in qualifier && packagelessActionOnRouteBeside(ql, objectName, actionName, resolved.action) !== undefined) {
+            throw addressedActionNotFoundError(actionName, objectName, actionAddressScope(qualifier));
+        }
         return {
             action: resolved.action,
             obj: obj ?? resolved.obj,

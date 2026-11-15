@@ -463,7 +463,7 @@
       "title": "Filtered roll-up summaries recompute only through their own filter",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -483,7 +483,7 @@
         "PATCH one line's status approved→rejected over /api/v1/data/showcase_expense_line/:id; re-read the parent and recompute again",
         "PATCH a different line's billable true→false; re-read the parent",
         "DELETE one line; re-read the parent — a delete must move every roll-up whose filter matched the deleted row, including the unfiltered total",
-        "on a writable base: POST /api/v1/packages to create a scratch base, author a parent object with a filtered summary field over a child object into it — both NAMED with the base's namespace prefix: POST /api/v1/packages derives the namespace from the id's last segment (deriveNamespaceFromPackageId: com.qa.rollup → rollup, so rollup_parent / rollup_child), and publish-drafts refuses an unprefixed object NAMESPACE_PREFIX, so the Studio edit below would never reach the persisted metadata (an active PUT /meta/object?package= saves the unprefixed name anyway — the open product defect #24547; do not read that save as a prefix-free fixture), then in Studio's visual filter editor edit that summary field's child-row filter (Studio Data › the parent object › Form › the summary field › Properties › 'Filter (rows to aggregate)'), save — the edit is a draft until 'Publish all' — publish, and re-read the persisted metadata over the meta API. ⛔ Not POST /packages/com.example.showcase/duplicate — it answers 422 DUPLICATE_SOURCE_NOT_A_BASE (#14451)"
+        "on a writable base: POST /api/v1/packages to create a scratch base, author a parent object with a filtered summary field over a child object into it — both NAMED with the base's namespace prefix: POST /api/v1/packages derives the namespace from the id's last segment (deriveNamespaceFromPackageId: com.qa.rollup → rollup, so rollup_parent / rollup_child), and publish-drafts refuses an unprefixed object NAMESPACE_PREFIX, so the Studio edit below would never reach the persisted metadata (an active PUT /meta/object?package= saves the unprefixed name anyway — the open product defect #24547; do not read that save as a prefix-free fixture), then in Studio's visual filter editor edit that summary field's child-row filter (Studio Data › the parent object › Form › the summary field › Properties › 'Filter (rows to aggregate)'), save — the edit is a draft until 'Publish all' — publish, and re-read the persisted metadata over the meta API. ⛔ Not POST /packages/com.example.showcase/duplicate — it answers 422 DUPLICATE_SOURCE_NOT_A_BASE (#14451); that refusal is reached only with the door's body { targetPackageId } (packages/runtime/src/domains/packages.ts), since a body without it answers 400 'Body { targetPackageId } is required' first"
       ],
       "acceptance": [
         {
@@ -571,6 +571,12 @@
           "date": "2026-10-27",
           "change": "steps[2] names the child's parent field and steps[6] the editor's location and its publish step. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the runner had to find the expense_report key and the Properties panel path, and found the edit stays a draft until 'Publish all'. Re-read at base e4ba846f (expense-report.object.ts). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[6] names the duplicate door's body {targetPackageId}, without which it answers 400 before the 422 the step cites. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -579,7 +585,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -627,7 +633,7 @@
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map — its itemObject is showcase_task, so each item is record-shaped, {id, title})",
         "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
         "approval chain: the boot already leaves a PAUSED showcase_expense_signoff run at its approval node — the showcase's approval-demo seed launches it on EXP-2001 (examples/app-showcase/src/security/seed-approval-demo.ts) — so locate the approval variant on that run; a NEW one needs a report ENTERING submitted from another status (the start condition requires previous.status != 'submitted'), e.g. PATCH EXP-2003 (draft) to submitted; PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node. To take the EXP-2001 run to completed (acceptance[2]'s resume half), both groups of the per-group sign-off decide: the dev admin's manager slot AND the auditor persona's finance slot (auditor.demo@example.com, password showcase123: examples/app-showcase/src/security/demo-personas.ts AUDITOR_DEMO_USER; the routing in examples/app-showcase/src/security/seed-approval-demo.ts)",
-        "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature to exercise create_record — the door accepts only the timestamped form t=UNIX_SECONDS,v1=HEX, the HMAC-SHA256 of 'T.RAW_BODY'; a body-only HMAC (sha256=HEX, the HMAC-SHA256 of the raw body) answers 401 INVALID_SIGNATURE, logged as the cause 'signature-body-only', and a bare hex HMAC with no prefix is 'signature-malformed', the same 401 (packages/triggers/trigger-api/src/api-trigger.ts verifyInboundSignature) — the flow names its secret (config.secretRef: 'SHOWCASE_WEBHOOK_SECRET'), so boot with that environment variable set to a value of your choosing and sign with it; unset, the hook answers 503",
+        "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature to exercise create_record — the door accepts only the timestamped form t=UNIX_SECONDS,v1=HEX, the HMAC-SHA256 of 'T.RAW_BODY'; a body-only HMAC (sha256=HEX, the HMAC-SHA256 of the raw body) answers 401 INVALID_SIGNATURE, logged as the cause 'signature-body-only', and a bare hex HMAC with no prefix is 'signature-malformed', the same 401 (packages/triggers/trigger-api/src/api-trigger.ts verifyInboundSignature) — the flow names its secret (config.secretRef: 'SHOWCASE_WEBHOOK_SECRET'), so boot with that environment variable set to a value of your choosing and sign with it; unset, the hook answers 503. The body must carry title AND project (a showcase_project id): the flow maps project as optional (has(record.project) ? … : null) but showcase_task requires it, so a body without project runs and its create_record fails 'Project is required' (QA runs #33853 and #33914)",
         "for EACH variant: GET the owning flow's runs (GET /api/v1/automation/<name>/runs + /runs/:runId) and locate a step whose nodeType equals the variant; record run id, step status, and — for suspending types — the paused-then-resumed transition",
         "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps",
         "unknown-type probe (the late-binding contract, ruled status quo in #7545): POST /api/v1/automation a flow whose one non-start node carries type 'bogus_node' — capture the HTTP status and the server log record the registration emits, then POST /api/v1/automation/<that flow>/trigger and read GET /api/v1/automation/<that flow>/runs/:runId"
@@ -765,6 +771,12 @@
           "date": "2026-11-14",
           "change": "step- and verify-text correction, no clause change. steps[1]: 'In com.example.showcase.custom' is the opened copy's header chip (StudioPairItemChip), the base rail marks the copy 'Added · Switched off'. steps[5]: EXP-2001's per-group sign-off needs the auditor persona's decision beside the admin's to complete (seed-approval-demo.ts, demo-personas.ts). steps[6]: names the body-only spelling (sha256=HEX) the door refuses and the bare-hex malformed form, both 401 (api-trigger.ts UNVERIFIED_POST_CAUSE_TEXT). acceptance[2].verify: a suspending step logs 'success' while the run is paused. acceptance[5].verify: the bogus-node trigger answers HTTP 400. Read from source at base 87330e89. Source records: QA records #33048 (comment 6846028996), #33093 (comment 6850899929) and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[6]: the webhook body must carry project, since the flow maps it as optional while showcase_task requires it and create_record fails 'Project is required' without it. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) and QA record #33914 (comment 6895723718) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ],
       "enumSource": {
@@ -778,7 +790,7 @@
       "title": "Every flow trigger type fires and produces a run of its bound flow; the run's trigger block records the launch event",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -788,7 +800,7 @@
         "app": "showcase",
         "requires": [
           "one seeded flow per trigger kind: record_change=showcase_urgent_task_alert (record-after-write, the only type:'record_change' flow) · autolaunched=showcase_batch_reminders (trigger route) · schedule=showcase_scheduled_digest (60s interval) · screen=showcase_reassign_wizard (Tasks row action showcase_bulk_reassign) · api=showcase_inbound_task_webhook (HMAC intake hook) · time_relative=showcase_task_due_reminder (schedule flow hosting config.timeRelative)",
-          "⚠️ the schedule and time_relative legs need package-authored scheduled work switched ON at boot: export OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 (with OS_PORT). On a default boot both showcase flows are unbound by deployment policy — the banner says \"1 flow declares a 'schedule' trigger but is NOT bound — disabled by deployment policy\" (and the same for 'time_relative'), and GET /api/v1/automation/_status reports bound:false with that reason — so no tick and no sweep ever comes, which is the policy working, not a trigger defect. ⚠️ time_relative has a second clock: showcase_task_due_reminder declares no `schedule` beside its timeRelative block, so even with the switch on it sweeps once a day at 08:00 UTC (the default cadence, packages/spec/src/automation/time-relative-trigger.zod.ts), and a run outside that minute sees no sweep. Fire the variant on a FAST CLONE, as QA run #27409 did: the same definition authored under a scratch name into a writable package (?package=, the way the area's qa-flow-status-doors recipe authors flows), with `schedule: { type: 'interval', intervalMs: 60000 }` as a sibling of `timeRelative` on the start node's config, plus a showcase_task that is not done and whose due_date falls 1 or 3 days out (offsetDays [3, 1])"
+          "⚠️ the schedule and time_relative legs need package-authored scheduled work switched ON at boot: export OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 (with OS_PORT). On a default boot both showcase flows are unbound by deployment policy — the banner says \"1 flow declares a 'schedule' trigger but is NOT bound — disabled by deployment policy\" (and the same for 'time_relative'), and GET /api/v1/automation/_status reports bound:false with that reason — so no tick and no sweep ever comes, which is the policy working, not a trigger defect. ⚠️ time_relative has a second clock: showcase_task_due_reminder declares no `schedule` beside its timeRelative block, so even with the switch on it sweeps once a day at 08:00 UTC (the default cadence, packages/spec/src/automation/time-relative-trigger.zod.ts), and a run outside that minute sees no sweep. Fire the variant on a FAST CLONE, as QA run #27409 did: the same definition authored under a scratch name into a writable package (?package=, the way the area's qa-flow-status-doors recipe authors flows) that can reach showcase_task: com.example.showcase.custom (ensure-customization first) takes it, while a fresh POST /api/v1/packages scratch package is refused 422 (timeRelative.object showcase_task outside its dependency closure) unless it declares the showcase dependency (QA run #33853), with `schedule: { type: 'interval', intervalMs: 60000 }` as a sibling of `timeRelative` on the start node's config, plus a showcase_task that is not done and whose due_date falls 1 or 3 days out (offsetDays [3, 1])"
         ]
       },
       "variants": [
@@ -922,7 +934,8 @@
           "change": "automated.ref names two pins that corroborate clauses below their oracle's layer. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): the mapping pass found inbound-hook-member.test.ts covering negative[1]'s refusal and screen-flow.spec.ts carrying acceptance[4]'s network half, neither named. No clause changed",
           "ref": "#25807"
         },
-        { "revision": 10, "date": "2026-10-31", "change": "fixtures.requires[1] says how to fire the time_relative variant inside a run. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the stock sweep runs daily at 08:00 UTC, so the variant had to be fired on a fast clone, and the fixture line named only the scheduled-work switch. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts TaskDueReminderFlow (no schedule on its start config), packages/spec/src/automation/time-relative-trigger.zod.ts (omitting schedule means daily at 08:00 UTC; schedule is a sibling of timeRelative). No clause changed", "ref": "#27409" }
+        { "revision": 10, "date": "2026-10-31", "change": "fixtures.requires[1] says how to fire the time_relative variant inside a run. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the stock sweep runs daily at 08:00 UTC, so the variant had to be fired on a fast clone, and the fixture line named only the scheduled-work switch. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts TaskDueReminderFlow (no schedule on its start config), packages/spec/src/automation/time-relative-trigger.zod.ts (omitting schedule means daily at 08:00 UTC; schedule is a sibling of timeRelative). No clause changed", "ref": "#27409" },
+        { "revision": 11, "date": "2026-11-15", "change": "fixture-text correction, no clause change. fixtures.requires[1]: the fast clone's writable package must reach showcase_task; com.example.showcase.custom takes it, and a fresh scratch package is refused 422 outside its dependency closure. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -2199,7 +2212,7 @@
       "title": "POST /automation/:name/clone (Studio's New similar): whole-definition copy mutating exactly name/label/status, written switched off (status obsolete) into a package — the base's .custom pair when `package` is omitted —, protection envelope dropped, no ancestry, notice verbatim, 400/404/409/422 refusal arms — and the honest clause: the copy survives a restart and reaches Studio",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2233,7 +2246,7 @@
           "evidence": "the four 400 bodies with their details arrays"
         },
         {
-          "clause": "the copy is whole-definition with exactly name/label/status mutated, the protection envelope and read decorations dropped, and NO ancestry: every other key of the copy deep-equals the source; none of the 11 FLOW_CLONE_DROPPED_KEYS (_diagnostics, _draft, _lock, _lockReason, _lockSource, _provenance, _packageId, _packageVersion, _lockDocsUrl, protection, overrides) is present on the copy; no clonedFrom-shaped key exists in the response or the stored definition. The response names where the copy LIVES (packageId com.example.showcase.custom when `package` was omitted), which is not ancestry",
+          "clause": "the copy is whole-definition with exactly name/label/status mutated, the protection envelope and read decorations dropped, and NO ancestry: every other key of the copy deep-equals the source; none of the 11 FLOW_CLONE_DROPPED_KEYS (_diagnostics, _draft, _lock, _lockReason, _lockSource, _provenance, _packageId, _packageVersion, _lockDocsUrl, protection, overrides) is carried over from the source onto the copy (read on the clone response and the stored definition; a later GET /automation/COPY decorates _packageId naming the copy's own holder, com.example.showcase.custom, which is a read decoration naming where it lives, not a carried key); no clonedFrom-shaped key exists in the response or the stored definition. The response names where the copy LIVES (packageId com.example.showcase.custom when `package` was omitted), which is not ancestry",
           "oracle": "api",
           "verify": "the step-4 diff: differences are exactly {name, label, status:'obsolete'} (FLOW_CLONE_MUTATED_FIELDS and FLOW_CLONE_STATUS, flow-clone.ts — 'obsolete' since #28149, ADR-0146 D4) plus the ABSENCE of the dropped keys (flow-clone.ts — METADATA_READ_DECORATIONS + MetadataProtectionFields, derived, plus the package author's `protection` block, named (#23120), plus OverrideDeclarationFields (`overrides`, ADR-0146 D2): 2+7+1+1=11 at base f68b47ca; count them from the source at run time rather than trusting this line). The step-3 response carries data.packageId 'com.example.showcase.custom' (domains/automation.ts, the clone arm's deps.success). A missing facet (nodes, edges, variables, runAs, retry…) is the #11703 param-list failure shape; a surviving _packageId or _lock defeats the feature (the copy would claim the base's package or be locked); any ancestry key violates amendment ruling 2 / §9",
           "evidence": "the key-by-key diff + the dropped-keys absence check + the response's packageId"
@@ -2334,6 +2347,12 @@
           "date": "2026-11-04",
           "change": "acceptance[1] (clause and verify), acceptance[6] (clause and verify) and steps[7] corrected from QA run #29890 (W5-FAIL, at 589049b0). FLOW_CLONE_DROPPED_KEYS now also drops OverrideDeclarationFields (`overrides`), 11 keys (flow-clone.ts). On the base's rail the copy carries the row mark 'Added'; 'In com.example.showcase.custom' is the designer header's chip (#29693). Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-15",
+          "change": "clause wording corrected, not narrowed. acceptance[1]: the dropped keys are judged on the clone response and the stored definition; a later GET of the copy decorates _packageId naming the copy's own holder, which is a read decoration, not a key carried from the source. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -2342,7 +2361,7 @@
       "title": "The packaged-automation doors after ADR-0146 D4/D11: Setup nav serves Packaged actions (the retired flows page's bookmark lands in Studio), Studio's Automations pillar lists the packaged flows, its ledger switch persists, New similar is offered on flows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2379,13 +2398,13 @@
         {
           "clause": "the Setup navigation serves the Packaged actions entry and no longer the retired flows page: the served setup app carries the type:'component' item componentRef 'automation:packaged-actions' and none naming 'automation:packaged', clicking the sidebar entry lands on Setup › Packaged actions, and the retired page's bookmark lands in Studio (the cross-package flow list, or the named package's Automations pillar), never on a dead Setup page",
           "oracle": "network",
-          "verify": "the GET /api/v1/meta/app?id=setup body carries id 'nav_packaged_actions', type 'component', componentRef 'automation:packaged-actions', label 'Packaged Actions' (setup-nav.contributions.ts), and nav_packaged_automation occurs 0 times (tombstoned in setup-nav-dead-key-tombstone.test.ts) — AND the sidebar click navigates to the page. The entry carries no requiresService and no requiredPermissions, as its predecessor did (the write doors gate server-side) — do not 'fix' either. The bookmark legs are the navigation trace of steps[1]: /component/automation/packaged → /studio/~all/metadata/flow with no ?package=, → /studio/com.example.showcase/automations with one (packagedAutomationStudioPath; pinned by AppContent.setupMetadataStudio-28578.test.tsx). ⛔ A typed-URL landing does not tick the sidebar half: each repo half pins only itself (setup-packaged-actions-nav.test.ts; PackagedActionsPage.navContribution.test.tsx), and the live served body + real sidebar click is the only observation that crosses the seam",
+          "verify": "the GET /api/v1/meta/app?id=setup body carries id 'nav_packaged_actions', type 'component', componentRef 'automation:packaged-actions', label 'Packaged Actions' (setup-nav.contributions.ts), and nav_packaged_automation occurs 0 times (tombstoned in setup-nav-dead-key-tombstone.test.ts) — AND the sidebar click navigates to the page. The entry carries no requiresService and no requiredPermissions, as its predecessor did (the write doors gate server-side) — do not 'fix' either; it does carry visible: \"current_user.can('sys_metadata_activation', 'read')\" (#33224), the audience of its page's own ledger read, so a member who cannot read sys_metadata_activation is neither shown the entry nor landed on it. The bookmark legs are the navigation trace of steps[1]: /component/automation/packaged → /studio/~all/metadata/flow with no ?package=, → /studio/com.example.showcase/automations with one (packagedAutomationStudioPath; pinned by AppContent.setupMetadataStudio-28578.test.tsx). ⛔ A typed-URL landing does not tick the sidebar half: each repo half pins only itself (setup-packaged-actions-nav.test.ts; PackagedActionsPage.navContribution.test.tsx), and the live served body + real sidebar click is the only observation that crosses the seam",
           "evidence": "the meta/app body + sidebar screenshot + the two bookmark navigation traces"
         },
         {
-          "clause": "inventory: Studio's Automations rail on the read-only showcase package lists exactly that package's packaged flows, each with a row in GET /api/v1/automation/_status, and an open flow's ledger switch is checked by default (an obsolete-status flow excepted: the engine holds it disabled). A flow the customization pair adds appears only marked 'In com.example.showcase.custom' (engine.studio.customize.addedIn), never as one of the base's flows. This clause judges the flag, not the reading: on a default boot the two policy-unbound schedule flows keep a checked switch whose data-reading is 'not-running' (steps[3]), and that does not fail this clause",
+          "clause": "inventory: Studio's Automations rail on the read-only showcase package lists exactly that package's packaged flows, each with a row in GET /api/v1/automation/_status, and an open flow's ledger switch is checked by default (an obsolete-status flow excepted: the engine holds it disabled). A flow the customization pair adds appears only with the rail row mark 'Added' (engine.customizationMark.added), never as one of the base's flows; 'In com.example.showcase.custom' (engine.studio.customize.addedIn) is the opened copy's header chip (StudioPairItemChip), not the rail row. This clause judges the flag, not the reading: on a default boot the two policy-unbound schedule flows keep a checked switch whose data-reading is 'not-running' (steps[3]), and that does not fail this clause",
           "oracle": "dom",
-          "verify": "rail rows vs the _status rows filtered to the package: same names, none missing, none extra (a copy from steps[5] shows only with its 'In PAIR' mark). For each opened flow, auto-ledger-switch aria-checked equals the enabled field of its _status row (StudioDesignSurface.tsx: ledgerRow from flowStatus, FlowLedgerSwitch checked), which the engine sets false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts). OS_AUTOMATION_SCHEDULED_WORK_ENABLED moves the reading, never the flag. ⛔ Do not score a 'not-running' reading as a switch reading Off, nor read a checked switch as a flow that runs. QA run #29124 read 32 flows on the rail and in _status",
+          "verify": "rail rows vs the _status rows filtered to the package: same names, none missing, none extra (a copy from steps[5] shows only with its 'Added' row mark). For each opened flow, auto-ledger-switch aria-checked equals the enabled field of its _status row (StudioDesignSurface.tsx: ledgerRow from flowStatus, FlowLedgerSwitch checked), which the engine sets false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts). OS_AUTOMATION_SCHEDULED_WORK_ENABLED moves the reading, never the flag. ⛔ Do not score a 'not-running' reading as a switch reading Off, nor read a checked switch as a flow that runs. QA run #29124 read 32 flows on the rail and in _status",
           "evidence": "rail list vs the two API reads, side by side, plus the switch's aria-checked and data-reading per flow opened"
         },
         {
@@ -2525,6 +2544,12 @@
           "date": "2026-11-04",
           "change": "steps[3] and acceptance[6].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): the ledger switch readings are 'Switched on / off for this deployment' (engine.studio.auto.ledger.*, respelled by #29784 / #29841), and a New similar copy on the read-only base opens on the base's pillar URL, selected in its rail, not on a pair URL. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-15",
+          "change": "clause wording corrected, not narrowed, and verify-text correction. acceptance[1] (clause and verify): a pair-added flow carries the rail row mark 'Added' (engine.customizationMark.added); 'In com.example.showcase.custom' is the opened copy's header chip. acceptance[0].verify names the entry's visible gate, current_user.can('sys_metadata_activation', 'read') (setup-nav.contributions.ts). Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -2927,7 +2952,7 @@
       "title": "Customize a read-only base's flow in Studio: the pair's item under the base's name, declaring the override, is armed in place of the base in one reload, keeps the base's ledger switch, lets a waiting run finish on the base, and Restore re-arms the base — New similar stays a separate copy under a new name",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2954,8 +2979,8 @@
         "edit the flow (e.g. a node's label) and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and PUT /api/v1/meta/flow/showcase_budget_approval?mode=draft&package=com.example.showcase.custom; confirm no POST /api/v1/automation/showcase_budget_approval/toggle and no sys_metadata_activation write",
         "publish the pair; then GET /api/v1/automation/_status (one row for the name) and GET /api/v1/meta/flow/showcase_budget_approval (no package); read the header: the override badge is folded into the item's More menu (open auto-item-more; studio-override-chip sits in studio-item-header-folded-chips) beside the ledger switch (auto-ledger-switch) — no definition switch",
         "as the approver, approve the step-1 run's pending request; GET /api/v1/automation/showcase_budget_approval/runs/RUN_ID",
-        "PATCH the project budget again (a new value above 100000): the new run's step log",
-        "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on",
+        "PATCH the project budget again (a new value above 100000): the new run's step log. Then decide that run's pending request as in step 5 before any later budget change on this project: while an approval request on the same project is still pending, the next run's request is refused DUPLICATE_REQUEST and that run reads failed, so the runs acceptance[3] and acceptance[4] read would fail for the fixture's sake (QA run #33853). A fresh showcase_project per budget change avoids it too",
+        "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on, and PATCH the budget once more: that change starts a run that follows the override's definition, which is the 'on re-arms it' half acceptance[3] reads (the engine's trigger dispatch skips a flow only while isFlowEnabled answers false, packages/services/service-automation/src/engine.ts, so the switch turned back on arms the next change, it does not replay the change made while off). Decide that run's pending request before step 8's budget change, as in step 6",
         "Restore package original from the override chip's popover (studio-override-restore, as in studio-authoring.package-customize-restore-display steps[6]), read the confirmation (studio-restore-original-dialog) and confirm (studio-restore-original-confirm): capture the two DELETEs at the pair; PATCH the budget once more and read the new run",
         "New similar on the same flow (auto-new-similar-*): give a new name and label; read where the copy opens and its status",
         "Customize and publish the flow again (as steps 2–4), and while that override is live press New similar on it with another new name and label; read the answer, the copy's draft in the pair, and GET /api/v1/meta/flow/showcase_budget_approval; then Restore package original as in step 8"
@@ -3051,6 +3076,18 @@
           "date": "2026-11-08",
           "change": "steps[0], steps[3] and steps[7] corrected: the runs list is at data.runs, the override chip is folded into auto-item-more as studio-item-header-folded-chips, and Restore is the chip popover's studio-override-restore. fixtures.knownGaps gains acceptance[2]'s discrimination gap. Checklist-accuracy finding and coverage gap of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[5]: decide the override run's pending request before the next budget change on the same project, or the later runs read failed DUPLICATE_REQUEST (QA run #33853 saw it on the runs acceptance[3] and acceptance[4] read). Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[6] now makes the budget change after switching the ledger back on, the change acceptance[3].verify reads ('with it on the next change runs the override'); the step stopped at switching it on, so the re-arm half had no step. steps[5] cites step 5, the approval step, not step 4. Read from source at base 895783a1 (engine.ts, the trigger dispatch's isFlowEnabled guard). Found while doing #33966 (batch D of the #33761 close-out); QA record #33853 (comment 6894307378) made that change as its R4",
+          "ref": "#33984"
         }
       ]
     },

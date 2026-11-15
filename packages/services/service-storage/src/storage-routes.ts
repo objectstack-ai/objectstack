@@ -86,10 +86,13 @@ import { uploadLinkCopy, uploadLinkRefusalText, type UploadLinkCopy } from './up
 // [#23306] The size refusal itself lives there too, beside the limit it
 // enforces, because a second door asks it: the server-side attach verb.
 import {
+  announceUploadBound,
+  parseHostMaxUploadMb,
   resolveStorageLimits,
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
   UPLOAD_TOO_LARGE_STATUS,
+  type HostMaxUploadMb,
   type ResolvedStorageLimits,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
@@ -319,7 +322,7 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
  * length is (`IHttpRequest.rawBody`). `{ over: true }` when the read was
  * refused for passing the `maxBytes` this door stated; any other failure,
  * a size refusal on a read that stated no bound included, is thrown. With no bound
- * (`max_upload_mb` unset) the whole body is read, as before.
+ * (only a host's explicit `maxUploadMb: 'unlimited'`) the whole body is read.
  *
  * `null` when the request offers no raw bytes and its body is not a buffer:
  * the door answers that it needs a binary body.
@@ -416,6 +419,14 @@ export interface StorageRoutesOptions {
    */
   sessionTtl?: number;
   /**
+   * The host's upload bound, in MB (counted as MiB), or `'unlimited'` to
+   * accept uploads of any size. A SAVED `storage.max_upload_mb` wins over it;
+   * it wins over the namespace's own default; left out, the namespace default
+   * or else the built-in 100 MB applies. Anything but a positive number or
+   * `'unlimited'` is refused when the routes are registered.
+   */
+  maxUploadMb?: HostMaxUploadMb;
+  /**
    * [#22283] The `storage` settings namespace's Limits group as last read —
    * `presigned_ttl`, `session_ttl` and `max_upload_mb` — asked once per
    * request, so a save reaches the next upload without a remount. Resolved
@@ -423,9 +434,9 @@ export interface StorageRoutesOptions {
    * (`storage-limits.ts`): a saved value wins over these options, these options
    * win over the namespace default.
    *
-   * Absent, or answering `undefined` (no settings namespace bound): the TTLs
-   * are the options above and NO upload size limit applies — the behaviour
-   * before the Limits group was honoured. `composeStorageRoutes` binds it from
+   * Absent, or answering `undefined` (no settings namespace bound): the
+   * options above apply, else the built-in defaults — the upload bound
+   * included, which is never unset. `composeStorageRoutes` binds it from
    * the `storage` service the plugin registers, for both mounts.
    */
   limitsSnapshot?: () => StorageLimitsSnapshot | undefined;
@@ -521,7 +532,11 @@ export interface StorageRoutesOptions {
    * download keeps `presignedTtl`.
    */
   downloadTtl?: number;
-  /** Optional logger for the one-time open-mode notice. */
+  /**
+   * Optional logger for the one-time notices (open mode, and on
+   * `registerStorageRoutes` the upload bound in force). Without one, an
+   * explicit `maxUploadMb: 'unlimited'` is still announced, on `console.warn`.
+   */
   logger?: { info(msg: string): void; warn(msg: string): void };
 }
 
@@ -551,6 +566,15 @@ export function registerStorageRoutes(
   opts: StorageRoutesOptions = {},
 ): void {
   registerStorageFamily(httpServer, storage, store, opts, undefined);
+  // The direct registrar is a host door too: the upload bound in force is said
+  // once, and no bound (an explicit `'unlimited'`) at `warn` with or without a
+  // logger. The two composed mounts say it themselves (the plugin's boot hook,
+  // `mountStorageRoutes`), so it is said here and not in the family.
+  announceUploadBound(
+    'registerStorageRoutes',
+    resolveStorageLimits(opts.limitsSnapshot?.(), { maxUploadMb: opts.maxUploadMb as HostMaxUploadMb | undefined }),
+    opts.logger,
+  );
 }
 
 /**
@@ -657,10 +681,14 @@ export function registerStorageFamily(
   // [#22283] The limits THIS request is served under — the saved Limits group
   // resolved against this mount's own options, asked per request (never
   // hoisted to registration) so a settings save reaches the next request.
+  // The host's upload bound is judged once, here: a malformed one refuses the
+  // mount rather than leave a door with a guessed bound.
+  const hostMaxUploadMb = parseHostMaxUploadMb(opts.maxUploadMb, 'registerStorageRoutes');
   const currentLimits = (): ResolvedStorageLimits =>
     resolveStorageLimits(opts.limitsSnapshot?.(), {
       presignedTtl: opts.presignedTtl,
       sessionTtl: opts.sessionTtl,
+      maxUploadMb: hostMaxUploadMb,
     });
 
   // [#22283] The size gate every upload door asks before it stores a byte or
