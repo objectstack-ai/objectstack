@@ -300,6 +300,10 @@ import {
   readmeClaims,
   takesAReadmeClaim,
   verifyStandInGuarded,
+  IMPORT_GRAPH_KEY_ROOT,
+  importGraphChain,
+  importGraphReach,
+  loadEdgeTargets,
 } from './dispatch-gates.mjs';
 import { SCANNED_ROOTS as RUNNER_ENV_ROOTS, isProductSource as runnerEnvIsProductSource } from '../check-runner-env-posture.mjs';
 import { findViolations as casingFindViolations } from '../check-error-code-casing.mjs';
@@ -1394,16 +1398,18 @@ export function selfTest({ tier = 'full' } = {}) {
       + ' already answers, so the novel half is a measurement and not the raw count',
     importCoveredElsewhere > 0,
   );
-  // The card's own witness, and the single lead this refusal is KNOWN to cost.
-  // Asserted in both halves: the import edge exists, and no key names it.
+  // The card's own witness, the single lead this refusal was KNOWN to cost —
+  // and now the lead the import-graph key (#33848) pays back, because the
+  // module it imports lives under `IMPORT_GRAPH_KEY_ROOT`. Asserted in both
+  // halves: the import edge exists, and the key that names it is that one.
   const bareRootKey = 'scripts/pm/bare-root-worklist.mjs --self-test';
   const bareRootImportFamily = importClassFamilies.find(([c]) => c === bareRootKey)?.[1];
   t(
-    'the witness holds — bare-root-worklist --self-test imports THIS file, and no key names that'
-      + ' family for a card editing it',
+    'the witness is paid back — bare-root-worklist --self-test imports THIS file, and the import-graph'
+      + ' key names that family for a card editing it',
     (importClassEdges.get(bareRootKey)?.has('scripts/pm/dispatch-gates.mjs') ?? false)
       && !!bareRootImportFamily
-      && coveringKey(bareRootImportFamily, 'scripts/pm/dispatch-gates.mjs') === null,
+      && String(coveringKey(bareRootImportFamily, 'scripts/pm/dispatch-gates.mjs')?.via ?? '').startsWith('import graph '),
   );
   // Why it is refused, re-derived rather than recalled: the worst module would
   // print a list nobody reads. The bound is the header's own "22 leads is the
@@ -1480,6 +1486,116 @@ export function selfTest({ tier = 'full' } = {}) {
       + ` ${importDeferredOnHeads.length} of ${importDeferred.length} land on a module more than 3`
       + ` families import`,
     importDeferredOnHeads.length * 2 > importDeferred.length,
+  );
+
+  // ── The import-graph key (#33848) ──────────────────────────────────────────
+  // A changed `scripts/pm/**` module names the family of every gate that LOADS
+  // it, transitively. The refused fifth key above stands outside that subtree;
+  // inside it, the pm tools import one another in chains, and a one-level edge
+  // missed the measured case: on PR #33804's first head the derivation named 35
+  // gates and not `check:pm-fleet-write-execute`, whose script imports a changed
+  // module and whose self-test then went red in CI.
+  //
+  // Fixture rows first: one in-memory graph, so the edge reader and the walk are
+  // pinned on shapes this tree may stop carrying.
+  const lgSources = {
+    'scripts/pm/gate.mjs': [
+      "import { a } from './a.mjs';",
+      "export { r } from './reexported.mjs';",
+      "import './side.mjs';",
+      'const fixture = `',
+      "import { never } from './fixture-only.mjs';",
+      '`;',
+      "// import { prose } from './comment-only.mjs';",
+      "import { pkg } from 'yaml';",
+      'export function selfTest() {',
+      "  return import('./battery.mjs');",
+      '}',
+      "const lazy = () => import(new URL('./by-url.mjs', import.meta.url));",
+    ].join('\n'),
+    'scripts/pm/a.mjs': "export { b } from './b.mjs';\nexport const a = 1;\n",
+    'scripts/pm/b.mjs': "export const b = 2;\n",
+    'scripts/pm/reexported.mjs': 'export const r = 3;\n',
+    'scripts/pm/side.mjs': '',
+    'scripts/pm/fixture-only.mjs': '',
+    'scripts/pm/comment-only.mjs': '',
+    'scripts/pm/battery.mjs': '',
+    'scripts/pm/by-url.mjs': '',
+    'scripts/pm/seam.mjs': [
+      'export const SOURCE = "./table.mjs";',
+      "const ROOT_SPELLED = 'scripts/pm/root-spelled.mjs';",
+      'export const load = (specifier) => import(specifier);',
+    ].join('\n'),
+    'scripts/pm/table.mjs': '',
+    'scripts/pm/root-spelled.mjs': '',
+    'scripts/pm/no-seam.mjs': 'export const SOURCE = "./table.mjs";\n',
+  };
+  const lgExists = (rel) => Object.hasOwn(lgSources, rel);
+  const lgEdges = (rel) => loadEdgeTargets(rel, lgSources[rel] ?? '', { exists: lgExists }).targets;
+  const lgGate = lgEdges('scripts/pm/gate.mjs');
+  t(
+    'the load-edge reader takes the static import, the re-export, the side-effect form, a literal import() inside'
+      + ' the self-test body and a new URL(...) import()',
+    ['scripts/pm/a.mjs', 'scripts/pm/reexported.mjs', 'scripts/pm/side.mjs', 'scripts/pm/battery.mjs', 'scripts/pm/by-url.mjs']
+      .every((m) => lgGate.includes(m)),
+    lgGate.join(' '),
+  );
+  t(
+    '…and refuses an import spelled inside a template literal or a comment, and a bare package specifier',
+    !lgGate.includes('scripts/pm/fixture-only.mjs') && !lgGate.includes('scripts/pm/comment-only.mjs')
+      && lgGate.every((m) => m.startsWith('scripts/')),
+    lgGate.join(' '),
+  );
+  const lgSeam = loadEdgeTargets('scripts/pm/seam.mjs', lgSources['scripts/pm/seam.mjs'], { exists: lgExists });
+  t(
+    'an import() whose argument is not a literal widens toward MORE: every relative module literal in the file is'
+      + ' an edge, a root-spelled path is not',
+    lgSeam.unreadDynamic === 1 && lgSeam.targets.join() === 'scripts/pm/table.mjs',
+    `${lgSeam.unreadDynamic} unread · ${lgSeam.targets.join(' ')}`,
+  );
+  t(
+    'CONTROL: the same relative literal in a file with no unread import() is not an edge',
+    lgEdges('scripts/pm/no-seam.mjs').length === 0,
+  );
+  const lgReach = importGraphReach(['scripts/pm/gate.mjs'], lgEdges);
+  const lgEntry = { check: 'check:fixture', files: ['scripts/pm/gate.mjs'], hints: [], importReach: lgReach };
+  const lgTransitive = coveringKey(lgEntry, 'scripts/pm/b.mjs');
+  t(
+    '⭐ the transitive row: a module reached only through an importer of an importer names the family, and the'
+      + ' row prints the chain from the gate file',
+    lgTransitive?.key === 'scripts/pm/b.mjs'
+      && lgTransitive?.via === 'import graph scripts/pm/gate.mjs -> scripts/pm/a.mjs -> scripts/pm/b.mjs'
+      && importGraphChain(lgReach, 'scripts/pm/b.mjs').length === 3,
+    lgTransitive?.via ?? 'no key',
+  );
+  const lgOutside = {
+    ...lgEntry,
+    importReach: new Map([['scripts/shared-head.mjs', 'scripts/pm/gate.mjs']]),
+  };
+  t(
+    'the key answers only under scripts/pm/ — a shared module outside it stays under the refusal above',
+    IMPORT_GRAPH_KEY_ROOT === 'scripts/pm/' && coveringKey(lgOutside, 'scripts/shared-head.mjs') === null,
+  );
+  // The live replay: PR #33804's first file list, against this tree.
+  const replayPaths = ['scripts/pm/check-governed-queue-guard.mjs', 'scripts/pm/check-governed-merges.mjs'];
+  const replayFamilies = new Map(discoverFamilies().byCheck);
+  const replayPlaced = (check) => {
+    const entry = replayFamilies.get(check);
+    return entry ? placeFamily(entry, replayPaths) : { verdict: 'not discovered', hits: [] };
+  };
+  const replayExecute = replayPlaced('check:pm-fleet-write-execute');
+  t(
+    '⭐ the replay row: PR #33804\'s first file list derives check:pm-fleet-write-execute, through the import graph',
+    replayExecute.verdict === 'matched'
+      && replayExecute.hits.some((h) => h.via.startsWith('import graph scripts/pm/fleet-write/execute.mjs -> '))
+      && runnableInvocation(replayFamilies.get('check:pm-fleet-write-execute') ?? {}) === 'pnpm check:pm-fleet-write-execute',
+    replayExecute.hits.map((h) => h.via).join(' · ') || replayExecute.verdict,
+  );
+  const replayFleet = ['check:pm-fleet-write-validate', 'check:pm-fleet-write-dispatch'].map((c) => [c, replayPlaced(c)]);
+  t(
+    '…and the validator and the dispatcher, the other two fleet-write families the card names',
+    replayFleet.every(([, placed]) => placed.verdict === 'matched'),
+    replayFleet.map(([c, placed]) => `${c}: ${placed.verdict}`).join(' · '),
   );
 
   // #12107, the live half — three claims about THIS tree, each one a thing the

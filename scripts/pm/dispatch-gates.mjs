@@ -6573,6 +6573,169 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
 }
 
 /**
+ * ── The LOAD edge, read for the import-graph key (#33848) ──────────────────
+ *
+ * `firstPartyImportBindings` answers a POPULATION question — what a gate
+ * inherits from a module it imports — and every one of its narrowings is
+ * priced for that question: static clauses only, self-test bodies masked.
+ * This answers a different one: *which first-party modules does running this
+ * file LOAD?* — the question `importGraphReach` walks to name the family that
+ * runs a changed `scripts/pm/**` module. A missed edge here is a gate a card
+ * can break without being told, so every narrowing above is turned the other
+ * way, toward MORE edges:
+ *
+ *   - self-test bodies are NOT masked: a `--self-test` invocation runs them, and
+ *     a self-test that loads its battery lazily loads it there.
+ *   - comments ARE masked, and a keyword inside a string or template literal is
+ *     not a load: a fixture spelling an import is text this file carries.
+ *   - static `import … from`, `export … from` (a re-export loads its target)
+ *     and the side-effect form; a dynamic `import()` whose argument is a string
+ *     literal or `new URL('<literal>', import.meta.url)`.
+ *   - a dynamic `import()` whose argument this scan cannot read (a variable, a
+ *     property, a computed URL) has a target nothing here can name. It is not
+ *     dropped: the file is marked, and EVERY code-position string literal in it
+ *     spelled as a relative specifier that resolves to a first-party module is
+ *     taken as an edge. The live shape is a loader seam
+ *     (`load = (specifier) => import(specifier)`) whose specifiers sit in a
+ *     constant elsewhere in the same file (`ARM_READER_SOURCE`). A path spelled
+ *     from the repo ROOT is not taken: in this tree that spelling is a fixture
+ *     row or a file a self-test reads as text (a module LOADED by root path goes
+ *     through `pathToFileURL` and lives in spawned-child templates), so reading
+ *     it as a load handed `check-governed-merges.mjs` five modules it never runs.
+ *
+ * Resolution is `firstPartyImportBindings`': relative specifiers only, inside
+ * `scripts/`, outside `node_modules`, and only a target that exists — a bare
+ * specifier is an installed package, not a source a card edits.
+ *
+ * Returns `{ targets, unreadDynamic }`: `targets` sorted, `unreadDynamic` the
+ * count of `import()` calls whose argument was not read, so a caller can name
+ * the files the literal fallback widened.
+ */
+const LOAD_DYNAMIC_IMPORT = /(?<![\w$.])import[ \t\n]*\(/g;
+const LOAD_DYNAMIC_LITERAL = /^[ \t\n]*(['"`])([^'"`\n]+)\1[ \t\n]*[,)]/;
+const LOAD_DYNAMIC_URL = /^[ \t\n]*new[ \t\n]+URL[ \t\n]*\([ \t\n]*(['"`])([^'"`\n]+)\1[ \t\n]*,[ \t\n]*import\.meta\.url[ \t\n]*\)/;
+const LOAD_MODULE_LITERAL = /(['"`])(\.\.?\/[^'"`\n]*?\.(?:mjs|cjs|js|mts|cts|ts))\1/g;
+
+export function loadEdgeTargets(scriptPath, source, { root = ROOT, exists = null } = {}) {
+  const text = String(source);
+  const scan = scanSource(text);
+  const body = blank(text, scan.comment);
+  const isCode = (at) => !scan.comment[at] && !scan.literal[at];
+  const here = nodePath.dirname(nodePath.join(root, scriptPath));
+  const present = exists ?? ((rel) => {
+    const abs = nodePath.join(root, rel);
+    return existsSync(abs) && statSync(abs).isFile();
+  });
+  const targets = new Set();
+  const admit = (rel) => {
+    if (!rel.startsWith('scripts/')) return;
+    if (rel.split('/').includes('node_modules')) return;
+    if (rel === scriptPath) return;
+    if (present(rel)) targets.add(rel);
+  };
+  const resolveRelative = (specifier) => {
+    if (!specifier.startsWith('./') && !specifier.startsWith('../')) return;
+    admit(nodePath.relative(root, nodePath.resolve(here, specifier)));
+  };
+  // The keyword's own offset, not the match's: both regexes open on the
+  // statement separator before it.
+  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) {
+    if (isCode(m.index + m[0].indexOf(m[1]))) resolveRelative(m[4]);
+  }
+  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) {
+    if (isCode(m.index + m[0].indexOf('import'))) resolveRelative(m[2]);
+  }
+  let unreadDynamic = 0;
+  for (const m of body.matchAll(LOAD_DYNAMIC_IMPORT)) {
+    if (!isCode(m.index)) continue;
+    const rest = body.slice(m.index + m[0].length, m.index + m[0].length + 400);
+    if (/^[ \t\n]*\)/.test(rest)) continue;
+    const literal = LOAD_DYNAMIC_LITERAL.exec(rest);
+    if (literal && !(literal[1] === '`' && literal[2].includes('${'))) {
+      resolveRelative(literal[2]);
+      continue;
+    }
+    const url = LOAD_DYNAMIC_URL.exec(rest);
+    if (url && !(url[1] === '`' && url[2].includes('${'))) {
+      resolveRelative(url[2]);
+      continue;
+    }
+    unreadDynamic += 1;
+  }
+  if (unreadDynamic > 0) {
+    for (const m of body.matchAll(LOAD_MODULE_LITERAL)) {
+      // A literal in CODE: its opening delimiter is code and its first byte is
+      // literal — the scan flags a literal's content, never its delimiters.
+      if (!isCode(m.index) || !scan.literal[m.index + 1]) continue;
+      if (m[1] === '`' && m[2].includes('${')) continue;
+      resolveRelative(m[2]);
+    }
+  }
+  return { targets: [...targets].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), unreadDynamic };
+}
+
+/**
+ * Every first-party module running these files LOADS, transitively, each with
+ * the importer that first reached it (#33848) — the forward closure of
+ * `loadEdgeTargets` from a family's gate files, which read from the module's
+ * side is the REVERSE import graph: module M is in family F's reach exactly
+ * when M is reachable backwards from F's gate files. Breadth-first, so each
+ * module's recorded importer is on a shortest chain, and the chain a row
+ * prints is the shortest one a reader can walk.
+ *
+ * `edgesOf(rel)` answers one file's targets; the discovery hands in a memoised
+ * one so a module shared by many families is scanned once. A file it cannot
+ * read contributes no edge and is still in the reach — the edge INTO it is a
+ * fact about its importer.
+ */
+export function importGraphReach(files, edgesOf) {
+  const own = new Set(files);
+  const reach = new Map();
+  const queue = [...files];
+  const seen = new Set(files);
+  while (queue.length > 0) {
+    const from = queue.shift();
+    let targets = [];
+    try {
+      targets = edgesOf(from) ?? [];
+    } catch {
+      targets = [];
+    }
+    for (const to of targets) {
+      if (seen.has(to)) continue;
+      seen.add(to);
+      if (!own.has(to)) reach.set(to, from);
+      queue.push(to);
+    }
+  }
+  return reach;
+}
+
+/**
+ * The chain a reach row prints, gate file first: walk the recorded importers
+ * back from the module until one is the family's own file.
+ */
+export function importGraphChain(reach, module) {
+  const chain = [module];
+  let at = module;
+  const guard = new Set([module]);
+  while (reach.has(at)) {
+    at = reach.get(at);
+    if (guard.has(at)) break;
+    guard.add(at);
+    chain.unshift(at);
+  }
+  return chain;
+}
+
+/**
+ * The subtree the import-graph key answers for (#33848). The refusal in
+ * `coveringKey`'s docblock (#13126) stands for every other module: its price is
+ * the fan-in of the shared heads under `scripts/`, none of which is in here.
+ */
+export const IMPORT_GRAPH_KEY_ROOT = 'scripts/pm/';
+
+/**
  * The exporter half of the binding rule: is NAME declared in this module as a
  * VALUE — a `const` initialised to one primitive literal?
  *
@@ -8009,6 +8172,16 @@ export function coveringKey(entry, inputPath) {
     const kind =
       entry.readEdge?.get(read) === 'declared-self-test' ? 'declared self-test read' : 'program text read';
     return { key: read, via: by && by !== read ? `${kind} by ${by}` : kind };
+  }
+  // The import-graph key (#33848), LAST for the reason the read key above is
+  // last: additive by construction, so every path an earlier key already
+  // answered keeps its exact key and label. The FIFTH key this docblock refuses
+  // is this one, and it stays refused outside `IMPORT_GRAPH_KEY_ROOT`; inside it
+  // it is admitted transitively, because the pm tools import one another in
+  // chains (a changed register read by an executor a dispatcher loads) and a
+  // one-level edge would miss the importer of an importer.
+  if (String(inputPath).startsWith(IMPORT_GRAPH_KEY_ROOT) && entry.importReach?.has(inputPath)) {
+    return { key: inputPath, via: `import graph ${importGraphChain(entry.importReach, inputPath).join(' -> ')}` };
   }
   return null;
 }
@@ -13527,7 +13700,22 @@ function discoverFamiliesPass(tree) {
     }
     return manifestHints.get(rel);
   };
+  // The LOAD graph the import-graph key walks (#33848), one scan per file
+  // however many families reach it — the discovery memo makes it one per tree.
+  const loadEdges = new Map();
+  const loadEdgesOf = (rel) => {
+    if (!loadEdges.has(rel)) {
+      const abs = nodePath.join(ROOT, rel);
+      loadEdges.set(rel, existsSync(abs) ? loadEdgeTargets(rel, readFileSync(abs, 'utf8')).targets : []);
+    }
+    return loadEdges.get(rel);
+  };
   for (const entry of byCheck.values()) {
+    // ⛔ NOT gated on `entry.selfTest`, and not narrowed to non-gate modules:
+    // this is a claim about what RUNNING the family loads, and a `--self-test`
+    // invocation loads its script's whole import graph as surely as the bare
+    // run does — the card's own specimen is a self-test family.
+    entry.importReach = importGraphReach(entry.files ?? [], loadEdgesOf);
     entry.imports = [];
     // The subset of `entry.imports` that CONTRIBUTES a population (#17991).
     // The edge list stays whole — the gate really does import every module in
@@ -16378,6 +16566,9 @@ export function derivationInputs({ tree = repoCorpus().tree } = {}) {
     for (const list of [entry.files, entry.imports, entry.runs, entry.reads, entry.manifests]) {
       for (const rel of list ?? []) inputs.add(rel);
     }
+    // The import-graph key's reach (#33848): a module's edges decide which
+    // families that key names, so every file the walk opened is an input.
+    for (const rel of entry.importReach?.keys() ?? []) inputs.add(rel);
   }
   derivationInputsMemo.set(discovered, inputs);
   return inputs;
