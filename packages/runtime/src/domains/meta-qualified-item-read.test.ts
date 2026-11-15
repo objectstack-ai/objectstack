@@ -367,6 +367,8 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
         for (const id of unnamed) expect(JSON.stringify(answer.body)).not.toContain(id);
     };
 
+    /** [#33385] The types whose by-name read serves the minimal stored row of the row-holder CONTROL below. */
+    const ROW_SERVED_TYPES: readonly string[] = ['dashboard', 'email_template', 'permission', 'report'];
     for (const type of PACKAGE_SCOPED_READ_TYPES) {
         // [contract review M1, S2] Both registration orders: a reader that takes
         // the first registered holder serves the disabled one's body when it
@@ -467,12 +469,16 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             const bare = await read(`/${type}/solo`);
             const env = await read(`/${type}/_env/solo`);
             expect(JSON.stringify(env.body ?? null)).not.toContain(`gamma row ${type}`);
-            if (labelOf(bare) === `gamma row ${type}`) {
+            // Measured on this fixture: these four types' by-name read serves
+            // the minimal stored row; the others serve no row of this shape, and
+            // `_env` answers as that read does (404). Named, so the 409 leg can
+            // never pass vacuously.
+            expect(labelOf(bare) === `gamma row ${type}`, JSON.stringify(bare.body)).toBe(ROW_SERVED_TYPES.includes(type));
+            if (ROW_SERVED_TYPES.includes(type)) {
                 expect([env.status, env.body?.error?.code], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT']);
             } else {
                 expect([bare.status, env.status], JSON.stringify([bare.body, env.body])).toEqual([404, 404]);
             }
-            console.info(`#33385-row-holder ${type} bare=${bare.status} env=${env.status}`);
         });
 
         it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
