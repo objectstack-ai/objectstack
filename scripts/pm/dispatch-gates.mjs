@@ -8089,7 +8089,11 @@ export function coveringJobFilter(entry, inputPath) {
  * and this file all load one another), so an edit to most pm modules names
  * the forty-odd families that run any of them. That is the size of what such
  * an edit can break, measured rather than assumed; the replay row and the
- * transitive row in `--self-test` are its pins.
+ * transitive row in `--self-test` are its pins, and a row there PRINTS the
+ * current size (modules reached, pairs, the most-reached module) rather than
+ * this prose recording it. Its time price is small and measured: the load
+ * scan adds about one to two seconds to a cold discovery (`derivationInputs`
+ * carries the before/after readings).
  *
  * WHERE THAT PRICE DOES NOT HOLD (#13467). "One CI round" is the WITNESS's
  * price and an AVERAGE over the class, and the next reader will quote it as the
@@ -16581,9 +16585,14 @@ const derivationInputsMemo = new WeakMap();
  *
  * Memoised per discovery, which is itself memoised per tree, so a derivation
  * that already discovered pays nothing more for it — and that is the ONLY
- * price this may have. A discovery costs seconds (measured: ~14 s cold on
- * this tree), so the modes that derive hand it to `baseDrift` and `--tier`,
- * which reads no workflow by contract, does not: a battery of `--tier`
+ * price this may have. A discovery costs seconds — measured on a quiet
+ * container, two cold runs each: 16.6 s and 14.8 s before the import-graph
+ * key (#33848, base e71ecc1b), 17.2 s and 17.0 s with it (6f34ab17); a whole `--commands`
+ * run over one pm path, 36.0 s and 37.0 s before, 38.0 s and 35.7 s after.
+ * A shared box reads higher (48.7 s was measured for that run under load), so
+ * quote the ratio, never one absolute. Because it costs that much, the modes
+ * that derive hand it to `baseDrift` and `--tier`, which reads no workflow by
+ * contract, does not: a battery of `--tier`
  * children on a tree a few commits behind was measured to quadruple its wall
  * clock when the banner asked for a discovery the mode never needed.
  */
