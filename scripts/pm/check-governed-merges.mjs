@@ -1180,7 +1180,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
-  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 50,
+  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2319,13 +2319,14 @@ export const LOW_RISK_ADD_ONLY_CONTEXT = 1000000;
  * A heading whose text names the decision or the status, in the spellings the registry uses (English and
  * Chinese): every line under it is the record's ruling or its state.
  */
-export const LOW_RISK_ADD_ONLY_RULED_HEADING = /decision|\bstatus\b|\bdecided\b|\bruling\b|\bresolution\b|决策|决定|裁决|状态/i;
+export const LOW_RISK_ADD_ONLY_RULED_HEADING = /decision|\bstatus\b|\bdecided\b|\bruling\b|\bresolution\b|决策|决定|裁决|状态|決策|決定|裁決|狀態/i;
 
 /**
  * The same words read with spaces, punctuation and symbols squeezed out (case folded): a letter-spaced
- * `D e c i s i o n` or `S.t.a.t.u.s` names the ruling too. Wider than the word test on purpose — it fails closed.
+ * `D e c i s i o n` or `S.t.a.t.u.s` names the ruling too. Wider than the word test on purpose, so it only ever
+ * REFUSES: whether a record names a ruled heading at all is read by the word test alone (`## Stat usage` names none).
  */
-export const LOW_RISK_ADD_ONLY_RULED_SQUEEZED = /decision|status|decided|ruling|resolution|决策|决定|裁决|状态/i;
+export const LOW_RISK_ADD_ONLY_RULED_SQUEEZED = /decision|status|decided|ruling|resolution|决策|决定|裁决|状态|決策|決定|裁決|狀態/i;
 
 /**
  * A status line: after its quote markers, list bullet, table bar, emphasis, HTML tags, link brackets and
@@ -2529,13 +2530,16 @@ export function addOnlyNoteReasons(file) {
   // or a raw HTML block outside a fence — could hide or invent a heading: where a note sits is then unknown.
   const unmodelled = oldLines.map((l, i) => [l, i]).filter(([l, i]) => !before[i].code && (/^[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)+(?:>[ \t]?)*[ \t]*(?:`{3,}|~{3,})/.test(l) || /^(?: {4,}|\t)[ \t]*(?:`{3,}|~{3,})/.test(l) || /^ {0,3}(?:>[ ]?)*[ \t]*<[A-Za-z!?/]/.test(l))).map(([, i]) => i);
   if (unmodelled.length > 0) return [`\`${path}\` carries a list-borne or indented fence, or a raw HTML block, at line ${unmodelled.slice(0, 3).map((n) => n + 1).join(', ')}, which the heading reader does not model`];
-  const ruled = (h) => Boolean(h) && (LOW_RISK_ADD_ONLY_RULED_HEADING.test(addOnlyHeadingText(h.text)) || LOW_RISK_ADD_ONLY_RULED_SQUEEZED.test(addOnlyHeadingText(h.text).replace(/[\s\p{P}\p{S}]/gu, '')));
+  // `ruledWord` decides whether the record names a ruled heading at all (a pass condition); `ruled` adds the
+  // squeezed reading and is used only where it refuses.
+  const ruledWord = (h) => Boolean(h) && LOW_RISK_ADD_ONLY_RULED_HEADING.test(addOnlyHeadingText(h.text));
+  const ruled = (h) => ruledWord(h) || (Boolean(h) && LOW_RISK_ADD_ONLY_RULED_SQUEEZED.test(addOnlyHeadingText(h.text).replace(/[\s\p{P}\p{S}]/gu, '')));
   const at1 = (list) => list.slice(0, 3).map((n) => `${n + 1}`).join(', ') + (list.length > 3 ? ` (+${list.length - 3} more)` : '');
   const sig = (r) => JSON.stringify([r.heading ? [r.heading.level, r.heading.text] : null, r.under.map((h) => [h.level, h.text])]);
   // Existing lines read as they read before: the added lines changed no heading and re-scoped nothing.
   const moved = ops.filter((op) => op.mark === ' ' && sig(before[op.old]) !== sig(after[op.new])).map((op) => op.new);
   if (moved.length > 0) reasons.push(`\`${path}\`'s added lines change the heading or the section of existing line ${at1(moved)} (a new heading, fence, frontmatter or setext underline over existing text)`);
-  if (!before.some((r) => !r.title && ruled(r.heading))) reasons.push(`\`${path}\` names no decision or status heading, so where a note sits cannot be judged`);
+  if (!before.some((r) => !r.title && ruledWord(r.heading))) reasons.push(`\`${path}\` names no decision or status heading, so where a note sits cannot be judged`);
   const firstSection = before.findIndex((r) => r.heading && !r.title);
   // Runs of consecutive added lines, each with the existing line it follows (-1: the top of the file).
   const runs = [];
@@ -9516,6 +9520,15 @@ async function selfTest() {
       append('## S.t.a.t.u.s', 'x') && append('## 决 策', 'x') && append('## 状-态', 'x') && append('## Ünïcode notes', 'x') && !append('## 修订注记', '', '注记。') && !append('## Notes 2', 'x'));
     assert('⛔ R5-N3-a-status-word-behind-punctuation-or-after-a-word-stays-H', append('## Notes', '(Status): Superseded by ADR-0154') && append('## Notes', '"Status": superseded') && append('## Notes', 'Current status: superseded') &&
       append('## Notes', '当前状态：已取代') && !append('## Notes', 'The status page now links here.'));
+
+    // ⛔ Contract review round 6 (comment 6897472749): S5 traditional Chinese ruled words; S6 the squeezed reading
+    // never makes a record count as naming a ruled heading.
+    const TW = ['# ADR-0122: 記錄', '', '**Status**: Accepted', '', '## 背景', '', '緣由。', '', '## 決定', '', '拒絕。'];
+    assert('⛔ R6-S5-a-traditional-Chinese-ruled-heading-rules-and-is-refused-as-an-added-heading', H_([...keep(TW), ['+', '也記日誌。']]) && append('## 決策', 'x') && append('## 裁決', 'x') && append('## 狀態', 'x') &&
+      ['決策', '決定', '裁決', '狀態'].every((w) => LOW_RISK_ADD_ONLY_RULED_HEADING.test(w) && LOW_RISK_ADD_ONLY_RULED_SQUEEZED.test(w)) && !H_([...keep(TW), ['+', ''], ['+', '## 修訂註記'], ['+', '註記。']]));
+    const STAT = ['# ADR-0123: Counters', '', '## Context', '', 'Why.', '', '## Stat usage', '', 'Some.'];
+    assert('⛔ R6-S6-a-record-whose-only-near-heading-is-Stat-usage-names-no-ruled-heading-and-stays-H', H_([...keep(STAT), ['+', ''], ['+', '## Notes'], ['+', 'x']]) &&
+      /names no decision or status heading/.test(why([ADR], read([ADR], [adrRow(patchOf([...keep(STAT), ['+', ''], ['+', '## Notes'], ['+', 'x']]))]))));
 
     // The heading reader: the title scopes nothing; fences and frontmatter hide headings; setext and quoted headings count.
     const h = addOnlyHeadingReading(['---', 'title: x', '---', '# ADR: a decision record', 'top', '```', '## Decision', '```', 'after fence', 'Decision', '========', 'under setext', '> ## Status', 'under quoted']);
