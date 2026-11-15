@@ -402,7 +402,7 @@
           "revision": 20,
           "date": "2026-11-15",
           "change": "steps[5]'s tab row re-pointed: QA run #33784 (at a557fa38) read 'Overview / Activity 2' at 1440 px with no panel tabs, because a related panel takes a row tab only once it has records and an empty one waits in the '+N' dropdown (RecordPageColumns.tsx partitionRecordTabsByRecords, ui/packages/plugin-detail/src/synth/recordTabRow.ts). Ledger row 9. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -1055,7 +1055,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "steps[6] re-pointed: the record page's Edit opens a modal (?form=ID), so the page routes are reached by URL (QA run #33861, ledger row 140), and a deep-linked page form no longer leaves the document on save (RecordFormPage goBack replaces to the record or the list when nothing was pushed). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -1200,7 +1200,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "steps[1] names the date input's typed text format and the save's door, POST /api/v1/batch (the invoice form is a master-detail form), and steps[7] reads paid_on's absence on INV-1004, because steps[1]-[2] leave INV-1002 sent. QA run #33861, ledger row 133. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -1481,7 +1481,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "steps[0]'s URL re-pointed: /_console/apps/com.example.showcase/showcase_cascade lands on the list (QA run #33861); the New form is its /new route (ui/packages/app-shell/src/console/AppContent.tsx, ':objectName/new' → RecordFormPage). Ledger row 131. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -1629,7 +1629,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "steps[1] gains a driver note: 'Add line' beside the grid's trailing blank row makes it a middle all-null row that the save submits and the batch refuses (400 'Product is required', nothing written). QA run #33861, ledger row 146. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -1798,7 +1798,7 @@
           "revision": 13,
           "date": "2026-11-15",
           "change": "steps[1] re-pointed: it said record page v3 draws no tab strip at the column tier, but at 1440 px QA run #33861 met both the two-column layout and the top-level tab row (Overview, Activity 0, Contacts 26, Field Zoo …), which RecordPageColumns draws over the columns. Ledger row 150. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -2608,7 +2608,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "steps[0] switches to Month first (the view opens at Day scale on today, so the done bars are off-screen; QA run #33914, ledger row 220); steps[1] says to grab a bar near its top edge, off the progress handle (QA run #33861, row 141); knownGaps[0] and steps[3] add the runtime overlay QA run #33914 used (dependenciesField 'notes' on a showcase.custom pair overlay) as a live route for acceptance[1] and the auto-schedule half of acceptance[2], keeping blocked(fixture) as the stock verdict the #33351 ruling set, which adds no dependency field to the showcase (row 219). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -2677,7 +2677,7 @@
           "revision": 2,
           "date": "2026-11-15",
           "change": "steps[3] re-pointed: the board's client lane gate (#25933) stops an FSM-illegal drop before any request, so reaching acceptance[2]'s server 400 needs a stale board; the step now records both legs. QA run #33861, ledger row 144. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -2855,7 +2855,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[1] states the precondition the idempotence holds under: the request leaves writeMode unset, since an explicit writeMode overrides the mapping's upsert by design (import-prepare.ts). QA run #33910, ledger row 200. The clause's oracle and verdict are unchanged; it now names the request shape it was always scored on. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -3488,7 +3488,7 @@
           "revision": 15,
           "date": "2026-11-15",
           "change": "fixtures.requires[1], steps[0] and steps[5] steer off showcase_task, whose authored Task Detail page has no discussion surface and no stream (QA run #33861, ledger row 148): the record is a showcase_project (panel) or a showcase_account (stream), and the interleave is read on the panel or on showcase_field_zoo's stream. steps[13] creates the private note with its required title. knownGaps[3] says the changes_only mode is offered only where the page is synthesized, which an authored record:discussion panel never is (RecordDetailView historyPage; row 149). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -3617,7 +3617,7 @@
           "revision": 7,
           "date": "2026-11-15",
           "change": "steps[1] names the density control as one cycling button, and steps[3] says a runtime group-by persists in the URL (uf__group), not in the user's list preference, so a bare-URL reload drops it by design; 'Add group field' groups by the first field at once. QA run #33861, ledger row 142. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -3718,7 +3718,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "steps[3] names the two PUT shapes: unsetting a packaged prior default goes through the customization pair (ensure-customization, then PUT ?package=com.example.showcase.custom), not a plain PUT. The clause still holds. QA run #33861, ledger row 151. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -3863,7 +3863,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "knownGaps[1] retired its 'acceptance[5] expected FAIL until #28552' wording: #28552 is fixed (d5da45b27, #28606), the bar names the 5000 cap through the three *Capped strings, and QA run #33861 read acceptance[5] passing (ledger row 128). acceptance[5] itself never said FAIL and is unchanged. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -4440,7 +4440,7 @@
           "revision": 13,
           "date": "2026-11-15",
           "change": "automated.ref names packages/verify/src/harness.hook-refusal-door.test.ts, which exists at the base and was missing (QA run #33785, ledger row 13). It is named as evidence of its own layer only; the hook-refusal locale coverage the same note asked for is new coverage, left to a checklist-author card. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -4915,7 +4915,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "steps[1]'s body gains the required f_master_detail: QA run #33861's POST without it answered 400 'Master-Detail → Project is required' (ledger row 135). The step says every field-zoo POST here carries it, so the fail-closed probe of steps[4] reads the crypto refusal, not a validation one. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -5255,7 +5255,7 @@
           "revision": 15,
           "date": "2026-11-15",
           "change": "acceptance[0] re-pointed: it still called the user sentence generic for a composite of two authored columns, but since #33348 a declared unique index whose fields all carry labels is named by those labels in the writer's locale (duplicate_record_fields; QA run #33785 finding 4, ledger row 14). No step drives a composite, so no verdict moves; the clause now states the rule the code answers by. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -5651,7 +5651,7 @@
           "revision": 13,
           "date": "2026-11-15",
           "change": "knownGaps[1] re-pointed: QA run #33861 closed the flag half live on a scratch object (per-field flags, no enable block, synthesized page), so the gap now names that route and keeps the code read as the fallback (ledger row 137). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -6663,7 +6663,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "steps[0] finds Delete under the record header's ⋯ 'More actions' menu (row 222), and negative[1] drops 'this item cannot show the absence': the showcase_ops member that qa-fixture.mjs contributor-member --position showcase_ops mints may delete showcase_project_membership rows with no restore grant, so the absence and the 403 restore door are observable on a stock boot (row 221). QA run #33914. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -6747,7 +6747,7 @@
           "revision": 2,
           "date": "2026-11-15",
           "change": "steps[0] spells the Setup nav label as it renders, 'Recycle Bin' (setup-nav.contributions.ts nav_recycle_bin); the page title stays 'Recycle bin'. QA run #33861, ledger row 153. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -6835,7 +6835,7 @@
           "revision": 2,
           "date": "2026-11-15",
           "change": "steps[2] and fixtures.provisioning.why add the prep the contributor recipe's invoice needs before the preview mounts (an admin-posted line, a member PATCH of currency_code to USD): the recipe's invoice has no line and no currency, so amount stays null. QA runs #33861 and #33914, ledger rows 143 and 224 (one edit). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
@@ -6981,7 +6981,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "steps[0] says where the action draws: QA run #33861 met the two probe actions under the record header's ⋯ overflow as menuitems, because the header already carried three inline actions (ledger row 126). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
-          "ref": "#PENDING-33963"
+          "ref": "#33990"
         }
       ]
     },
