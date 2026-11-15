@@ -168,7 +168,6 @@ export interface AuthInstanceHost {
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   isSsoDomainVerificationEnabled: AuthManager['isSsoDomainVerificationEnabled'];
   isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
-  isSsoWired: AuthManager['isSsoWired'];
   linkingContext: AuthManager['linkingContext'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
@@ -863,6 +862,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           resolveActor: (...a) => this.resolveActor(...a),
           resolvePasswordChangeUserId: (...a) => this.resolvePasswordChangeUserId(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
+          ssoDiscoveryTrustedOrigins: (...a) => this.ssoDiscoveryTrustedOrigins(...a),
           validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...a),
         };
         return globalBeforeHook.call(host, ctx, setShouldSkipSessionRefresh);
@@ -953,31 +953,14 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         origins.push('https://*.localhost:*');
       }
       // ── ADR-0135 D6: runtime self-service external-IdP registration ───────
-      // `@better-auth/sso`'s `validateDiscoveryUrl` requires the IdP's
-      // *discovery* origin to be in `trustedOrigins` — even for a publicly-
-      // routable IdP (stricter than its own sub-endpoint check, which allows
-      // any public host). Without help that breaks ADR-0135 D6's "register your
-      // IdP at runtime, no boot config" promise for every real IdP
-      // (Okta/Entra/Google). When the SSO RP is enabled, expose
-      // `trustedOrigins` as a per-request FUNCTION that, for a
-      // `/sso/register` | `/sso/update-provider` POST, additionally trusts the
-      // PUBLIC-ROUTABLE issuer / discovery origins declared in the request
-      // body. Private / internal hosts are never auto-trusted — they still
-      // require explicit `trustedOrigins` config (the documented SSRF escape
-      // hatch), and better-auth's own DNS-resolution checks still apply.
-      if (this.isSsoWired()) {
-        return {
-          trustedOrigins: async (request?: Request) => {
-            const base = [...origins];
-            try {
-              for (const o of await this.ssoDiscoveryTrustedOrigins(request)) {
-                if (!base.includes(o)) base.push(o);
-              }
-            } catch { /* never let trust resolution throw */ }
-            return base;
-          },
-        };
-      }
+      // The request's own origin check reads exactly this list, the
+      // deployment's configured trusted origins, on every POST: nothing a
+      // request carries is added to it. An origin a `/sso/register` body
+      // names (its issuer and any explicit `oidcConfig` endpoint) is trusted
+      // only for that provider's discovery fetch and validation — the global
+      // before-hook hands it to the register endpoint alone
+      // (`AuthManager.ssoDiscoveryTrustedOrigins`,
+      // `sso-discovery-companion-origins.ts`).
       return origins.length ? { trustedOrigins: origins } : {};
     })(),
 

@@ -9,8 +9,9 @@
  * `@better-auth/sso` (1.7.12) validates every endpoint of a fetched discovery
  * document against the request's trusted origins (`normalizeDiscoveryUrls`:
  * `discovery_untrusted_origin`). `AuthManager.ssoDiscoveryTrustedOrigins`
- * trusts the origins a `/sso/register` body names (its issuer and any explicit
- * `oidcConfig` endpoint), so an IdP whose endpoints all share the issuer's
+ * names the origins a `/sso/register` body names (its issuer and any explicit
+ * `oidcConfig` endpoint), trusted for the discovery validation the same way as
+ * a companion origin (below), so an IdP whose endpoints all share the issuer's
  * host registers with no boot configuration. Microsoft Entra ID does not: its
  * discovery document names `userinfo_endpoint` on `graph.microsoft.com`, so
  * every Entra ID registration was refused unless the operator widened the
@@ -27,9 +28,16 @@
  * - only while the vendor's register endpoint runs: the global before-hook
  *   returns it as a per-endpoint context change
  *   ({@link ssoDiscoveryCompanionContext}), which better-auth merges into the
- *   endpoint's own context AFTER its router-level origin check has run. The
- *   CSRF allow-list (the request's `trustedOrigins` function, which that check
- *   reads) never sees it, and no other endpoint does.
+ *   endpoint's own context AFTER its router-level origin check has run. That
+ *   check reads the deployment's configured trusted origins alone and never
+ *   sees it, and no other endpoint does.
+ *
+ * The origins the register body names travel the same way, for the same
+ * reason: an origin taken from a register or update body is trusted only for
+ * the server-side discovery fetch and validation of that provider, and never
+ * becomes an accepted `Origin` for the request's own origin check. An update
+ * needs none of them: `/sso/update-provider` validates each endpoint it is
+ * given with no discovery fetch, and admits any public host on its own.
  *
  * ⛔ An origin a fetched discovery document names is never trusted because the
  * document names it: an unknown issuer whose discovery points at a foreign
@@ -72,19 +80,22 @@ export const SSO_REGISTER_PATH = '/sso/register';
 
 /**
  * The before-hook answer for a `/sso/register` request: a context change that
- * adds the issuer's companion origins to the trusted origins the vendor's
- * register endpoint validates its discovery document against, or `undefined`
- * when the issuer has none (the request runs exactly as before).
+ * adds the origins the body names and the issuer's companion origins to the
+ * trusted origins the vendor's register endpoint validates its discovery
+ * document against, or `undefined` when there are none (the request runs
+ * exactly as before).
  *
  * `ctx` is the hook's endpoint context: `ctx.body.issuer` is the request's
  * issuer, `ctx.context.trustedOrigins` the list the request already trusts.
+ * `bodyOrigins` is `AuthManager.ssoDiscoveryTrustedOrigins` of that body.
  */
 export function ssoDiscoveryCompanionContext(
   ctx: { path?: unknown; body?: unknown; context?: { trustedOrigins?: unknown } } | undefined,
+  bodyOrigins: readonly string[] = [],
 ): { context: { context: { trustedOrigins: string[] } } } | undefined {
   if (ctx?.path !== SSO_REGISTER_PATH) return undefined;
   const issuer = (ctx.body as { issuer?: unknown } | undefined)?.issuer;
-  const companions = ssoDiscoveryCompanionOrigins(issuer);
+  const companions = [...bodyOrigins, ...ssoDiscoveryCompanionOrigins(issuer)];
   if (companions.length === 0) return undefined;
   const current = Array.isArray(ctx.context?.trustedOrigins)
     ? (ctx.context!.trustedOrigins as unknown[]).filter((o): o is string => typeof o === 'string')

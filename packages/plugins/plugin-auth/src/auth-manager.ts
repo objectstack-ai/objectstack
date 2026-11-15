@@ -2219,7 +2219,6 @@ export class AuthManager {
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoDomainVerificationEnabled: (...a) => this.isSsoDomainVerificationEnabled(...a),
-      isSsoWired: (...a) => this.isSsoWired(...a),
       isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
@@ -6103,24 +6102,23 @@ export class AuthManager {
   }
 
   /**
-   * Extra `trustedOrigins` entries derived from an external-SSO registration
-   * request. For a `POST /sso/register` | `/sso/update-provider`, parse the
-   * (cloned) body and return the PUBLIC-ROUTABLE origins of the declared
-   * `issuer` / `oidcConfig` endpoints so `@better-auth/sso`'s discovery
-   * validation accepts a customer IdP registered at runtime (ADR-0135 D6) without
-   * the operator pre-listing it in boot config. Only public-routable hosts are
-   * returned — private / internal / loopback hosts are never auto-trusted
-   * (better-auth's `isPublicRoutableHost`, the same predicate its own
-   * sub-endpoint check uses). Best-effort: any parse error yields `[]`.
+   * The origins an external-SSO registration body names, trusted for that
+   * provider's discovery fetch and validation only (ADR-0135 D6: a customer
+   * IdP registers at runtime without the operator pre-listing it in boot
+   * config). `body` is the vendor endpoint's parsed `/sso/register` body; the
+   * answer is the PUBLIC-ROUTABLE origins of its `issuer` and every explicit
+   * `oidcConfig` endpoint. Private / internal / loopback hosts are never
+   * trusted this way (better-auth's `isPublicRoutableHost`, the same predicate
+   * its own sub-endpoint check uses). Best-effort: anything unreadable yields
+   * `[]`.
+   *
+   * ⛔ Never an accepted `Origin`: the request's own origin check reads the
+   * deployment's configured trusted origins alone. The global before-hook
+   * hands this list to the register endpoint's context, after that check has
+   * run (`sso-discovery-companion-origins.ts`).
    */
-  private async ssoDiscoveryTrustedOrigins(request: unknown): Promise<string[]> {
+  private async ssoDiscoveryTrustedOrigins(body: unknown): Promise<string[]> {
     try {
-      const req = request as { url?: string; method?: string; clone?: () => Request } | undefined;
-      if (!req || typeof req.clone !== 'function' || !req.url) return [];
-      if ((req.method ?? 'GET').toUpperCase() !== 'POST') return [];
-      const path = new URL(req.url).pathname;
-      if (!/\/sso\/(register|update-provider)$/.test(path)) return [];
-      const body = await req.clone().json().catch(() => null);
       if (!body || typeof body !== 'object') return [];
       const oidc = (body as any).oidcConfig ?? {};
       const candidates = [
