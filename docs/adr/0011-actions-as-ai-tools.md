@@ -262,9 +262,17 @@ asking; an action the user can't invoke simply isn't offered.
 > - **What an answer proves.** An elicited `accept` proves that the client answered, and an approved hand-off that a
 >   signed-in session to the app answered. Neither proves a human; each is as strong as what it takes to give it.
 > - **Bounds.** The MCP `delete_record` and `delete_records` gates keep reading `confirm: true` until a decision moves
->   them, and REST `/actions` stays outside the gate for a person. **The in-app assistant door is OPEN**: the
->   bridge and approval queue this ADR describes in [Invocation flow](#4-invocation-flow) and the table above are not
->   named by the contract, which is silent on them until the maintainer decides (question 1 on #33689).
+>   them, and REST `/actions` stays outside the gate for a person.
+> - **The in-app assistant door: the same rule, its own channel.** Ruling-ref: Leehom 2026-11-15T11:10:57Z,
+>   「B 同一规则，两套流程暂留」 (record `6893484458` on #33689). The core rules bind every AI door, the in-app
+>   assistant included: neither the caller's nor the model's own confirmation counts; only the person the call ran
+>   as decides; the deciding doors take a signed-in session only; and an approved action runs as that person, with
+>   every gate and permission re-checked. The in-app door keeps its own channel, the pending-approval card and inbox
+>   this ADR describes in [Invocation flow](#4-invocation-flow) and the table above, and `IAIService`'s pending
+>   members stay. Merging the two seams was not ruled. The contract at `1e65a389` names the two MCP tools only; the
+>   in-app door's three changes (who decides, which credential may decide, and as whom the approved action runs,
+>   today the pre-registered bypass dispatcher) land through #33808, the cloud approve and reject routes are aligned
+>   through #33809, and the seam merge is #33806.
 > - **When it binds.** The contract ships in `@objectstack/spec/contracts` from the release that carries `1e65a389`.
 >   The doors implement it in the next card of the chain. Until that change ships, every door gates on the member as
 >   before (`packages/runtime/src/action-execution.ts#actionConfirmationRefusal`), and the addendum's sentence below
