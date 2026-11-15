@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import remarkCjkFriendly from "remark-cjk-friendly";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import type { CjkPlugin, PluginConfig } from "streamdown";
 
 /**
@@ -24,7 +24,8 @@ import type { CjkPlugin, PluginConfig } from "streamdown";
  * way it reads the whitespace an English sentence would have there. It runs
  * before remark-gfm (streamdown's `cjk.remarkPluginsBefore` slot) so it owns
  * the emphasis tokenizer; ASCII emphasis, code spans and backslash escapes
- * keep their CommonMark meaning.
+ * keep their CommonMark meaning. The `parseOnly` entry leaves out the
+ * markdown serializer half, which the chat never runs.
  */
 const CJK_EMPHASIS: CjkPlugin = {
   name: "cjk",
