@@ -604,7 +604,9 @@ export function bareNameTypeLabel(type: BareNameOneHolderType): string {
 
 /**
  * How each covered type's consumer names it with no package — the clause a
- * refusal's reason carries for the types it lists.
+ * refusal's reason carries for a type still held one name per deployment (not
+ * in {@link NAMESPACE_SCOPED_BARE_NAME_TYPES}; a narrowed type's reason states
+ * the namespace rule instead).
  */
 const CONSUMER_CLAUSE: Readonly<Record<BareNameOneHolderType, string>> = Object.freeze({
   picklist: 'a field names its picklist',
@@ -643,20 +645,43 @@ const joinList = (parts: readonly string[]): string =>
   parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 
 /**
- * Why a second holder is refused, in one sentence a reader can act on — for
- * the covered types `types` lists (every covered type when none), in the
- * order {@link BARE_NAME_ONE_HOLDER_TYPES} lists them. Shared by the doors'
- * refusal and the cold boot's warning.
+ * Why a second holder is refused, in one sentence a reader can act on per
+ * rule — for the covered types `types` lists (every covered type when none),
+ * in the order {@link BARE_NAME_ONE_HOLDER_TYPES} lists them. Shared by the
+ * doors' refusal and the cold boot's warning.
+ *
+ * A narrowed type ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES}, "The narrowing")
+ * is told its own rule: one holder per namespace, another namespace may ship
+ * the name, and a bare name two holders share is refused naming both. A type
+ * not yet narrowed keeps the one-name-per-deployment sentence and its
+ * consumers' clause. A list carrying both gets one sentence per rule, the
+ * narrowed one first.
  */
 export function bareNameReason(types: readonly BareNameOneHolderType[] = BARE_NAME_ONE_HOLDER_TYPES): string {
   const present = BARE_NAME_ONE_HOLDER_TYPES.filter((t) => types.includes(t));
   const listed = present.length > 0 ? present : BARE_NAME_ONE_HOLDER_TYPES;
-  const nouns = joinList(listed.map((t) => TYPE_NOUN[t]));
-  return (
-    `${nouns.charAt(0).toUpperCase()}${nouns.slice(1)} ${listed.length === 1 ? 'holds' : 'each hold'} one name per ` +
-    `deployment: ${joinList(listed.map((t) => CONSUMER_CLAUSE[t]))}, with no package to tell two definitions ` +
-    'apart, so with two holders every caller is served the same one, chosen by registration order.'
-  );
+  const subject = (group: readonly BareNameOneHolderType[]): string => {
+    const nouns = joinList(group.map((t) => TYPE_NOUN[t]));
+    return `${nouns.charAt(0).toUpperCase()}${nouns.slice(1)} ${group.length === 1 ? 'holds' : 'each hold'}`;
+  };
+  const narrowed = listed.filter((t) => isNamespaceScopedBareNameType(t));
+  const perDeployment = listed.filter((t) => !isNamespaceScopedBareNameType(t));
+  const sentences: string[] = [];
+  if (narrowed.length > 0) {
+    sentences.push(
+      `${subject(narrowed)} one name per namespace: a package of another namespace may ship the same name, ` +
+      'but within one namespace, or beside a package that declares no namespace, a name has one holder, and ' +
+      'a bare name two holders share is refused naming both.',
+    );
+  }
+  if (perDeployment.length > 0) {
+    sentences.push(
+      `${subject(perDeployment)} one name per deployment: ` +
+      `${joinList(perDeployment.map((t) => CONSUMER_CLAUSE[t]))}, with no package to tell two definitions ` +
+      'apart, so with two holders every caller is served the same one, chosen by registration order.',
+    );
+  }
+  return sentences.join(' ');
 }
 
 /** A stable identity for de-duplicating holders. */

@@ -773,7 +773,7 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
 
 });
 
-describe('the refusal\'s reason names the consumers of the types it lists', () => {
+describe('the refusal\'s reason states the rule of the types it lists', () => {
   it('one sentence per refusal, naming only the types it carries', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { flow: ['f1'], webhook: ['w1'], connector: ['c1'], email_template: ['e1'] }))).toBeUndefined();
@@ -782,9 +782,20 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
     expect(err!.conflicts!.map((c) => `${c.type}/${c.name}`)).toEqual(['flow/f1', 'webhook/w1', 'connector/c1', 'email_template/e1']);
     expect(err!.message).toContain(bareNameReason(['flow', 'webhook', 'connector', 'email_template']));
     expect(bareNameReason(['flow', 'webhook', 'connector', 'email_template'])).toMatch(
-      /^A flow, a webhook, a connector and an email template each hold one name per deployment: the automation engine arms one flow per name, the webhook dispatcher subscribes one declared webhook per name, /,
+      /^A flow, a webhook, a connector and an email template each hold one name per namespace: /,
     );
-    expect(bareNameReason(['email_template'])).toMatch(/^An email template holds one name per deployment: a send names its email template, /);
+    expect(bareNameReason(['email_template'])).toMatch(/^An email template holds one name per namespace: /);
+  });
+
+  it('a narrowed type is told the namespace rule, never one name per deployment', () => {
+    expect(bareNameReason(['flow'])).toBe(
+      'A flow holds one name per namespace: a package of another namespace may ship the same name, but within '
+      + 'one namespace, or beside a package that declares no namespace, a name has one holder, and a bare name '
+      + 'two holders share is refused naming both.',
+    );
+    // Every covered type has narrowed, so no reason says the old rule.
+    expect(bareNameReason()).not.toContain('one name per deployment');
+    expect(bareNameReason()).not.toContain('chosen by registration order');
   });
 
   it('a built-in name is refused to a package at the package door, naming the platform', async () => {
