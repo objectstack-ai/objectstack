@@ -529,7 +529,8 @@
  * the maintainer's list with its reasons, and so does an arm landing an
  * authorized approval or enqueue cleared first (the guard's own leg order); a
  * record counts only on a pull GitHub says landed AS this commit
- * (`merge_commit_sha`); a read that fails is NOT MEASURED and
+ * (`merge_commit_sha`), and only from an author the guard trusts
+ * (`recordAuthorTrusted`); a read that fails is NOT MEASURED and
  * the sweep INCOMPLETE (exit 2). Its reads ride the channel that attributed the
  * row; the body and labels are the pull's NOW (the timeline keeps a removed
  * `security` label). ⛔ It cannot tell a record written by the run that served
@@ -1167,7 +1168,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
-  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 36,
+  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 38,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -4420,7 +4421,7 @@ export function pullSizeFrom(head) {
 export const ARM_READER_SOURCE = './check-governed-queue-guard.mjs';
 
 /** The guard exports the arm leg reads with. A missing one is NOT MEASURED, never a second parser here. */
-export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader']);
+export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader']);
 
 /** Load the guard's readers and the record recognisers once per run. Never throws: a failed load is the reason. */
 export async function loadArmReaders(load = (specifier) => import(specifier)) {
@@ -4442,7 +4443,8 @@ export async function loadArmReaders(load = (specifier) => import(specifier)) {
  * then the record — so an entry the maintainer cleared is the maintainer's merge, never a seat's BREACH (#33711 S1).
  * Each leg reads only what existed before the landing: reviews and timeline events strictly before `merged_at`
  * (the queue's `removed_from_merge_queue` shares the merge's instant, measured on #33555, #33632 and #33616), and
- * comments created AND last edited at or before it (#33711 N4). The record's head is the landed commit's only
+ * comments by an author the guard trusts (`recordAuthorTrusted`, #33711 S3), created AND last edited at or before
+ * it (#33711 N4). The record's head is the landed commit's only
  * when GitHub's `merge_commit_sha` is that commit (#33711 S2).
  * States: `pass` (an arm landing on a same-head at-tier PASS record), `breach` (an arm landing without one, or
  * whose pull did not land as this commit), `cleared` (the arm read S, but an authorized approval or enqueue
@@ -4503,12 +4505,18 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
     baseRef = String(runGit(['rev-parse', '--verify', `${entry.sha}^1`])).trim() || null;
   } catch { /* a carried record then reads unreadable, never stands */ }
   const pair = { pr: entry.pr, card: card.card, headSha, runGit, baseRef, paths: work.paths, repo };
+  const editedAfter = [];
   for (const thread of recognisers.threads) {
     const number = pair[thread.number];
     try {
       const rows = number === null || number === undefined ? [] : await fetchers.fetchComments(number);
-      // A row counts only when it existed, unedited since, when the commit landed; a missing time never counts.
-      pair[thread.rows] = rows.filter((r) => [r?.created_at, r?.updated_at ?? r?.created_at].every((at) => Date.parse(at ?? '') <= landed));
+      // The guard's AUTHOR binding (#33687, #33711 S3) first: a row its author does not earn is dropped, as the queue
+      // drops it, so it can neither be the record nor shadow one. Then a row counts only when it existed, unedited
+      // since, when the commit landed; a missing time never counts. A trusted row edited after it is named (N7).
+      const trusted = rows.filter((r) => guard.recordAuthorTrusted(r, recognisers.trustedAuthors));
+      const existed = trusted.filter((r) => Date.parse(r?.created_at ?? '') <= landed);
+      pair[thread.rows] = existed.filter((r) => Date.parse(r?.updated_at ?? r?.created_at ?? '') <= landed);
+      for (const r of existed) if (!pair[thread.rows].includes(r)) editedAfter.push(`${thread.where} comment ${r?.id ?? '(no id)'}`);
     } catch (error) {
       return unmeasured(`${thread.where} #${number}'s comment thread could not be read (${why(error)})`);
     }
@@ -4518,7 +4526,8 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   if (record.state === 'unreadable') return unmeasured(record.reason);
   const found = { where: record.where ?? null, id: record.id ?? null, at: record.at ?? null, cardNote };
   if (record.state === 'stands') return { state: 'pass', headSha, record: found };
-  const reason = record.state === 'absent' ? `no \`## Contract review\` record on its head (${record.readSummary})`
+  const edited = editedAfter.length > 0 ? `; ${editedAfter.join(', ')} was edited after the landing, so it does not count` : '';
+  const reason = record.state === 'absent' ? `no \`## Contract review\` record on its head (${record.readSummary})${edited}`
     : record.state === 'below-tier' ? 'its record does not stand at the tier its face owes'
       : record.state === 'unsigned' ? 'its record names no reviewer'
         : `its record does not read PASS (${record.verdictReason ?? record.state})`;
@@ -8897,8 +8906,9 @@ async function selfTest() {
       if (args[0] === 'rev-parse') return `${'c'.repeat(40)}\n`;
       throw new Error(`fatal: unexpected git ${args.join(' ')}`);
     };
-    const record = ({ head = HEAD, tier = TIER_NAME, signed = true, verdict = '**VERDICT: PASS**', at = '2026-11-15T04:00:00Z', id = 900 } = {}) => ({
-      id, created_at: at,
+    const RELAY = readers.recognisers?.trustedAuthors?.[0] ?? '(relay unread)';
+    const record = ({ head = HEAD, tier = TIER_NAME, signed = true, verdict = '**VERDICT: PASS**', at = '2026-11-15T04:00:00Z', id = 900, by = RELAY } = {}) => ({
+      id, created_at: at, user: { login: by },
       body: ['## Contract review', '', `Served-tier: \`${tier}\``, `Head-sha: \`${head}\``, ...(signed ? ['Reviewed-by: `session_01SEAT`'] : []), '', verdict].join('\n'),
     });
     const entryOf = (paths = [SK, CS], size = null) => classifyCommit({ sha: LANDED, date: '2026-11-15T04:30:00Z', subject: 'docs(skills): wording (#70)' }, paths, OS, size);
@@ -8930,7 +8940,11 @@ async function selfTest() {
     assert('⛔ a-PASS-record-below-the-tier-is-a-BREACH', await breach({ prRows: [record({ tier: 'TIER_DEFAULT' })] }, /does not stand at the tier/) === true);
     assert('⛔ an-unsigned-PASS-record-is-a-BREACH', await breach({ prRows: [record({ signed: false })] }, /names no reviewer/) === true);
     assert('⛔ a-PASS-record-posted-AFTER-the-landing-is-a-BREACH-the-queue-could-not-read-it', await breach({ prRows: [record({ at: '2026-11-15T06:00:00Z' })] }, /no `## Contract review` record on its head/) === true);
-    assert('⛔ a-PASS-record-EDITED-after-the-landing-does-not-count', await breach({ prRows: [{ ...record(), updated_at: '2026-11-15T06:00:00Z' }] }, /no `## Contract review` record on its head/) === true);
+    assert('⛔ a-PASS-record-EDITED-after-the-landing-does-not-count-and-the-BREACH-says-it-was-edited', await breach({ prRows: [{ ...record(), updated_at: '2026-11-15T06:00:00Z' }] }, /no `## Contract review` record on its head .*PR comment 900 was edited after the landing/) === true);
+    // #33711 S3: the guard's author binding — a row from an author it does not trust is dropped, as the queue drops it.
+    assert('⛔ a-PASS-record-from-an-UNTRUSTED-author-is-not-PASS', await breach({ prRows: [record({ by: 'some-commenter' })] }, /no `## Contract review` record on its head/) === true);
+    assert('⭐ an-UNTRUSTED-FAIL-after-a-trusted-PASS-does-not-shadow-it', (await run({ prRows: [record(), record({ id: 902, verdict: '**VERDICT: FAIL**', at: '2026-11-15T04:20:00Z', by: 'some-commenter' })] }))?.state === 'pass' &&
+      await breach({ prRows: [record(), record({ id: 902, verdict: '**VERDICT: FAIL**', at: '2026-11-15T04:20:00Z' })] }, /does not read PASS/) === true);
     // #33711 S2: the record's head is tied to the landed commit only through the pull's own merge.
     assert('⛔ a-pull-that-landed-as-ANOTHER-commit-is-never-PASS', await breach({ attribution: { ...LANDING, mergeCommitSha: 'f'.repeat(40) } }, /landed as ffffffffffff, not as this commit/) === true);
     assert('⛔ a-pull-closed-UNMERGED-is-never-PASS', await breach({ attribution: { ...LANDING, mergedAt: null } }, /is not merged/) === true);
