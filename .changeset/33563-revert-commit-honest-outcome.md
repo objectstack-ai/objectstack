@@ -12,3 +12,5 @@ Metadata-protocol: none
 A write-through fault the registry helper only logs (every metadata type other than `object`) is still not seen by the revert.
 
 A revert is now itself revertible, as ADR-0067 D3 says. The revert's own commit records, for each row it changed, the version that row held before the revert, so reverting the revert brings that body back, and an item the revert removed is written again. An item recorded as existing before the commit but carrying no version to restore, which is how every revert commit recorded by an earlier release records the items it restored, is named in `failed[]` with nothing written. Before, it was skipped: it appeared in neither `reverted[]` nor `failed[]`. To undo such an older revert, restore each item from its own version history (`GET /api/v1/meta/:type/:name/history`, then `POST /api/v1/meta/:type/:name/rollback`).
+
+The `rollbackToPackageCommit` docblock now says what each step records: it attempts its own revert commit, best effort. When the commit store is unprovisioned or the write fails, nothing is recorded and the step's answer omits `revertCommitId`, so that step cannot itself be reverted as a commit.

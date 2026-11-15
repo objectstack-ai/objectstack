@@ -10933,11 +10933,16 @@ export class ObjectStackProtocolImplementation implements
      * `failed[]` carries both kinds of failure a step can have: a step that
      * THREW (one entry for the commit), and every item a step REFUSED and
      * reported in its own returned `failed[]` (one entry per item, its `error`
-     * naming the item and quoting the step's client-facing text). Either makes
-     * `success` false — the declared answer's "true exactly when nothing
-     * failed". A refused item stops neither its commit nor the rollback: the
-     * step still reverts the item's neighbours and records its revert commit,
-     * so that commit is also listed in `revertedCommits`.
+     * naming the item and quoting the step's client-facing text) — an item
+     * whose row the step wrote but whose registry, storage or projection step
+     * failed among them, its row state named. Either makes `success` false —
+     * the declared answer's "true exactly when nothing failed". A refused item
+     * stops neither its commit nor the rollback: the step still reverts the
+     * item's neighbours and attempts its own revert commit, so that commit is
+     * also listed in `revertedCommits`. [#33486] That record is best effort:
+     * when the commit store is unprovisioned or the write fails, nothing is
+     * recorded and the step's answer omits `revertCommitId`, so the step is on
+     * no package-commit timeline and cannot itself be reverted as a commit.
      *
      * [#32700] `advisories` carries every step's own `advisories` (its storage
      * sync refusals and stored-expression fill notices), in step order;
