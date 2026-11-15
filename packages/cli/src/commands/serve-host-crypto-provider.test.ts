@@ -34,9 +34,14 @@
  *      sealed by the registered provider; a seal attempted during plugin init
  *      refuses and records nothing; a registration after init, or a replaced
  *      one, refuses the boot;
- *   5. the wiring inside `run()`: the one host provider reaches the binder, the
- *      default settings service and the data engine, and the declaration check
- *      runs before the boot.
+ *   5. the boot order: the host plugin's `kernel:ready` hook hands the data
+ *      engine the chosen provider, so a webhook dispatcher armed in a later
+ *      `kernel:ready` hook (a real `AutoEnqueuer`) signs the delivery for a
+ *      record seeded at `kernel:bootstrapped` instead of parking it;
+ *   6. the wiring inside `run()`: the one host provider reaches the binder, the
+ *      default settings service and the data engine, the host plugin is
+ *      mounted before the capability resolver, and the declaration check runs
+ *      before the boot.
  *
  * ⛔ No key material reaches a refusal: every refusal is checked against the
  * test keys' bytes.
@@ -49,6 +54,8 @@ import { fileURLToPath } from 'node:url';
 
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
+import { AutoEnqueuer } from '@objectstack/plugin-webhooks';
+import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { createDatasourceSecretBinder } from '@objectstack/service-datasource';
 import { deferredLocalCryptoProvider, LocalCryptoProvider, SettingsService } from '@objectstack/service-settings';
 import type { CryptoContext, CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
@@ -79,6 +86,7 @@ import '@objectstack/driver-turso';
 import '@objectstack/driver-sql';
 import '@objectstack/platform-objects/plugin';
 import '@objectstack/plugin-security';
+import '@objectstack/cloud-connection';
 
 /** …/packages/cli/src/commands — seeded from `import.meta.url`. */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -744,6 +752,136 @@ describe('the deferred path: nothing is sealed by a provider the boot did not ch
   });
 });
 
+// ---------------------------------------------------------------------------
+// The boot order the webhook dispatcher needs: a REAL AutoEnqueuer over a REAL
+// ObjectQL engine, armed from a kernel:ready hook the way plugin-webhooks arms it.
+// ---------------------------------------------------------------------------
+
+describe('the data engine holds the chosen provider before a later kernel:ready hook arms the webhook dispatcher', () => {
+  beforeEach(() => { vi.stubEnv('OS_SECRET_KEY', LOCAL_KEY_HEX); });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  const WEBHOOK_SECRET = 'whsec_boot_order';
+
+  /** An engine over `driver` with `sys_secret`, the `sys_webhook` columns the enqueuer reads, and one data object. */
+  async function webhookEngine(driver: ReturnType<typeof memoryDriver>['driver']) {
+    const engine = new ObjectQL();
+    engine.registerDriver(driver as never, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'sys_secret',
+      label: 'Secret',
+      fields: {
+        ...Object.fromEntries(
+          ['id', 'namespace', 'key', 'kms_key_id', 'alg', 'ciphertext', 'created_at', 'rotated_at']
+            .map((f) => [f, textField(f)]),
+        ),
+        version: { name: 'version', label: 'version', type: 'number' as const },
+      },
+    } as never, TEST_PACKAGE_ID);
+    engine.registry.registerObject({
+      name: 'sys_webhook',
+      label: 'Webhook',
+      fields: {
+        ...Object.fromEntries(['id', 'name', 'url', 'triggers', 'object_name', 'method'].map((f) => [f, textField(f)])),
+        active: { name: 'active', label: 'active', type: 'boolean' as const },
+        signing_secret: { name: 'signing_secret', label: 'signing_secret', type: 'secret' as const },
+      },
+    } as never, TEST_PACKAGE_ID);
+    engine.registry.registerObject({
+      name: 'task',
+      label: 'Task',
+      fields: { id: textField('id'), title: textField('title') },
+    } as never, TEST_PACKAGE_ID);
+    return engine;
+  }
+
+  it('an event fired at kernel:bootstrapped (an app seed) is enqueued SIGNED, never parked for boot order', async () => {
+    const store = memoryDriver();
+    // A webhook a previous boot persisted, its signing secret sealed under the
+    // local key this boot chooses again.
+    const previousBoot = await webhookEngine(store.driver);
+    previousBoot.setCryptoProvider(new LocalCryptoProvider());
+    await previousBoot.insert('sys_webhook', {
+      id: 'wh_1', name: 'task_hook', url: 'https://receiver.example/hook', triggers: 'create',
+      object_name: 'task', method: 'post', active: true, signing_secret: WEBHOOK_SECRET,
+    });
+    expect(String(store.rowsOf('sys_webhook')[0].signing_secret)).toMatch(/^secret:/);
+
+    // This boot's engine starts with NO provider, exactly as serve's does.
+    const engine = await webhookEngine(store.driver);
+    const local = deferredLocalCryptoProvider();
+    const host = createHostCryptoProvider(() => local.resolve());
+
+    const enqueued: EnqueueHttpInput[] = [];
+    const errors: string[] = [];
+    const firehose: Array<(event: unknown) => void> = [];
+    const realtime = {
+      subscribe: async (_name: string, handler: (event: unknown) => void, filter?: unknown) => {
+        if (!filter) firehose.push(handler);
+        return `sub_${firehose.length}`;
+      },
+      unsubscribe: async () => {},
+    };
+    let enqueuer: AutoEnqueuer | undefined;
+    // The dispatcher as plugin-webhooks composes it: armed from its own
+    // kernel:ready hook, and mounted after the host plugin (the capability
+    // resolver's position in `run()`).
+    const dispatcher = {
+      name: 'com.example.webhook-dispatcher',
+      version: '1.0.0',
+      init: async (ctx: { hook(name: string, fn: () => Promise<void> | void): void }) => {
+        ctx.hook('kernel:ready', async () => {
+          enqueuer = new AutoEnqueuer(engine as never, realtime as never, async (input) => {
+            enqueued.push(input);
+            return 'delivery_1';
+          }, {
+            refreshIntervalMs: 0,
+            logger: { warn: () => {}, error: (msg: string) => { errors.push(msg); } },
+          });
+          await enqueuer.start();
+        });
+        // A record an app seeds at `kernel:bootstrapped`, before `runtime.start()` returns.
+        ctx.hook('kernel:bootstrapped', () => {
+          for (const handler of firehose) {
+            handler({
+              type: 'data.record.created',
+              object: 'task',
+              payload: { recordId: 't_1', after: { id: 't_1', title: 'seeded' } },
+              timestamp: '2026-11-14T00:00:00.000Z',
+            });
+          }
+        });
+      },
+    };
+    const enginePlugin = {
+      name: 'com.example.boot-order.engine',
+      version: '1.0.0',
+      init: async (ctx: { registerService(name: string, service: unknown): void }) => { ctx.registerService('data', engine); },
+    };
+
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    await kernel.use(enginePlugin as never);
+    await kernel.use(host.plugin as never);
+    await kernel.use(dispatcher as never);
+    await kernel.bootstrap();
+    try {
+      // Handed at the choice, by the host plugin's own hook.
+      expect(host.wiredEngine()).toBe(engine);
+      await vi.waitFor(() => expect(enqueued).toHaveLength(1));
+      const [delivery] = enqueued;
+      expect(delivery.refId).toBe('wh_1');
+      expect(delivery.signingSecret).toBe(WEBHOOK_SECRET);
+      // Not routed to the dead-row door: nothing was refused for boot order.
+      expect(delivery.undeliverableReason).toBeUndefined();
+      expect(errors).toEqual([]);
+    } finally {
+      await enqueuer?.stop();
+      await kernel.shutdown();
+    }
+  });
+});
+
 describe('the wiring inside run()', () => {
   it('builds one host provider over the deferred local one, and mounts its plugin', () => {
     expect(SERVE.match(/createHostCryptoProvider\(/g)).toHaveLength(2); // the definition and the one call
@@ -754,10 +892,21 @@ describe('the wiring inside run()', () => {
   it('hands that one provider to the binder, the default settings service and the data engine', () => {
     expect(SERVE).toMatch(/createDatasourceSecretBinder\(\{\s*engine: lazySecretEngine,\s*cryptoProvider: hostCrypto\.provider,\s*\}\)/);
     expect(SERVE).toMatch(/cap === 'settings' && hostCrypto\s*\?\s*\{ \.\.\.\(arg \?\? \{\}\), cryptoProvider: hostCrypto\.provider \}/);
-    expect(SERVE).toMatch(/hostCrypto\.provider\.confirm\(\);\s*dataEngine\.setCryptoProvider\(hostCrypto\.provider\);/);
+    // The engine is handed the host provider at the choice (the host plugin's
+    // hook), and the post-start block confirms it and hands it only to an
+    // engine that hook did not reach.
+    expect(SERVE).toMatch(/resolve\(\);\s*const engine = secretFieldEngineOf\(ctx\);\s*if \(engine\) \{\s*engine\.setCryptoProvider\(provider\);/);
+    expect(SERVE).toMatch(/hostCrypto\.provider\.confirm\(\);\s*if \(hostCrypto\.wiredEngine\(\) !== dataEngine\) dataEngine\.setCryptoProvider\(hostCrypto\.provider\);/);
     // No consumer is handed a provider of its own any more.
     expect(SERVE).not.toMatch(/new LocalCryptoProvider\(/);
-    expect(SERVE.match(/setCryptoProvider\(/g)).toHaveLength(1);
+    expect(SERVE.match(/\.setCryptoProvider\(/g)).toHaveLength(2);
+  });
+
+  it('mounts the host plugin before the capability resolver, so its kernel:ready hook runs before the webhook dispatcher arms', () => {
+    const host = SERVE.indexOf('await kernel.use(hostCrypto.plugin);');
+    const resolver = SERVE.indexOf('const CAPABILITY_PROVIDERS = Serve.CAPABILITY_PROVIDERS;');
+    expect(host).toBeGreaterThan(0);
+    expect(resolver).toBeGreaterThan(host);
   });
 
   it('refuses an unloaded entry that may provide the crypto provider right after the plugins loop, before the host provider is built', () => {

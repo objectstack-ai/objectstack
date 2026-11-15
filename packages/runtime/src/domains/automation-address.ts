@@ -196,8 +196,8 @@ export type AutomationAddressRefusal =
     | { readonly status: 409; readonly refusal: PackageScopedRefusal };
 
 /**
- * [ADR-0150 D4/D9, #31696] An address admitted to one holder's slot: the flow
- * name is one two packages hold, which the bare doors refuse (`refusal`), and
+ * [ADR-0150 D4/D9, #31696; #31699] An address admitted to one holder's slot: the flow
+ * (or connector) name is one two packages hold, which the bare doors refuse (`refusal`), and
  * the address names `packageId`, one of them. The domain serves it from that
  * package's slot, or answers `refusal` where it cannot (a door that writes the
  * definition, an engine with no slot entries).
@@ -263,7 +263,7 @@ export function bareNameRefusal(
  * Judge an addressed path's qualifier (see the module note). `undefined`
  * admits it: the path is then served as its bare path, whose item is the
  * address's. An {@link AutomationAddressSlot} admits it to one holder's slot
- * of a flow name two packages hold. A registry that cannot answer admits
+ * of a flow or connector name two packages hold. A registry that cannot answer admits
  * nothing it could not judge: a namespace was read through it, so it answers;
  * `_env` with no registry is the bare path.
  */
@@ -311,8 +311,10 @@ export function admitAutomationAddress(
     });
     if (bare.status === 'refused') {
         // [#31696] A flow name two packages hold: each holder's flow is its own
-        // slot, and the address names one holder of it.
-        return type === 'flow' && holder.kind === 'package'
+        // slot, and the address names one holder of it. [ADR-0150 D9, #31699]
+        // So is a connector name: each holder's instance is its own, and the
+        // connection door connects the addressed one.
+        return (type === 'flow' || type === 'connector') && holder.kind === 'package'
             ? { status: 'slot', packageId: holder.packageId, refusal: bare }
             : { status: 409, refusal: bare };
     }

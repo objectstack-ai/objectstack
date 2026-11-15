@@ -47,6 +47,25 @@ export interface ConcurrentUpdateConflict {
   currentVersion?: string;
   /** Full latest server record, when the backend included it in the 409. */
   currentRecord?: Record<string, unknown> | null;
+  /**
+   * objectstack#33346 — one entry per field of a MULTI-field save, each with
+   * its label and both values. When present the dialog lists them one per row
+   * instead of the two `pendingValue` / `currentValue` previews, which for a
+   * multi-field save are whole maps and read as raw JSON.
+   */
+  fields?: ConcurrentUpdateFieldConflict[];
+}
+
+/** One field of a multi-field conflict (objectstack#33346). */
+export interface ConcurrentUpdateFieldConflict {
+  /** Field machine name. */
+  field: string;
+  /** User-facing label for the field. */
+  label?: string;
+  /** Value the user attempted to write. */
+  pendingValue: unknown;
+  /** Value currently on the server (undefined when the 409 carried no record). */
+  currentValue: unknown;
 }
 
 export interface ConcurrentUpdateDialogProps {
@@ -66,6 +85,10 @@ const formatValue = (value: unknown): string => {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'string') return value.length > 0 ? value : '""';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  // objectstack#33346 — a multi-value field (tags, multi-select) reads as a list.
+  if (Array.isArray(value) && value.every((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v))) {
+    return value.length > 0 ? value.map((v) => (v === null ? '—' : String(v))).join(', ') : '—';
+  }
   try {
     return JSON.stringify(value);
   } catch {
@@ -102,6 +125,8 @@ export const ConcurrentUpdateDialog: React.FC<ConcurrentUpdateDialogProps> = ({
   const fieldLabel = conflict?.label || conflict?.field || '';
   const pendingPreview = conflict ? formatValue(conflict.pendingValue) : '';
   const currentPreview = conflict ? formatValue(conflict.currentValue) : '';
+  // objectstack#33346 — a multi-field save lists each field on its own row.
+  const fieldRows = conflict?.fields && conflict.fields.length > 0 ? conflict.fields : null;
 
   // Audit metadata for the racer's write, when the server included currentRecord.
   const racer = (conflict?.currentRecord ?? {}) as Record<string, unknown>;
@@ -156,6 +181,43 @@ export const ConcurrentUpdateDialog: React.FC<ConcurrentUpdateDialogProps> = ({
           </div>
         </AlertDialogHeader>
 
+        {fieldRows ? (
+          <div className="space-y-2 text-sm">
+            {(racerUpdatedBy || racerUpdatedAt) && (
+              <div className="text-[11px] text-muted-foreground">
+                {racerUpdatedBy && (
+                  <span>{t('detail.concurrentUpdateUpdatedBy', { name: racerUpdatedBy })}</span>
+                )}
+                {racerUpdatedBy && racerUpdatedAt && <span> · </span>}
+                {racerUpdatedAt && (
+                  <span>{t('detail.concurrentUpdateUpdatedAt', { when: racerUpdatedAt })}</span>
+                )}
+              </div>
+            )}
+            <ul data-testid="concurrent-update-field-list" className="max-h-72 space-y-2 overflow-y-auto">
+              {fieldRows.map((row) => (
+                <li
+                  key={row.field}
+                  data-testid="concurrent-update-field"
+                  data-field={row.field}
+                  className="rounded-md border p-3"
+                >
+                  <div className="font-medium text-foreground">{row.label || row.field}</div>
+                  <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                      {t('detail.concurrentUpdateYourEdit')}
+                    </dt>
+                    <dd className="min-w-0 break-words text-foreground">{formatValue(row.pendingValue)}</dd>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-sky-800 dark:text-sky-300">
+                      {t('detail.concurrentUpdateCurrentValue')}
+                    </dt>
+                    <dd className="min-w-0 break-words text-foreground">{formatValue(row.currentValue)}</dd>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
         <div className="space-y-2 text-sm">
           <div className="rounded-md border border-amber-200/70 bg-amber-50/60 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
             <div className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
@@ -183,6 +245,7 @@ export const ConcurrentUpdateDialog: React.FC<ConcurrentUpdateDialogProps> = ({
             <div className="mt-1 break-all font-mono text-foreground">{currentPreview}</div>
           </div>
         </div>
+        )}
 
         <AlertDialogFooter className="gap-2 sm:gap-2">
           <button

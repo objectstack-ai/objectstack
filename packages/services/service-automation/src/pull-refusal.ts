@@ -20,6 +20,14 @@ export type ConnectorPullRefusalReason =
      */
     | 'mapping_name_refused'
     | 'no_connector_source'
+    /**
+     * [ADR-0150 D9, #31699] The mapping's `connectorSource.connector`
+     * resolves, from the mapping's package, to no single connector instance:
+     * two holders in the package's closure, or, for a mapping no package
+     * holds, two packages' instances of the name. The message names every
+     * candidate.
+     */
+    | 'connector_name_refused'
     | 'connector_not_registered'
     | 'connector_plugin_origin'
     | 'connector_degraded'

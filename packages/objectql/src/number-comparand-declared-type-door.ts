@@ -166,6 +166,18 @@
  * call them, run both arms. At `having` it reads each column's TYPE (a groupBy
  * of a boolean field), as the no-operator-object arm does.
  *
+ * ## [#29486] …and the string-stored arm, at all three positions
+ *
+ * The same walk narrows a NUMBER or BOOLEAN comparand against a declared
+ * text-family or option-family field (`@objectstack/spec/data`'s
+ * `filter-string-stored-comparand-declared-type.ts`) to `String(value)` — the
+ * string the write door stores for that value since #29241 / #29562 — so
+ * `{ code: 42 }` matches a row written `42` (stored `"42"`) on every driver,
+ * where it matched none. It never refuses. It is asked at every field key
+ * neither the number arm nor the boolean arm judges (the three classes are
+ * disjoint), at the same positions ({@link judgeFieldSpec}), so every engine
+ * site that runs the walk inherits it with no change of its own.
+ *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
@@ -178,9 +190,12 @@ import {
   numberComparandDoorVerdict,
   numberComparandFieldVerdict,
   numberComparandRefusalMessage,
+  stringStoredComparandDoorVerdict,
+  stringStoredComparandFieldVerdict,
   type BooleanComparandDoorFieldMeta,
   type NumberComparandDoorFieldMeta,
   type NumberComparandRefusalSite,
+  type StringStoredComparandDoorFieldMeta,
 } from '@objectstack/spec/data';
 import {
   booleanArmFieldMeta,
@@ -229,6 +244,12 @@ interface KeyFacts {
    * where the number arm does not judge.
    */
   readonly boolean: BooleanComparandDoorFieldMeta | null;
+  /**
+   * [#29486] The string-stored arm's field meta — `null` when that arm has
+   * nothing to judge here. Disjoint from the two classes above; the walk asks
+   * this arm only where neither of them judges.
+   */
+  readonly string: StringStoredComparandDoorFieldMeta | null;
   /**
    * [#20546] The column the no-operator-object arm judges — else `null`.
    * [#20745] Any of its three kinds (a scalar-valued, a relation or a
@@ -360,6 +381,17 @@ const booleanArm = (meta: BooleanComparandDoorFieldMeta, ctx: RefusalSiteContext
   (field, comparand, path) => {
     const answer = judgeBooleanComparand(meta, field, comparand, path, ctx.aggregated);
     return answer.refused ? { ok: false, refusal: { arm: 'boolean', site: answer.site } } : kept(answer.value);
+  };
+
+/**
+ * [#29486] The string-stored arm: a number or boolean comparand against a
+ * text- or option-family field is narrowed to the string the write stores. It
+ * never refuses — the spec's verdict answers `narrows` or `passes` only.
+ */
+const stringStoredArm = (meta: StringStoredComparandDoorFieldMeta): JudgeOne =>
+  (_field, comparand) => {
+    const verdict = stringStoredComparandDoorVerdict(meta, comparand);
+    return kept(verdict.verdict === 'narrows' ? verdict.value : comparand);
   };
 
 /**
@@ -531,8 +563,15 @@ function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: num
           // [#21333] …and where the number arm does not judge, the boolean arm
           // may: the two classes are disjoint, so at most one arm judges a key.
           const booleanMeta = booleanArmFieldMeta(facts.boolean);
-          if (!booleanMeta) continue;
-          judged = judgeFieldSpec(booleanArm(booleanMeta, ctx), key, value, here);
+          if (booleanMeta) {
+            judged = judgeFieldSpec(booleanArm(booleanMeta, ctx), key, value, here);
+          } else {
+            // [#29486] …and where neither judges, the string-stored arm may:
+            // a number or boolean against a text- or option-family field.
+            const stringMeta = facts.string;
+            if (!stringMeta || stringStoredComparandFieldVerdict(stringMeta) !== 'judged') continue;
+            judged = judgeFieldSpec(stringStoredArm(stringMeta), key, value, here);
+          }
         }
       }
     }
@@ -571,13 +610,14 @@ function declaredFactsOf(schema: unknown): FactsOf | null {
       // column all the same, and the arm judges it by the type it stores;
       // every other undeclared key keeps the registry-less tolerance.
       const provisioned = provisionedNoOperatorObjectColumn(key);
-      return provisioned === null ? null : { number: null, boolean: null, column: provisioned };
+      return provisioned === null ? null : { number: null, boolean: null, string: null, column: provisioned };
     }
     const meta = fieldMetaOf(fields[key]);
     if (!meta) return null;
-    // [#21333] The same declaration slice serves both comparand arms; each
-    // arm's field verdict decides whether it judges the key.
-    return { number: meta, boolean: meta, column: declaredNoOperatorObjectColumn(fields[key]) };
+    // [#21333] The same declaration slice serves every comparand arm
+    // ([#29486] the string-stored one too); each arm's field verdict decides
+    // whether it judges the key.
+    return { number: meta, boolean: meta, string: meta, column: declaredNoOperatorObjectColumn(fields[key]) };
   };
 }
 
@@ -734,6 +774,9 @@ export function narrowHavingNumberComparands<H>(
         // [#21333] A groupBy projection (or a `min` / `max`) of a boolean
         // field carries that field's type; the boolean arm judges it by that.
         boolean: type === undefined ? null : { type },
+        // [#29486] …and a groupBy (or `min` / `max`) of a text- or
+        // option-family field carries its stored string; judged by that type.
+        string: type === undefined ? null : { type },
         column: kind === null ? null : { kind, type: type as string },
       };
     },

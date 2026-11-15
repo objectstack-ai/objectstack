@@ -33,10 +33,18 @@
  *   projection serves, never guessed from the value's shape; nothing reads the
  *   target.
  *
- * System fields are shown, not hidden: the record detail view's notion of a
- * framework-managed column (`isSystemManagedField`, `@object-ui/types`) only
- * orders them after the business fields, the way the detail view keeps
- * provenance out of the leading rows.
+ * Which keys are listed follows the record page's own body rule
+ * (objectstack#33346), read from the same two sources it reads
+ * (`record-detail-system-fields.ts`, `@object-ui/app-shell`): the framework's
+ * system columns (`FIELD_GROUP_SYSTEM_FIELDS`, `@objectstack/spec/data`) and
+ * the audit-provenance columns (`AUDIT_FIELD_NAMES`, `@object-ui/types`) are
+ * never listed, and — when the answer carries the `fields` projection — only
+ * a key the object declares is, as the record page lists only the object's
+ * declared fields. A key with no projection entry (the record's `id`, an
+ * injected column the schema does not declare) therefore stays off the page.
+ * An answer with no projection (a server that predates it) or an empty one
+ * (the server could not read the schema) keeps every non-system key,
+ * labelled from the key.
  */
 
 import type * as React from 'react';
@@ -48,7 +56,8 @@ import {
   type CellRendererProps,
 } from '@object-ui/fields';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { isSystemManagedField, type FieldMetadata } from '@object-ui/types';
+import { AUDIT_FIELD_NAMES, type FieldMetadata } from '@object-ui/types';
+import { FIELD_GROUP_SYSTEM_FIELDS } from '@objectstack/spec/data';
 import type { SharedFieldDisplay } from './shared-record-shape';
 
 /** An empty value's face — the date-display path's own placeholder. */
@@ -157,14 +166,21 @@ export interface SharedRecordFieldsProps {
 export function SharedRecordFields({ record, fields }: SharedRecordFieldsProps) {
   const { t } = useObjectTranslation();
   const locale = useDisplayLocale();
-  const keys = Object.keys(record);
+  // objectstack#33346 — the record page's body rule: no system or audit
+  // column, and only a declared field once the projection says which are. An
+  // EMPTY projection is what the server answers when it could not read the
+  // object's schema, so it says nothing about which keys are declared.
+  const declaredOnly = fields !== undefined && Object.keys(fields).length > 0;
+  const keys = Object.keys(record).filter(
+    (key) =>
+      !FIELD_GROUP_SYSTEM_FIELDS.has(key) &&
+      !AUDIT_FIELD_NAMES.has(key) &&
+      (!declaredOnly || Object.prototype.hasOwnProperty.call(fields, key)),
+  );
 
   if (keys.length === 0) {
     return <p className="text-sm text-muted-foreground">{t('common.noData', { defaultValue: 'No data' })}</p>;
   }
-
-  const business = keys.filter((key) => !isSystemManagedField(key));
-  const system = keys.filter((key) => isSystemManagedField(key));
 
   const rows = (group: string[]) =>
     group.map((key) => {
@@ -198,12 +214,7 @@ export function SharedRecordFields({ record, fields }: SharedRecordFieldsProps) 
 
   return (
     <div className="rounded-md border bg-card px-4">
-      {business.length > 0 && <dl className="divide-y">{rows(business)}</dl>}
-      {system.length > 0 && (
-        <dl data-testid="shared-record-system-fields" className={business.length > 0 ? 'divide-y border-t' : 'divide-y'}>
-          {rows(system)}
-        </dl>
-      )}
+      <dl className="divide-y">{rows(keys)}</dl>
     </div>
   );
 }

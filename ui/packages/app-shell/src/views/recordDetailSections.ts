@@ -78,8 +78,14 @@ export type SectionHeading = string | Readonly<Record<string, string>>;
 
 /** Display text the derivation writes into a section it authors itself. */
 export interface RecordDetailSectionLabels {
-  /** Heading of the collapsible secondary section (section name `details`). */
-  moreDetails: string;
+  /**
+   * Heading of the collapsible secondary section (section name `details`).
+   *
+   * A surface that draws the page passes the translated text. A surface that
+   * PERSISTS the page passes {@link loadPersistedSectionLabels}' inline locale
+   * map, so the saved heading stays translated.
+   */
+  moreDetails: SectionHeading;
   /**
    * Heading of the section holding the fields no declared field group claims
    * (`deriveFieldGroupLayout`'s keyless trailing bucket). Read only when the
@@ -88,67 +94,83 @@ export interface RecordDetailSectionLabels {
    * included). An object with no groups keeps its untitled primary section.
    *
    * A surface that draws the page passes the translated text. A surface that
-   * PERSISTS the page passes {@link loadPersistedUngroupedHeading}'s inline
-   * locale map, so the saved heading stays translated.
+   * PERSISTS the page passes {@link loadPersistedSectionLabels}' inline locale
+   * map, so the saved heading stays translated.
    */
   ungrouped: SectionHeading;
 }
 
 /**
- * The English heading of the "More details" section, for a surface with no
- * translator to hand: the Studio page-create seed, which persists it. It is the
- * en text of the `detail.sectionMoreDetails` key the runtime and the preview
- * translate (their call sites keep the literal default so `check:i18n-keys`
- * judges it against the en pack).
+ * The English heading of the "More details" section: the en text of the
+ * `detail.sectionMoreDetails` key the runtime and the preview translate (their
+ * call sites keep the literal default so `check:i18n-keys` judges it against
+ * the en pack). ⛔ Never persisted as a heading: a page Studio saves carries
+ * {@link loadPersistedSectionLabels}' locale map instead.
  */
 export const MORE_DETAILS_DEFAULT_LABEL = 'More details';
 
 /**
  * The English heading of the ungrouped-fields section: the en text of the
  * `common.ungroupedSection` key. ⛔ Never persisted as a heading: a page Studio
- * saves carries {@link loadPersistedUngroupedHeading}'s locale map instead.
+ * saves carries {@link loadPersistedSectionLabels}' locale map instead.
  */
 export const UNGROUPED_SECTION_DEFAULT_LABEL = 'Other';
 
+/** The English headings, for a page that writes neither heading. */
+const ENGLISH_SECTION_LABELS: RecordDetailSectionLabels = {
+  moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+  ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+};
+
 /**
- * Whether the object's `fieldGroups` apply, i.e. whether its default record
- * page draws the ungrouped bucket under its own heading.
+ * Whether the object's default record page writes a heading of the
+ * derivation's own: the ungrouped bucket's when the object's `fieldGroups`
+ * apply, else the "More details" section's when the split yields one.
  */
-function fieldGroupsApply(objectDef: RecordDetailSectionsObject): boolean {
-  return deriveFieldGroupDetailSections(objectDef as any) !== null;
+function writesDerivedHeading(objectDef: RecordDetailSectionsObject): boolean {
+  if (deriveFieldGroupDetailSections(objectDef as any) !== null) return true;
+  return deriveRecordDetailSections(objectDef, ENGLISH_SECTION_LABELS).some((section) => section.name === 'details');
 }
 
 /**
- * The ungrouped bucket's heading in the form a PERSISTED page writes it: an
- * inline locale map holding the `common.ungroupedSection` text of every
- * catalogue `@object-ui/i18n` ships, keyed by its language tag.
+ * The derivation's own headings in the form a PERSISTED page writes them: each
+ * an inline locale map holding its key's text in every catalogue
+ * `@object-ui/i18n` ships, keyed by the catalogue's language tag —
+ * `detail.sectionMoreDetails` for `moreDetails`, `common.ungroupedSection` for
+ * `ungrouped`.
  *
  * A saved page is metadata, so it cannot carry the shell's `t()` call, and a
  * plain string would render in one language for every viewer. The inline map
  * is the `I18nLabel` form `@objectstack/spec` declares for exactly this, and
  * `record:details` resolves it for the viewer's language (`pickLocalized`), so
- * the saved page reads the same heading the running page translates.
+ * the saved page reads the same heading the running page translates. The
+ * "More details" section keeps its `name: 'details'`, and `record:details`
+ * hands the resolved text to `sectionLabel` as the fallback, so the object's
+ * own `objects.OBJECT._sections.details.label` still wins over the map.
  *
- * The catalogues are fetched only when the object's `fieldGroups` apply, the
- * one case a persisted page writes this heading. Otherwise it answers the
- * English default, which {@link deriveStudioDetailSections} does not read.
- * A catalogue that fails to load rejects the whole call: a partial map would
+ * The catalogues are fetched only when the page writes one of these headings.
+ * Otherwise it answers the English defaults, which no section reads. A
+ * catalogue that fails to load rejects the whole call: a partial map would
  * save English for the missing languages.
  */
-export async function loadPersistedUngroupedHeading(
+export async function loadPersistedSectionLabels(
   objectDef: RecordDetailSectionsObject | null | undefined,
-): Promise<SectionHeading> {
-  if (!objectDef || !fieldGroupsApply(objectDef)) return UNGROUPED_SECTION_DEFAULT_LABEL;
+): Promise<RecordDetailSectionLabels> {
+  if (!objectDef || !writesDerivedHeading(objectDef)) return ENGLISH_SECTION_LABELS;
   const catalogues = await Promise.all(
     BUILT_IN_LANGUAGE_CODES.map(async (code) => [code, await loadBuiltInLocale(code)] as const),
   );
-  const heading: Record<string, string> = {};
-  for (const [code, catalogue] of catalogues) {
-    const common = catalogue?.common as Record<string, unknown> | undefined;
-    const text = common?.ungroupedSection;
+  const moreDetails: Record<string, string> = {};
+  const ungrouped: Record<string, string> = {};
+  const put = (heading: Record<string, string>, code: string, namespace: unknown, key: string) => {
+    const text = (namespace as Record<string, unknown> | undefined)?.[key];
     if (typeof text === 'string' && text.length > 0) heading[code] = text;
+  };
+  for (const [code, catalogue] of catalogues) {
+    put(moreDetails, code, catalogue?.detail, 'sectionMoreDetails');
+    put(ungrouped, code, catalogue?.common, 'ungroupedSection');
   }
-  return heading;
+  return { moreDetails, ungrouped };
 }
 
 /**

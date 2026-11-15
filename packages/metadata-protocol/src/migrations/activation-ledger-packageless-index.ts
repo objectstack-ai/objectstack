@@ -69,7 +69,11 @@
  * switches, so nothing here deletes or picks one: the operator gets the key that
  * is not enforced, the consequence, and the query that lists the rows
  * ({@link buildActivationLedgerPackagelessDuplicateProbeSql}, also what
- * `os migrate duplicates` runs through `runtime-index-preflight.ts`).
+ * `os migrate duplicates` runs through `runtime-index-preflight.ts`). The
+ * migration counts those rows before it sends the build, so the refusal it
+ * expects is never provoked and the operator reads one report, not a raw
+ * driver fault ahead of it; a build refused for any other reason is reported
+ * with the driver's text, as before.
  *
  * The drift differ leaves the index alone: a partial or expression index is not
  * sync-reproducible (`isSyncReproducibleIndex`), so it is runtime-managed and
@@ -279,6 +283,23 @@ export async function ensureActivationLedgerPackagelessIndex(
         return { status: 'failed', detail: presence.detail };
     }
 
+    // Rows that already collide are read BEFORE the build, never learned from
+    // its refusal: the driver writes every refused raw statement to the log as
+    // a raw DATABASE_ERROR line, which would print ahead of the report below
+    // and give the operator two answers for one finding. Only the expected
+    // refusal is spared this way. A count that cannot be read builds as before,
+    // and any refusal the build then meets (a row written between the two
+    // statements, a server fault) still reaches the operator through the
+    // driver's line and the report's detail.
+    const blocking = await countDuplicateKeys(exec, buildActivationLedgerPackagelessDuplicateProbeSql());
+    if (blocking !== undefined && blocking.keys > 0) {
+        const detail =
+            `${blocking.keys} duplicated key(s) held by ${blocking.rows} row(s), read before the build, ` +
+            'so the build was not attempted';
+        reportDegradation('conflict', detail, logger, describeDuplicateKeys(blocking));
+        return { status: 'conflict', detail };
+    }
+
     try {
         if (catalogFamilyOf(opts.client) === 'mysql' && (await isMariaDb(exec))) await buildOnMariaDb(exec);
         else await exec(buildActivationLedgerPackagelessIndexSql(opts.client));
@@ -301,8 +322,15 @@ export async function ensureActivationLedgerPackagelessIndex(
 /**
  * Say what is NOT enforced and what fixes it (ADR-0120 D4's wording contract).
  * Every arm is `error`: afterwards the platform looks healthy while two switches
- * for one environment-authored item can coexist, and which one applies is
+ * naming no package can coexist for one item, and which one applies is
  * unspecified.
+ *
+ * A row that names no package is not always an item the environment authored:
+ * on a database an earlier release wrote, a package's item has such rows until
+ * the boot's backfill gives them the package, and the backfill leaves an item
+ * with two rows unbound (`activation-ledger-backfill.ts` in objectql, whose own
+ * line names the holder). So the wording says what the rows ARE, rows naming
+ * no package, and ⛔ never calls the item the environment's.
  */
 function reportDegradation(
     status: PartialIndexStatus,
@@ -313,8 +341,9 @@ function reportDegradation(
     const key = `(${ACTIVATION_LEDGER_PACKAGELESS_INDEX_COLUMNS.join(', ')}) WHERE ${ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE}`;
     const duplicateQuery = buildActivationLedgerPackagelessDuplicateProbeSql();
     const consequence =
-        'two activation rows for one item the environment authored (no package) can coexist, and which switch ' +
-        'applies to it is unspecified';
+        'two activation rows that name no package can coexist for one item (one the environment authored, or a ' +
+        "package's item whose rows were written before the ledger named the package), and which switch applies " +
+        'to it is unspecified';
 
     if (status === 'unsupported') {
         logProblem(
@@ -335,7 +364,8 @@ function reportDegradation(
             logger,
             `[metadata-protocol] cannot build '${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME}' on ` +
                 `"${ACTIVATION_LEDGER_TABLE}" — existing rows violate ${key}${duplicates}. Nothing is enforced on ` +
-                `that key, so ${consequence}. They are administrators' switches, so no row is discarded ` +
+                `that key, so ${consequence}; for a package's item, the activation ledger backfill's line names the ` +
+                `package that holds it. They are administrators' switches, so no row is discarded ` +
                 `automatically and this migration keeps refusing until an operator deletes the one that should not ` +
                 `apply. List them with: ${duplicateQuery} — or run "os migrate duplicates" — then restart (ADR-0120 D4).`,
             detail,

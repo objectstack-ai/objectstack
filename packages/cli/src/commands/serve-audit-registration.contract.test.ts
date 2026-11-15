@@ -249,6 +249,18 @@ describe('os serve registers AuditPlugin with no config-derived options, above t
     expect(SERVE).toMatch(/cap === 'audit' && hostCrypto\s*\?\s*\{ \.\.\.\(arg \?\? \{\}\), cryptoProvider: hostCrypto\.provider, armSealer: !migrateAndExit \}/);
   });
 
+  it('hands the host crypto provider to an app-supplied AuditPlugin in the stack `plugins` loop, before the kernel takes it (seat ruling 6884540128 item 3)', () => {
+    // The app's `plugins` entry supersedes the CLI's instance (last one wins), so without this hand-over an app
+    // that composed its own AuditPlugin seals nothing. The same provider function, the same one-shot posture.
+    const HAND = 'handHostCryptoToAppAuditPlugin(pluginToLoad, RealAuditPlugin, () => hostCrypto?.provider, !migrateAndExit)';
+    const loop = soleOffset(SERVE, PLUGINS_LOOP, 'stack-plugins-loop');
+    const hand = soleOffset(SERVE, HAND, 'app AuditPlugin hand-over');
+    expect(hand).toBeGreaterThan(loop);
+    expect(hand).toBeLessThan(soleOffset(SERVE, 'await kernel.use(pluginToLoad);', 'stack-plugin registration'));
+    // Judged against the real class, loaded once ahead of the loop: never by name, so a lookalike is never fed.
+    expect(soleOffset(SERVE, '({ AuditPlugin: RealAuditPlugin } = await import(', 'real AuditPlugin class')).toBeLessThan(loop);
+  });
+
   it('arms no sealer on an `OS_MIGRATE_AND_EXIT=1` boot, a one-shot job (ADR-0154 D3)', () => {
     // One reading of the variable, ahead of both constructions; the exit reads the same constant.
     const reading = "const migrateAndExit = process.env.OS_MIGRATE_AND_EXIT === '1';";
