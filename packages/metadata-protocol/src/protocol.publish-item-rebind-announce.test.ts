@@ -30,6 +30,9 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetaItemPublishedEvent } from './protocol.js';
+// Paid at collection, not inside a clocked case: the save door's diagnostics reach
+// `@objectstack/lint` through a dynamic import (check:test-source-alias).
+import '@objectstack/lint';
 
 interface Row {
     id: string;
