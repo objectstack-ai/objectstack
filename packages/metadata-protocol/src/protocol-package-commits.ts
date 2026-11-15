@@ -76,6 +76,7 @@ import {
     memberOption,
     mutationEventMember,
     resolveBundleMemberSelector,
+    type CommitPlanItem,
 } from './protocol-bundle-members.js';
 import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
@@ -101,6 +102,16 @@ import type { ImportUnmanagedPackageAnswer, InstallPackageStoredRowHook, StoredP
  * door's `inheritedGrantObjectsOf` (`@objectstack/runtime`, which depends on
  * this package, so it is restated, not imported).
  */
+/**
+ * [#33563] What `revertCommit` says, in an item's `failed[]` entry, when the
+ * mutation projector (ADR-0094) failed after the item's row write: the derived
+ * read-model still holds the state the revert moved away from. The projector's
+ * own text is driver-shaped and stays on the operator's log line
+ * (`runMutationProjector` warns it), never on the answer.
+ */
+const REVERT_PROJECTION_NOT_APPLIED =
+    'its mutation projector failed, so the record derived from it still holds the state before the revert';
+
 function storedGrantObjectKeys(stored: unknown): string[] {
     const objects = stored && typeof stored === 'object' ? (stored as { objects?: unknown }).objects : undefined;
     return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
@@ -1210,9 +1221,14 @@ export class ProtocolPackageCommitsFacet {
         const actor = request.actor ?? null;
         const reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }> = [];
         const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
-        // [#22877] The members of what `reverted` reports, in its order, for
-        // the revert's own plan below; the response keeps its declared keys.
-        const revertedMembers: Array<string | undefined> = [];
+        // [#33563] The revert's own plan, one item per row the walk changed —
+        // whether or not that item then reached `reverted[]`. An item whose row
+        // was written and whose registry, storage or projection step failed is
+        // reported in `failed[]`, and its row change is still recorded here, so
+        // the append-only history holds every row the revert moved.
+        // [#22877] Each item carries the member it changed; the response keeps
+        // its declared keys.
+        const revertPlan: CommitPlanItem[] = [];
         // [#32700] Each object whose stored computed fields an item changes,
         // captured as served BEFORE the revert's first registry change of it, and
         // filled once after the loop and the commit row (one walk an object, as the package
@@ -1311,8 +1327,9 @@ export class ProtocolPackageCommitsFacet {
             // ruling — the caller's spelling reaches the ledger keys unfolded, and
             // #8908's `AUDIT_TYPE_NOT_CANONICAL` fires loudly when it is wrong — is
             // untouched in both directions. The refused item is simply absent from
-            // `reverted[]`, so the append-only revert commit built from it below
-            // does not claim to have reverted what it did not.
+            // `reverted[]` and wrote no row, so the append-only revert commit
+            // built below (from the rows the walk changed) does not claim to
+            // have reverted what it did not.
             //
             // ⛔ And NOT an audit row either, unlike the publish pre-flight's.
             // That door audits because every other refusal on that route audits;
@@ -1357,6 +1374,33 @@ export class ProtocolPackageCommitsFacet {
             // one locale of a template leaves the other locale's row alone.
             // Absent (the canonical member) on every other item, as before.
             const member = it.member;
+            // [#33563] What this item's row write did, once it has done it:
+            // every step after it (the registry write-through or heal, the
+            // storage sync, the projector) acts on a row that is already
+            // changed, so a fault there is reported with the row state named,
+            // never as a revert the process acted on, and never as one that
+            // wrote nothing. `notApplied` holds each such step's failure.
+            let rowWritten: string | undefined;
+            const notApplied: string[] = [];
+            let notAppliedCode: string | undefined;
+            // A revert that answers `success: true` is one the running process
+            // has already acted on (the docblock on `protocol.ts`): an item
+            // with any `notApplied` step goes into `failed[]`, not `reverted[]`.
+            const settle = (action: 'removed' | 'restored'): void => {
+                if (notApplied.length === 0) {
+                    reverted.push({ type: it.type, name: it.name, action });
+                    return;
+                }
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: `Commit item '${it.type}/${it.name}': ${rowWritten}, but the running process did not `
+                        + `take the change: ${notApplied.join('; ')}. The stored row and what the process serves `
+                        + 'disagree until those steps run: resolve the cause, then publish the item again, which '
+                        + 're-runs them.',
+                    ...(notAppliedCode ? { code: notAppliedCode } : {}),
+                });
+            };
             try {
                 // [#29414] The committing package's own row, and no other
                 // package's: the plan describes the rows this package's publish
@@ -1411,7 +1455,12 @@ export class ProtocolPackageCommitsFacet {
                             packageId: commitPackageId,
                             ...memberOption(member),
                         });
+                        rowWritten = 'its row was removed from sys_metadata';
                     }
+                    revertPlan.push({
+                        type: it.type, name: it.name, existedBefore: false, prevVersion: null,
+                        ...(member !== undefined ? { member } : {}),
+                    });
                     // [#6621] The registry must stop serving what the revert
                     // just removed — the #4521 rule on the DELETE side of it.
                     //
@@ -1497,7 +1546,9 @@ export class ProtocolPackageCommitsFacet {
                         // back to the artifact baseline. No `body` — a
                         // soft-remove has none to hand over, exactly as the
                         // sibling delete call passes none.
-                        await host.runMutationProjector({
+                        // [#33563] A projector that failed left the derived
+                        // record on the removed row: named, not discarded.
+                        const projection = await host.runMutationProjector({
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                             name: it.name,
                             state: 'deleted',
@@ -1505,6 +1556,7 @@ export class ProtocolPackageCommitsFacet {
                             // [#31698] The commit's row (ADR-0150 D4).
                             ...projectorEventPackage(PLURAL_TO_SINGULAR[it.type] ?? it.type, commitPackageId),
                         });
+                        if (projection && !projection.success) notApplied.push(REVERT_PROJECTION_NOT_APPLIED);
                         host.emitMetadataMutation({
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                             name: it.name,
@@ -1515,8 +1567,7 @@ export class ProtocolPackageCommitsFacet {
                             ...mutationEventPackage(commitPackageId),
                         });
                     }
-                    reverted.push({ type: it.type, name: it.name, action: 'removed' });
-                    revertedMembers.push(member);
+                    settle('removed');
                 } else if (restoreToVersion !== null) {
                     // Edited an existing artifact → restore the pre-commit body.
                     //
@@ -1615,6 +1666,11 @@ export class ProtocolPackageCommitsFacet {
                         deriveRestoredBody,
                         ...memberOption(member),
                     });
+                    rowWritten = `its row was restored to the body of version ${restoreToVersion}`;
+                    revertPlan.push({
+                        type: it.type, name: it.name, existedBefore: true, prevVersion: null,
+                        ...(member !== undefined ? { member } : {}),
+                    });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
                     // immediately, not after someone lists the type.
@@ -1639,7 +1695,10 @@ export class ProtocolPackageCommitsFacet {
                     // taken before this object's first write-through.
                     const capture = captureStoredExpressionChange(host.engine, PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name);
                     if (capture && !storedExpressions.has(capture.object)) storedExpressions.set(capture.object, capture);
-                    await host.applyRegistryWriteThrough({
+                    // [#33563] The registry's refusal of the restored object is
+                    // this item's outcome, not a line on stderr: the row holds
+                    // the pre-commit body and the registry does not serve it.
+                    const registryRefusal = await host.applyRegistryWriteThrough({
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         item: restored.item.body,
@@ -1653,14 +1712,27 @@ export class ProtocolPackageCommitsFacet {
                         // org; the resolution above is what makes the comment true.
                         organizationId: null,
                     });
+                    if (registryRefusal) {
+                        notApplied.push(
+                            'the runtime registry refused to serve the restored body ('
+                            + `${clientFacingFailureText(registryRefusal.error, 'the registry refused it')})`,
+                        );
+                        notAppliedCode = clientFacingFailureCode(registryRefusal.error);
+                    }
                     // [#32700] …and its storage synced, as the save and publish
                     // doors sync it: a restored body that brings a field back
-                    // needs its column. A refusal rides `advisories`; the item
-                    // still reverts (its row is written, registered and served).
+                    // needs its column. The refusal rides `advisories`, whole.
+                    // [#33563] …and the item is not reverted: its row is
+                    // written, but the table it is served over does not match
+                    // it, so the process has not acted on the restore.
                     const storageRefused = await host.ensureObjectStorage(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name);
                     if (storageRefused) {
                         advisories.push(storageRefused);
                         if (capture) storageRefusedObjects.add(capture.object);
+                        notApplied.push(
+                            `its storage did not follow the restored body (the '${storageRefused.rule}' advisory `
+                            + 'on this answer says why)',
+                        );
                     }
                     // [ADR-0094] Awaited projection BEFORE the
                     // fire-and-forget emit below — the order `saveMetaItem`'s
@@ -1668,7 +1740,8 @@ export class ProtocolPackageCommitsFacet {
                     // artifact's pre-commit body, so the derived read-model
                     // gets exactly that body, the same one the write-through
                     // just registered under the same singular key and scope.
-                    await host.runMutationProjector({
+                    // [#33563] A failed projection is named, not discarded.
+                    const projection = await host.runMutationProjector({
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         state: 'active',
@@ -1677,6 +1750,7 @@ export class ProtocolPackageCommitsFacet {
                         // [#31698] The row this restore wrote (ADR-0150 D4).
                         ...projectorEventPackage(PLURAL_TO_SINGULAR[it.type] ?? it.type, restorePackageId),
                     });
+                    if (projection && !projection.success) notApplied.push(REVERT_PROJECTION_NOT_APPLIED);
                     // [#14179] The restore limb's half of the same repair: a
                     // revert is a live write, so it funnels through the ONE
                     // choke point {@link emitMetadataMutation} like every
@@ -1692,8 +1766,7 @@ export class ProtocolPackageCommitsFacet {
                         // [#32451] The commit's package: the row this revert restored.
                         ...mutationEventPackage(commitPackageId),
                     });
-                    reverted.push({ type: it.type, name: it.name, action: 'restored' });
-                    revertedMembers.push(member);
+                    settle('restored');
                 }
             } catch (e: any) {
                 // [#8333 · P11] `failed[].error` is revert-response DATA.
@@ -1717,10 +1790,19 @@ export class ProtocolPackageCommitsFacet {
                 // driver's dialect is replaced. See {@link
                 // clientFacingFailureCode}.
                 const failureCode = clientFacingFailureCode(e);
+                // [#33563] A throw AFTER the row write (the heal's store
+                // re-read, a write-through that throws) leaves the row changed:
+                // the entry says so, so a caller never reads it as a revert
+                // that wrote nothing. Its row change is in `revertPlan`.
+                const failureText = clientFacingFailureText(e, 'revert failed');
                 failed.push({
                     type: it.type,
                     name: it.name,
-                    error: clientFacingFailureText(e, 'revert failed'),
+                    error: rowWritten === undefined
+                        ? failureText
+                        : `Commit item '${it.type}/${it.name}': ${rowWritten}, but the revert did not finish: `
+                            + `${failureText}. The stored row and what the process serves may disagree: resolve `
+                            + 'the cause, then publish the item again.',
                     ...(failureCode ? { code: failureCode } : {}),
                 });
                 console.warn(
@@ -1738,13 +1820,10 @@ export class ProtocolPackageCommitsFacet {
             message: `Revert: ${row.message ?? request.commitId}`,
             ...(request.actor ? { actor: request.actor } : {}),
             parentCommitId: request.commitId,
-            items: reverted.map((r, index) => ({
-                type: r.type,
-                name: r.name,
-                existedBefore: r.action === 'restored',
-                prevVersion: null,
-                ...(revertedMembers[index] !== undefined ? { member: revertedMembers[index] } : {}),
-            })),
+            // [#33563] Every row the walk changed, not only what `reverted[]`
+            // reports: a row restored or removed under an item that then failed
+            // its registry, storage or projection step is still a row change.
+            items: revertPlan,
         });
 
         // [#32700] A stored computed field the revert made compute something new

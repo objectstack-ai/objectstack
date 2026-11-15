@@ -10844,6 +10844,16 @@ export class ObjectStackProtocolImplementation implements
      * {@link rollbackToPackageCommit} inherited it, so a whole-package
      * rollback could report success and change nothing the process could see.
      *
+     * [#33563] …and an item whose row was written but whose next step did not
+     * land is reported in `failed[]`, not `reverted[]`: the registry refused
+     * the restored object, its storage did not follow the restored body (the
+     * advisory stays on `advisories`), its mutation projector failed, or a
+     * step after the row write threw. The entry names the row state (removed,
+     * or restored to the body of version N) beside the step that failed, and
+     * the revert's own commit still records the row change. A write-through
+     * fault the registry helper only logs (every type but `object`) is not
+     * seen here.
+     *
      * [#9174] An item whose STORED `type` is non-canonical
      * ({@link isNonCanonicalStoredType}) is REFUSED on the restore limb, into
      * `failed[]` with `code: 'STORED_TYPE_NOT_CANONICAL'` — the same wire-visible
