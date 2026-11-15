@@ -1,5 +1,142 @@
 # @objectstack/plugin-email
 
+## 18.5.0
+
+### Patch Changes
+
+- 4dfb9f1: fix(plugin-email): a template name an enabled and a disabled package hold sends what it sends when only the enabled package holds it (ADR-0150 D3)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  While one of two packages that hold an email template name is disabled, the send (over the metadata protocol's execution list) now reads the bundle the way it reads a name one package holds: from the environment-wide list, which no longer lists a disabled package's members, its customization pair's rows or a dependent's added locales. Before, it read the enabled package's own address, which leaves out the locales its dependents add.
+  
+  FROM → TO, with `B` disabled and `A` the one enabled holder: a send of a locale that both `A`'s customization pair (`A.custom`) and a dependent of `A` carry answered the pair's row, and now answers the same member a send answers when `B` holds nothing of the name (the dependent's locale). Every other answer is unchanged, and nothing changes while no holder of the name is disabled, or when the loader reads the registry's own list (no protocol registered).
+- 9951f46: fix(plugin-email)!: the email template send judges the served holders, so a disabled package holds no name at the send (ADR-0150 D3)
+  
+  Clause-②: yes (narrowing) — widened: a send of a template name an enabled and a disabled package hold, made with no package or from a caller whose closure holds both, is served the enabled holder's template where it was refused naming both. Narrowed: a send that only a disabled holder's side answered (its customization pair's row, a dependent's added locale, the environment's item or a package-less stored row beside a name only it holds) finds no template; a send of an auth name whose one overriding package is disabled is served the built-in copy. Refusals name only the packages that serve the name. With no holder of the name disabled, every answer is unchanged.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches what an email template send answers when a package holding the name is disabled.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) every moved answer follows a package's enabled state, which the operator flips back with the enable door; no authored key, stored row or export changes -->
+  
+  **BREAKING** for a send of an email template (`createRegistryEmailTemplateLoader`: the `sendTemplate` path and a flow's `notify` delivery) of a name a disabled package holds. Before, the send counted every holder, a disabled package's included: a disabled package was still the answer, and a refusal still named it. Now, when a holder of the name is disabled, the name is resolved over the served holders, and the bundle is read only where no member of a disabled holder's side is listed: the resolved holder's own address, or the built-ins' own address. A caller whose own holding is the disabled one, or that no served holder answers, finds no template. With no holder disabled, every read is the one it was.
+  
+  Why the read is chosen and never filtered: the environment-wide execution list keeps a disabled holder's customization-pair rows and a dependent's added locales listed, and an item's `_packageId` there is the slot it fills, not the package that stores it (a pair row filling a dependent's locale wears the dependent's id; the environment's item over a disabled holder's slot wears the disabled holder's), so no member can be told apart after the read.
+  
+  **Every moved answer, before → after.** Holders ALPHA and BETA; ALPHA's pair `ALPHA.custom` stores a member row; ADDER depends on ALPHA only and adds a locale. Both registration orders, the protocol's read and the registry's own read. First-party count 0: no first-party composition ships an email template name two packages hold, or disables a package that holds one.
+  
+  Widening:
+  
+  - Row 27. Two holders, one disabled, a send with no package (omitted or `null`): 409 naming both → the enabled holder's address (its template; a locale only the disabled side carries finds no template).
+  - Row 28. The same, from a caller whose closure holds both: 409 naming both → the enabled holder's address.
+  
+  Refused, the disabled package no longer named:
+  
+  - Row 29. Two holders, one disabled, a caller whose closure reaches the name only through the disabled holder (a dependent of it included): no template, or the disabled holder's pair row → 409 `outside-closure` naming the enabled holder.
+  - Row 30. Two holders, one disabled, a caller that reaches neither (the built-in package as caller included): 409 `outside-closure` naming both → naming the enabled holder.
+  
+  Served or refused → no template:
+  
+  - Row 31. Every holder disabled, every caller: 409 naming them, or the pair's row → no template.
+  - Row 36. Two holders, the disabled holder's own send: its pair's row → no template.
+  - Row 37. One holder, disabled, every caller: the environment's item, a package-less stored row, ADDER's locale or the pair's row (the environment-wide list), or 409 `outside-closure` naming it for a caller with no path → no template.
+  
+  Re-targeted to the built-in copy:
+  
+  - Row 38. An auth name (`auth.*`, platform-requested) whose one overriding package is disabled: every caller but that package → the built-ins' own address (the built-in template, or a package-less stored row there), where the environment-wide list sent the disabled package's side; ADDER's send, refused naming ADDER and the package → the same; the package's own send → no template.
+  
+  **Not moved.** A send of a name none of whose holders is disabled; a disabled dependent's addition beside enabled holders (the address it was read at already left it out); the enabled holder's own send beside a disabled holder (read at its address, as before, so its own pair row and a package-less stored row there are still its customization). The metadata reads (`/meta`, `?package=`, `_env`) and the lists are not touched.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/formula@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

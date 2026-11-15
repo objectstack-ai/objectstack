@@ -1790,6 +1790,19 @@ describe('role: resolves in the emitting organization — the producer\'s, else 
         expect(memberReads.every((w) => w.organization_id === 'org_a')).toBe(true);
     });
 
+    it('per-spec branch: an entry that is itself a list is skipped, as the single-call branch skips it', async () => {
+        // Outside the `AudienceSpec` type, so cast: a nested list is not an audience entry.
+        const audience = ['role:admin', ['u_nested']] as unknown as string[];
+        const { recipients } = await emitRoleAdmin('org_a', undefined, audience);
+        expect(recipients).toEqual(['u_a_admin_1', 'u_a_admin_2']);
+    });
+
+    it('CONTROL: the single-call branch skips the same nested entry', async () => {
+        const audience = ['role:admin', ['u_nested']] as unknown as string[];
+        const { recipients } = await emitRoleAdmin(null, 'org_a', audience);
+        expect(recipients).toEqual(['u_a_admin_1', 'u_a_admin_2']);
+    });
+
     it('CONTROL: a producer-named organization is the one used', async () => {
         const { recipients, memberReads } = await emitRoleAdmin(null, 'org_b');
         expect(recipients).toEqual(['u_b_admin']);

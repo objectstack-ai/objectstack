@@ -3975,6 +3975,14 @@ const de = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: '{{left}} deines KI-Kontingents sind noch übrig. Ein mit ×N markiertes Modell verbraucht es N-mal so schnell wie das Standardmodell.',
+      confirmTitle: 'Zu {{model}} wechseln?',
+      confirmBody: 'Jede Nachricht mit diesem Modell verbraucht {{multiplier}}-mal so viel KI-Kontingent wie eine mit dem Standardmodell.',
+      confirmAllowance: 'Davon sind noch {{left}} übrig, und mit diesem Modell ist es {{multiplier}}-mal so schnell aufgebraucht.',
+      confirmCancel: 'Abbrechen',
+      confirmAction: 'Modell wechseln',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Nachricht senden',
     scrollToBottom: 'Zur neuesten Nachricht scrollen',
