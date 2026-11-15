@@ -4,17 +4,17 @@
     {
       "id": 1,
       "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form.",
-      "expected_output": "One `defineView({ list, form, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, a `listViews.my_open` entry with `filter` triples (`{ field: 'assigned_to', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `form` with `type: 'simple'` and `sections` referencing a declared field group.",
+      "expected_output": "One `defineView({ list, form, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, the owner column is the injected `owner_id` (never an `assigned_to` field), a `listViews.my_open` entry with `filter` triples (`{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `form` with `type: 'simple'` and `sections` referencing a declared field group.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineView", "provider: 'object'", "listViews", "groupByField", "link: true", "{current_user_id}"],
-        "must_not_contain": ["groupBy:", "conditionalRequired:"]
+        "must_contain": ["defineView", "provider: 'object'", "listViews", "groupByField", "link: true", "{current_user_id}", "owner_id"],
+        "must_not_contain": ["groupBy:", "conditionalRequired:", "'assigned_to'"]
       }
     },
     {
       "id": 2,
       "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects.",
-      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and the approvals inbox as `type: 'component', componentRef: 'approvals:inbox'` gated by `requiresService: 'approvals'` (never `requiresObject: 'sys_approval_request'`: that object read answers 404 to an approver until a request involves them). At most one app per package, so not a second `App.create` here: the support team shares this product and its objects, so it is a `requiredPermissions`-gated group inside the app. (A support product with objects of its own would carry its app in its own `type: 'module'` package of the suite.) Registered under `defineStack({ apps })`.",
+      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and the approvals inbox as `type: 'component', componentRef: 'approvals:inbox'` gated by `requiresService: 'approvals'` (never a `requiresObject` gate on `sys_approval_request`: that object read answers 404 to an approver until a request involves them). At most one app per package, so not a second `App.create` here: the support team shares this product and its objects, so it is a `requiredPermissions`-gated group inside the app. (A support product with objects of its own would carry its app in its own `type: 'module'` package of the suite.) Registered under `defineStack({ apps })`.",
       "files": [],
       "assertions": {
         "must_contain": ["App.create", "navigation", "objectName", "viewName", "filters", "approvals:inbox", "requiresService", "requiredPermissions"],
@@ -114,11 +114,11 @@
     {
       "id": 12,
       "prompt": "On `task`, add an 'Attention' list for the signed-in user: their tasks that are open or urgent, in one list.",
-      "expected_output": "One `listViews.attention` entry, not two views. Its `filter` is a list whose elements all match: one any-of group `{ or: [{ field: 'status', operator: 'equals', value: 'open' }, { field: 'priority', operator: 'equals', value: 'urgent' }] }` beside the rule `{ field: 'assigned_to', operator: 'equals', value: '{current_user_id}' }`. Flat rules only inside the group; no `$or`, `logic` / `conditions` or `anyOf` key.",
+      "expected_output": "One `listViews.attention` entry, not two views. Its `filter` is a list whose elements all match: one any-of group `{ or: [{ field: 'status', operator: 'equals', value: 'open' }, { field: 'priority', operator: 'equals', value: 'urgent' }] }` beside the rule `{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }` (the record owner, never an `assigned_to` field). Flat rules only inside the group; no `$or`, `logic` / `conditions` or `anyOf` key.",
       "files": [],
       "assertions": {
-        "must_contain": ["listViews", "or: [", "{current_user_id}"],
-        "must_not_contain": ["$or:", "logic:", "conditions:", "anyOf:"]
+        "must_contain": ["listViews", "or: [", "{current_user_id}", "owner_id"],
+        "must_not_contain": ["$or:", "logic:", "conditions:", "anyOf:", "'assigned_to'"]
       }
     },
     {
