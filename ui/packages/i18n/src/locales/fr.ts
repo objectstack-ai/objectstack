@@ -2800,6 +2800,8 @@ const fr = {
         ssoBackToConsole: "Retour à la console",
         ssoSwitchAccountHint: "Changer de compte ouvre votre service de connexion dans un nouvel onglet et vous y déconnecte. Reconnectez-vous ensuite ici avec un compte qui a accès.",
         linkEmailMismatch: "Le compte n'a pas été lié : son adresse e-mail ne correspond pas à celle du compte avec lequel vous êtes connecté. Liez un compte qui utilise la même adresse e-mail.",
+        linkAlreadyLinkedToOtherUser: "Le compte n'a pas été lié : il est déjà lié à un autre utilisateur de ce système. Liez un autre compte, ou connectez-vous en tant qu'utilisateur auquel il est lié et supprimez d'abord la liaison depuis ce compte.",
+        linkUnableToLink: "Le compte n'a pas pu être lié. Vérifiez que son adresse e-mail est confirmée auprès de ce service de connexion, puis réessayez. Si le problème persiste, contactez votre administrateur.",
         twoFactorInvalidCode: "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
         twoFactorInvalidBackupCode: "Ce code de secours n'est pas valide ou a déjà été utilisé.",
         twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",

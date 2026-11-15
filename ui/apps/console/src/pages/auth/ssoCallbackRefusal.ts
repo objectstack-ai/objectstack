@@ -130,6 +130,18 @@ const LINK_EMAIL_MISMATCH: RefusalCopy = {
     "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
 };
 
+const LINK_ALREADY_LINKED_TO_OTHER_USER: RefusalCopy = {
+  key: 'auth.login.errors.linkAlreadyLinkedToOtherUser',
+  defaultValue:
+    'The account was not linked: it is already linked to a different user of this system. Link a different account, or sign in as the user it is linked to and unlink it there first.',
+};
+
+const LINK_UNABLE_TO_LINK: RefusalCopy = {
+  key: 'auth.login.errors.linkUnableToLink',
+  defaultValue:
+    'The account could not be linked. Check that its email address is verified with that sign-in service, then try again. If it still fails, ask your administrator.',
+};
+
 /**
  * Callback `error` code → the sentence for a person who is ALREADY signed in.
  *
@@ -142,12 +154,24 @@ const LINK_EMAIL_MISMATCH: RefusalCopy = {
  *  - `email_does_not_match`: better-auth refused to link a provider account
  *    whose email differs from the signed-in account's
  *    (`accountLinking.allowDifferentEmails` is off). No account row is written.
+ *  - `account_already_linked_to_different_user`: the provider account is
+ *    already linked to another user here (its email now matches the
+ *    signed-in account's, or different emails are allowed). Nothing is
+ *    moved. The sentence names no one.
+ *  - `unable_to_link_account`: better-auth would not link it, chiefly because
+ *    a provider that is not trusted did not assert the email as verified
+ *    (also when linking is turned off, or the account row cannot be written).
+ *
+ * All three are `linkOAuthAccount`'s refusals (better-auth
+ * `oauth2/link-account.mjs`), redirected by the callback to the error URL.
  *
  * Only these codes travel; any other `error` a signed-in person arrives with
  * is left where it was, and nothing from the URL is ever shown as it came.
  */
 const SIGNED_IN_LINK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   email_does_not_match: LINK_EMAIL_MISMATCH,
+  account_already_linked_to_different_user: LINK_ALREADY_LINKED_TO_OTHER_USER,
+  unable_to_link_account: LINK_UNABLE_TO_LINK,
 };
 
 /** Whether `code` is a link refusal a signed-in person is told about where they land. */
