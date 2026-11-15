@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
+import { findEgressRefusal } from '@objectstack/core/egress';
 import type { HttpAckResult, HttpDelivery } from './http-outbox.js';
 
 /**
@@ -83,6 +84,9 @@ export type HttpAttemptOutcome =
  *   - 2xx                       → success
  *   - 4xx (except 408/429)      → permanent failure (retriable = false → dead)
  *   - 408, 429, 5xx, transport  → retriable
+ *   - a connect the egress guard refused → permanent failure, named
+ *     `EGRESS_REFUSED`: retrying cannot change the verdict, so it dead-letters
+ *     at once instead of walking the retry schedule
  */
 export async function sendOnce(
     delivery: HttpDelivery,
@@ -134,6 +138,8 @@ export async function sendOnce(
     } catch (err: unknown) {
         clearTimeout(timer);
         const durationMs = Date.now() - start;
+        const refused = findEgressRefusal(err);
+        if (refused) return { success: false, retriable: false, error: refused.message, durationMs };
         const e = err as { name?: string; message?: string };
         const error = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : e?.message ?? String(err);
         return { success: false, retriable: true, error, durationMs };
