@@ -45,10 +45,12 @@
 //     aggregate. This module used to claim it "logs a warning if one is
 //     present" — it never did; the key was silently ignored on every path,
 //     which is exactly the defect #10413 measured. NOTE this fallback is the
-//     documented LOWERING for every driver: `engine.aggregate` routes any call
-//     whose aggregations carry a filter through here (no driver advertises
-//     native conditional aggregation today), and the driver faces refuse
-//     NOT_IMPLEMENTED/501 if reached directly with one.
+//     documented LOWERING for every driver without the capability:
+//     `engine.aggregate` routes a call whose aggregations carry a filter
+//     through here unless the driver both declares `supports.aggregationFilter`
+//     and has `aggregate()` (#33698; driver-sql does), and a driver face that
+//     compiles no conditional aggregate refuses NOT_IMPLEMENTED/501 if reached
+//     directly with one.
 //
 // Date bucketing uses ISO-8601 conventions (weeks start Monday).
 //
