@@ -12867,60 +12867,84 @@ export function contractReviewVerdictLines(body) {
  * the queue guard, built on this file's regexes, ⛔ never a second parser:
  *
  *   verdicts      every explicit `VERDICT:` line's word, whole comment (N3);
- *   failSpellings the trimmed lines that read FAIL OUTSIDE the explicit form (N2):
- *                 the heading's own tail (the patrol's inline dialect), a line
- *                 keyed `verdict:` in any case, under a list bullet or emphasis,
- *                 and a line that opens with a bare `FAIL` and nothing but a
- *                 separator after it. A record carrying one never clears beside
- *                 its one PASS line: it contradicts itself;
+ *   failSpellings the trimmed lines that read FAIL OUTSIDE the explicit form (N2),
+ *                 in every verdict-bearing shape measured: any heading's own
+ *                 tail (the patrol's inline dialect); a `verdict` key in any
+ *                 case, under a heading mark, quote, list bullet or emphasis,
+ *                 after up to two words (`Overall verdict:`), with `:`, a dash
+ *                 or `=` (`Verdict — FAIL`); a table row with a verdict cell and
+ *                 a FAIL cell; a line that opens with a bare `FAIL` and nothing
+ *                 but a separator or a full stop after it. A record carrying one
+ *                 never clears beside its one PASS line: it contradicts itself;
  *   findings      the must-fix and should-fix grades (`contract-review.md`: a
  *                 must-fix is a FAIL, a should-fix earns a delta review of its
  *                 fix, nits alone end the round). Read per mention of the
  *                 hyphenated word, case-insensitive:
- *                   open        a finding NAMED with its grade, the line's lead
- *                               (after quote, bullet, emphasis): `S1 (should-fix) —`,
- *                               `**M2 (must-fix, rules face)**`, `- should-fix: …`;
- *                   negated     `no must-fix`, `no should-fix`, `no must-fix or
- *                               should-fix` — the shape a clean round states;
+ *                   open        a finding NAMED with its grade at the line's lead
+ *                               (after heading mark, quote, bullet, emphasis):
+ *                               `S1 (should-fix) —`, `**M2 (must-fix, rules face)**`,
+ *                               `- should-fix: …`;
+ *                   closed      a named finding whose line goes on to say
+ *                               `closed` and nothing before it but punctuation:
+ *                               `- **S1 (should-fix): closed.**` — a delta record
+ *                               closing what an earlier one raised;
+ *                   none        a named grade whose value is `none` (`must-fix: none`);
+ *                   cited       a mention inside the citation of an earlier
+ *                               record, `(record 6891274033: PASS, should-fix S3, …)`,
+ *                               the preamble a delta record opens with;
+ *                   negated     `no must-fix`, `no new should-fix`, `neither must-fix
+ *                               nor should-fix`, `0 must-fix`, and a second grade
+ *                               carried by `or` or `/` (`no must-fix or should-fix`).
+ *                               After a comma or `and` the second grade needs its own
+ *                               `no` — `No must-fix, should-fix S1 and S2 below.`
+ *                               names findings, it does not deny them;
  *                   unreadable  any other mention (`Two should-fix, both …`): the
  *                               grade is there and this reader cannot say whose,
  *                               so the record fails CLOSED.
- *                 A delta record names the findings it closes by id alone
- *                 (`S1: closed.`, the measured shape), which mentions no grade.
+ *                 A delta record may also name what it closes by id alone
+ *                 (`S1: closed.`), which mentions no grade.
  *
- * Grammar measured on the records of PRs #33686, #33687, #33688 (both rounds)
- * and #33711 (2026-11-15): `**S1 (should-fix) — …**`, `- **S2 (should-fix) — …**`,
- * `- nit: …`, `- N1 (nit, prose face): …`, `No must-fix, no should-fix.`,
- * `Findings: no must-fix, no should-fix.`, `No must-fix. S1 and S2 each earn …`,
- * `- **S1: closed.** …`; nits are never read. Pure.
+ * Grammar measured on the records of PRs #33686, #33687, #33688 (both rounds),
+ * #33711 (all three rounds), #33720, #33726 and #33736 (2026-11-15); nits are
+ * never read. Pure.
  */
-const CONTRACT_REVIEW_LINE_LEAD = String.raw`^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?[*_]{0,3}[ \t]*`;
-const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`verdict[ \t]*[*_]{0,3}[ \t]*[:：][ \t]*[*_` + '`' + String.raw`]{0,3}[ \t]*fail\b`, 'i');
-const CONTRACT_REVIEW_FAIL_BARE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`FAIL[*_]{0,3}[ \t]*(?:$|[—–·:：|]|-[ \t])`);
+const CONTRACT_REVIEW_LINE_LEAD = String.raw`^[ \t]*(?:#{1,6}[ \t]+)?(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?[*_]{0,3}[ \t]*`;
+const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:[A-Za-z-]+[ \t]+){0,2}verdict[ \t]*[*_]{0,3}[ \t]*(?:[:：=]|[—–]|-(?=[ \t]))[ \t]*[*_` + '`' + String.raw`]{0,3}[ \t]*fail\b`, 'i');
+const CONTRACT_REVIEW_FAIL_CELL = /^[ \t]*\|.*\bverdict\b[^|]*\|[ \t]*[*_`]{0,3}[ \t]*fail\b/i;
+const CONTRACT_REVIEW_FAIL_BARE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`FAIL[*_]{0,3}[ \t]*(?:$|[—–·:：|.。]|-[ \t])`);
 const CONTRACT_REVIEW_GRADE = /\b(must|should)-fix(?:es)?\b/gi;
-const CONTRACT_REVIEW_GRADE_NAMED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:([A-Z]{1,3}\d+)[*_]{0,3}[ \t]*(?:[(\[][ \t]*|[—–:][ \t]*)?)?[*_]{0,3}(must|should)-fix\b`, 'i');
-const CONTRACT_REVIEW_GRADE_NEGATED = /\b(?:no|nor|zero)[ \t]+(?:(?:must|should)-fix(?:es)?[ \t]*(?:,|\/|or|and)[ \t]*(?:no[ \t]+)?)?$/i;
+const CONTRACT_REVIEW_GRADE_NAMED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:([A-Z]{1,3}\d+)[*_]{0,3}[ \t]*([(\[][ \t]*|[—–:][ \t]*)?)?[*_]{0,3}(must|should)-fix\b`, 'i');
+const CONTRACT_REVIEW_GRADE_NAMED_STATE = /^[^\S\n]*[*_:：—–.,-]*[ \t]*[*_]{0,3}(closed|none)\b/i;
+const CONTRACT_REVIEW_GRADE_NEGATED = /\b(?:no|nor|neither|zero|0)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?(?:(?:must|should)-fix(?:es)?[ \t]*(?:(?:or|nor|\/)[ \t]*|(?:,|and)[ \t]*(?:no|nor)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?))?$/i;
+const CONTRACT_REVIEW_RECORD_CITATION = /\(record[ \t]+\d{6,}\b[^()]*\)/gi;
 export function contractReviewRecordReading(body) {
   const text = String(body ?? '');
-  const m = CONTRACT_REVIEW_HEADING_MARKER.exec(text);
-  if (!m) return null;
-  const headingTail = text.slice(m.index + m[0].length).split(/\r?\n/)[0];
-  const lines = text.split(/\r?\n/);
+  if (!CONTRACT_REVIEW_HEADING_MARKER.test(text)) return null;
   const verdicts = [];
   const failSpellings = [];
   const open = [];
   const unreadable = [];
-  if (CONTRACT_REVIEW_VERDICT_INLINE.exec(headingTail)?.[1] === 'FAIL') failSpellings.push(`## Contract review${headingTail}`.trim());
-  for (const line of lines) {
+  const headingLine = new RegExp(CONTRACT_REVIEW_HEADING_MARKER.source);
+  for (const line of text.split(/\r?\n/)) {
+    // Every heading's own tail is read for an inline FAIL, not only the first one's (nit N3, review 6891926185).
+    const heading = headingLine.exec(line);
+    if (heading && CONTRACT_REVIEW_VERDICT_INLINE.exec(line.slice(heading.index + heading[0].length))?.[1] === 'FAIL') failSpellings.push(line.trim());
     const explicit = CONTRACT_REVIEW_VERDICT_EXPLICIT.exec(line);
     if (explicit) verdicts.push(explicit[1]);
-    else if (CONTRACT_REVIEW_FAIL_KEYED.test(line) || CONTRACT_REVIEW_FAIL_BARE.test(line)) failSpellings.push(line.trim());
+    else if (!heading && (CONTRACT_REVIEW_FAIL_KEYED.test(line) || CONTRACT_REVIEW_FAIL_CELL.test(line) || CONTRACT_REVIEW_FAIL_BARE.test(line))) failSpellings.push(line.trim());
+    const cited = [...line.matchAll(CONTRACT_REVIEW_RECORD_CITATION)].map((c) => [c.index, c.index + c[0].length]);
     const named = CONTRACT_REVIEW_GRADE_NAMED.exec(line);
     // The NAMED mention is the one the lead regex ended on; every other mention on the line is read on its own.
-    const namedAt = named ? named[0].length - `${named[2]}-fix`.length : -1;
+    const namedAt = named ? named[0].length - `${named[3]}-fix`.length : -1;
     for (const mention of line.matchAll(CONTRACT_REVIEW_GRADE)) {
-      if (mention.index === namedAt) open.push({ id: named[1] ?? null, grade: `${named[2].toLowerCase()}-fix`, line: line.trim() });
-      else if (!CONTRACT_REVIEW_GRADE_NEGATED.test(line.slice(0, mention.index))) unreadable.push(line.trim());
+      if (cited.some(([from, to]) => mention.index >= from && mention.index < to)) continue;
+      if (mention.index === namedAt) {
+        // What follows the grade: past the bracket the finding opened with, then `closed` or `none` and only punctuation before it.
+        let rest = line.slice(named[0].length);
+        if (named[2] && /[(\[]/.test(named[2])) rest = rest.slice(rest.search(/[)\]]/) + 1 || rest.length);
+        const state = CONTRACT_REVIEW_GRADE_NAMED_STATE.exec(rest)?.[1]?.toLowerCase();
+        if (state === undefined) open.push({ id: named[1] ?? null, grade: `${named[3].toLowerCase()}-fix`, line: line.trim() });
+      } else if (!CONTRACT_REVIEW_GRADE_NEGATED.test(line.slice(0, mention.index))) unreadable.push(line.trim());
     }
   }
   return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] } };
@@ -32924,6 +32948,9 @@ async function selfTest() {
   t43('#33604 grades: a clean round reads none — `No must-fix, no should-fix.`, `Findings: no must-fix, no should-fix.`, `no must-fix or should-fix`, `No must-fix. S1 and S2 each earn …`, the closing `- **S1: closed.**`, and nits', ['No must-fix, no should-fix.', 'Findings: no must-fix, no should-fix.', 'There is no must-fix or should-fix.', 'No must-fix. S1 and S2 each earn a delta review of their fix.', '- **S1: closed.** Every knock names a key.', '- N1 (nit, prose face): the body overstates.\n- nit: the compare is sent first.'].map(grades43).join(), '|0,|0,|0,|0,|0,|0');
   t43('#33604 grades: a mention the reader cannot attribute is UNREADABLE (fail closed) — the count line `Two should-fix, both …` beside two named ones', grades43('No must-fix. Two should-fix, both in `readArmLanding`.\n\n**S1 (should-fix) — x.**\n**S2 (should-fix) — y.**'), 'S1:should-fix+S2:should-fix|1');
   t43('#33604 N2: FAIL read outside the explicit line — heading tail, lower-case key, bullet, emphasis, a bare line; prose that only mentions the word is not one', [contractReviewRecordReading(PASS43.replace('## Contract review', '## Contract review — **FAIL**')).failSpellings.length, ...['verdict: fail', '- **VERDICT: FAIL**', '**Verdict:** FAIL', 'FAIL', '**FAIL** — x'].map((l) => read43(l).failSpellings.length), ...['- Newest FAIL over an older PASS.', 'FAIL, none or two refuse.', 'The fail-closed verdict: holds.'].map((l) => read43(l).failSpellings.length)].join(), '1,1,1,1,1,1,0,0,0');
+  t43('#33604 S1 (review 6891926185): the measured delta preamble cites, a named finding whose line says closed is closed, `No new should-fix` denies', ['DELTA review from `42323f34` (record 6891274033: PASS, should-fix S3, nits N7 and N8) to this head.', '- **S1 (should-fix): closed.**', 'S1 (should-fix) — closed on this head', 'No new should-fix.', 'must-fix: none'].map(grades43).join(), '|0,|0,|0,|0,|0');
+  t43('#33604 S2 (review 6891926185): `No must-fix, should-fix S1 and S2 below.` is unreadable (a comma carries no denial); its own `no` after `and` does', [grades43('No must-fix, should-fix S1 and S2 below.'), grades43('No must-fix and no should-fix.')].join(), '|1,|0');
+  t43('#33604 S2 (review 6891926185): heading-led key, table cell, words before the key, a dash, a bare `FAIL.` and a second heading read FAIL', ['### VERDICT: FAIL', '## Verdict: FAIL', '| Verdict | FAIL |', 'Overall verdict: FAIL', 'Verdict — FAIL', 'FAIL.', '**FAIL.**', '## Contract review — FAIL', '| Verdict | PASS |'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,1,1,0');
   t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]}}');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.

@@ -2119,7 +2119,8 @@ export function recordPassVerdict(record, pair, recognisers) {
     const named = open.slice(0, 4).map((f) => (f.id ? `${f.id} (${f.grade})` : f.grade)).join(', ');
     return { ...refuse(null, `it reads PASS but names ${open.length} open must-fix/should-fix finding(s) (${named}${open.length > 4 ? ', …' : ''}): each earns a delta review of its fix, and the later same-head record that closes them is the one that clears (#33604)`), author };
   }
-  if (unreadable.length > 0) return { ...refuse(null, `it reads PASS but a must-fix/should-fix grade on it cannot be attributed (${unreadable.slice(0, 2).map(quote).join(', ')}): name each finding \`S1 (should-fix)\`, or state \`no should-fix\` (#33604)`), author };
+  // ⛔ The remedy names the shapes the reader takes, and never asks for a sentence the record may already carry.
+  if (unreadable.length > 0) return { ...refuse(null, `it reads PASS but a must-fix/should-fix mention on it cannot be attributed (${unreadable.slice(0, 2).map(quote).join(', ')}): the reader takes a finding named at a line's lead (\`S1 (should-fix) — …\`, closed as \`S1 (should-fix): closed\`), a citation \`(record ID: …)\` and a denial (\`No must-fix, no should-fix.\`); any other mention of the grade word refuses (#33604)`), author };
   return { ...record, verdict: 'PASS', author };
 }
 
@@ -5564,7 +5565,21 @@ export async function selfTest() {
     const clean = await graded(['Findings: no must-fix, no should-fix.', '- N1 (nit, prose face): the body overstates.', '- nit: the compare is sent first.', 'Nits only; the head is not moved.']);
     assert('#33604-CONTROL-a-PASS-whose-grades-read-no-must-fix-no-should-fix-and-nits-CLEARS', clean.exitCode === EXIT_CLEAR && clean.entries[0].record.verdict === 'PASS', renderGuardVerdict(clean));
     const unattributed = await graded(['Two should-fix remain, see the thread.']);
-    assert('⛔ #33604-a-grade-the-reader-cannot-attribute-FAILS-CLOSED', unattributed.exitCode === EXIT_REFUSED_UNAPPROVED && /cannot be attributed \(`Two should-fix remain, see the thread\.`\)/.test(renderGuardVerdict(unattributed)), renderGuardVerdict(unattributed));
+    assert('⛔ #33604-a-grade-the-reader-cannot-attribute-FAILS-CLOSED-and-the-remedy-names-the-shapes-not-a-sentence-to-add', unattributed.exitCode === EXIT_REFUSED_UNAPPROVED && /cannot be attributed \(`Two should-fix remain, see the thread\.`\)/.test(renderGuardVerdict(unattributed)) && /a citation `\(record ID: …\)`/.test(renderGuardVerdict(unattributed)) && !/or state `no should-fix`/.test(renderGuardVerdict(unattributed)), renderGuardVerdict(unattributed));
+    // ⭐ S1 of review 6891926185: a delta record that cites or closes graded findings CLEARS — measured on #33711's final record 6891542450.
+    const cleanDelta = await graded(['DELTA review from `42323f341b198c6c0625ac74f6ffd3eea8265c6b` (record 6891274033: PASS, should-fix S3, nits N7 and N8) to this head.', '', '- **S3: closed.** The record leg applies the author binding.', '', 'No must-fix. No should-fix. Three new nits.', '', '- **N9** wording.']);
+    assert('#33604-S1-the-MEASURED-clean-delta-record-citing-the-prior-record-with-its-grade-CLEARS', cleanDelta.exitCode === EXIT_CLEAR && cleanDelta.entries[0].record.verdict === 'PASS', renderGuardVerdict(cleanDelta));
+    const closedNamed = await Promise.all(['- **S1 (should-fix): closed.**', 'S1 (should-fix) — closed on this head', 'No new should-fix.', 'No open should-fix.'].map((line) => graded([line])));
+    assert('#33604-S1-a-named-finding-whose-line-says-closed-and-no-new-or-open-should-fix-CLEAR', closedNamed.every((r) => r.exitCode === EXIT_CLEAR), closedNamed.map((r) => r.entries[0].record.verdictReason).join(' | '));
+    const citedThenOpen = await graded(['DELTA review from `9d13278d` (record 6890932729: PASS, should-fix S1 and S2, nits N1 to N6) to this head.', '**S3 (should-fix) — new at this head.**']);
+    assert('⛔ #33604-S1-CONTROL-a-citation-excuses-only-itself-a-new-named-should-fix-beside-it-still-refuses', citedThenOpen.exitCode === EXIT_REFUSED_UNAPPROVED && /S3 \(should-fix\)/.test(renderGuardVerdict(citedThenOpen)), renderGuardVerdict(citedThenOpen));
+    // ⛔ S2 of review 6891926185: every verdict-bearing FAIL form refuses, and an ambiguous negation fails closed.
+    const s2Fails = await Promise.all(['### VERDICT: FAIL', '## Verdict: FAIL', '| Verdict | FAIL |', 'Overall verdict: FAIL', 'Verdict — FAIL', 'FAIL.', '**FAIL.**', '## Contract review — FAIL'].map((line) => graded([line])));
+    assert('⛔ #33604-S2-heading-led-key-table-cell-words-before-the-key-a-dash-a-bare-FAIL-full-stop-and-a-second-heading-each-REFUSE', s2Fails.every((r) => r.exitCode === EXIT_REFUSED_UNAPPROVED && /yet it also reads FAIL/.test(renderGuardVerdict(r))), s2Fails.map((r) => r.entries[0].record.verdictReason).join(' | '));
+    const halfDenied = await graded(['No must-fix, should-fix S1 and S2 below.', '- **S1** the knock has no key.']);
+    assert('⛔ #33604-S2-a-comma-does-not-carry-the-denial-No-must-fix-comma-should-fix-S1-is-UNREADABLE-not-clean', halfDenied.exitCode === EXIT_REFUSED_UNAPPROVED && /cannot be attributed/.test(renderGuardVerdict(halfDenied)), renderGuardVerdict(halfDenied));
+    const cleanDenials = await Promise.all(['No must-fix. No should-fix.', 'No must-fix and no should-fix.', 'Neither must-fix nor should-fix.', '0 must-fix, 0 should-fix', '- should-fix: none', '| Verdict | PASS |'].map((line) => graded([line])));
+    assert('#33604-S2-CONTROL-denials-with-their-own-no-neither-nor-zero-and-a-grade-valued-none-CLEAR', cleanDenials.every((r) => r.exitCode === EXIT_CLEAR), cleanDenials.map((r) => r.entries[0].record.verdictReason).join(' | '));
     const unread = await tierRun({ comments: [recordComment()], recognisers: { ...live, reading: () => ({ verdicts: ['PASS'] }) } });
     assert('⛔ #33604-a-reading-with-no-grades-in-it-FAILS-CLOSED', unread.exitCode === EXIT_REFUSED_UNAPPROVED && /could not be read, so it clears nothing/.test(renderGuardVerdict(unread)), renderGuardVerdict(unread));
     // ⛔ N2 of record 6890532571: a self-contradicting record never clears beside its one PASS line.
