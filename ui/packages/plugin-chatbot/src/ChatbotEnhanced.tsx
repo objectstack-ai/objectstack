@@ -120,7 +120,7 @@ import {
   type PackageRemoval,
   type ReplayOutcome,
 } from './mapMessages';
-import type { ObjectQuerySource } from '@objectstack/spec/ai';
+import type { DatasetProvenance, ObjectQuerySource } from '@objectstack/spec/ai';
 import { AnswerSourceBlock } from './AnswerSource';
 
 /**
@@ -417,7 +417,7 @@ export interface ChatbotEnhancedToolInvocation {
    * "How this was computed" block. Only this lifted copy is drawn there, never
    * `result` itself.
    */
-  answerSource?: ObjectQuerySource;
+  answerSource?: ObjectQuerySource | DatasetProvenance;
   /**
    * cloud#3565 — 「清理示例数据」: the tables and counts the seed ledger
    * recorded, listed on the card before the user confirms (the generic

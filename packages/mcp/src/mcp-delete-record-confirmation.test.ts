@@ -7,7 +7,8 @@
  *
  * ## Why
  *
- * A delete over MCP is hard and permanent, and before this gate one call did
+ * A delete over MCP is destructive (a business record goes to the recycle
+ * bin, a platform object's is gone for good), and before this gate one call did
  * it: `annotations.destructiveHint` is a hint a client may ignore, and the
  * bridge's own checks (API exposure, credentials, the caller's permissions)
  * say whether the caller MAY delete, never whether a human asked for it. An

@@ -2295,6 +2295,7 @@ function FieldControl({
         value={value}
         fields={fields}
         schema={schema}
+        offerUnset={offerUnset}
         readOnly={readOnly}
         widgetContext={widgetContext}
         widget={fieldSpec?.widget}
@@ -3120,6 +3121,7 @@ function RecordField({
   value,
   fields,
   schema,
+  offerUnset,
   readOnly,
   widgetContext,
   widget,
@@ -3132,6 +3134,17 @@ function RecordField({
   value: unknown;
   fields: Array<string | FormFieldSpec>;
   schema: JsonSchema;
+  /**
+   * The key is OPTIONAL (`FieldControl`'s `offerUnset`): removing its last
+   * entry writes it ABSENT, through the form's clear convention
+   * (`onChange(undefined)`), not as `{}`. An empty map and an absent one draw
+   * the same empty list, yet a key may read them apart — a hook's
+   * `refusals: {}` refuses every code its body throws while an absent one
+   * leaves its throws as they were; an entry's `reasons: {}` refuses every
+   * thrown reason while an absent one does not read it (objectstack#33657).
+   * A required key keeps `{}`: it has no absent state.
+   */
+  offerUnset?: boolean;
   readOnly?: boolean;
   widgetContext?: WidgetContext;
   widget?: string;
@@ -3218,7 +3231,8 @@ function RecordField({
   const entries = Object.entries(record);
   const specs = fields.map(normaliseField).filter((s) => s.field !== keyProp);
 
-  const emit = (next: Record<string, Record<string, unknown>>) => onChange(next);
+  const emit = (next: Record<string, Record<string, unknown>>) =>
+    onChange(offerUnset && Object.keys(next).length === 0 ? undefined : next);
 
   const updateItem = (key: string, patch: Record<string, unknown>) => {
     const next: Record<string, Record<string, unknown>> = {};
