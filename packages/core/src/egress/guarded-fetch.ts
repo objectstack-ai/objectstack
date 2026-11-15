@@ -252,7 +252,8 @@ export function installEgressGuard(options: { policy?: EgressPolicy; logger: Egr
         : withLogger(defaultEgressGuard(), options.logger);
     if (!announced.has(guard.policy)) {
         announced.add(guard.policy);
-        (options.logger.info ?? options.logger.warn)(guard.describe());
+        if (options.logger.info) options.logger.info(guard.describe());
+        else options.logger.warn(guard.describe());
     }
     return guard;
 }
