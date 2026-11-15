@@ -72,7 +72,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, permissionSetHoldersMeet, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, packageScopedRefusalMessage, permissionSetHoldersMeet, resolvePackageScopedHolders, type PackageScopedResolvableType, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -10096,8 +10096,52 @@ export class SchemaRegistry {
    *   caller may not reach.
    */
   resolveItem<T>(type: string, name: string, callerPackageId?: string | null, member?: string): T | undefined {
+    if (type === 'doc' && !callerPackageId) return this.readBareDoc<T>(name, member);
     if (!isPackageScopedReadType(type)) return this.getItem<T>(type, name, callerPackageId ?? undefined, member);
     return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
+  }
+
+  /**
+   * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The by-name read of a
+   * `doc` that names no package. `doc` keeps its literal global name and its
+   * addressing (bucket 1); what changes is the context-free read's answer
+   * when two or more ENABLED packages hold the name: a `409
+   * RESOURCE_CONFLICT` naming every holder (`ambiguous-in-environment`), in
+   * place of {@link getItem}'s first composite, which is a registration-order
+   * pick (ADR-0146 D8; the bare save, delete, publish and layered read refuse
+   * the same address already).
+   *
+   * Unchanged: one holder; a package-less bare-slot entry (the environment's
+   * own item) answers first, as {@link getItem} serves it; a disabled package
+   * holds no name ({@link packageScopedHoldersOf}), so beside one enabled
+   * holder the read serves that holder's item, never the disabled one's.
+   * `MetadataFacade.get` serves this answer; the protocol's by-name read asks
+   * it before any layer for its refusal only (`protocol-meta-item-reads.ts`).
+   *
+   * @throws {PackageScopedNameRefusedError} two or more enabled holders.
+   */
+  private readBareDoc<T>(name: string, member?: string): T | undefined {
+    const bare = this.metadata.get('doc')?.get(name) as { _packageId?: unknown } | undefined;
+    const stamp = bare?._packageId;
+    if (bare !== undefined && (typeof stamp !== 'string' || stamp === '' || stamp === 'sys_metadata')) {
+      return this.getItem<T>('doc', name, undefined, member);
+    }
+    const served = this.packageScopedHoldersOf('doc', name);
+    if (served.length >= 2) {
+      const base: Omit<PackageScopedRefusal, 'message'> = {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'doc' as PackageScopedResolvableType,
+        name,
+        callerPackageId: null,
+        candidates: served.map((packageId) => ({ kind: 'package' as const, packageId })),
+      };
+      throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    }
+    if (served.length === 1 && this.packageScopedHoldersOf('doc', name, null, { includeDisabledPackages: true }).length > 1) {
+      return this.getPackageScopedItem<T>('doc', name, served[0], member);
+    }
+    return this.getItem<T>('doc', name, undefined, member);
   }
 
   /**
