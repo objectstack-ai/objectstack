@@ -51,6 +51,7 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
+import { askedFirst, confirmedByAgent } from '../score/index.js';
 import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
@@ -79,7 +80,7 @@ export interface HalfScores {
    * agent half alone, the reason in the mode's findings
    * ({@link platformNotMeasuredFindings}). Absent ⇒ none.
    */
-  operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
+  operations?: Tally & { notMeasured: number; platformNotMeasured?: number; confirmation?: ConfirmationTally };
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
 }
@@ -95,6 +96,18 @@ export interface ModelTally {
 }
 
 export const MODEL_NOT_REPORTED = '(not reported)';
+
+/**
+ * How the passing `pending_confirmation` operations were met
+ * (`OperationGrade.confirmation`): the agent asked the person first, or it
+ * sent `confirm: true` itself through the action's gate, accepted only until
+ * objectstack-ai/cloud#3826 item 6 (`AGENT_CONFIRMATION_MEETS_PENDING`).
+ * Absent ⇒ none passed.
+ */
+export interface ConfirmationTally {
+  askedFirst: number;
+  confirmedByAgent: number;
+}
 
 /** What the authoring turns cost, as their driver reported it ({@link authorCost}). */
 export interface AuthorCost {
@@ -124,6 +137,8 @@ export interface CardScorecard {
   counts: CardRun['counts'];
   /** Every authoring turn of the card, across its modes: the channel's cost on this card. Absent on a record written before the scorecard carried it. */
   authorCost?: AuthorCost;
+  /** {@link ConfirmationTally} summed over every mode and half; absent ⇒ none passed. */
+  confirmation?: ConfirmationTally;
   modes: ModeScorecard[];
 }
 
@@ -171,12 +186,21 @@ export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | und
   if (!r) return undefined;
   const measured = r.operations.filter((o) => !o.notMeasured);
   const platformNotMeasured = measured.filter((o) => platformNotMeasuredReason(o) !== undefined).length;
+  const confirmation = confirmationTally(measured.map((o) => o.grade?.confirmation));
   return {
     passed: measured.filter((o) => o.grade?.pass).length,
     total: measured.length,
     notMeasured: r.operations.length - measured.length,
     ...(platformNotMeasured ? { platformNotMeasured } : {}),
+    ...(confirmation ? { confirmation } : {}),
   };
+}
+
+/** Count each way a passing `pending_confirmation` operation was met; `undefined` when none was. */
+function confirmationTally(ways: ReadonlyArray<string | undefined>): ConfirmationTally | undefined {
+  const asked = ways.filter((w) => w === askedFirst).length;
+  const confirmed = ways.filter((w) => w === confirmedByAgent).length;
+  return asked + confirmed > 0 ? { askedFirst: asked, confirmedByAgent: confirmed } : undefined;
 }
 
 /** Why an operation's platform half was not measured (its `platform:` checks' shared reason), or `undefined`. */
@@ -310,17 +334,25 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
 }
 
 export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
+  const modes = run.modes.map((m) => modeScorecard(m));
+  const halves = modes.flatMap((m) => [m.first.operations?.confirmation, m.iterate?.operations?.confirmation]);
+  const asked = halves.reduce((n, c) => n + (c?.askedFirst ?? 0), 0);
+  const confirmed = halves.reduce((n, c) => n + (c?.confirmedByAgent ?? 0), 0);
   return {
     card: run.card,
     ...(packages ? { packages } : {}),
     counts: run.counts,
     authorCost: authorCost(run.modes.flatMap(authorTurnsOf)),
-    modes: run.modes.map((m) => modeScorecard(m)),
+    ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
+    modes,
   };
 }
 
 const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }) | undefined) =>
   t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
+/** `1 asked first · 1 confirmed by the agent`: how the passing irreversible operations were met. */
+export const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
+const opsCell = (t: HalfScores['operations']) => `${cell(t)}${t?.confirmation ? ` (irreversible: ${confirmationText(t.confirmation)})` : ''}`;
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
 /** `42s`, `15m 00s`. */
@@ -363,6 +395,7 @@ export function renderScorecard(sc: CardScorecard): string {
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
     `author cost: ${authorCostText(sc.authorCost)}`,
     '',
+    ...(sc.confirmation ? [`irreversible operations: ${confirmationText(sc.confirmation)} (accepted until real human confirmation lands)`, ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
@@ -371,13 +404,13 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Build · author', (m) => authorCell(m.first.build));
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
-  row('Run-operations', (m) => cell(m.first.operations));
+  row('Run-operations', (m) => opsCell(m.first.operations));
   row('Run · model', (m) => modelCell(m.first.models));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
-  row('Iterate · Run-operations', (m) => cell(m.iterate?.operations));
+  row('Iterate · Run-operations', (m) => opsCell(m.iterate?.operations));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
