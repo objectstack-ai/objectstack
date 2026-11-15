@@ -554,30 +554,22 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
   });
 
-  it('a package that holds only the parent is refused over a child another package holds, though its upgrade changes nothing in the pair', async () => {
+  it('[#33593 R7] a package that holds only the parent installs an upgrade that changes nothing in the pair, though a child another package holds follows a code it lacks', async () => {
     // The other package's child got in at a cold boot, which is not asked: it
     // follows `currency_code`, and the ledger's parent holds no such field.
     const { ql, manifest } = await bootWith([ledger(), billing([line('invoice.currency_code')])]);
     expect(followedBy(ql)).toBe('invoice.currency_code');
 
-    // The ledger's next version re-registers the same parent.
-    const err = await refusal(() => manifest.register({ ...ledger(), version: '2.0.0' }));
-
-    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
-    expect(String(err?.message)).toContain("'suite_invoice' does not hold the code a registered amount follows");
-    expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency_code'");
-    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
-    expect(ql.registry.getObjectOwner('suite_line')?.packageId).toBe(BILLING);
-
-    // The correction is the child's holder's: once its amount follows nothing
-    // the parent lacks, the ledger's upgrade installs unchanged.
-    await manifest.register(billing([line()], '1.1.0'));
+    // The ledger's next version re-registers the same parent: the pair is as
+    // the upgrade found it, so the upgrade is not what breaks it.
     await manifest.register({ ...ledger(), version: '2.0.0' });
 
     expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('2.0.0');
+    expect(ql.registry.getObjectOwner('suite_line')?.packageId).toBe(BILLING);
+    expect(followedBy(ql)).toBe('invoice.currency_code');
   });
 
-  it('…and a package that holds only the child is refused over a `record` roll-up another package holds', async () => {
+  it('[#33593 R7] …and a package that holds only the child installs an unchanged child under a `record` roll-up another package holds', async () => {
     // At the cold boot the ledger's parent totals, in its own currency, an
     // amount of the other package's child that follows no record's currency.
     const { ql, manifest } = await bootWith([
@@ -587,15 +579,22 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(fieldOf(ql, 'suite_invoice', 'subtotal')?.currencyConfig?.currencyMode).toBe('record');
 
     // The child's package re-registers the same child.
+    await manifest.register(billing([line()], '1.1.0'));
+
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.1.0');
+  });
+
+  it('[#33593 R6] CONTROL: the child\'s upgrade that CHANGES the pair is still refused under that roll-up', async () => {
+    const { ql, manifest } = await bootWith([
+      billing([line('invoice.currency_code')]),
+      { ...ledger(), objects: [invoice('currency_code', SUBTOTAL)] },
+    ]);
+
+    // 1.1.0 makes the amount follow nothing: the roll-up over it is now the upgrade's to answer for.
     const err = await refusal(() => manifest.register(billing([line()], '1.1.0')));
 
     expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_invoice', fieldName: 'subtotal' });
     expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.0');
-
-    // Here the refused package can supply what the other end names: an amount that follows the parent.
-    await manifest.register(billing([line('invoice.currency_code')], '1.1.0'));
-
-    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.1.0');
     expect(followedBy(ql)).toBe('invoice.currency_code');
   });
 

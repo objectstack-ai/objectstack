@@ -3889,8 +3889,9 @@ class RegistrationRestorePoint {
    * the registry.
    */
   noteRegisteredObject(slot: string, layer: RunRegisteredObject): void {
+    const earlier = this.registered.get(slot);
     this.registered.delete(slot);
-    this.registered.set(slot, layer);
+    this.registered.set(slot, earlier === undefined ? layer : { ...layer, replaced: earlier.replaced });
   }
 
   /** The object layers the run registered, in registration order. */
@@ -3921,6 +3922,18 @@ class RegistrationRestorePoint {
 }
 
 /**
+ * [#33593] How the follow door is asked of one layer
+ * ({@link SchemaRegistry.recordCurrencyFollowRefusalOf}): its slot's package,
+ * the priority it sorts at (the slot's, when omitted), and `before` — what the
+ * slot held before the change being judged, `null` for an empty slot.
+ */
+interface FollowDoorLayer {
+  readonly packageId: string | undefined;
+  readonly priority?: number;
+  readonly before: ObjectContributor | null;
+}
+
+/**
  * One object layer a registration run registered: the body its registration's
  * doors judged, and the contributor it became — the registry's own entry, so
  * the run's end can tell a layer a later write of the run took out again, and
@@ -3930,6 +3943,13 @@ interface RunRegisteredObject {
   readonly fqn: string;
   readonly schema: ServiceObject;
   readonly contributor: ObjectContributor;
+  /**
+   * What the layer's slot held before the run's first write to it, or `null`
+   * when it was empty: the run's end judges the layer against the object as
+   * it was served with this in its place, so a pair the run leaves as it
+   * found it is not the run's to answer for (#33593 ruling R7).
+   */
+  readonly replaced: ObjectContributor | null;
 }
 
 /**
@@ -4423,12 +4443,13 @@ export class SchemaRegistry {
     if (layers.length === 0) return undefined;
     // One read for the whole question: nothing registers while it is asked.
     const all = this.getAllObjects();
-    for (const { fqn, schema, contributor } of layers) {
+    for (const { fqn, schema, contributor, replaced } of layers) {
       const sitting = this.objectContributors.get(fqn);
       if (!sitting?.includes(contributor)) continue;
       if (contributor.ownership === 'own' && sitting.some((c) => c.ownership === 'overlay')) continue;
-      const refusal = this.recordCurrencyFollowRefusalOf(schema, contributor.ownership, () => all);
-      if (refusal) return this.followRefusalAsServed(refusal, schema, contributor.ownership, all);
+      const layer: FollowDoorLayer = { packageId: contributor.packageId, priority: contributor.priority, before: replaced };
+      const refusal = this.recordCurrencyFollowRefusalOf(schema, contributor.ownership, layer, () => all);
+      if (refusal) return this.followRefusalAsServed(refusal, schema, contributor.ownership, layer, all);
     }
     return undefined;
   }
@@ -4453,6 +4474,7 @@ export class SchemaRegistry {
     refusal: RecordCurrencyFollowRefusedError,
     schema: ServiceObject,
     ownership: ObjectOwnership,
+    layer: FollowDoorLayer,
     all: readonly ServiceObject[],
   ): RecordCurrencyFollowRefusedError {
     const overPackage: string[] = [];
@@ -4468,7 +4490,7 @@ export class SchemaRegistry {
         return fqn !== undefined && throughPackage.has(fqn) ? this.resolveOwnerLayer(fqn) ?? object : object;
       };
       const objects = all.map((object) => read(object) ?? object);
-      return this.recordCurrencyFollowRefusalOf(schema, ownership, () => objects, (name) => read(this.getObject(name))) !== undefined;
+      return this.recordCurrencyFollowRefusalOf(schema, ownership, layer, () => objects, (name) => read(this.getObject(name))) !== undefined;
     };
     if (refusedReading(new Set(overPackage))) return refusal;
     // The ones that decide it, each on its own; all of them when only together they do.
@@ -5768,44 +5790,94 @@ export class SchemaRegistry {
     // option, a registration run at its end
     // ({@link recordCurrencyFollowRefusalOfRun}).
     if (opts.againstRegistry === true && this.bareNameHoldersAreSealed) {
-      const recordCurrencyFollow = this.recordCurrencyFollowRefusalOf(schema, ownership);
+      const recordCurrencyFollow = this.recordCurrencyFollowRefusalOf(schema, ownership, { packageId, before: null });
       if (recordCurrencyFollow) return { refusal: recordCurrencyFollow };
     }
     return { schema };
   }
 
   /**
-   * [ADR-0144 D2 and D6, amended] The follow door's question of one body, as
+   * [ADR-0144 D2 and D6, amended] The follow door's question of one layer, as
    * `ownership`, against the registry as it stands: the one copy a single
    * save ({@link judgeRegistrationDoors}) and a registration run
    * ({@link recordCurrencyFollowRefusalOfRun}) ask. `all` answers the
    * registered objects; a caller asking of several bodies reads them once.
    * `lookup` answers one of them by name, and is the served object unless the
    * caller reads an object another way ({@link followRefusalAsServed}).
+   *
+   * [#33593 ruling A, amended] The door judges the layer's object AS SERVED
+   * with the layer in its slot ({@link servedFoldWithLayer}) — never the bare
+   * body, so an `extend` contribution's following amount is judged as an own
+   * body's is (R1), and an owner judges the amounts the extensions already
+   * registered under it add (R3). An object no owner serves is no verdict
+   * (R2). `layer.before` is what the slot held before: a pair already refused
+   * with it in place is not this layer's to answer for (R7).
    */
   private recordCurrencyFollowRefusalOf(
     schema: ServiceObject,
     ownership: ObjectOwnership,
+    layer: FollowDoorLayer,
     all: () => readonly ServiceObject[] = () => this.getAllObjects(),
     lookup: (name: string) => ServiceObject | undefined = (name) => this.getObject(name),
   ): RecordCurrencyFollowRefusedError | undefined {
-    return recordCurrencyFollowRefusal(schema, {
+    const fqn = String(schema.name ?? '');
+    const served = this.servedFoldWithLayer(fqn, ownership, layer.packageId, {
+      packageId: layer.packageId,
+      namespace: '',
+      ownership,
+      priority: layer.priority ?? this.followDoorSlotPriority(fqn, ownership, layer.packageId),
+      definition: { ...schema, name: fqn },
+    });
+    if (served === undefined) return undefined;
+    const before = this.servedFoldWithLayer(fqn, ownership, layer.packageId, layer.before ?? undefined);
+    return recordCurrencyFollowRefusal(served, {
       lookup,
       all,
-      extensionFieldsOf: (name) => {
-        const fqn = this.resolveObjectKey(name);
-        // As the served fold reads the parent ({@link resolveObject}): a
-        // disabled package's extension is withheld, so both ends of the pair
-        // read one parent.
-        const extensions = fqn === undefined
-          ? []
-          : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend' && !this.isPackageDisabled(c.packageId));
-        return extensions.length === 0
-          ? undefined
-          : Object.assign({}, ...extensions.map((c) => (c.definition as { fields?: Record<string, unknown> }).fields ?? {}));
+      extensionPackageOf: (name, field) => {
+        const key = this.resolveObjectKey(name);
+        if (key === undefined) return undefined;
+        // As the served fold reads the object ({@link resolveObject}): a
+        // disabled package's extension is withheld; the last to add wins.
+        const adders = this.getObjectContributors(key).filter((c) => c.ownership === 'extend'
+          && !this.isPackageDisabled(c.packageId)
+          && Object.prototype.hasOwnProperty.call((c.definition as { fields?: object }).fields ?? {}, field));
+        return adders.length === 0 ? undefined : adders[adders.length - 1].packageId;
       },
-      partial: ownership === 'extend',
-    });
+    }, before);
+  }
+
+  /**
+   * [#33593 ruling R1] The object `fqn` as {@link resolveObject} would serve
+   * it with `layer` filling the slot `ownership` and `packageId` name (one
+   * owner, one overlay, one extension per package — the replacement rules
+   * {@link registerObject} applies), or with that slot empty when `layer` is
+   * `undefined`. `undefined` when no owner would serve it. Uncached: it is a
+   * question about a registry the caller has not written.
+   */
+  private servedFoldWithLayer(
+    fqn: string,
+    ownership: ObjectOwnership,
+    packageId: string | undefined,
+    layer: ObjectContributor | undefined,
+  ): ServiceObject | undefined {
+    const others = (this.objectContributors.get(fqn) ?? []).filter((c) => c.ownership !== ownership
+      || (ownership === 'extend' && c.packageId !== packageId));
+    const contributors = layer === undefined ? others : [...others, layer].sort((a, b) => a.priority - b.priority);
+    const owner = contributors.find((c) => c.ownership === 'own');
+    if (!owner) return undefined;
+    const base = contributors.find((c) => c.ownership === 'overlay') ?? owner;
+    const withheld = this.withholdDisabledExtensions(contributors);
+    return withheld
+      ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
+      : this.foldExtenders(contributors, base);
+  }
+
+  /** The priority a layer about to register in the slot would take: the sitting one's, else the kind's default. */
+  private followDoorSlotPriority(fqn: string, ownership: ObjectOwnership, packageId: string | undefined): number {
+    const sitting = (this.objectContributors.get(fqn) ?? []).find((c) => c.ownership === ownership
+      && (ownership !== 'extend' || c.packageId === packageId));
+    if (sitting) return sitting.priority;
+    return ownership === 'own' ? DEFAULT_OWNER_PRIORITY : ownership === 'overlay' ? DEFAULT_OVERLAY_PRIORITY : DEFAULT_EXTENDER_PRIORITY;
   }
 
   /**
@@ -6003,6 +6075,8 @@ export class SchemaRegistry {
     // it keeps `objectKeysByShortName` in step with `objectContributors`)
     const contributors = this.openObjectEntry(fqn);
 
+    // [#33593 ruling R7] What this layer's slot held, for the open run's end.
+    let replaced: ObjectContributor | null = null;
     // Validate ownership rules
     if (ownership === 'own') {
       const existingOwner = contributors.find(c => c.ownership === 'own');
@@ -6049,6 +6123,7 @@ export class SchemaRegistry {
         // same owned object), not an error — keep it at debug so a stock boot
         // stays warning-free (#3420).
         contributors.splice(contributors.indexOf(existingOwner), 1);
+        replaced = existingOwner;
         this.debug(`[Registry] Re-registering owned object: ${fqn} from ${packageId}`);
       }
     } else if (ownership === 'overlay') {
@@ -6065,14 +6140,14 @@ export class SchemaRegistry {
       // `loadMetaFromDb`'s per-record `errors` at boot.
       const idx = contributors.findIndex(c => c.ownership === 'overlay');
       if (idx !== -1) {
-        contributors.splice(idx, 1);
+        replaced = contributors.splice(idx, 1)[0];
         this.debug(`[Registry] Replacing overlay layer of object: ${fqn} from ${packageId}`);
       }
     } else {
       // extend mode: remove existing extension from same package
       const idx = contributors.findIndex(c => c.packageId === packageId && c.ownership === 'extend');
       if (idx !== -1) {
-        contributors.splice(idx, 1);
+        replaced = contributors.splice(idx, 1)[0];
       }
     }
 
@@ -6099,7 +6174,7 @@ export class SchemaRegistry {
     // ({@link restoringOnRefusal}). Outside a run nothing is recorded.
     this.restorePoint?.noteRegisteredObject(
       `${fqn}\u0000${ownership}${ownership === 'extend' ? `\u0000${packageId ?? ''}` : ''}`,
-      { fqn, schema: judged, contributor },
+      { fqn, schema: judged, contributor, replaced },
     );
 
     // Sort by priority (ascending: lower priority applied first)
