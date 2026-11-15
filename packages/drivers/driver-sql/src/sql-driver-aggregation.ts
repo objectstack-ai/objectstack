@@ -30,6 +30,7 @@
 
 import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
 import { emptyGroupValueFor } from '@objectstack/spec/data';
+import type { Knex } from 'knex';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { AGGREGATE_ACCUMULATION, AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
@@ -78,8 +79,19 @@ export interface AggregationHost {
 export class AggregationFacet {
   /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
   static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#33698] The per-measure `filter`s that carry a condition (`{}` is the
+    // vacuous filter, same convention as `where` / `having`): each compiles
+    // with the where compiler below, so each is primed and read like a `where`.
+    const measureFilters = (query.aggregations ?? [])
+      .map((agg) => agg.filter)
+      .filter((filter): filter is NonNullable<typeof filter> => !!filter && Object.keys(filter).length > 0);
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
-    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    if (this.isMssql) {
+      await this.primeMssqlGuidColumns(
+        object,
+        measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where,
+      );
+    }
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
@@ -94,6 +106,46 @@ export class AggregationFacet {
     // named the field verbatim, so a mapped object's GROUP BY / aggregand /
     // `distinct` asked the remote table for a column it does not have.
     const columnOf = (field: string): string => this.remoteColumn(object, field, field);
+    // [#33698] A measure filter's predicate, compiled by the SAME where
+    // compiler a `where` goes through (`applyFilters`: the same comparand
+    // gates, refusals, coercion and column map), on a builder of the same
+    // table carrying the same tenant scope as the statement, then lifted out
+    // of `select * from t [where <tenant>] (where|and) <pred>`. It goes inside
+    // the aggregate as `CASE WHEN (pred) THEN … END`, so it only NARROWS the
+    // rows the statement already reads: the tenant wall and the read scope
+    // stay on the statement's own WHERE, never in a measure. Neither builder
+    // here is executed; each is scoped like every other builder of a read
+    // door, so the reference statement and the filtered one differ by exactly
+    // the predicate. `undefined` = the filter compiled to no condition at all
+    // (a vacuous tree), so the measure is the unfiltered aggregate — what the
+    // in-memory path answers for it.
+    // The lift is guarded rather than trusted: a statement that is not the
+    // reference plus one predicate, whose leading bindings are not the
+    // reference's, or whose predicate's `?` placeholders do not pair one to
+    // one with its own bindings (a `??` or an escaped `\?` would be re-read by
+    // `knex.raw`), is refused (NOT_IMPLEMENTED/501), never guessed at.
+    const compileMeasureFilter = (filter: NonNullable<DriverQuery['where']>, alias: string): { sql: string; bindings: readonly Knex.Value[] } | undefined => {
+      const reference = this.getBuilder(object, options);
+      this.applyTenantScope(reference, object, options);
+      const filtered = this.getBuilder(object, options);
+      this.applyTenantScope(filtered, object, options);
+      this.applyFilters(filtered, filter, options);
+      const bare = reference.toSQL();
+      const compiled = filtered.toSQL();
+      if (compiled.sql === bare.sql && compiled.bindings.length === bare.bindings.length) return undefined;
+      const prefix = [`${bare.sql} where `, `${bare.sql} and `].find((p) => compiled.sql.startsWith(p));
+      const sql = prefix === undefined ? '' : compiled.sql.slice(prefix.length);
+      const bindings = compiled.bindings.slice(bare.bindings.length);
+      if (
+        prefix === undefined
+        || bare.bindings.some((b, i) => b !== compiled.bindings[i])
+        || /\?\?|\\\?/.test(sql)
+        || (sql.match(/\?/g) ?? []).length !== bindings.length
+      ) {
+        throw unsupportedAggregationFilterError(alias, 'driver-sql');
+      }
+      return { sql, bindings };
+    };
     this.applyTenantScope(builder, object, options);
 
     if (query.where) {
@@ -201,15 +253,21 @@ export class AggregationFacet {
     const aggregates = query.aggregations;
     if (aggregates) {
       for (const agg of aggregates) {
-        // [#10576] A per-aggregation `filter` this compiler cannot express is
-        // refused before any statement is built — silently emitting the
-        // UNFILTERED aggregate is the #10413 defect. Unreachable through
-        // `engine.aggregate` (the engine lowers filtered aggregations in
-        // memory); this is the direct-caller guard. `{}` is the vacuous filter,
-        // same convention as `where` / `having`.
-        if (agg.filter && Object.keys(agg.filter).length > 0) {
-          throw unsupportedAggregationFilterError(agg.alias ?? agg.field ?? '(unaliased)', 'driver-sql');
-        }
+        // [#33698] A per-aggregation `filter` (#10576) compiles to a
+        // conditional aggregate — `fn(CASE WHEN (pred) THEN arg END)` — which
+        // is SQL's `fn(arg) FILTER (WHERE pred)` on every dialect this driver
+        // targets: a row the predicate rejects contributes NULL, which every
+        // aggregate skips. `count(*)` becomes `count(CASE WHEN (pred) THEN 1
+        // END)` — ⛔ never `ELSE 0`, which `count` would count. A group the
+        // filter empties answers what that aggregate answers over nothing
+        // (`emptyGroupValueFor`, folded below like any other measure): `sum`
+        // and both counts `0`, `avg`/`min`/`max` NULL — the in-memory path's
+        // answer. Silently emitting the UNFILTERED aggregate is the #10413
+        // defect; a predicate that cannot be lifted is refused instead (see
+        // `compileMeasureFilter`). `{}` is the vacuous filter.
+        const measureFilter = agg.filter && Object.keys(agg.filter).length > 0
+          ? compileMeasureFilter(agg.filter, agg.alias ?? agg.field ?? '(unaliased)')
+          : undefined;
         const funcName = agg.function;
         const lowering = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).
@@ -249,14 +307,22 @@ export class AggregationFacet {
         const argExpr = dialect === 'mssql'
           ? mssqlAggregandOperandSql(funcName, aggregandClass, '??')
           : aggregandOperandSql(funcName, aggregandClass, coreSqlDialectOf(dialect), '??');
+        // The operand, conditional when a measure filter compiled: the
+        // predicate's bindings precede the column's `??` in the text, so they
+        // precede it in the bindings too.
+        const operand = measureFilter ? `CASE WHEN (${measureFilter.sql}) THEN ${argExpr} END` : argExpr;
+        const filterBindings: Knex.Value[] = measureFilter ? [...measureFilter.bindings] : [];
         const rawFunc = lowering.distinct
-          ? `${lowering.sql}(distinct ${argExpr})`
-          : `${lowering.sql}(${argExpr})`;
+          ? `${lowering.sql}(distinct ${operand})`
+          : `${lowering.sql}(${operand})`;
+        const starFunc = measureFilter
+          ? `${lowering.sql}(CASE WHEN (${measureFilter.sql}) THEN 1 END)`
+          : `${lowering.sql}(*)`;
         if (agg.alias) {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${lowering.sql}(*) as ${this.aliasIdentifierSql(agg.alias)}`));
+            builder.select(this.knex.raw(`${starFunc} as ${this.aliasIdentifierSql(agg.alias)}`, filterBindings));
           } else {
-            builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [columnOf(fieldExpr)]));
+            builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [...filterBindings, columnOf(fieldExpr)]));
           }
           // [#15546] What this aggregate answers over NOTHING, read from the
           // policy rather than restated: `sum` (and the two counts, which never
@@ -303,9 +369,9 @@ export class AggregationFacet {
           }
         } else {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${lowering.sql}(*)`));
+            builder.select(this.knex.raw(starFunc, filterBindings));
           } else {
-            builder.select(this.knex.raw(rawFunc, [columnOf(fieldExpr)]));
+            builder.select(this.knex.raw(rawFunc, [...filterBindings, columnOf(fieldExpr)]));
           }
         }
       }
