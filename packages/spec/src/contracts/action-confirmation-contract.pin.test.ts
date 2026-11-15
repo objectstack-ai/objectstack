@@ -55,8 +55,11 @@ import {
   AI_ACTION_CONFIRMATION_CAPABILITY,
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
+  type ActionConfirmationHandOff,
+  type ActionConfirmationPending,
   type ActionConfirmationRefusalReason,
   type ActionConfirmationRequiredDetails,
+  type IActionConfirmationService,
 } from './ai-service';
 
 /** The refusal code the contract names. */
@@ -146,18 +149,23 @@ describe('action-confirmation contract — an unconfirmed gated action is refuse
 });
 
 /**
- * The amended contract: a person confirms a declared-gated action through MCP
- * elicitation, and the caller's own `confirm` never counts (ruling
- * 「3826 照建议（征询版）」, objectstack-ai/cloud#3826 item 6).
+ * The amended contract: a person confirms a declared-gated action, through
+ * MCP elicitation when the client can be asked and through a hand-off to the
+ * host's pending-confirmation service otherwise, refused only when the host
+ * has none; the caller's own `confirm` never counts (ruling
+ * 「3826 照建议（征询版）」, objectstack-ai/cloud#3826 item 6, as amended on
+ * the card).
  *
- * Pinned here: the capability's spelling, the CLOSED refusal-reason set, that
- * `details.reason` is typed to it and stays optional while the member gates
- * still answer without it, that the amendment adds no second refusal code,
- * and that the contract's own text names every reason and every elicitation
- * answer, so the tuple and the prose cannot drift apart. NOT pinned: any door
- * behaviour, which the implementing change lands and pins.
+ * Pinned here: the capability's spelling, the CLOSED refusal-reason set (a
+ * hand-off is not in it), that `details.reason` is typed to it and stays
+ * optional while the member gates still answer without it, the pending
+ * answer's discriminant and the hand-off seam's shape, that the amendment adds
+ * no second refusal code, and that the contract's own text names every reason,
+ * every answer and the three steps, so the types and the prose cannot drift
+ * apart. NOT pinned: any door behaviour, which the implementing change lands
+ * and pins.
  */
-describe('action-confirmation contract, as amended: a person confirms through elicitation', () => {
+describe('action-confirmation contract, as amended: a person confirms, elicited or handed off', () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const CONTRACT_SOURCE = join(HERE, 'ai-service.ts');
 
@@ -178,14 +186,18 @@ describe('action-confirmation contract, as amended: a person confirms through el
 
   it('the refusal reasons are a CLOSED set of exactly five', () => {
     expect([...ACTION_CONFIRMATION_REFUSAL_REASONS]).toEqual([
-      'elicitation_unsupported',
       'declined',
       'cancelled',
       'timed_out',
+      'no_confirmation_service',
       'service_account',
     ]);
-    // Control: an accepted elicitation is not a refusal, so it is no reason.
-    expect((ACTION_CONFIRMATION_REFUSAL_REASONS as readonly string[]).includes('accepted')).toBe(false);
+    // Controls: an accepted elicitation and a hand-off are not refusals, and a
+    // client that cannot elicit is handed off rather than refused for that.
+    const reasons = ACTION_CONFIRMATION_REFUSAL_REASONS as readonly string[];
+    for (const notARefusal of ['accepted', 'pending_confirmation', 'elicitation_unsupported']) {
+      expect(reasons.includes(notARefusal), `${notARefusal} must not be a refusal reason`).toBe(false);
+    }
   });
 
   it('`details.reason` is typed to the closed set, and optional', () => {
@@ -212,6 +224,34 @@ describe('action-confirmation contract, as amended: a person confirms through el
     expect(ACTION_CONFIRMATION_REFUSAL_REASONS).toContain(reason);
   });
 
+  it('a hand-off answers with the pending discriminant, through an optional host seam', () => {
+    const pending: ActionConfirmationPending = {
+      status: 'pending_confirmation',
+      pendingId: 'pc_1',
+      message: 'A confirmation was sent to you.',
+      actionName: 'archive_account',
+      objectName: 'account',
+    };
+    expect(pending.status).toBe('pending_confirmation');
+    const wrongStatus: ActionConfirmationPending = {
+      // @ts-expect-error — the discriminant is one literal; the in-app chat's
+      // older `pending_approval` envelope is not this answer.
+      status: 'pending_approval',
+      pendingId: 'pc_1',
+      message: 'm',
+      actionName: 'archive_account',
+    };
+    expect(String(wrongStatus.status)).toBe('pending_approval');
+
+    const handOff: ActionConfirmationHandOff = {
+      actionName: 'archive_account', objectName: 'account', recordId: 'a1', params: {}, door: 'mcp',
+    };
+    const service: IActionConfirmationService = {
+      submit: async (h) => ({ pendingId: `pc_${h.actionName}` }),
+    };
+    return expect(service.submit(handOff, {} as never)).resolves.toEqual({ pendingId: 'pc_archive_account' });
+  });
+
   it('the amendment keeps ONE refusal code: no second code is registered for it', () => {
     const all = Object.values(ERROR_CODE_LEDGER).flat() as string[];
     expect(all).toContain(CODE);
@@ -225,9 +265,18 @@ describe('action-confirmation contract, as amended: a person confirms through el
     for (const reason of ACTION_CONFIRMATION_REFUSAL_REASONS) {
       expect(prose, `the contract no longer states the \`${reason}\` case`).toContain(`\`${reason}\``);
     }
-    for (const answer of ['`accept`', '`decline`', '`cancel`', 'Timed out']) {
+    for (const answer of ['`accept`', '`decline`', '`cancel`', 'timed out', 'then approved in the app', 'then rejected in the app']) {
       expect(prose, `the contract no longer says what ${answer} does`).toContain(answer);
     }
+    for (const step of ['**Elicit**', '**Hand off**', '**Refuse**, only when the host has no pending-confirmation service']) {
+      expect(prose, `the contract dropped the step ${step}`).toContain(step);
+    }
+    expect(prose, 'the contract dropped the AI-identity refusal on the approve and reject doors').toMatch(
+      /approve and reject doors of the pending-confirmation service refuse an AI identity/,
+    );
+    expect(prose, 'the contract dropped the re-check at approval').toMatch(/every gate and permission re-checked/);
+    expect(prose, 'the contract dropped the trust bound of an elicited answer').toMatch(/proves that the CLIENT answered, not that a person did/);
+    expect(prose, 'the contract claims a refused call read nothing again').not.toMatch(/no record was read/);
     expect(prose, 'the contract dropped "the caller\'s `confirm` never counts"').toMatch(/The caller's `confirm` never counts/);
     expect(prose, 'the contract dropped the unchanged AI service account rule').toMatch(
       /An AI service account: unchanged\*\* \(ADR-0151 D3 rule 3\)/,
