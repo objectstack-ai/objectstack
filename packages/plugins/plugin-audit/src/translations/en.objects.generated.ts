@@ -329,6 +329,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           late: "Late"
         }
       },
+      part_index: {
+        label: "Part",
+        help: "Place among the consecutive checkpoints of at most 10,000 rows its window (or late sealing) is cut into, from 0"
+      },
+      final_part: {
+        label: "Final Part",
+        help: "Whether this is the last part of its window (or late sealing)"
+      },
       window_start: {
         label: "Window Start"
       },

@@ -93,15 +93,15 @@ export const SysAuditCheckpoint = ObjectSchema.create({
         description: 'A window sealed on time, or rows that arrived after their window was sealed',
       },
     ),
+    // Not required: a checkpoint written before ADR-0154's 2026-11-14 amendment holds NULL in both and reads as
+    // one part, final — its signed body never carried them.
     part_index: Field.number({
       label: 'Part',
-      required: true,
       readonly: true,
       description: 'Place among the consecutive checkpoints of at most 10,000 rows its window (or late sealing) is cut into, from 0',
     }),
     final_part: Field.boolean({
       label: 'Final Part',
-      required: true,
       readonly: true,
       description: 'Whether this is the last part of its window (or late sealing)',
     }),

@@ -2,7 +2,7 @@
 
 import type { IAuditCheckpointSigner, IClusterService, LockHandle } from '@objectstack/spec/contracts';
 import { describe, expect, it } from 'vitest';
-import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes, verifyAuditLedger } from './index.js';
+import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes, verifyAuditLedger, type CheckpointSignedBody } from './index.js';
 import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
 import { AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS, AUDIT_SEAL_MAX_LEAVES, AUDIT_SEALER_LOCK, AuditSealer } from './sealer.js';
 import { LocalCheckpointSigner } from './signer.js';
@@ -342,6 +342,26 @@ describe('bounded checkpoints: a window seals into consecutive parts of at most 
       ['org_a', 'window', at(9, 0), 1, 0, true, ['r3']],
     ]);
     expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+  });
+
+  it('reads a checkpoint written before the amendment (no part index, no final flag) as one final part: it verifies, and its chain goes on', async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    await s.sealer.runPass();
+    const stored = s.hot.table('sys_audit_checkpoint')[0];
+    const { part_index: _part, final_part: _final, ...legacy } = checkpointBodyFromRow(stored);
+    const { signature } = await s.signer.sign(signedBodyBytes(legacy as CheckpointSignedBody));
+    Object.assign(stored, { part_index: null, final_part: null, signature });
+    expect(Object.keys(checkpointBodyFromRow(stored))).not.toContain('part_index');
+    s.hot.table('ledger_probe').push(row('r2', at(9, 10)));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, undefined, undefined, ['r1']],
+      ['org_a', 'window', at(9, 0), 1, 0, true, ['r2']],
+    ]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(true);
+    expect(report.totals).toMatchObject({ unmodified: 2 });
   });
 
   it('resumes a window a stopped pass left mid-way as further window parts, never late ones', async () => {

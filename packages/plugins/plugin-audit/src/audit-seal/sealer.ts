@@ -472,7 +472,8 @@ class ObjectPass {
         let part: { part_index: number; final_part: boolean };
         try {
           start = Date.parse(canonicalDatetime(row.window_start, 'window_start'));
-          part = checkpointPartOf(row);
+          // A checkpoint written before the amendment is one part, final.
+          part = checkpointPartOf(row) ?? { part_index: 0, final_part: true };
         } catch (err) {
           this.skip(key, err, this.floor);
           continue;
