@@ -940,7 +940,23 @@ export const CEILINGS = new Map([
   // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
   // 6682024726); raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
-  ['skills/objectstack-data/rules/relationships.md', 4127],
+  // 4127 -> 4232: the roll-up section tells the builder to resolve a
+  // `security-rollup-source-unreadable` warning before finishing (grant the
+  // child read, or mask the parent summary on the set, View All / Modify All on
+  // the parent removed first), with one worked `client_viewer` example proven
+  // against the lint rule. PAID DOWN FIRST — two restatements cut from the
+  // same section, each keeping a home: the `procurement_receipt` /
+  // `received_amount` filtered-sum example (the section's code block shows
+  // `function: 'sum'` beside `filter: { status: 'received' }`, and the
+  // three-counts sentence carries "one child, several totals") and the
+  // "a child moving in or out of the predicate recomputes the parent" sentence
+  // (the section's opening: recomputed whenever a child is inserted, updated
+  // or deleted). Arithmetic in bytes against `main`'s 16444 (4111 tokens, 16
+  // under the old ceiling): -239 cut, +720 added -> 16925 (+481 net) ->
+  // ceil(16925 / 4) = 4232; the ceiling moves +105, pinned AT the measurement.
+  // Raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068), quoted verbatim and untranslated in the PR body.
+  ['skills/objectstack-data/rules/relationships.md', 4232],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
