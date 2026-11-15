@@ -3700,10 +3700,12 @@ export async function selfTest() {
     // ⛔ A governed path git would C-quote, read through REAL git (gitFreeEnv): a non-ASCII name and a name holding a
     // newline. Without `-z` the first prints as `"skills/a/\346\226\207\346\241\243.md"` and the second as
     // `"skills/a/two\nlines.md"`, quoted spellings that match no governed prefix, so the queue never saw the file.
+    // `core.quotePath=true` is pinned on the command line: gitFreeEnv strips GIT_* but not a user or system gitconfig,
+    // and a box set to `core.quotePath=false` spells the non-ASCII name raw, which reds the CONTROL witness below.
     const quotedDir = mkdtempSync(join(tmpdir(), 'guard-quoted-paths-'));
     try {
       const g = (args) =>
-        execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], {
+        execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', '-c', 'core.quotePath=true', ...args], {
           cwd: quotedDir,
           encoding: 'utf8',
           env: gitFreeEnv(),
