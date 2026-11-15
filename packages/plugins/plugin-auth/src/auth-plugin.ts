@@ -128,7 +128,11 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
-import type { DirectSignInOptions } from './direct-sign-in.js';
+import {
+  directSignInNetworkRefusal,
+  isDirectSignInDoorNavigation,
+  type DirectSignInOptions,
+} from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -3880,6 +3884,9 @@ export class AuthPlugin implements Plugin {
     // of the routes below. The public render helpers (/config,
     // /bootstrap-status) are exempt so a blocked client still gets a clean
     // login page + error. Nothing is judged when no ranges are configured.
+    // Direct sign-in's start door is NOT exempt: a blocked browser that
+    // navigated to it is refused with a landing on the sign-in page that names
+    // the refusal (`directSignInNetworkRefusal`), never by reaching the door.
     //
     // The address judged is the one the server ESTABLISHED, by the platform's
     // client-address trust rule (`AuthManager.resolveClientAddress`, shared
@@ -3905,6 +3912,13 @@ export class AuthPlugin implements Plugin {
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
         this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
+        if (
+          this.directSignInDoorMounted &&
+          typeof mgr.getConsoleUrl === 'function' &&
+          isDirectSignInDoorNavigation(c.req.method, path, basePath)
+        ) {
+          return directSignInNetworkRefusal(c.req.url, (page) => mgr.getConsoleUrl(page));
+        }
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,
@@ -4075,16 +4089,17 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/set-initial-password`, async (c: any) => {
       try {
         const authApi = await this.authManager!.getApi();
-        // [#25083] On a cloud-managed environment the door narrows to a caller
-        // with platform-admin standing: everyone else signs in through the
-        // hosting organisation's identity provider, while an administrator can
-        // still give themselves the local password break-glass needs (ADR-0135
-        // D5.2 splits by population, never wholesale). A caller with no
-        // session falls through to the body, which answers it as before.
+        // [#25083] [#33203] On a cloud-managed environment the door refuses
+        // every signed-in caller, a platform administrator included: everyone
+        // signs in through the hosting organisation's identity provider, and a
+        // hosted environment keeps no local break-glass password (ruling 10 of
+        // objectstack-ai/cloud#4465; `cloud-managed.ts` states the rule). A
+        // caller with no session falls through to the body, which answers it
+        // as before.
         if (isCloudManaged()) {
           // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
           const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
-          if (session?.user?.id && !isPlatformAdminUser(session.user)) {
+          if (session?.user?.id) {
             const refusal = cloudManagedRefusal('setInitialPassword');
             return c.json(refusal.body, refusal.status);
           }

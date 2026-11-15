@@ -476,8 +476,9 @@
  *
  * Modelled as the workflows split is: the `skills-catalog` and
  * `ui-skills-catalog` rows KEEP `tier: H` — every path-only reader (`--test`,
- * `--branch`, the CODEOWNERS mirror, the prose gate) answers exactly as before —
- * and carry `lowRisk`, scoped to objectstack. The relay's review plan is not
+ * `--branch`, the prose gate) answers exactly as before, while the CODEOWNERS
+ * mirror reads the arm and keeps both rows out of the file (ruling record
+ * 6891850019) — and carry `lowRisk`, scoped to objectstack. The relay's review plan is not
  * path-only from #33540: `governedReviewPlan` (`scripts/pm/fleet-write/execute.mjs`)
  * reads the arm with its readers. A READING of the pull request
  * (`lowRiskArmVerdict`: every changed path, the body, the label names, the
@@ -4463,6 +4464,8 @@ export async function loadArmReaders(load = (specifier) => import(specifier)) {
  * the record leg would have read had it not been edited, on every BREACH reason (N9, N10); a recogniser set with no
  * trusted-author list is `not-measured` (N11), and the comments the author binding dropped are counted in the
  * guard's own words (`ignoredAuthorLines`, N11).
+ * #33765: an unread labels list is unread too (N-b), and a Tier H the measured inputs settle alone stays `tier-h`
+ * with its unread inputs named (N-a, `armSettledWithoutUnread`); an edited `Regen-provenance:` hop is named (N-e).
  * The carry test's `baseRef` is the landed commit's first parent (N6): between it and the merge group's base lie
  * only the squash commits of entries ahead in the same group, which no queued head contains, so `git merge-base`
  * of either base with a head names the same commit and the carry reads the same.
@@ -4504,8 +4507,15 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   guard.readLowRiskTier(work, repo, head, { timeline: { measured: true, reason: null, events }, runGit: armGit });
   if (!guard.landsOnLowRiskArm(work)) {
     const reasons = work.surfaces.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict?.reasons ?? [];
-    const unread = armReadsNotMeasured(gitFailures, pull.fork, runGit);
-    if (unread.length > 0) return unmeasured(`the low-risk arm could not read ${unread.join('; ')}, so its Tier H cannot say how the queue read it (arm: ${reasons.join('; ') || 'no reason recorded'})`);
+    // #33765 N-b: an unread labels list is an unread input too, though no git read failed.
+    const inputs = armUnreadInputs(gitFailures, pull.fork, runGit, pull.labels);
+    if (inputs.length > 0) {
+      const unread = inputs.map((u) => u.words);
+      // #33765 N-a: a reason the measured inputs give on their own settles Tier H whatever the unread ones say.
+      const settled = armSettledWithoutUnread({ guard, entry, paths, repo, head, events, runGit, inputs });
+      if (settled) return { state: 'tier-h', headSha, reasons: settled, unread };
+      return unmeasured(`the low-risk arm could not read ${unread.join('; ')}, so its Tier H cannot say how the queue read it (arm: ${reasons.join('; ') || 'no reason recorded'})`);
+    }
     return { state: 'tier-h', headSha, reasons };
   }
   if (sizeLimbFires(entry.size)) return { state: 'tier-h', headSha, reasons: [`the landed diff crosses the ${HUMAN_MERGE_LINE_THRESHOLD}-line human-merge line`] };
@@ -4533,7 +4543,9 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   const enqueue = guard.authorizedEnqueueVerdict(guard.enqueuerFromTimeline(events.filter((e) => before(e?.created_at))));
   if (enqueue.state === 'authorized') return { state: 'cleared', by: 'enqueue', who: [enqueue.login], headSha };
   if (recognisers?.available !== true) return unmeasured(recognisers?.reason ?? 'the record recognisers were not loaded');
-  // N11: no trusted-author list is a reading that is missing, not a thread with no record in it.
+  // N11: no trusted-author list is a reading that is missing, not a thread with no record in it. Defensive only
+  // (#33765 N-c): the guard's `loadRecordRecognisers` answers `available: false` rather than a set without the
+  // list, and a list it builds always holds the relay's login, so only a hand-built recogniser set reaches here.
   if (!Array.isArray(recognisers.trustedAuthors) || recognisers.trustedAuthors.length === 0) {
     return unmeasured('the record recognisers carry no trusted-author list, so no comment can be read as a record');
   }
@@ -4578,6 +4590,17 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
     try {
       const would = guard.recordVerdict({ pair: unedited, recognisers, cardNote });
       if (would?.id != null && editedAfter.has(would.id)) edited = `; ${editedAfter.get(would.id)} was edited after the landing, so it does not count (it is the record this leg would otherwise have read)`;
+      // #33765 N-e: a record the unedited threads reach through a carry also rests on its `Regen-provenance:` hops.
+      // An edited row is named when leaving it out of the unedited threads changes what the leg would have read.
+      if (would?.carriedFrom) {
+        const same = (v) => v?.state === would.state && v?.id === would.id && v?.carriedFrom === would.carriedFrom;
+        for (const [id, where] of editedAfter) {
+          if (id === would.id) continue;
+          const without = { ...unedited };
+          for (const thread of recognisers.threads) if (Array.isArray(without[thread.rows])) without[thread.rows] = without[thread.rows].filter((r) => r?.id !== id);
+          if (!same(guard.recordVerdict({ pair: without, recognisers, cardNote }))) edited += `; ${where} was edited after the landing, so it does not count (it is a \`Regen-provenance:\` hop of the carry this leg would otherwise have read)`;
+        }
+      }
     } catch { /* a name only; the BREACH stands without it */ }
   }
   const reason = (record.state === 'absent' ? `no \`## Contract review\` record on its head (${record.readSummary})`
@@ -4591,7 +4614,9 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
  * The reviews as they stood when the commit landed (#33729 N8): a review GitHub now reads DISMISSED, whose
  * dismissal the timeline dates at or after the landing, is put back in the state the timeline's `review_dismissed`
  * event names (`dismissed_review.state`). A dismissal with no such event, no review id or no readable time stays
- * DISMISSED: toward BREACH, never toward cleared. Pure.
+ * DISMISSED: toward BREACH, never toward cleared. A dismissal in the same second as the landing is read as after
+ * it and restores the approval (#33765 N-g, pinned as is): GitHub's times are whole seconds, so that order is
+ * unknowable, and the restored approval is the maintainer's own, so the entry reads cleared, never `pass`. Pure.
  */
 export function reviewsAsLanded(reviews, events, landed) {
   const restored = new Map();
@@ -4614,10 +4639,21 @@ export function reviewsAsLanded(reviews, events, landed) {
  * that commit answering nothing proves the deletion, so it is a measured H; any other answer, or a throw, is unread.
  * Pure but for `runGit`.
  */
-export function armReadsNotMeasured(gitFailures, fork, runGit) {
+export function armReadsNotMeasured(gitFailures, fork, runGit, labels = []) {
+  return armUnreadInputs(gitFailures, fork, runGit, labels).map((u) => u.words);
+}
+
+/**
+ * The guard's changeset read, `git show SHA:PATH`, as the deleted-changeset exception and the favourable answer
+ * both key on it (#33765 N-f). The self-test records the argv the guard really sends and holds it to this.
+ */
+export const ARM_CHANGESET_SHOW = /^([0-9a-f]{7,40}):(.+)$/;
+
+/** `armReadsNotMeasured`'s inputs, each `{ words, argv }` (`argv` null for a non-git input). Pure but for `runGit`. */
+function armUnreadInputs(gitFailures, fork, runGit, labels) {
   const unread = [];
   for (const { argv, why } of Array.isArray(gitFailures) ? gitFailures : []) {
-    const shown = argv?.[0] === 'show' ? /^([0-9a-f]{7,40}):(.+)$/.exec(String(argv[1] ?? '')) : null;
+    const shown = argv?.[0] === 'show' ? ARM_CHANGESET_SHOW.exec(String(argv[1] ?? '')) : null;
     if (shown) {
       let listed = null;
       try {
@@ -4625,10 +4661,66 @@ export function armReadsNotMeasured(gitFailures, fork, runGit) {
       } catch { /* unread */ }
       if (listed === '') continue;
     }
-    unread.push(`\`git ${(argv ?? []).slice(0, 2).join(' ')}\` (${why})`);
+    unread.push({ words: `\`git ${(argv ?? []).slice(0, 2).join(' ')}\` (${why})`, argv });
   }
-  if (!fork || fork.measured !== true) unread.push('its head repository (the fork predicate)');
+  if (!fork || fork.measured !== true) unread.push({ words: 'its head repository (the fork predicate)', argv: null });
+  if (!Array.isArray(labels)) unread.push({ words: 'its labels', argv: null });
   return unread;
+}
+
+/** A clean low-risk changeset: the answer to an unread `git show SHA:PATH` that gives the arm no reason. */
+const ARM_FAVOURABLE_CHANGESET = "---\n'@objectstack/skills': patch\n---\n\nClause-②: no\nMetadata-protocol: none\n";
+
+/**
+ * The answer to one of the arm's git reads that gives the arm no reason (#33765 N-a): a clean changeset for the
+ * guard's `show SHA:PATH`, and every path a modified regular file for its `diff-tree`; null for any other read,
+ * which then cannot be answered the arm's way. Pure.
+ */
+export function favourableArmGitRead(argv, paths) {
+  if (argv?.[0] === 'show' && ARM_CHANGESET_SHOW.test(String(argv[1] ?? ''))) return ARM_FAVOURABLE_CHANGESET;
+  if (argv?.[0] === 'diff-tree') return (Array.isArray(paths) ? paths : []).map((p) => `:100644 100644 ${'0'.repeat(40)} ${'0'.repeat(40)} M\0${p}\0`).join('');
+  return null;
+}
+
+/**
+ * Does the arm read H on its measured inputs alone (#33765 N-a)? The guard's own arm re-reads a fresh
+ * decomposition with every unread input answered the way that gives the arm no reason: the git read by
+ * `favourableArmGitRead`, the fork predicate as no fork, the labels as none. The arm's verdict is a conjunction,
+ * so if it still reads H, the reasons it gives come from measured inputs and settle Tier H: those reasons, or null
+ * (a read with no such answer, a read that fails anew, or an arm that would read S), which stays NOT MEASURED.
+ * Never throws.
+ */
+function armSettledWithoutUnread({ guard, entry, paths, repo, head, events, runGit, inputs }) {
+  try {
+    const answers = new Map();
+    for (const { argv } of inputs) {
+      if (!argv) continue;
+      const answer = favourableArmGitRead(argv, paths);
+      if (answer === null) return null;
+      answers.set(JSON.stringify(argv), answer);
+    }
+    const [work] = guard.decomposeGovernedWork([{ pr: entry.pr, sha: entry.sha, subject: entry.subject, paths }], repo).governed;
+    if (!work) return null;
+    const failures = [];
+    const git = (argv) => {
+      const key = JSON.stringify(argv);
+      if (answers.has(key)) return answers.get(key);
+      try {
+        return runGit(argv);
+      } catch (error) {
+        failures.push({ argv, why: String(error?.message ?? error).split('\n')[0] });
+        throw error;
+      }
+    };
+    const fork = head.fork?.measured === true ? head.fork : { measured: true, isFork: false };
+    const labels = Array.isArray(head.labels) ? head.labels : [];
+    guard.readLowRiskTier(work, repo, { ...head, fork, labels }, { timeline: { measured: true, reason: null, events }, runGit: git });
+    if (guard.landsOnLowRiskArm(work) || armUnreadInputs(failures, fork, runGit, labels).length > 0) return null;
+    const reasons = work.surfaces.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict?.reasons ?? [];
+    return reasons.length > 0 ? reasons : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The arm cell under a sweep row, or ''. Pure. */
@@ -4642,7 +4734,8 @@ export function armCell(entry) {
   if (a.state === 'cleared') return `\n      low-risk arm: Tier S${head}, cleared by an authorized ${a.by === 'review' ? 'approval' : 'enqueue'} (${(a.who ?? []).join(', ')}) before the record leg — the maintainer's merge`;
   if (a.state === 'not-measured') return `\n      ⚠️  low-risk arm NOT MEASURED${head} — ${a.reason}; listed here, unjudged`;
   const reasons = a.reasons ?? [];
-  return `\n      low-risk arm: Tier H${head} — ${reasons.slice(0, 2).join('; ') || 'no reason recorded'}${reasons.length > 2 ? ` (+${reasons.length - 2} more)` : ''}`;
+  const unread = (a.unread ?? []).length > 0 ? `; settled without the unread ${a.unread.join('; ')}` : '';
+  return `\n      low-risk arm: Tier H${head} — ${reasons.slice(0, 2).join('; ') || 'no reason recorded'}${reasons.length > 2 ? ` (+${reasons.length - 2} more)` : ''}${unread}`;
 }
 
 /**
@@ -6185,7 +6278,7 @@ async function selfTest() {
     const rider = (p) => LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p));
     assert('the-rider-allowlist-is-changesets-and-Markdown-prose-under-the-docs-trees-only', Object.isFrozen(LOW_RISK_RIDER_PATTERNS) && [CS, 'docs/agents/x.md', 'content/docs/guides/x.mdx'].every(rider) && !['.changeset/config.json', 'docs/x.ts', 'content/docs/x.json', 'content/x.md', 'packages/docs/x.md', '.changeset/a/b.md'].some(rider));
 
-    // ⛔ Fail closed: no reading, or an unmeasured one, is H — the path-only readers (`--test`, `--branch`, CODEOWNERS, the prose gate) answer as before.
+    // ⛔ Fail closed: no reading, or an unmeasured one, is H — the path-only readers (`--test`, `--branch`, the prose gate) answer as before.
     assert('⛔ no-reading-is-Tier-H-and-says-NOT-MEASURED', tier([SK], null) === GOVERNED_TIER_H && governedTierFor([SK], REPO) === GOVERNED_TIER_H && testVerdict([SK], { repo: REPO }).tier === GOVERNED_TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderTestVerdict(testVerdict([SK], { repo: REPO }))));
     assert('⛔ an-unmeasured-reading-is-Tier-H-with-its-own-reason', tier([SK], { measured: false, reason: 'the pull could not be read' }) === GOVERNED_TIER_H && /the pull could not be read/.test(renderTestVerdict(testVerdict([SK], { repo: REPO, lowRisk: { measured: false, reason: 'the pull could not be read' } }))));
 
@@ -8688,11 +8781,13 @@ async function selfTest() {
   // ⛔ #33620: governed paths git would C-quote, read through REAL git with a GIT_*-free environment (gitFreeEnv):
   // a non-ASCII name and a name holding a newline. Without `-z` each path list (--branch, the sweep's
   // commitChanges, the workflow split's ls-tree) spells them `"skills/a/\346\226\207\346\241\243.md"` and
-  // `"skills/a/two\nlines.md"`, which match no governed prefix.
+  // `"skills/a/two\nlines.md"`, which match no governed prefix. `core.quotePath=true` is pinned on the command line:
+  // gitFreeEnv strips GIT_* but not a user or system gitconfig, and `core.quotePath=false` there spells the non-ASCII
+  // names raw, which reds the CONTROL witness below.
   const quotedFx = mkdtempSync(join(tmpdir(), 'governed-merges-quoted-paths-'));
   try {
     const fg = (cwd, ...rest) =>
-      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', '-c', 'core.quotePath=true', ...rest],
         { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(quotedFx, 'repo');
     fg(quotedFx, 'init', '-q', repo);
@@ -9182,6 +9277,52 @@ async function selfTest() {
       const cell = armCell({ arm: v });
       return v?.state === 'breach' && v.ignored?.length === 1 && cell.includes('some-commenter') && cell.includes('#33541') ? true : JSON.stringify(v);
     })() === true);
+
+    // #33765 N-a: a git read that failed, beside a reason the measured inputs give alone, is a measured Tier H.
+    const diffTreeThrows = gitWith((a) => { if (a[0] === 'diff-tree') throw new Error('fatal: bad object'); });
+    assert('⭐ #33765-N-a-an-unread-diff-tree-beside-a-security-label-is-a-measured-Tier-H-naming-what-it-did-not-read', await (async () => {
+      const v = await run({ git: diffTreeThrows, pull: { labels: ['security'] } });
+      return v?.state === 'tier-h' && v.reasons.some((r) => /`security` label/.test(r)) && !v.reasons.some((r) => /status and mode/.test(r)) &&
+        v.unread?.some((u) => /git diff-tree/.test(u)) && armCell({ arm: v }).includes('settled without the unread `git diff-tree') ? true : JSON.stringify(v);
+    })() === true);
+    assert('⭐ #33765-N-a-an-unread-changeset-beside-a-Clause-2-yes-body-and-an-unread-fork-beside-a-fork-free-reason-are-Tier-H',
+      await tierH({ git: gitWith((a) => { if (a[0] === 'show') throw new Error('fatal: unable to read'); if (a[0] === 'ls-tree') return `${CS}\0`; }), pull: { body: 'Fixes #69\n\nClause-②: yes\nMetadata-protocol: none\n' } }, /Clause-②/) === true &&
+      await tierH({ pull: { fork: { measured: false, isFork: false }, labels: ['security'] } }, /`security` label/) === true);
+    assert('⛔ #33765-N-a-control-an-unread-read-that-alone-keeps-the-arm-H-stays-NOT-MEASURED-never-measured-S',
+      await unmeasured({ git: diffTreeThrows }, /could not read `git diff-tree/) === true &&
+      await unmeasured({ git: gitWith((a) => { if (a[0] === 'diff-tree') throw new Error('fatal: bad object'); if (a[0] === 'show') throw new Error('fatal: unable to read'); if (a[0] === 'ls-tree') return `${CS}\0`; }) }, /could not read `git show.*`git diff-tree/) === true);
+    assert('⛔ #33765-N-a-an-unread-read-the-arm-has-no-favourable-answer-for-stays-NOT-MEASURED', favourableArmGitRead(['rev-parse', 'x'], [SK]) === null &&
+      favourableArmGitRead(['show', `${LANDED}:${CS}`], [SK]) !== null && favourableArmGitRead(['diff-tree', LANDED], [SK]).includes(`M\0${SK}\0`));
+    // #33765 N-b: an unread labels list is an unread input, though no git read failed.
+    assert('⛔ #33765-N-b-an-unread-labels-list-alone-is-NOT-MEASURED-not-tier-h', await unmeasured({ pull: { labels: null } }, /could not read its labels/) === true &&
+      armReadsNotMeasured([], { measured: true }, runGit, null).includes('its labels') && armReadsNotMeasured([], { measured: true }, runGit).length === 0);
+    assert('#33765-N-b-an-unread-labels-list-beside-a-Clause-2-yes-body-is-a-measured-Tier-H', await tierH({ pull: { labels: null, body: 'Fixes #69\n\nClause-②: yes\nMetadata-protocol: none\n' } }, /Clause-②/) === true);
+    // #33765 N-f: the argv the guard really sends for a changeset is the spelling the deletion exception and the
+    // favourable answer key on; a renamed read reds here instead of folding the exception into NOT MEASURED.
+    assert('⛔ #33765-N-f-the-guards-changeset-and-status-reads-are-the-spellings-the-arm-keys-on', await (async () => {
+      const sent = [];
+      await run({ git: (a) => { sent.push(a); return runGit(a); } });
+      const shows = sent.filter((a) => a[0] === 'show');
+      const trees = sent.filter((a) => a[0] === 'diff-tree');
+      return shows.length > 0 && trees.length > 0 && shows.every((a) => a.length === 2 && ARM_CHANGESET_SHOW.test(a[1]) && a[1] === `${LANDED}:${CS}`) &&
+        [...shows, ...trees].every((a) => favourableArmGitRead(a, [SK, CS]) !== null) ? true : JSON.stringify(sent);
+    })() === true);
+    // #33765 N-e: an edited `Regen-provenance:` hop that breaks the carry is named on the BREACH reason.
+    const OLD = 'd'.repeat(40);
+    const HOP = (over = {}) => ({ id: 905, created_at: '2026-11-15T04:10:00Z', user: { login: RELAY }, body: `Regen-provenance: 900 · \`${OLD}\` → \`${HEAD}\` · \`git diff --name-only\` → (empty)`, ...over });
+    const carryGit = gitWith((a) => {
+      if (a[0] === 'diff') return '';
+      if (a[0] === 'rev-parse' && String(a[1]).endsWith('^{commit}')) return `${String(a[1]).slice(0, -'^{commit}'.length)}\n`;
+    });
+    assert('#33765-N-e-control-a-record-carried-over-an-unedited-hop-is-PASS', (await run({ prRows: [record({ head: OLD, at: '2026-11-15T03:00:00Z' }), HOP()], git: carryGit }))?.state === 'pass');
+    assert('⛔ #33765-N-e-a-Regen-provenance-hop-edited-after-the-landing-is-named-on-the-BREACH', await breach({ prRows: [record({ head: OLD, at: '2026-11-15T03:00:00Z' }), HOP({ updated_at: '2026-11-15T06:00:00Z' })], git: carryGit },
+      /no `## Contract review` record on its head .*PR comment 905 was edited after the landing.*`Regen-provenance:` hop/) === true);
+    assert('#33765-N-e-an-edited-claim-beside-a-carry-is-still-not-named', await (async () => {
+      const v = await run({ prRows: [record({ head: OLD, at: '2026-11-15T03:00:00Z' }), HOP({ updated_at: '2026-11-15T06:00:00Z' }), { id: 950, created_at: '2026-11-15T04:00:00Z', updated_at: '2026-11-15T06:00:00Z', user: { login: RELAY }, body: 'Claim: PM loop' }], git: carryGit });
+      return v?.state === 'breach' && v.reason.includes('PR comment 905') && !v.reason.includes('950') ? true : JSON.stringify(v);
+    })() === true);
+    // #33765 N-g, pinned as is: a dismissal in the landing's own second is read as after it and restores the approval.
+    assert('#33765-N-g-a-dismissal-in-the-same-second-as-the-landing-restores-the-approval-pinned-as-is', await cleared({ prRows: [], reviews: [dismissedReview], events: DISMISSED(MERGED_AT) }, 'review') === true);
 
     const at = (e, arm) => ({ ...e, attribution: { mergedBy: 'os-zhuang', mergedAt: MERGED_AT, title: 't', size: null }, attributionChannel: 'env-token', arm });
     const human = at(classifyCommit({ sha: 'e'.repeat(40), date: MERGED_AT, subject: 'docs(adr): x (#71)' }, ['docs/adr/0001-x.md'], OS), undefined);

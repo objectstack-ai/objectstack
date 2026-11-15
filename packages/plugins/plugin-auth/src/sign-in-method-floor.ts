@@ -40,17 +40,23 @@
  *
  * The local sign-in path behind direct sign-in (`features.localSignIn`, served
  * only while direct sign-in is on): under `'off'` the page draws no local way
- * in, so the provider delete and the boot report count neither email and
- * password nor phone sign-in there, on or not ({@link pageOffersLocalSignIn},
- * the page's own predicate). The settings save is not judged that way yet.
+ * in, so the settings save, the provider delete and the boot report count
+ * neither email and password nor phone sign-in there, on or not
+ * ({@link pageOffersLocalSignIn}, the page's own predicate).
  *
  * ## The changes refused
  *
  *   - `email_password_enabled` off when nothing else is in force after the save;
- *   - with email and password off after the save, the Google change that
- *     removes a Google provider in force and leaves nothing else:
- *     `google_enabled` off, or clearing a client credential that no environment
- *     variable and no stack config backs.
+ *   - with email and password off after the save, or not offered by the page
+ *     (the local sign-in path `'off'`), the Google change that removes a Google
+ *     provider in force and leaves nothing else: `google_enabled` off, or
+ *     clearing a client credential that no environment variable and no stack
+ *     config backs. Under `'off'` the refusal says so (`googleLocalOff`): the
+ *     email-off copy's remedy, keep email and password on, does nothing there.
+ *
+ * Under `'off'` the `email_password_enabled` key itself is never refused:
+ * the page draws email and password neither way, so the save removes no way
+ * in the page offers.
  *
  * Each is judged on the state AFTER the whole save (`batch`, every key the save
  * sets), not on one key against the rest as they stand: asked one key at a
@@ -254,6 +260,8 @@ export async function otherSignInMethods(
 interface SignInFloorCopy {
   emailPassword: string;
   google: string;
+  /** The same Google change, while the sign-in page does not offer local sign-in. */
+  googleLocalOff: string;
   /** Deleting the last identity provider ({@link ssoProviderDeleteRefusal}). */
   enterpriseSso: string;
   /** The same, while email and password is on but the sign-in page does not offer local sign-in. */
@@ -277,6 +285,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'With email and password off, this change to Google would leave no way to sign in, so everyone would be ' +
       'locked out, administrators included. Keep email and password sign-in on, or set up another sign-in method, ' +
       'before or in this save.',
+    googleLocalOff:
+      'The sign-in page offers no local sign-in (the local sign-in path behind direct sign-in is off), so email and ' +
+      'password does not count, and this change to Google would leave no way to sign in: everyone would be locked ' +
+      'out, administrators included. Keep Google sign-in, set up another sign-in method before or in this save, or ' +
+      'first set the local sign-in path back to hidden with email and password sign-in on.',
     enterpriseSso:
       'This is the last enterprise SSO identity provider, and with email and password off nothing else signs ' +
       'anyone in, so deleting it would lock everyone out, administrators included. First turn email and password ' +
@@ -288,8 +301,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'the local sign-in path back to hidden with email and password sign-in on, then delete this one.',
     enterpriseSsoUnverified:
       'The identity provider was not deleted: the list of identity providers could not be read to confirm that ' +
-      'another way to sign in remains, and with email and password off this one may be the last. Try again once ' +
-      'the database is reachable.',
+      'another way to sign in remains, and the sign-in page offers no email and password sign-in, so this one may be ' +
+      'the last. Try again once the database is reachable.',
   },
   'zh-CN': {
     emailPassword:
@@ -298,6 +311,10 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
     google:
       '邮箱/密码登录关闭时，这项 Google 修改会导致没有任何登录方式，所有人（包括管理员）都将无法登录。' +
       '请保持邮箱/密码登录开启，或在本次保存之前或同时配置另一种登录方式。',
+    googleLocalOff:
+      '登录页不提供本地登录（直接登录的本地登录路径已关闭），邮箱/密码登录不算一种登录方式，这项 Google ' +
+      '修改会导致没有任何登录方式，所有人（包括管理员）都将无法登录。请保留 Google ' +
+      '登录、在本次保存之前或同时配置另一种登录方式，或先把本地登录路径改回 hidden 并开启邮箱/密码登录。',
     enterpriseSso:
       '这是最后一个企业 SSO 身份提供方，邮箱/密码登录又已关闭，没有其他登录方式，删除后所有人（包括管理员）都将无法登录。' +
       '请先重新开启邮箱/密码登录，或登记另一个身份提供方、配置另一种登录方式，然后再删除它。',
@@ -306,8 +323,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '删除后所有人（包括管理员）都将无法登录。请先登记另一个身份提供方、配置另一种登录方式，或把本地登录路径改回 hidden 并开启邮箱/密码登录，' +
       '然后再删除它。',
     enterpriseSsoUnverified:
-      '身份提供方未删除：无法读取身份提供方列表来确认仍有其他登录方式，而邮箱/密码登录已关闭，它可能是最后一种。' +
-      '请在数据库可以访问时重试。',
+      '身份提供方未删除：无法读取身份提供方列表来确认仍有其他登录方式，而登录页不提供邮箱/密码登录，它可能是最后一种。请在数据库可以访问时重试。',
   },
   'ja-JP': {
     emailPassword:
@@ -319,6 +335,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'メール/パスワードログインがオフの状態でこの Google の変更を行うとログイン方法がなくなり、管理者を含む全員が' +
       'ログインできなくなります。メール/パスワードログインをオンのままにするか、この保存の前か同じ保存で別のログイン' +
       '方法を設定してください。',
+    googleLocalOff:
+      'ログインページはローカルログインを表示しません（ダイレクトサインインのローカルログインパスがオフ）。そのためメール/パスワードはログイン方法に数えられず、この ' +
+      'Google の変更を行うとログイン方法がなくなり、管理者を含む全員がログインできなくなります。Google ' +
+      'ログインを残すか、この保存の前か同じ保存で別のログイン方法を設定するか、先にローカルログインパスを hidden ' +
+      'に戻してメール/パスワードログインをオンにしてください。',
     enterpriseSso:
       'これは最後のエンタープライズ SSO の ID プロバイダーで、メール/パスワードログインもオフのため他にログイン方法が' +
       'ありません。削除すると管理者を含む全員がログインできなくなります。先にメール/パスワードログインをオンに戻すか、' +
@@ -329,9 +350,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'なります。先に別の ID プロバイダーを登録するか、別のログイン方法を設定するか、ローカルログインパスを hidden に戻してメール/パスワードログインをオンにしてから' +
       '削除してください。',
     enterpriseSsoUnverified:
-      'ID プロバイダーは削除されませんでした。ID プロバイダーの一覧を読み取れず、他のログイン方法が残ることを確認できません' +
-      'でした。メール/パスワードログインがオフのため、これが最後のログイン方法かもしれません。データベースに接続できる' +
-      'ようになってから再試行してください。',
+      'ID プロバイダーは削除されませんでした。ID ' +
+      'プロバイダーの一覧を読み取れず、他のログイン方法が残ることを確認できませんでした。ログインページはメール/パスワードログ' +
+      'インを表示しないため、これが最後のログイン方法かもしれません。データベースに接続できるようになってから再試行してください。',
   },
   'es-ES': {
     emailPassword:
@@ -344,6 +365,12 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Con el correo y la contraseña desactivados, este cambio en Google dejaría sin ninguna forma de iniciar ' +
       'sesión, así que todo el mundo quedaría fuera, incluidos los administradores. Mantenga activado el inicio de ' +
       'sesión con correo y contraseña o configure otro método, antes o en este mismo guardado.',
+    googleLocalOff:
+      'La página de inicio de sesión no ofrece el inicio de sesión local (la ruta local del inicio de sesión directo ' +
+      'está desactivada), así que el correo y la contraseña no cuentan, y este cambio en Google dejaría sin ninguna ' +
+      'forma de iniciar sesión: todo el mundo quedaría fuera, incluidos los administradores. Mantenga el inicio de ' +
+      'sesión con Google, configure otro método antes o en este mismo guardado, o vuelva primero a poner la ruta ' +
+      'local en hidden con el inicio de sesión con correo y contraseña activado.',
     enterpriseSso:
       'Este es el último proveedor de identidad de SSO empresarial y, con el correo y la contraseña desactivados, ' +
       'nada más permite iniciar sesión, así que eliminarlo dejaría fuera a todo el mundo, incluidos los ' +
@@ -357,8 +384,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'después elimine este.',
     enterpriseSsoUnverified:
       'El proveedor de identidad no se ha eliminado: no se pudo leer la lista de proveedores de identidad para ' +
-      'confirmar que queda otra forma de iniciar sesión y, con el correo y la contraseña desactivados, este podría ' +
-      'ser el último. Vuelva a intentarlo cuando la base de datos esté disponible.',
+      'confirmar que queda otra forma de iniciar sesión y, como la página de inicio de sesión no ofrece el inicio de ' +
+      'sesión con correo y contraseña, este podría ser el último. Vuelva a intentarlo cuando la base de datos esté ' +
+      'disponible.',
   },
   'zh-Hant': {
     emailPassword:
@@ -367,6 +395,10 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
     google:
       '電子郵件/密碼登入關閉時，這項 Google 變更會導致沒有任何登入方式，所有人（包括管理員）都將無法登入。' +
       '請保持電子郵件/密碼登入開啟，或在本次儲存之前或同時設定另一種登入方式。',
+    googleLocalOff:
+      '登入頁不提供本機登入（直接登入的本機登入路徑已關閉），電子郵件/密碼登入不算一種登入方式，這項 Google ' +
+      '變更會導致沒有任何登入方式，所有人（包括管理員）都將無法登入。請保留 Google ' +
+      '登入、在本次儲存之前或同時設定另一種登入方式，或先把本機登入路徑改回 hidden 並開啟電子郵件/密碼登入。',
     enterpriseSso:
       '這是最後一個企業 SSO 身分提供者，電子郵件/密碼登入又已關閉，沒有其他登入方式，刪除後所有人（包括管理員）都將無法登入。' +
       '請先重新開啟電子郵件/密碼登入，或登記另一個身分提供者、設定另一種登入方式，然後再刪除它。',
@@ -375,8 +407,7 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '刪除後所有人（包括管理員）都將無法登入。請先登記另一個身分提供者、設定另一種登入方式，或把本機登入路徑改回 hidden 並開啟電子郵件/密碼登入，' +
       '然後再刪除它。',
     enterpriseSsoUnverified:
-      '身分提供者未刪除：無法讀取身分提供者清單來確認仍有其他登入方式，而電子郵件/密碼登入已關閉，它可能是最後一種。' +
-      '請在資料庫可以存取時重試。',
+      '身分提供者未刪除：無法讀取身分提供者清單來確認仍有其他登入方式，而登入頁不提供電子郵件/密碼登入，它可能是最後一種。請在資料庫可以存取時重試。',
   },
   ar: {
     emailPassword:
@@ -387,6 +418,11 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'مع إيقاف البريد الإلكتروني وكلمة المرور، لن يترك هذا التغيير على Google أي طريقة لتسجيل الدخول، فيُمنع الجميع ' +
       'من الدخول بمن فيهم المسؤولون. أبقِ تسجيل الدخول بالبريد الإلكتروني وكلمة المرور مفعّلًا، أو اضبط طريقة أخرى ' +
       'لتسجيل الدخول قبل هذا الحفظ أو ضمنه.',
+    googleLocalOff:
+      'صفحة تسجيل الدخول لا تعرض تسجيل الدخول المحلي (مسار تسجيل الدخول المحلي خلف تسجيل الدخول المباشر متوقف)، فلا ' +
+      'يُحتسب البريد الإلكتروني وكلمة المرور، ولن يترك هذا التغيير على Google أي طريقة لتسجيل الدخول، فيُمنع الجميع ' +
+      'من الدخول بمن فيهم المسؤولون. أبقِ تسجيل الدخول عبر Google، أو اضبط طريقة أخرى لتسجيل الدخول قبل هذا الحفظ أو ' +
+      'ضمنه، أو أعد أولًا مسار تسجيل الدخول المحلي إلى hidden مع تشغيل تسجيل الدخول بالبريد الإلكتروني وكلمة المرور.',
     enterpriseSso:
       'هذا آخر موفّر هوية SSO مؤسسي، ومع إيقاف البريد الإلكتروني وكلمة المرور لا شيء غيره يتيح لأحد تسجيل الدخول، ' +
       'لذا فإن حذفه سيمنع الجميع من الدخول بمن فيهم المسؤولون. أعد أولًا تفعيل تسجيل الدخول بالبريد الإلكتروني ' +
@@ -397,8 +433,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'المسؤولون. سجّل أولًا موفّر هوية آخر، أو أعدّ طريقة تسجيل دخول أخرى، أو أعد مسار تسجيل الدخول المحلي إلى hidden مع تشغيل تسجيل الدخول بالبريد الإلكتروني وكلمة المرور، ' +
       'ثم احذف هذا الموفّر.',
     enterpriseSsoUnverified:
-      'لم يُحذف موفّر الهوية: تعذّرت قراءة قائمة موفّري الهوية للتأكد من بقاء طريقة أخرى لتسجيل الدخول، ومع إيقاف ' +
-      'البريد الإلكتروني وكلمة المرور قد يكون هذا آخرها. أعد المحاولة عندما تصبح قاعدة البيانات متاحة.',
+      'لم يُحذف موفّر الهوية: تعذّرت قراءة قائمة موفّري الهوية للتأكد من بقاء طريقة أخرى لتسجيل الدخول، ولأن صفحة ' +
+      'تسجيل الدخول لا تعرض تسجيل الدخول بالبريد الإلكتروني وكلمة المرور قد يكون هذا آخرها. أعد المحاولة عندما تصبح ' +
+      'قاعدة البيانات متاحة.',
   },
   fr: {
     emailPassword:
@@ -410,6 +447,12 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Avec l’e-mail et le mot de passe désactivés, cette modification de Google ne laisserait aucun moyen de se ' +
       'connecter : tout le monde serait bloqué, administrateurs compris. Laissez la connexion par e-mail et mot de ' +
       'passe activée, ou configurez une autre méthode de connexion, avant ou dans cet enregistrement.',
+    googleLocalOff:
+      'La page de connexion n’offre aucune connexion locale (le chemin de connexion locale derrière la connexion ' +
+      'directe est désactivé) : l’e-mail et le mot de passe ne comptent donc pas, et cette modification de Google ne ' +
+      'laisserait aucun moyen de se connecter : tout le monde serait bloqué, administrateurs compris. Conservez la ' +
+      'connexion Google, configurez une autre méthode de connexion avant ou dans cet enregistrement, ou remettez ' +
+      'd’abord le chemin de connexion locale à hidden avec la connexion par e-mail et mot de passe activée.',
     enterpriseSso:
       'C’est le dernier fournisseur d’identité SSO d’entreprise et, avec l’e-mail et le mot de passe désactivés, ' +
       'rien d’autre ne permet de se connecter : le supprimer bloquerait tout le monde, administrateurs compris. ' +
@@ -423,8 +466,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'locale à hidden avec la connexion par e-mail et mot de passe activée, puis supprimez celui-ci.',
     enterpriseSsoUnverified:
       'Le fournisseur d’identité n’a pas été supprimé : la liste des fournisseurs d’identité n’a pas pu être lue ' +
-      'pour vérifier qu’un autre moyen de connexion subsiste et, avec l’e-mail et le mot de passe désactivés, ' +
-      'celui-ci est peut-être le dernier. Réessayez quand la base de données sera accessible.',
+      'pour vérifier qu’un autre moyen de connexion subsiste et, comme la page de connexion n’offre pas la connexion ' +
+      'par e-mail et mot de passe, celui-ci est peut-être le dernier. Réessayez quand la base de données sera ' +
+      'accessible.',
   },
   'pt-BR': {
     emailPassword:
@@ -436,6 +480,12 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Com o e-mail e a senha desativados, esta alteração no Google deixaria sem nenhuma forma de entrar, então todos ' +
       'ficariam bloqueados, inclusive os administradores. Mantenha o login com e-mail e senha ativado ou configure ' +
       'outro método de login, antes ou neste mesmo salvamento.',
+    googleLocalOff:
+      'A página de login não oferece login local (o caminho de login local por trás do login direto está ' +
+      'desativado), então o e-mail e a senha não contam, e esta alteração no Google deixaria sem nenhuma forma de ' +
+      'entrar: todos ficariam bloqueados, inclusive os administradores. Mantenha o login com Google, configure outro ' +
+      'método de login antes ou neste mesmo salvamento, ou volte primeiro o caminho de login local para hidden com o ' +
+      'login por e-mail e senha ativado.',
     enterpriseSso:
       'Este é o último provedor de identidade de SSO corporativo e, com o e-mail e a senha desativados, nada mais ' +
       'permite entrar, então excluí-lo bloquearia todos, inclusive os administradores. Primeiro reative o login com ' +
@@ -448,8 +498,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'outro método de login ou volte o caminho de login local para hidden com o login por e-mail e senha ativado, e depois exclua este.',
     enterpriseSsoUnverified:
       'O provedor de identidade não foi excluído: não foi possível ler a lista de provedores de identidade para ' +
-      'confirmar que resta outra forma de entrar e, com o e-mail e a senha desativados, este pode ser o último. ' +
-      'Tente novamente quando o banco de dados estiver acessível.',
+      'confirmar que resta outra forma de entrar e, como a página de login não oferece login com e-mail e senha, ' +
+      'este pode ser o último. Tente novamente quando o banco de dados estiver acessível.',
   },
   ru: {
     emailPassword:
@@ -461,6 +511,12 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'При отключённом входе по электронной почте и паролю это изменение Google не оставит ни одного способа входа, ' +
       'и доступ потеряют все, включая администраторов. Оставьте вход по электронной почте и паролю включённым или ' +
       'настройте другой способ входа до этого сохранения или в нём же.',
+    googleLocalOff:
+      'Страница входа не предлагает локальный вход (локальный путь входа за прямым входом отключён), поэтому вход по ' +
+      'электронной почте и паролю не учитывается, и это изменение Google не оставит ни одного способа входа: доступ ' +
+      'потеряют все, включая администраторов. Оставьте вход через Google, настройте другой способ входа до этого ' +
+      'сохранения или в нём же либо сначала верните локальному пути входа значение hidden с включённым входом по ' +
+      'почте и паролю.',
     enterpriseSso:
       'Это последний корпоративный поставщик удостоверений SSO, а вход по электронной почте и паролю отключён, так ' +
       'что войти больше нечем: его удаление лишит доступа всех, включая администраторов. Сначала снова включите вход ' +
@@ -473,8 +529,8 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'или верните локальному пути входа значение hidden с включённым входом по почте и паролю, а затем удалите этого.',
     enterpriseSsoUnverified:
       'Поставщик удостоверений не удалён: не удалось прочитать список поставщиков удостоверений, чтобы убедиться, ' +
-      'что останется другой способ входа, а при отключённом входе по электронной почте и паролю этот может быть ' +
-      'последним. Повторите попытку, когда база данных станет доступна.',
+      'что останется другой способ входа, а страница входа не предлагает вход по электронной почте и паролю, поэтому ' +
+      'этот может быть последним. Повторите попытку, когда база данных станет доступна.',
   },
   de: {
     emailPassword:
@@ -486,6 +542,12 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Bei ausgeschalteter Anmeldung mit E-Mail und Passwort ließe diese Änderung an Google keine Möglichkeit zur ' +
       'Anmeldung, und alle wären ausgesperrt, Administratoren eingeschlossen. Lassen Sie die Anmeldung mit E-Mail ' +
       'und Passwort eingeschaltet oder richten Sie vor oder in diesem Speichervorgang eine andere Anmeldemethode ein.',
+    googleLocalOff:
+      'Die Anmeldeseite bietet keine lokale Anmeldung an (der lokale Anmeldepfad hinter der Direktanmeldung ist ' +
+      'aus), daher zählen E-Mail und Passwort nicht, und diese Änderung an Google ließe keine Möglichkeit zur ' +
+      'Anmeldung: Alle wären ausgesperrt, Administratoren eingeschlossen. Behalten Sie die Google-Anmeldung, richten ' +
+      'Sie vor oder in diesem Speichervorgang eine andere Anmeldemethode ein, oder setzen Sie zuerst den lokalen ' +
+      'Anmeldepfad wieder auf hidden mit eingeschalteter Anmeldung per E-Mail und Passwort.',
     enterpriseSso:
       'Dies ist der letzte Enterprise-SSO-Identitätsanbieter, und bei ausgeschalteter Anmeldung mit E-Mail und ' +
       'Passwort meldet nichts anderes jemanden an. Ihn zu löschen würde daher alle aussperren, Administratoren ' +
@@ -498,9 +560,10 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       'Identitätsanbieter, richten Sie eine andere Anmeldemethode ein oder setzen Sie den lokalen Anmeldepfad wieder ' +
       'auf hidden mit eingeschalteter Anmeldung per E-Mail und Passwort, und löschen Sie diesen dann.',
     enterpriseSsoUnverified:
-      'Der Identitätsanbieter wurde nicht gelöscht: Die Liste der Identitätsanbieter konnte nicht gelesen werden, ' +
-      'um zu bestätigen, dass eine andere Anmeldemöglichkeit bleibt, und bei ausgeschalteter Anmeldung mit E-Mail ' +
-      'und Passwort ist dieser vielleicht der letzte. Versuchen Sie es erneut, sobald die Datenbank erreichbar ist.',
+      'Der Identitätsanbieter wurde nicht gelöscht: Die Liste der Identitätsanbieter konnte nicht gelesen werden, um ' +
+      'zu bestätigen, dass eine andere Anmeldemöglichkeit bleibt, und da die Anmeldeseite keine Anmeldung mit E-Mail ' +
+      'und Passwort anbietet, ist dieser vielleicht der letzte. Versuchen Sie es erneut, sobald die Datenbank ' +
+      'erreichbar ist.',
   },
   ko: {
     emailPassword:
@@ -511,6 +574,12 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '이메일/비밀번호 로그인이 꺼진 상태에서 이 Google 변경을 저장하면 로그인할 방법이 전혀 남지 않아 관리자를 포함한 ' +
       '모든 사람이 로그인할 수 없게 됩니다. 이메일/비밀번호 로그인을 켜 두거나, 이번 저장 전이나 이번 저장에서 다른 ' +
       '로그인 방법을 설정하세요.',
+    googleLocalOff:
+      '로그인 페이지는 로컬 로그인을 제공하지 않습니다(직접 로그인의 로컬 로그인 경로가 꺼져 있음). 따라서 ' +
+      '이메일/비밀번호는 로그인 방법으로 계산되지 않으며, 이 Google 변경을 저장하면 로그인할 방법이 전혀 ' +
+      '남지 않아 관리자를 포함한 모든 사람이 로그인할 수 없게 됩니다. Google 로그인을 유지하거나, 이번 ' +
+      '저장 전이나 이번 저장에서 다른 로그인 방법을 설정하거나, 먼저 로컬 로그인 경로를 hidden으로 ' +
+      '되돌리고 이메일/비밀번호 로그인을 켜세요.',
     enterpriseSso:
       '이것은 마지막 엔터프라이즈 SSO ID 공급자이며, 이메일/비밀번호 로그인도 꺼져 있어 다른 로그인 방법이 없습니다. ' +
       '삭제하면 관리자를 포함한 모든 사람이 로그인할 수 없게 됩니다. 먼저 이메일/비밀번호 로그인을 다시 켜거나, 다른 ID ' +
@@ -521,9 +590,9 @@ export const SIGN_IN_FLOOR_COPY: Record<SettingsCopyLocale, SignInFloorCopy> = {
       '됩니다. 먼저 다른 ID 공급자를 등록하거나, 다른 로그인 방법을 설정하거나, 로컬 로그인 경로를 hidden으로 되돌리고 이메일/비밀번호 로그인을 켠 ' +
       '다음 이 공급자를 삭제하세요.',
     enterpriseSsoUnverified:
-      'ID 공급자를 삭제하지 않았습니다. 다른 로그인 방법이 남아 있는지 확인하기 위해 ID 공급자 목록을 읽을 수 없었고, ' +
-      '이메일/비밀번호 로그인이 꺼져 있어 이것이 마지막 방법일 수 있습니다. 데이터베이스에 연결할 수 있게 되면 다시 ' +
-      '시도하세요.',
+      'ID 공급자를 삭제하지 않았습니다. 다른 로그인 방법이 남아 있는지 확인하기 위해 ID 공급자 목록을 읽을 ' +
+      '수 없었고, 로그인 페이지가 이메일/비밀번호 로그인을 제공하지 않으므로 이것이 마지막 방법일 수 있습니다. ' +
+      '데이터베이스에 연결할 수 있게 되면 다시 시도하세요.',
   },
 };
 
@@ -624,29 +693,37 @@ async function googleAfter(
 
 /**
  * The write predicate shared by {@link SIGN_IN_FLOOR_KEYS}. It refuses when the
- * state after the whole save leaves email and password off and no other way in:
- * at `email_password_enabled` when the save turns it off, and at a `google_*`
- * key when the save removes a Google provider that was in force.
+ * state after the whole save leaves the sign-in page no email and password
+ * ({@link pageOffersEmailPassword}: off, or the local sign-in path `'off'`) and
+ * no other way in the page offers: at `email_password_enabled` when the save
+ * turns it off (never under `'off'`, where that key changes nothing the page
+ * draws), and at a `google_*` key when the save removes a Google provider that
+ * was in force.
  */
 export function signInMethodFloorPredicate(deps: SignInMethodFloorDeps, read: AuthSettingReader) {
   return async (input: SignInFloorWriteInput): Promise<SignInFloorRefusal | undefined> => {
     const { key, next, locale } = input;
     const batch = input.batch ?? { [key]: next };
     const config = deps.publicConfig();
-    const emailPasswordAfter = Object.prototype.hasOwnProperty.call(batch, 'email_password_enabled')
+    // The page draws no local way in under the local sign-in path `'off'`, so
+    // email and password counts for nothing there, whatever this save sets it to.
+    const localOffered = pageOffersLocalSignIn(config);
+    if (!localOffered && key === 'email_password_enabled') return undefined;
+    const emailPasswordAfter = localOffered && (Object.prototype.hasOwnProperty.call(batch, 'email_password_enabled')
       ? readToggle(
         await valueAfter(read, input, batch, 'email_password_enabled'),
         deps.declaredEmailPasswordEnabled?.() ?? true,
       )
-      : config.emailPassword?.enabled !== false;
+      : config.emailPassword?.enabled !== false);
     if (emailPasswordAfter) return undefined;
     const googleNow = (config.socialProviders ?? []).some((p) => isSettingsGoogle(p) && providerCounts(deps, p));
     if (key !== 'email_password_enabled' && !googleNow) return undefined;
-    if ((await otherSignInMethods(deps, { withoutGoogle: true })).length > 0) return undefined;
+    if ((await otherSignInMethods(deps, { withoutGoogle: true, asThePageOffers: true })).length > 0) return undefined;
     if (await googleAfter(deps, read, input, batch, googleNow)) return undefined;
+    const copy = signInFloorCopy(locale);
     return key === 'email_password_enabled'
-      ? { message: signInFloorCopy(locale).emailPassword, constraint: { lastSignInMethod: 'email_password' } }
-      : { message: signInFloorCopy(locale).google, constraint: { lastSignInMethod: 'google' } };
+      ? { message: copy.emailPassword, constraint: { lastSignInMethod: 'email_password' } }
+      : { message: localOffered ? copy.google : copy.googleLocalOff, constraint: { lastSignInMethod: 'google' } };
   };
 }
 

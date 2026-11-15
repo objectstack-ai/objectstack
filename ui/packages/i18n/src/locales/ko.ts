@@ -2731,6 +2731,7 @@ const ko = {
         directSignInIncomplete: "로그인이 완료되지 않았습니다. 싱글 사인온에서 돌아왔지만 로그인되지 않았습니다. 이 브라우저에서 이 사이트의 쿠키가 허용되어 있는지 확인한 후 다시 시도하세요.",
         directSignInUnavailable: "이 시스템의 싱글 사인온을 시작할 수 없습니다. 관리자에게 사용하는 로그인 서비스를 확인해 달라고 요청하세요.",
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
+        networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
@@ -4005,6 +4006,9 @@ const ko = {
       aggregations: '집계',
       records: '레코드',
       visibleToYou: '내가 볼 수 있는 레코드만',
+      dataset: '데이터셋',
+      metrics: '지표',
+      noAddedFilter: '데이터셋 정의에 추가된 필터 없음',
     },
     tool: {
       aggregate_data: "관련 데이터 집계하기",
