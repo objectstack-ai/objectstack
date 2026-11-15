@@ -40,14 +40,20 @@
 export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[]>> = {
   /**
    * `@objectstack/service-ai` (cloud) — the `ask` data product's shared
-   * data/knowledge/visualization tools, and the package-doc pair that reads the
+   * data/knowledge/visualization tools, the package-doc pair that reads the
    * installed packages' `doc` items behind the `/meta/doc` audience gate
-   * (cloud#3335).
+   * (cloud#3335), and the dataset pair (cloud#4551): `list_datasets` reads
+   * the installed datasets and the metrics each defines, and `query_dataset`
+   * answers a question through one governed metric instead of an ad-hoc
+   * aggregate. Their names and shapes are declared once in
+   * `../../ai/dataset-tools.zod` (ADR-0149 D2), which MCP registers too.
    */
   'service-ai': [
     'aggregate_data',
     'get_record',
+    'list_datasets',
     'query_data',
+    'query_dataset',
     'query_records',
     'read_package_doc',
     'search_knowledge',
