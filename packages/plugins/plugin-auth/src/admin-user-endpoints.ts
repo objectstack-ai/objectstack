@@ -681,7 +681,8 @@ export async function writeAdminAudit(
  * whose status says it is addressed to the caller (4xx). Anything else is an
  * unclassified internal failure: it is answered `INTERNAL_ERROR` in the
  * generic words every route catch in `auth-plugin.ts` uses, and the error is
- * handed to `logger.error` once, as `[AuthPlugin] <fallback>` — the thrown
+ * handed to `logger.error` once (to `logger.warn` on a sink without one), as
+ * `[AuthPlugin] <fallback>` — the thrown
  * error's own text never reaches the caller. The status is read the same way
  * in every case.
  *
@@ -692,7 +693,7 @@ export async function writeAdminAudit(
 export function mapAuthApiError(
   error: unknown,
   fallback: string,
-  logger?: { error?(message: string, error?: Error): void },
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void },
 ): EndpointResult {
   const e = error as {
     statusCode?: number;
@@ -704,7 +705,9 @@ export function mapAuthApiError(
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
   if (vendorCode === undefined && !(rawStatus >= 400 && rawStatus <= 499)) {
-    logger?.error?.(`[AuthPlugin] ${fallback}`, error instanceof Error ? error : new Error(String(error)));
+    const failure = error instanceof Error ? error : new Error(String(error));
+    if (logger?.error) logger.error(`[AuthPlugin] ${fallback}`, failure);
+    else logger?.warn(`[AuthPlugin] ${fallback}: ${failure.message}`);
     return { status: rawStatus, body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } } };
   }
   const code = vendorCode ?? 'INTERNAL_ERROR';

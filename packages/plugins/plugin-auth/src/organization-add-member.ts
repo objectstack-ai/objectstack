@@ -96,7 +96,7 @@ export interface OrganizationAddMemberDeps {
    * with the generic internal-error message, and the error is handed here,
    * once, at error level (`mapAuthApiError`).
    */
-  logger?: { error(message: string, error?: Error): void };
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 const badRequest = (message: string): EndpointResult => ({

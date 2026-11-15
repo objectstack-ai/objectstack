@@ -1667,7 +1667,7 @@ describe('an unclassified internal failure is answered with the generic message 
 
   it('the shared mapper: no vendor code answers INTERNAL_ERROR in the generic words, and the logger receives the error once', () => {
     const thrown = new Error(`adapter failed ${MARKER}`);
-    const logger = { error: vi.fn() };
+    const logger = { warn: vi.fn(), error: vi.fn() };
     const result = mapAuthApiError(thrown, 'create-user failed', logger);
     expect(result).toEqual({
       status: 500,
@@ -1716,7 +1716,7 @@ describe('an unclassified internal failure is answered with the generic message 
     const direct = mapAuthApiError(
       { statusCode: 403, body: { code: 'YOU_ARE_NOT_ALLOWED_TO_CREATE_USERS', message: 'You are not allowed to create users' } },
       'create-user failed',
-      { error },
+      { warn: m.warn, error },
     );
     expect(direct).toEqual({
       status: 403,
@@ -1730,7 +1730,7 @@ describe('an unclassified internal failure is answered with the generic message 
     const result = mapAuthApiError(
       Object.assign(new Error('The email domain is not accepted here.'), { statusCode: 400 }),
       'create-user failed',
-      { error },
+      { warn: vi.fn(), error },
     );
     expect(result).toEqual({
       status: 400,

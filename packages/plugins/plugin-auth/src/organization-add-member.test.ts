@@ -447,7 +447,7 @@ describe('runOrganizationAddMember — an unclassified internal failure is answe
   it('a vendor call that fails without a code answers INTERNAL_ERROR in the generic words, and the logger receives the error once', async () => {
     const thrown = new Error(`adapter failed ${MARKER}`);
     const addMember = vi.fn(async () => { throw thrown; });
-    const logger = { error: vi.fn() };
+    const logger = { warn: vi.fn(), error: vi.fn() };
     const res = await runOrganizationAddMember(
       { getAuthApi: async () => ({ addMember }), logger },
       post({ userId: 'usr_1', role: 'member', organizationId: 'org_1' }),
@@ -468,7 +468,7 @@ describe('runOrganizationAddMember — an unclassified internal failure is answe
         body: { code: 'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION', message: 'User is already a member of this organization' },
       });
     });
-    const logger = { error: vi.fn() };
+    const logger = { warn: vi.fn(), error: vi.fn() };
     const res = await runOrganizationAddMember(
       { getAuthApi: async () => ({ addMember }), logger },
       post({ userId: 'usr_1', role: 'member', organizationId: 'org_1' }),
