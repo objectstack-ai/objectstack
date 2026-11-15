@@ -40,6 +40,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
+import { recordMasterDetailRequiredOmissions } from './data/master-detail-required-omission';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
 import { InlineGridColumnSchema, summaryFunctionReadsField } from './data/field.zod';
@@ -7065,6 +7066,19 @@ function buildDefinedStack(
   // enforced, Prime Directive #12). No alias canonicalization — the deprecated
   // `aiStudio`/`aiSeat` spellings were removed in #3308.
   const data = result.data;
+
+  // [ADR-0055 §1 as amended · ruling A] The parse just wrote `false` into every
+  // omitted `required`, so on a `controlled_by_parent` object an omitted one
+  // now reads as the optional master — the reading the ruling keeps. The
+  // omission itself is still visible here, in the input the parse read, and
+  // nowhere downstream: record it on the parsed field, where `os lint`'s
+  // `relationship/master-detail-required` reads it to report the omitted
+  // spelling the ruling promises it reports. Nothing parsed changes, and
+  // nothing is refused (`master-detail-required-omission.ts`).
+  recordMasterDetailRequiredOmissions(
+    (normalized as Record<string, unknown>).objects,
+    (data as Record<string, unknown>).objects,
+  );
 
   const capErrors = validateKnownCapabilities(data);
   if (capErrors.length > 0) {
