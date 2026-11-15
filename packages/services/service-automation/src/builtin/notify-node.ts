@@ -95,6 +95,13 @@ export interface MessagingServiceSurface {
  *
  * The reason text is each failed delivery's own, passed through verbatim; the
  * node never branches on it.
+ *
+ * The text carries no count. It is stable per cause (which channels failed,
+ * why, and whether anything got through), so the run summary's distinct-text
+ * fold reads a `notify` in a loop whose fan-out varies as ONE warning rather
+ * than one per recipient count. How many deliveries failed, were delivered or
+ * were enqueued is in the step's own `output` (`failed`, `delivered`,
+ * `enqueued`), per execution.
  */
 function deliveryFailureWarning(
     results: ReadonlyArray<Awaited<ReturnType<MessagingServiceSurface['emit']>>>,
@@ -105,26 +112,24 @@ function deliveryFailureWarning(
         (sum, result) => sum + (Number(result.delivered) || 0) + (Number(result.enqueued) || 0),
         0,
     );
-    // One entry per (channel, reason), in first-seen order, with its count.
-    const groups = new Map<string, { channel: string; error: string | undefined; count: number }>();
+    // One entry per (channel, reason), in first-seen order.
+    const groups = new Map<string, { channel: string; error: string | undefined }>();
     for (const result of results) {
         for (const delivery of result.deliveries ?? []) {
             if (delivery.ok) continue;
             const key = JSON.stringify([delivery.channel, delivery.error ?? null]);
-            const group = groups.get(key);
-            if (group) group.count += 1;
-            else groups.set(key, { channel: delivery.channel, error: delivery.error, count: 1 });
+            if (!groups.has(key)) groups.set(key, { channel: delivery.channel, error: delivery.error });
         }
     }
-    const named = [...groups.values()].map(({ channel, error, count }) =>
-        `channel '${channel}' (${count} ${count === 1 ? 'delivery' : 'deliveries'})${error ? `: ${error}` : ''}`,
+    const named = [...groups.values()].map(({ channel, error }) =>
+        `channel '${channel}'${error ? `: ${error}` : ''}`,
     );
     const which = named.length > 0
         ? named.join('; ')
         : 'the messaging service named no channel for them';
     return reached === 0
-        ? `notify delivered nothing: every delivery it attempted failed (${failed}). ${which}.`
-        : `notify: ${failed} of ${failed + reached} deliveries failed. ${which}.`;
+        ? `notify delivered nothing: every delivery it attempted failed. ${which}.`
+        : `notify: some deliveries failed while others were delivered or enqueued. ${which}.`;
 }
 
 /**
