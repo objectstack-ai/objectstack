@@ -1,5 +1,114 @@
 # @objectstack/metadata-core
 
+## 18.5.0
+
+### Patch Changes
+
+- 8c88db6: fix(metadata)!: on a name one row slot holds, the manager's addressed history and rollback answer the versions attributed to no package and the environment's own as that slot's, a version's existing history row (never the restored body's package stamp) says whose version it is, and a rollback writes its body stamped for the row slot it lands in (#32717)
+  
+  Clause-②: yes (narrowing) — for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`; at this release `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`, `picklist`, `mapping`, `dataset`, `webhook`, `tool`). Widened: `MetadataManager.getHistory`, `diff` and `rollback`, and `DatabaseLoader.getHistoryRecord` and `queryHistory`, addressed (`{ packageId }`, a package or `null` for the environment) to the name's one row slot, left out a version attributed to no package, and (addressing a package) the environment's own version, answering `Version N not found in history for TYPE/NAME (package PKG)` (or `(environment)`), and now list, diff and restore it into that row, as naming no package does; a direct `DatabaseLoader.registerRollback` to a version attributed to no package, on a name one row slot holds, with a restored body stamped (`_packageId`, or the envelope's `packageId`) for a package that holds no row of the name, answered `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`) and now lands in the one row. Narrowed: a direct `DatabaseLoader.registerRollback` addressing a package to a version attributed to no package, on a name two or more row slots hold, with a restored body stamped for a package, wrote it into that package's row (the address and the stamp agreeing), or answered a plain `Error` that the version was that package's, or `409 not-held-by-qualifier` naming a stamped package that holds no row, and now answers `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder), writing nothing.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row changes shape or is rewritten: what moves is which answer the metadata service's history and rollback methods give, and the package stamp of the body a rollback writes from now on, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for a direct caller of `DatabaseLoader.registerRollback` that addresses a package and restores a version recorded with no attribution (a history row written before `sys_metadata_history.package_id`, or one `SysMetadataRepository` wrote before it recorded the column) on a name several row slots hold, relying on the restored body's package stamp to say whose version it is. Nothing records whose it is, so it is refused naming every holder, as `MetadataManager.rollback` already refused it. No first-party caller reaches it: `MetadataManager.rollback`, the one caller in the workspace, restores a history row's own body, and a row attributed to none has a body naming no package. The fix: write the body into the package's row with a save (`save(type, name, body)` with the body's `_packageId` naming that package), which records a version attributed to it.
+  
+  ADR-0150 D3/D4, seat ruling 6885958183 (amended B). `MetadataManager` and `DatabaseLoader` give one answer, and on a name one row slot holds the `/meta` history and rollback doors (`SysMetadataRepository`, `isVersionOf`) give it too:
+  
+  - **A sole row slot's versions.** On a name one row slot holds, a version attributed to no package and the environment's own version are that slot's, addressed or not: a package-less row at a held name is that one holder's customization (ADR-0150 D4), so the address and the bare name write the same row. An addressed history read lists exactly what an addressed rollback restores: FROM "not found" at `MetadataManager.rollback`, `diff` and the addressed `getHistory` (which left such a version out) while `DatabaseLoader.registerRollback` restored it, TO listed, diffed and restored at every door. On a name several row slots hold such a version is in no addressed history and its rollback is refused `409 ambiguous-in-environment` naming every holder, addressed or not, as before.
+  - **Whose version it is.** FROM the version's history row's attribution, else the restored body's package stamp when the row was attributed to none, TO the history row's attribution whenever the row exists; the body's stamp stands in only for a version with no history row at all (history not tracked, or no row of that version).
+  - **The body a rollback writes.** FROM the restored body as handed in, TO the body stamped for the row slot it lands in: a package stamp (`_packageId`, or the envelope's `packageId`) naming another package than the slot's is replaced by the slot's package, or removed from a body the environment's package-less row stores. A body naming no package, or the slot's own, is written byte for byte, as before. Before, a foreign stamp written into the environment's row handed that row to the stamped package (`DatabaseLoader` keys a row whose `package_id` names no package by its body's stamp), and one written into a package's row served that package's item stamped for another. `DatabaseLoader.registerRollback` now resolves to the body it wrote, and `MetadataManager.rollback` files and returns that body.
+  
+  `@objectstack/metadata-core` ships a documentation change only: the `sys_metadata_history.package_id` doc comment (in its published `dist`) says NULL means "not attributed", never the environment, and that such a row is the version of the name's one row slot and of no slot while several hold the name. No field, type or export changes.
+- b462444: fix(metadata-protocol)!: the history and rollback doors of a by-package name refuse the bare name two holders hold, and `?package=` addresses one holder's versions (ADR-0150 D3/D4, #32905)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/history` and `POST /meta/:type/:name/rollback` naming no package are refused `409 RESOURCE_CONFLICT` before any row is read or written wherever the bare plain read refuses the name: its active rows held by two or more row slots (two packages', or a package's beside the package-less row; `ambiguous-in-environment`, `details.candidates` naming every holder), one row held while a second package ships the name in code, or a name two packages ship with no stored row (the read's own refusal) — where the history answered every holder's versions as one log and the rollback wrote the chosen version into whichever row the bare read served. An addressed rollback (`?package=`) to a version of another holder's row, or to a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is; a `?package=` naming a package that neither holds a row of the name nor ships it is refused `409` (`not-held-by-qualifier`) while another slot holds one, and `422 WRITABLE_PACKAGE_REQUIRED` while no row is stored and no such package is installed; nothing is restored. Widened: both doors accept `?package=` on a by-package type (the `/layers?package=` spelling), which reads or restores that holder's versions only; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds answers bare exactly as on `main`: its whole log, and its bare rollback restores any of its versions into its row, including a version saved package-less before a package took the name over.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the history or rollback door, and the docs that do (`content/docs/api/metadata-api.mdx`, `content/docs/kernel/contracts/metadata-service.mdx`, `content/docs/plugins/adding-a-metadata-type.mdx`, `content/docs/permissions/system-context.mdx`) list the routes without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `packageId` field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (one optional request key, `HistoryMetaItemRequest.packageId`, is added, and `RollbackMetaItemRequestSchema` is a new schema declaring a request the door already took, so nothing written before needs rewriting), and no stored row changes shape: `sys_metadata_history.package_id` already existed and is now also written by the `/meta` doors. What moves is which versions a door answers and which row a rollback may write, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare history or rollback request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/history` TO `GET /meta/TYPE/NAME/history?package=PKG`, once per holder the `409` names.
+  - FROM `POST /meta/TYPE/NAME/rollback` TO `POST /meta/TYPE/NAME/rollback?package=PKG`, with `toVersion` one of that holder's versions (its `?package=` history lists them).
+  
+  An `action` name is judged here by its row slots and the registry's package-scoped resolver only: the bare read's own action judges (an object-less name two packages ship, two packages binding the name to their own objects) are not asked by these doors yet, so such a name with no stored row still answers its (empty) history bare.
+  
+  `?package=` names a holder the way the item read does: the row a read naming that package serves — the package's own row, its `.custom` pair's declared override of it (so a base package addresses its customization pair), or the package-less row that read falls back to — else the package's own slot when it ships the name and holds no row yet. A package that neither holds nor ships the name, while another slot holds it, is refused `409` (`not-held-by-qualifier`); with no row stored, a package that is not installed is refused `422` as a save naming it is. `all` and the empty string name no package. For a type not stored per package, `?package=` is refused `400`, as it was before this release.
+  
+  The `/meta` doors' history rows now record whose row they snapshot (`sys_metadata_history.package_id`, the rule `DatabaseLoader` already applies; the package-less row is marked `sys_metadata`). A version recorded before this release carries no attribution, and an environment-attributed version stays with a package that took the package-less row over: each is listed and restorable while the name has one holder, and never guessed once two hold it. `@objectstack/metadata` exports that rule as `historyRowAttribution` and `ENVIRONMENT_HISTORY_MARK`.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (`HistoryMetaItemRequestSchema.packageId`, the authorable-surface entry `api/HistoryMetaItemRequest:packageId`, the new `RollbackMetaItemRequestSchema` that declares the rollback door's request with its `packageId` and a `toVersion` of at least 1, and `PACKAGE_SLOTTED_METADATA_TYPES` / `isPackageSlottedMetaType`, the one list of types stored per package that the doors and the console both read), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`historyMetaItem` and `RollbackMetaItemRequest` take `packageId`), `@objectstack/rest` (both doors accept `?package=`; the rollback door reads `toVersion` through its declaration), `@objectstack/metadata` (new exports `historyRowAttribution`, `ENVIRONMENT_HISTORY_MARK`; `PACKAGE_SLOTTED_STORE_TYPES` is now built from the spec list, same members), `@object-ui/data-objectstack` (`history()` / `rollback()` take `packageId`), `@objectstack/metadata-core` (a field description only) and `@object-ui/app-shell` (no exported signature changes: `HistoryPanel` and `StudioItemTools` are not exported, and `MetadataResourceHistoryPage` keeps its props).
+  
+  The console follows: `MetadataClient.history()` and `rollback()` take `packageId` (sent as `?package=`), and the History item tool (routed page, the edit page's sheet and Studio's item tools) names the package its item page reads, for a type stored per package only (`isPackageSlottedMetaType`): an object, view or page opened under a package reads and restores its history bare, as before, since the doors refuse `?package=` on those types.
+- 6e28797: fix(metadata-core): the protocol refusal for a package declared below the migration floor names the remedies that apply, never a `migrate meta --from` the chain refuses (#33031)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `OS_PROTOCOL_INCOMPATIBLE` (`checkProtocolCompat`, answered `422` by the package install doors) prescribed `objectstack migrate meta --from N` for every declared major behind the runtime, and that command refuses every `N` under the chain's support floor (`MIGRATION_SUPPORT_FLOOR`, 16, ADR-0087 D3). A manifest declaring `engines.protocol: '^15'` (or `'^0'`) was told to run `--from 15`, which then failed with "the chain's support floor is 16".
+  
+  Below the floor the refusal now does what it already did for a package ahead of the runtime: `diagnostic.migrateCommand` (and so `error.details.migrateCommand` on the HTTP answer) is absent, and the message names the two remedies that apply instead: install a build of the package for this runtime's protocol, or bring its metadata to protocol 16 by another path first and then run `objectstack migrate meta --from 16`. `^16` and every major from the floor up to the runtime's keep their `Run: objectstack migrate meta --from N` exactly as before, and the status, the code and the other four `details` members are unchanged.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
