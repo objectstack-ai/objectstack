@@ -4,7 +4,7 @@
 
 fix(plugin-security): `member_default` grants read and create on `sys_comment_reaction`, so a stock member can react to the comments they can read
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 The record page offers every member a reaction control on each comment, but no shipped permission set named `sys_comment_reaction`, so a member with only the platform baseline was refused (`403`) both adding a reaction (`POST /api/v1/data/sys_comment_reaction`) and listing them. `member_default` now carries `sys_comment_reaction` with read and create only. No row policy is added, and edit and delete stay off.

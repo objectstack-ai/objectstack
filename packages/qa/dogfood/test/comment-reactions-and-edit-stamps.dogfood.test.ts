@@ -207,6 +207,8 @@ describe('records-forms.comment-reactions-and-edit-stamps — over the REST data
 //     /api/v1/comments/reactions/:id`: the baseline carries no delete bit);
 //   - they cannot remove another member's reaction, on that door (403) or the
 //     data door (no delete bit), and the row stays;
+//   - CONTROL: an unfiltered list carries the readable comment's reactions and
+//     not the unreadable comment's;
 //   - CONTROL: on a comment they cannot read, a reaction is neither listed,
 //     read by id, removed, nor inserted (403 RECORD_NOT_ACCESSIBLE).
 
@@ -352,6 +354,21 @@ describe('a stock member reacts to the comments they can read — member_default
     expect(data.json.code).toBe('PERMISSION_DENIED');
 
     expect(await reactionRows({ id: theirsId })).toHaveLength(1);
+  });
+
+  it('CONTROL: an unfiltered list answers the readable comment\u2019s reactions and omits the unreadable comment\u2019s', async () => {
+    const visible = await react(aliceTok, commentId, '👏');
+    expect(visible.status, JSON.stringify(visible.json)).toBe(201);
+    const visibleId = await reactionId({ comment_id: commentId, emoji: '👏' });
+
+    const list = await call(aliceTok, 'GET', `/data/${REACTION}`);
+    expect(list.status, JSON.stringify(list.json)).toBe(200);
+    const ids = listed(list.json).map((r: any) => String(r.id));
+    // The readable side is the witness that the answer carries rows at all.
+    expect(ids).toContain(visibleId);
+    expect(ids).not.toContain(privateReactionId);
+    // Ground truth past every scope: the hidden row exists.
+    expect(await reactionRows({ id: privateReactionId })).toHaveLength(1);
   });
 
   it('CONTROL: on a comment the member cannot read, a reaction is neither listed, read, removed nor inserted', async () => {
