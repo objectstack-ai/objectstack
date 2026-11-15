@@ -777,16 +777,21 @@ OAuth client's hand-off and when no provider can be started. It changes the
 form only: `POST /api/v1/auth/sign-in/email` still accepts a password, and the
 `/register` and `/forgot-password` pages are not changed by it.
 
-Because the form then offers no email and password and no phone sign-in, two
-checks that keep a way to sign in do not count them under `off`, even while
-they are switched on: Setup's **Delete SSO Provider** on the last identity
-provider is refused `409 DELETE_RESTRICTED` with nothing deleted, and a boot
-with no identity provider reports at **error** under the grep token
-`no_sign_in_method_at_boot`. Recover by setting
-`OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden`, and
+Because the form then offers no email and password and no phone sign-in, the
+three checks that keep a way to sign in do not count them under `off`, even
+while they are switched on. Saving the auth settings refuses a Google change
+that removes the last way in (Google switched off, or a client credential
+cleared that no environment variable backs) with `400 SETTINGS_VALIDATION`,
+and turning email and password on in that save does not help. The email and
+password switch itself is never refused under `off`, because the form draws it
+neither way. Setup's **Delete SSO Provider** on the last identity provider is
+refused `409 DELETE_RESTRICTED` with nothing deleted. A boot with no identity
+provider reports at **error** under the grep token
+`no_sign_in_method_at_boot`. Another identity provider, a social or OIDC
+provider with a client ID and secret, or a host sign-in handoff still counts.
+Recover by setting `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden`, and
 `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` too when email and password sign-in is
-off, then restarting. The auth settings save still counts email and password
-under `off`; that check is still open.
+off, then restarting.
 
 **What a visit does.** The Console sign-in page reads `features.directSignIn`
 from `GET /api/v1/auth/config`. That is `true` only while a provider can be
@@ -821,6 +826,13 @@ button (and the reason, where there is one), instead of starting again when:
   starts from one address in a few seconds). It redirects to
   `/login?error=direct_sign_in_rate_limited`, the page asks the visitor to
   wait a few seconds and try again, and the `warn` line names `rate_limited`;
+- the [IP allow-list](/docs/permissions/authentication) refuses the
+  visitor's network. The door is not exempt from the allow-list: a browser
+  `GET` of the door from a refused address starts nothing and is redirected
+  to `/login?error=IP_NOT_ALLOWED` (keeping a same-origin `?redirect=`)
+  instead of the `403` body, the page says sign-in is not allowed from this
+  network, and every other auth request from that address is still refused
+  `403 IP_NOT_ALLOWED`;
 - the person just signed out in that tab. Often the identity provider's
   session outlives the platform's, so starting again would sign them straight
   back in. When the provider ends its own session too (an OIDC provider whose
