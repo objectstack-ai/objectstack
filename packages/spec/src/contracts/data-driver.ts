@@ -232,7 +232,9 @@ export interface IDataDriver {
    * road. `aggregations[].filter` (#10576) reaches this method only on a driver
    * that declares `supports.aggregationFilter` (#33698, `DriverCapabilities`),
    * which then evaluates each measure's filter with the in-memory path's
-   * answers; on every other driver it forces the in-memory path.
+   * answers except where `DriverCapabilities.aggregationFilter` states a
+   * latitude (text compares by the backend collation, as in `where`); on every
+   * other driver it forces the in-memory path.
    *
    * What a driver returns: one row per group, keyed by the `groupBy` field
    * names and by each aggregation's `alias`, with the per-function value

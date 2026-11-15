@@ -310,10 +310,11 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * Measured (in-memory path against driver-sql's where compiler, 119
    * filters): SQLite, and PostgreSQL 16 with a `C.UTF-8` database collation,
    * answer alike on every operator; PostgreSQL 16 with an ICU `en-US` database
-   * collation differs only in text ordering. NOT measured: MySQL and SQL
-   * Server, whose default collations are case-insensitive, so equality and
-   * membership on text are expected to fold case there. Numbers, booleans,
-   * dates, datetimes and times answer alike wherever measured.
+   * collation differs only in text ordering. NOT measured: MySQL, SQL Server
+   * and Oracle. The MySQL and SQL Server default collations are
+   * case-insensitive, so equality and membership on text are expected to
+   * fold case there. Numbers, booleans, dates, datetimes and times answer
+   * alike wherever measured.
    *
    * What the engine does with it: `engine.aggregate` sends an aggregate whose
    * measures carry a filter to `driver.aggregate` only when this bit is `true`
