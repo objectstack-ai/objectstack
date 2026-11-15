@@ -868,7 +868,7 @@
       "title": "Self-service profile: name + avatar edits persist through real storage, and password change verifies the current password (passwordless users get set-initial)",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["a signed-in email+password user", "a signed-in passwordless (SSO-only) user"],
@@ -890,7 +890,7 @@
         "remove the avatar (profile-avatar-remove-btn → updateUser({image:null})); confirm get-session image is cleared and the fallback initials render again",
         "change the password: enter the correct current password + a new one (PasswordCard → auth.changePassword(current,new) → POST /api/v1/auth/change-password); sign out and sign in with the NEW password (2xx), then confirm the OLD password is refused",
         "negative: attempt change-password with a WRONG current password and capture the refusal — the current-password check is server-enforced, not just a UI confirm",
-        "confirm email is immutable on this surface (the email input is disabled, 'Email cannot be changed') — self-service email change is a distinct endpoint (identity-auth.auth-method-matrix covers /auth/change-email)",
+        "confirm email is immutable on this surface (the email input is disabled, 'Email cannot be changed') — self-service email change is a distinct endpoint (identity-auth.auth-method-matrix covers /auth/change-email); then, as the same signed-in user, send the field the disabled input withholds straight to the server: POST /api/v1/auth/update-user {email: a new address}, and re-read get-session",
         "passwordless branch: provision a credential-less user per fixtures.requires[2] (import-users with passwordPolicy none, then impersonate-user for its session); as that user, the card renders 'Set Local Password' (hasLocalPassword false) — set an initial password (setInitialPassword → no current-password field) and then sign in with email+password to prove the local credential now exists"
       ],
       "acceptance": [
@@ -929,19 +929,27 @@
           "oracle": "api",
           "verify": "the set-initial call 2xx with no current-password; a subsequent email+password sign-in for that user 2xx (was impossible before)",
           "evidence": "the set-initial response + the new sign-in"
+        },
+        {
+          "clause": "email is immutable on this surface, in the UI and at the server: the Profile page's email field is disabled with the note 'Email cannot be changed.', and an update-user carrying email is refused with a coded body, the address unchanged",
+          "oracle": "api",
+          "verify": "the email input renders disabled beside 'Email cannot be changed.' (ui/apps/console/src/pages/system/ProfilePage.tsx); POST /api/v1/auth/update-user {email} answers 400 {message: 'Email can not be updated', code: 'EMAIL_CAN_NOT_BE_UPDATED'} (packages/plugins/plugin-auth/src/account-self-service-refusal-code.ts), pinned by packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts ('refusals the vendor already codes on these doors pass through unchanged'; run it with `pnpm --filter @objectstack/plugin-auth exec vitest run --reporter=tree --maxWorkers=1 FILE`, ≥1 test and 0 failed); get-session still carries the old email",
+          "evidence": "the disabled-field screenshot, the 400 body and the get-session read"
         }
       ],
       "negative": [
         "a name/avatar 'save' that updates the header but does NOT persist (gone after reload) is a FAIL — updateUser must write server-side",
         "an avatar stored as an inline data: URL rather than a committed storage object is a FAIL (the item asserts a real storage write)",
         "change-password succeeding with a WRONG current password is a security FAIL — the current-password check must be server-enforced",
-        "offering the passwordless user a change-password form with a required current password they don't have (locking them out of setting one) is a FAIL — set-initial is the correct branch"
+        "offering the passwordless user a change-password form with a required current password they don't have (locking them out of setting one) is a FAIL — set-initial is the correct branch",
+        "an update-user {email} that answers 2xx, or a get-session whose email changed, is a FAIL: self-service email change goes only through /auth/change-email and its verification"
       ],
       "traps": ["hydration-race", "stale-console-bundle"],
       "source": [
         "objectui apps/console/src/pages/system/ProfilePage.tsx (updateUser name/image; useUpload avatar; PasswordCard changePassword vs setInitialPassword gated on hasLocalPassword; email immutable; data-testids profile-avatar-file/-upload-btn/-remove-btn)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me — re-pointed #18104: updateUser is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
-        "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password ONLY while the auth setting password_history_count is above 0, and it defaults to 0, which disables the history check: packages/services/service-settings/src/manifests/auth.manifest.ts (password_history_count, default 0) and packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts#assertPasswordNotReused (returns early on a count of 0 unless an admin-forced change is outstanding). So on a stock boot a change back to a previous password is admitted, and a run that wants the PASSWORD_REUSE refusal sets password_history_count first (QA run #27441))"
+        "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password ONLY while the auth setting password_history_count is above 0, and it defaults to 0, which disables the history check: packages/services/service-settings/src/manifests/auth.manifest.ts (password_history_count, default 0) and packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts#assertPasswordNotReused (returns early on a count of 0 unless an admin-forced change is outstanding). So on a stock boot a change back to a previous password is admitted, and a run that wants the PASSWORD_REUSE refusal sets password_history_count first (QA run #27441))",
+        "packages/plugins/plugin-auth/src/account-self-service-refusal-code.ts (the coded refusal update-user answers for an email key)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: self-service name + avatar (real storage write, persists) and password change with current-password verification, plus the passwordless set-initial branch, grounded in ProfilePage.tsx + the auth route ledger (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -956,6 +964,12 @@
           "date": "2026-10-31",
           "change": "source[2] says when the reuse ring backs change-password, as QA run #27441 noted: only while password_history_count > 0. The auth settings manifest declares it with default 0 ('0 disables the check', packages/services/service-settings/src/manifests/auth.manifest.ts), and assertPasswordNotReused (plugin-auth auth-manager-password-session-policy.ts) returns early on a count of 0 unless an admin-forced change is outstanding. No clause changed: no clause here asserts a reuse refusal. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6490438726",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[6] (new), steps[6], negative[4] and source[3]: email immutability gets its own clause, scored in the UI and at the server. steps[6] only looked at the disabled field, so nothing proved the server refuses; it now sends update-user {email} and reads the coded 400 (EMAIL_CAN_NOT_BE_UPDATED, pinned by plugin-auth change-email-delete-user-wiring.test.ts). New coverage for ledger 6896511848 of #33761, row 101. Read from source at main 159757ab. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -3642,6 +3656,120 @@
           "date": "2026-11-15",
           "change": "acceptance[0].verify re-pointed (stale spec, QA run #33853, card #33859). The verify listed the kept keys as the only keys allowed after sign-out, but the anonymous login page writes its own flow-palette-recents = [] (FlowPaletteRecentsProvider re-hydrates with no user after the purge and saves the unscoped key); a never-signed-in visit writes the same. The verify now judges keys the signed-out user's session wrote, as negative[1] does, names that anonymous-shell key with its value, adds objectui:auth:signed-out-via-provider to the kept list as SIGNED_OUT_KEPT_KEYS has it, and has the runner diff any other unlisted key against a fresh anonymous visit. What the clause tests, no signed-out user's state left behind, is unchanged. Read at base 895783a1",
           "ref": "#33936"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.pending-sso-users-managed",
+      "title": "On a cloud-managed environment an admin adds people who sign in only through single sign-on: add-sso-user and import-sso-users create a pending person (source idp_pending, no credential) with positions, permission sets and a manager; every password door refuses that person 409; ban and unban work without the admin plugin; the password-based add doors answer 409 pointing to Setup → Users; and an environment that is not cloud-managed refuses the new doors",
+      "since": "v18.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin, admin@objectos.ai): authors the fixture and makes every admin call",
+        "a non-admin member of the Default Organization, created by the admin and past its first password change, for the platform-admin gate"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a boot with OS_CLOUD_MANAGED=1 and OS_AUTH_ADMIN=false, the hosted kernel shape (GET /api/v1/auth/config answers features.cloudManaged true and admin false), single posture, on a file database so sys_user, sys_account, sys_session and sys_verification can be read",
+          "a second boot of the same app without OS_CLOUD_MANAGED, for acceptance[7]",
+          "a position and a permission set the showcase ships, named in the add and import bodies"
+        ],
+        "knownGaps": [
+          "a WIRED environmentUserHost (told on an add, asked before a ban and an unban, its typed refusal, and a fail-closed 503 deactivation) is an AuthPlugin constructor option with no env or config door, so a local boot answers host {notified: false, reason: 'no_host'} only: score the wired half from the pins in automated.ref and record it blocked(fixture) live",
+          "the first platform single sign-on that binds the pending person needs an objectstack-cloud OAuth provider, which a local boot lacks: identity-auth.implicit-account-linking-ownership carries it on its pin. set-initial-password and the pending-session refusal have no local door either: pins only"
+        ]
+      },
+      "steps": [
+        "as admin POST /api/v1/auth/admin/add-sso-user {email (mixed case), name, positions: [P], permissionSets: [S], manager: the admin's email}; read that person's sys_user, sys_account, sys_user_position, sys_user_permission_set and sys_member rows",
+        "add the same email again with positions; add the admin's own email; add with an extra password key; add with a position nobody declares",
+        "POST /api/v1/auth/admin/import-sso-users {csv} whose rows hold a manager defined on a later row, a malformed email, a manager no one is, a permission set nobody declares and the admin's email; send the same CSV again",
+        "against the pending person: POST /api/v1/auth/admin/set-user-password; POST /api/v1/auth/request-password-reset, then /reset-password with the token read from sys_verification; POST /api/v1/auth/sign-in/email",
+        "ban a member (POST /api/v1/auth/admin/ban-user), read its sys_user row and sessions, call with its old token and sign in as it; unban it and sign in; ban it with banExpiresIn 2, sign in at once and again after 4 s",
+        "as admin POST /api/v1/auth/admin/create-user, /admin/import-users and /organization/invite-member; as the non-admin member POST add-sso-user, import-sso-users and ban-user",
+        "on the second boot: POST add-sso-user and import-sso-users as admin"
+      ],
+      "acceptance": [
+        {
+          "clause": "the pending person's add and import, the password-door refusals, the ban doors and the host seams — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`; `--reporter=tree` prints the one line per file this clause is scored on, RUNNER.md's environment facts); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "add-sso-user creates a pending person with its grants, no credential and a linked manager",
+          "oracle": "api",
+          "verify": "201 with source 'idp_pending', alreadyPending false, the manager linked and host {notified: false, reason: 'no_host'}; the sys_user row carries source idp_pending, the email lower-cased, email_verified false and manager_id the admin; no sys_account row exists for it; the position, the set grant and one sys_member row do (packages/plugins/plugin-auth/src/pending-sso-users.ts#runAddSsoUser)",
+          "evidence": "the answer and the five reads"
+        },
+        {
+          "clause": "an add that would change nothing, take a held address or carry a bad grant writes nothing",
+          "oracle": "api",
+          "verify": "the re-add answers 200 alreadyPending true with notApplied ['positions'] and the grants unchanged; the admin's email answers 409 RESOURCE_CONFLICT; the password key answers 400 naming the unknown field; the unknown position answers 400 VALIDATION_FAILED and leaves no sys_user row for that email",
+          "evidence": "the four answers and the row reads"
+        },
+        {
+          "clause": "import-sso-users answers per row, links a manager defined later in the file, and never duplicates a person",
+          "oracle": "api",
+          "verify": "200 with a per-row result: the later-defined manager linked by the second pass, the malformed email INVALID_REQUEST on its own row, the unknown manager added with manager 'unresolved', the unknown set VALIDATION_FAILED with no row created, the admin's email RESOURCE_CONFLICT; the second send answers every existing row alreadyPending, and sys_user holds one row per email (packages/plugins/plugin-auth/src/pending-sso-users.ts#runImportSsoUsers)",
+          "evidence": "both import answers and a sys_user count per email"
+        },
+        {
+          "clause": "every password door refuses a pending person, and no credential appears",
+          "oracle": "api",
+          "verify": "set-user-password and /reset-password each answer 409 RESOURCE_CONFLICT saying the person signs in with single sign-on and nothing was set; sign-in/email answers 401; no sys_account row exists afterwards (packages/plugins/plugin-auth/src/pending-sso-marker.ts#pendingSsoPasswordRefusal)",
+          "evidence": "the three answers and the sys_account read"
+        },
+        {
+          "clause": "ban and unban work without the admin plugin, and a banned person has no session until the ban ends",
+          "oracle": "api",
+          "verify": "ban-user answers 200; the row carries banned and its reason, and no session is left; the old token answers 401 and sign-in 403 BANNED_USER; after the unban sign-in answers 200; the 2-second ban refuses at once and admits the person after it expires (packages/plugins/plugin-auth/src/admin-ban-endpoints.ts#runAdminBanUser; packages/plugins/plugin-auth/src/user-session-admission.ts#refuseInactiveUserSession)",
+          "evidence": "each answer and the row and session reads"
+        },
+        {
+          "clause": "on a managed environment the password-based add doors point to Setup → Users, and the new doors are a platform admin's",
+          "oracle": "api",
+          "verify": "create-user, import-users and invite-member each answer 409 RESOURCE_CONFLICT whose sentence points to Setup → Users (packages/plugins/plugin-auth/src/cloud-managed.ts#cloudManagedRefusal); the non-admin's three calls each answer 403 PERMISSION_DENIED and write no row",
+          "evidence": "the six answers"
+        },
+        {
+          "clause": "an environment that is not cloud-managed refuses the new doors",
+          "oracle": "api",
+          "verify": "add-sso-user and import-sso-users each answer 409 saying the environment is not cloud-managed and no user was added",
+          "evidence": "the two answers"
+        }
+      ],
+      "negative": [
+        "a pending person gaining a local password through any door is a FAIL",
+        "a banned person keeping a session, or signing in before the ban ends, is a FAIL"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/pending-sso-users.test.ts + packages/plugins/plugin-auth/src/pending-sso-seams.test.ts + packages/plugins/plugin-auth/src/implicit-account-linking.test.ts + packages/plugins/plugin-auth/src/password-reset-ends-sessions.test.ts. Plugin units: Hono-mounted plugin routes over an engine double, the host seams over fakes"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/pending-sso-users.ts#runAddSsoUser",
+        "packages/plugins/plugin-auth/src/pending-sso-users.ts#runImportSsoUsers",
+        "packages/plugins/plugin-auth/src/pending-sso-marker.ts#pendingSsoPasswordRefusal",
+        "packages/plugins/plugin-auth/src/admin-ban-endpoints.ts#runAdminBanUser",
+        "packages/plugins/plugin-auth/src/user-ban-write.ts#applyUserBan",
+        "packages/plugins/plugin-auth/src/user-session-admission.ts#refuseInactiveUserSession",
+        "packages/plugins/plugin-auth/src/environment-user-host.ts#EnvironmentUserHost",
+        "packages/plugins/plugin-auth/src/cloud-managed.ts#cloudManagedRefusal",
+        "#33181 (fix PR #33227), driven live by QA run #33785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-15",
+          "change": "initial — new coverage for #33181's pending single-sign-on people (ledger 6896511848 of #33761, row 15): no item cited pending-sso-users.ts, admin-ban-endpoints.ts, user-session-admission.ts, pending-sso-marker.ts, user-ban-write.ts, environment-user-host.ts or cloud-managed.ts. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893199839); its two blocked legs are knownGaps. Sources re-read at main 159757ab. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     }

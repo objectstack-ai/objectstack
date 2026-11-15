@@ -5351,6 +5351,193 @@
           "ref": "#33332"
         }
       ]
+    },
+    {
+      "id": "access-security.cbp-master-read-opt-in",
+      "title": "A controlled_by_parent detail that declares sharing.controlledByParent.writeRequiresMasterRead lets whoever reads its master insert, update and delete it under the detail's own grants; without read on the master an insert is refused 403 and a stored row is hidden 404; a detail without the key still asks edit on the master; and the save door refuses the key off a detail or beside ownerMayEdit",
+      "since": "v18.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin, admin@objectos.ai): authors the fixture and makes every admin call",
+        "reader: a member holding a set with read and View All on the master and full CRUD on both details; reads the master row and cannot edit it",
+        "blind: a member holding full CRUD on both details and no grant on the master object",
+        "hidden: a member holding read without View All on the master, whose private OWD hides the admin's master row, and full CRUD on both details",
+        "looker: a member who reads the master (read and View All) and holds READ alone on the opted-in detail"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch copy of the showcase (never the shared example), compiled into its own dist and booted from it, adding: a master object with a private OWD (e.g. showcase_qa_contract) and one admin-owned row C1; an opted-in detail (sharingModel 'controlled_by_parent', one required master_detail field to the master, sharing: { controlledByParent: { writeRequiresMasterRead: true } }, e.g. showcase_qa_milestone) with one admin-owned row under C1; and a CONTROL detail identical but without the key (e.g. showcase_qa_step) with one admin-owned row under C1. The recipe QA run #33785 drove at a557fa38 (record comment 6893194178)",
+          "one permission set and one member per persona above: create each member as admin with POST /api/v1/auth/admin/create-user and change its password (the session lands held until then), then grant its set with POST /api/v1/data/sys_user_permission_set",
+          "for acceptance[5]: a package the metadata save door can address, the scratch app's own or one authored with POST /api/v1/packages"
+        ]
+      },
+      "steps": [
+        "as reader: GET the master row C1, then PATCH it",
+        "as reader on the opted-in detail: POST /api/v1/data/DETAIL naming C1, then POST /api/v1/data/DETAIL/createMany with two rows under C1; PATCH and DELETE the admin-owned row by id. Read the detail back as admin",
+        "as blind, then as hidden, on the opted-in detail: POST a row naming C1, and PATCH and DELETE the admin-owned row by id. Read that row back as admin",
+        "as looker on the opted-in detail: POST, PATCH and DELETE as in step 2",
+        "as reader on the CONTROL detail: POST a row naming C1, and PATCH and DELETE its admin-owned row by id",
+        "as reader: POST /api/v1/security/explain for an update of the opted-in admin-owned row and for an update of the CONTROL row",
+        "as admin through the save door (PUT /api/v1/meta/object/NAME?package=PKG): an object declaring the key under sharingModel 'private'; a controlled_by_parent detail declaring the key beside ownerMayEdit: true; and a controlled_by_parent detail declaring the key alone"
+      ],
+      "acceptance": [
+        {
+          "clause": "the opt-in's admit side, its refusals by door, explain's answer and the parse refusals — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`; `--reporter=tree` prints the one line per file this clause is scored on, RUNNER.md's environment facts); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a master reader writes the opted-in detail with no edit on the master: an insert, a batch insert, and an update and a delete of a row the reader neither owns nor created all land",
+          "oracle": "api",
+          "verify": "step 1's PATCH of C1 answers 403 PERMISSION_DENIED, while the single POST answers 201, /createMany 201 with two rows, and the by-id PATCH and DELETE 200; the admin's read-back holds exactly those rows. On an opted-in hop the gate asks READ on the master in place of the three edit legs (packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts#assertControlledByParentChainEditable)",
+          "evidence": "each status line and the admin read-back"
+        },
+        {
+          "clause": "without read on the master every write of the opted-in detail is refused, and the door decides the status: an insert meets the master gate (403, asking READ), a by-id update or delete meets the read door (404), and the stored row is unchanged",
+          "oracle": "api",
+          "verify": "blind's and hidden's inserts each answer 403 PERMISSION_DENIED whose message asks for read access to the master, never edit access; their by-id PATCH and DELETE each answer 404 RECORD_NOT_FOUND, because a detail's rows are read through its master (ADR-0055 §2), so the row is hidden before the gate runs; the admin read-back shows the row as seeded",
+          "evidence": "the six refusal bodies and the read-back"
+        },
+        {
+          "clause": "the detail's own grants still decide: a master reader holding READ alone on the detail is refused insert, update and delete",
+          "oracle": "api",
+          "verify": "looker's three writes each answer 403 PERMISSION_DENIED with the object-permission refusal, not the master gate's sentence",
+          "evidence": "the three bodies"
+        },
+        {
+          "clause": "a detail without the key asks edit on the master as before, and explain answers what the write path does",
+          "oracle": "api",
+          "verify": "reader's three writes on the CONTROL detail each answer 403 PERMISSION_DENIED whose message asks for edit access to the master. Explain reports the opted-in row writable (its PATCH answered 200) and the CONTROL row excluded by sharing on the object_permission leg (its PATCH answered 403) (packages/plugins/plugin-security/src/explain-engine.ts; packages/spec/src/contracts/security-service.ts#ControlledByParentWriteDenialLeg)",
+          "evidence": "the CONTROL bodies and both explain answers beside their PATCH status"
+        },
+        {
+          "clause": "the save door refuses the key where nothing reads it: off a controlled_by_parent detail, and beside ownerMayEdit",
+          "oracle": "api",
+          "verify": "the 'private' object answers 422 INVALID_METADATA at path sharing.controlledByParent.writeRequiresMasterRead; the detail with both keys answers 422 at path sharing.controlledByParent.ownerMayEdit, naming that key to delete; the detail with the key alone saves 200 (packages/spec/src/data/object.zod.ts#refuseControlledByParentWriteRequiresMasterReadMisplaced)",
+          "evidence": "the three save answers"
+        }
+      ],
+      "negative": [
+        "a 403 for reader on an opted-in write (the edit question asked anyway) is a FAIL, and so is any write landing for blind, hidden or looker",
+        "an insert naming the unreadable C1 and one naming a master id that exists nowhere answering different bodies is an existence-oracle FAIL: both are the one 403 (access-security.parent-and-organization-write-guards negative[0])"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/controlled-by-parent-owner-may-edit.test.ts + packages/plugins/plugin-security/src/explain-controlled-by-parent-write.test.ts + packages/spec/src/data/controlled-by-parent-owner-may-edit.test.ts + packages/lint/src/validate-security-posture-owner-may-edit.test.ts. The plugin-security files are engine pins (a real ObjectQL over SqlDriver with the security wiring; their '[#33250]' describes carry this opt-in); the spec and lint files are schema and rule units"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/security-plugin-cbp-relation.ts#resolveCbpRelation (reads the key onto the detail's resolved relation)",
+        "packages/plugins/plugin-security/src/security-plugin-cbp-write-gate.ts#assertControlledByParentChainEditable (the one hop where the master question becomes READ)",
+        "packages/spec/src/data/object.zod.ts#refuseControlledByParentWriteRequiresMasterReadMisplaced",
+        "packages/spec/src/contracts/security-service.ts#ControlledByParentWriteDenialLeg",
+        "#33250 (fix PR #33369; ADR-0055 §3 as amended), driven live by QA run #33785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-15",
+          "change": "initial — new coverage for the #33250 opt-in (ledger 6896511848 of #33761, rows 11 and 16): no item drove writeRequiresMasterRead, and security-plugin-cbp-relation.ts had no exact citer, so `checklist-select file:` fell back to its directory. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893194178); sources re-read at main 159757ab. Card #33969",
+          "ref": "#PENDING-33969"
+        }
+      ]
+    },
+    {
+      "id": "access-security.position-renamed-holder-carry",
+      "title": "A position renamed with renamedFrom carries its holders to the new name on a hot install or upgrade and on the per-item publish door, with no restart: the holders keep their access, a holder of an untouched position stays as it was, a repeat is idempotent, and a package never claims another package's position holders",
+      "since": "v18.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin, admin@objectos.ai): authors the fixture and makes every admin call",
+        "pu1: a member holding the position the upgrade renames",
+        "pu2: a member holding the CONTROL position, which no release renames",
+        "pu3: a member holding the authored package's position for the publish-door leg"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch package sent to the install-local door, POST /api/v1/marketplace/install-local with admin credentials (the body `os package install` sends). POST /api/v1/packages cannot carry it: ManifestSchema declares no positions key, so that door refuses the manifest 400 naming its keys. v1 ships one object, two permission sets (one granting read and create on the object, one granting read) and two positions, P_old (the first set) and P_ctl (the second, the CONTROL); v2 ships P_new { renamedFrom: ['P_old'] } with the first set, and the same P_ctl. The recipe QA run #33785 drove at a557fa38 (com.qa.posren, record comment 6893194178)",
+          "pu1 holding P_old and pu2 holding P_ctl, each given its position as admin with POST /api/v1/data/sys_user_position after v1 installs",
+          "for steps[3]: an authored package (POST /api/v1/packages) and pu3; for steps[4]: a third scratch package whose position declares renamedFrom naming P_ctl, a name another package holds"
+        ],
+        "knownGaps": [
+          "a rename saved through the metadata save door's default ACTIVE mode does not carry its holders until a restart (#33788, open): only a draft and its publish announce the reload. steps[3] drives the draft and publish door; an active-save reading belongs to that card, never to a verdict here"
+        ]
+      },
+      "steps": [
+        "install v1 through install-local. As pu1 GET and POST the object; as pu2 POST it",
+        "install v2 through install-local in the same server process. Read pu1's and pu2's sys_user_position rows (GET /api/v1/data/sys_user_position), GET /api/v1/auth/me/permissions as pu1, then as pu1 GET and POST the object again; GET /api/v1/meta/position",
+        "send v2 to install-local again; read both holder rows' updated_at",
+        "in the authored package: save a position P_a (PUT /api/v1/meta/position/P_a?package=PKG) and give pu3 that position; DELETE P_a; save P_b { renamedFrom: ['P_a'] } as a draft and publish it (POST /api/v1/meta/position/P_b/publish). Read pu3's row and drive pu3's write the position grants",
+        "install the third package through install-local; read pu2's row and the served log"
+      ],
+      "acceptance": [
+        {
+          "clause": "the carry at boot, on a hot install and on the publish door, and its refusals — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`; `--reporter=tree` prints the one line per file this clause is scored on, RUNNER.md's environment facts); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a hot upgrade that renames a position carries its holders, with no restart",
+          "oracle": "api",
+          "verify": "v2 answers success with hotLoaded true; pu1's row now names P_new, its updated_at moved; me/permissions lists P_new and still the first set; pu1's GET answers 200 and POST 201 in the same process; GET /api/v1/meta/position serves P_new and P_ctl and no P_old (packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHolders)",
+          "evidence": "the install answer, both holder rows, the permissions body and pu1's two writes"
+        },
+        {
+          "clause": "a holder of an untouched position stays as it was, and a repeat changes nothing",
+          "oracle": "api",
+          "verify": "pu2's row still names P_ctl with its updated_at unchanged, and pu2's POST still answers 403; the repeated install answers success and neither row's updated_at moves",
+          "evidence": "the rows' updated_at before and after, and pu2's answer"
+        },
+        {
+          "clause": "the per-item publish door carries the holders too",
+          "oracle": "api",
+          "verify": "after the publish pu3's row names P_b and pu3's write lands",
+          "evidence": "pu3's row and the write's answer"
+        },
+        {
+          "clause": "a package never claims another package's position holders",
+          "oracle": "log",
+          "verify": "the third package installs; the served log carries one warning that the rename of P_ctl was not carried, naming it held by another package (the 'held-by-other' refusal of position-renamed-holder-carry.ts); pu2's row is unchanged",
+          "evidence": "the log line and pu2's row"
+        }
+      ],
+      "negative": [
+        "pu1 losing access across the upgrade, or keeping only P_old until a restart, on the install-local or the publish door is a FAIL; the active-save door is knownGaps[0]",
+        "the third package moving pu2 to its own position is a FAIL"
+      ],
+      "traps": [
+        "cache-staleness",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-security/src/position-renamed-holder-carry.test.ts + packages/cloud-connection/src/marketplace-install-local-hot-resync.test.ts + packages/runtime/src/domains/packages-reload-announce.test.ts. The plugin-security file boots a real ObjectKernel over SqlDriver with SecurityPlugin; the cloud-connection file drives the real install-local route handler over a real kernel; the runtime file drives HttpDispatcher over a real kernel"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHolders (the hot carry, its report and its refusals)",
+        "packages/plugins/plugin-security/src/position-renamed-holder-carry.ts#carryRenamedPositionHoldersAtBoot",
+        "#33238 (fix PR #33245, completed by #33448, #33473 and #33304), driven live by QA run #33785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-15",
+          "change": "initial — new coverage for the #33238 renamedFrom holder carry (ledger 6896511848 of #33761, row 12): no item covered it, at boot or hot. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893194178); its active-save finding is #33788 (knownGaps[0]). Sources re-read at main 159757ab. Card #33969",
+          "ref": "#PENDING-33969"
+        }
+      ]
     }
   ]
 }
