@@ -343,14 +343,14 @@ describe('6. a key the action does not declare is refused before dispatch (#3355
 
   it('a schema that admits more keys, or lists no `properties`, declares open input and dispatches every key', async () => {
     const { engine, sent } = makeEngine();
-    for (const [action, input] of [
-      ['openTrue', { channel: 'c1', extra: 'kept' }],
-      ['openSchema', { channel: 'c1', extra: 'kept' }],
-      ['openPattern', { channel: 'c1', x_extra: 'kept' }],
-      ['openComposed', { channel: 'c1', thread_ts: '1.2' }],
-      ['unlisted', { anything: 'kept' }],
+    for (const [flow, action, input] of [
+      ['open_true', 'openTrue', { channel: 'c1', extra: 'kept' }],
+      ['open_schema', 'openSchema', { channel: 'c1', extra: 'kept' }],
+      ['open_pattern', 'openPattern', { channel: 'c1', x_extra: 'kept' }],
+      ['open_composed', 'openComposed', { channel: 'c1', thread_ts: '1.2' }],
+      ['open_unlisted', 'unlisted', { anything: 'kept' }],
     ] as const) {
-      const result = await run(engine, `open_${action}`, action, input);
+      const result = await run(engine, flow, action, input);
       expect(result.success, `${action}: ${result.error}`).toBe(true);
     }
     expect(sent.map((s) => s.input)).toEqual([
