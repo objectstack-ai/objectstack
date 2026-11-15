@@ -926,6 +926,8 @@ export interface PersonaGrantNeed {
   verb: PersonaGrantVerb;
   /** The questions and operations that need the grant: a question the persona answers, a write applied or awaiting confirmation. */
   requiredBy: string[];
+  /** The operations among those whose outcome is `pending_confirmation`: the write waits on a person's confirmation. */
+  awaitingConfirmation: string[];
   /** The writes the card declares refused `PERMISSION_DENIED`, each with the fields it names. */
   refusedBy: Array<{ operation: string; fields: string[] }>;
 }
@@ -949,7 +951,7 @@ export function personaGrantNeeds(card: ScenarioArtifactCard): PersonaGrantNeed[
   const need = (persona: string, object: string, verb: PersonaGrantVerb): PersonaGrantNeed => {
     const key = `${persona}:${object}:${verb}`;
     let n = needs.get(key);
-    if (!n) needs.set(key, (n = { persona, object, verb, requiredBy: [], refusedBy: [] }));
+    if (!n) needs.set(key, (n = { persona, object, verb, requiredBy: [], awaitingConfirmation: [], refusedBy: [] }));
     return n;
   };
   const hidesObject = new Map(card.run.personas.map((p) => [p.id, new Set(p.hidden.objects ?? [])]));
@@ -962,7 +964,9 @@ export function personaGrantNeeds(card: ScenarioArtifactCard): PersonaGrantNeed[
   for (const op of card.run.operations ?? []) {
     const { outcome } = op;
     if (outcome.kind === 'applied' || outcome.kind === 'pending_confirmation') {
-      need(op.actingAs, op.object, op.kind).requiredBy.push(`operation ${op.id}`);
+      const n = need(op.actingAs, op.object, op.kind);
+      n.requiredBy.push(`operation ${op.id}`);
+      if (outcome.kind === 'pending_confirmation') n.awaitingConfirmation.push(op.id);
     } else if (outcome.code === 'PERMISSION_DENIED') {
       need(op.actingAs, op.object, op.kind).refusedBy.push({ operation: op.id, fields: Object.keys(op.values ?? {}) });
     }
@@ -1018,6 +1022,22 @@ function writeRefusalRoute(
 }
 
 /**
+ * The confirm-gated agent actions the card declares on `object`
+ * (`run.agentActions[]` with `confirm`) that the build declares there too, by
+ * name. An action body runs elevated (`isSystem`, the runtime's sandbox), so a
+ * build may withhold a write the card has wait on a person's confirmation from
+ * the persona's set and route it through such an action: the lock and the
+ * door ruling A on #31999 item 9 accepts on the Run side, here offered by the
+ * card itself. Only the confirm-gated door counts: a write the card applies
+ * outright stays measured against the grant, whatever actions the build adds.
+ */
+function confirmGatedRoutes(facts: ArtifactFacts, card: ScenarioArtifactCard, object: string): string[] {
+  return (card.run.agentActions ?? [])
+    .filter((a) => a.confirm === true && a.object === object && facts.actions.some((x) => x.object === object && x.action.name === a.name))
+    .map((a) => a.name);
+}
+
+/**
  * One Build check per persona × object × verb the card implies
  * ({@link personaGrantNeeds}), named `persona-grant:<persona>:<object>:<verb>`,
  * judged against the persona's own permission set
@@ -1035,7 +1055,11 @@ function writeRefusalRoute(
  *  - Needed (a question's read, an applied or pending write): passes when the
  *    set grants the verb. A refused write of the same persona, object and verb
  *    beside it is refused by a row or a field, not the grant; it is named in
- *    the detail and judged no further.
+ *    the detail and judged no further. One exception, not measured and never
+ *    a pass: a write verb the set withholds that only `pending_confirmation`
+ *    operations need, where the card's confirm-gated agent action on the
+ *    object is declared by the build ({@link confirmGatedRoutes}) — the route
+ *    the card itself designs for a write that asks before acting.
  *  - Refused `PERMISSION_DENIED` only: passes when the set refuses every such
  *    write — it grants no verb, or it locks a field each write names
  *    ({@link writeRefusalRoute}). When only a row rule could refuse one, the
@@ -1062,6 +1086,17 @@ export function gradePersonaGrants(facts: ArtifactFacts, card: ScenarioArtifactC
 
     if (n.requiredBy.length > 0) {
       const beside = refused.length > 0 ? `; ${refused.join(', ')} is refused by a row or a field, not the grant` : '';
+      const onlyAwaiting = n.awaitingConfirmation.length === n.requiredBy.length;
+      const routed = granted || n.verb === 'read' || !onlyAwaiting ? [] : confirmGatedRoutes(facts, card, n.object);
+      if (routed.length > 0) {
+        return {
+          check: name,
+          pass: false,
+          notMeasured:
+            `${setName} grants no ${n.verb} on ${n.object}, and the build declares the card's confirm-gated agent action${routed.length > 1 ? 's' : ''} ` +
+            `${routed.join(', ')} there, a door that writes as the platform: whether ${n.requiredBy.join(', ')} goes through it is the run's to observe`,
+        };
+      }
       return check(
         name,
         granted,

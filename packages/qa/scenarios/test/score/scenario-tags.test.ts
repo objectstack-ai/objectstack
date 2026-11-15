@@ -798,8 +798,13 @@ describe('persona grants — what the card has each persona read and write, agai
     ]);
   });
 
+  const READ_ONLY = { ...GRANTED, contractor: { objects: { project: { allowRead: true }, task: { allowRead: true } } } };
+  const withoutAction = (name: string) => (stack: Bag) => {
+    stack.actions = (stack.actions as Bag[]).filter((x) => x.name !== name);
+  };
+
   it('a grant missing: the read-only contractor of the first live run fails each write the card gives it', () => {
-    const readOnly = built({ ...GRANTED, contractor: { objects: { project: { allowRead: true }, task: { allowRead: true } } } });
+    const readOnly = built(READ_ONLY, withoutAction('delete_task'));
     expect(verdicts(readOnly)).toEqual([
       ['persona-grant:contractor:task:read', true],
       ['persona-grant:contractor:task:create', false],
@@ -812,10 +817,42 @@ describe('persona grants — what the card has each persona read and write, agai
     );
   });
 
+  it("a write the card has wait on confirmation, withheld and routed through the build's confirm-gated card action: not measured, named, never a pass", () => {
+    // The rich build declares the card's set_task_status (not confirm-gated)
+    // and delete_task (confirm-gated). `start_qa` is applied: it stays measured
+    // against the grant whatever actions the build adds. `drop_packing` waits
+    // on confirmation: the card designs delete_task as its route.
+    const facts = built(READ_ONLY);
+    expect(verdicts(facts).slice(1, 4)).toEqual([
+      ['persona-grant:contractor:task:create', false],
+      ['persona-grant:contractor:task:update', false],
+      ['persona-grant:contractor:task:delete', 'not-measured'],
+    ]);
+    expect(gradePersonaGrants(facts, PROJECT)[3]!.notMeasured).toBe(
+      'contractor grants no delete on task, and the build declares the card\'s confirm-gated agent action delete_task there, a door that writes as the platform: whether operation drop_packing goes through it is the run\'s to observe',
+    );
+    const s = scoreScenarioArtifact(artifact(READ_ONLY), PROJECT);
+    const g = scoreScenarioArtifact(artifact(GRANTED), PROJECT);
+    expect([s.total, s.passed]).toEqual([g.total - 1, g.passed - 3]);
+    // The card's action without `confirm` is no designed route: the check is measured.
+    const unconfirmed: ScenarioArtifactCard = {
+      ...PROJECT,
+      run: { ...PROJECT.run, agentActions: PROJECT.run.agentActions!.map((a) => ({ ...a, confirm: false })) },
+    };
+    expect(verdicts(facts, unconfirmed)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
+    // A delete the card applies outright is measured, even beside the confirm-gated action.
+    const appliedDelete: ScenarioArtifactCard = {
+      ...PROJECT,
+      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'drop_packing' ? { ...o, outcome: { kind: 'applied' as const } } : o)) },
+    };
+    expect(verdicts(facts, appliedDelete)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
+  });
+
   it('edit and delete are read ∧ grant, as the enforcement door folds them', () => {
     const writeOnly = built({ ...GRANTED, contractor: { objects: { task: { allowCreate: true, allowEdit: true, allowDelete: true } } } }, (stack) => {
       // The authoring schema refuses a write grant without read; a stored set may still carry one.
       stack.permissions[0].objects.task.allowRead = true;
+      withoutAction('delete_task')(stack);
     });
     writeOnly.permissionSets[0]!.objects = { task: { allowCreate: true, allowEdit: true, allowDelete: true } };
     expect(verdicts(writeOnly).slice(0, 4)).toEqual([
@@ -882,6 +919,7 @@ describe('persona grants — what the card has each persona read and write, agai
     expect(verdicts(built(wildcard)).slice(0, 4).map(([, v]) => v)).toEqual([true, true, true, true]);
     const privateTask = built(wildcard, (stack) => {
       (stack.objects as Bag[]).find((o) => o.name === 'task')!.access = { default: 'private' };
+      withoutAction('delete_task')(stack);
     });
     expect(verdicts(privateTask).slice(0, 4).map(([, v]) => v)).toEqual([false, false, false, false]);
   });

@@ -200,7 +200,7 @@ describe('control cards — scored end to end against their golden builds', () =
 
     for (const degrade of [
       (a: Bag) => { a.permissions = []; },
-      (a: Bag) => { delete a.permissions[0].objects.contact.allowDelete; },
+      (a: Bag) => { delete a.permissions[0].objects.contact.allowEdit; },
       (a: Bag) => { a.permissions[1].objects.account = { allowRead: true, allowEdit: true }; },
       (a: Bag) => { a.actions = []; },
       (a: Bag) => { delete a.actions.find((x: Bag) => x.name === 'delete_contact').ai.requiresConfirmation; },
@@ -211,6 +211,15 @@ describe('control cards — scored end to end against their golden builds', () =
       degrade(a);
       expect(scoreScenarioArtifact(a, card).score!).toBeLessThan(1);
     }
+
+    // The sdr's delete waits on confirmation, and the build declares the
+    // card's confirm-gated delete_contact: withholding the raw delete is the
+    // route the card designs, so the check leaves both figures, never a pass.
+    const noDelete = structuredClone(complete);
+    delete noDelete.permissions[0].objects.contact.allowDelete;
+    const routed = scoreScenarioArtifact(noDelete, card);
+    expect([routed.score, routed.total, routed.passed]).toEqual([1, full.total - 1, full.passed - 1]);
+    expect(routed.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')!.notMeasured).toMatch(/confirm-gated agent action delete_contact/);
   });
 
   it("crm_account_with_contacts: the first live run's build (public_read, sdr narrowed by read policies) passes the row-scope tag", () => {
