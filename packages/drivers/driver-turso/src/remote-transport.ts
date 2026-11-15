@@ -94,6 +94,10 @@ import {
 // registered object passed the hosted libSQL server's depth limit of 100.
 import { joinBalancedGroup } from '@objectstack/driver-sql';
 import { nanoid } from 'nanoid';
+// Server-Timing `db`: every statement this transport sends is one round trip
+// knex never sees, so it is counted here, into the same ambient collector and
+// under the same mark `SqlDriver.installQueryTiming()` feeds on the local face.
+import { currentPerfTiming, perfNow } from '@objectstack/observability';
 
 /**
  * Default ID length for auto-generated IDs.
@@ -1310,8 +1314,8 @@ export class RemoteTransport {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const client = await this.ensureConnected();
-      await client.execute('SELECT 1');
+      await this.ensureConnected();
+      await this.sendStatement('SELECT 1');
       return true;
     } catch {
       return false;
@@ -1330,7 +1334,7 @@ export class RemoteTransport {
       ? { sql: command, args: params as any[] }
       : command;
 
-    const result = await this.client!.execute(stmt);
+    const result = await this.sendStatement(stmt);
     return result.rows;
   }
 
@@ -1344,8 +1348,8 @@ export class RemoteTransport {
    * name, without ever leaving the half-applied state between the two.
    */
   async batch(statements: InStatement[], mode: 'read' | 'write'): Promise<Array<ResultSet['rows']>> {
-    const client = await this.ensureConnected();
-    const results = await client.batch(statements, mode);
+    await this.ensureConnected();
+    const results = await this.sendBatch(statements, mode);
     return results.map((result) => result.rows);
   }
 
@@ -1381,7 +1385,7 @@ export class RemoteTransport {
     const { sql, args } = this.buildSelectSQL(object, query, table, scope);
 
     try {
-      const result = await this.client!.execute({ sql, args });
+      const result = await this.sendStatement({ sql, args });
       return this.mapRows(result);
     } catch (error: any) {
       const isUnknownColumn =
@@ -1424,7 +1428,7 @@ export class RemoteTransport {
           try {
             // [#21226] Each rung keeps the tenant scope, as it keeps the WHERE.
             const fallback = this.buildSelectSQL(object, rung, table, scope);
-            const result = await this.client!.execute({ sql: fallback.sql, args: fallback.args });
+            const result = await this.sendStatement({ sql: fallback.sql, args: fallback.args });
             return this.mapRows(result);
           } catch (rungError) {
             // The next, broader rung. The last one to fail names the column
@@ -1659,7 +1663,7 @@ export class RemoteTransport {
     // or aggregation column, `INVALID_FILTER` / 400 for a WHERE column, and
     // `DATABASE_ERROR` / 500 for the rest. The catch arrived with this method's
     // first version, with no comment, no pin and no case it was written for.
-    const result = await this.client!.execute({ sql, args });
+    const result = await this.sendStatement({ sql, args });
     return this.foldEmptyAggregateAnswers(this.mapRows(result), foldedOutput);
   }
 
@@ -1712,10 +1716,10 @@ export class RemoteTransport {
     const values = columns.map((col) => this.serializeValue(toInsert[col]));
 
     const sql = `INSERT INTO ${this.tableSql(table)} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
-    await this.client!.execute({ sql, args: values });
+    await this.sendStatement({ sql, args: values });
 
     // Fetch the inserted row to return complete record
-    const result = await this.client!.execute({
+    const result = await this.sendStatement({
       sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
       args: [toInsert.id],
     });
@@ -1773,10 +1777,10 @@ export class RemoteTransport {
     // (`null`), the local face's answer for it.
     const byId = this.byIdWhereSQL(id, scope);
     const sql = `UPDATE ${this.tableSql(table)} SET ${setClauses} WHERE ${byId.sql}`;
-    await this.client!.execute({ sql, args: [...values, ...byId.args] });
+    await this.sendStatement({ sql, args: [...values, ...byId.args] });
 
     // Fetch updated row
-    const result = await this.client!.execute({
+    const result = await this.sendStatement({
       sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${byId.sql}`,
       args: [...byId.args],
     });
@@ -1860,7 +1864,7 @@ export class RemoteTransport {
     }
 
     try {
-      await this.client!.execute({ sql, args: values });
+      await this.sendStatement({ sql, args: values });
     } catch (e) {
       // [#8413] SQLite requires an `ON CONFLICT` target to be backed by a
       // PRIMARY KEY or UNIQUE index, and answers a bare `SqliteError`
@@ -1891,7 +1895,7 @@ export class RemoteTransport {
     // alone.
     const fenceSql = fence ? ` AND "${fence.column}" = ?` : '';
     const fenceArgs = fence ? [this.serializeValue(fence.value)] : [];
-    const result = await this.client!.execute({
+    const result = await this.sendStatement({
       sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${keyColumns.map((k) => `"${k}" = ?`).join(' AND ')}${fenceSql}`,
       args: [...keyColumns.map((k) => this.serializeValue(toUpsert[k])), ...fenceArgs],
     });
@@ -1909,7 +1913,7 @@ export class RemoteTransport {
     await this.ensureConnected();
     // [#21226] The key AND the tenant scope, as `SqlDriver.delete` scopes it.
     const byId = this.byIdWhereSQL(id, scope);
-    const result = await this.client!.execute({
+    const result = await this.sendStatement({
       sql: `DELETE FROM ${this.tableSql(table)} WHERE ${byId.sql}`,
       args: byId.args,
     });
@@ -1928,7 +1932,7 @@ export class RemoteTransport {
     let sql = `SELECT COUNT(*) as count FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
-    const result = await this.client!.execute({ sql, args });
+    const result = await this.sendStatement({ sql, args });
     if (result.rows.length > 0) {
       // Use result.columns to find the count column dynamically
       const row = result.rows[0] as any;
@@ -2013,7 +2017,7 @@ export class RemoteTransport {
     const placeholders = ids.map(() => '?').join(', ');
     // [#21226] The id set AND the tenant scope, as `SqlDriver.bulkDelete`.
     const scopeSql = scope ? ` AND (${scope.sql})` : '';
-    await this.client!.execute({
+    await this.sendStatement({
       sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" IN (${placeholders})${scopeSql}`,
       args: [...ids, ...(scope ? scope.args : [])] as any[],
     });
@@ -2036,7 +2040,7 @@ export class RemoteTransport {
     let sql = `UPDATE ${this.tableSql(table)} SET ${setClauses}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
-    const result = await this.client!.execute({ sql, args: [...setValues, ...whereArgs] });
+    const result = await this.sendStatement({ sql, args: [...setValues, ...whereArgs] });
     return result.rowsAffected;
   }
 
@@ -2052,7 +2056,7 @@ export class RemoteTransport {
     let sql = `DELETE FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
-    const result = await this.client!.execute({ sql, args });
+    const result = await this.sendStatement({ sql, args });
     return result.rowsAffected;
   }
 
@@ -2095,7 +2099,7 @@ export class RemoteTransport {
     this.assertSafeIdentifier(tableName);
 
     // Check if table exists
-    const checkResult = await this.client!.execute({
+    const checkResult = await this.sendStatement({
       sql: `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
       args: [tableName],
     });
@@ -2103,19 +2107,19 @@ export class RemoteTransport {
     if (exists) this.noteFoundExisting(tableName);
 
     if (!exists) {
-      await this.client!.execute(this.buildCreateTableSQL(tableName, objectDef));
+      await this.sendStatement(this.buildCreateTableSQL(tableName, objectDef));
       this.tablesCreatedHere.add(tableName);
       // [#8413 · #17609] The table was created empty microseconds ago, so its
       // declared indexes cannot fail on existing data — no isolation needed,
       // and any error here is a real DDL fault that should surface.
       for (const index of this.buildDeclaredIndexDDL(tableName, objectDef, this.materializedColumns(objectDef))) {
-        await this.client!.execute(index.sql);
+        await this.sendStatement(index.sql);
       }
     } else {
       // ALTER TABLE — add missing columns
       const materialized = new Set<string>(BUILTIN_COLUMNS);
       if (objectDef.fields) {
-        const columnsResult = await this.client!.execute({
+        const columnsResult = await this.sendStatement({
           sql: `PRAGMA table_info("${tableName}")`,
           args: [],
         });
@@ -2137,7 +2141,7 @@ export class RemoteTransport {
       // re-issued. See {@link retrofitDeclaredIndexes}.
       const planned = this.buildDeclaredIndexDDL(tableName, objectDef, materialized);
       if (planned.length > 0) {
-        const existing = await this.client!.execute(EXISTING_INDEX_NAMES_SQL);
+        const existing = await this.sendStatement(EXISTING_INDEX_NAMES_SQL);
         await this.retrofitDeclaredIndexes(this.missingIndexes(planned, existing.rows));
       }
     }
@@ -2190,7 +2194,7 @@ export class RemoteTransport {
       sql: `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
       args: [s.object],
     }));
-    const introspectResults = await this.client!.batch(introspectStmts, 'read');
+    const introspectResults = await this.sendBatch(introspectStmts, 'read');
 
     // Separate new tables from existing tables
     const newSchemas: Array<{ object: string; schema: any }> = [];
@@ -2242,7 +2246,7 @@ export class RemoteTransport {
         sql: `PRAGMA table_info("${s.object}")`,
         args: [],
       }));
-      const introspection = await this.client!.batch([...pragmaStmts, EXISTING_INDEX_NAMES_SQL], 'read');
+      const introspection = await this.sendBatch([...pragmaStmts, EXISTING_INDEX_NAMES_SQL], 'read');
       const planned: PlannedIndex[] = [];
 
       for (let i = 0; i < existingSchemas.length; i++) {
@@ -2269,7 +2273,7 @@ export class RemoteTransport {
 
     // Phase 3: execute all DDL in a single batch
     if (ddlStatements.length > 0) {
-      await this.client!.batch(ddlStatements, 'write');
+      await this.sendBatch(ddlStatements, 'write');
     }
     // The batch is one transaction: its CREATE TABLEs landed together, or none did.
     for (const { object } of newSchemas) this.tablesCreatedHere.add(object);
@@ -2284,7 +2288,7 @@ export class RemoteTransport {
 
   async dropTable(object: string): Promise<void> {
     await this.ensureConnected();
-    await this.client!.execute(`DROP TABLE IF EXISTS "${object}"`);
+    await this.sendStatement(`DROP TABLE IF EXISTS "${object}"`);
   }
 
   /**
@@ -2305,6 +2309,65 @@ export class RemoteTransport {
   // ===================================
   // Internal Helpers
   // ===================================
+
+  /**
+   * Send ONE statement to the remote database: the only place this transport
+   * calls `client.execute`, so every round trip is counted into Server-Timing.
+   *
+   * The local face is counted by `SqlDriver.installQueryTiming()` from knex's
+   * query events; this face talks to `@libsql/client` directly, so knex never
+   * sees its statements and the `db` member read `0 queries` on every hosted
+   * environment. Each call folds its wall time into the ambient request
+   * collector as `count('db', dur, 'queries')`, the same mark the local face
+   * produces, on success and on failure alike (the local face settles on
+   * `query-error` too).
+   *
+   * With no collector active (no request scope, or perf-tuning off) the cost is
+   * the one `AsyncLocalStorage` lookup and nothing is allocated. With detail
+   * capture on (admin-gated `X-OS-Debug-Timing: json`) the statement's SQL text
+   * is kept as its shape: values travel in `args`, which are NEVER recorded.
+   */
+  private async sendStatement(stmt: InStatement): Promise<ResultSet> {
+    const timing = currentPerfTiming();
+    if (!timing) return this.client!.execute(stmt);
+    const t0 = perfNow();
+    try {
+      return await this.client!.execute(stmt);
+    } finally {
+      const dur = perfNow() - t0;
+      timing.count('db', dur, 'queries');
+      if (timing.detailEnabled) {
+        timing.recordDetail('db', RemoteTransport.statementShape(stmt), dur);
+      }
+    }
+  }
+
+  /**
+   * Send statements as ONE libSQL batch: the only place this transport calls
+   * `client.batch`. A batch is one round trip, so it counts as one `db` query
+   * (see {@link sendStatement}); its detail sample is labelled
+   * `batch(N): <first statement's shape>`, bindings never recorded.
+   */
+  private async sendBatch(statements: InStatement[], mode: 'read' | 'write'): Promise<ResultSet[]> {
+    const timing = currentPerfTiming();
+    if (!timing) return this.client!.batch(statements, mode);
+    const t0 = perfNow();
+    try {
+      return await this.client!.batch(statements, mode);
+    } finally {
+      const dur = perfNow() - t0;
+      timing.count('db', dur, 'queries');
+      if (timing.detailEnabled) {
+        const first = statements.length > 0 ? RemoteTransport.statementShape(statements[0]!) : '';
+        timing.recordDetail('db', `batch(${statements.length}): ${first}`, dur);
+      }
+    }
+  }
+
+  /** A statement's SQL text without its bindings: the shape a detail sample records. */
+  private static statementShape(stmt: InStatement): string {
+    return typeof stmt === 'string' ? stmt : stmt.sql;
+  }
 
   /**
    * Ensure the @libsql/client is initialized, attempting lazy connect if a
@@ -2522,7 +2585,7 @@ export class RemoteTransport {
    */
   private async executeAddColumn(ddl: string): Promise<void> {
     try {
-      await this.client!.execute(ddl);
+      await this.sendStatement(ddl);
     } catch (e) {
       if (e instanceof Error) e.message = `${ddl} - ${e.message}`;
       throw e;
@@ -2720,7 +2783,7 @@ export class RemoteTransport {
   private async retrofitDeclaredIndexes(planned: PlannedIndex[]): Promise<void> {
     if (planned.length === 0) return;
     try {
-      await this.client!.batch(planned.map((index) => index.sql), 'write');
+      await this.sendBatch(planned.map((index) => index.sql), 'write');
       return;
     } catch {
       // The batch told us SOMETHING failed, not which. Re-issue one at a time
@@ -2729,7 +2792,7 @@ export class RemoteTransport {
     }
     for (const index of planned) {
       try {
-        await this.client!.execute(index.sql);
+        await this.sendStatement(index.sql);
       } catch (e) {
         const cause = e instanceof Error ? e.message : String(e);
         this.durabilitySink?.(
