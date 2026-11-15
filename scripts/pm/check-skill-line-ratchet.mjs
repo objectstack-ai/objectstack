@@ -418,7 +418,12 @@ export const CEILINGS = new Map([
   // also the one lane-wide line saying the mode is open to any lane past the split
   // threshold (cheaper than a line in each `lanes/*.md`). Measured delta +1; landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 320],
+  // Raised 320 → 321 by the repo:objectstack lane (#33959; an ORDINARY ruled raise; ruling of
+  // record: the maintainer, 2026-11-15, verbatim 「是否考虑开一个全仓调度车道，按照你现在的执行的方案。」 ·
+  // 「就是仓库名」, quoted in that card's body, filing gate ③): one 域车道 row naming
+  // `references/lanes/objectstack.md`. No existing row can carry it (the security · review · eval
+  // row is 1 B under its 341 B pin). Measured delta +1; landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 321],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1866,6 +1871,12 @@ export const CEILINGS = new Map([
   // row and no other row moves; set at the landed line count (headroom 0,
   // same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
+  // repo:objectstack lane charter: the whole-repo dispatch lane, several seats on several
+  // accounts, each running area-lease mode and splitting areas through seat-post lease tables
+  // and `Notify: split` (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that
+  // card's body). A NEW file, so this is an added row and no other row moves; set at the landed
+  // line count (headroom 0, same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 35],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -2697,6 +2708,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/queue.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],
