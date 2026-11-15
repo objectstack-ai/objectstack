@@ -360,7 +360,11 @@
  *     more leading hex characters of it) — the maintainer's confirmation that
  *     the approval carries to this head. The comment is read by its own GET
  *     (`/repos/{repo}/issues/comments/{id}`); a comment on another pull, by
- *     another author, or naming another head lifts nothing.
+ *     another author, or naming another head lifts nothing. Nor does one whose
+ *     first non-empty line is a seat signature (`LANE#N · ACCOUNT · SESSION`):
+ *     an authorised account is agent-operated too (AGENTS.md Prime Directive
+ *     #14), and a seat's knock or record quoting the head is no confirmation
+ *     by the maintainer's own hand.
  *
  * The approval stays the maintainer's: the relay reads it and never gives
  * one. The governed fence, the one-jump fence and the jump reasons are
@@ -385,9 +389,17 @@
  *     failed is the three-fact test of `landing-operations.md`, which no read
  *     here can run: the seat states it in `reason`, and the audit comment
  *     carries it;
- *   - `seat-asks`: the dispatching session signed a comment on this pull — a
- *     fleet comment whose first non-empty line is a seat signature naming
- *     `payload.session` (`readSignatureLine`): the seat that landed it asks.
+ *   - `seat-asks`: the pull's LANDING seat asks. The landing seat is the one
+ *     the pull's own body names in its signed trailer (`<!-- signed: LANE#N ·
+ *     ACCOUNT · SESSION -->` on its last non-empty line, `readPrBodyTrailer`);
+ *     a body whose trailer names no seat is refused. The proof is a fleet
+ *     comment on the pull whose first non-empty line is a seat signature
+ *     naming `payload.session` AND that same seat and account. Another seat's
+ *     signed comment — a review record, a triage knock, the queue seat's own
+ *     jump or ejection comment — answers nothing, and the relay's own audit
+ *     comments open with no signature. `payload.session` is still the
+ *     sender's own word: the fence binds it to the seat the pull names, it
+ *     does not prove who typed it.
  *
  * Beside the cause, the pull is open, its head is `expected_head_sha` (a push
  * after the seat's reading may have fixed what it read), it is not the
@@ -404,16 +416,22 @@
  * `STROKE_SCOPED_PERMISSIONS`, as for the jump; `contents` and `issues` (the
  * audit comment) are its literal `alsoSpends`. Whether `dequeuePullRequest`
  * needs the merge-queue grant at all, or what an App token without it
- * answers, is NOT MEASURED until the first live stroke: the row mints it so
+ * answers, is NOT MEASURED until the first live stroke — nor is the reading
+ * that an entry's `headCommit { statusCheckRollup }` is its merge-group
+ * commit's rollup (the `own-failure` cause's second half; the audit comment
+ * prints the rollup it read, so the first such stroke measures it): the row mints it so
  * that the door works once the maintainer grants it, an installation without
  * it fails the mint with zero writes, and GraphQL errors on the mutation are
  * a FAILED action naming the grant. Travels alone.
  *
  * The 200 is an acceptance, not a landing: the executor re-reads the queue
  * every `DEQUEUE_POLL_MS` for up to `DEQUEUE_WINDOW_MS` and lands only when
- * the pull is no longer listed (`dequeueReadBack`). A read-back that still
- * lists it after the window is a FAILED action, UNCONFIRMED — ⛔ a 200 is
- * never trusted alone. WHEN a seat may send it is pm-dispatch's rule
+ * the pull is no longer listed (`dequeueReadBack`) AND its own GET reads it
+ * still open with `merged` false (`dequeuePullAfter`) — out of the queue and
+ * not landed, the two readings `platform-readings.md` asks for. A pull that
+ * left by MERGING inside the window is a FAILED action naming the merge; one
+ * closed unmerged is FAILED too. A read-back that still lists it after the
+ * window is a FAILED action, UNCONFIRMED — ⛔ a 200 is never trusted alone. WHEN a seat may send it is pm-dispatch's rule
  * (`landing-operations.md`), never this table's.
  *
  * ## A workflow's inputs are CLOSED per file — `WORKFLOW_DISPATCH_INPUTS`
@@ -1399,11 +1417,12 @@ export const CARRIED_HEAD_MIN_CHARS = 7;
  * The jump's SIZE lift (header: "The SIZE lift"), judged on reads the executor took. `verdict` is the queue guard's
  * `authorizedApprovalVerdict` over the pull's reviews (null: not read whole), `headSha` the pull's current head,
  * `comment` the `approval_comment`'s own GET answer `{ status, json }` (null: the action names none), `pull` the
- * pull's number and `approvers` the authorised logins (`GOVERNED_APPROVERS`, passed in so this file imports no
- * guard). Answers `{ lifts, way, reading }`: `way` is `head`, `carried` or null; `reading` is what the size fence's
+ * pull's number, `approvers` the authorised logins (`GOVERNED_APPROVERS`) and `signatureOf` the seat-signature
+ * reader (`readSignatureLine`) — both passed in so this file imports no guard; a reader missing carries nothing.
+ * Answers `{ lifts, way, reading }`: `way` is `head`, `carried` or null; `reading` is what the size fence's
  * sentence quotes. Pure.
  */
-export function enqueueFrontSizeLift({ verdict = null, headSha = null, comment = null, pull = null, approvers = [] } = {}) {
+export function enqueueFrontSizeLift({ verdict = null, headSha = null, comment = null, pull = null, approvers = [], signatureOf = null } = {}) {
   if (!verdict || verdict.state === 'unreadable' || !Array.isArray(verdict.approvals)) return { lifts: false, way: null, reading: `the reviews unread${verdict?.reason ? ` (${verdict.reason})` : ''}` };
   const head = typeof headSha === 'string' ? headSha.toLowerCase() : '';
   const approvals = verdict.approvals.filter((a) => typeof a?.login === 'string' && a.login !== '');
@@ -1417,6 +1436,9 @@ export function enqueueFrontSizeLift({ verdict = null, headSha = null, comment =
   const author = c.user?.login ?? null;
   if (!approvers.includes(author)) return { lifts: false, way: null, reading: `${earlier}; the approval_comment's author ${author ?? 'unread'} is not an authorised approver` };
   if (!new RegExp(`/issues/${pull}$`).test(String(c.issue_url ?? ''))) return { lifts: false, way: null, reading: `${earlier}; the approval_comment is not on #${pull}` };
+  if (typeof signatureOf !== 'function') return { lifts: false, way: null, reading: `${earlier}; the approval_comment's opening line was not judged` };
+  const seat = signatureOf(c.body);
+  if (seat) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} opens with the seat signature ${seat.lane}#${seat.seat} · ${seat.account} — a seat's comment is no carried approval` };
   const tokens = String(c.body ?? '').match(/\b[0-9a-f]{7,40}\b/giu) ?? [];
   const carries = head !== '' && tokens.some((tok) => tok.length >= CARRIED_HEAD_MIN_CHARS && head.startsWith(tok.toLowerCase()));
   if (!carries) return { lifts: false, way: null, reading: `${earlier}; the approval_comment by ${author} names no prefix of the current head` };
@@ -1444,6 +1466,15 @@ export const DEQUEUE_FAILED_ROLLUPS = Object.freeze(['FAILURE', 'ERROR']);
 export const MAX_DEQUEUE_REASON_BYTES = 1000;
 
 const entryOf = (c) => (c.queue?.entries ?? []).find((e) => e.number === c.number) ?? null;
+const seatOf = (sig) => `${sig.lane}#${sig.seat} · ${sig.account}`;
+
+/**
+ * Is `signature` (a `readSignatureLine` reading) the pull's landing seat — the same lane, seat number and account
+ * as `landing`, the reading of the pull body's signed trailer — under `session`? The `seat-asks` proof (header). Pure.
+ */
+export function signedByLandingSeat(signature, landing, session) {
+  return Boolean(signature && landing) && signature.session === session && signature.lane === landing.lane && signature.seat === landing.seat && signature.account === landing.account;
+}
 
 /** What each cause reads and whether it holds — the `cause` fence's two halves, keyed by cause. Pure. */
 const DEQUEUE_CAUSE_JUDGES = Object.freeze({
@@ -1464,17 +1495,22 @@ const DEQUEUE_CAUSE_JUDGES = Object.freeze({
     },
   }),
   'seat-asks': Object.freeze({
-    wants: "a pull carrying a fleet comment signed by the dispatching session — its landing seat asks",
-    reads: (c) => (c.signed === true ? `signed by ${c.session}` : c.signed === false ? `no fleet comment on it signed by ${c.session}` : 'its comments unread'),
-    holds: (c) => c.signed === true,
+    wants: "a pull whose body's signed trailer names its landing seat, carrying a fleet comment signed by that seat and account under the dispatching session — its landing seat asks",
+    reads: (c) => {
+      if (!c.landing) return "the pull body's signed trailer names no seat";
+      const seat = seatOf(c.landing);
+      return c.signed === true ? `landing seat ${seat}, signed by ${seat} · ${c.session}` : c.signed === false ? `landing seat ${seat}, no fleet comment on it signed by ${seat} · ${c.session}` : `landing seat ${seat}, its comments unread`;
+    },
+    holds: (c) => Boolean(c.landing) && c.signed === true,
   }),
 });
 
 /**
  * The fences on the PULL, its QUEUE and the CAUSE (header). Each takes one context
- * `{ number, pull, expectedHeadSha, queue, cause, session, signed }`: `pull` the pull's own GET, `queue`
- * `mergeQueueOf`'s reading of `DEQUEUE_QUEUE_READ_QUERY`, `signed` whether the dispatching session signed a fleet
- * comment on it (null: not read — read only for `seat-asks`). Alone in its stroke and the grant are the validator's.
+ * `{ number, pull, expectedHeadSha, queue, cause, session, landing, signed }`: `pull` the pull's own GET, `queue`
+ * `mergeQueueOf`'s reading of `DEQUEUE_QUEUE_READ_QUERY`, `landing` the seat the pull body's signed trailer names
+ * (a `readSignatureLine` reading, or null), `signed` whether that seat signed a fleet comment on it under the
+ * dispatching session (null: not read — read only for `seat-asks`, and only when `landing` is read). Alone in its stroke and the grant are the validator's.
  */
 export const DEQUEUE_FENCES = Object.freeze([
   Object.freeze({ fence: 'open', wants: 'an open pull', reads: (c) => `state ${c.pull?.state ?? null}`, holds: (c) => c.pull?.state === 'open' }),
@@ -1556,9 +1592,23 @@ export function dequeueReadBack({ pull, queue } = {}) {
   return { ok: true, pending: false, why: '' };
 }
 
+/**
+ * The second half of a dequeue's landing (header): the pull's own GET once the queue no longer lists it — still open
+ * and `merged` false, so it left the queue without landing. `{ ok, pending, why }`: a read that is not a 200 object
+ * is `pending` (read again inside the window); a merged pull, or one closed unmerged, is a terminal failure. Pure.
+ */
+export function dequeuePullAfter(answer) {
+  const p = answer?.json;
+  if (answer?.status !== 200 || !isObject(p)) return { ok: false, pending: true, why: `the pull's own read answered HTTP ${answer?.status ?? 'none'}, so "not landed" was not read` };
+  if (p.merged === true || p.merged_at) return { ok: false, pending: false, why: `the pull MERGED${p.merged_at ? ` at ${p.merged_at}` : ''} — it left the queue by landing, not by this dequeue` };
+  if (p.state !== 'open') return { ok: false, pending: false, why: `the pull reads state ${p.state ?? null}, not open — it left the queue closed, not by this dequeue alone` };
+  if (p.merged !== false) return { ok: false, pending: true, why: `the pull's merged reads ${p.merged ?? null}, not false` };
+  return { ok: true, pending: false, why: '' };
+}
+
 /** The read-back line a landing prints. Pure. */
 export function dequeueLandedText({ pull, total, auditId }) {
-  return `#${pull} out of the merge queue · read back ${total} entr(ies), none is #${pull} · audit comment ${auditId}`;
+  return `#${pull} out of the merge queue and still open, unmerged · read back ${total} entr(ies), none is #${pull} · audit comment ${auditId}`;
 }
 
 /** The two modes of the hierarchy rows (header: "The two rows that write an issue's hierarchy") — the descriptor's `subIssue.mode`. */

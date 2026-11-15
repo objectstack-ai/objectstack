@@ -18,10 +18,10 @@
   敲分诊 `Request: main-red`、锚卡车道 `Notify: main-red`(project-forms.md 立锚卡者行)。
 - flake 受害者(head 未变):照 landing-operations.md 四分支与三事实重投一次,同签名再弹即停。
 - 插队只用中继 `pr_enqueue_front`:ACCEPT 后、无受管面,照该文三因与一插队者规则。
-- 逾 3,000 行者另须授权批准在现 head,或维护者评论点名现 head 承接(`approval_comment`)。
+- 逾 3,000 行者另须授权批准在现 head,或维护者非席位签名评论点名现 head 承接。
 - 插队前在 PR 留审计评论点名字母与依据;读回非队首即 FAILED,⛔ 不重发,报维护者。
-- 出队只用中继 `pr_dequeue`:落地席离线时本席照该文 (a)(b) 两因代其出队;(c) 只归落地席。
-- 中继自贴审计评论并回读,回读仍在即 FAILED,⛔ 不重发,报维护者;落地席经 PR 订阅得知。
+- 出队只用中继 `pr_dequeue`:落地席离线时本席代办 (a)(b);(c) 中继只认正文签名尾行之席。
+- 中继自贴审计评论并回读,仍在队或已合即 FAILED,⛔ 不重发,报维护者;落地席经订阅得知。
 
 ## 归维护者
 
