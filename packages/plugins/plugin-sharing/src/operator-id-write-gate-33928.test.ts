@@ -300,7 +300,7 @@ describe('sharing write gate: the by-id branch is exactly the engine dispatch de
     };
   }
 
-  it.each(ROWS)('a %s write meets the branch the engine dispatches it to (row %#)', async (verb, data, options, branch) => {
+  it.each(ROWS)('%s: the gate takes the branch the engine dispatches the write to (row %#)', async (verb, data, options, branch) => {
     const svc = service();
     const mw = buildSharingMiddleware(svc as never, { warn: () => {} } as never) as unknown as (
       ctx: Record<string, unknown>, next: () => Promise<void>,
