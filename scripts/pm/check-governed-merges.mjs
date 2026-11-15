@@ -551,7 +551,9 @@
  * not move), and reads each one again with the queue guard's own arm and record
  * readers on the landed commit (`readArmLanding`): an arm landing is listed APART
  * from the maintainer's merges, a `pass` on a same-head at-tier PASS record that
- * existed when it landed, a ⛔ `breach` without one; the arm's Tier H stays on
+ * existed when it landed, a ⛔ `breach` without one or on a record stage that
+ * read Tier H then (read only where the landed commit's own tree carries the
+ * stage, `armRecordStageBound`); the arm's Tier H stays on
  * the maintainer's list with its reasons, and so does an arm landing an
  * authorized approval or enqueue cleared first (the guard's own leg order); a
  * record counts only on a pull GitHub says landed AS this commit
@@ -1196,8 +1198,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   // 74 → 95 with the arm's record stage: sixteen pins on the two conjuncts and the stage's three states, five on `--pr`.
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 95,
-  // 51 → 61 with the record stage as the sweep reads it at the landing: ten pins.
-  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 61,
+  // 51 → 66 with the record stage as the sweep reads it at the landing: ten pins, and five on which landings it binds.
+  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 66,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
 });
@@ -4968,7 +4970,8 @@ export async function loadArmReaders(load = (specifier) => import(specifier)) {
  * LANDING: the line off the same as-landed rows (`lowRiskRecordStage`), the card's labels rebuilt from its timeline
  * (`cardLabelsAsLanded`; `fetchers.fetchLabels` reads them, absent ⇒ `not-measured`). A stage that then reads Tier H
  * is a `breach` flagged `stage: true` — the queue would have refused that landing — and a stage that could not be
- * read is `not-measured`, ⛔ never `tier-h` and never a stand-in.
+ * read is `not-measured`, ⛔ never `tier-h` and never a stand-in. The stage is read only for a landing whose own tree
+ * carries it (`armRecordStageBound`): an earlier landing is a `pass` on its record alone, flagged `stageBound: false`.
  * States: `pass` (an arm landing on a same-head at-tier PASS record whose record stage holds), `breach` (an arm
  * landing without one, on a record stage at Tier H, or whose pull did not land as this commit), `cleared` (the
  * arm's pull-read conditions held, but an authorized approval or enqueue cleared it before the record was read: the
@@ -5087,6 +5090,11 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   const found = { where: record.where ?? null, id: record.id ?? null, at: record.at ?? null, cardNote };
   const ignored = guard.ignoredAuthorLines({ ignoredAuthors }).map((line) => line.trim());
   if (record.state === 'stands') {
+    // The stage binds a landing only when the queue that judged it ran it (`armRecordStageBound`): a landing whose
+    // own tree predates the stage stood on its record alone, as its queue read it, and nothing below is read for it.
+    const bound = armRecordStageBound(runGit, entry.sha);
+    if (bound === null) return unmeasured(`its landed tree's \`${ARM_RULE_PATH}\` could not be read, so whether the queue read the record stage for it is not known`);
+    if (bound === false) return { state: 'pass', headSha, record: found, stageBound: false, ...(ignored.length > 0 ? { ignored } : {}) };
     // ⭐ The arm's record stage, as the queue read it: the line off the rows that existed, unedited, at the landing,
     // and the card's labels as they stood then. ⛔ Anything unread is NOT MEASURED — never a stand-in, never `no`.
     const stage = guard.lowRiskRecordStage({ pair, recognisers });
@@ -5128,6 +5136,31 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
       : record.state === 'unsigned' ? 'its record names no reviewer'
         : `its record does not read PASS (${record.verdictReason ?? record.state})`) + edited;
   return { state: 'breach', headSha, reason, record: found, ...(ignored.length > 0 ? { ignored } : {}) };
+}
+
+/** This file, as a tree names it: where a landed commit keeps the rule its queue ran. */
+export const ARM_RULE_PATH = 'scripts/pm/check-governed-merges.mjs';
+
+/** The record stage's own declaration, at a line start: a tree whose copy of this file has it ran the stage. */
+export const LOW_RISK_RECORD_STAGE_DECLARED = /^export const LOW_RISK_RECORD_STAGE = /m;
+
+/**
+ * Did the queue that judged this landing read the arm's record stage? The queue leg runs this file from the merge
+ * group's own tree (`governed-surface-guard.yml` checks out the `merge_group` ref itself), and a queue landing IS
+ * that merge-group commit, so the rule its queue applied is the one in the landed commit's tree: the stage bound the
+ * landing exactly when that tree's copy of this file declares it (`LOW_RISK_RECORD_STAGE_DECLARED`).
+ * ⛔ Without this read the first sweeps after the stage lands would read every earlier arm landing — whose record
+ * could not carry a line no template printed yet — as a stage BREACH, and file it as an incident.
+ * `true` bound, `false` the tree predates the stage, `null` the tree could not be read: NOT MEASURED, never a guess.
+ * `cat-file`, never `show`: `show` is the spelling the arm's own reads take (`ARM_CHANGESET_SHOW`), and this read
+ * is the sweep's, not the arm's — it is never stood in for and never counted among the arm's unread inputs.
+ */
+export function armRecordStageBound(runGit, sha) {
+  try {
+    return LOW_RISK_RECORD_STAGE_DECLARED.test(String(runGit(['cat-file', '-p', `${sha}:${ARM_RULE_PATH}`])));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -5273,7 +5306,8 @@ export function armCell(entry) {
   if (!a) return '';
   const head = a.headSha ? ` on head ${String(a.headSha).slice(0, 12)}` : '';
   const ignored = (a.ignored ?? []).map((line) => `\n         ${line}`).join('');
-  if (a.state === 'pass') return `\n      ✅ low-risk arm landing${head}: same-head at-tier PASS record ${a.record?.where ?? ''} comment ${a.record?.id ?? '(no id)'}${ignored}`;
+  const unbound = a.stageBound === false ? ' (its landed tree predates the record stage, so its queue read the record alone)' : '';
+  if (a.state === 'pass') return `\n      ✅ low-risk arm landing${head}: same-head at-tier PASS record ${a.record?.where ?? ''} comment ${a.record?.id ?? '(no id)'}${unbound}${ignored}`;
   if (a.state === 'breach' && a.stage === true) return `\n      ⛔ BREACH — low-risk arm landing${head} on a record stage that reads Tier H: ${a.reason}${ignored}`;
   if (a.state === 'breach') return `\n      ⛔ BREACH — low-risk arm landing${head} WITHOUT a same-head at-tier PASS record: ${a.reason}${ignored}`;
   if (a.state === 'cleared') return `\n      low-risk arm: its pull-read conditions held${head}, cleared by an authorized ${a.by === 'review' ? 'approval' : 'enqueue'} (${(a.who ?? []).join(', ')}) before the record was read — the maintainer's merge`;
@@ -10528,11 +10562,16 @@ async function selfTest() {
     const HEAD = 'b'.repeat(40);
     const BODY = 'Fixes #69\n\nClause-②: no\nMetadata-protocol: none\n';
     const MERGED_AT = '2026-11-15T05:00:00Z';
+    // This file as a landed tree holds it: with the record stage declared, and as it read before the stage.
+    const RULE_TREE = "/** the register */\nexport const LOW_RISK_RECORD_STAGE = Object.freeze({ pending: 'pending' });\n";
+    const OLD_RULE_TREE = "/** the register, before the stage */\nexport function lowRiskArmVerdict() {}\n// 'export const LOW_RISK_RECORD_STAGE = ' only quoted\n";
     // The landed commit as git answers the guard's readers: a MODIFIED skill and an added changeset.
     const runGit = (args) => {
       if (args[0] === 'diff-tree') return `:100644 100644 ${'1'.repeat(40)} ${'2'.repeat(40)} M\0${SK}\0:000000 100644 ${'0'.repeat(40)} ${'3'.repeat(40)} A\0${CS}\0`;
       if (args[0] === 'show' && args[1] === `${LANDED}:${CS}`) return CS_TEXT;
       if (args[0] === 'rev-parse') return `${'c'.repeat(40)}\n`;
+      // The landed tree's own copy of this file declares the record stage: its queue ran the stage.
+      if (args[0] === 'cat-file' && args[2] === `${LANDED}:${ARM_RULE_PATH}`) return RULE_TREE;
       throw new Error(`fatal: unexpected git ${args.join(' ')}`);
     };
     const RELAY = readers.recognisers?.trustedAuthors?.[0] ?? '(relay unread)';
@@ -10677,6 +10716,34 @@ async function selfTest() {
       const without = await run({ git: failing, prRows: [record({ line: null })] });
       return withLine?.state === 'not-measured' && without?.state === 'not-measured' && !withLine.reason.includes('Security-touching') && /so its Tier H cannot say how the queue read it/.test(without.reason) ? true : JSON.stringify([withLine, without]);
     })() === true);
+
+    // The record stage binds a landing only when its own tree carries it: the queue leg runs this file from the merge
+    // group's tree, so a landing whose tree predates the stage stood on its record alone and is no BREACH of a rule
+    // that did not exist yet. ⛔ A tree that cannot be read is NOT MEASURED — never PASS on a guess, never a BREACH.
+    const treeGit = (text) => (a) => { if (a[0] !== 'cat-file') return runGit(a); if (text === null) throw new Error('fatal: path does not exist'); return text; };
+    assert('⭐ RULE-AGE a-landing-whose-own-tree-predates-the-record-stage-is-PASS-on-its-record-alone-and-reads-no-card', await (async () => {
+      const seen = [];
+      const noLine = await run({ seen, git: treeGit(OLD_RULE_TREE), prRows: [record({ line: null })] });
+      const labelled = await run({ seen, git: treeGit(OLD_RULE_TREE), cardLabels: ['security'] });
+      const cell = armCell({ arm: noLine });
+      return noLine?.state === 'pass' && noLine.stageBound === false && noLine.record.id === 900 && labelled?.state === 'pass' && labelled.stageBound === false && seen.length === 0 &&
+        cell.includes('same-head at-tier PASS record PR comment 900 (its landed tree predates the record stage, so its queue read the record alone)') ? true : JSON.stringify([noLine, labelled, seen, cell]);
+    })() === true);
+    assert('⛔ RULE-AGE control-the-same-landings-on-a-tree-that-carries-the-stage-are-stage-BREACHES-and-a-bound-PASS-carries-no-flag',
+      await stageBreach({ git: treeGit(RULE_TREE), prRows: [record({ line: null })] }, /carries no `Security-touching:` line$/) === true &&
+      await stageBreach({ git: treeGit(RULE_TREE), cardLabels: ['security'] }, /^its card #69 carries the `security` label$/) === true &&
+      !('stageBound' in (await run({ git: treeGit(RULE_TREE) }))) && !armCell({ arm: pass }).includes('predates'));
+    assert('⛔ RULE-AGE a-landed-tree-that-cannot-be-read-is-NOT-MEASURED-never-PASS-and-never-a-BREACH',
+      await unmeasured({ git: treeGit(null) }, /^its landed tree's `scripts\/pm\/check-governed-merges\.mjs` could not be read, so whether the queue read the record stage for it is not known$/) === true &&
+      await unmeasured({ git: treeGit(null), prRows: [record({ line: null })] }, /could not be read, so whether the queue read the record stage/) === true);
+    assert('⛔ RULE-AGE an-earlier-tree-excuses-only-the-record-stage-a-landing-with-no-record-is-still-a-BREACH',
+      await breach({ git: treeGit(OLD_RULE_TREE), prRows: [] }, /no `## Contract review` record on its head/) === true &&
+      await breach({ git: treeGit(OLD_RULE_TREE), prRows: [record({ verdict: '**VERDICT: FAIL**' })] }, /does not read PASS/) === true &&
+      await tierH({ git: treeGit(OLD_RULE_TREE), pull: { labels: ['security'] } }, /`security` label/) === true);
+    assert('⛔ RULE-AGE the-declaration-the-sweep-looks-for-is-this-files-own-and-a-quoted-copy-of-it-does-not-count',
+      LOW_RISK_RECORD_STAGE_DECLARED.test(readFileSync(scriptPath, 'utf8')) && scriptPath.replaceAll('\\', '/').endsWith(`/${ARM_RULE_PATH}`) &&
+      armRecordStageBound(() => RULE_TREE, LANDED) === true && armRecordStageBound(() => OLD_RULE_TREE, LANDED) === false && armRecordStageBound(() => { throw new Error('x'); }, LANDED) === null &&
+      (() => { const sent = []; armRecordStageBound((a) => { sent.push(a); return ''; }, LANDED); return JSON.stringify(sent) === JSON.stringify([['cat-file', '-p', `${LANDED}:${ARM_RULE_PATH}`]]); })());
 
     // #33729 N5: a git read the arm needed that failed, or a fork predicate not measured, is NOT MEASURED, never Tier H.
     const gitWith = (over) => (args) => (over(args) ?? runGit(args));
