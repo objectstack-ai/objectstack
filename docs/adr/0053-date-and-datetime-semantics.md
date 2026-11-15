@@ -318,10 +318,13 @@ workload needs it. Ship correct-and-uniform first.
 >   that dispatches on it, in the same change). A bit is the right carrier here because method
 >   presence cannot carry the signal: one `SqlDriver` class serves PostgreSQL and SQLite.
 > - **PostgreSQL** declares it. The instant is read in the reference zone before it is
->   truncated and labelled — `date_trunc(unit, col AT TIME ZONE tz)`, or, equivalently for the
->   label, today's UTC arm of `buildDateBucketExpr` (`to_char((col)::timestamptz AT TIME ZONE
->   'UTC', fmt)`) with `tz` in place of `'UTC'` — so a day, week, month, quarter or year
->   starts at the zone's local midnight, on either side of a DST change. The labels stay the
+>   truncated and labelled — `date_trunc(unit, (col)::timestamptz AT TIME ZONE tz)`, or,
+>   equivalently for the label, today's UTC arm of `buildDateBucketExpr`
+>   (`to_char((col)::timestamptz AT TIME ZONE 'UTC', fmt)`) with `tz` in place of `'UTC'` — so
+>   a day, week, month, quarter or year starts at the zone's local midnight, on either side of
+>   a DST change. The `::timestamptz` cast is part of the rule: on a zone-less `timestamp`,
+>   `col AT TIME ZONE tz` converts the other way (it reads the value as wall time in `tz` and
+>   answers an instant), so the two spellings are equal only on a `timestamptz`. The labels stay the
 >   vocabulary `bucketDateKey` (`@objectstack/core`) writes (`2026`, `2026-Q2`, `2026-06`,
 >   `2026-06-15`, `2026-W23`). The zone reaches the statement as a bound value, never spliced
 >   into the SQL text: `timezone` is a free string in the query contract.
@@ -336,20 +339,28 @@ workload needs it. Ship correct-and-uniform first.
 > - **`Field.date` is untouched.** A timezone-naive calendar day is never zone-shifted (#24618):
 >   the native arm keeps its calendar-day expression under every zone, as the in-memory path
 >   does. Only an instant column takes the zone.
+> - **Only an IANA zone name is pushed down.** `timezone` is an unvalidated string, and the two
+>   sides read the other spellings differently, some of them silently: the in-memory path reads
+>   a zone it cannot resolve as UTC (`calendarPartsInTzOrUtc`) where PostgreSQL rejects it; an
+>   offset string such as `+08:00` is east of UTC in `Intl` and west of it under PostgreSQL's
+>   POSIX reading in `AT TIME ZONE`; abbreviations and POSIX forms (`CST`, `UTC+8`) are known to
+>   PostgreSQL and fall back to UTC in memory. So a zone string goes to the database only when
+>   the runtime resolves it as an IANA zone name; anything else keeps the in-memory path, which
+>   answers it as it does today.
 > - **Parity is the acceptance rule.** In-database buckets equal the in-memory buckets
 >   (`applyInMemoryAggregation`, the side `checkDateBucketParity` in `@objectstack/verify`
 >   reads) for a DST zone across both DST boundaries — Europe/Berlin in March and in October —
->   and for Asia/Taipei. This turns the risk the paragraph above named (different bucket
+>   and for Asia/Taipei, with a `Field.date` column in the fixtures under the non-UTC zone
+>   beside the instant columns. This turns the risk the paragraph above named (different bucket
 >   boundaries per driver for the same data) into a test that fails, instead of a reason not to
->   push down. Two readings the code PR settles and states: an unknown zone, which the
->   in-memory path reads as UTC (`calendarPartsInTzOrUtc`) and PostgreSQL rejects, must not
->   answer differently on the two paths; and the database's tz data and the Node runtime's ICU
->   tz data are two copies, so a zone whose rules changed between their versions can differ
->   near the changed instants (recorded here, not closed).
+>   push down. One residual is recorded here, not closed: the database's tz data and the Node
+>   runtime's ICU tz data are two copies, so a zone whose rules changed between their versions
+>   can differ near the changed instants.
 > - **Security does not move.** The read scope and the tenant wall stay in the aggregate's
 >   `WHERE`: both paths take the AST `composeReadableIdsAtBoundary` returns and the same driver
->   options, and only the bucketing expression changes. The other reasons the engine takes the in-memory path (a
->   granularity the driver does not declare, a per-aggregation `filter`) are unchanged.
+>   options, and only the bucketing expression changes. The other reasons the engine takes the
+>   in-memory path (a granularity the driver does not declare, a per-aggregation `filter`) are
+>   unchanged.
 
 **D3 — wire report schedules onto the existing `CronJobAdapter`; do not delete the
 fields.** `sys-report-schedule.object.ts` documents `cron_expression` as "reserved
