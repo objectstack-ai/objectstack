@@ -352,7 +352,9 @@
  * (`git show`) — through the register's `governedTierFor`. An unread pull,
  * timeline or changeset stays Tier H. An entry the arm puts at Tier S clears on
  * a same-head record that READS PASS (`lowRiskRecordVerdict`, the fleet's
- * `contractReviewVerdictOf`); the other Tier S legs still read no verdict.
+ * `contractReviewVerdictOf`), and a record carried from an older head stands for it
+ * only when the hops moved no changeset and no catalog path; the other Tier S
+ * legs still read no verdict.
  *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
@@ -665,7 +667,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 38,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 42,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1172,8 +1174,8 @@ export function decomposeGovernedWork(rows, repo) {
   // governed filter below drops a row, so an ungoverned commit of the same PR
   // (a `packages/**` edit in a commit of its own) still counts against the arm.
   const allByPull = new Map();
-  // ⭐ And every changeset each commit of the PR touches, with the commit it is read at (contract review
-  // 6886243839, M1): the arm reads each one's committed text, so a changeset in an ungoverned commit counts too.
+  // ⭐ And every changeset each commit of the PR touches, with the commit it is read at: the arm reads each
+  // one's committed text, so a changeset in an ungoverned commit counts too.
   const changesetsByPull = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     if (typeof row?.pr !== 'number' || !Number.isInteger(row.pr) || row.pr <= 0) continue;
@@ -1918,8 +1920,7 @@ export function renderGuardVerdict(verdict) {
  * (#33501): `paths` = every path of the PR's commits (`allPaths`); the body,
  * labels and fork predicate off the pull object the queue leg read; the timeline
  * the enqueue leg read (`timeline`: `{ measured, reason, events }`); and each
- * changeset at the commit that touched it, read with `runGit` (contract review
- * 6886243839). An entry with no catalog row is left untouched; `pull` null (its
+ * changeset at the commit that touched it, read with `runGit`. An entry with no catalog row is left untouched; `pull` null (its
  * read failed) is an UNMEASURED reading, so the entry stays Tier H with the
  * reason printed, and so is a missing timeline, fork reading or git reader.
  * ⛔ The tier comes from the register's own `governedTierFor` and
@@ -1967,15 +1968,36 @@ export function landsOnLowRiskArm(entry) {
 
 /**
  * The record leg's verdict for an entry the low-risk arm put at Tier S: a
- * record that STANDS must also READ PASS (contract review 6886243839), read off
+ * record that STANDS must also READ PASS, read off
  * the same comment the locator chose, with the fleet's verdict reader
  * (`contractReviewVerdictOf`, re-exported by the recognisers). Anything else —
  * FAIL, no verdict word, the comment not among the rows, no reader loaded — is
  * `not-pass`, a refusal. Every other entry's record is returned as it was (the
- * other Tier S legs read no verdict; card #33541). Pure.
+ * other Tier S legs read no verdict; card #33541).
+ *
+ * ⛔ A record CARRIED from an older head (the regeneration and prose-only hops)
+ * stands for this arm only when nothing it reads moved after the PASS: the hops
+ * (`git diff -z --name-only <reviewed head> <this head>`, through `pair.runGit`)
+ * may touch no `.changeset/` path and no path under a catalog row. A changeset,
+ * the body's partner, and catalog text such as a skill's `CHANGELOG.md` are
+ * prose faces the carry admits, yet they are exactly what the arm's tier was
+ * read from. A diff that cannot be read refuses too. Pure but for `runGit`.
  */
 export function lowRiskRecordVerdict(record, pair, recognisers) {
   if (record?.state !== 'stands') return record;
+  if (record.carriedFrom) {
+    const refuse = (why) => ({ ...record, state: 'not-pass', verdict: null, verdictReason: why });
+    if (typeof pair?.runGit !== 'function' || !pair?.headSha) return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` and this leg could not diff the hops`);
+    let moved;
+    try {
+      moved = String(pair.runGit(['diff', '-z', '--name-only', record.carriedFrom, pair.headSha])).split('\0').filter(Boolean);
+    } catch (error) {
+      return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` and the hops could not be diffed (${String(error?.message ?? error).split('\n')[0]})`);
+    }
+    const catalog = GOVERNED_SURFACES.filter((s) => s.lowRisk && s.prefix).map((s) => s.prefix);
+    const touched = moved.filter((p) => p.startsWith('.changeset/') || catalog.some((prefix) => p.startsWith(prefix)));
+    if (touched.length > 0) return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` over hops that moved ${touched.slice(0, 3).join(', ')}${touched.length > 3 ? ` (+${touched.length - 3} more)` : ''}, which the arm reads, after the review`);
+  }
   if (typeof recognisers?.verdictOf !== 'function') return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the contract-review verdict reader was not loaded' };
   const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
   const comment = record.id === null || record.id === undefined ? null : rows.find((r) => r?.id === record.id) ?? null;
@@ -5749,6 +5771,24 @@ export async function selfTest() {
       const absent = { state: 'absent' };
       const pair = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [] };
       return lowRiskRecordVerdict(absent, pair, live) === absent && lowRiskRecordVerdict({ state: 'stands', id: 5 }, pair, live).verdict === 'PASS' && lowRiskRecordVerdict({ state: 'stands', id: 6 }, pair, live).state === 'not-pass' && lowRiskRecordVerdict({ state: 'stands', id: null }, pair, live).state === 'not-pass';
+    })());
+    // ⛔ A record CARRIED over prose-only hops stands for the arm only when the hops moved no changeset and no catalog path.
+    const armCarry = (moved) => {
+      const tree = qgit({ moved, attrs: '', own: { [REF_HEAD]: moved } });
+      return (args) => (args[0] === 'show' ? CS_TEXT : tree(args));
+    };
+    const carriedDocs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry('content/docs/guides/x.mdx\0'), baseRef: QBASE });
+    assert('SF1-CONTROL-a-PASS-record-carried-over-a-docs-only-hop-still-clears-the-arm', carriedDocs.exitCode === EXIT_CLEAR && carriedDocs.entries[0].record.carriedHops === 1 && carriedDocs.entries[0].record.verdict === 'PASS', JSON.stringify(carriedDocs.entries[0].record));
+    const carriedCs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry(`${CS}\0`), baseRef: QBASE });
+    assert('⛔ SF1-a-record-carried-over-a-hop-that-rewrote-the-CHANGESET-is-refused-on-the-arm', carriedCs.exitCode === EXIT_REFUSED_UNAPPROVED && carriedCs.entries[0].record.state === 'not-pass' && /over hops that moved \.changeset\/33501-skills-wording\.md/.test(renderGuardVerdict(carriedCs)), JSON.stringify(carriedCs.entries[0].record));
+    const carriedLog = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry('skills/objectstack-data/CHANGELOG.md\0'), baseRef: QBASE });
+    assert('⛔ SF1-a-record-carried-over-a-hop-that-moved-CATALOG-text-a-skill-CHANGELOG-is-refused-on-the-arm', carriedLog.exitCode === EXIT_REFUSED_UNAPPROVED && carriedLog.entries[0].record.state === 'not-pass' && /skills\/objectstack-data\/CHANGELOG\.md/.test(renderGuardVerdict(carriedLog)), JSON.stringify(carriedLog.entries[0].record));
+    assert('⛔ SF1-a-carried-record-whose-hops-cannot-be-diffed-or-with-no-git-reader-is-refused', (() => {
+      const carriedRec = { state: 'stands', id: 5, carriedFrom: REF_OLD, carriedHops: 1 };
+      const rows = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [], headSha: REF_HEAD };
+      return lowRiskRecordVerdict(carriedRec, { ...rows, runGit: () => { throw new Error('fatal: bad object'); } }, live).state === 'not-pass' &&
+        lowRiskRecordVerdict(carriedRec, rows, live).state === 'not-pass' &&
+        lowRiskRecordVerdict(carriedRec, { ...rows, runGit: () => 'docs/x.md\0' }, live).verdict === 'PASS';
     })());
     const nonArmFail = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
     assert('the-other-Tier-S-legs-are-unchanged-here-a-FAIL-record-still-stands-for-them-follow-up-33541', nonArmFail.entries[0].record.state === 'stands' && nonArmFail.entries[0].record.verdict === undefined);

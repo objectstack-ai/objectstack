@@ -481,8 +481,7 @@
  * `lowRisk`, scoped to objectstack. A READING of the pull request
  * (`lowRiskArmVerdict`: every changed path, the body, the label names, the
  * timeline, the fork predicate and the changesets read at the head) moves them
- * to Tier S only when ALL hold (the last five tightened by contract review
- * 6886243839):
+ * to Tier S only when ALL hold:
  *
  *   - every governed path lies under a catalog row — `.claude/**`, a workflow,
  *     `AGENTS.md`, an ADR or any other row beside it is H;
@@ -2255,7 +2254,7 @@ function lowRiskArmIn(surface, repo) {
 }
 
 /**
- * The file SHAPES a low-risk row may change (contract review 6886243839, S4): skill
+ * The file SHAPES a low-risk row may change: skill
  * wording and its evals, nothing else. A script, a JSON or YAML outside an
  * `evals/` folder, an image or any other file under `skills/**` keeps the PR H.
  */
