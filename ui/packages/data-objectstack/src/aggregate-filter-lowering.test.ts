@@ -60,10 +60,10 @@ import { isFilterAST, parseFilterAST } from '@objectstack/spec/data';
 import { AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   isMalformedFilterError,
   UnlowerableAnalyticsFilterError,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /** Rows that carry the requested measure, so nothing degrades to the fallback. */
 const ANALYTICS_ROWS = { rows: [{ amount_sum: 150 }] };

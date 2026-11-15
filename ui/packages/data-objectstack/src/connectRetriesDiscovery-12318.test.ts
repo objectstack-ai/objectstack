@@ -34,8 +34,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ObjectStackAdapter,
   ConnectionError,
-  clearSharedDiscoveryCache,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 const DISCOVERY = { name: 'fake', routes: {} };
 
