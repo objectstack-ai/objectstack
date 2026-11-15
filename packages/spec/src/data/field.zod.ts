@@ -1348,7 +1348,8 @@ export const LookupFilterRecordReferenceSchema = lazySchema(() => strictObject({
   + 'The picker replaces it with that value before querying; unlike { $field }, which names a column of the candidate row.',
 );
 
-export type LookupFilterRecordReference = z.infer<typeof LookupFilterRecordReferenceSchema>;
+export type LookupFilterRecordReference = z.input<typeof LookupFilterRecordReferenceSchema>;
+export type LookupFilterRecordReferenceParsed = z.infer<typeof LookupFilterRecordReferenceSchema>;
 
 /**
  * [#34009] Is `value` written as a `{ $record }` comparand — a non-array object
