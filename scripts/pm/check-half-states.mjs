@@ -1286,7 +1286,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // ---------------------------------------------------------------------------
 
 /** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
-const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|review|qa|eval|queue)';
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|l2-review|review|qa|eval|queue)';
 const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 /** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
 export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
