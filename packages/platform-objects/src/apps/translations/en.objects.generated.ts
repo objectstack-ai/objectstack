@@ -449,7 +449,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "Session",
     pluralLabel: "Sessions",
-    description: "Active user sessions",
+    description: "User sessions",
     fields: {
       user_id: {
         label: "User"

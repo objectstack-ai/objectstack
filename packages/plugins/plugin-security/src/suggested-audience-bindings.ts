@@ -999,7 +999,10 @@ async function recordRow(ql: any, organizationId: string, id: string): Promise<a
  * `permission_set_package` names, else the suggesting package (`package_id`)
  * as the D3 caller, else — a host-declared name, no row — a caller with no
  * package. A name the rule refuses answers no entry and the refusal's own
- * sentence, which names every candidate, plus the operator's bind.
+ * sentence, which names every candidate, plus the fix the row's column
+ * allows: the operator's bind for a column naming no package — the only
+ * column the bind writes — and, for one that names a package already, the
+ * package named or the dismissal.
  */
 async function resolveSuggestedSet(
   reader: SecurityCatalogReader | undefined,
@@ -1011,10 +1014,23 @@ async function resolveSuggestedSet(
   const answer = await resolveCatalogReference(reader, 'permission', name, scope);
   if (answer.status === 'resolved') return { entry: answer.entry };
   if (answer.status === 'refused') {
-    const bind = row ? ` Review it and bind one: \`${bindCommandFor(SUGGESTION_OBJECT, row.id)}\`.` : '';
-    return { refusal: `${answer.message}${bind}` };
+    return { refusal: `${answer.message}${row ? refusedSuggestionFix(row, scope?.packageId) : ''}` };
   }
   return {};
+}
+
+/**
+ * [ADR-0150 D10] The fix a refused suggestion's sentence ends with, following
+ * its package column: a column naming no package is bound after review; the
+ * bind writes no other column, so one that names a package already — a
+ * package that no longer serves the set, or the read would not be refused — is
+ * served again by that package, or the suggestion is dismissed.
+ */
+function refusedSuggestionFix(row: Record<string, unknown>, column: string | undefined): string {
+  if (column === undefined) return ` Review it and bind one: \`${bindCommandFor(SUGGESTION_OBJECT, row.id)}\`.`;
+  return ` Its permission_set_package already names package "${column}", which no longer serves the set, so ` +
+    '`os migrate stored-references bind` (which writes only a column naming no package) does not apply: install or ' +
+    `enable "${column}" again if its set is the one meant, or dismiss the suggestion.`;
 }
 
 /**

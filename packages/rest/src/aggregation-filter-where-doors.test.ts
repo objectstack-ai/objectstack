@@ -499,12 +499,28 @@ describe('[#21299] POST /data/:object/query — every position answers a { $fiel
     // a declared field); the engine-side positions keep the fail-open
     // direction for a side with no declaration and answer, as #21255 and
     // #21242 pin. Recorded so a change on either side is seen.
+    //
+    // [#33698] Re-recorded (seat ruling A, 6893557132): SqlDriver declares
+    // `supports.aggregationFilter`, so the per-aggregation filter is compiled
+    // by the same where compiler and answers its `where` twin's refusal. On a
+    // driver without the bit the engine still evaluates it in memory, and
+    // `applyInMemoryAggregation` still answers 6.
     const NO_AUDIT = { ...MEDIA, name: 'ledger_noaudit', systemFields: { audit: false } };
     const { post, engine } = await boot(true, NO_AUDIT as any, MEDIA_ROWS);
     const filter = { created_at: { $ne: { $field: 'photo' } } };
     expect(answerOf(await post(whereTwin(filter)), 'n')).toEqual({ status: 400, code: 'INVALID_FILTER' });
-    expect(answerOf(await post(perAggregation(filter)), 'm')).toEqual({ status: 200, total: 6 });
+    expect(answerOf(await post(perAggregation(filter)), 'm')).toEqual({ status: 400, code: 'INVALID_FILTER' });
     const rows = (await engine.find(NO_AUDIT.name, {})) as any[];
     expect(sum(applyInMemoryAggregation(rows, perAggregation(filter) as never, undefined, NO_AUDIT.fields), 'm')).toBe(6);
+  });
+
+  it('[#33698] the same posture on a driver WITHOUT aggregationFilter: the engine evaluates the measure in memory and answers 200', async () => {
+    const NO_AUDIT = { ...MEDIA, name: 'ledger_noaudit_rows', systemFields: { audit: false } };
+    const { post, engine } = await boot(true, NO_AUDIT as any, MEDIA_ROWS);
+    const driver: any = (engine as any).getDriverForObject(NO_AUDIT.name);
+    const supports = driver.supports;
+    Object.defineProperty(driver, 'supports', { configurable: true, get: () => ({ ...supports, aggregationFilter: false }) });
+    const filter = { created_at: { $ne: { $field: 'photo' } } };
+    expect(answerOf(await post(perAggregation(filter)), 'm')).toEqual({ status: 200, total: 6 });
   });
 });

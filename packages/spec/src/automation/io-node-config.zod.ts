@@ -1093,11 +1093,11 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
    * ⛔ **No `.default()`, and that is the measured answer, not an omission.**
    * The executor applies TWO values for an absent key, decided by `durable`:
    * run with `config: { url }` it calls `fetch` with `GET`; run with
-   * `config: { url, durable: true }` against a ready outbox it enqueues `POST`
-   * (`http-nodes.ts`: `method: cfg.method ?? 'POST'` on the durable arm,
-   * `const method = cfg.method ?? 'GET'` on the inline one). A static
-   * `.default('GET')` would materialise `GET` at parse time, the durable arm's
-   * `??` would never fire again, and every stored durable callout that omits
+   * `config: { url, durable: true }` it sends `POST`, enqueued on a ready
+   * outbox or sent on the no-outbox fallback alike (`http-nodes.ts` resolves
+   * the verb once, from the authored `method` and `durable`). A static
+   * `.default('GET')` would materialise `GET` at parse time, the durable
+   * `POST` would never apply again, and every stored durable callout that omits
    * the method would silently change from POST to GET — a protocol-declared
    * default the runtime does not apply, which is precisely the defect the
    * maintainer's ruling on defaults (decision batch #127 item 5) forbids.
