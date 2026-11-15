@@ -9,7 +9,9 @@
  *   node scripts/qa/qa-fixture.mjs external-database [--port N] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs broken-upstream-app [--variant missing-script|config-fault] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs restore-upstream --dir DIR
+ *   node scripts/qa/qa-fixture.mjs oidc-stub [--port N] [--dir DIR] [--register [--base-url URL] [--provider-id ID] [--domain DOMAIN] [--groups-claim CLAIM]]
  *   node scripts/qa/qa-fixture.mjs teardown --dir DIR
+ *   node scripts/qa/qa-fixture.mjs --help          (also FIXTURE --help, -h, help: this usage, exit 0, nothing run)
  *
  * Common flags: `--base-url` (default `http://localhost:$OS_PORT`, else :3000),
  * `--admin-email` / `--admin-password` (default the `--seed-admin` pair,
@@ -69,6 +71,20 @@
  *   parked beside the copy, the variant steps[4] undoes with `restore-upstream`)
  *   or misconfigured (`config-fault`: the transport kind is one no provider
  *   knows). It prints the boot command; the item times the boot itself.
+ * - `oidc-stub` — the local OIDC identity provider the SSO items' fixtures
+ *   bring (`identity-auth.sso-provider-groups-claim` fixtures.requires[0] and
+ *   knownGaps[0]: no stock OIDC identity provider exists): a detached HTTP
+ *   server on `localhost` that serves a discovery document and a JWKS holding
+ *   one per-run RSA key, which is all `@better-auth/sso` reads to register a
+ *   provider. It serves no interactive sign-in: its authorize, token and
+ *   userinfo endpoints answer 501, so a clause that needs a federated sign-in
+ *   is still not driven by it. It prints the two variables the boot that
+ *   registers it needs exported (`OS_SSO_ENABLED=true`, and the stub's origin
+ *   in `OS_TRUSTED_ORIGINS` beside the boot's own: the vendor refuses a
+ *   loopback discovery URL that is not a trusted origin, `discovery_private_host`)
+ *   and the `POST /api/v1/auth/admin/sso/register` body. `--register` sends
+ *   that body as the admin to the boot at `--base-url` and proves the provider
+ *   landed by reading it back through `POST /api/v1/auth/admin/sso/get-groups-claim`.
  *
  * Every fixture that leaves a process or a directory behind writes
  * `fixture.json` into its directory, and `teardown --dir DIR` undoes exactly
@@ -86,11 +102,12 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import {
   chmodSync, chownSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync,
   rmSync, statSync, symlinkSync, writeFileSync, openSync,
 } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -694,6 +711,124 @@ function restoreUpstream(flags) {
   return { fixture: 'broken-upstream-app', restored: join(dir, 'app', MCP_SCRIPT), dir };
 }
 
+// ── oidc-stub ────────────────────────────────────────────────────────────────
+
+/** The discovery document the stub serves at ISSUER/.well-known/openid-configuration. */
+function oidcDiscovery(issuer) {
+  return {
+    issuer,
+    authorization_endpoint: `${issuer}/authorize`,
+    token_endpoint: `${issuer}/token`,
+    userinfo_endpoint: `${issuer}/userinfo`,
+    jwks_uri: `${issuer}/jwks`,
+    response_types_supported: ['code'],
+    subject_types_supported: ['public'],
+    id_token_signing_alg_values_supported: ['RS256'],
+    scopes_supported: ['openid', 'email', 'profile'],
+    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+    claims_supported: ['sub', 'email', 'name', 'groups'],
+  };
+}
+
+/**
+ * The stub's own process (`_oidc-stub-serve`, spawned detached by `oidc-stub`,
+ * never typed by a runner): serves discovery and the JWKS until its process
+ * group is stopped by `teardown`.
+ */
+function serveOidcStub(flags) {
+  const port = Number(flags.port);
+  const issuer = `http://localhost:${port}`;
+  const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwks = { keys: [{ ...publicKey.export({ format: 'jwk' }), kid: `qa-${stamp()}`, use: 'sig', alg: 'RS256' }] };
+  const discovery = oidcDiscovery(issuer);
+  const server = createHttpServer((req, res) => {
+    const path = new URL(req.url, issuer).pathname;
+    const body = path === '/.well-known/openid-configuration' ? discovery : path === '/jwks' ? jwks : null;
+    log(`${req.method} ${path} → ${body ? 200 : (['/authorize', '/token', '/userinfo'].includes(path) ? 501 : 404)}`);
+    if (body) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    } else if (['/authorize', '/token', '/userinfo'].includes(path)) {
+      res.writeHead(501, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_implemented', error_description: 'qa-fixture oidc-stub serves discovery and JWKS only: no federated sign-in' }));
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+  server.listen(port, 'localhost', () => log(`oidc-stub serving ${issuer}`));
+  return new Promise(() => {});
+}
+
+async function oidcStub(flags) {
+  const port = Number(flags.port || (await freePort()));
+  const dir = newRunDir(flags, 'qa-oidc-stub-');
+  const issuer = `http://localhost:${port}`;
+  const logFile = join(dir, 'oidc-stub.log');
+  const out = openSync(logFile, 'a');
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_oidc-stub-serve', '--port', String(port)], {
+    detached: true, stdio: ['ignore', out, out],
+  });
+  writeState(dir, { kind: 'oidc-stub', pids: [child.pid], port, issuer, createdAt: new Date().toISOString() });
+  child.unref();
+
+  // The proof is what the vendor reads at register: the four discovery fields it
+  // requires (issuer equal to the registered one), and a JWKS holding a key.
+  let discovery;
+  for (let i = 0; i < 40 && !discovery; i++) {
+    try {
+      const res = await fetch(`${issuer}/.well-known/openid-configuration`);
+      if (res.status === 200) discovery = await res.json();
+    } catch { /* not listening yet */ }
+    if (!discovery) await new Promise((r) => setTimeout(r, 250));
+  }
+  if (!discovery) throw new StepFailure(`the stub never answered ${issuer}/.well-known/openid-configuration — read ${logFile}`);
+  if (discovery.issuer !== issuer || !discovery.authorization_endpoint || !discovery.token_endpoint || !discovery.jwks_uri) {
+    throw new StepFailure(`the stub's discovery document lacks a field @better-auth/sso requires: ${JSON.stringify(discovery)}`);
+  }
+  const jwks = await (await fetch(discovery.jwks_uri)).json();
+  if (!jwks.keys?.[0]?.n || jwks.keys[0].kty !== 'RSA') throw new StepFailure(`the stub's JWKS holds no RSA key: ${JSON.stringify(jwks)}`);
+
+  const base = baseUrlOf(flags);
+  const providerId = String(flags['provider-id'] || `qa-oidc-${stamp()}`);
+  const registerBody = {
+    providerId,
+    issuer,
+    domain: String(flags.domain || `${providerId}.verify.test`),
+    clientId: 'qa-oidc-client',
+    clientSecret: freshSecret(),
+    ...(typeof flags['groups-claim'] === 'string' ? { mapGroups: flags['groups-claim'] } : {}),
+  };
+  let registered = null;
+  if (flags.register) {
+    const token = await signIn(base, adminOf(flags).email, adminOf(flags).password);
+    expectStatus(
+      'register the stub (POST /api/v1/auth/admin/sso/register) — a 400 SSO_REGISTER_FAILED naming "not publicly routable" means the boot lacks the stub origin in OS_TRUSTED_ORIGINS, a 404 that it lacks OS_SSO_ENABLED=true',
+      await call(base, 'POST', '/api/v1/auth/admin/sso/register', { token, body: registerBody }),
+      200,
+    );
+    const readBack = expectStatus(
+      'read the provider back (POST /api/v1/auth/admin/sso/get-groups-claim)',
+      await call(base, 'POST', '/api/v1/auth/admin/sso/get-groups-claim', { token, body: { providerId } }),
+      200,
+    );
+    registered = { providerId, at: base, groupsClaim: readBack.json?.data?.groupsClaim ?? null };
+  }
+
+  return {
+    fixture: 'oidc-stub',
+    replays: 'docs/qa/platform-checklist/areas/identity-auth.json identity-auth.sso-provider-groups-claim fixtures.requires[0]',
+    issuer,
+    discoveryEndpoint: `${issuer}/.well-known/openid-configuration`,
+    bootEnv: { OS_SSO_ENABLED: 'true', OS_TRUSTED_ORIGINS: `${base},${issuer}` },
+    registerBody,
+    register: registered ?? `POST ${base}/api/v1/auth/admin/sso/register with registerBody as the admin (or rerun with --register)`,
+    signIn: 'not served: authorize, token and userinfo answer 501 — the stub registers a provider and drives its admin doors, never a federated sign-in',
+    log: logFile,
+    dir,
+    teardown: `node scripts/qa/qa-fixture.mjs teardown --dir ${dir}`,
+  };
+}
+
 // ── teardown ─────────────────────────────────────────────────────────────────
 
 function readState(dir) {
@@ -735,11 +870,38 @@ const COMMANDS = {
   'external-database': externalDatabase,
   'broken-upstream-app': brokenUpstreamApp,
   'restore-upstream': restoreUpstream,
+  'oidc-stub': oidcStub,
   teardown,
 };
 
+/**
+ * The usage `--help` prints: the synopsis and common flags at the top of this
+ * file's header, read from the file itself so the two cannot drift.
+ */
+function usage() {
+  const header = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('## What each one provisions')[0];
+  const lines = header.split('\n').filter((l) => l.startsWith(' *')).map((l) => l.replace(/^ \* ?/, ''));
+  return `${lines.slice(lines.findIndex((l) => l.startsWith('  node scripts/qa/qa-fixture.mjs'))).join('\n').trimEnd()}\n\n`
+    + 'What each fixture provisions, and the exit codes: the header of scripts/qa/qa-fixture.mjs.\n';
+}
+
+/**
+ * A help request anywhere on the line answers the usage and runs nothing. It is
+ * read off the raw arguments, ahead of `parseArgs`, which would otherwise take
+ * `--help` as one more flag and run the fixture named before it.
+ */
+function asksForHelp(argv) {
+  return argv[0] === 'help' || argv.some((a) => a === '--help' || a === '-h');
+}
+
 async function main() {
-  const { command, flags } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  if (asksForHelp(argv)) {
+    process.stdout.write(usage());
+    return;
+  }
+  const { command, flags } = parseArgs(argv);
+  if (command === '_oidc-stub-serve') return serveOidcStub(flags);
   const run = COMMANDS[command];
   if (!run) throw new Refusal(`unknown fixture "${command ?? ''}": one of ${Object.keys(COMMANDS).join(', ')}`);
   const result = await run(flags);
