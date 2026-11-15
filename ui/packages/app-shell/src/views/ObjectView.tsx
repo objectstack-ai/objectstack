@@ -38,7 +38,12 @@ const ViewConfigPanel = lazy(() =>
 );
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { dropPublishedViewList } from './metadata-admin/viewListDrop.js';
-import { CreateViewDialog } from './CreateViewDialog.js';
+// objectstack#33582: the create-view dialog loads with the first list, as the
+// view config panel above does. Statically, it held the dataset catalogue and,
+// through it, the Studio `en` string namespace in the EAGER closure.
+const CreateViewDialog = lazy(() =>
+  import('./CreateViewDialog.js').then((m) => ({ default: m.CreateViewDialog })),
+);
 import {
   usePreviewDrafts,
 } from '../preview/PreviewModeContext.js';
@@ -1396,13 +1401,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                         />
                     </Suspense>
                 </div>
-                <CreateViewDialog
-                    open={showCreateViewDialog && isAdmin}
-                    onOpenChange={setShowCreateViewDialog}
-                    existingLabels={views.map((v: any) => v.label).filter(Boolean)}
-                    objectDef={objectDef}
-                    onCreate={(cfg) => handleViewCreate(cfg)}
-                />
+                <Suspense fallback={null}>
+                    <CreateViewDialog
+                        open={showCreateViewDialog && isAdmin}
+                        onOpenChange={setShowCreateViewDialog}
+                        existingLabels={views.map((v: any) => v.label).filter(Boolean)}
+                        objectDef={objectDef}
+                        onCreate={(cfg) => handleViewCreate(cfg)}
+                    />
+                </Suspense>
                 <PersonalViewNameDialog
                     open={!!personalViewDialog}
                     onOpenChange={(open) => { if (!open) setPersonalViewDialog(null); }}
