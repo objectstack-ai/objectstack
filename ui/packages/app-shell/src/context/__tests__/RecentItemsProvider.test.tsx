@@ -536,6 +536,8 @@ describe('RecentItemsProvider — a deleted record leaves the recents (objectsta
     act(() => view.result.current.recent.addRecentItem({ id: 'object:crm_account', type: 'object', name: 'crm_account', href: '/apps/crm/crm_account' }));
     act(() => view.result.current.recent.addRecentItem(record('crm_account', 'a1', 'Browser Test Co')));
     act(() => view.result.current.recent.addRecentItem(record('crm_account', 'b2', 'Globex')));
+    // The visits' own debounced save lands first, so the counts below start at zero.
+    await waitFor(() => expect(adapter.saveMock).toHaveBeenCalled(), { timeout: 1500 });
     adapter.saveMock.mockClear();
     return { ...view, source, adapter };
   }
