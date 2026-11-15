@@ -1528,7 +1528,7 @@ export function selfTest({ tier = 'full' } = {}) {
     ].join('\n'),
     'scripts/pm/table.mjs': '',
     'scripts/pm/root-spelled.mjs': '',
-    'scripts/pm/no-seam.mjs': 'export const SOURCE = "./table.mjs";\n',
+    'scripts/pm/no-seam.mjs': 'export const SOURCE = "./table.mjs";\nexport const ROOT_SPELLED = \'scripts/pm/root-spelled.mjs\';\n',
   };
   const lgExists = (rel) => Object.hasOwn(lgSources, rel);
   const lgEdges = (rel) => loadEdgeTargets(rel, lgSources[rel] ?? '', { exists: lgExists }).targets;
@@ -1548,13 +1548,13 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   const lgSeam = loadEdgeTargets('scripts/pm/seam.mjs', lgSources['scripts/pm/seam.mjs'], { exists: lgExists });
   t(
-    'an import() whose argument is not a literal widens toward MORE: every relative module literal in the file is'
-      + ' an edge, a root-spelled path is not',
-    lgSeam.unreadDynamic === 1 && lgSeam.targets.join() === 'scripts/pm/table.mjs',
+    'an import() whose argument is not a literal widens toward MORE: every module literal in the file is an edge,'
+      + ' relative or spelled from the repo root',
+    lgSeam.unreadDynamic === 1 && lgSeam.targets.join() === 'scripts/pm/root-spelled.mjs,scripts/pm/table.mjs',
     `${lgSeam.unreadDynamic} unread · ${lgSeam.targets.join(' ')}`,
   );
   t(
-    'CONTROL: the same relative literal in a file with no unread import() is not an edge',
+    'CONTROL: the same two literals in a file with no unread import() are not edges',
     lgEdges('scripts/pm/no-seam.mjs').length === 0,
   );
   const lgReach = importGraphReach(['scripts/pm/gate.mjs'], lgEdges);
@@ -1596,6 +1596,37 @@ export function selfTest({ tier = 'full' } = {}) {
     '…and the validator and the dispatcher, the other two fleet-write families the card names',
     replayFleet.every(([, placed]) => placed.verdict === 'matched'),
     replayFleet.map(([c, placed]) => `${c}: ${placed.verdict}`).join(' · '),
+  );
+  // The root-spelled roster, live (review M1): the dispatcher's self-test loads
+  // every sender in process through `pathToFileURL(join(REPO_ROOT, sender))`,
+  // and `scripts/pm/issue-create.mjs` has no static importer under scripts/ —
+  // so only the root-spelled fallback reaches it, and without it a card editing
+  // the sender reddens check:pm-fleet-write-dispatch in CI underived.
+  const senderDispatch = replayFamilies.get('check:pm-fleet-write-dispatch');
+  const senderPlaced = senderDispatch
+    ? placeFamily(senderDispatch, ['scripts/pm/issue-create.mjs'])
+    : { verdict: 'not discovered', hits: [] };
+  t(
+    '⭐ a sender the dispatcher loads by a root-spelled path derives check:pm-fleet-write-dispatch, through the import graph',
+    senderPlaced.verdict === 'matched' && senderPlaced.hits.some((h) => h.via.startsWith('import graph ')),
+    senderPlaced.hits.map((h) => h.via).join(' · ') || senderPlaced.verdict,
+  );
+  // The key's price, PRINTED rather than recorded (review nit): the pm modules
+  // it reaches, the (family, module) pairs, and the module that names the most
+  // families. Prose cannot notice the tree moving under these numbers, so the
+  // run says them and asserts only that the key reaches anything at all.
+  const priceByModule = new Map();
+  for (const entry of replayFamilies.values()) {
+    for (const mod of entry.importReach?.keys() ?? []) {
+      if (mod.startsWith(IMPORT_GRAPH_KEY_ROOT)) priceByModule.set(mod, (priceByModule.get(mod) ?? 0) + 1);
+    }
+  }
+  const pricePairs = [...priceByModule.values()].reduce((sum, n) => sum + n, 0);
+  const priceWorst = [...priceByModule].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
+  t(
+    `the import-graph key's price on this tree: ${priceByModule.size} pm module(s) reached over ${pricePairs}`
+      + ` (family, module) pair(s); ${priceWorst?.[0]} names ${priceWorst?.[1]} famil(ies)`,
+    priceByModule.size > 0 && pricePairs >= priceByModule.size,
   );
 
   // #12107, the live half — three claims about THIS tree, each one a thing the

@@ -6594,14 +6594,18 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
  *   - a dynamic `import()` whose argument this scan cannot read (a variable, a
  *     property, a computed URL) has a target nothing here can name. It is not
  *     dropped: the file is marked, and EVERY code-position string literal in it
- *     spelled as a relative specifier that resolves to a first-party module is
- *     taken as an edge. The live shape is a loader seam
- *     (`load = (specifier) => import(specifier)`) whose specifiers sit in a
- *     constant elsewhere in the same file (`ARM_READER_SOURCE`). A path spelled
- *     from the repo ROOT is not taken: in this tree that spelling is a fixture
- *     row or a file a self-test reads as text (a module LOADED by root path goes
- *     through `pathToFileURL` and lives in spawned-child templates), so reading
- *     it as a load handed `check-governed-merges.mjs` five modules it never runs.
+ *     that names a first-party module — a relative specifier, or a path spelled
+ *     from the repo ROOT under `scripts/` — is taken as an edge. Both live
+ *     shapes: a loader seam (`load = (specifier) => import(specifier)`) whose
+ *     relative specifiers sit in a constant elsewhere in the file
+ *     (`ARM_READER_SOURCE`), and a root-spelled roster loaded in process —
+ *     `fleet-write/dispatch.mjs`'s self-test imports every sender through
+ *     `pathToFileURL(join(REPO_ROOT, sender))`, `check-dispatch-gates.mjs` its
+ *     engine through `import(resolve(ROOT, TOOL))`. Taking the root spelling
+ *     also takes the fixture rows and text reads such a file spells in the same
+ *     form (measured: five modules `check-governed-merges.mjs` names as data
+ *     and never loads), and that is the direction this key errs in: a lead too
+ *     many costs one gate run, a lead too few costs a red CI round.
  *
  * Resolution is `firstPartyImportBindings`': relative specifiers only, inside
  * `scripts/`, outside `node_modules`, and only a target that exists — a bare
@@ -6614,7 +6618,7 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
 const LOAD_DYNAMIC_IMPORT = /(?<![\w$.])import[ \t\n]*\(/g;
 const LOAD_DYNAMIC_LITERAL = /^[ \t\n]*(['"`])([^'"`\n]+)\1[ \t\n]*[,)]/;
 const LOAD_DYNAMIC_URL = /^[ \t\n]*new[ \t\n]+URL[ \t\n]*\([ \t\n]*(['"`])([^'"`\n]+)\1[ \t\n]*,[ \t\n]*import\.meta\.url[ \t\n]*\)/;
-const LOAD_MODULE_LITERAL = /(['"`])(\.\.?\/[^'"`\n]*?\.(?:mjs|cjs|js|mts|cts|ts))\1/g;
+const LOAD_MODULE_LITERAL = /(['"`])((?:\.\.?\/|scripts\/)[^'"`\n]*?\.(?:mjs|cjs|js|mts|cts|ts))\1/g;
 
 export function loadEdgeTargets(scriptPath, source, { root = ROOT, exists = null } = {}) {
   const text = String(source);
@@ -6668,7 +6672,8 @@ export function loadEdgeTargets(scriptPath, source, { root = ROOT, exists = null
       // literal — the scan flags a literal's content, never its delimiters.
       if (!isCode(m.index) || !scan.literal[m.index + 1]) continue;
       if (m[1] === '`' && m[2].includes('${')) continue;
-      resolveRelative(m[2]);
+      if (m[2].startsWith('scripts/')) admit(m[2]);
+      else resolveRelative(m[2]);
     }
   }
   return { targets: [...targets].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), unreadDynamic };
