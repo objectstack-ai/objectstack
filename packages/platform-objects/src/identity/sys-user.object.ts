@@ -176,22 +176,26 @@ export const SysUser = ObjectSchema.create({
 
     // ── Platform admin operations ───────────────────────────────────────
     //
-    // `create_user` and the actions further down that carry
-    // `requiresFeature: 'admin'` (#2874) are gated on the better-auth `admin`
+    // `create_user` and `impersonate_user`, the actions here that carry
+    // `requiresFeature: 'admin'` (#2874), are gated on the better-auth `admin`
     // plugin: when `features.admin` is off the UI hides them instead of
     // rendering buttons that 404. SCIM deployments keep them: SCIM forces the
     // admin plugin (and `features.admin`) on (ADR-0134).
     //
-    // Ban / Unban / Unlock carry NO `requiresFeature: 'admin'`, deliberately.
-    // Their doors, plugin-auth's `admin/ban-user` / `admin/unban-user` /
-    // `admin/unlock-user`, are ObjectStack mounts registered whether or not
-    // the vendor plugin is on. Without it the ban is written through the data
-    // engine and the session refusal answers `403 BANNED_USER`
-    // (`admin-ban-endpoints.ts`, `user-session-admission.ts`); the lockout is
-    // plugin-auth's own (ADR-0069 D2, stamped by its sign-in path), and the
-    // unlock clears it through the data engine. So `features.admin == true`
-    // would hide a working Deactivate / Reactivate / Unlock on every kernel
-    // that runs without the plugin, managed environments included. Pinned in
+    // Ban / Unban / Unlock / Set Password carry NO `requiresFeature: 'admin'`,
+    // deliberately. Their doors, plugin-auth's `admin/ban-user` /
+    // `admin/unban-user` / `admin/unlock-user` / `admin/set-user-password`,
+    // are ObjectStack mounts registered whether or not the vendor plugin is
+    // on. Without it the ban is written through the data engine and the
+    // session refusal answers `403 BANNED_USER` (`admin-ban-endpoints.ts`,
+    // `user-session-admission.ts`); the lockout is plugin-auth's own
+    // (ADR-0069 D2, stamped by its sign-in path), and the unlock clears it
+    // through the data engine; the password is hashed and written through
+    // better-auth's core `internalAdapter`, which every kernel carries. So
+    // `features.admin == true` would hide a working Deactivate / Reactivate /
+    // Unlock / Set Password on every kernel that runs without the plugin,
+    // managed environments included (Set Password keeps its own
+    // hide-when-cloud-managed rule). Pinned in
     // `action-state-visibility.test.ts` (the offer) and plugin-auth's
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
@@ -572,7 +576,6 @@ export const SysUser = ObjectSchema.create({
       // Console only: the server keeps answering it on an `env_native` row, so
       // the break-glass admin stays editable (ruling 6341690661, Q4 A).
       visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Password updated',
       refreshAfter: false,

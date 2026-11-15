@@ -84,17 +84,19 @@ describe('sys_user Ban / Unban switch with `banned`', () => {
 });
 
 /**
- * Ban / Unban / Unlock are offered on a kernel WITHOUT the better-auth admin
- * plugin: their doors (plugin-auth `admin/ban-user` / `admin/unban-user` /
- * `admin/unlock-user`) are mounted and work there too, so `features.admin`
- * off, the flag every such kernel serves, managed or not, hides none of them.
- * The actions whose doors still need the plugin keep their
- * `requiresFeature: 'admin'` gate.
+ * Ban / Unban / Unlock / Set Password are offered on a kernel WITHOUT the
+ * better-auth admin plugin: their doors (plugin-auth `admin/ban-user` /
+ * `admin/unban-user` / `admin/unlock-user` / `admin/set-user-password`) are
+ * mounted and work there too, so `features.admin` off, the flag every such
+ * kernel serves, managed or not, hides none of them (Set Password keeps its
+ * own hide-when-cloud-managed rule). The actions whose doors still need the
+ * plugin keep their `requiresFeature: 'admin'` gate.
  */
-describe('sys_user Ban / Unban / Unlock are offered without the admin plugin', () => {
+describe('sys_user Ban / Unban / Unlock / Set Password are offered without the admin plugin', () => {
   const ban = visibleOf(SysUser, 'ban_user');
   const unban = visibleOf(SysUser, 'unban_user');
   const unlock = visibleOf(SysUser, 'unlock_user');
+  const setPassword = visibleOf(SysUser, 'set_user_password');
   /** What a kernel without the plugin serves: unmanaged (self-hosted) and managed (a Free or Team environment). */
   const WITHOUT_PLUGIN = [
     { admin: false, apiKey: true, cloudManaged: false },
@@ -120,6 +122,12 @@ describe('sys_user Ban / Unban / Unlock are offered without the admin plugin', (
     }
   });
 
+  it('Set Password is offered unmanaged and stays hidden managed, its own rule kept', () => {
+    const [unmanaged, managed] = WITHOUT_PLUGIN;
+    expect(offered(setPassword, { source: 'env_native' }, ADMIN, unmanaged!)).toBe(true);
+    expect(offered(setPassword, { source: 'env_native' }, ADMIN, managed!)).toBe(false);
+  });
+
   it('the standing leg stays: a caller without it is offered neither with the plugin off', () => {
     for (const features of WITHOUT_PLUGIN) {
       for (const banned of [true, false]) {
@@ -127,6 +135,7 @@ describe('sys_user Ban / Unban / Unlock are offered without the admin plugin', (
         expect(offered(unban, { banned }, MEMBER, features)).toBe(false);
       }
       expect(offered(unlock, { locked_until: '2999-01-01T00:00:00.000Z', two_factor_enabled: true }, MEMBER, features)).toBe(false);
+      expect(offered(setPassword, { source: 'env_native' }, MEMBER, features)).toBe(false);
     }
   });
 
@@ -134,7 +143,6 @@ describe('sys_user Ban / Unban / Unlock are offered without the admin plugin', (
   // otherwise offers, so the flag alone decides.
   const PLUGIN_ONLY: ReadonlyArray<[string, Record<string, unknown>]> = [
     ['create_user', {}],
-    ['set_user_password', { source: 'env_native' }],
     ['impersonate_user', {}],
   ];
 
