@@ -14,3 +14,5 @@ Metadata-protocol: none
 - A persona whose set the build does not declare fails each of its checks.
 
 Not-measured checks now leave the card score's passed and total.
+
+The run record's build evidence (`./runner`, `runRecord`) lists each persona grant check beside the Build's other checks, so a failing one is named with its detail and a not-measured one with its reason. `personaGrants` also reaches `./runner` through `BuildHalf.score`.

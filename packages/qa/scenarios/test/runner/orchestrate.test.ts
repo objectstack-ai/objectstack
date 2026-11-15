@@ -319,6 +319,13 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     const results = record.results as Array<{ id: string; verdict: string }>;
     expect(results.find((r) => r.id === 'crm_account_with_contacts.scratch.run-operations')!.verdict).toBe('pass');
     expect(results.find((r) => r.id === 'crm_account_with_contacts.template.build')!.verdict).toBe('not-run'); // template mode builds nothing first
+    // The build's persona grant checks are its evidence, each named, as its other Build checks are.
+    const grants = run.modes[0]!.build!.score!.personaGrants;
+    expect(grants.length).toBeGreaterThan(0);
+    const buildEvidence = (record.results as Array<{ id: string; clauses: Array<{ evidence: { check?: string } }> }>)
+      .find((r) => r.id === 'crm_account_with_contacts.scratch.build')!
+      .clauses.map((c) => c.evidence.check);
+    expect(buildEvidence.filter((c) => c?.startsWith('persona-grant:'))).toEqual(grants.map((g) => g.check));
     expect(renderScorecard(sc)).toContain('| Run-问数 | 9/9 | — |');
     expect(renderScorecard(sc)).toContain('| Seed | 8/8 | — |'); // every row loaded: no warning
   });
