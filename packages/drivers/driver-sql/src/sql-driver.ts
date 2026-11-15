@@ -389,6 +389,9 @@ export class SqlDriver implements IDataDriver {
       // engine sends filtered measures here instead of reading every row into
       // memory. A subclass whose transport cannot run the compile (TursoDriver's
       // remote mode answers `aggregate()` with 501) spreads this and turns it off.
+      // Declared on every dialect: text comparison in the filter is then the
+      // collation's, as for this datasource's `where` (the latitude the bit's
+      // TSDoc in `data/driver.zod.ts` states, measured dialects named there).
       aggregationFilter: true,
     };
   }

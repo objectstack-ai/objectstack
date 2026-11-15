@@ -8,9 +8,9 @@
 feat(spec, objectql, driver-sql, driver-turso): a per-measure aggregation filter runs in SQL on driver-sql, behind one declared driver capability (#33698)
 
 Clause-②: yes (widening: one optional DriverCapabilities bit)
-Metadata-protocol: added
+Metadata-protocol: semantic
 
-**The capability.** `DriverCapabilities` (`@objectstack/spec/data`) gains one optional boolean, `aggregationFilter`: the driver's `aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the answers the engine's in-memory aggregation gives. Absence means `false`. A driver that declares nothing keeps exactly the path it had.
+**The capability.** `DriverCapabilities` (`@objectstack/spec/data`) gains one optional boolean, `aggregationFilter`: the driver's `aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the answers the engine's in-memory aggregation gives, except that text compares by the database collation (see the last paragraph). Absence means `false`. A driver that declares nothing keeps exactly the path it had.
 
 **What runs where.**
 
@@ -23,4 +23,4 @@ Metadata-protocol: added
 
 **A measure filter the `where` compiler refuses now refuses on driver-sql.** Because driver-sql compiles a measure filter with the same where compiler, a filter that compiler refuses answers the same `400 INVALID_FILTER` its `where` twin answers. The recorded case is a `{ $field }` comparison between columns of different classes on an object with no audit fields (`created_at` against an image field): before, the engine evaluated it in memory and answered `200`; on driver-sql it now answers `400 INVALID_FILTER`, as `where` always did. A driver without the bit still evaluates it in memory and answers `200`.
 
-**Declared latitude.** Ordering a non-temporal text column (`$gt` / `$lt` / `$between` on text) follows the database collation, as it always has for a `where`. On a database whose collation is not code-point order (measured: PostgreSQL with an ICU `en-US` collation), such a measure filter can select other rows in SQL than in memory. Every other operator agreed on SQLite and PostgreSQL 16. MySQL was not measured.
+**Declared latitude: text compares by the database collation.** On driver-sql a measure filter now answers what the `where` of the same datasource answers, so text comparison in it follows the database collation, where the in-memory path compares text exactly. Ordering a non-temporal text column (`$gt` / `$lt` / `$between` on text) follows the collation everywhere; on a case- or accent-insensitive collation, equality and membership do too, so `stage $eq 'won'` also counts `Won` rows, as `where` already does. Measured: SQLite and PostgreSQL 16 agree with the in-memory path on every operator with a `C.UTF-8` collation; PostgreSQL 16 with an ICU `en-US` collation differs only in text ordering. MySQL and SQL Server were not measured; their default collations are case-insensitive.

@@ -293,15 +293,27 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * statement's `where` and stay on the whole statement; the measure filter
    * only narrows inside it.
    *
-   * The one latitude the promise inherits rather than closes: ordering a
-   * NON-temporal text column (`$gt` / `$lt` / `$between` on text) is the
-   * backend collation's, not promised (the comparison-operator text in
-   * `filter.zod.ts`), exactly as it is for a `where`. On a backend whose
-   * collation is not code-point order — measured: PostgreSQL with an ICU
-   * `en-US` database collation — such a measure filter can select other rows
-   * than the in-memory path, which orders by UTF-16 code units. Every other
-   * operator, and ordering on numbers, dates, datetimes and times, answers
-   * alike.
+   * The latitude the promise inherits rather than closes: TEXT comparison in
+   * a measure filter is the backend collation's, as it is for a `where` on the
+   * same datasource. A measure filter answers what its `where` twin answers
+   * there, not what the in-memory path answers, which compares text exactly,
+   * by UTF-16 code units. Concretely:
+   *
+   * - ordering a NON-temporal text column (`$gt` / `$gte` / `$lt` / `$lte` /
+   *   `$between` on text) follows the collation on every backend; it is not
+   *   promised in any case (the comparison-operator text in `filter.zod.ts`);
+   * - equality and membership on text (`$eq`, implicit equality, `$ne`, `$in`,
+   *   `$nin`) follow the collation too, so on a case- or accent-insensitive
+   *   collation `stage $eq 'won'` also selects `Won`, exactly as the `where`
+   *   of the same datasource does.
+   *
+   * Measured (in-memory path against driver-sql's where compiler, 119
+   * filters): SQLite, and PostgreSQL 16 with a `C.UTF-8` database collation,
+   * answer alike on every operator; PostgreSQL 16 with an ICU `en-US` database
+   * collation differs only in text ordering. NOT measured: MySQL and SQL
+   * Server, whose default collations are case-insensitive, so equality and
+   * membership on text are expected to fold case there. Numbers, booleans,
+   * dates, datetimes and times answer alike wherever measured.
    *
    * What the engine does with it: `engine.aggregate` sends an aggregate whose
    * measures carry a filter to `driver.aggregate` only when this bit is `true`
@@ -323,7 +335,7 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    *
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
-  aggregationFilter: z.boolean().optional().describe('`aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine\'s in-memory answer (absence = false: the engine aggregates filtered measures in memory)'),
+  aggregationFilter: z.boolean().optional().describe('`aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine\'s in-memory answer, except that text compares by the backend collation as in `where` (absence = false: the engine aggregates filtered measures in memory)'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0
