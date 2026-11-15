@@ -505,10 +505,10 @@
  * the arm's RECORD STAGE pending — every pull-read condition holds — the
  * follow-up reads the stage too, through the queue guard's one reader
  * (`readLowRiskRecordStage`: the card the pull delivers, both comment threads
- * cut to trusted authors, the card's labels and its timeline), and asks the
- * arm again. ⛔ Fail closed: a
+ * cut to trusted authors, the labels and timeline of every card it names), and
+ * asks the arm again. ⛔ Fail closed: a
  * condition broken (`Clause-②` not a bare `no`, a `security` label now or
- * removed, on the pull or on its card, a catalog path named for security, auth
+ * removed, on the pull or on a card it names, a catalog path named for security, auth
  * or permission, a catalog file added, deleted, renamed or not regular, a
  * changeset releasing more than the skills catalog, a path off the allowlist,
  * a contract-review record on the head that lacks one bare
@@ -1047,7 +1047,7 @@ export async function workflowReadingFor({ repo, paths, pr, api, t, git = null }
  * The arm's RECORD STAGE is read SECOND, and only when that reading leaves it pending (every pull-read condition
  * holds), so no other pull pays for it: the queue guard's `readLowRiskRecordStage`, imported, ⛔ no second reader,
  * over the guard's own comment, label and timeline readers on the relay's token — the review of record's
- * `Security-touching:` line and the labels of the card `pr` delivers. `loadRecognisers` is the seam for the
+ * `Security-touching:` line and the labels of every card `pr` names. `loadRecognisers` is the seam for the
  * contract-review recognisers; a load that fails, a thread or label list that does not read, or a pull that
  * names no card is NOT MEASURED, so H. Never throws.
  */
@@ -2603,7 +2603,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // words, the readable gate, a Tier S skills pull requesting no one, three H readings, eight unreadable readings, a mixed pull and objectui.
   // 45 → 50 with the arm's record stage on the relay: nine H variants of the stage in one plan case, twelve in one run case (the record
   // without its line first), the record on the card thread, the recogniser seam, and the stage's cost on a pull-read H.
-  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; a skills-only pull in lowRisk.repos is judged by the low-risk arm's own reading — pull, file statuses, timeline, changesets and catalog modes, then the review record's `Security-touching:` line and the card's labels — and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 50,
+  // 50 → 52 with every card the pull names: five H variants of a second card in one run case, and its clean control.
+  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; a skills-only pull in lowRisk.repos is judged by the low-risk arm's own reading — pull, file statuses, timeline, changesets and catalog modes, then the review record's `Security-touching:` line and the card's labels — and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 52,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
@@ -3104,7 +3105,7 @@ export async function selfTest() {
       // The arm's record stage, read and favourable — a record on the head whose line reads `no`, a card never
       // labelled `security` — unless a case overrides a half (`null` hands that half in unread: the arm's `pending`).
       const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, ...over });
-      const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, ...over });
+      const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] }, ...over });
       const lowRead = (paths, over = {}) => pullLowRiskReading(armPullJson(over.pull ?? {}), paths, {
         timeline: { measured: true, reason: null, events: over.events ?? [] },
         changesets: { measured: true, reason: null, files: paths.filter((p) => p.startsWith('.changeset/')).map((path) => ({ path, text: over.csText ?? CS_TEXT })) },
@@ -3211,6 +3212,24 @@ export async function selfTest() {
         'a card timeline that does not read': [await stageRun({}, { [CARD_TIMELINE]: { status: 502, json: { message: 'bad gateway' } } }), 'the timeline of its card #1 was not read'],
       };
       t('⛔ record-stage-skills-pull-requests: an arm pull whose record LACKS the `Security-touching:` line, reads yes, doubles it, is absent, is by an untrusted author or is shadowed by a newer one without it, whose card carries `security` or had it removed, that names no card, or whose thread, labels or card timeline do not read — each requests BOTH approvers, and its row says Tier H, fail closed, with the reason', Object.entries(stageH).map(([k, [r, why]]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('low-risk skills arm read: Tier H, fail closed') && r.rows[1]?.result.includes(why)]), Object.keys(stageH).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(stageH).map(([r]) => r.rows[1]?.result).join(' | '));
+      // ⛔ Every card the pull NAMES is read on the relay too — a `Part of` beside the `Fixes`, the card the branch is
+      // named for — not only the one whose thread may carry its record.
+      const ALSO = 7;
+      const [ALSO_LABELS, ALSO_TIMELINE] = ['labels', 'timeline'].map((leaf) => `GET /repos/${REPO}/issues/${ALSO}/${leaf}`);
+      const alsoCard = (labels = [], events = []) => ({ [ALSO_LABELS]: { status: 200, json: labels.map((name) => ({ name })) }, [ALSO_TIMELINE]: { status: 200, json: events } });
+      const partOfPull = { [PULL]: { status: 200, json: armPullJson({ body: `Fixes #1\n\nPart of #${ALSO}\n\nClause-②: no\nMetadata-protocol: none\n` }) } };
+      const branchPull = { [PULL]: { status: 200, json: armPullJson({ head: { sha: ARM_HEAD, ref: `claude/issue-${ALSO}-x`, ...sameRepo } }) } };
+      const alsoCarries = `card #${ALSO}, which it also names, carries the \`security\` label`;
+      const namedH = {
+        'a security label on the card a Part of names': [await stageRun({}, { ...partOfPull, ...alsoCard(['security']) }), alsoCarries],
+        'a security label on the card the branch is named for': [await stageRun({}, { ...branchPull, ...alsoCard(['tooling', 'Security']) }), alsoCarries],
+        'a security label removed from that card': [await stageRun({}, { ...partOfPull, ...alsoCard([], [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }]) }), `the timeline of card #${ALSO}, which it also names, shows the \`security\` label removed`],
+        'labels of that card that do not read': [await stageRun({}, { ...partOfPull, ...alsoCard(), [ALSO_LABELS]: { status: 403, json: { message: 'forbidden' } } }), `the labels of card #${ALSO}, which it also names, were not read (card #${ALSO}'s labels could not be read`],
+        'a timeline of that card that does not read': [await stageRun({}, { ...branchPull, ...alsoCard(), [ALSO_TIMELINE]: { status: 502, json: { message: 'bad gateway' } } }), `the timeline of card #${ALSO}, which it also names, was not read`],
+      };
+      t('⛔ named-cards-skills-pull-requests: an arm pull that ALSO names a card — by a `Part of` or by its branch — which carries `security`, had it removed, or whose labels or timeline do not read, requests BOTH approvers, and its row says Tier H, fail closed, naming that card', Object.entries(namedH).map(([k, [r, why]]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('low-risk skills arm read: Tier H, fail closed') && r.rows[1]?.result.includes(why)]), Object.keys(namedH).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(namedH).map(([r]) => r.rows[1]?.result).join(' | '));
+      const twoClean = [await stageRun({}, { ...partOfPull, ...alsoCard() }), await stageRun({}, { ...branchPull, ...alsoCard() })];
+      t('⭐ CONTROL: the same two pulls with BOTH cards clean are Tier S with no request, and the second card cost its labels and its timeline after the first', twoClean.map((r) => [r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.endsWith(`low-risk skills arm read: Tier S (${LOW_RISK_ARM_RULING})`), r.seen.map((s) => s.call).filter((c) => [...STAGE_READS, ALSO_LABELS, ALSO_TIMELINE].includes(c))]), twoClean.map(() => [EXIT_OK, [GRAPHQL], true, [...STAGE_READS, ALSO_LABELS, ALSO_TIMELINE]]), twoClean.map((r) => r.rows[1]?.result).join(' | '));
       const onCard = await stageRun({ rows: [], cardRows: [reviewOfRecord(LOW_RISK_RECORD_LINE, { id: 902 })] });
       t('⭐ the record on the CARD thread carries the line as well as one on the pull: Tier S, no request', [onCard.exit, writes(onCard.seen).map((s) => s.call), onCard.rows[1]?.result.endsWith(`low-risk skills arm read: Tier S (${LOW_RISK_ARM_RULING})`)], [EXIT_OK, [GRAPHQL], true], onCard.rows[1]?.result);
       const stageFor = (loadRecognisers) => lowRiskReadingFor({ repo: REPO, pull: N, paths: [SK, CS], files: armFiles(SK, CS).json, pr: armPullJson(), api: 'https://api.github.test', t: { fetch: platform(armAnswers(), []), token: TOKEN }, git: armGit([]), ...(loadRecognisers ? { loadRecognisers } : {}) });

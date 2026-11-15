@@ -99,6 +99,7 @@ import {
   latestMarkedComment,
   partOfTargets,
   readSignatureLine,
+  refsTargets,
   SEAT_SIGNATURE_SESSION_SOURCE,
   stripSignatureLine,
 } from './check-half-states.mjs';
@@ -2025,6 +2026,37 @@ export function deliveredCardNumber(pr) {
 }
 
 /**
+ * EVERY card a pull request NAMES through a channel the card relations read, as numbers in ascending
+ * order: each closing keyword's target, each `Part of` target (at the declaration position or inline),
+ * each `Refs` target, and the card a protocol dev branch is named for — the branch whether or not the
+ * body declares another card.
+ *
+ * ⭐ WIDER than `deliveredCardNumber` on purpose, and for ONE reader: the low-risk skills arm's card
+ * conjunct (`readCardLabels`, the queue guard), which lands no pull request while ANY card it names
+ * carries the `security` label. `deliveredCardNumber` answers which ONE thread may hold the record — the
+ * strongest evidence — so beside a `Fixes #A`, a `Part of #B` or a branch named for #B leaves #B unread
+ * there. A label is not a thread: one card read too many costs two reads and fails closed, one read too
+ * few lands security teaching with no human approval.
+ *
+ * ⛔ NOT a delivery relation: nothing here says the pull request delivers these cards (`deliveryEvidence`
+ * rejects a branch name once the body speaks, and never reads `Refs`), and no reader may search these
+ * threads for a record. A number mentioned in prose with none of the four spellings is not named.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the branch
+ * @returns {number[]}
+ */
+export function namedCardNumbers(pr) {
+  const body = String(pr?.body ?? '');
+  const named = new Set([
+    ...closingKeywordTargets(body).keys(),
+    ...partOfTargets(body),
+    ...refsTargets(body).keys(),
+    ...[branchNameTarget(pr?.head?.ref)].filter((n) => n !== null && n !== undefined),
+  ]);
+  return [...named].map(Number).filter((n) => Number.isInteger(n) && n > 0).sort((a, b) => a - b);
+}
+
+/**
  * ③'s SQL push-down check, the one wording both printed shapes carry (the brief's ③ line and the
  * `--template` legend's ③ entry), read from `references/contract-review.md`'s ③ line and AGENTS.md
  * Prime Directive 5 (SQL first, ruling record 6888468549). It is face-neutral: an engine or driver PR
@@ -2113,10 +2145,10 @@ export function contractReviewTemplateLines(values = {}) {
       `  · ${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}  read by the low-risk skills arm alone (skill wording, add-only ADR notes): that arm`,
       '                    lands a PR on this record with no human approval, and only when this line reads `no`.',
       '                    Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,',
-      '                    authentication or other security behaviour, whatever the path is called; else `yes`, and',
-      '                    the seat adopting the record adds the `security` label. A missing line, `yes`, a second',
-      '                    line, one that is quoted, fenced or code-indented, or anything after the value keeps the',
-      `                    PR at Tier H. The template ships \`${RECORD_SECURITY_TOUCHING_DEFAULT}\`, so an unedited paste never lands on the arm.`,
+      '                    authentication or other security behaviour, whatever the path is called; else `yes`. A missing',
+      '                    line, `yes`, a second line, the key inside a code span, a quoted, fenced or code-indented line,',
+      `                    or anything after the value keeps the PR at Tier H. The template ships \`${RECORD_SECURITY_TOUCHING_DEFAULT}\`, so an unedited paste`,
+      '                    never lands on the arm: the seat adds the `security` label only once the reviewer confirms a `yes` was meant.',
     ] : []),
     '  · ③ Boundary flags  every dev flag and every `open_questions` entry answered, or escalated; and on',
     '                    every face the SQL push-down check:',
@@ -2531,7 +2563,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 38,
   // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
   // posted by an untrusted author not read — two pins, two cases.
-  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 19,
+  // Raised 19 → 22 with `namedCardNumbers`, every card a pull names: the low-risk arm reads the label on each.
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 22,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   // Raised 23 → 24 with ③'s SQL push-down check on every face's brief: one pin.
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 24,
@@ -3391,7 +3424,7 @@ export async function selfTest() {
   t('…and a reviewer who writes `no` over it is read as `no` — the one value the arm stands on', JSON.stringify(stOf(TPL_RECORD.replace(ST_LINE('yes'), ST_LINE('no')))) === '{"state":"read","value":"no"}' && TPL_RECORD.includes(`\n${ST_LINE('yes')}\n`));
   t('⛔ the line prints exactly where an arm PR can sit: with the `hits` known, under a low-risk row (skills, ui/skills, an ADR) and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face', ARM_PATHS.every((path) => fenced(contractReviewTemplateLines({ paths: [path] })).includes(`\n${ST_LINE('yes')}\n`)) && !contractReviewTemplateLines({ paths: [OFF_ARM_PATH] }).join('\n').includes('Security-touching') && !contractReviewTemplateLines({ paths: MIXED }).join('\n').includes('Security-touching') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(ST_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Security-touching')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Security-touching'));
   t('the predicate is ONE function over face, tier and hits — below tier never, a narrowing never, known hits by the register\'s own low-risk row test', recordCarriesSecurityTouching(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, undefined) && !recordCarriesSecurityTouching(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined) && recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [ARM_PATHS[0]]) && !recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [OFF_ARM_PATH]) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, [ARM_PATHS[0]]));
-  t('the notes explain the line where the record carries it — who reads it, when `no` may be written, what keeps Tier H — and the key and values are the reader\'s own constants', ['· Security-touching  read by the low-risk skills arm alone', 'only when this line reads `no`', 'Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,', 'adds the `security` label', 'PR at Tier H', 'The template ships `yes`'].every((frag) => says(TPL_TEXT, frag)) && CONTRACT_REVIEW_SECURITY_TOUCHING_KEY === 'Security-touching' && CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join() === 'no,yes');
+  t('the notes explain the line where the record carries it — who reads it, when `no` may be written, what keeps Tier H — and the key and values are the reader\'s own constants', ['· Security-touching  read by the low-risk skills arm alone', 'only when this line reads `no`', 'Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,', 'the key inside a code span', 'keeps the PR at Tier H', 'The template ships `yes`', 'adds the `security` label only once the reviewer confirms a `yes` was meant'].every((frag) => says(TPL_TEXT, frag)) && CONTRACT_REVIEW_SECURITY_TOUCHING_KEY === 'Security-touching' && CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join() === 'no,yes');
   // -- item ④: the owner's full-review order rides THIS record as a fourth section ------------
   const DJ = '### ④ Design judgment';
   const headings = (lines) => lines.filter((line) => line.startsWith('### '));
@@ -3562,6 +3595,15 @@ export async function selfTest() {
   t('⛔ a body naming NO card yields no card and a reason, never a guess', (() => { const r = deliveredCardNumber(PIN_PULL('nothing here')); return r.card === null && r.reason.includes('names no card'); })());
   t('⛔ two cards at the SAME strength yield NEITHER, and the reason names both', (() => { const r = deliveredCardNumber(PIN_PULL('Fixes #4444\nFixes #5555')); return r.card === null && r.reason.includes('#4444') && r.reason.includes('#5555'); })());
   t('…while a STRONGER grade still decides, so a stray `Part of` beside a keyword is not a tie', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}\n\npart of #4444 already landed`)).card === PIN_CARD);
+  // `namedCardNumbers` -- every card the pull names, for the low-risk arm's label read: wider than the one
+  // card above, because a `security` label on ANY of them keeps the arm at Tier H.
+  t('⭐ namedCardNumbers lists EVERY card a pull names -- a closing keyword, a `Part of` (declared or inline), a `Refs`, and its branch -- ascending, once each', namedCardNumbers(PIN_PULL('Fixes #4444\n\nPart of #5555\nRefs #3333 (item 2)\nthis is part of #2222 too\ncloses #4444', 'claude/issue-6666-x')).join() === '2222,3333,4444,5555,6666');
+  t('⛔ namedCardNumbers keeps the card the WEAKER evidence names: a `Part of` beside a keyword, and a branch named for another card once the body speaks -- the two `deliveredCardNumber` drops', (() => {
+    const partOf = PIN_PULL('Fixes #4444\nPart of #5555');
+    const branch = PIN_PULL('Fixes #4444', 'claude/issue-5555-x');
+    return deliveredCardNumber(partOf).card === 4444 && namedCardNumbers(partOf).join() === '4444,5555' && deliveredCardNumber(branch).card === 4444 && deliveryEvidence(branch, 5555) === null && namedCardNumbers(branch).join() === '4444,5555';
+  })());
+  t('namedCardNumbers names nothing a relation spelling does not: a bare mention, a spelling in a code span or a fence, and a branch outside the protocol shape name no card', namedCardNumbers(PIN_PULL('see #4444 and `Fixes #5555`\n```\nPart of #6666\n```\nRefs: #7777', 'feat/8888-x')).join() === '7777' && namedCardNumbers(PIN_PULL('nothing here')).length === 0 && namedCardNumbers(null).length === 0);
   t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
   t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
 

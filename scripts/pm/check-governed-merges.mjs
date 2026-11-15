@@ -515,9 +515,9 @@
  *     `securityTouching`, the fleet's one record reader) — the line absent,
  *     unreadable, doubled, quoted, fenced, `yes`, or the record absent, unsigned,
  *     unread or carried over a hop that moved catalog text is H;
- *   - and the CARD the pull request delivers was read and neither carries the
+ *   - and EVERY card the pull request names was read and neither carries the
  *     `security` label nor ever had it removed (its labels and its timeline) —
- *     a card that cannot be derived or read is H.
+ *     no derivable card, or a named card that cannot be read, is H.
  *
  * The record stage is a SECOND read (`recordStage`): a reading that hands none
  * in is Tier H — `pending` when every condition above holds, and then the
@@ -1196,10 +1196,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
-  // 74 → 95 with the arm's record stage: sixteen pins on the two conjuncts and the stage's three states, five on `--pr`.
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 95,
-  // 51 → 66 with the record stage as the sweep reads it at the landing: ten pins, and five on which landings it binds.
-  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 66,
+  // 74 → 95 with the arm's record stage: sixteen pins on the two conjuncts and the stage's three states, five on `--pr`;
+  // 95 → 100 with every other card the pull names (`others`): labelled, unread, not said to be read, each its own
+  // reason, and one on `--pr`.
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 100,
+  // 51 → 66 with the record stage as the sweep reads it at the landing: ten pins, and five on which landings it binds;
+  // 66 → 71 with the other cards as they stood at the landing (four pins) and the stage's two NOT MEASURED reads.
+  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
 });
@@ -2721,7 +2724,7 @@ export function lowRiskChangesetReasons(file) {
  *   - the head lives in the base repository (no fork);
  *   - the RECORD STAGE, the two conjuncts read off the review rather than the pull (`lowRiskRecordStageReasons`):
  *     the contract-review record on this head carries one bare `Security-touching: no` line
- *     (`reading.record`), and the card the PR delivers carries no `security` label, now or
+ *     (`reading.record`), and no card the PR names carries a `security` label, now or
  *     removed (`reading.cardLabels`).
  * ⛔ Fail closed: no reading, or one not measured, is Tier H with its reason.
  *
@@ -2837,7 +2840,7 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   const fork = reading.fork;
   if (!fork || fork.measured !== true) reasons.push('its head repository was not read, so a fork cannot be ruled out');
   else if (fork.isFork === true) reasons.push(`its head lives in a fork (${fork.headRepo ?? 'a deleted repository'})`);
-  // ── the RECORD STAGE, last: the review's own statement and the card's labels ──
+  // ── the RECORD STAGE, last: the review's own statement and the labels of the cards it names ──
   // Judged whenever a reading of it was handed in. With none handed in it is consulted only when every
   // pull-read conjunct above holds, and then it is the one reason left: Tier H until the caller reads it.
   const handed = reading.record != null || reading.cardLabels != null;
@@ -2879,11 +2882,12 @@ export const LOW_RISK_RECORD_STAGE_PENDING_REASON =
  * carried over a hop that moved catalog text, or whose line is missing, unreadable or `yes`, is
  * each a reason.
  *
- * `cardLabels` is the reading of the card the pull request delivers:
- *   `{ measured: true, card, labels: string[], timeline: { measured, reason, events } }`
+ * `cardLabels` is the reading of the cards the pull request names — the one whose thread may carry
+ * its record on top, every other under `others`, each `{ measured, reason, card, labels, timeline }`:
+ *   `{ measured: true, card, labels: string[], timeline: { measured, reason, events }, others: { measured, reason, cards } }`
  * or `{ measured: false, reason }` — no derivable card included, since a label on a card nobody
- * could name cannot be ruled out. The conjunct holds only when the labels were read and none is
- * `security`, and the card's timeline was read and never removed one: the PR's own rule, on the card.
+ * could name cannot be ruled out. The conjunct holds only when each card's labels were read and none is
+ * `security`, and its timeline was read and never removed one: the PR's own rule, on every card it names.
  */
 export function lowRiskRecordStageReasons(record, cardLabels) {
   return [...lowRiskRecordLineReasons(record), ...lowRiskCardLabelReasons(cardLabels)];
@@ -2910,17 +2914,37 @@ function lowRiskRecordLineReasons(record) {
   return reasons;
 }
 
-/** The record stage's second conjunct: the card the pull request delivers never carried `security`. Pure. */
+/** What ONE card's reading says against the arm: it carries `security`, had it removed, or its timeline is unread. Pure. */
+function cardLabelFacts(reading, card) {
+  const reasons = [];
+  if (reading.labels.some((l) => String(l ?? '').toLowerCase() === 'security')) reasons.push(`${card} carries the \`security\` label`);
+  const timeline = reading.timeline;
+  if (!timeline || timeline.measured !== true || !Array.isArray(timeline.events)) reasons.push(`the timeline of ${card} was not read (${timeline?.reason ?? 'no reading'}), so a removed \`security\` label cannot be ruled out`);
+  else if (timeline.events.some((e) => e?.event === 'unlabeled' && String(e?.label?.name ?? '').toLowerCase() === 'security')) reasons.push(`the timeline of ${card} shows the \`security\` label removed`);
+  return reasons;
+}
+
+/**
+ * The record stage's second conjunct: NO card the pull request names ever carried `security` — the card
+ * whose thread may hold its record (the top of the reading) and every other card it names (`others`: a
+ * `Part of` beside a `Fixes`, a `Refs`, the card its branch is named for; `readCardLabels`, the queue
+ * guard). ⛔ A reading that does not say it read the others is a reason, never "it names no other". Pure.
+ */
 function lowRiskCardLabelReasons(cardLabels) {
   if (!cardLabels || cardLabels.measured !== true || !Array.isArray(cardLabels.labels)) {
     return [`the labels of its card were not read (${cardLabels?.reason ?? 'no reading'}), so a \`security\` label on the card cannot be ruled out`];
   }
-  const reasons = [];
-  const card = `its card #${cardLabels.card ?? '(no number)'}`;
-  if (cardLabels.labels.some((l) => String(l ?? '').toLowerCase() === 'security')) reasons.push(`${card} carries the \`security\` label`);
-  const timeline = cardLabels.timeline;
-  if (!timeline || timeline.measured !== true || !Array.isArray(timeline.events)) reasons.push(`the timeline of ${card} was not read (${timeline?.reason ?? 'no reading'}), so a removed \`security\` label cannot be ruled out`);
-  else if (timeline.events.some((e) => e?.event === 'unlabeled' && String(e?.label?.name ?? '').toLowerCase() === 'security')) reasons.push(`the timeline of ${card} shows the \`security\` label removed`);
+  const reasons = cardLabelFacts(cardLabels, `its card #${cardLabels.card ?? '(no number)'}`);
+  const others = cardLabels.others;
+  if (!others || others.measured !== true || !Array.isArray(others.cards)) {
+    reasons.push(`the other cards it names were not read (${others?.reason ?? 'no reading'}), so a \`security\` label on one of them cannot be ruled out`);
+    return reasons;
+  }
+  for (const other of others.cards) {
+    const card = `card #${other?.card ?? '(no number)'}, which it also names,`;
+    if (!other || other.measured !== true || !Array.isArray(other.labels)) reasons.push(`the labels of ${card} were not read (${other?.reason ?? 'no reading'}), so a \`security\` label on it cannot be ruled out`);
+    else reasons.push(...cardLabelFacts(other, card));
+  }
   return reasons;
 }
 
@@ -2949,7 +2973,7 @@ export function renderLowRiskLines(matched) {
     );
   }
   if (v.tier === GOVERNED_TIER_S) {
-    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — modified skill files, add-only ADR notes and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever on the PR or its card and no catalog path named for it, no fork, and a record on this head reading \`${LOW_RISK_RECORD_LINE}\`.\n`;
+    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — modified skill files, add-only ADR notes and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever on the PR or a card it names and no catalog path named for it, no fork, and a record on this head reading \`${LOW_RISK_RECORD_LINE}\`.\n`;
   }
   return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
@@ -4927,7 +4951,7 @@ export function pullSizeFrom(head) {
 export const ARM_READER_SOURCE = './check-governed-queue-guard.mjs';
 
 /** The guard exports the arm leg reads with. A missing one is NOT MEASURED, never a second parser here. */
-export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'ignoredAuthorLines', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'lowRiskRecordStagePending', 'lowRiskRecordStage', 'readCardLabels', 'readLowRiskRecordStage', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader', 'makeLabelReader']);
+export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'ignoredAuthorLines', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'lowRiskRecordStagePending', 'lowRiskRecordStage', 'readCardLabels', 'namedCardsOf', 'readLowRiskRecordStage', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader', 'makeLabelReader']);
 
 /** Load the guard's readers and the record recognisers once per run. Never throws: a failed load is the reason. */
 export async function loadArmReaders(load = (specifier) => import(specifier)) {
@@ -4966,8 +4990,8 @@ export async function loadArmReaders(load = (specifier) => import(specifier)) {
  * The arm's RECORD STAGE is read as the queue reads it, SECOND and only for an entry nothing else cleared: the first
  * arm read leaves it pending (`lowRiskRecordStagePending`) when every pull-read condition holds, and a first read
  * that is not pending is Tier H on a pull-read reason. Past the approval and enqueue legs, a record that stands and
- * reads PASS must also carry the arm's line and the card must be free of the `security` label AS THEY STOOD AT THE
- * LANDING: the line off the same as-landed rows (`lowRiskRecordStage`), the card's labels rebuilt from its timeline
+ * reads PASS must also carry the arm's line and every card it names be free of the `security` label AS THEY STOOD AT
+ * THE LANDING: the line off the same as-landed rows (`lowRiskRecordStage`), each card's labels rebuilt from its timeline
  * (`cardLabelsAsLanded`; `fetchers.fetchLabels` reads them, absent ⇒ `not-measured`). A stage that then reads Tier H
  * is a `breach` flagged `stage: true` — the queue would have refused that landing — and a stage that could not be
  * read is `not-measured`, ⛔ never `tier-h` and never a stand-in. The stage is read only for a landing whose own tree
@@ -5096,13 +5120,24 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
     if (bound === null) return unmeasured(`its landed tree's \`${ARM_RULE_PATH}\` could not be read, so whether the queue read the record stage for it is not known`);
     if (bound === false) return { state: 'pass', headSha, record: found, stageBound: false, ...(ignored.length > 0 ? { ignored } : {}) };
     // ⭐ The arm's record stage, as the queue read it: the line off the rows that existed, unedited, at the landing,
-    // and the card's labels as they stood then. ⛔ Anything unread is NOT MEASURED — never a stand-in, never `no`.
+    // and the labels of every card it names as they stood then. ⛔ Anything unread is NOT MEASURED — never a stand-in, never `no`.
     const stage = guard.lowRiskRecordStage({ pair, recognisers });
     if (stage.measured !== true) return unmeasured(`its record's \`${LOW_RISK_RECORD_LINE.split(':')[0]}:\` line could not be read (${stage.reason})`);
-    const carded = await guard.readCardLabels({ card, fetchLabels: fetchers.fetchLabels, fetchTimeline: fetchers.fetchTimeline });
+    const carded = await guard.readCardLabels({ card, named: guard.namedCardsOf(recognisers, head), fetchLabels: fetchers.fetchLabels, fetchTimeline: fetchers.fetchTimeline });
     const named = card.card !== null && card.card !== undefined;
     if (named && (carded.reading.measured !== true || carded.reading.timeline?.measured !== true)) {
       return unmeasured(`the labels of its card #${card.card} could not be read as they stood at the landing (${carded.reading.reason ?? carded.reading.timeline?.reason ?? 'no reading'})`);
+    }
+    // Every other card the pull names is read the same way: one that was not read, or whose timeline was not,
+    // cannot be rebuilt as it stood at the landing — NOT MEASURED, never a BREACH on what it shows today.
+    // ⛔ More cards than the leg reads (`overLimit`) is no failed read: the queue counted the same names and
+    // refused the landing, so the conjunct below judges it — a stage BREACH.
+    const others = named ? carded.reading.others : null;
+    if (named && (!others || others.measured !== true || !Array.isArray(others.cards))) {
+      if (others?.overLimit !== true) return unmeasured(`the other cards it names could not be read as they stood at the landing (${others?.reason ?? 'no reading'})`);
+    } else if (named) {
+      const unread = others.cards.find((o) => o?.measured !== true || o?.timeline?.measured !== true);
+      if (unread) return unmeasured(`the labels of card #${unread?.card ?? '(no number)'}, which it also names, could not be read as they stood at the landing (${unread?.reason ?? unread?.timeline?.reason ?? 'no reading'})`);
     }
     const cardLabels = named ? cardLabelsAsLanded(carded.reading, landed) : carded.reading;
     guard.readLowRiskTier(work, repo, head, { timeline: { measured: true, reason: null, events }, runGit: armGit, record: stage, cardLabels });
@@ -5170,9 +5205,18 @@ export function armRecordStageBound(runGit, sha) {
  *     landing reads as removed), and the newest of them says whether the card carried it at the landing;
  *   - with no such event before the landing, the card carried it then only if it carries it now and no `labeled`
  *     event at or after the landing explains that — a label with no event behind it is read as already there.
- * An event with no readable time is read as before the landing: toward BREACH, never toward clean. Pure.
+ * An event with no readable time is read as before the landing: toward BREACH, never toward clean.
+ * Every other card the pull names (`others`) is rebuilt by the same rule. Pure.
  */
 export function cardLabelsAsLanded(reading, landed) {
+  const first = oneCardAsLanded(reading, landed);
+  const others = reading?.others;
+  // Every other card the pull names is rebuilt the same way; an `others` that was not read stays as it is.
+  return others?.measured === true && Array.isArray(others.cards) ? { ...first, others: { ...others, cards: others.cards.map((o) => (o?.measured === true ? oneCardAsLanded(o, landed) : o)) } } : first;
+}
+
+/** One card's reading as it stood at the landing — `cardLabelsAsLanded`'s rule, for the first card and each other. Pure. */
+function oneCardAsLanded(reading, landed) {
   const events = Array.isArray(reading?.timeline?.events) ? reading.timeline.events : [];
   const isSecurity = (e) => (e?.event === 'labeled' || e?.event === 'unlabeled') && String(e?.label?.name ?? '').toLowerCase() === 'security';
   const after = (e) => Date.parse(e?.created_at ?? '') >= landed;
@@ -7314,7 +7358,8 @@ async function selfTest() {
     // never carried `security`. Every reading below carries it, so a row that pins Tier S pins it on the whole
     // conjunction, and the record-stage rows further down each drop one piece.
     const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, ...over });
-    const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, ...over });
+    // `others`: every OTHER card the pull names, each read like the first; none here unless a row says so.
+    const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] }, ...over });
     const read = (paths, over = {}) => ({
       measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [],
       timeline: { measured: true, reason: null, events: [] },
@@ -7421,6 +7466,25 @@ async function selfTest() {
       cardH(stageCard({ labels: null }), /the labels of its card were not read \(no reading\)/) === true && cardH({}, /the labels of its card were not read/) === true && cardH(true, /the labels of its card were not read/) === true &&
       cardH(stageCard({ card: 69, timeline: { measured: false, reason: 'HTTP 502', events: null } }), /^the timeline of its card #69 was not read \(HTTP 502\), so a removed `security` label cannot be ruled out$/) === true &&
       cardH(stageCard({ timeline: null }), /the timeline of its card #1 was not read \(no reading\)/) === true && cardH(stageCard({ timeline: { measured: true, events: 'none' } }), /was not read/) === true);
+    // ── EVERY card the pull request names (`others`, read by the queue guard's `readCardLabels`): a `security`
+    // label on a card it merely names beside the one that carries its record keeps the arm at Tier H too.
+    const otherCard = (over = {}) => ({ measured: true, reason: null, card: 71, labels: [], timeline: { measured: true, reason: null, events: [] }, ...over });
+    const withOthers = (cards) => stageCard({ card: 69, others: { measured: true, reason: null, cards } });
+    assert('⛔ NAMED-CARDS a-security-label-now-or-removed-on-ANOTHER-card-the-pull-names-is-Tier-H-and-the-reason-names-that-card',
+      cardH(withOthers([otherCard({ labels: ['docs', 'Security'] })]), /^card #71, which it also names, carries the `security` label$/) === true &&
+      cardH(withOthers([otherCard(), otherCard({ card: 72, timeline: { measured: true, reason: null, events: [{ event: 'unlabeled', label: { name: 'SECURITY' } }] } })]), /^the timeline of card #72, which it also names, shows the `security` label removed$/) === true &&
+      stageTier({ cardLabels: withOthers([otherCard({ labels: ['docs'] }), otherCard({ card: 72 })]) }) === GOVERNED_TIER_S);
+    assert('⛔ NAMED-CARDS another-card-whose-labels-or-timeline-were-not-read-is-Tier-H',
+      cardH(withOthers([{ measured: false, reason: "card #71's labels could not be read (HTTP 502)", card: 71 }]), /^the labels of card #71, which it also names, were not read \(card #71's labels could not be read \(HTTP 502\)\), so a `security` label on it cannot be ruled out$/) === true &&
+      cardH(withOthers([otherCard({ timeline: { measured: false, reason: 'HTTP 403', events: null } })]), /^the timeline of card #71, which it also names, was not read \(HTTP 403\), so a removed `security` label cannot be ruled out$/) === true &&
+      cardH(withOthers([null]), /^the labels of card #\(no number\), which it also names, were not read \(no reading\)/) === true && cardH(withOthers([otherCard({ labels: 'security' })]), /the labels of card #71, which it also names, were not read/) === true);
+    assert('⛔ NAMED-CARDS a-reading-that-does-not-say-it-read-the-other-cards-is-Tier-H-never-read-as-none-named',
+      cardH(stageCard({ others: undefined }), /^the other cards it names were not read \(no reading\), so a `security` label on one of them cannot be ruled out$/) === true &&
+      cardH(stageCard({ others: { measured: false, reason: 'it names 9 more cards (#71, #72, #73, …), over the 8 this leg reads', cards: null } }), /^the other cards it names were not read \(it names 9 more cards \(#71, #72, #73, …\), over the 8 this leg reads\), so/) === true &&
+      [{ measured: true, reason: null, cards: 'none' }, { measured: 'true', cards: [] }, { cards: [] }, [], true, null].every((others) => cardH(stageCard({ others }), /the other cards it names were not read/) === true));
+    assert('⛔ NAMED-CARDS each-card-prints-its-own-reason-the-first-card-and-every-other',
+      (() => { const why = stageWhy({ cardLabels: stageCard({ card: 69, labels: ['security'], others: { measured: true, reason: null, cards: [otherCard({ labels: ['security'] }), otherCard({ card: 72, labels: ['security'] })] } }) });
+        return why === 'its card #69 carries the `security` label | card #71, which it also names, carries the `security` label | card #72, which it also names, carries the `security` label' ? true : why; })() === true);
     // ⛔ PENDING: every pull-read condition holds and no record stage was handed in. Tier H on ONE reason, and the
     // caller (the queue leg, the relay, `--pr`, the sweep) reads the stage and asks again. Never Tier S.
     assert('⛔ RECORD-STAGE a-reading-with-no-record-stage-handed-in-is-Tier-H-PENDING-on-one-reason',
@@ -7450,7 +7514,7 @@ async function selfTest() {
         stageTier({ record: stageRecord({ securityTouching: line(`${LOW_RISK_RECORD_LINE}\n${LOW_RISK_RECORD_LINE}`) }) }) === GOVERNED_TIER_H &&
         stageTier({ record: stageRecord({ securityTouching: line(`> ${LOW_RISK_RECORD_LINE}`) }) }) === GOVERNED_TIER_H, JSON.stringify(line(LOW_RISK_RECORD_LINE)));
     }
-    assert('the-Tier-S-words-name-the-record-line-and-the-card', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return t.includes(`a record on this head reading \`${LOW_RISK_RECORD_LINE}\``) && /no `security` label ever on the PR or its card/.test(t); })());
+    assert('the-Tier-S-words-name-the-record-line-and-the-card', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return t.includes(`a record on this head reading \`${LOW_RISK_RECORD_LINE}\``) && /no `security` label ever on the PR or a card it names/.test(t); })());
 
     // The H words name every reason; `--pr` reads the arm off the SAME pull object and file walk.
     assert('the-H-words-list-each-reason', (() => { const t = renderTestVerdict(testVerdict([SK, 'packages/core/src/x.ts'], { repo: REPO, lowRisk: read([SK, 'packages/core/src/x.ts'], { labels: ['security'] }) })); return /low-risk skills arm .*Tier H/.test(t) && /packages\/core/.test(t) && /`security` label/.test(t) && /landing tier: H/.test(t); })());
@@ -7488,12 +7552,12 @@ async function selfTest() {
         });
         const calls = [];
         let loads = 0;
-        const stagePr = ({ rows = [review()], cardRows = [], labels = [], events = [], body = 'Fixes #69\n\nClause-②: no\nMetadata-protocol: none', rd = armReaders, reading = withCs(walked.lowRisk), throws = null, fetchers = undefined } = {}) => pullRecordStage({
+        const stagePr = ({ rows = [review()], cardRows = [], labels = [], labelsBy = {}, events = [], body = 'Fixes #69\n\nClause-②: no\nMetadata-protocol: none', rd = armReaders, reading = withCs(walked.lowRisk), throws = null, fetchers = undefined } = {}) => pullRecordStage({
           lowRisk: reading, paths: walked.paths, repo: REPO, pullHead: { number: 2, body, head: { ref: 'claude/project-thread-x' } }, derivation: { pull: 2, headSha: PRHEAD, baseSha: null },
           readers: () => { loads += 1; return rd; },
           fetchers: fetchers !== undefined ? fetchers : {
             fetchComments: async (n) => { calls.push(`comments ${n}`); if (throws === 'comments') throw new Error('HTTP 502'); return n === 2 ? rows : n === 69 ? cardRows : []; },
-            fetchLabels: async (n) => { calls.push(`labels ${n}`); if (throws === 'labels') throw new Error('HTTP 502'); return labels; },
+            fetchLabels: async (n) => { calls.push(`labels ${n}`); if (throws === 'labels') throw new Error('HTTP 502'); return labelsBy[n] ?? labels; },
             fetchTimeline: async (n) => { calls.push(`timeline ${n}`); if (throws === 'timeline') throw new Error('HTTP 502'); return events; },
           },
         });
@@ -7515,6 +7579,13 @@ async function selfTest() {
           await prH({ labels: ['docs', 'security'] }, /^its card #69 carries the `security` label$/) === true &&
           await prH({ events: [{ event: 'unlabeled', label: { name: 'security' } }] }, /^the timeline of its card #69 shows the `security` label removed$/) === true &&
           await prH({ body: 'Clause-②: no\nMetadata-protocol: none' }, /^the labels of its card were not read \(no card could be derived for it/) === true);
+        assert('⛔ --pr-NAMED-CARDS a-security-label-on-ANOTHER-card-the-PR-names-reads-Tier-H-with-both-cards-read-and-clears-when-that-card-is-clean', await (async () => {
+          const TWO = 'Fixes #69\n\nPart of #71\n\nClause-②: no\nMetadata-protocol: none';
+          calls.length = 0;
+          const labelled = await prH({ body: TWO, labelsBy: { 71: ['docs', 'security'] } }, /^card #71, which it also names, carries the `security` label$/);
+          const read = calls.join();
+          return labelled === true && read === 'comments 2,comments 69,labels 69,timeline 69,labels 71,timeline 71' && await prTier({ body: TWO }) === GOVERNED_TIER_S ? true : `${labelled} ${read}`;
+        })() === true);
         assert('⛔ --pr-RECORD-STAGE readers-that-did-not-load-or-any-read-that-threw-is-NOT-MEASURED-so-Tier-H',
           await prH({ rd: { available: false, reason: 'no guard' } }, /its contract-review record was not read \(no guard\).*labels of its card were not read \(not read: no guard\)/) === true &&
           await prH({ rd: { ...armReaders, recognisers: { available: false, reason: 'recognisers did not load' } } }, /was not read \(recognisers did not load\)/) === true &&
@@ -10369,7 +10440,7 @@ async function selfTest() {
       catalogFiles: { measured: true, reason: null, files: catalog },
       // The arm's record stage, read and favourable (the skills battery pins each piece of it).
       record: { measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' } },
-      cardLabels: { measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] } },
+      cardLabels: { measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] } },
       ...over,
     });
     const tier = (paths, reading, repo = REPO) => governedTierFor(paths, repo, GOVERNED_SURFACES, null, reading);
@@ -10583,15 +10654,16 @@ async function selfTest() {
     const entryOf = (paths = [SK, CS], size = null) => classifyCommit({ sha: LANDED, date: '2026-11-15T04:30:00Z', subject: 'docs(skills): wording (#70)' }, paths, OS, size);
     const LANDING = { mergedAt: MERGED_AT, mergeCommitSha: LANDED };
     // Card #69 as the label reader and the timeline reader answer it NOW: `cardLabels` its labels, `cardEvents` its
-    // timeline (`labelReader: false` hands the leg no label reader at all).
-    const run = async ({ prRows = [record()], cardRows = [], pull = {}, throws = null, paths = [SK, CS], size = null, rd = readers, attribution = LANDING, reviews = [], events = [], git = runGit, cardLabels = [], cardEvents = [], labelReader = true, seen = null } = {}) => readArmLanding(entryOf(paths, size), {
+    // timeline (`labelReader: false` hands the leg no label reader at all). Another card the pull names answers
+    // `cardLabelsBy[n]` and `cardEventsBy[n]` (`'throw'` throws), else no label and no event.
+    const run = async ({ prRows = [record()], cardRows = [], pull = {}, throws = null, paths = [SK, CS], size = null, rd = readers, attribution = LANDING, reviews = [], events = [], git = runGit, cardLabels = [], cardEvents = [], cardLabelsBy = {}, cardEventsBy = {}, labelReader = true, seen = null } = {}) => readArmLanding(entryOf(paths, size), {
       paths, repo: 'objectstack', readers: rd, runGit: git, attribution,
       fetchers: {
         fetchPull: async () => { if (throws === 'pull') throw new Error('HTTP 502'); return { sha: HEAD, body: BODY, labels: [], fork: { measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' }, headRef: 'claude/project-thread-x', ...pull }; },
         fetchReviews: async () => { if (throws === 'reviews') throw new Error('HTTP 502'); return reviews; },
-        fetchTimeline: async (n) => { if (throws === 'timeline' || (throws === 'card-timeline' && n === 69)) throw new Error('HTTP 502'); return n === 69 ? cardEvents : events; },
+        fetchTimeline: async (n) => { if (throws === 'timeline' || (throws === 'card-timeline' && n === 69) || cardEventsBy[n] === 'throw') throw new Error('HTTP 502'); return n === 69 ? cardEvents : n === 70 ? events : (cardEventsBy[n] ?? []); },
         fetchComments: async (n) => { if (throws === 'comments') throw new Error('HTTP 502'); return n === 70 ? prRows : n === 69 ? cardRows : []; },
-        ...(labelReader ? { fetchLabels: async (n) => { seen?.push(n); if (throws === 'labels') throw new Error('HTTP 502'); return cardLabels; } } : {}),
+        ...(labelReader ? { fetchLabels: async (n) => { seen?.push(n); if (throws === 'labels' || cardLabelsBy[n] === 'throw') throw new Error('HTTP 502'); return n === 69 ? cardLabels : (cardLabelsBy[n] ?? []); } } : {}),
       },
     });
 
@@ -10679,6 +10751,45 @@ async function selfTest() {
       await unmeasured({ throws: 'labels' }, /the labels of its card #69 could not be read as they stood at the landing \(card #69's labels could not be read \(HTTP 502\)\)/) === true &&
       await unmeasured({ throws: 'card-timeline' }, /the labels of its card #69 could not be read as they stood at the landing \(HTTP 502\)/) === true &&
       await unmeasured({ labelReader: false }, /no label reader was supplied to this leg/) === true);
+    // Every OTHER card the pull names is read as it stood at the landing too: a `Part of` beside the `Fixes`, the card
+    // the branch is named for, a `Refs` — the cards the delivery relation does not answer with.
+    const ALSO = { pull: { body: `${BODY}\nPart of #71\n` } };
+    const alsoCarries = /^card #71, which it also names, carries the `security` label$/;
+    assert('⛔ NAMED-CARDS another-card-the-pull-names-carrying-security-AT-the-landing-is-a-stage-BREACH-that-names-it',
+      await stageBreach({ ...ALSO, cardLabelsBy: { 71: ['security'] } }, alsoCarries) === true &&
+      await stageBreach({ pull: { headRef: 'claude/issue-71-x' }, cardLabelsBy: { 71: ['docs', 'Security'] } }, alsoCarries) === true &&
+      await stageBreach({ pull: { body: `${BODY}\nRefs #71\n` }, cardEventsBy: { 71: [AT('labeled', '2026-11-15T03:00:00Z'), AT('unlabeled', '2026-11-15T06:00:00Z')] } }, alsoCarries) === true &&
+      await stageBreach({ ...ALSO, cardEventsBy: { 71: [AT('labeled', '2026-11-15T03:00:00Z'), AT('unlabeled', '2026-11-15T03:30:00Z')] } }, /^the timeline of card #71, which it also names, shows the `security` label removed$/) === true);
+    assert('⭐ NAMED-CARDS both-cards-clean-is-PASS-with-both-read-and-a-label-put-on-the-other-card-AFTER-the-landing-is-not-the-landing', await (async () => {
+      const seen = [];
+      const clean = await run({ ...ALSO, seen });
+      const after = await run({ ...ALSO, cardLabelsBy: { 71: ['security'] }, cardEventsBy: { 71: [AT('labeled', '2026-11-15T06:00:00Z')] } });
+      const onAndOffAfter = await run({ ...ALSO, cardEventsBy: { 71: [AT('labeled', '2026-11-15T06:00:00Z'), AT('unlabeled', '2026-11-15T07:00:00Z')] } });
+      return clean?.state === 'pass' && seen.join() === '69,71' && after?.state === 'pass' && onAndOffAfter?.state === 'pass' ? true : JSON.stringify([clean, seen, after, onAndOffAfter]);
+    })() === true);
+    assert('⛔ NAMED-CARDS another-card-that-could-not-be-read-as-it-stood-is-NOT-MEASURED-never-PASS-and-never-a-BREACH',
+      await unmeasured({ ...ALSO, cardLabelsBy: { 71: 'throw' } }, /^the labels of card #71, which it also names, could not be read as they stood at the landing \(card #71's labels could not be read \(HTTP 502\)\)$/) === true &&
+      await unmeasured({ ...ALSO, cardLabelsBy: { 71: ['security'] }, cardEventsBy: { 71: 'throw' } }, /^the labels of card #71, which it also names, could not be read as they stood at the landing \(HTTP 502\)$/) === true &&
+      await unmeasured({ ...ALSO, rd: { ...readers, recognisers: { ...readers.recognisers, namedCards: undefined } } }, /^the other cards it names could not be read as they stood at the landing \(the cards the pull request names were not listed for this leg\)$/) === true);
+    assert('⛔ NAMED-CARDS a-landing-that-names-more-cards-than-the-leg-reads-is-a-stage-BREACH-not-a-failed-read-and-reads-only-its-first-card', await (async () => {
+      const seen = [];
+      const over = await stageBreach({ seen, pull: { body: `${BODY}\n${Array.from({ length: 9 }, (_, i) => `Part of #${71 + i}`).join('\n')}\n` } }, /^the other cards it names were not read \(it names 9 more cards \(#71, #72, #73, …\), over the 8 this leg reads\), so a `security` label on one of them cannot be ruled out$/);
+      return over === true && seen.join() === '69' ? true : `${over} ${seen.join()}`;
+    })() === true);
+    // ⛔ The two reads the stage itself can lose are NOT MEASURED, never a BREACH and never a PASS: a line the guard's
+    // stage reader could not read (defensive: a record that stands was read by the same recognisers, so only a guard
+    // that answers so reaches it), and a git read that answered the first arm read and failed the second.
+    assert('⛔ RECORD-STAGE a-stage-whose-line-could-not-be-read-and-a-git-read-that-failed-on-the-second-pass-are-NOT-MEASURED', await (async () => {
+      const seen = [];
+      const noReader = await run({ seen, rd: { ...readers, guard: { ...readers.guard, lowRiskRecordStage: () => ({ measured: false, reason: 'the record reader was not loaded' }) } }, cardLabels: ['security'] });
+      // The rule-age read sits between the two arm reads, so a `diff-tree` after it is the second pass's.
+      const failsSecond = () => { let bound = false; return (a) => { if (a[0] === 'cat-file') bound = true; if (bound && a[0] === 'diff-tree') throw new Error('fatal: bad object'); return runGit(a); }; };
+      const secondPass = await run({ git: failsSecond() });
+      const secondPassNoLine = await run({ git: failsSecond(), prRows: [record({ line: null })] });
+      return noReader?.state === 'not-measured' && noReader.reason === "its record's `Security-touching:` line could not be read (the record reader was not loaded)" && seen.length === 0 &&
+        secondPass?.state === 'not-measured' && secondPass.reason === 'the low-risk arm could not re-read `git diff-tree -r` (fatal: bad object) for its record stage' &&
+        secondPassNoLine?.state === 'not-measured' && secondPassNoLine.reason === secondPass.reason ? true : JSON.stringify([noReader, secondPass, secondPassNoLine, seen]);
+    })() === true);
     assert('the-record-stage-is-read-only-on-a-record-that-stands-past-the-approval-and-enqueue-legs', await (async () => {
       const seen = [];
       await run({ seen, reviews: [APPROVED('os-zhuang')] });

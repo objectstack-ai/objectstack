@@ -13033,11 +13033,15 @@ const CONTRACT_REVIEW_SECURITY_TOUCHING_LINE = new RegExp(CONTRACT_REVIEW_LINE_L
  *
  * Every declaration line counts, fenced and quoted ones included, and exactly ONE may exist:
  * outside any code fence (`FENCE_LINE`, `FENCE_CLOSE_LINE`) and any `>` quote, indented at most
- * three spaces, and with its list bullet, bold and backticks stripped reading EXACTLY
- * `Security-touching: no` or `Security-touching: yes`. So a second declaration (a quoted `no`
- * beside the record's own `yes`), trailing words (`no — wording only`), another value, a
- * near-miss key (`Security touching:`) and a fenced, quoted or code-indented line are each
- * `unreadable` — the same strictness `readBareDeclaration` holds a PR body's `Clause-②:` line to.
+ * three spaces, and with its list bullet, bold and a code span around the VALUE stripped reading
+ * EXACTLY `Security-touching: no` or `Security-touching: yes`. So a second declaration (a quoted
+ * `no` beside the record's own `yes`), trailing words (`no — wording only`), another value, a
+ * near-miss key (`Security touching:`), a fenced, quoted or code-indented line and a code span
+ * holding the KEY (the spelling that mentions the line) are each `unreadable` — the same
+ * strictness `readBareDeclaration` holds a PR body's `Clause-②:` line to.
+ * ⚠️ Not read: whether GitHub RENDERS the line. A bare line inside an HTML comment, a `pre` element
+ * or a code span opened on an earlier line is hidden or shown as code there and still reads here;
+ * only an author the guard trusts can write a record, so the reader is not widened into a renderer.
  *
  * ⛔ Fail closed, in the one direction that matters: `missing`, `unreadable` and `yes` each
  * keep the pull request at Tier H, and no reading here ever DEFAULTS to `no`. Pure.
@@ -13069,7 +13073,12 @@ function contractReviewSecurityTouching(body) {
   if (fenced) return unreadable(`its one \`${key}:\` line sits inside a code fence`);
   if (/^[ \t]*>/.test(line)) return unreadable(`its one \`${key}:\` line is a quote (${quote(line)})`);
   if (/^(?: {4,}| *\t)/.test(line)) return unreadable(`its one \`${key}:\` line is indented as code (${quote(line)})`);
-  const bare = line.replace(/^[ \t]*(?:[-*+][ \t]+)?/, '').replace(/\*\*|`/g, '').replace(/[ \t]+/g, ' ').trim();
+  const stated = line.replace(/^[ \t]*(?:[-*+][ \t]+)?/, '').replace(/\*\*/g, '');
+  // A code span that holds the KEY is how the line is MENTIONED — the template's legend, the review brief and every
+  // reason the arm prints spell it so — and a record that only mentions the line states nothing. The value alone
+  // may sit in a span (`Head-sha:` refuses a span holding its key the same way).
+  if (/^[^:：]*`/.test(stated)) return unreadable(`its one \`${key}:\` line holds the key inside a code span (${quote(line)}), which mentions the line and states nothing`);
+  const bare = stated.replace(/`/g, '').replace(/[ \t]+/g, ' ').trim();
   const value = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.find((v) => bare === `${key}: ${v}`);
   if (value === undefined) return unreadable(`its \`${key}:\` line reads ${quote(line)}, not exactly ${CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.map((v) => `\`${key}: ${v}\``).join(' or ')}`);
   return { state: 'read', value };
@@ -25636,7 +25645,8 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // (two more, the real guard's predicate and set, run where the register loads).
   // 88 → 93: the record's `Security-touching:` line, the low-risk skills arm's machine line — the bare
   // readings, the MISSING record, the unreadable shapes, the fence and reason pins, and the constants.
-  'H43 hand-off timing': 93,
+  // 93 → 94: a code span holding the KEY mentions the line and is unreadable; only the value may sit in one.
+  'H43 hand-off timing': 94,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
   'H70/H71 seat patrol': 30,
@@ -33134,7 +33144,8 @@ async function selfTest() {
   t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]},"securityTouching":{"state":"missing"}}');
   // The record's `Security-touching:` line — the low-risk skills arm's machine line, three-valued and fail closed.
   const st43 = (prose) => { const r = read43(prose).securityTouching; return r.state === 'read' ? `read:${r.value}` : r.state; };
-  t43('Security-touching: the one bare line reads its value — `no`, `yes`, and behind a bullet, bold or a code span', ['Security-touching: no', 'Security-touching: yes', '- Security-touching: no', '**Security-touching:** no', '- **Security-touching**: `no`', '`Security-touching: no`', '   Security-touching:  no'].map(st43).join(), 'read:no,read:yes,read:no,read:no,read:no,read:no,read:no');
+  t43('Security-touching: the one bare line reads its value — `no`, `yes`, and behind a bullet, bold, or with the VALUE alone in a code span', ['Security-touching: no', 'Security-touching: yes', '- Security-touching: no', '**Security-touching:** no', '- **Security-touching**: `no`', 'Security-touching: `yes`', '   Security-touching:  no'].map(st43).join(), 'read:no,read:yes,read:no,read:no,read:no,read:yes,read:no');
+  t43('⛔ Security-touching: a code span that holds the KEY mentions the line and states nothing — UNREADABLE, never `no`, and the reason says so', [...['`Security-touching: no`', '- `Security-touching: no`', '`Security-touching:` no', '`Security-touching`: no', '**`Security-touching: no`**', '`Security-touching: yes`'].map(st43), /holds the key inside a code span \(`Security-touching: no`\), which mentions the line and states nothing$/.test(read43('`Security-touching: no`').securityTouching.reason)].join(), `${Array(6).fill('unreadable').join()},true`);
   t43('⛔ Security-touching: a record with no such line reads MISSING, never `no` — every record written before the line existed, a mention in prose included', [st43('① Derived judgments: none.'), st43('The record carries no line; the seat reads `Security-touching: no` as the arm asks.'), contractReviewRecordReading(PASS43).securityTouching.state].join(), 'missing,missing,missing');
   t43('⛔ Security-touching: two lines, a quoted, fenced or code-indented line, trailing words, another value and a near-miss key are each UNREADABLE', ['Security-touching: no\nSecurity-touching: no', '> Security-touching: no\n\nSecurity-touching: yes', '> Security-touching: no', '```\nSecurity-touching: no\n```', '~~~text\nSecurity-touching: no', '    Security-touching: no', '\tSecurity-touching: no', 'Security-touching: no — wording only', 'Security-touching: none', 'Security-touching: No', 'Security-touching:', 'security-touching: no', 'Security touching: no', '### Security-touching: no', 'Security-touching：no'].map(st43).join(), Array(15).fill('unreadable').join());
   t43('⛔ Security-touching: a fenced `no` beside the record\'s own bare `yes` is two declarations (unreadable); a fence closed before the line leaves it read; the reasons name the shape', [st43('```\nSecurity-touching: no\n```\nSecurity-touching: yes'), st43('```\nsome code\n```\nSecurity-touching: no'), /2 `Security-touching:` lines/.test(read43('Security-touching: no\n> Security-touching: no').securityTouching.reason), /inside a code fence/.test(read43('```\nSecurity-touching: no\n```').securityTouching.reason), /is a quote/.test(read43('> Security-touching: no').securityTouching.reason), /not exactly `Security-touching: no` or `Security-touching: yes`/.test(read43('Security-touching: maybe').securityTouching.reason)].join(), 'unreadable,read:no,true,true,true,true');

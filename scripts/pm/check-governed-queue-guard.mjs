@@ -360,9 +360,9 @@
  * conditions all hold is still Tier H until the record leg below, on the
  * threads it reads anyway, hands the arm the review's `Security-touching:` line
  * (`lowRiskRecordStage`: the record on this head, read with the fleet's record
- * reader) and the linked card's labels and timeline (`readCardLabels`), and
+ * reader) and the labels and timeline of EVERY card it names (`readCardLabels`), and
  * `readLowRiskTier` reads the tier again. A record that is absent, unreadable or
- * says anything but `Security-touching: no`, a `security` label on the card now
+ * says anything but `Security-touching: no`, a `security` label on any such card now
  * or removed, or a card nobody could name, stays Tier H — and so does an entry
  * an approval or an authorized enqueue already cleared, whose stage is never
  * read. An entry the arm puts at Tier S clears on
@@ -707,9 +707,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // the unreadable shapes, newest-governs, the author binding, unsigned and unread, the card thread) and the linked
   // card's `security` label (now, removed, unread, no card), the stage's cost, the unloaded recognisers, and the
   // three builders — eighteen pins; 72 → 74 with the thread walk and the whole-stage reader `--pr` and the relay share.
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 74,
-  // Raised 12 → 13 with the arm's record stage on the ADR leg: a record without the line, a `security`-labelled card.
-  '⚖️ the ADR leg at the queue: an add-only note clears on its PASS record, any other ADR change is H (#33539)': 13,
+  // Raised 74 → 84 with every card the pull NAMES: `security` on the second card behind a `Part of`, a branch name
+  // and a `Refs`, their clean control, the first card beside a clean second, the second card unread, the limit, the
+  // reader's own walk, `namedCardsOf`, and the cleared entry that spends no stage read — ten pins.
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 84,
+  // Raised 12 → 13 with the arm's record stage on the ADR leg: a record without the line, a `security`-labelled card;
+  // 13 → 14 with a second card the note names.
+  '⚖️ the ADR leg at the queue: an add-only note clears on its PASS record, any other ADR change is H (#33539)': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1030,6 +1034,8 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
     const found = {
       locate: tier?.locateReviewOfRecord,
       deliveredCard: tier?.deliveredCardNumber,
+      // Every card the pull names (the arm's card conjunct reads the `security` label on each, not on the one above).
+      namedCards: tier?.namedCardNumbers,
       servedTierStands: tier?.servedTierStands,
       isModelIdentifierToken: tier?.isModelIdentifierToken,
       reviewFace: tier?.reviewFace,
@@ -1042,7 +1048,7 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       trustedAuthors: recordTrustedAuthors(bot),
     };
     const missing = [
-      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'reading'].filter((key) => typeof found[key] !== 'function'),
+      ...['locate', 'deliveredCard', 'namedCards', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'reading'].filter((key) => typeof found[key] !== 'function'),
       ...(found.trustedAuthors === null ? [`trustedAuthors (FLEET_BOT_LOGIN from ${RECOGNISER_SOURCES.author})`] : []),
       ...(Array.isArray(found.threads) && found.threads.length > 0 ? [] : ['threads']),
       ...(typeof found.location === 'string' && found.location.length > 0 ? [] : ['location']),
@@ -2211,37 +2217,70 @@ export function lowRiskRecordStage({ pair, recognisers }) {
 }
 
 /**
- * The arm's reading of the CARD the pull request delivers — the `cardLabels` half of its record stage:
- * the card's label names (`fetchLabels`) and its timeline (`fetchTimeline`, where a removed `security`
- * label sits). `card` is `deliveredCardNumber`'s answer. No derivable card, no label reader or a label
- * read that threw is NOT MEASURED; a timeline that could not be read is carried unmeasured inside a
- * measured reading — each a reason in the arm, so Tier H. Returns `{ reading, apiCalls }`. Never throws.
+ * How many cards BESIDE the one that carries its record a pull request may name and still be read on the arm.
+ * Each costs two reads in the merge group, so a body naming more is not read at all: Tier H.
  */
-export async function readCardLabels({ card, fetchLabels = null, fetchTimeline = null }) {
+export const LOW_RISK_NAMED_CARD_LIMIT = 8;
+
+/** One card's label names and timeline, for `readCardLabels`. Returns `{ reading, apiCalls }`. Never throws. */
+async function readOneCardLabels(number, fetchLabels, fetchTimeline) {
   const why = (error) => String(error?.message ?? error).split('\n')[0];
-  if (!card || card.card === null || card.card === undefined) {
-    return { reading: { measured: false, reason: `no card could be derived for it — ${card?.reason ?? 'no card reading'}` }, apiCalls: 0 };
-  }
-  if (typeof fetchLabels !== 'function') return { reading: { measured: false, reason: 'no label reader was supplied to this leg' }, apiCalls: 0 };
   let apiCalls = 1;
   let labels;
   try {
-    labels = await fetchLabels(card.card);
+    labels = await fetchLabels(number);
   } catch (error) {
-    return { reading: { measured: false, reason: `card #${card.card}'s labels could not be read (${why(error)})` }, apiCalls };
+    return { reading: { measured: false, reason: `card #${number}'s labels could not be read (${why(error)})`, card: number }, apiCalls };
   }
-  if (!Array.isArray(labels)) return { reading: { measured: false, reason: `card #${card.card}'s labels answered no list` }, apiCalls };
+  if (!Array.isArray(labels)) return { reading: { measured: false, reason: `card #${number}'s labels answered no list`, card: number }, apiCalls };
   let timeline = { measured: false, reason: 'no timeline reader was supplied to this leg', events: null };
   if (typeof fetchTimeline === 'function') {
     apiCalls += 1;
     try {
-      const events = await fetchTimeline(card.card);
+      const events = await fetchTimeline(number);
       timeline = Array.isArray(events) ? { measured: true, reason: null, events } : { measured: false, reason: 'the timeline answered no list', events: null };
     } catch (error) {
       timeline = { measured: false, reason: why(error), events: null };
     }
   }
-  return { reading: { measured: true, reason: null, card: card.card, labels: labels.map((l) => String(l ?? '')), timeline }, apiCalls };
+  return { reading: { measured: true, reason: null, card: number, labels: labels.map((l) => String(l ?? '')), timeline }, apiCalls };
+}
+
+/**
+ * The arm's reading of the CARDS the pull request names — the `cardLabels` half of its record stage:
+ * each card's label names (`fetchLabels`) and its timeline (`fetchTimeline`, where a removed `security`
+ * label sits). `card` is `deliveredCardNumber`'s answer, the ONE card whose thread may carry the record;
+ * `named` is `namedCardNumbers`' answer, EVERY card the pull names (a `Part of` beside a `Fixes`, a
+ * `Refs`, the card its branch is named for) — a `security` label on any of them keeps the arm at Tier H,
+ * so each is read, the first card at the top of the reading and the rest under `others`.
+ * No derivable card, no label reader or a label read that threw is NOT MEASURED; a timeline that could
+ * not be read is carried unmeasured inside a measured reading; `named` not handed in, or more than
+ * `LOW_RISK_NAMED_CARD_LIMIT` other cards (flagged `overLimit`: a fact of the pull, not a failed read),
+ * leaves `others` unmeasured with nothing read; one other card that could not be read is carried
+ * unmeasured in its place — each a reason in the arm, so Tier H.
+ * Returns `{ reading, apiCalls }`. Never throws.
+ */
+export async function readCardLabels({ card, named = null, fetchLabels = null, fetchTimeline = null }) {
+  if (!card || card.card === null || card.card === undefined) {
+    return { reading: { measured: false, reason: `no card could be derived for it — ${card?.reason ?? 'no card reading'}` }, apiCalls: 0 };
+  }
+  if (typeof fetchLabels !== 'function') return { reading: { measured: false, reason: 'no label reader was supplied to this leg' }, apiCalls: 0 };
+  const first = await readOneCardLabels(card.card, fetchLabels, fetchTimeline);
+  if (first.reading.measured !== true) return { reading: { measured: false, reason: first.reading.reason }, apiCalls: first.apiCalls };
+  let apiCalls = first.apiCalls;
+  const withOthers = (others) => ({ reading: { ...first.reading, others }, apiCalls });
+  if (!Array.isArray(named)) return withOthers({ measured: false, reason: 'the cards the pull request names were not listed for this leg', cards: null });
+  const rest = [...new Set(named.map(Number))].filter((n) => Number.isInteger(n) && n > 0 && n !== Number(card.card)).sort((a, b) => a - b);
+  if (rest.length > LOW_RISK_NAMED_CARD_LIMIT) {
+    return withOthers({ measured: false, reason: `it names ${rest.length} more cards (${rest.slice(0, 3).map((n) => `#${n}`).join(', ')}, …), over the ${LOW_RISK_NAMED_CARD_LIMIT} this leg reads`, cards: null, overLimit: true });
+  }
+  const cards = [];
+  for (const number of rest) {
+    const one = await readOneCardLabels(number, fetchLabels, fetchTimeline);
+    apiCalls += one.apiCalls;
+    cards.push(one.reading);
+  }
+  return withOthers({ measured: true, reason: null, cards });
 }
 
 /**
@@ -2283,13 +2322,25 @@ export async function readRecordThreads({ pair, recognisers, fetchComments }) {
 }
 
 /**
+ * Every card the pull names, as the arm's card conjunct reads them (`recognisers.namedCards`), or null when
+ * the recogniser set does not carry that reader or there is no pull row: `readCardLabels` reads null as
+ * NOT MEASURED, ⛔ never as "names no other card". Pure.
+ */
+export function namedCardsOf(recognisers, pull) {
+  if (typeof recognisers?.namedCards !== 'function' || !pull) return null;
+  const named = recognisers.namedCards(pull);
+  return Array.isArray(named) ? named : null;
+}
+
+/**
  * The arm's whole RECORD STAGE for one pull request, for a caller that holds no thread yet (`--pr`
  * and the relay; the queue leg reads the same pieces inline, beside its record leg): the card
  * `recognisers.deliveredCard` derives from the pull object, the threads (`readRecordThreads`), then
- * `lowRiskRecordStage` and `readCardLabels`. `pull` is the object `deliveredCard` reads (`number`,
- * `body`, `head.ref`); `runGit` and `baseRef` are what a carried record is re-tested with, and one
- * absent refuses the carry. ⛔ Anything that did not load or did not read is NOT MEASURED — recognisers
- * that did not load, no comment reader, a thread that threw — which the arm reads as Tier H.
+ * `lowRiskRecordStage` and `readCardLabels` over every card `recognisers.namedCards` lists. `pull` is
+ * the object both read (`number`, `body`, `head.ref`); `runGit` and `baseRef` are what a carried
+ * record is re-tested with, and one absent refuses the carry. ⛔ Anything that did not load or did
+ * not read is NOT MEASURED — recognisers that did not load, no comment reader, a thread that threw —
+ * which the arm reads as Tier H.
  * Returns `{ record, cardLabels, card, apiCalls }`. Never throws.
  */
 export async function readLowRiskRecordStage({ pr, pull, headSha, paths, repo, runGit = null, baseRef = null, recognisers, fetchComments = null, fetchLabels = null, fetchTimeline = null }) {
@@ -2309,7 +2360,7 @@ export async function readLowRiskRecordStage({ pr, pull, headSha, paths, repo, r
     ? await readRecordThreads({ pair, recognisers, fetchComments })
     : { unreadable: 'no comment reader was supplied to this leg, so no thread was read', apiCalls: 0 };
   const record = threads.unreadable !== null ? { measured: false, reason: threads.unreadable } : lowRiskRecordStage({ pair, recognisers });
-  const labelled = await readCardLabels({ card, fetchLabels, fetchTimeline });
+  const labelled = await readCardLabels({ card, named: namedCardsOf(recognisers, pull), fetchLabels, fetchTimeline });
   return { record, cardLabels: labelled.reading, card, apiCalls: threads.apiCalls + labelled.apiCalls };
 }
 
@@ -2550,7 +2601,8 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
       if (pending) {
         // ⛔ A thread that could not be read is a record that was not read: NOT MEASURED, so Tier H.
         const stage = unreadable !== null ? { measured: false, reason: unreadable } : lowRiskRecordStage({ pair, recognisers });
-        const labelled = await readCardLabels({ card, fetchLabels, fetchTimeline });
+        // Every card the pull names, not only the one whose thread may carry the record.
+        const labelled = await readCardLabels({ card, named: namedCardsOf(recognisers, pull), fetchLabels, fetchTimeline });
         apiCalls += labelled.apiCalls;
         readRecordStage(stage, labelled.reading);
         // Tier H on the record stage: the entry needs the maintainer, and the record leg is never consulted.
@@ -3363,7 +3415,7 @@ export function makeTimelineReader({ apiUrl, slug, token, fetchImpl = fetch, per
 }
 
 /**
- * The label NAMES on an issue — the CARD a low-risk arm pull request delivers, whose `security` label
+ * The label NAMES on an issue — a CARD a low-risk arm pull request names, whose `security` label
  * keeps that pull request at Tier H (`readCardLabels`).
  *
  * Scope, measured the way the two readers above were: `GET /repos/{o}/{r}/issues/{n}/labels` answers
@@ -5425,6 +5477,9 @@ export async function selfTest() {
     // a list, `'throw'`, or `null` for no reader at all.
     cardLabels = [],
     cardTimeline = [],
+    // Per-card answers for a pull that names more than one card: `{ [number]: list | 'throw' }`, over the two above.
+    cardLabelsBy = {},
+    cardTimelineBy = {},
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
@@ -5435,8 +5490,8 @@ export async function selfTest() {
       rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }, ...extraRows],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
       fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch, labels, fork }); },
-      ...(timeline === null ? {} : { fetchTimeline: async (n) => { if (n !== pr) tierApiCalls += 1; const read = n === pr ? timeline : cardTimeline; if (read === 'throw') throw new Error('HTTP 403'); return read; } }),
-      ...(cardLabels === null ? {} : { fetchLabels: async (n) => { tierApiCalls += 1; tierLabelsRead.push(n); if (cardLabels === 'throw') throw new Error('HTTP 403'); return cardLabels; } }),
+      ...(timeline === null ? {} : { fetchTimeline: async (n) => { if (n !== pr) tierApiCalls += 1; const read = n === pr ? timeline : (cardTimelineBy[n] ?? cardTimeline); if (read === 'throw') throw new Error('HTTP 403'); return read; } }),
+      ...(cardLabels === null ? {} : { fetchLabels: async (n) => { tierApiCalls += 1; tierLabelsRead.push(n); const read = cardLabelsBy[n] ?? cardLabels; if (read === 'throw') throw new Error('HTTP 403'); return read; } }),
       fetchComments: async (n) => {
         tierApiCalls += 1;
         tierThreadsRead.push(n);
@@ -6345,7 +6400,7 @@ export async function selfTest() {
     const old = await tierRun({ ...arm, comments: [armRecord({ sha: REF_OLD.slice(0, 12) })] });
     assert('⛔ a-record-on-an-OLDER-head-is-REFUSED-Tier-H-its-line-does-not-carry-forward', old.exitCode === EXIT_REFUSED_UNAPPROVED && old.entries[0].tier === TIER_H && old.entries[0].record === undefined && /no contract-review record names this head/.test(renderGuardVerdict(old)));
 
-    // ── the arm's RECORD STAGE: the record's `Security-touching:` line, and the `security` label on the linked card ──
+    // ── the arm's RECORD STAGE: the record's `Security-touching:` line, and the `security` label on a card it names ──
     const stage = (v) => v.entries[0].surfaces.find((x) => x.lowRiskVerdict)?.lowRiskVerdict;
     const stageH = (v, why) => v.exitCode === EXIT_REFUSED_UNAPPROVED && v.entries[0].tier === TIER_H && v.entries[0].record === undefined && stage(v).recordStage === 'read' && stage(v).reasons.length === 1 && why.test(stage(v).reasons[0]);
     assert('⭐ RECORD-LINE-CONTROL: the-passing-arm-PR-was-read-through-the-record-stage-its-record-says-Security-touching-no', stage(pass).recordStage === 'read' && stage(pass).tier === TIER_S && stage(pass).reasons.length === 0 && pass.entries[0].record.id === 900);
@@ -6364,6 +6419,57 @@ export async function selfTest() {
     assert('⛔ CARD-LABEL: a-security-label-REMOVED-on-the-card-timeline-keeps-it-Tier-H', stageH(await tierRun({ ...arm, cardTimeline: [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }] }), new RegExp(`^the timeline of its card #${REF_CARD} shows the \`security\` label removed$`)));
     assert('⛔ CARD-LABEL: labels-that-threw-no-label-reader-or-a-card-timeline-that-threw-are-NOT-MEASURED-so-Tier-H', stageH(await tierRun({ ...arm, cardLabels: 'throw' }), /^the labels of its card were not read \(card #69's labels could not be read \(HTTP 403\)\)/) && stageH(await tierRun({ ...arm, cardLabels: null }), /^the labels of its card were not read \(no label reader was supplied to this leg\)/) && stageH(await tierRun({ ...arm, cardTimeline: 'throw' }), /^the timeline of its card #69 was not read \(HTTP 403\), so a removed `security` label cannot be ruled out$/));
     assert('⛔ CARD-LABEL: a-PR-that-names-NO-card-cannot-rule-the-label-out-Tier-H-with-no-label-read', stageH(await tierRun({ ...arm, prBody: 'Clause-②: no\nMetadata-protocol: none\n', branch: 'wording' }), /^the labels of its card were not read \(no card could be derived for it — /) && tierLabelsRead.length === 0);
+    // ── EVERY card the pull request NAMES is read (`namedCardNumbers`), not only the one whose thread may carry its
+    // record: a `Part of` beside a `Fixes`, a `Refs`, the card the branch is named for — two cards at different
+    // strengths, where the delivery relation answers with the stronger one alone.
+    const ALSO = 71;
+    const alsoLabelled = { cardLabelsBy: { [ALSO]: ['tooling', 'Security'] } };
+    const partOfTwo = { ...arm, prBody: `${LOW}\nPart of #${ALSO}\n` };
+    const branchTwo = { ...arm, branch: `claude/issue-${ALSO}-x` };
+    const refsTwo = { ...arm, prBody: `${LOW}\nRefs #${ALSO}\n` };
+    const alsoCarries = new RegExp(`^card #${ALSO}, which it also names, carries the \`security\` label$`);
+    const bothRead = () => tierLabelsRead.join() === `${REF_CARD},${ALSO}`;
+    assert('⛔ NAMED-CARDS: Fixes-A-plus-Part-of-B-with-security-on-B-reads-Tier-H-naming-card-B', stageH(await tierRun({ ...partOfTwo, ...alsoLabelled }), alsoCarries) && bothRead(), tierLabelsRead.join());
+    assert('⛔ NAMED-CARDS: Fixes-A-on-a-branch-named-for-B-with-security-on-B-reads-Tier-H-naming-card-B', stageH(await tierRun({ ...branchTwo, ...alsoLabelled }), alsoCarries) && bothRead(), tierLabelsRead.join());
+    assert('⛔ NAMED-CARDS: Fixes-A-plus-Refs-B-with-security-on-B-reads-Tier-H-naming-card-B', stageH(await tierRun({ ...refsTwo, ...alsoLabelled }), alsoCarries) && bothRead(), tierLabelsRead.join());
+    assert('⭐ NAMED-CARDS-CONTROL: the-same-three-pulls-with-BOTH-cards-clean-CLEAR-and-the-second-card-costs-two-more-reads', await (async () => {
+      const cleared = [];
+      for (const shape of [partOfTwo, branchTwo, refsTwo]) {
+        const v = await tierRun(shape);
+        // pull + reviews + PR thread + card thread + two cards' labels and timelines.
+        cleared.push(v.exitCode === EXIT_CLEAR && stage(v).tier === TIER_S && stage(v).reasons.length === 0 && bothRead() && tierApiCalls === 8 && tierThreadsRead.join() === `70,${REF_CARD}`);
+      }
+      return cleared.join() === 'true,true,true';
+    })());
+    assert('⛔ NAMED-CARDS: the-label-on-the-card-that-carries-the-record-still-reads-Tier-H-beside-a-clean-second-card', stageH(await tierRun({ ...partOfTwo, cardLabelsBy: { [REF_CARD]: ['security'] } }), new RegExp(`^its card #${REF_CARD} carries the \`security\` label$`)) && bothRead());
+    assert('⛔ NAMED-CARDS: a-second-card-whose-labels-or-timeline-could-not-be-read-or-whose-timeline-shows-the-label-removed-is-Tier-H',
+      stageH(await tierRun({ ...partOfTwo, cardLabelsBy: { [ALSO]: 'throw' } }), /^the labels of card #71, which it also names, were not read \(card #71's labels could not be read \(HTTP 403\)\), so a `security` label on it cannot be ruled out$/) &&
+      stageH(await tierRun({ ...branchTwo, cardTimelineBy: { [ALSO]: 'throw' } }), /^the timeline of card #71, which it also names, was not read \(HTTP 403\), so a removed `security` label cannot be ruled out$/) &&
+      stageH(await tierRun({ ...refsTwo, cardTimelineBy: { [ALSO]: [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'Security' } }] } }), /^the timeline of card #71, which it also names, shows the `security` label removed$/));
+    assert('⛔ NAMED-CARDS: a-pull-that-names-more-cards-than-the-leg-reads-is-Tier-H-with-only-its-first-card-read-and-one-fewer-clears', await (async () => {
+      const lines = Array.from({ length: LOW_RISK_NAMED_CARD_LIMIT + 1 }, (_, i) => `Part of #${ALSO + i}`);
+      const over = await tierRun({ ...arm, prBody: `${LOW}\n${lines.join('\n')}\n` });
+      const overRead = tierLabelsRead.join();
+      const atLimit = await tierRun({ ...arm, prBody: `${LOW}\n${lines.slice(1).join('\n')}\n` });
+      return stageH(over, /^the other cards it names were not read \(it names 9 more cards \(#71, #72, #73, …\), over the 8 this leg reads\), so a `security` label on one of them cannot be ruled out$/) && overRead === String(REF_CARD) &&
+        atLimit.exitCode === EXIT_CLEAR && tierLabelsRead.length === LOW_RISK_NAMED_CARD_LIMIT + 1 && tierLabelsRead[0] === REF_CARD;
+    })());
+    // ⛔ An entry something else already cleared never reaches the stage: no thread and no label is read for it, and it
+    // stays Tier H — cleared by the human leg, never by the arm. An authorized ENQUEUE leaves it `pending` on the one
+    // reason that says nothing of the stage was read; an APPROVAL clears before the timeline is read at all, so the
+    // arm stops one conjunct earlier (`not-reached`) on the unread timeline.
+    assert('⛔ an-arm-entry-an-authorized-enqueue-or-an-approval-CLEARED-spends-no-stage-read-and-stays-Tier-H-on-the-reason-that-says-what-was-not-read', await (async () => {
+      const cleared = async (over) => {
+        const v = await tierRun({ ...partOfTwo, ...alsoLabelled, ...over });
+        const read = stage(v);
+        return v.exitCode === EXIT_CLEAR && v.entries[0].tier === TIER_H && v.entries[0].record === undefined && read.reasons.length === 1 &&
+          tierLabelsRead.length === 0 && tierThreadsRead.length === 0 && renderGuardVerdict(v).includes(`- ${read.reasons[0]}`) ? `${read.recordStage}: ${read.reasons[0]}` : `✗ ${JSON.stringify(read)}`;
+      };
+      const enqueued = await cleared({ timeline: [added(GOVERNED_APPROVERS[0])] });
+      const approved = await cleared({ reviews: [approvedAt(GOVERNED_APPROVERS[0], REF_HEAD)] });
+      return enqueued === 'pending: its contract-review record and the labels of its card were not read, so neither a `Security-touching: no` line nor a card free of the `security` label is established' &&
+        approved === 'not-reached: its timeline was not read (the timeline was not read), so a removed `security` label cannot be ruled out';
+    })());
     assert('the-record-stage-costs-one-label-read-and-one-card-timeline-read-and-only-where-the-pull-read-conditions-all-hold', await (async () => {
       await tierRun(arm);
       const clean = [tierApiCalls, tierLabelsRead.join(), tierThreadsRead.join()];
@@ -6388,13 +6494,39 @@ export async function selfTest() {
     })());
     assert('readCardLabels-never-throws-and-counts-its-reads-a-card-nobody-could-name-reads-nothing', await (async () => {
       const none = await readCardLabels({ card: { card: null, reason: 'its body names no card' }, fetchLabels: async () => { throw new Error('must not be read'); } });
-      const both = await readCardLabels({ card: { card: 69 }, fetchLabels: async () => ['a'], fetchTimeline: async () => [] });
-      const noTimeline = await readCardLabels({ card: { card: 69 }, fetchLabels: async () => ['a'] });
-      const notList = await readCardLabels({ card: { card: 69 }, fetchLabels: async () => ({}) });
+      const both = await readCardLabels({ card: { card: 69 }, named: [69], fetchLabels: async () => ['a'], fetchTimeline: async () => [] });
+      const noTimeline = await readCardLabels({ card: { card: 69 }, named: [69], fetchLabels: async () => ['a'] });
+      const notList = await readCardLabels({ card: { card: 69 }, named: [69], fetchLabels: async () => ({}) });
+      // ⛔ The cards the pull names were not handed in: the first card is read, `others` says it was not — never "none".
+      const unlisted = await readCardLabels({ card: { card: 69 }, fetchLabels: async () => ['a'], fetchTimeline: async () => [] });
       return none.apiCalls === 0 && none.reading.measured === false && /its body names no card/.test(none.reading.reason) &&
-        both.apiCalls === 2 && JSON.stringify(both.reading) === JSON.stringify({ measured: true, reason: null, card: 69, labels: ['a'], timeline: { measured: true, reason: null, events: [] } }) &&
+        both.apiCalls === 2 && JSON.stringify(both.reading) === JSON.stringify({ measured: true, reason: null, card: 69, labels: ['a'], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] } }) &&
         noTimeline.apiCalls === 1 && noTimeline.reading.measured === true && noTimeline.reading.timeline.measured === false &&
-        notList.reading.measured === false;
+        notList.reading.measured === false && notList.reading.others === undefined &&
+        unlisted.apiCalls === 2 && unlisted.reading.measured === true && JSON.stringify(unlisted.reading.others) === JSON.stringify({ measured: false, reason: 'the cards the pull request names were not listed for this leg', cards: null }) && !('overLimit' in unlisted.reading.others);
+    })());
+    assert('⛔ readCardLabels-reads-EVERY-named-card-once-in-ascending-order-after-the-first-and-carries-an-unread-one-in-its-place', await (async () => {
+      const read = [];
+      const labelsOf = { 69: ['a'], 70: ['security'], 72: 'throw' };
+      const fetchLabels = async (n) => { read.push(`labels ${n}`); if (labelsOf[n] === 'throw') throw new Error('HTTP 502'); return labelsOf[n] ?? []; };
+      const fetchTimeline = async (n) => { read.push(`timeline ${n}`); if (n === 71) throw new Error('HTTP 403'); return []; };
+      const all = await readCardLabels({ card: { card: 70 }, named: [72, 69, 70, 71, 69, '71', 0, -3, 1.5, 'x'], fetchLabels, fetchTimeline });
+      const others = all.reading.others;
+      const over = await readCardLabels({ card: { card: 1 }, named: Array.from({ length: LOW_RISK_NAMED_CARD_LIMIT + 2 }, (_, i) => i + 1), fetchLabels: async () => [], fetchTimeline: async () => [] });
+      const atLimit = await readCardLabels({ card: { card: 1 }, named: Array.from({ length: LOW_RISK_NAMED_CARD_LIMIT + 1 }, (_, i) => i + 1), fetchLabels: async () => [], fetchTimeline: async () => [] });
+      return read.join() === 'labels 70,timeline 70,labels 69,timeline 69,labels 71,timeline 71,labels 72' && all.apiCalls === 7 &&
+        all.reading.card === 70 && all.reading.labels.join() === 'security' && others.measured === true && others.cards.map((c) => c.card).join() === '69,71,72' &&
+        others.cards[0].measured === true && others.cards[0].labels.join() === 'a' && others.cards[0].timeline.measured === true &&
+        others.cards[1].measured === true && others.cards[1].timeline.measured === false && others.cards[1].timeline.reason === 'HTTP 403' &&
+        others.cards[2].measured === false && others.cards[2].reason === "card #72's labels could not be read (HTTP 502)" &&
+        over.apiCalls === 2 && over.reading.others.measured === false && over.reading.others.cards === null && over.reading.others.overLimit === true && /^it names 9 more cards \(#2, #3, #4, …\), over the 8 this leg reads$/.test(over.reading.others.reason) &&
+        atLimit.apiCalls === 2 * (LOW_RISK_NAMED_CARD_LIMIT + 1) && atLimit.reading.others.measured === true && atLimit.reading.others.cards.length === LOW_RISK_NAMED_CARD_LIMIT;
+    })());
+    assert('namedCardsOf-lists-the-cards-through-the-recogniser-set-and-answers-null-never-an-empty-list-where-it-cannot', (() => {
+      const pull = { number: 70, body: 'Fixes #69\n\nPart of #71', head: { ref: 'claude/issue-73-x' } };
+      return namedCardsOf(live, pull).join() === '69,71,73' && namedCardsOf(live, { number: 70, body: 'wording', head: { ref: 'wording' } }).join() === '' &&
+        namedCardsOf(live, null) === null && namedCardsOf({ ...live, namedCards: undefined }, pull) === null && namedCardsOf({ available: false, reason: 'x' }, pull) === null &&
+        namedCardsOf({ ...live, namedCards: () => 'none' }, pull) === null;
     })());
     assert('makeLabelReader-reads-the-label-NAMES-off-the-issue-labels-route-and-throws-on-a-refusal', await (async () => {
       const urls = [];
@@ -6442,7 +6574,7 @@ export async function selfTest() {
       const unreadPull = await stageOf({ pull: null });
       return order === `comments 70,comments ${REF_CARD},labels ${REF_CARD},timeline ${REF_CARD}` && clean.apiCalls === 4 && clean.card.card === REF_CARD &&
         JSON.stringify(clean.record) === JSON.stringify({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' } }) &&
-        JSON.stringify(clean.cardLabels) === JSON.stringify({ measured: true, reason: null, card: REF_CARD, labels: ['tooling'], timeline: { measured: true, reason: null, events: [] } }) &&
+        JSON.stringify(clean.cardLabels) === JSON.stringify({ measured: true, reason: null, card: REF_CARD, labels: ['tooling'], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] } }) &&
         noLine.record.securityTouching.state === 'missing' && untrusted.record.located === 'absent' &&
         unloaded.apiCalls === 0 && unloaded.record.measured === false && /would not load: boom/.test(unloaded.record.reason) && unloaded.cardLabels.measured === false &&
         noReader.record.measured === false && /no comment reader was supplied/.test(noReader.record.reason) && noReader.cardLabels.measured === false && /no label reader was supplied/.test(noReader.cardLabels.reason) &&
@@ -6645,6 +6777,7 @@ export async function selfTest() {
     // No record is no `Security-touching: no` line: Tier H on the arm's record stage (it read Tier S, refused on its absent record, before that stage).
     assert('⛔ CONTROL: the-same-ADR-note-with-NO-record-is-REFUSED-Tier-H-on-the-record-stage', noRecord.exitCode === EXIT_REFUSED_UNAPPROVED && noRecord.entries[0].tier === TIER_H && noRecord.entries[0].record === undefined && /no contract-review record names this head/.test(renderGuardVerdict(noRecord)));
     assert('⛔ RECORD-LINE: an-ADR-note-whose-PASS-record-lacks-the-Security-touching-line-reads-Tier-H-and-a-security-labelled-card-does-too', JSON.stringify(await hCase({ comments: [recordComment()] })) === H && JSON.stringify(await hCase({ cardLabels: ['security'] })) === H);
+    assert('⛔ NAMED-CARDS: an-ADR-note-that-also-names-a-security-labelled-card-reads-Tier-H-and-clears-when-that-card-is-clean', JSON.stringify(await hCase({ prBody: `${LOW}\nPart of #71\n`, cardLabelsBy: { 71: ['security'] } })) === H && tierLabelsRead.join() === `${REF_CARD},71` && (await tierRun({ ...arm, prBody: `${LOW}\nPart of #71\n` })).exitCode === EXIT_CLEAR);
     // ⛔ ROWS 2–6, each WITH a valid PASS record: the record leg is never consulted.
     assert('⛔ ROW-2-a-removed-line-stays-H', JSON.stringify(await hCase({ runGit: adrGit(REMOVED) })) === H);
     assert('⛔ ROW-3-a-changed-or-added-Status-line-stays-H', JSON.stringify(await hCase({ runGit: adrGit(STATUS) })) === H);
