@@ -29,6 +29,11 @@
  *  - item 6: the modal and drawer record forms write a picked holder's package
  *    through the record form's create step (`createWritePayload`); one holder
  *    writes the name alone (CONTROL).
+ *
+ * objectstack#33077 — two pins that could not see their regression: item 6
+ * now lists two packages beside the environment, in both orders, so a pick
+ * resolved by list order fails on the modal and drawer; item 2's rendered
+ * one-call pin now covers the modal and drawer too.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, fireEvent, cleanup, screen, act } from '@testing-library/react';
@@ -59,6 +64,7 @@ const PERMISSION_ITEMS = [
 ];
 const ENV = 'Sales User (sales_user) · defined in this environment';
 const CRM = 'Sales User (sales_user) · package com.acme.crm';
+const HR = 'Sales User (sales_user) · package com.acme.hr';
 
 function dataSourceFor(objectSchema: Record<string, unknown>) {
   return {
@@ -255,6 +261,15 @@ describe('objectstack#32833 item 6 — the modal and drawer record forms carry a
       fireEvent.submit(document.querySelector('form') as HTMLFormElement);
     });
   };
+  const HR_ITEM = { name: 'sales_user', label: 'Sales User', packageId: 'com.acme.hr' };
+  const ENV_CRM_HR = [...PERMISSION_ITEMS, HR_ITEM];
+  const HR_CRM_ENV = [...ENV_CRM_HR].reverse();
+  const TWO_PACKAGE_CASES: Array<[string, string, Array<Record<string, unknown>>]> = [
+    ['environment, crm, hr', 'com.acme.crm', ENV_CRM_HR],
+    ['environment, crm, hr', 'com.acme.hr', ENV_CRM_HR],
+    ['hr, crm, environment', 'com.acme.crm', HR_CRM_ENV],
+    ['hr, crm, environment', 'com.acme.hr', HR_CRM_ENV],
+  ];
 
   describe.each(CONTAINERS)('%s (create)', (_name, Container, formType) => {
     it("a package holder is pickable, and the save writes the holder's package beside the name", async () => {
@@ -297,6 +312,27 @@ describe('objectstack#32833 item 6 — the modal and drawer record forms carry a
       expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', note: 'n' });
       expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
     });
+
+    // objectstack#33077 — with one package beside the environment, the package
+    // clicked and the first or last package served are the same one, so a pick
+    // resolved by list order would pass. Two packages, served in both orders,
+    // and each picked in turn: only the clicked holder's package is right.
+    it.each(TWO_PACKAGE_CASES)(
+      'two packages served %s: picking %s writes exactly that package',
+      async (_order, picked, items) => {
+        const ds = mountContainer(Container, formType, {}, items);
+        const trigger = await openPicker();
+        const option = await optionOf(picked === 'com.acme.crm' ? CRM : HR);
+        expect(option).not.toHaveAttribute('aria-disabled', 'true');
+        await act(async () => {
+          fireEvent.click(option);
+        });
+        await waitFor(() => expect(trigger).toHaveTextContent(picked === 'com.acme.crm' ? CRM : HR));
+        await submitOpen();
+        await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+        expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', permission_set_package: picked });
+      },
+    );
 
     it('CONTROL — one holder: the pick writes the name alone, as before', async () => {
       const ds = mountContainer(Container, formType, {}, [{ name: 'sales_user', label: 'Sales User', packageId: 'com.acme.crm' }]);
@@ -388,17 +424,21 @@ describe("objectstack#32833 item 2 — a create's values and its baseline come f
     expect(save(seed, otherBaseline)).toStrictEqual(values);
   });
 
+  // objectstack#33077 — the modal and drawer judge a create's package against
+  // the values they opened with too, so they carry the rendered pin as well.
   it.each([
-    ['TabbedForm', TabbedForm as any, 'tabbed'],
-    ['WizardForm', WizardForm as any, 'wizard'],
-  ])('%s, rendered on an unnamed definition with a seeded package, saves the name alone', async (_name, Container, formType) => {
+    ['TabbedForm', TabbedForm as any, { formType: 'tabbed' }],
+    ['WizardForm', WizardForm as any, { formType: 'wizard' }],
+    ['ModalForm', ModalForm as any, { formType: 'modal', open: true }],
+    ['DrawerForm', DrawerForm as any, { formType: 'drawer', open: true }],
+  ])('%s, rendered on an unnamed definition with a seeded package, saves the name alone', async (_name, Container, extra) => {
     const ds = dataSourceFor(UNNAMED_GRANT_SCHEMA);
-    const { container } = render(
+    render(
       <SchemaRendererProvider dataSource={ds as any}>
         <Container
           schema={{
             type: 'object-form',
-            formType,
+            ...extra,
             objectName: 'sys_user_permission_set',
             mode: 'create',
             sections: [{ name: 'main', label: 'Main', fields: ['permission_set', 'note'] }],
@@ -409,7 +449,10 @@ describe("objectstack#32833 item 2 — a create's values and its baseline come f
       </SchemaRendererProvider>,
     );
     await screen.findByRole('combobox');
-    await submit(container);
+    // The modal and drawer render into a portal, outside `render`'s container.
+    await act(async () => {
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    });
     await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
     expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', note: 'n' });
     expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');

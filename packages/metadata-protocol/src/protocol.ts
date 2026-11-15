@@ -1753,6 +1753,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private runAuthoringGate(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown;
+        userTextLocales?: readonly (string | undefined)[];
     }): Promise<void> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const readAuthoringGates = () => this.authoringGates;
@@ -10081,8 +10082,12 @@ export class ObjectStackProtocolImplementation implements
          * `success === (outcome === 'published')` — `success` keeps its exact
          * pre-#10462 value and is now derivable. Values are lowercase snake,
          * matching the `sys_metadata_audit` outcome vocabulary.
+         * [#33277] `published_unregistered`: the drafts landed as on
+         * `published`, but the runtime registry refused a promoted object, so
+         * it is not served; `unregistered` is present if and only if this is
+         * the outcome, and `success` is false on it.
          */
-        outcome: 'published' | 'refused' | 'nothing_to_publish';
+        outcome: 'published' | 'published_unregistered' | 'refused' | 'nothing_to_publish';
         publishedCount: number;
         failedCount: number;
         published: Array<{
@@ -10107,6 +10112,14 @@ export class ObjectStackProtocolImplementation implements
             advisories?: RuntimeAuthoringIssue[];
         }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
+        /**
+         * [#33277] Each promoted object the runtime registry refused, in
+         * publish order, under the rule its `published[]` element's warning
+         * carries. Present only on `outcome: 'published_unregistered'`, and
+         * then non-empty; the object stays in `published[]` (its metadata is
+         * live) but is not served until something registers it.
+         */
+        unregistered?: Array<{ type: string; name: string; rule: 'object-registry-refused' }>;
         /** Aggregate result of materializing every published `seed` (absent when no seeds). */
         seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         /**

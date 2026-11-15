@@ -1,6 +1,6 @@
 # ADR-0019: App as the Consumer-Facing Unit
 
-**Status**: Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-05-31, v3 narrowed to the consumer-surface decision). Landed in spec: `CONSUMER_INSTALLABLE_TYPES` / `isConsumerInstallable`, the `MarketplaceListingSchema.packageType` narrowing, and the `defineStack` check that holds a module package to at most one app, as it does an app package ([#32586](https://github.com/objectstack-ai/objectstack/issues/32586), merged 2026-11-12 as `9ae829108c`). Landed in HotCRM: the split into a suite that surfaces its sales, service and marketing apps, each in a package of its own (hotcrm#2417, by hotcrm#2430, merged 2026-11-12 as hotcrm commit `41d301a7bd`). Pending: the Console marketplace filling `packageType` from the manifest. · **Amended** (2026-11-12, [#32585](https://github.com/objectstack-ai/objectstack/issues/32585), maintainer ruling 「改成 Salesforce 模式」) — D3's fold reversed: a suite (one install: an app package plus the module packages it composes) may surface more than one app, each defined by a different package of the suite, and an app package still defines at most one app. `type: app` is not renamed (「同意」); D3 gains one terminology table for app package, module, app and suite. D1 and D2 are unchanged. Until this amendment the Pending clause ended "HotCRM folded to a single App (D3/D4)"; see the amendment note under D3.
+**Status**: Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-05-31, v3 narrowed to the consumer-surface decision). Landed in spec: `CONSUMER_INSTALLABLE_TYPES` / `isConsumerInstallable`, the `MarketplaceListingSchema.packageType` narrowing, and the `defineStack` check that holds a module package to at most one app, as it does an app package ([#32586](https://github.com/objectstack-ai/objectstack/issues/32586), merged 2026-11-12 as `9ae829108c`), and the same rule on a flat `composeStacks` and on every `packages[]` body ([#32898](https://github.com/objectstack-ai/objectstack/pull/32898), merged 2026-11-13 as `0b23b2a0c4`; [#33074](https://github.com/objectstack-ai/objectstack/pull/33074), merged 2026-11-13 as `2c98485db5`), and the namespace-prefix rule judged per `packages[]` body ([#33122](https://github.com/objectstack-ai/objectstack/pull/33122), merged 2026-11-13 as `5b2ec820c8`). Landed in HotCRM: the split into a suite that surfaces its sales, service and marketing apps, each in a package of its own (hotcrm#2417, by hotcrm#2430, merged 2026-11-12 as hotcrm commit `41d301a7bd`). Pending: the Console marketplace filling `packageType` from the manifest. · **Amended** (2026-11-12, [#32585](https://github.com/objectstack-ai/objectstack/issues/32585), maintainer ruling 「改成 Salesforce 模式」) — D3's fold reversed: a suite (one install: an app package plus the module packages it composes) may surface more than one app, each defined by a different package of the suite, and an app package still defines at most one app. `type: app` is not renamed (「同意」); D3 gains one terminology table for app package, module, app and suite. D1 and D2 are unchanged. Until this amendment the Pending clause ended "HotCRM folded to a single App (D3/D4)"; see the amendment note under D3.
 **Shares its number with**: [`0019-approval-as-flow-node`](./0019-approval-as-flow-node.md) (Collapse Approval into Flow — approval as a durable-pause node) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0019-app-as-consumer-unit`.
 **Date**: 2026-05-31
 **Deciders**: ObjectStack Protocol Architects
@@ -202,11 +202,57 @@ as a wrapper that surfaces N apps.
 > defines more than one app with the same `STACK_SINGLE_APP_VIOLATION`, and the finding names the
 > package, each app and the remedy. Every other package type, a stack with no manifest and
 > `strict: false` are not judged, as before (`packages/spec/src/stack.test.ts` keeps the `driver`
-> pin). The check reads one `defineStack` call. Two shapes are not judged
+> pin). At this merge the check read one `defineStack` call, and two shapes were not judged
 > ([#32810](https://github.com/objectstack-ai/objectstack/issues/32810)): a flat `composeStacks`
 > (the default `manifest: 'last'`) of packages with one app each, which answers one package id
-> that carries several apps, and a hand-built `packages[]` body. The placement sentence above
-> stands: still argued, not checked.
+> that carries several apps, and a hand-built `packages[]` body. Both are judged since
+> 2026-11-13; see the next paragraph. The placement sentence above stands: still argued, not
+> checked.
+>
+> **Enforced for compositions and `packages[]` bodies since 2026-11-13.** The paragraph above is
+> the reading at #32586's merge. Three merges since judge both shapes it names:
+>
+> - [#32898](https://github.com/objectstack-ai/objectstack/pull/32898), merged as `0b23b2a0c4`:
+>   `composeStacks` judges what a composition puts under each package id
+>   (`packages/spec/src/stack.zod.ts#collectComposedSingleAppErrors`). A flat composition (the
+>   default `manifest: 'last'`, `'first'` or an index) of inputs that carry no `packages[]` keeps
+>   one manifest and puts every input's apps under its id, so when that manifest is an `app` or
+>   `module` package and the inputs bring two or more apps, it is refused with
+>   `STACK_SINGLE_APP_VIOLATION` (422), naming each app and the input it came from
+>   (`#flatSingleAppFinding`). The remedy the finding names is `manifest: 'preserve'`, which keeps
+>   each package's own id (`#SINGLE_APP_COMPOSE_REMEDY`), the shape
+>   `examples/app-multi-package/objectstack.config.ts` composes. A composition whose result
+>   carries `packages[]` (under `'preserve'`, or a flat option with an input that carries
+>   `packages[]`) is judged by the residual rule instead: a top-level app that no body declares
+>   is registered under the artifact's manifest id, beside the apps of that id's own body, and
+>   two or more there are refused (`packages/spec/src/stack.zod.ts#residualSingleAppFinding`). The
+>   same merge holds every `packages[]` body to one app, each by its own `type`, `id` and `apps`,
+>   at `composeStacks` and at strict `defineStack`
+>   (`packages/spec/src/stack.zod.ts#collectPackageBodySingleAppErrors`). A composition of one
+>   input is handed back as it is, judged only by its own `defineStack`.
+> - [#33074](https://github.com/objectstack-ai/objectstack/pull/33074), merged as `2c98485db5`:
+>   changes only how strict `defineStack` counts the top level of a stack that carries
+>   `packages[]`; the bodies are judged as before. Until then every top-level app counted against
+>   `manifest.id`; since, the top level is judged by the residual rule #32898 gave `composeStacks`
+>   (`packages/spec/src/stack.zod.ts#validateSingleApp`), so a top-level app a body declares is a
+>   copy of that body's app and counts against that body only.
+> - [#33122](https://github.com/objectstack-ai/objectstack/pull/33122), merged as `5b2ec820c8`:
+>   strict `defineStack` judges namespace prefixes per body
+>   (`packages/spec/src/stack.zod.ts#namespacePrefixErrors`), each body's objects against that
+>   body's own `namespace` and a top-level object that no body declares against
+>   `manifest.namespace`, refused with `STACK_NAMESPACE_PREFIX_INVALID`. A body with no
+>   `namespace` is not judged, the rule's legacy skip. `composeStacks` runs no namespace-prefix
+>   check.
+>
+> `packages/spec/src/stack.test.ts` pins each of the three. At `defineStack`, package types other
+> than `app` and `module` are not judged by the single-app rule, and `strict: false` skips both
+> rules. A stack with no manifest goes unjudged only at its top level: every `packages[]` body it
+> carries is still judged by both rules. A `strict: false` stack meets a rule only when it is one
+> of two or more inputs to `composeStacks`, and then only the single-app rule. The
+> placement sentence stands: on `main` at `b392ff7b`, a module package that defines no object
+> builds with an app that names an object of a sibling package, at `defineStack` and in a
+> `manifest: 'preserve'` composition (probed once, not kept as a test; reason 2's first bullet
+> gives the reason).
 >
 > **Not decided here.** Several apps in one `type: app` package (option C) is not ruled, and the
 > three reasons above contradict it. Per-position app visibility and a per-position default app

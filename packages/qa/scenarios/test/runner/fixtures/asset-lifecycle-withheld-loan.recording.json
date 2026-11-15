@@ -1,0 +1,24 @@
+{
+  "driver": { "driver": "claude-code-cli", "authMethod": "oauth_token", "apiBilled": false },
+  "turns": {
+    "asset_lifecycle/scratch/iterate-run/check_out_asset_in_repair/asset_admin": {
+      "replyText": "I didn't lend out AST-0041. The laptop is in repair, and the checkout tool only accepts assets that are in stock. Its repair order RO-0017 is still open; once the repair is completed and the asset is back in stock, it can be lent to Ella Ma.",
+      "toolCalls": [
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": { "objectName": "demoasset_asset", "where": { "name": "AST-0041" } },
+          "output": "{\n  \"records\": [\n    {\n      \"id\": \"a041\",\n      \"name\": \"AST-0041\",\n      \"status\": \"in_repair\"\n    }\n  ],\n  \"total\": 1\n}"
+        },
+        {
+          "name": "query_records",
+          "rawName": "mcp__app__query_records",
+          "input": { "objectName": "demoasset_repair_order", "where": { "asset": "a041", "status": "open" } },
+          "output": "{\n  \"records\": [\n    {\n      \"id\": \"ro17\",\n      \"name\": \"RO-0017\",\n      \"status\": \"open\"\n    }\n  ],\n  \"total\": 1\n}"
+        }
+      ],
+      "meta": { "resultSubtype": "success", "isError": false, "numTurns": 4 }
+    }
+  },
+  "files": {}
+}

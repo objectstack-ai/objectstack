@@ -761,13 +761,16 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Look up a registered function by name, with no package: the last
-   * registration of the name. [ADR-0150 D3/D4, #31700; epic seat ruling R2-C]
-   * A name two packages hold (two namespaces may each bind one) is refused,
-   * `409 RESOURCE_CONFLICT` naming every holder, never answered with one of
-   * them; a reader that knows its package resolves through
-   * {@link functionHoldersOf}.
+   * registration of the name. [ADR-0150 D3/D4, #31700, #32907; epic seat
+   * ruling R2-C] A name two holders hold — two packages (two namespaces may
+   * each bind one), or the platform (an owner-less registration) beside a
+   * package — is refused, `409 RESOURCE_CONFLICT` naming every holder, never
+   * answered with one of them, whichever registered last. [#32933] A disabled
+   * package is counted as a holder and never answered: a name only a disabled
+   * package holds answers nothing. A reader that knows its package resolves
+   * through {@link functionHoldersOf}.
    *
-   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   * @throws {PackageScopedNameRefusedError} for a name two holders hold.
    */
   resolveFunction(name: string): HookHandler | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -780,9 +783,10 @@ export class ObjectQL implements IObjectQLEngine {
    * it"; a caller that must also report what the call did (the automation
    * engine's `script` node, feeding the #4354 run summary) needs the
    * declaration, and reading it off the same registry keeps the two from
-   * drifting. Refused alike for a name two packages hold (above).
+   * drifting. Refused alike for a name two holders hold, and answers nothing
+   * alike for a name only a disabled package holds (above).
    *
-   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   * @throws {PackageScopedNameRefusedError} for a name two holders hold.
    */
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -799,7 +803,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `script` node resolves through it (#32073), and `bindHooksToEngine` reads
    * a hook's own package's entry from it. `resolveFunction` and
    * `resolveFunctionEntry` answer the one last-registered entry per name, and
-   * refuse a name two packages hold (#31700).
+   * refuse a name two holders hold (#31700, #32907).
    */
   functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
     // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -5304,8 +5308,14 @@ export class ObjectQL implements IObjectQLEngine {
    *   from a transport that inherited one it cannot honour (#18063) — the
    *   callback
    *   runs directly with the supplied base context (no rollback). This keeps
-   *   the API safe to call on drivers without ACID support (e.g. the
-   *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
+   *   the API safe to call on drivers that cannot roll back (a test double
+   *   with no `beginTransaction`, remote Turso, OData). The in-memory driver
+   *   is not one: it implements `beginTransaction` / `rollback` over a
+   *   snapshot of its whole store, so the callback runs inside a
+   *   transaction there, with no isolation: its rollback restores the whole
+   *   store to its state at begin, discarding what other callers wrote since
+   *   then too (unsafe with concurrent writers). The
+   *   degrade is DECLARED behaviour (ADR-0119 D1), not
    *   a bug to be discovered — but since v17 it is no longer *silent*: the
    *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}),
    *   and a caller who cannot live with it says so with `opts.require: true`,

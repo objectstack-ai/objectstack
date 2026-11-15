@@ -6342,6 +6342,7 @@ export class RestServer {
             enforceAuth: (...a) => this.enforceAuth(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
             translateMetaItem: (...a) => this.translateMetaItem(...a),
+            resolveAuditService: (...a) => this.resolveAuditService(...a),
         };
         registerAnalyticsEndpoints.call(host, basePath);
     }

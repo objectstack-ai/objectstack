@@ -47,6 +47,7 @@ import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
 import { publishAuthState } from './i18nSession';
 import { FaviconSync } from './components/FaviconSync';
 import { RootLandingRedirect } from './components/RootLandingRedirect';
+import { LinkRefusalNotice } from './components/LinkRefusalNotice';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { studioRoutes } from './components/StudioRoute';
 import { SetupRoute } from './components/SetupRoute';
@@ -275,6 +276,8 @@ export function App() {
           screen indefinitely, so the only way out was the × . The toaster's
           4s default was never wrong; it just never got to run. */}
       <ConsoleToaster />
+      {/* After the toaster, so it is listening when a held link refusal is shown. */}
+      <LinkRefusalNotice />
       <MetadataHmrReloader />
       <BrowserRouter basename={BASENAME}>
         <FaviconSync />

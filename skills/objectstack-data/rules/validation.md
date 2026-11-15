@@ -75,9 +75,6 @@ condition: P`record.amount != null && record.amount < 0`
 
 // Require field when another field has value
 condition: P`record.status == 'approved' && isBlank(record.approver_id)`
-
-// Date range validation
-condition: P`record.start_date != null && record.end_date != null && record.end_date < record.start_date`
 ```
 
 > On **insert**, an optional field omitted from the payload reads as `null`
@@ -246,8 +243,9 @@ With an `otherwise` branch:
 
 Hitting another object or running arbitrary code is **not** a validation type.
 Implement it as a `beforeInsert` / `beforeUpdate` lifecycle hook whose `body`
-throws on failure. A `body` has no outbound HTTP: an external-API check goes
-through a Connector recipe ([data-hooks.md](../references/data-hooks.md#capabilities--the-complete-list)).
+throws a [declared code](../references/data-hooks.md#declared-refusals-refusals).
+A `body` has no outbound HTTP: an external-API check goes through a Connector
+recipe ([data-hooks.md](../references/data-hooks.md#capabilities--the-complete-list)).
 
 <!-- os:check -->
 ```typescript
@@ -257,12 +255,13 @@ const taxIdCheck = defineHook({
   name: 'crm_tax_id_blocklist_check',
   object: 'account',
   events: ['beforeInsert', 'beforeUpdate'],
+  refusals: { TAX_ID_BLOCKED: { message: 'This tax ID is blocked.' } },
   body: {
     language: 'js',
     source: `
       if (!ctx.input.tax_id) return;
       const hit = await ctx.api.object('blocked_tax_id').findOne({ where: { tax_id: ctx.input.tax_id } });
-      if (hit) throw new Error('Tax ID is blocked');
+      if (hit) throw Object.assign(new Error(), { code: 'TAX_ID_BLOCKED' });
     `,
     capabilities: ['api.read'],
   },

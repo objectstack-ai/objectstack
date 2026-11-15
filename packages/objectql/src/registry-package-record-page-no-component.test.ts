@@ -67,7 +67,7 @@ afterEach(async () => {
 });
 
 describe('a package carrying a full record page that places no component (#32434)', () => {
-  it('a release artifact handed whole is refused at the page\'s `regions`, with the parse\'s sentence, and nothing registers', async () => {
+  it('a release artifact handed whole is refused at the page\'s `regions`, ending on the parse\'s sentence, and nothing registers', async () => {
     const { registry, register } = await boot();
     const err = await register({ packages: [{ manifest: body() }] });
     expect(err, 'the artifact was refused').toBeDefined();
@@ -75,6 +75,11 @@ describe('a package carrying a full record page that places no component (#32434
     expect(err!.message).toContain('`packages[0]`');
     expect(err!.message).toContain('manifest.pages.0.regions');
     expect(err!.message).toContain('This record page places no component in its `regions`, so every record of its object would open on a blank detail panel');
+    // The entry is wrapped correctly and only its page is refused, so the
+    // refusal ends on the page's sentence: no advice about the wrapper or
+    // about glob patterns follows it to point the author away from the page.
+    expect(err!.message).not.toContain('wrap an inlined body as');
+    expect(err!.message).not.toContain('glob patterns');
     expect(registry.getPackage(PKG)).toBeUndefined();
   });
 

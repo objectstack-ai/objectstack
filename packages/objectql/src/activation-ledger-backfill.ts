@@ -158,13 +158,52 @@ async function previewOnOneShotBoot(
     return undefined;
   }
   if (report.bound.length > 0) {
+    const packageLess = packageLessRowCount(report);
+    const kept = packageLess - report.bound.length;
     logger.info(
-      `[ObjectQLPlugin] activation ledger: ${report.bound.length} row(s) name no package, and the next served boot ` +
-        'gives each the package that holds its item (ADR-0150 D8); this one-shot boot writes none — ' +
-        `${report.bound.map((r) => `${describeRow(r)} → ${r.packageId}`).join(', ')}.`,
+      `[ObjectQLPlugin] activation ledger: ${packageLess} row(s) name no package, and the next served boot gives ` +
+        `${report.bound.length} of them the package that holds its item (ADR-0150 D8); this one-shot boot writes ` +
+        `none — ${report.bound.map((r) => `${describeRow(r)} → ${r.packageId}`).join(', ')}.` +
+        (kept > 0 ? ` The other ${kept} keep naming none: ${describeKeptRows(report)}.` : ''),
     );
   }
   return report;
+}
+
+/**
+ * Every row the run read that names no package: the rows it binds and every
+ * row it leaves as it is, an item with more than one row counted by each of
+ * its package-less rows. The preview's "N row(s) name no package" is this
+ * number, never the bound count alone.
+ */
+export function packageLessRowCount(report: ActivationLedgerBackfillReport): number {
+  const duplicated = report.duplicated.reduce(
+    (n, d) => n + d.rows.filter((r) => r.packageId === undefined).length,
+    0,
+  );
+  return report.bound.length + report.ambiguous.length + report.unchanged.length + duplicated + report.failed.length;
+}
+
+/** Why each row the preview does not bind stays as it is, as counts by reason. */
+function describeKeptRows(report: ActivationLedgerBackfillReport): string {
+  const count = (reason: 'environment' | 'unheld' | 'unaddressed') =>
+    report.unchanged.filter((r) => r.reason === reason).length;
+  const duplicated = report.duplicated.reduce(
+    (n, d) => n + d.rows.filter((r) => r.packageId === undefined).length,
+    0,
+  );
+  const parts: Array<[number, string]> = [
+    [count('environment'), 'for an item the environment authored'],
+    [count('unheld'), 'for a name no package or environment item holds'],
+    [count('unaddressed'), 'for a type not addressed by package (a position, for one)'],
+    [report.ambiguous.length, 'for a name more than one package holds'],
+    [duplicated, 'for an item with more than one row'],
+    [report.failed.length, 'whose write failed'],
+  ];
+  return parts
+    .filter(([n]) => n > 0)
+    .map(([n, why]) => `${n} ${why}`)
+    .join(', ');
 }
 
 /**

@@ -9,7 +9,8 @@
  * by the admitted holder's.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import type { PackageScopedType } from '@objectstack/core';
 import { exactQualifierItem, judgesPackageLessRows, packageLessRowOwners, pairRowOnAddress } from './protocol-exact-qualifier.js';
 
 const BASE = 'com.acme.alpha';
@@ -85,6 +86,17 @@ describe('[#31699] packageLessRowOwners', () => {
         expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'email_template', 'welcome')).toEqual(['a.x', 'b.y']);
         expect(packageLessRowOwners({ packageScopedHoldersOf: () => ['a.x', 'b.y'] }, 'action', 'approve')).toEqual(['a.x', 'b.y']);
         expect(judgesPackageLessRows({ readsByPackage: () => false }, 'function')).toBe(false);
+    });
+
+    // [#32716 N1] Checked by `tsc` (the package's `typecheck` compiles this
+    // file): under the type predicate `type is PackageScopedType`, the `false`
+    // branch below narrowed `type` to `never`, though a package-scoped type the
+    // registry does not read by package (`hook`) lands there.
+    it('[#32716 N1] judgesPackageLessRows is a plain boolean: a package-scoped type it does not judge keeps its type in the false branch (BASE: never)', () => {
+        const type = 'hook' as PackageScopedType;
+        if (judgesPackageLessRows({ readsByPackage: () => false }, type)) throw new Error('hook is not judged here');
+        expectTypeOf(type).toEqualTypeOf<PackageScopedType>();
+        expect(type).toBe('hook');
     });
 });
 

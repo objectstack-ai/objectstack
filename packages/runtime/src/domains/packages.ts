@@ -648,6 +648,12 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  * someone else's success, so it runs only on a success the producer NAMES.
  *
  * - `published` — the drafts landed; the package is live and becomes visible.
+ * - `published_unregistered` — the drafts landed exactly as on `published`,
+ *   but the runtime registry refused an object among them (#33277), which
+ *   `unregistered[]` names. Kept in the list on purpose (contract review of
+ *   PR #33528): the drafts are live, the flip concerns the package's apps, and
+ *   dropping it would hide the parts that are served while the refused object
+ *   stays unserved either way.
  * - `nothing_to_publish` — kept on purpose: for a materialized (additive)
  *   build there are no drafts, and this flip IS the publish (ADR-0045 §3).
  *
@@ -659,6 +665,7 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  */
 const PUBLISH_OUTCOMES_THAT_FLIP: ReadonlySet<unknown> = new Set<PublishPackageDraftsResponse['outcome']>([
     'published',
+    'published_unregistered',
     'nothing_to_publish',
 ]);
 
@@ -919,6 +926,63 @@ async function writePackageStateAfterChange(
 async function summaryRefreshSettled(engine: unknown): Promise<void> {
     const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
     if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
+}
+
+/**
+ * [#33302] Announce a package the install door (`POST /packages`) or the
+ * enable door (`PATCH /packages/:id/enable`) has just put into service as
+ * `metadata:reloaded`, the platform's one post-boot re-sync signal, in the
+ * spelling the marketplace install-local door announces a hot install with
+ * (`changed: ['app/ID']`, `announceHotInstall` in `@objectstack/cloud-connection`).
+ * Every subscriber then re-reads what the package holds without a restart, as
+ * it does for that door: `plugin-security` carries the holders of the
+ * positions the package renamed (`renamedFrom`), the automation engine
+ * re-syncs flows, and the authored hooks, actions and translations re-sync.
+ * An install that lands disabled (`enableOnInstall` false, or its switch
+ * refused) is announced too; harmless, since every subscriber reads through
+ * the registry's disabled filter and so binds nothing of it.
+ *
+ * [#33527] The two doors that take a package OUT of service announce through
+ * here too, in the same spelling the install-local door announces its
+ * uninstall with: the disable door (`PATCH /packages/:id/disable`) and the
+ * uninstall door (`DELETE /packages/:id`). Measured before they did: a
+ * disabled package's record-triggered flow stayed bound in the automation
+ * engine and kept running on every matching write until an unrelated reload
+ * or a restart, while `GET /meta/flow` no longer listed it; an uninstalled
+ * one was withdrawn only by the asynchronous metadata-mutation sync of its
+ * deleted rows, after the door had answered. The same re-sync that binds a
+ * package's flows withdraws them once the registry no longer serves it.
+ *
+ * Called only after the registry write has landed, so a subscriber reading the
+ * registry finds the package there (a scope of `app/ID` names a package the
+ * registry holds NOW), or, for a withdrawal, finds it disabled or gone. Never
+ * throws: the registry change is made and answered either way, so a failed
+ * re-sync is a FUNCTIONAL degradation, said once at `warn` with the restart
+ * that repairs it — the level the publish-drafts door and the install-local
+ * door use for the same announce.
+ */
+async function announcePackageReload(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    id: string,
+    door: 'installed' | 'enabled' | 'disabled' | 'uninstalled',
+): Promise<void> {
+    try {
+        await deps.announceKernelEvent(context, 'metadata:reloaded', { changed: [`app/${id}`] });
+    } catch (e: any) {
+        const kept = door === 'disabled' || door === 'uninstalled'
+            ? 'keep serving what they read of it until this process restarts: its record-triggered and scheduled '
+                + 'flows stay armed and keep running, and its authored hooks, actions and translations are not '
+                + 're-synced.'
+            : 'keep their earlier view of it until this process restarts: holders of the positions it renamed stay '
+                + 'on the old names, its record-triggered flows do not bind, and its authored hooks, actions and '
+                + 'translations are not re-synced.';
+        (deps.logger ?? console).warn(
+            `[Packages] package '${id}' is ${door}, but the 'metadata:reloaded' announce FAILED — boot-cached consumers `
+            + `${kept} Nothing retries this announce; restart the process to rebuild every subscriber from storage. `
+            + `Cause: ${e?.message ?? String(e)}`,
+        );
+    }
 }
 
 /**
@@ -2736,6 +2800,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } catch (err) {
                 console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
             }
+            // [#33302] The install has landed in the registry (the row this
+            // door returns), so announce it the way the marketplace
+            // install-local door announces a hot install. On BOTH answers
+            // below: a lifecycle refusal refuses the `enableOnInstall` switch
+            // only, never the install, whose row is already served.
+            await announcePackageReload(deps, _context, pkgId, 'installed');
             if (installLifecycleRefusal !== undefined) {
                 return {
                     handled: true,
@@ -2795,9 +2865,22 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'enabled');
                 console.warn('[handlePackages] failed to persist enable state', { id, error: (err as Error)?.message });
             }
+            // [#33302] Whether this enable puts the package back into service,
+            // read by the registry's own predicate before it switches (the one
+            // `enablePackage` asks before telling its enable listeners). The
+            // registry view the contract declares does not carry it; a registry
+            // that cannot say is announced to, since every subscriber is
+            // idempotent.
+            const isPackageDisabled = (registry as { isPackageDisabled?: (packageId: string) => boolean }).isPackageDisabled;
+            const wasDisabled = typeof isPackageDisabled !== 'function' || isPackageDisabled.call(registry, id) === true;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             await summaryRefreshSettled(qlService);
+            // [#33302] A disabled package's positions, flows and other items
+            // serve again from here on: announce it, as the install door does.
+            // An enable of a package already enabled changes nothing served,
+            // so it announces nothing.
+            if (wasDisabled) await announcePackageReload(deps, _context, id, 'enabled');
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -2859,8 +2942,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'disabled');
                 console.warn('[handlePackages] failed to persist disable state', { id, error: (err as Error)?.message });
             }
+            // [#33527] Whether this disable takes the package out of service,
+            // read by the registry's own predicate before it switches — the
+            // enable door's reading, mirrored. A registry that cannot say is
+            // announced to, since every subscriber is idempotent.
+            const isPackageDisabled = (registry as { isPackageDisabled?: (packageId: string) => boolean }).isPackageDisabled;
+            const wasEnabled = typeof isPackageDisabled !== 'function' || isPackageDisabled.call(registry, id) !== true;
             const pkg = registry.disablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#33527] The registry no longer serves the package's flows and
+            // other items, but a subscriber that bound them keeps them until it
+            // re-reads: announce the withdrawal, as the install-local door
+            // announces an uninstall. A disable of a package already disabled
+            // changes nothing served, so it announces nothing.
+            if (wasEnabled) await announcePackageReload(deps, _context, id, 'disabled');
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -4117,6 +4212,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
                 }
             }
+
+            // [#33527] LAST of the withdrawal, after the registry's uninstall
+            // and the verb's cleanups, as the install-local door announces its
+            // uninstall: a subscriber that bound the package's flows and other
+            // items re-reads a registry that no longer has them, before this
+            // door answers. Whatever the answer below, partial included: the
+            // package left the running registry either way. Not when the
+            // registry kept it (refused, or never held it): a re-sync would
+            // only read back what it serves.
+            if (registryRemoved) await announcePackageReload(deps, _context, id, 'uninstalled');
 
             const deletedCount = persisted?.deletedCount ?? 0;
             const failedCount = persisted?.failedCount ?? 0;

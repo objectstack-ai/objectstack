@@ -10,6 +10,7 @@ import { loadConfig, bundleConfigModule } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { handHostCryptoToAppAuditPlugin } from '../utils/app-audit-plugin-host-crypto.js';
 import { mountsAiServicePlugin, resolveAiServiceLoad, resolveOptionalPluginLoad } from '../utils/ai-service-auto-inject.js';
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
@@ -4978,6 +4979,17 @@ export default class Serve extends Command {
       // got that far), for `refuseUnloadedCryptoProviderPlugins` below.
       const unloadedStackPlugins: UnloadedStackPlugin[] = [];
       if (plugins.length > 0) {
+        // [ADR-0154 D2, D6; seat ruling 6884540128 item 3] The class an app's
+        // own AuditPlugin is judged by, loaded as this host loads it: only an
+        // instance of it is handed the host's crypto provider below, never a
+        // plugin that merely carries its name. Optional, as at 5d.
+        let RealAuditPlugin: typeof import('@objectstack/plugin-audit').AuditPlugin | undefined;
+        try {
+          const auditPkg = '@objectstack/plugin-audit';
+          ({ AuditPlugin: RealAuditPlugin } = await import(/* webpackIgnore: true */ auditPkg));
+        } catch {
+          RealAuditPlugin = undefined;
+        }
         let index = -1;
         for (const plugin of plugins) {
           index += 1;
@@ -5014,6 +5026,14 @@ export default class Serve extends Command {
             // declared contract (`packages/core/src/plugin-registration.ts`),
             // with a `warn` naming both versions. That is how an app supplies
             // options to a plugin this CLI mounts without them.
+            //
+            // [ADR-0154 D2, D6; seat ruling 6884540128 item 3] An app's own
+            // AuditPlugin composed with no crypto provider is handed the
+            // host's — the same provider function, and the same one-shot
+            // posture, as the instance at 5d and the `requires: ['audit']`
+            // resolver — so superseding the CLI's instance does not leave the
+            // sealed objects unsealed. An explicit provider is never replaced.
+            handHostCryptoToAppAuditPlugin(pluginToLoad, RealAuditPlugin, () => hostCrypto?.provider, !migrateAndExit);
             await kernel.use(pluginToLoad);
             stackMountedPlugins.push(pluginToLoad);
             const pluginName = plugin.name || plugin.constructor?.name || 'unnamed';
@@ -5387,6 +5407,9 @@ export default class Serve extends Command {
         const localCryptoProvider = deferredLocalCryptoProvider();
         hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());
         // ⛔ Not `trackPlugin`ed: it is the host's own seam, not a capability.
+        // Mounted BEFORE the capability resolver below, so its `kernel:ready`
+        // hook hands the data engine the provider before the webhook
+        // dispatcher's hook arms (`createHostCryptoProvider`).
         await kernel.use(hostCrypto.plugin);
       } catch (cryptoErr: unknown) {
         // Reached only when the settings package (which ships the local
@@ -5948,7 +5971,9 @@ export default class Serve extends Command {
       // objectql's `secret` field type encrypts on write to `sys_secret`
       // and fails closed when no ICryptoProvider is registered. objectql
       // must NOT depend on a crypto implementation (layering), so the
-      // host injects one here: its ONE crypto provider (`hostCrypto`, composed
+      // host injects one — at `kernel:ready`, from the host plugin's hook
+      // (`createHostCryptoProvider`), and this block confirms that choice once
+      // the boot is over: its ONE crypto provider (`hostCrypto`, composed
       // before the capability resolver), which the datasource binder and the
       // default settings service already hold. That is the provider a plugin
       // registered as CRYPTO_PROVIDER_SERVICE during init (a KMS/Vault one),
@@ -5976,7 +6001,11 @@ export default class Serve extends Command {
           // Let that error be loud: secret writes must not proceed under an
           // unstable key.
           hostCrypto.provider.confirm();
-          dataEngine.setCryptoProvider(hostCrypto.provider);
+          // The host plugin's `kernel:ready` hook already handed this engine
+          // the provider, at the choice, so the webhook dispatcher armed after
+          // it opens its signing secrets (`createHostCryptoProvider`). Handed
+          // here only when that hook did not reach it.
+          if (hostCrypto.wiredEngine() !== dataEngine) dataEngine.setCryptoProvider(hostCrypto.provider);
           if (isDev) {
             printDiagnostic(
               chalk.dim(
@@ -6529,8 +6558,39 @@ export class HostCryptoProviderRefusal extends Error {
 /** The plugin context members {@link createHostCryptoProvider}'s plugin reads. */
 interface HostCryptoProviderContext {
   getServices(): Map<string, unknown>;
+  /** Throws for a name nothing registered (the kernel's own contract). */
+  getService?: (name: string) => unknown;
   getKernel?: () => { getState?: () => string } | undefined;
   hook(name: string, handler: () => Promise<void> | void): void;
+}
+
+/** A data engine that backs `secret` fields with a crypto provider (ObjectQL's `setCryptoProvider`). */
+interface SecretFieldEngine {
+  setCryptoProvider(provider: ICryptoProvider): void;
+}
+
+/**
+ * The data engine `os serve` hands the crypto provider: the service registered
+ * as `data`, else `objectql` — the lookup the post-start block makes — when it
+ * has `setCryptoProvider`. Feature-detected: an engine without the method keeps
+ * failing a secret write closed, as designed.
+ */
+function secretFieldEngineOf(ctx: HostCryptoProviderContext): SecretFieldEngine | undefined {
+  for (const name of ['data', 'objectql']) {
+    let service: unknown;
+    try {
+      service = ctx.getService?.(name);
+    } catch {
+      // Not registered under this name; the next one is asked.
+      continue;
+    }
+    if (service) {
+      return typeof (service as Partial<SecretFieldEngine>).setCryptoProvider === 'function'
+        ? (service as SecretFieldEngine)
+        : undefined;
+    }
+  }
+  return undefined;
 }
 
 /** What a value registered as {@link CRYPTO_PROVIDER_SERVICE} must carry, as callable members. */
@@ -6554,11 +6614,23 @@ function quotedNameList(names: readonly string[]): string {
  *   runs before every hook registered in a `start()` — the settings service's
  *   among them — so a production boot without a stable local key still stops
  *   at `kernel:ready`.
+ * - The same hook hands the data engine the provider, at the choice, so a
+ *   `secret` field opens from every later `kernel:ready` hook on. The webhook
+ *   dispatcher arms in one (plugin-webhooks), and it decrypts each
+ *   subscription's signing secret there: handed over after `runtime.start()`
+ *   instead, every event in between (an app's seed at `kernel:bootstrapped`, a
+ *   request once the port is open) was refused for nothing but boot order —
+ *   recorded as a dead, unsigned, never-redeliverable delivery. A plugin whose
+ *   `init()` runs after this plugin's registers its `kernel:ready` hook after
+ *   this one, so it runs after it: `run()` mounts this plugin before the
+ *   capability providers. `wiredEngine()` names the engine handed it.
  */
 export function createHostCryptoProvider(local: () => ICryptoProvider): {
   provider: HostCryptoProvider;
   plugin: { name: string; version: string; init(ctx: HostCryptoProviderContext): Promise<void> };
+  wiredEngine(): unknown;
 } {
+  let wired: SecretFieldEngine | undefined;
   let registry: { read(): unknown; initDone(): boolean } | undefined;
   let chosen: { provider: ICryptoProvider; source: HostCryptoProviderSource; registered: unknown } | undefined;
 
@@ -6639,11 +6711,18 @@ export function createHostCryptoProvider(local: () => ICryptoProvider): {
       ctx.hook('kernel:ready', async () => {
         ready = true;
         resolve();
+        // Handed over at the choice, not after `runtime.start()`: see the
+        // docblock. A refusal above stops the boot before anything is handed.
+        const engine = secretFieldEngineOf(ctx);
+        if (engine) {
+          engine.setCryptoProvider(provider);
+          wired = engine;
+        }
       });
     },
   };
 
-  return { provider, plugin };
+  return { provider, plugin, wiredEngine: () => wired };
 }
 
 /**

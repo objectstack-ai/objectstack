@@ -33,7 +33,7 @@ Part of #31699 (ADR-0150 child B, PR 3a: the storage half). The maintainer's rul
 
 **Declared limits.**
 
-- MySQL 8, upgraded databases: `driver-sql` reads the guard's functional key part as an expression, not as a partial guard, so the widening arm keeps the old key there. The old key keeps refusing what it refused, so an organization cannot connect a second package's instance of one name on such a database until `driver-sql` recognises the form. A database created fresh on MySQL 8 has the wide key and the guard and no old key. The permission-set grant's guard (#32164) shares this limit. MySQL before 8.0.13 and MariaDB before 10.3 build no form, keep the old key (or build it under the driver's generated name where it is missing) and say so at `error` each boot.
+- MySQL 8, upgraded databases: `driver-sql` reads the guard's functional key part as the partial unique it is, so the old key retires there as it does on PostgreSQL, as one safe `replace_unique_index` on the next sync that runs safe drift. A database created fresh on MySQL 8 has the wide key and the guard and no old key. MySQL before 8.0.13 and MariaDB before 10.3 build no form, keep the old key (or build it under the driver's generated name where it is missing) and say so at `error` each boot.
 - `driver-memory` builds no guard (no raw-SQL seam), as for the grant: a pin measures that its unique check treats a NULL package as distinct, so two package-less connections of one instance are admitted there.
 - The MySQL, MariaDB and real-mongod pins run in suites that run on `main` only, so they first run after this lands.
 

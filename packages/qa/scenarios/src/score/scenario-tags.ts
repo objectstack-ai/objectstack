@@ -394,6 +394,13 @@ function readPolicies(set: Bag | undefined, object: string): Bag[] {
  */
 const admitsEveryRow = (r: Bag): boolean => typeof r.using !== 'string' || r.using.trim() === '' || r.using.trim() === 'true';
 
+/**
+ * Whether the read policies that apply to a persona on an object narrow it on
+ * their own: at least one applies, and none admits every row. Whether each
+ * lowers to a filter is asked apart, before this (`rowSecurityGap`).
+ */
+const narrowsOnItsOwn = (policies: readonly Bag[]): boolean => policies.length > 0 && !policies.some(admitsEveryRow);
+
 function uniqueBy<T>(items: readonly T[], key: (t: T) => string): T[] {
   const seen = new Set<string>();
   return items.filter((t) => {
@@ -423,6 +430,11 @@ function scopedObjects(card: ScenarioArtifactCard): Map<string, string[]> {
  * `effectiveSharingModel`), a detail controlled by its parent — here only
  * when that master is itself kept so for the persona (ADR-0055: the detail
  * reads through it), or a read policy on the persona's own permission set.
+ * A detail takes the last route too: the engine ANDs the detail's own read
+ * policies with the filter it derives from the master (plugin-security's find
+ * path composes `computeRlsFilter` and `computeControlledByParentFilter` into
+ * one `$and`), so a detail they narrow is kept to the persona's rows whatever
+ * the master admits, and the master is followed only when they do not.
  * Whichever route, every read policy that applies there must lower to a query
  * filter: one that does not matches no row (`rlsPredicateEnforces`), so the
  * persona would see none of its own.
@@ -436,13 +448,14 @@ function rowSecurityGap(f: ArtifactFacts, ctx: TagCheckContext, persona: string,
   if (dead) return `the read policy ${String(dead.name)} on ${set} does not lower to a filter on ${object}, so it matches no row`;
   if (effectiveSharingModel(def) === 'private') return undefined;
   if (def.sharingModel === 'controlled_by_parent') {
+    if (narrowsOnItsOwn(policies)) return undefined;
     const master = controlledByParentMasterOf(def.fields);
     const target = master && isBag(def.fields) ? referenceTargetOf(def.fields[master.field]) : undefined;
     if (target === undefined) return `${object} is controlled by a parent it names no master of`;
     if ([...via, object].some((o) => norm(o) === norm(target))) return `${object} is controlled by a parent chain that loops back to ${target}`;
     return rowSecurityGap(f, ctx, persona, target, [...via, object]);
   }
-  if (policies.length === 0 || policies.some(admitsEveryRow)) return `no read policy on ${set} narrows ${object}`;
+  if (!narrowsOnItsOwn(policies)) return `no read policy on ${set} narrows ${object}`;
   return undefined;
 }
 
@@ -642,7 +655,7 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
           const unnarrowed = personas.filter((p) => {
             const name = personaSetName(ctx, p);
             const policies = readPolicies(f.permissionSets.find((ps) => ps.name === name), object);
-            return policies.length === 0 || policies.some(admitsEveryRow);
+            return !narrowsOnItsOwn(policies);
           });
           const sets = personas.map((p) => personaSetName(ctx, p)).join(', ');
           return check(

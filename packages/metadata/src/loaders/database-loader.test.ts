@@ -2124,7 +2124,7 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
-  /** [#31699 PR 2] The unbundled slotted types the boot pass reads: every one but `webhook`, which the registry the pass walks does not list. */
+  /** [#31699 PR 2, PR 3] The unbundled slotted types the boot pass reads: every one but `webhook` and `connector`, which the registry the pass walks does not list. */
   const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
@@ -2229,7 +2229,11 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     await seed('action', null, 2);
     const m = await bootPass(HOST);
     // [#32812] FROM `main` `25ee5076`: the host's key. TO: the bare slot.
-    expect(registryKeys(m, 'action')).toEqual(['helper']);
+    // [#32681] …beside ALPHA's own `account` key: the object-less row is not
+    // ALPHA's customization (ALPHA binds the name to `account`), so the plural
+    // read keeps both rows and the pass registers both, FROM the bare slot
+    // alone (the fold kept the row saved last).
+    expect(registryKeys(m, 'action')).toEqual([`${ALPHA}\u0000account\u0001helper`, 'helper']);
     expect(await bareAnswers(m)).toEqual(['env', 'env']);
   });
 
@@ -2484,28 +2488,29 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
 
   /**
    * [#31699 PR 2] `webhook` is slotted, but the pass registers none of its
-   * rows (`DEFAULT_METADATA_TYPE_REGISTRY` lists no `webhook`), so the case
+   * rows (`DEFAULT_METADATA_TYPE_REGISTRY` lists no `webhook`; nor any
+   * `connector`, slotted since #31699 PR 3), so the case
    * above, which asks for the row the pass registered, does not hold for it.
    * Its bare read is the loader's own: the package's row, in either save
    * order, on every host. FROM (`webhook` out of `PACKAGE_SLOTTED_STORE_TYPES`,
    * as on main): the row saved first, so `ALPHA` when the package-less row
    * was saved last and the package-less row when it was saved first.
    */
-  it('CONTROL webhook, slotted but not a type the pass reads, one package\'s row and a package-less row: the pass registers neither, and the bare read answers the package\'s row in either save order on every host (FROM the row saved first)', async () => {
-    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+  it.each(['webhook', 'connector'] as const)('CONTROL %s, slotted but not a type the pass reads, one package\'s row and a package-less row: the pass registers neither, and the bare read answers the package\'s row in either save order on every host (FROM the row saved first)', async (slotted) => {
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook' && type !== 'connector'));
     const seen: unknown[] = [];
     for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
       for (const hostPackage of [undefined, ALPHA, HOST]) {
         driver = createMockDriver();
         if (order === 'package-less row saved last') {
-          await seed('webhook', ALPHA, 1);
-          await seed('webhook', null, 2);
+          await seed(slotted, ALPHA, 1);
+          await seed(slotted, null, 2);
         } else {
-          await seed('webhook', null, 1);
-          await seed('webhook', ALPHA, 2);
+          await seed(slotted, null, 1);
+          await seed(slotted, ALPHA, 2);
         }
         const m = await bootPass(hostPackage);
-        seen.push([order, hostPackage ?? 'no host package', registryKeys(m, 'webhook'), await answer(m, 'webhook')]);
+        seen.push([order, hostPackage ?? 'no host package', registryKeys(m, slotted), await answer(m, slotted)]);
       }
     }
     expect(seen).toEqual(['package-less row saved last', 'package-less row saved first'].flatMap((order) =>
@@ -2797,9 +2802,9 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   });
 
   it('the types are taken from the tree', () => {
-    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook']));
+    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook', 'connector']));
     expect(UNBUNDLED).not.toContain('email_template');
-    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook' && type !== 'connector'));
   });
 
   it('CONTROL — webhook: the boot pass registers none of its rows, so a read stays the loader\'s, as before it was slotted', async () => {
@@ -4058,4 +4063,127 @@ describe('[#32680] the plural read takes a by-package name\'s bodies and package
       expect(await answer(m, type, 'helper', GAMMA)).toBeUndefined();
     });
   }
+});
+
+/**
+ * [#32681; seat ruling A on #32681, ADR-0150 D4] The unscoped plural read
+ * counts an action name's holders per `(object, name)` (`pluralEntryKeys`): a
+ * stored package-less row bound to an object no package binds the name to is
+ * the environment's own item and keeps an entry of its own, where it was
+ * folded into the name's one holder by name. So the boot priming pass
+ * registers both rows, and every read after the pass answers what it answers
+ * without it.
+ *
+ * BEFORE (measured on main `fc283d6d97`, same fixtures), with the
+ * package-less row saved last: the plural read handed on that row alone, the
+ * registry ended with the package-less key alone, and after the pass a read
+ * naming the holder answered the package-less row (ALPHA: the `contact` row;
+ * BETA: the `account` row) where the read without the pass answered the
+ * holder's own one. Saved first: the plural read handed on the holder's row
+ * alone, and the package-less row was in no registry slot. The CONTROLs
+ * answered as here.
+ */
+describe('[#32681] the plural read counts an action name\'s holders per (object, name): a package-less row on an object no package binds is the environment\'s own', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+
+  /** A binding of `approve`: its package (`null`: none) and its object (`null`: object-less). */
+  type Binding = readonly [packageId: string | null, objectName: string | null];
+  const labelOf = ([packageId, objectName]: Binding) => `${packageId ?? 'env'}@${objectName ?? 'global'}`;
+  /** A stored row of `approve`, bound by its columns, at `version`. */
+  const seed = (binding: Binding, version: number) =>
+    driver.create('sys_metadata', {
+      id: `approve_${labelOf(binding)}`, type: 'action', name: 'approve', state: 'active', version, checksum: `approve_${version}`,
+      source: 'database', package_id: binding[0], bundle_member: binding[1],
+      metadata: JSON.stringify({ name: 'approve', label: labelOf(binding), ...(binding[1] ? { objectName: binding[1] } : {}) }),
+    });
+  const cold = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** What a read answers: the body's label, or the refusal's code, status, reason and holders. */
+  const answer = async (m: MetadataManager, packageId?: string) => {
+    try {
+      return ((await m.get('action', 'approve', packageId)) as { label?: string } | undefined)?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
+    }
+  };
+  /** Every read: bare, naming ALPHA, naming BETA; and the listed labels. */
+  const reads = async (m: MetadataManager) => [
+    ...(await Promise.all([undefined, ALPHA, BETA].map((packageId) => answer(m, packageId)))),
+    ((await m.list('action')) as Array<{ label?: string }>).map((item) => item.label).sort(),
+  ];
+  /** The registry's keys of `approve`, spelled `PACKAGE|OBJECT>name`, sorted. */
+  const registryKeys = (m: MetadataManager) => [...(((m as any).registry.get('action') as Map<string, unknown> | undefined)?.keys() ?? [])]
+    .map((key) => key.replace(/\u0000/g, '|').replace(/\u0001/g, '>')).sort();
+  /** What the unscoped plural read hands on: `[package stamp, label]`, sorted. */
+  const plural = async () => ((await cold().loadMany('action')) as Array<{ _packageId?: string; label?: string }>)
+    .map((item) => [item._packageId ?? null, item.label]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  const MOVED: ReadonlyArray<[shape: string, holder: Binding, packageLess: Binding, readsAfter: unknown[], keys: string[]]> = [
+    ['mirror shape: ALPHA on account, a package-less row on contact', [ALPHA, 'account'], [null, 'contact'],
+      ['env@contact', `${ALPHA}@account`, 'env@contact', [`${ALPHA}@account`, 'env@contact']], [`${ALPHA}|account>approve`, 'contact>approve']],
+    ['single holder on another object: BETA on contact, a package-less row on account', [BETA, 'contact'], [null, 'account'],
+      ['env@account', 'env@account', `${BETA}@contact`, [`${BETA}@contact`, 'env@account']], [`${BETA}|contact>approve`, 'account>approve']],
+    ['ALPHA on account, an object-less package-less row', [ALPHA, 'account'], [null, null],
+      ['env@global', `${ALPHA}@account`, 'env@global', [`${ALPHA}@account`, 'env@global']], [`${ALPHA}|account>approve`, 'approve']],
+    ['ALPHA object-less, a package-less row on account', [ALPHA, null], [null, 'account'],
+      ['env@account', `${ALPHA}@global`, 'env@account', [`${ALPHA}@global`, 'env@account']], [`${ALPHA}|approve`, 'account>approve']],
+  ];
+  for (const [shape, holder, packageLess, readsAfter, keys] of MOVED) {
+    for (const [order, versions] of [['the package-less row saved last', [1, 2]], ['the package-less row saved first', [2, 1]]] as const) {
+      it(`${shape} (${order}): the plural read hands on both, the pass registers both, and every read after it answers what it answers without it`, async () => {
+        await seed(holder, versions[0]);
+        await seed(packageLess, versions[1]);
+        expect(await plural()).toEqual([[holder[0], labelOf(holder)], [null, labelOf(packageLess)]]);
+        const without = await reads(cold());
+        expect(without).toEqual(readsAfter);
+        const m = await bootPass();
+        expect(registryKeys(m)).toEqual([...keys].sort());
+        expect(await reads(m)).toEqual(without);
+        expect(driver.update).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  for (const [order, versions] of [['the package-less row saved last', [1, 2]], ['the package-less row saved first', [2, 1]]] as const) {
+    it(`CONTROL a name one package holds on one object: ALPHA on account and a package-less row on account (${order}) are one entry of the plural read, the one saved last, as before`, async () => {
+      await seed([ALPHA, 'account'], versions[0]);
+      await seed([null, 'account'], versions[1]);
+      const last = versions[1] > versions[0] ? [null, 'env@account'] : [ALPHA, `${ALPHA}@account`];
+      expect(await plural()).toEqual([last]);
+      const m = await bootPass();
+      expect(registryKeys(m)).toEqual([last[0] === null ? 'account>approve' : `${ALPHA}|account>approve`]);
+    });
+  }
+
+  it('CONTROL two packages on one object: ALPHA and BETA on account and a package-less row on account are three entries, a bare read is refused naming both and the environment, before and after the pass', async () => {
+    await seed([ALPHA, 'account'], 1);
+    await seed([BETA, 'account'], 2);
+    await seed([null, 'account'], 3);
+    expect(await plural()).toEqual([[ALPHA, `${ALPHA}@account`], [BETA, `${BETA}@account`], [null, 'env@account']]);
+    const without = await reads(cold());
+    expect(without).toEqual([
+      ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA, 'environment'], `${ALPHA}@account`, `${BETA}@account`,
+      [`${ALPHA}@account`, `${BETA}@account`, 'env@account'],
+    ]);
+    const m = await bootPass();
+    expect(registryKeys(m)).toEqual(['account>approve', `${ALPHA}|account>approve`, `${BETA}|account>approve`]);
+    expect(await reads(m)).toEqual(without);
+  });
 });

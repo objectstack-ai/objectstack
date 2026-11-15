@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AutomationEngine } from './engine.js';
 import { ObjectStoreSuspendedRunStore, type SuspendedRunStoreEngine } from './suspended-run-store.js';
 import type { RunRecord, SuspendedRun } from './engine.js';
@@ -1576,5 +1576,136 @@ describe('#20725 the parked-run read behind the §7.3 disable guard asks for the
         expect(thrown.status).toBe(409);
         expect(thrown.subflowCallers).toEqual(['vendor_process']);
         expect(thrown.message).toContain(`'${runId}'`);
+    });
+});
+
+// ─── The wait clock on the row (#32284) ──────────────────────────────────────
+//
+// `ExecutionLog.waitMs` is only as good as the row that carries the clock
+// across a restart: a screen flow's user typically answers long after the
+// process that parked the run is gone. So these pins drive the REAL engine
+// across fresh instances over one table and read the cells, as the
+// trigger-attribution and refusal groups above do: a mapper that never wrote a
+// column but happened to rebuild the value from memory would pass a
+// `loadTerminal` assertion and fail the cell one.
+describe('ObjectStoreSuspendedRunStore — the wait clock survives the restart (#32284)', () => {
+    const T0 = Date.parse('2026-11-14T09:00:00.000Z');
+    const advance = (ms: number) => vi.setSystemTime(Date.now() + ms);
+    const settle = () => new Promise((r) => setImmediate(r));
+
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(T0);
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    /** start → prepare (100 ms) → ask (pause) → apply (40 ms) → confirm (pause) → end, over `table`. */
+    function twoPauseEngine(table: ReturnType<typeof createFakeEngine>, options: { failFirstApply?: boolean } = {}) {
+        const e = new AutomationEngine(createTestLogger(), new ObjectStoreSuspendedRunStore(table, createTestLogger()));
+        e.registerNodeExecutor({
+            type: 'pause_node',
+            descriptor: PAUSE_NODE_DESCRIPTOR,
+            async execute(node) { return { success: true, suspend: true, correlation: `screen:${node.id}` }; },
+        });
+        let applies = 0;
+        e.registerNodeExecutor({
+            type: 'work',
+            async execute(node) {
+                advance(node.id === 'prepare' ? 100 : 40);
+                if (node.id === 'apply' && options.failFirstApply && ++applies === 1) {
+                    return { success: false, error: 'downstream row was locked' };
+                }
+                return { success: true };
+            },
+        });
+        e.registerFlow('two_pause_flow', {
+            name: 'two_pause_flow', label: 'Two Pause Flow', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'prepare', type: 'work', label: 'Prepare' },
+                { id: 'ask', type: 'pause_node', label: 'Ask' },
+                { id: 'apply', type: 'work', label: 'Apply' },
+                { id: 'confirm', type: 'pause_node', label: 'Confirm' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'prepare' },
+                { id: 'e2', source: 'prepare', target: 'ask' },
+                { id: 'e3', source: 'ask', target: 'apply' },
+                { id: 'e4', source: 'apply', target: 'confirm' },
+                { id: 'e5', source: 'confirm', target: 'end' },
+            ],
+        } as never);
+        return e;
+    }
+
+    it('writes active_ms on each paused row and the summed wait_ms on the terminal row, read back by a fresh engine', async () => {
+        const table = createFakeEngine();
+        const runId = (await twoPauseEngine(table).execute('two_pause_flow')).runId!;
+        expect(table.rows.get(runId)).toMatchObject({ status: 'paused', node_id: 'ask', active_ms: 100 });
+
+        advance(5_000);
+        expect((await twoPauseEngine(table).resume(runId)).status).toBe('paused');
+        // The clock written forward: 140 ms executed, 5 s waited.
+        expect(table.rows.get(runId)).toMatchObject({ status: 'paused', node_id: 'confirm', active_ms: 140 });
+
+        advance(30_000);
+        expect((await twoPauseEngine(table).resume(runId)).success).toBe(true);
+        await settle();
+
+        const terminal = [...table.rows.values()].find((r) => r.status === 'completed');
+        expect(terminal).toMatchObject({ duration_ms: 35_140, wait_ms: 35_000 });
+
+        // A process that never saw the run answers from the row alone.
+        const run = await twoPauseEngine(table).getRun(runId);
+        expect(run).toMatchObject({ status: 'completed', durationMs: 35_140, waitMs: 35_000 });
+    });
+
+    it('a stranded row keeps the consumed pause\'s clock, so a restore after a restart still sums every pause', async () => {
+        const table = createFakeEngine();
+        const runId = (await twoPauseEngine(table, { failFirstApply: true }).execute('two_pause_flow')).runId!;
+
+        advance(1_000);
+        expect((await twoPauseEngine(table, { failFirstApply: true }).resume(runId)).status).toBe('stranded');
+        await settle();
+        const stranded = [...table.rows.values()].find((r) => r.status === 'failed');
+        // `wait_ms` is the failed record's own; `active_ms` is the consumed pause's.
+        expect(stranded).toMatchObject({ duration_ms: 1_140, wait_ms: 1_000, active_ms: 100 });
+
+        advance(500);
+        // A fresh process: no journal, only the row — the restore reads the clock from it.
+        expect((await twoPauseEngine(table).restoreConsumedSuspension(runId)).restored).toBe(true);
+        expect(table.rows.get(runId)).toMatchObject({ status: 'paused', node_id: 'ask', active_ms: 100 });
+
+        advance(2_000);
+        expect((await twoPauseEngine(table).resume(runId)).status).toBe('paused');
+        advance(10_000);
+        expect((await twoPauseEngine(table).resume(runId)).success).toBe(true);
+        await settle();
+        const run = await twoPauseEngine(table).getRun(runId);
+        // Active: prepare 100 + the apply that landed 40. Wait: the first pause
+        // as the restore re-armed it (3 540 ms, the failed attempt and the
+        // stranded time included) plus the second pause (10 s).
+        expect(run).toMatchObject({ status: 'completed', durationMs: 13_680, waitMs: 13_540 });
+    });
+
+    it('a row written before the columns existed reads waitMs NOT RECORDED, never 0', async () => {
+        const table = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(table, createTestLogger());
+        await store.recordTerminal({
+            runId: 'legacy_run', flowName: 'two_pause_flow', status: 'completed',
+            startedAt: '2026-11-01T00:00:00.000Z', finishedAt: '2026-11-01T00:00:18.691Z', durationMs: 18_691,
+        });
+        const row = [...table.rows.values()][0];
+        delete row.wait_ms; // the column as an older schema left it: absent
+        const reread = await new ObjectStoreSuspendedRunStore(table, createTestLogger()).loadTerminal('legacy_run');
+        expect(reread?.durationMs).toBe(18_691);
+        expect(reread?.waitMs).toBeUndefined();
+
+        await store.save(baseRun()); // a paused row with no clock
+        expect(table.rows.get('run_abc')?.active_ms).toBeNull();
+        expect((await store.load('run_abc'))?.activeMs).toBeUndefined();
     });
 });

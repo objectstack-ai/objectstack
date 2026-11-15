@@ -113,6 +113,7 @@ const result = CheckpointSchema.parse(data);
 | **startedAt** | `string` | ✅ | Execution start timestamp |
 | **completedAt** | `string` | optional | Execution completion timestamp |
 | **durationMs** | `integer` | optional | Total execution duration in milliseconds |
+| **waitMs** | `integer` | optional | Total time the run spent suspended (waiting at a `screen`, `approval`, `wait` or other pausing node), summed over all its pauses, in milliseconds. Included in `durationMs`, which stays the total wall time, so the time spent executing is `durationMs - waitMs`. `0` on a run that never paused; on a `paused` entry, the wait up to the moment the entry was written. Absent when not recorded — a `missed` entry, or a run paused before this was tracked — which is not the same as zero. |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution context identity |
 | **tenantId** | `string` | optional | Tenant ID for multi-tenant isolation |
 
@@ -306,6 +307,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
 | **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |
 | **unmeasured** | `integer` | optional | Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect) |
+| **warnings** | `string[]` | optional | Advisory warnings the node's executions raised (`ExecutionStepLog.warnings`), distinct texts in first-seen order. A `success` node may carry them — e.g. a `notify` whose channel was refused, or a write whose requested fields the data engine stripped — so a node that partly did not do its job never reads as a clean success. Bounded per node like the rest of the summary: past the bound a final entry says how many distinct warnings were left out, and the run's step log holds each execution's own. Absent when no execution raised one |
 
 
 ---
@@ -339,6 +341,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
 | **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |
 | **unmeasured** | `integer` | optional | Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect) |
+| **warnings** | `string[]` | optional | Advisory warnings the node's executions raised (`ExecutionStepLog.warnings`), distinct texts in first-seen order. A `success` node may carry them — e.g. a `notify` whose channel was refused, or a write whose requested fields the data engine stripped — so a node that partly did not do its job never reads as a clean success. Bounded per node like the rest of the summary: past the bound a final entry says how many distinct warnings were left out, and the run's step log holds each execution's own. Absent when no execution raised one |
 
 ### Nested Shape: `FlowRunSummary.gates[number]`
 
