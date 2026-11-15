@@ -12955,6 +12955,9 @@ export function contractReviewVerdictLines(body) {
  *                               so the record fails CLOSED.
  *                 A delta record may also name what it closes by id alone
  *                 (`S1: closed.`), which mentions no grade.
+ *   securityTouching  the record's ONE `Security-touching:` line, three-valued
+ *                 (`contractReviewSecurityTouching` below) — the line the low-risk
+ *                 skills arm stands on, read by nobody else.
  *
  * Grammar measured on the records of PRs #33686, #33687, #33688 (both rounds),
  * #33711 (all three rounds), #33720, #33726 and #33736 (2026-11-15); nits are
@@ -13005,7 +13008,71 @@ export function contractReviewRecordReading(body) {
       } else if (!CONTRACT_REVIEW_GRADE_NEGATED.test(line.slice(0, mention.index))) unreadable.push(line.trim());
     }
   }
-  return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] } };
+  return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] }, securityTouching: contractReviewSecurityTouching(text) };
+}
+
+/**
+ * The key and the two values of the record's ONE machine line the LOW-RISK SKILLS ARM reads
+ * (`lowRiskArmVerdict`, `check-governed-merges.mjs`). `Security-touching: no` is the reviewer's
+ * statement that no changed hunk teaches permission, sharing, credential, token, authentication
+ * or other security behaviour — the teaching a path's name and a label cannot show; `yes` says
+ * one does. The arm stands on `no` alone.
+ */
+export const CONTRACT_REVIEW_SECURITY_TOUCHING_KEY = 'Security-touching';
+export const CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES = Object.freeze(['no', 'yes']);
+// A DECLARATION line: the key at the line's lead — behind a heading mark, quote, bullet or emphasis, inside
+// a code span, in any case, its two words joined by a hyphen, an underscore or blanks — then a colon.
+const CONTRACT_REVIEW_SECURITY_TOUCHING_LINE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + '`?[*_]{0,3}security[-_ \\t]*touching[*_`]{0,3}[ \\t]*[:：]', 'i');
+
+/**
+ * The record's `Security-touching:` line, read off the WHOLE comment like its `VERDICT:` lines:
+ *
+ *   missing     no declaration line at all — every record written before the line existed;
+ *   read        the one bare line, with its value (`no` or `yes`);
+ *   unreadable  anything else, with the reason.
+ *
+ * Every declaration line counts, fenced and quoted ones included, and exactly ONE may exist:
+ * outside any code fence (`FENCE_LINE`, `FENCE_CLOSE_LINE`) and any `>` quote, indented at most
+ * three spaces, and with its list bullet, bold and backticks stripped reading EXACTLY
+ * `Security-touching: no` or `Security-touching: yes`. So a second declaration (a quoted `no`
+ * beside the record's own `yes`), trailing words (`no — wording only`), another value, a
+ * near-miss key (`Security touching:`) and a fenced, quoted or code-indented line are each
+ * `unreadable` — the same strictness `readBareDeclaration` holds a PR body's `Clause-②:` line to.
+ *
+ * ⛔ Fail closed, in the one direction that matters: `missing`, `unreadable` and `yes` each
+ * keep the pull request at Tier H, and no reading here ever DEFAULTS to `no`. Pure.
+ */
+function contractReviewSecurityTouching(body) {
+  const key = CONTRACT_REVIEW_SECURITY_TOUCHING_KEY;
+  const hits = [];
+  let fence = null; // the OPEN fence — its character and run length — or null outside one
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (fence !== null) {
+      if (CONTRACT_REVIEW_SECURITY_TOUCHING_LINE.test(line)) hits.push({ line, fenced: true });
+      const c = FENCE_CLOSE_LINE.exec(line);
+      if (c !== null && c[1][0] === fence.ch && c[1].length >= fence.len) fence = null;
+      continue;
+    }
+    const f = FENCE_LINE.exec(line);
+    if (f !== null) {
+      fence = { ch: f[1][0], len: f[1].length };
+      continue;
+    }
+    if (CONTRACT_REVIEW_SECURITY_TOUCHING_LINE.test(line)) hits.push({ line, fenced: false });
+  }
+  if (hits.length === 0) return { state: 'missing' };
+  const unreadable = (reason) => ({ state: 'unreadable', reason });
+  // A quoted record line is comment text: flattened (no backtick, pipe or angle bracket survives) and cut.
+  const quote = (line) => `\`${String(line).replace(/[`|<>\r\n]+/g, ' ').trim().slice(0, 80)}\``;
+  if (hits.length > 1) return unreadable(`it carries ${hits.length} \`${key}:\` lines, and a record states exactly one`);
+  const [{ line, fenced }] = hits;
+  if (fenced) return unreadable(`its one \`${key}:\` line sits inside a code fence`);
+  if (/^[ \t]*>/.test(line)) return unreadable(`its one \`${key}:\` line is a quote (${quote(line)})`);
+  if (/^(?: {4,}| *\t)/.test(line)) return unreadable(`its one \`${key}:\` line is indented as code (${quote(line)})`);
+  const bare = line.replace(/^[ \t]*(?:[-*+][ \t]+)?/, '').replace(/\*\*|`/g, '').replace(/[ \t]+/g, ' ').trim();
+  const value = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.find((v) => bare === `${key}: ${v}`);
+  if (value === undefined) return unreadable(`its \`${key}:\` line reads ${quote(line)}, not exactly ${CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.map((v) => `\`${key}: ${v}\``).join(' or ')}`);
+  return { state: 'read', value };
 }
 
 // ---------------------------------------------------------------------------
@@ -25567,7 +25634,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // shadow a trusted FAIL, an approver's read, two lines and an inline word alone
   // no PASS, no binding UNREAD, the binding's four unloaded reasons and its clause
   // (two more, the real guard's predicate and set, run where the register loads).
-  'H43 hand-off timing': 88,
+  // 88 → 93: the record's `Security-touching:` line, the low-risk skills arm's machine line — the bare
+  // readings, the MISSING record, the unreadable shapes, the fence and reason pins, and the constants.
+  'H43 hand-off timing': 93,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
   'H70/H71 seat patrol': 30,
@@ -33062,7 +33131,14 @@ async function selfTest() {
   t43('#33604 S2 (review 6891926185): heading-led key, table cell, words before the key, a dash, a bare `FAIL.` and a second heading read FAIL', ['### VERDICT: FAIL', '## Verdict: FAIL', '| Verdict | FAIL |', 'Overall verdict: FAIL', 'Verdict — FAIL', 'FAIL.', '**FAIL.**', '## Contract review — FAIL', '| Verdict | PASS |'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,1,1,0');
   t43('#33604 r3 (review 6892305129): the state word must end the finding — `closed in part`, `Closed PRs …`, `none of …` stay open; `closed here.`, a closed bold title then a sentence, `closed;` close', ['S1 (should-fix): closed in part, still open for X', '**S2 (should-fix) — Closed PRs are still read as merged.**', '- should-fix: none of S1, S2 is fixed', 'S1 (should-fix): closed here.', '- **S1 (should-fix): closed.** Every knock names a key.', 'S1 (should-fix): closed;'].map(grades43).join(), 'S1:should-fix|0,S2:should-fix|0,-:should-fix|0,|0,|0,|0');
   t43('#33604 r3 N2: `Verdict: FAILED`, `Verdict is FAIL`, `Verdict (delta): FAIL`, `| FAIL | Verdict |`, `FAIL!` and a late FAIL in a heading tail read FAIL', ['Verdict: FAILED', 'Verdict is FAIL', 'Verdict (delta): FAIL', '| FAIL | Verdict |', 'FAIL!', '## Contract review — PASS withdrawn, FAIL', 'The verdict is PASS.'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,0');
-  t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]}}');
+  t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]},"securityTouching":{"state":"missing"}}');
+  // The record's `Security-touching:` line — the low-risk skills arm's machine line, three-valued and fail closed.
+  const st43 = (prose) => { const r = read43(prose).securityTouching; return r.state === 'read' ? `read:${r.value}` : r.state; };
+  t43('Security-touching: the one bare line reads its value — `no`, `yes`, and behind a bullet, bold or a code span', ['Security-touching: no', 'Security-touching: yes', '- Security-touching: no', '**Security-touching:** no', '- **Security-touching**: `no`', '`Security-touching: no`', '   Security-touching:  no'].map(st43).join(), 'read:no,read:yes,read:no,read:no,read:no,read:no,read:no');
+  t43('⛔ Security-touching: a record with no such line reads MISSING, never `no` — every record written before the line existed, a mention in prose included', [st43('① Derived judgments: none.'), st43('The record carries no line; the seat reads `Security-touching: no` as the arm asks.'), contractReviewRecordReading(PASS43).securityTouching.state].join(), 'missing,missing,missing');
+  t43('⛔ Security-touching: two lines, a quoted, fenced or code-indented line, trailing words, another value and a near-miss key are each UNREADABLE', ['Security-touching: no\nSecurity-touching: no', '> Security-touching: no\n\nSecurity-touching: yes', '> Security-touching: no', '```\nSecurity-touching: no\n```', '~~~text\nSecurity-touching: no', '    Security-touching: no', '\tSecurity-touching: no', 'Security-touching: no — wording only', 'Security-touching: none', 'Security-touching: No', 'Security-touching:', 'security-touching: no', 'Security touching: no', '### Security-touching: no', 'Security-touching：no'].map(st43).join(), Array(15).fill('unreadable').join());
+  t43('⛔ Security-touching: a fenced `no` beside the record\'s own bare `yes` is two declarations (unreadable); a fence closed before the line leaves it read; the reasons name the shape', [st43('```\nSecurity-touching: no\n```\nSecurity-touching: yes'), st43('```\nsome code\n```\nSecurity-touching: no'), /2 `Security-touching:` lines/.test(read43('Security-touching: no\n> Security-touching: no').securityTouching.reason), /inside a code fence/.test(read43('```\nSecurity-touching: no\n```').securityTouching.reason), /is a quote/.test(read43('> Security-touching: no').securityTouching.reason), /not exactly `Security-touching: no` or `Security-touching: yes`/.test(read43('Security-touching: maybe').securityTouching.reason)].join(), 'unreadable,read:no,true,true,true,true');
+  t43('Security-touching: the key and its two values are this file\'s constants, and the line is read above the heading too (the whole comment, like `VERDICT:`)', [CONTRACT_REVIEW_SECURITY_TOUCHING_KEY, CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join('+'), Object.isFrozen(CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES), contractReviewRecordReading(`Security-touching: no\n\n${PASS43}`).securityTouching.value, contractReviewRecordReading('Security-touching: no') === null].join(), 'Security-touching,no+yes,true,no,true');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.
   t43('H43 row: ⛔ BEFORE the hand-off, nobody asked is NOT a half state — quiet', h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], BEFORE43), null);
