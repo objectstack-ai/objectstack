@@ -209,6 +209,7 @@ import {
   demotedDeclaredCode,
   INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
+import { PackageScopedNameRefusedError, packageScopedRefusalMessage } from '@objectstack/core';
 import { registerPackageRoutes } from './package-routes.js';
 
 const PKGS = '/api/v1/packages';
@@ -703,5 +704,47 @@ describe('[#12405] the wire `declaredCode` IS the shared rule, not a second copy
     const answers = SHAPES.map((s) => demotedDeclaredCode(resolveThrownHttpError(s)));
     expect(answers.filter((a) => a !== undefined).length).toBeGreaterThan(2);
     expect(answers.filter((a) => a === undefined).length).toBeGreaterThan(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. A census door: a package-scoped refusal names its candidates
+// ---------------------------------------------------------------------------
+
+/**
+ * [#32744, ADR-0150 D5] This door forwards the resolver's `details`, so a
+ * package-scoped refusal (core's `PackageScopedNameRefusedError`) answers
+ * `details.candidates` here, beside the status and code it answered before.
+ * Pinned at the one production seam (**Seam census** above).
+ */
+describe('[#32744] a package-scoped refusal names its candidates at this door', () => {
+  const CANDIDATES = [
+    { kind: 'package' as const, packageId: 'com.acme.crm' },
+    { kind: 'package' as const, packageId: 'com.acme.sales' },
+  ];
+  const BASE = {
+    status: 'refused' as const,
+    reason: 'ambiguous-in-environment' as const,
+    type: 'permission' as const,
+    name: 'sales_rep',
+    callerPackageId: null,
+    candidates: CANDIDATES,
+  };
+  const REFUSAL = { ...BASE, message: packageScopedRefusalMessage(BASE) };
+
+  it('POST /packages/publish: 409 RESOURCE_CONFLICT with details.candidates', async () => {
+    const publish = vi.fn(async () => { throw new PackageScopedNameRefusedError(REFUSAL); });
+    const captured = await drive(
+      mount({ publish }),
+      'POST',
+      `${PKGS}/publish`,
+      { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
+    );
+
+    expect(publish.mock.calls.length, 'the throwing seam was never called').toBe(1);
+    const error = expectDeclaredEnvelope(captured);
+    expect(captured.status).toBe(409);
+    expect(error.code).toBe('RESOURCE_CONFLICT');
+    expect(error.details).toEqual({ candidates: CANDIDATES });
   });
 });

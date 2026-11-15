@@ -8,6 +8,10 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { PackageScopedNameRefusedError, packageScopedRefusalMessage } from '@objectstack/core';
+// Paid during collection, not inside a case's clocked window: the route
+// source reaches `@objectstack/objectql` through a dynamic import.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -401,5 +405,101 @@ describe('POST {basePath}/batch — cross-object transactional batch', () => {
     const res = await post(route, { operations: [{ object: 'account', action: 'frobnicate', data: {} }] });
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('VALIDATION_FAILED');
+  });
+});
+
+// ── a package-scoped refusal's candidates (ADR-0150 D5) ─────────────────────
+
+/**
+ * [#32744] The cross-object batch answers a package-scoped refusal (core's
+ * `PackageScopedNameRefusedError`, or an error of its shape that crossed a
+ * second copy of `@objectstack/core`) as every `/data` whole-request door
+ * does: `409 RESOURCE_CONFLICT`, its sentence and code, plus
+ * `details.candidates`. The member is answered only when every element of the
+ * refusal's list is a holder of one of core's four kinds.
+ */
+describe('POST {basePath}/batch — a package-scoped refusal names its candidates', () => {
+  const CANDIDATES = [
+    { kind: 'package' as const, packageId: 'com.acme.crm' },
+    { kind: 'package' as const, packageId: 'com.acme.sales' },
+  ];
+  const BASE = {
+    status: 'refused' as const,
+    reason: 'ambiguous-in-environment' as const,
+    type: 'permission' as const,
+    name: 'sales_rep',
+    callerPackageId: null,
+    candidates: CANDIDATES,
+  };
+  const REFUSAL = { ...BASE, message: packageScopedRefusalMessage(BASE) };
+
+  /** A refusal of the class's shape, carrying `candidates` as given. */
+  const shaped = (candidates: unknown): Error => Object.assign(new Error(REFUSAL.message), {
+    code: 'RESOURCE_CONFLICT',
+    status: 409,
+    refusal: { ...REFUSAL, candidates },
+  });
+
+  /** Drive one create or update op whose engine call throws `error`. */
+  async function refuse(error: unknown, action: 'create' | 'update' = 'create') {
+    const fail = vi.fn(async () => { throw error; });
+    const ql = makeQl(action === 'create' ? { insert: fail } : { update: fail });
+    const { route } = buildServer({ ql });
+    const op = action === 'create'
+      ? { object: 'account', action: 'create', data: { name: 'Acme' } }
+      : { object: 'account', action: 'update', id: 'a1', data: { name: 'Acme' } };
+    const res = await post(route, { operations: [op] });
+    expect(fail, 'the throwing engine call was never reached').toHaveBeenCalledTimes(1);
+    return res;
+  }
+
+  it('the class, thrown by a create op: 409 RESOURCE_CONFLICT with details.candidates', async () => {
+    const res = await refuse(new PackageScopedNameRefusedError(REFUSAL));
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES } });
+  });
+
+  it('the class, thrown by an update op: the same answer', async () => {
+    const res = await refuse(new PackageScopedNameRefusedError(REFUSAL), 'update');
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES } });
+  });
+
+  it('a plain error of the class\'s shape: the same answer', async () => {
+    const res = await refuse(shaped(CANDIDATES));
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES } });
+  });
+
+  it('a holder of each of the four kinds is answered as it was thrown', async () => {
+    const every = [
+      { kind: 'package', packageId: 'com.acme.crm' },
+      { kind: 'environment' },
+      { kind: 'platform' },
+      { kind: 'residual', ownerId: 'com.acme.stack' },
+    ];
+    const res = await refuse(shaped(every));
+    expect(res.statusCode).toBe(409);
+    expect(res.body.details).toEqual({ candidates: every });
+  });
+
+  for (const [name, candidates] of [
+    ['a package holder with no packageId', [{ kind: 'package' }]],
+    ['a bare string', ['com.acme.crm']],
+    ['a kind that is no package-scoped holder', [{ kind: 'built-in' }]],
+    ['one good holder beside a null', [{ kind: 'package', packageId: 'com.acme.crm' }, null]],
+    ['a residual holder with a numeric ownerId', [{ kind: 'residual', ownerId: 7 }]],
+  ] as const) {
+    it(`a list holding ${name}: 409 RESOURCE_CONFLICT with no details`, async () => {
+      const res = await refuse(shaped(candidates));
+      expect(res.statusCode).toBe(409);
+      expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT' });
+    });
+  }
+
+  it('CONTROL: a RESOURCE_CONFLICT thrown with no refusal carries no details', async () => {
+    const res = await refuse(Object.assign(new Error('The record is in conflict.'), { code: 'RESOURCE_CONFLICT', status: 409 }));
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'The record is in conflict.', code: 'RESOURCE_CONFLICT' });
   });
 });

@@ -601,3 +601,21 @@ export function isProbedOperation(card: Pick<ScenarioCard, 'run'>, operationId: 
   const op = card.run.operations.find((o) => o.id === operationId);
   return op !== undefined && op.outcome.kind === 'refused' && op.kind !== 'delete';
 }
+
+/**
+ * The operations the runner may probe for the build's denial: every `applied`
+ * create or update (#33596). The card gives the acting persona that write, so
+ * when the agent's own write met 403 `PERMISSION_DENIED` and nothing was
+ * written, the runner sends the declared write itself as that persona; a
+ * probe the door denies as well makes the operation not measured, charged to
+ * the build (`buildDeniesWrite`). It probes only then: a probe after a write
+ * that landed would apply it twice and shift the rows later operations read.
+ * An `applied` `delete` is not probed (the runner sends no delete of its own;
+ * no card declares one today), and neither is a `pending_confirmation` one:
+ * the MCP delete door asks for confirmation before it checks permission, so a
+ * 403 there follows the agent's own `confirm: true` and stays the agent's.
+ */
+export function probesBuildDenial(card: Pick<ScenarioCard, 'run'>, operationId: string): boolean {
+  const op = card.run.operations.find((o) => o.id === operationId);
+  return op !== undefined && op.outcome.kind === 'applied' && op.kind !== 'delete';
+}
