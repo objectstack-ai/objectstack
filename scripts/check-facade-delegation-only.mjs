@@ -194,6 +194,7 @@ const DECLARED_WATCH_HINTS = [
   'packages/metadata-protocol/src/protocol.ts',
   'packages/objectql/src/engine.ts',
   'packages/drivers/driver-sql/src/sql-driver.ts',
+  'packages/objectql/src/registry.ts',
 ];
 
 const CARD_REF = /^#[1-9][0-9]*$/;
