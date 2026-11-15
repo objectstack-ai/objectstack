@@ -205,19 +205,21 @@ describe('[#27681] run_action: the flagged sys_* action runs through every gate 
         expect(executeAction).not.toHaveBeenCalled();
     });
 
-    it('the HITL confirmation gate refuses an unconfirmed destructive call (428), and runs the confirmed one', async () => {
+    // [#33690] The caller's own `confirm: true` never counts: with no
+    // pending-confirmation service the call is refused either way.
+    it('the HITL confirmation gate refuses a destructive call (428) with the confirmation member and without it', async () => {
         const { bridge, executeAction } = harness();
-        const err = await refusalOf(bridge.runAction('probe_purge', { objectName: SYS_OBJECT, recordId: 'acct_1' }));
-        expect(err).toMatchObject({
-            code: ACTION_CONFIRMATION_REQUIRED_CODE,
-            status: ACTION_CONFIRMATION_REQUIRED_STATUS,
-            details: { actionName: 'probe_purge', objectName: SYS_OBJECT, confirmationMember: AI_ACTION_CONFIRMATION_MEMBER },
-        });
+        for (const extra of [{}, { [AI_ACTION_CONFIRMATION_MEMBER]: true }]) {
+            const err = await refusalOf(bridge.runAction('probe_purge', { objectName: SYS_OBJECT, recordId: 'acct_1', ...extra }));
+            expect(err, JSON.stringify(extra)).toMatchObject({
+                code: ACTION_CONFIRMATION_REQUIRED_CODE,
+                status: ACTION_CONFIRMATION_REQUIRED_STATUS,
+                details: {
+                    actionName: 'probe_purge', objectName: SYS_OBJECT, confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+                    reason: 'no_confirmation_service',
+                },
+            });
+        }
         expect(executeAction).not.toHaveBeenCalled();
-
-        await expect(bridge.runAction('probe_purge', {
-            objectName: SYS_OBJECT, recordId: 'acct_1', [AI_ACTION_CONFIRMATION_MEMBER]: true,
-        })).resolves.toMatchObject({ ok: true, action: 'probe_purge' });
-        expect(executeAction).toHaveBeenCalledTimes(1);
     });
 });
