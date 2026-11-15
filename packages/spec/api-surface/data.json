@@ -455,6 +455,7 @@
     "LocationValueSchema (const)",
     "LogicalOperatorKey (type)",
     "LookupFilterRecordReference (type)",
+    "LookupFilterRecordReferenceParsed (type)",
     "LookupFilterRecordReferenceSchema (const)",
     "MANAGED_BY_WRITE_LOCKED_BUCKETS (const)",
     "MANAGED_WRITE_VERB_AFFORDANCE (const)",
