@@ -895,6 +895,25 @@ describe('MCP resumeRun — a run of a flow name two namespaces hold (ADR-0150 D
         expect(h.engine.resume.mock.calls.map((c: unknown[]) => c[0])).toEqual([runId]);
     });
 
+    it('[#33386] CRM disabled: HR\'s paused run is resumed through a package-less action and through BOTH\'s (depends on CRM and HR) (FROM: 403, the name answered two holders)', async () => {
+        const BOTH = 'com.both.pkg';
+        const manifestOf = (id: string) => (id === BOTH
+            ? { id, namespace: 'both', dependencies: { [CRM]: '^1.0.0', [HR]: '^1.0.0' } }
+            : { id, namespace: id === CRM ? 'crm' : 'hr' });
+        const withBoth = {
+            ...withCrmDisabled,
+            getPackage: (id: string) => ({ manifest: manifestOf(id), source: 'code' }),
+            getAllPackages: () => [CRM, HR, BOTH].map((id) => ({ manifest: manifestOf(id), source: 'code' })),
+        };
+        for (const objectPackage of [undefined, BOTH]) {
+            const h = makeHarness({ actions: [SCHEDULE], ...(objectPackage ? { objectPackage } : {}), registry: withBoth });
+            const runId = parkedRunOf(h, HR);
+            const resumed = await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } });
+            expect(resumed, String(objectPackage)).toMatchObject({ ok: true, action: SCHEDULE.name });
+            expect(h.engine.resume.mock.calls.map((c: unknown[]) => c[0]), String(objectPackage)).toEqual([runId]);
+        }
+    });
+
     for (const [filed, what] of [[[], 'no holder\'s slot'], [[CRM, HR], 'both holders\' slots (CONTROL)']] as const) {
         it(`[R3-B] a run under a key ${what} is filed under is refused 409 naming every holder, and stays parked`, async () => {
             const h = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });

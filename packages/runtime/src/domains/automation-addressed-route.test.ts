@@ -541,8 +541,8 @@ describe('[#33386] the by-name doors judge the served holders of a name two pack
         const resolve = (name: string) => services[name];
         const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
         const dispatcher = new HttpDispatcher(kernel);
-        const call = async (path: string, method: string) => {
-            const answered = await dispatcher.handleAutomation(path, method, {}, { request: {}, executionContext: ADMIN } as any, {});
+        const call = async (path: string, method: string, body: unknown = {}) => {
+            const answered = await dispatcher.handleAutomation(path, method, body, { request: {}, executionContext: ADMIN } as any, {});
             return { status: answered.response?.status ?? 200, body: answered.response?.body as any };
         };
         return { call, automation };
@@ -592,6 +592,35 @@ describe('[#33386] the by-name doors judge the served holders of a name two pack
                 expect([path, other.status, packagesOf(other)]).toEqual([path, 409, [HR]]);
             }
             expect(automation.getConnectorConnection).toHaveBeenCalledTimes(2);
+        });
+
+        it('the definition writes (PUT, DELETE, clone) under a disable: an address naming CRM, `_env` or a third namespace is refused naming HR only (FROM: naming both); HR\'s address still names both; both disabled, an address answers 404 (FROM: 409)', async () => {
+            const writes = (prefix: string) => [
+                [`${prefix}/convert`, 'PUT', { name: 'convert', type: 'autolaunched' }],
+                [`${prefix}/convert`, 'DELETE', {}],
+                [`${prefix}/convert/clone`, 'POST', { name: 'convert_copy' }],
+            ] as const;
+            const oneOff = dispatcherOver(registryOf(order, [CRM]));
+            for (const prefix of ['/crm', '/_env', '/ops']) {
+                for (const [path, method, body] of writes(prefix)) {
+                    const answer = await oneOff.call(path, method, body);
+                    expect([path, method, answer.status, codeOf(answer), packagesOf(answer)]).toEqual([path, method, 409, 'RESOURCE_CONFLICT', [HR]]);
+                }
+            }
+            // Not moved: HR's own address keeps the 409 naming every holder.
+            for (const prefix of ['/hr']) {
+                for (const [path, method, body] of writes(prefix)) {
+                    const answer = await oneOff.call(path, method, body);
+                    expect([path, method, answer.status, packagesOf(answer).sort()]).toEqual([path, method, 409, [CRM, HR].sort()]);
+                }
+            }
+            const bothOff = dispatcherOver(registryOf(order, [CRM, HR]));
+            for (const prefix of ['/crm', '/hr']) {
+                for (const [path, method, body] of writes(prefix)) {
+                    expect([path, method, (await bothOff.call(path, method, body)).status]).toEqual([path, method, 404]);
+                }
+            }
+            for (const h of [oneOff, bothOff]) expect(h.automation.executeSlot).not.toHaveBeenCalled();
         });
 
         it('both disabled: no address reaches a flow or an instance (404); the bare door and `_env` reach no slot, and the service answers them with no package', async () => {
