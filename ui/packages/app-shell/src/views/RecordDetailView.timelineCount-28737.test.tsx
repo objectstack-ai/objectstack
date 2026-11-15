@@ -128,7 +128,10 @@ function pageAnswer(id: string, body: any, answers: Answers) {
 }
 
 function answerFor(h: Held, answers: Answers): unknown {
-  if (h.method === 'PATCH') return { success: true, data: { object: OBJECT, id: 'c1', record: { id: 'c1', name: 'Contact c1', account: 'a1', ...h.body } } };
+  if (h.method === 'PATCH') {
+    const id = h.path.slice(h.path.lastIndexOf('/') + 1);
+    return { success: true, data: { object: OBJECT, id, record: { id, name: `Contact ${id}`, account: 'a1', ...h.body } } };
+  }
   const meta = /\/api\/v1\/meta\/object\/([^/?]+)/.exec(h.path);
   if (meta) return { success: true, data: ALL.find((o) => o.name === meta[1]) ?? null };
   const page = /\/api\/v1\/data\/[^/?]+\/([^/?]+)\/page$/.exec(h.path);
@@ -364,5 +367,48 @@ describe('objectstack#30035 — the 动态 stream is read again after a save', (
     await act(async () => { void ds.update(OBJECT, 'c2', { name: 'Other' }); });
     await settle(held);
     expect(held.slice(before).filter(isPage)).toEqual([]);
+  });
+});
+
+/**
+ * objectstack#33827 — a save through the edit dialog draws the saved values
+ * from the save's own answer, by the time the save resolves (the moment the
+ * dialog's success toast shows), while every read the save triggers is still
+ * on the wire. The re-read still goes out (objectstack#30035 above).
+ */
+describe('objectstack#33827 — the saved values are on screen when the save resolves', () => {
+  const isPatch = (h: Held) => h.method === 'PATCH';
+
+  async function saveWithReadsHeld(embedded: boolean, id = 'c1') {
+    const { held, open, ds } = await boot({ activity: { total: 1, records: [ACTIVITY] }, timeline: { total: 2 } }, undefined, ALL, embedded);
+    const view = open();
+    await settle(held);
+    expect(view.container.textContent).toContain('Contact c1');
+    expect(view.container.textContent).not.toContain('Renamed');
+    const before = held.length;
+
+    const saved = ds.update(OBJECT, id, { name: 'Renamed' });
+    await idle();
+    const patch = held.slice(before).filter(isPatch);
+    expect(patch).toHaveLength(1);
+    await act(async () => { patch[0].release(); await saved; });
+    const reads = held.slice(before).filter((h) => !isPatch(h) && !isMeta(h));
+    return { view, reads };
+  }
+
+  for (const [surface, embedded] of [['the record page', false], ['the drawer', true]] as const) {
+    it(`${surface}: the saved value is drawn when the save resolves, with every re-read still held`, async () => {
+      const { view, reads } = await saveWithReadsHeld(embedded);
+      // The save did trigger the re-read, and nothing it asked has answered.
+      expect(reads.length).toBeGreaterThan(0);
+      expect(reads.every((h) => !h.released)).toBe(true);
+      expect(view.container.textContent).toContain('Renamed');
+    });
+  }
+
+  it('a save to another record of the object leaves this one as it is', async () => {
+    const { view } = await saveWithReadsHeld(false, 'c2');
+    expect(view.container.textContent).not.toContain('Renamed');
+    expect(view.container.textContent).toContain('Contact c1');
   });
 });

@@ -25,6 +25,11 @@ export type {
 // group as last read. Types only — the reading and the resolution stay inside
 // the package, so the precedence has one definition.
 export type { StorageLimitsSnapshot, StorageLimitReading } from './storage-limits.js';
+// The host's upload bound (`maxUploadMb` on the plugin, `mountStorageRoutes` and
+// `registerStorageRoutes`): its type, so a host can type the option, and the
+// refusal a malformed one boots into, so a host can recognise it by class.
+export type { HostMaxUploadMb } from './storage-limits.js';
+export { InvalidMaxUploadMbError } from './storage-limits.js';
 // [#15169] The host door: the storage routes composed from a kernel and
 // mounted on an HTTP surface the host owns — for kernels with no `http-server`
 // service (cloud's per-environment tenant kernels). Published as ONE entry

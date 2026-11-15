@@ -19,8 +19,9 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { DatasetSchema, resolveI18nLabel, type Dataset } from '@objectstack/spec/ui';
 import { fieldsFromZodIssues } from '@objectstack/types';
-import type { AnalyticsService } from './analytics-service.js';
+import type { AnalyticsService, DatasetCatalogAdmission } from './analytics-service.js';
 import { dimensionType } from './dataset-compiler.js';
+import { invalidMemberError, type AnalyticsRequestKey } from './dataset-refusal.js';
 import { matchDatasetTerms } from './dataset-term-matcher.js';
 
 /**
@@ -54,8 +55,9 @@ import { matchDatasetTerms } from './dataset-term-matcher.js';
  *
  * `provenance` is composed here, after the query ran, from the dataset the
  * tool resolved and the selection the service answered. Nothing in it is read
- * from the model's input except the selection's own member names (which the
- * service just judged) and its `runtimeFilter`, echoed as sent. The input is a
+ * from the model's input except the selection's own member names (each one a
+ * member the dataset declares, {@link assertDeclaredMembers}, which the service
+ * then judged) and its `runtimeFilter`, echoed as sent. The input is a
  * strict object, so a `provenance` (or any other key) the model puts beside
  * `datasetName` / `selection` is refused, never merged.
  */
@@ -89,7 +91,9 @@ const LIST_DATASETS_DESCRIPTION =
 
 const QUERY_DATASET_DESCRIPTION =
   'Run a selection (measures, optional dimensions, filter, time window, order, limit) against one saved business '
-  + 'dataset, by the name `list_datasets` lists, under the caller\'s permissions. Answers the rows plus '
+  + 'dataset, by the name `list_datasets` lists, under the caller\'s permissions. Measures and dimensions are the '
+  + 'member names `list_datasets` lists for that dataset; any other name (a raw field, `count`) is refused '
+  + 'INVALID_FIELD, naming the members you may use. Answers the rows plus '
   + '`provenance` naming the dataset and the measures used — render the answer\'s source from `provenance` '
   + '(e.g. 「指标：营收（数据集：销售分析）」), and explain a number with its measure\'s description. A dataset that '
   + 'does not exist and one this caller may not query both answer NOT_FOUND. Rows are capped; `truncated` says '
@@ -472,12 +476,15 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     // candidate and is never named. An item the parse left out is refused for
     // every caller, so it is admitted to none.
     const admitted = new Map<string | null, Dataset>();
+    const admissions = new Map<Dataset, Extract<DatasetCatalogAdmission, { admitted: true }>>();
     let unresolved = false;
     for (const [holder, candidate] of savedHoldersOf(loaded, datasetName)) {
       if (candidate === undefined) continue;
       const admission = await service.admitDatasetCatalogEntry(candidate, context);
-      if (admission.admitted) admitted.set(holder, candidate);
-      else if (admission.unresolved) unresolved = true;
+      if (admission.admitted) {
+        admitted.set(holder, candidate);
+        admissions.set(candidate, admission);
+      } else if (admission.unresolved) unresolved = true;
     }
     // A holder whose admission could not be judged may be one the caller can
     // query: with fewer than two admitted, whether the answer is that holder,
@@ -504,6 +511,9 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     }
     const dataset = resolveAdmittedDataset(admitted, datasetName);
     if (!dataset) throw notFound();
+    // [ADR-0149] Judged against the dataset it resolved, before anything is
+    // read: a member it does not declare is refused, never minted.
+    assertDeclaredMembers(dataset, raw.selection, admissions.get(dataset));
 
     // The row cap: the caller's own `limit` when it is within the cap, the cap
     // otherwise; one row past it is asked for, so `truncated` is a fact.
@@ -552,6 +562,69 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     listDatasets,
     queryDataset,
   };
+}
+
+/**
+ * [ADR-0149] `query_dataset` answers only the members the dataset declares.
+ *
+ * The dataset is the one declared definition (D1): a selection member it does
+ * not declare is outside it. `AnalyticsService.queryDataset` serves the REST
+ * door, the dashboard and the report too, and mints a caller-named measure the
+ * cube does not declare (`count`, a raw field read as its `sum`, an
+ * `<field>_sum` suffix spelling) and groups by a raw field named as a
+ * dimension. Through this tool such an answer was cited in `provenance` as a
+ * governed metric, which is exactly what D3's fallback rule keeps apart
+ * (非指标口径). So the tool refuses it here, before anything is read.
+ *
+ * Declared means one of the dataset's own `measures[].name` /
+ * `dimensions[].name`, spelled as `list_datasets` lists it: a
+ * `<dataset>.`-qualified spelling is not a listed name and is refused too.
+ * Judged against every declared member, so a declared member the caller may
+ * not read still reaches the service's own field gate (403), unchanged. The
+ * refusal names only the members THIS caller may use (the catalogue's
+ * admission): a withheld member, or one over an `internal` field, is never
+ * named (ADR-0100). `selection.totals.groupings` and `order` keys are judged
+ * downstream against the selected members, so they need no second check here.
+ *
+ * `INVALID_FIELD` / 400, the code the service's member-level refusals answer
+ * (`invalidMemberError`, `member` / `param` / `cube`): the tool invents no code.
+ */
+function assertDeclaredMembers(
+  dataset: Dataset,
+  selection: DatasetSelection,
+  admission: Extract<DatasetCatalogAdmission, { admitted: true }> | undefined,
+): void {
+  const measures = new Set((dataset.measures ?? []).map((m) => m.name));
+  const dimensions = new Set((dataset.dimensions ?? []).map((d) => d.name));
+  const undeclared: Array<{ member: string; param: AnalyticsRequestKey }> = [];
+  const judge = (names: readonly unknown[], declared: ReadonlySet<string>, param: AnalyticsRequestKey) => {
+    for (const name of names) {
+      if (typeof name === 'string' && !declared.has(name) && !undeclared.some((u) => u.member === name && u.param === param)) {
+        undeclared.push({ member: name, param });
+      }
+    }
+  };
+  judge(selection.measures ?? [], measures, 'measures');
+  judge(selection.dimensions ?? [], dimensions, 'dimensions');
+  judge(
+    ((selection as { timeDimensions?: Array<{ dimension?: unknown }> }).timeDimensions ?? []).map((td) => td?.dimension),
+    dimensions,
+    'timeDimensions',
+  );
+  if (undeclared.length === 0) return;
+
+  const usable = (declared: ReadonlyArray<{ name: string }>, admitted: ReadonlySet<string> | undefined) =>
+    declared.map((m) => m.name).filter((name) => admitted?.has(name) === true);
+  const list = (names: string[]) => (names.length > 0 ? names.join(', ') : '(none)');
+  const named = undeclared.map((u) => `${u.param === 'measures' ? 'measure' : 'dimension'} "${u.member}"`).join(', ');
+  const first = undeclared[0];
+  throw invalidMemberError(
+    `The dataset "${dataset.name}" does not declare the ${named}. query_dataset answers only the members a dataset `
+      + `declares, by the names list_datasets lists. Measures you may use: ${list(usable(dataset.measures ?? [], admission?.measures))}. `
+      + `Dimensions you may use: ${list(usable(dataset.dimensions ?? [], admission?.dimensions))}. Pick one of these; when none `
+      + 'fits the question, answer with the object query tools and say that no governed metric was used (非指标口径).',
+    { member: first.member, param: first.param, cube: dataset.name },
+  );
 }
 
 /**
