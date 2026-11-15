@@ -785,6 +785,50 @@ describe('TranslationConfigSchema', () => {
       }),
     ).toThrow();
   });
+
+  describe('sourceLocale — the language the inline text is written in', () => {
+    it('is optional: a config that declares none parses exactly as before', () => {
+      const result = TranslationConfigSchema.safeParse({ defaultLocale: 'zh-CN', supportedLocales: ['en', 'zh-CN'] });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ defaultLocale: 'zh-CN', supportedLocales: ['en', 'zh-CN'] });
+      expect(result.data).not.toHaveProperty('sourceLocale');
+    });
+
+    it('is accepted beside a different users\' default, and canonicalised like defaultLocale', () => {
+      const result = TranslationConfigSchema.safeParse({
+        defaultLocale: 'zh-CN',
+        sourceLocale: 'EN-us',
+        supportedLocales: ['zh-CN', 'es-ES'],
+      });
+      expect(result.success).toBe(true);
+      // Same LocaleSchema as defaultLocale, and — like defaultLocale — not
+      // required to be one of supportedLocales.
+      expect(result.data?.sourceLocale).toBe('en-US');
+    });
+
+    it('refuses a value that is not a locale tag, as defaultLocale does', () => {
+      const result = TranslationConfigSchema.safeParse({
+        defaultLocale: 'zh-CN',
+        sourceLocale: 'en_US',
+        supportedLocales: ['zh-CN'],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((i) => i.path.join('.'))).toContain('sourceLocale');
+    });
+
+    it.each(['sourceLanguage', 'authoringLocale', 'authoringLanguage'])(
+      'answers the near-miss `%s` with sourceLocale',
+      (key) => {
+        const result = TranslationConfigSchema.safeParse({
+          defaultLocale: 'zh-CN',
+          supportedLocales: ['zh-CN'],
+          [key]: 'en',
+        });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('sourceLocale');
+      },
+    );
+  });
 });
 
 // ============================================================================

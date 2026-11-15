@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { useLocalization, readCachedLanguageSeed } from '@object-ui/i18n';
-import { clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 import { resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
 import { __resetAppDefaultLocaleForTests, seedTenantLanguage } from '../languageSeed';
 import { LocalizationFetchProvider } from '../LocalizationFetchProvider';

@@ -6141,6 +6141,36 @@ const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
+  rule: 'field-label-duplicate',
+  covers: 'which fields and which labels are compared',
+  paragraphs: [
+    'Every surface that draws an object\'s fields names a column by its label: the list grid\'s header, the ' +
+      'kanban card\'s field line, the form\'s caption, the export and import columns. Two visible fields with one ' +
+      'label are two columns a person cannot tell apart, and editing one reads as editing the other. The common ' +
+      'case is a field added beside a platform field it duplicates, such as a `user` field labelled like the ' +
+      '`owner_id` column the platform adds to every user-owned object (served as "Owner" in English and under ' +
+      'its translated label in other languages).',
+    'Compared: the fields the object serves, that is its own fields plus every `objectExtensions` field of the ' +
+      'same stack, and the columns the platform injects on it (`owner_id` and the `created_*` / `updated_*` ' +
+      'audit columns; the organization, business-unit and queue columns are hidden). A field you declare under ' +
+      'one of those names replaces the injected column. A field with `hidden: true` is not compared, and a field ' +
+      'with no label is drawn under its unique name and is not compared either.',
+    'Labels are compared as a reader is served them, trimmed, otherwise exactly: once as written, and once per ' +
+      'locale, for every locale a `translations` bundle of the stack carries and every locale the platform ' +
+      'translates the injected columns into (`en`, `zh-CN`, `ja-JP`, `es-ES`). The second set needs no bundle: ' +
+      'a reader in one of those languages sees the injected columns translated while your untranslated field ' +
+      'keeps the label you wrote, so a field labelled "负责人" clashes with `owner_id` for a `zh-CN` reader only, ' +
+      'and the finding names that locale.',
+    'An error at `os build`, `os validate`, `os lint` and the metadata publish door. At the door a write of ' +
+      'another object is never refused for a clash a stored object carries, while saving the object itself is ' +
+      'refused until its clash is fixed; nothing on the boot path runs the rule, so an installed app keeps ' +
+      'loading. To fix it, give each ' +
+      'visible field its own label (in the translation bundle too, when only a translation clashes), set ' +
+      '`hidden: true` on the field readers should not see, or drop the duplicate and use the platform\'s column.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6374,6 +6404,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
   [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
   [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
+  [FIELD_LABEL_DUPLICATE_EXPLANATION.rule]: FIELD_LABEL_DUPLICATE_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

@@ -23,7 +23,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isFilterAST, parseFilterAST } from '@objectstack/spec/data';
-import { ObjectStackAdapter, clearSharedDiscoveryCache, isMalformedFilterError } from './index';
+import { ObjectStackAdapter, isMalformedFilterError } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 function makeAdapter() {
   const calls: string[] = [];

@@ -341,6 +341,23 @@
  * `merge_group`, the merge base on `pull_request` — to the register's
  * `applyWorkflowSplit`, and a commit it could not read stays Tier H.
  *
+ * ⚖️ The two skills catalog rows are read off the PULL REQUEST (maintainer
+ * ruling 2026-11-14 on #33501, the register's "The low-risk skills arm"):
+ * `decomposeGovernedWork` keeps every path of every attributed commit
+ * (`allPaths`, ungoverned commits of the same PR included) and reads the arm
+ * NOT MEASURED, so the `pull_request` leg says Tier H; the `merge_group` leg's
+ * `readLowRiskTier` re-reads the tier with the body, label names and fork
+ * predicate of the pull object it already fetched for the head, the timeline the
+ * enqueue leg already read, and each changeset at the commit that touched it
+ * (`git show`), and each governed commit's status and mode per path
+ * (`catalogFilesOf`, `diff-tree --raw --no-renames`) — through the register's
+ * `governedTierFor`. An unread pull,
+ * timeline or changeset stays Tier H. An entry the arm puts at Tier S clears on
+ * a same-head record that READS PASS (`lowRiskRecordVerdict`, the fleet's
+ * `contractReviewVerdictOf`), and a record carried from an older head stands for it
+ * only when the hops moved no changeset and no catalog path; the other Tier S
+ * legs still read no verdict.
+ *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
  * criterion: 「复核记录 = 一条评论落 PR 或卡」
@@ -567,7 +584,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -577,27 +595,34 @@ import {
   GOVERNED_TIER_H,
   GOVERNED_TIER_S,
   HUMAN_MERGE_LINE_THRESHOLD,
+  LOW_RISK_ARM_RULING,
+  LOW_RISK_CHANGESET_PATH,
   SELF_REPO_ID,
   WORKFLOWS_PREFIX,
   applyGeneratedExceptions,
+  applyLowRiskArm,
   applyWorkflowSplit,
   assertGovernedRepo,
+  forkVerdict,
   generatedExceptionFor,
   governedPathsIn,
   governedSurfacesFor,
   governedTierFor,
   groupHitsByException,
   landsByHumanMerge,
+  lowRiskArmVerdict,
   mergeWorkflowReadings,
   pullNumberFromSubject,
   pullSizeFrom,
   recomputeProvenanceFor,
   readWorkflowDiff,
   renderLiftApprovals,
+  renderLowRiskLines,
   renderWorkflowSplitLines,
   repoIdForSlug,
   testVerdict,
 } from './check-governed-merges.mjs';
+import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -647,6 +672,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 54,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -659,7 +685,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 27 → 28 with the ENQUEUE leg battery (maintainer ruling 2026-10-26): one battery, one row.
 // Raised 28 → 29 with the cheap early-warning leg battery: one battery, one row.
 // Raised 29 → 30 with the workflows split battery (ruling record 6722205630): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 30;
+// Raised 30 → 31 with the low-risk skills arm battery (#33501): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 31;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -908,6 +935,8 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       reviewFace: tier?.reviewFace,
       threads: tier?.REVIEW_OF_RECORD_THREADS,
       location: tier?.REVIEW_OF_RECORD_LOCATION,
+      // Read by the low-risk skills arm alone (#33501); absent, that arm refuses and nothing else changes.
+      verdictOf: tier?.contractReviewVerdictOf,
     };
     const missing = [
       ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace'].filter((key) => typeof found[key] !== 'function'),
@@ -1145,6 +1174,26 @@ export function decomposeGovernedWork(rows, repo) {
   assertGovernedRepo(repo, 'decomposeGovernedWork');
   const byPull = new Map();
   const unattributed = [];
+  // ⭐ EVERY path of every attributed row, governed or not, per PR — the low-risk
+  // skills arm's allowlist reads the whole diff (#33501). Collected BEFORE the
+  // governed filter below drops a row, so an ungoverned commit of the same PR
+  // (a `packages/**` edit in a commit of its own) still counts against the arm.
+  const allByPull = new Map();
+  // ⭐ And every changeset each commit of the PR touches, with the commit it is read at: the arm reads
+  // each one's committed text, so a changeset in an ungoverned commit counts too.
+  const changesetsByPull = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (typeof row?.pr !== 'number' || !Number.isInteger(row.pr) || row.pr <= 0) continue;
+    const all = allByPull.get(row.pr) ?? new Set();
+    const refs = changesetsByPull.get(row.pr) ?? [];
+    for (const p of Array.isArray(row.paths) ? row.paths : []) {
+      if (typeof p !== 'string' || p === '') continue;
+      all.add(p);
+      if (LOW_RISK_CHANGESET_PATH.test(p)) refs.push({ sha: row.sha ?? null, path: p });
+    }
+    allByPull.set(row.pr, all);
+    changesetsByPull.set(row.pr, refs);
+  }
   for (const row of Array.isArray(rows) ? rows : []) {
     const surfaces = governedPathsIn(row?.paths ?? [], repo);
     if (surfaces.length === 0) continue;
@@ -1171,12 +1220,18 @@ export function decomposeGovernedWork(rows, repo) {
       // SAME governed path list the verdict is judged on — never from the raw
       // diff, which carries files the register does not govern at all — and,
       // for the `workflows` row, from the reading of its diff (the split).
+      // The low-risk skills arm (#33501) needs the PR body and labels, which no
+      // row carries: here it is NOT MEASURED, so a catalog path is Tier H; the
+      // queue leg re-reads the tier with `readLowRiskTier` once the pull is read.
       return {
         pr: entry.pr,
         shas: entry.shas,
         paths,
-        surfaces: applyWorkflowSplit(governedPathsIn(paths, repo), repo, workflowDiff),
-        tier: governedTierFor(paths, repo, GOVERNED_SURFACES, workflowDiff),
+        allPaths: [...(allByPull.get(entry.pr) ?? entry.paths)],
+        changesetRefs: changesetsByPull.get(entry.pr) ?? [],
+        workflowDiff,
+        surfaces: applyLowRiskArm(applyWorkflowSplit(governedPathsIn(paths, repo), repo, workflowDiff), repo, null),
+        tier: governedTierFor(paths, repo, GOVERNED_SURFACES, workflowDiff, null),
       };
     })
     .sort((a, b) => a.pr - b.pr);
@@ -1545,6 +1600,7 @@ export function renderGuardVerdict(verdict) {
     lines.push('', `  #${entry.pr} — governed:`);
     lines.push(...surfaceLines(entry));
     lines.push(...renderWorkflowSplitLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
+    lines.push(...renderLowRiskLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
     // The pre-#19133 `pull_request` byte-identity constraint (2026-08-27) is
     // superseded by that ruling's own requirement: the early warning names the
     // tier and what it waits for.
@@ -1592,8 +1648,12 @@ export function renderGuardVerdict(verdict) {
               '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20; prose arm: 6159870311).',
             ]
           : []),
-        '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
-        '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
+        ...(entry.record.verdict === 'PASS'
+          ? ['           ⚖️ the low-risk skills arm lands on a record that READS PASS, and this one does (#33501).']
+          : [
+              '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
+              '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
+            ]),
       );
     } else if (entry.approval.state === 'unreadable') {
       lines.push(`        ⛔ the review list could NOT be read — ${entry.approval.reason}`);
@@ -1629,6 +1689,12 @@ export function renderGuardVerdict(verdict) {
             ]
           : entry.record.state === 'unreadable'
             ? [`        ⛔ the review of record could NOT be read — ${entry.record.reason}`]
+            : entry.record.state === 'not-pass'
+              ? [
+                  `        ⛔ the \`## Contract review\` comment on this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
+                    `${entry.record.at ?? 'undated'}) does not read PASS: ${entry.record.verdictReason}.`,
+                  '           The low-risk skills arm lands on a PASS record only (#33501); a FAIL owes a patch and a new review.',
+                ]
             : entry.record.state === 'unsigned'
               ? [
                   `        ⛔ a \`## Contract review\` comment names this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
@@ -1855,6 +1921,141 @@ export function renderGuardVerdict(verdict) {
 }
 
 /**
+ * Re-read one governed entry's tier with the low-risk skills arm's reading
+ * (#33501): `paths` = every path of the PR's commits (`allPaths`); the body,
+ * labels and fork predicate off the pull object the queue leg read; the timeline
+ * the enqueue leg read (`timeline`: `{ measured, reason, events }`); each
+ * changeset at the commit that touched it, read with `runGit`; and the status
+ * and both modes of every path of every governed commit (`catalogFilesOf`).
+ * `lowRiskArmVerdict` then holds all of its conditions: catalog rows only, an
+ * allowlisted path list, the bare declarations in the body and in clean
+ * changesets, no `security` label now or removed, no catalog path named for
+ * security, auth or permission, every catalog file a modified regular file with
+ * its mode unchanged, and no fork. An entry with no catalog row is left
+ * untouched; `pull` null (its read failed) is an UNMEASURED reading, so the
+ * entry stays Tier H with the reason printed, and so is a missing timeline,
+ * fork reading, status reading or git reader.
+ * ⛔ The tier comes from the register's own `governedTierFor` and
+ * `applyLowRiskArm` — no second predicate here. Mutates `entry` (its `surfaces`
+ * and `tier`); returns it.
+ */
+export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = null } = {}) {
+  if (!entry || !(entry.surfaces ?? []).some((s) => s?.lowRiskVerdict)) return entry;
+  const refs = Array.isArray(entry.changesetRefs) ? entry.changesetRefs : [];
+  const changesets = typeof runGit !== 'function'
+    ? { measured: false, reason: 'no git reader was handed to the queue leg', files: [] }
+    : {
+        measured: true,
+        reason: null,
+        files: refs.map(({ sha, path }) => {
+          if (!sha) return { path, text: null };
+          try {
+            return { path, text: String(runGit(['show', `${sha}:${path}`])) };
+          } catch {
+            return { path, text: null };
+          }
+        }),
+      };
+  const reading = pull
+    ? {
+        measured: true,
+        reason: null,
+        catalogFiles: catalogFilesOf(entry, runGit),
+        paths: entry.allPaths ?? entry.paths,
+        body: String(pull.body ?? ''),
+        labels: Array.isArray(pull.labels) ? pull.labels : null,
+        fork: pull.fork ?? null,
+        timeline: timeline ?? { measured: false, reason: 'the timeline was not read', events: null },
+        changesets,
+      }
+    : { measured: false, reason: 'its pull request could not be read, so its body and labels are unknown' };
+  entry.surfaces = applyLowRiskArm(applyWorkflowSplit(governedPathsIn(entry.paths, repo), repo, entry.workflowDiff ?? null), repo, reading);
+  entry.tier = governedTierFor(entry.paths, repo, GOVERNED_SURFACES, entry.workflowDiff ?? null, reading);
+  return entry;
+}
+
+/** `git diff-tree --raw` status letters, spelled as the arm reads them. */
+const RAW_STATUS = Object.freeze({ M: 'modified', A: 'added', D: 'deleted', T: 'type-changed', R: 'renamed', C: 'copied' });
+
+/**
+ * The status and both modes of every path each governed commit of the entry
+ * touched, read with `git diff-tree -r --raw -z --no-renames` against the
+ * commit's first parent (the same comparison `enumerateRows` lists the paths
+ * from): `{ path, status, oldMode, mode }`, the raw line's two modes, so a mode
+ * change reads H in the arm. One row per commit per path, so an add in one
+ * commit and an edit in the next reads `added`.
+ * No git reader, a commit with no sha, or a read that throws is NOT MEASURED.
+ */
+export function catalogFilesOf(entry, runGit) {
+  if (typeof runGit !== 'function') return { measured: false, reason: 'no git reader was handed to the queue leg', files: [] };
+  const shas = Array.isArray(entry?.shas) ? entry.shas : [];
+  if (shas.length === 0) return { measured: false, reason: 'the entry names no commit to read the status from', files: [] };
+  const files = [];
+  for (const sha of shas) {
+    let out;
+    try {
+      out = String(runGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--raw', '-z', '-m', '--first-parent', sha]));
+    } catch (error) {
+      return { measured: false, reason: `the status of ${String(sha).slice(0, 12)} could not be read (${String(error?.message ?? error).split('\n')[0]})`, files: [] };
+    }
+    const tokens = out.split('\0');
+    for (let i = 0; i + 1 < tokens.length; i += 2) {
+      const meta = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z])/.exec(tokens[i].trim());
+      if (!meta || tokens[i + 1] === '') continue;
+      files.push({ path: tokens[i + 1], status: RAW_STATUS[meta[3]] ?? meta[3], oldMode: meta[1], mode: meta[2] });
+    }
+  }
+  return { measured: true, reason: null, files };
+}
+
+/** Did the low-risk skills arm put this entry at Tier S? */
+export function landsOnLowRiskArm(entry) {
+  return entry?.tier === TIER_S && (entry.surfaces ?? []).some((s) => s?.lowRiskVerdict?.tier === TIER_S);
+}
+
+/**
+ * The record leg's verdict for an entry the low-risk arm put at Tier S: a
+ * record that STANDS must also READ PASS, read off the same comment the locator
+ * chose, with the fleet's verdict reader (`contractReviewVerdictOf`, re-exported
+ * by the recognisers). Anything else —
+ * FAIL, no verdict word, the comment not among the rows, no reader loaded — is
+ * `not-pass`, a refusal. Every other entry's record is returned as it was (the
+ * other Tier S legs read no verdict; card #33541).
+ *
+ * ⛔ A record CARRIED from an older head (the regeneration and prose-only hops)
+ * stands for this arm only when nothing it reads moved after the PASS: the hops
+ * (`git diff -z --name-only --no-renames <reviewed head> <this head>` through
+ * `pair.runGit`; a rename lists BOTH paths, so a skill moved out of the catalog
+ * counts)
+ * may touch no `.changeset/` path and no path under a catalog row. A changeset,
+ * the body's partner, and catalog text such as a skill's `CHANGELOG.md` are
+ * prose faces the carry admits, yet they are exactly what the arm's tier was
+ * read from. A diff that cannot be read refuses too. Pure but for `runGit`.
+ */
+export function lowRiskRecordVerdict(record, pair, recognisers) {
+  if (record?.state !== 'stands') return record;
+  if (record.carriedFrom) {
+    const refuse = (why) => ({ ...record, state: 'not-pass', verdict: null, verdictReason: why });
+    if (typeof pair?.runGit !== 'function' || !pair?.headSha) return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` and this leg could not diff the hops`);
+    let moved;
+    try {
+      moved = String(pair.runGit(['diff', '-z', '--name-only', '--no-renames', record.carriedFrom, pair.headSha])).split('\0').filter(Boolean);
+    } catch (error) {
+      return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` and the hops could not be diffed (${String(error?.message ?? error).split('\n')[0]})`);
+    }
+    const catalog = GOVERNED_SURFACES.filter((s) => s.lowRisk && s.prefix).map((s) => s.prefix);
+    const touched = moved.filter((p) => p.startsWith('.changeset/') || catalog.some((prefix) => p.startsWith(prefix)));
+    if (touched.length > 0) return refuse(`it was carried from \`${String(record.carriedFrom).slice(0, 12)}\` over hops that moved ${touched.slice(0, 3).join(', ')}${touched.length > 3 ? ` (+${touched.length - 3} more)` : ''}, which the arm reads, after the review`);
+  }
+  if (typeof recognisers?.verdictOf !== 'function') return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the contract-review verdict reader was not loaded' };
+  const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
+  const comment = record.id === null || record.id === undefined ? null : rows.find((r) => r?.id === record.id) ?? null;
+  if (comment === null) return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the record comment was not among the rows read, so its verdict is unknown' };
+  const verdict = recognisers.verdictOf(comment.body);
+  return verdict === 'PASS' ? { ...record, verdict } : { ...record, state: 'not-pass', verdict, verdictReason: verdict === null ? 'it states no verdict' : `it reads ${verdict}` };
+}
+
+/**
  * The orchestrator, with its one IO dependency injected.
  *
  * ⭐ The early return below is requirement (d)'s ordering guarantee expressed
@@ -1878,6 +2079,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
   const records = new Map();
   const heads = new Map();
   const pulls = new Map();
+  const timelines = new Map();
   const headNotes = [];
   let apiCalls = 0;
   for (const entry of governed) {
@@ -1898,7 +2100,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
           // head read was not already making.
           const pull = await fetchPull(entry.pr);
           headSha = pull?.sha ?? null;
-          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', head: { ref: pull?.headRef ?? '' } });
+          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', labels: Array.isArray(pull?.labels) ? pull.labels : null, fork: pull?.fork ?? null, head: { ref: pull?.headRef ?? '' } });
         } catch (error) {
           headNotes.push(
             `  ℹ️  #${entry.pr}: the PR head could not be read (${String(error?.message ?? error).split('\n')[0]}) — ` +
@@ -1928,12 +2130,18 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     if (event === EVENT_MERGE_GROUP && approvals.get(entry.pr)?.state !== 'approved') {
       if (typeof fetchTimeline !== 'function') {
         enqueues.set(entry.pr, undeterminedEnqueue('no timeline reader was supplied to the queue leg'));
+        timelines.set(entry.pr, { measured: false, reason: 'no timeline reader was supplied to the queue leg', events: null });
       } else {
         try {
           apiCalls += 1;
-          enqueues.set(entry.pr, authorizedEnqueueVerdict(enqueuerFromTimeline(await fetchTimeline(entry.pr))));
+          const events = await fetchTimeline(entry.pr);
+          // ⭐ Kept for the low-risk skills arm (S1): a removed `security` label is on this same timeline.
+          timelines.set(entry.pr, Array.isArray(events) ? { measured: true, reason: null, events } : { measured: false, reason: 'the timeline answered no list', events: null });
+          enqueues.set(entry.pr, authorizedEnqueueVerdict(enqueuerFromTimeline(events)));
         } catch (error) {
-          enqueues.set(entry.pr, undeterminedEnqueue(`the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`));
+          const why = `the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`;
+          timelines.set(entry.pr, { measured: false, reason: why, events: null });
+          enqueues.set(entry.pr, undeterminedEnqueue(why));
         }
       }
     }
@@ -1946,6 +2154,11 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
   // take a pass away), and it is FREE on every merge group that does not need
   // it — no thread is read, and the recognisers are not even loaded.
   if (event === EVENT_MERGE_GROUP) {
+    // ⭐ The low-risk skills arm (#33501) FIRST: a catalog entry's tier is read
+    // off the pull object this leg already holds — body, labels, fork — the
+    // timeline the enqueue leg read, the changesets at their commits and the whole
+    // path list of its commits. An unread pull is NOT MEASURED: Tier H.
+    for (const entry of governed) readLowRiskTier(entry, repo, pulls.get(entry.pr) ?? null, { timeline: timelines.get(entry.pr) ?? null, runGit });
     let recognisers = null;
     for (const entry of governed) {
       if (entry.tier !== TIER_S) continue;
@@ -2007,7 +2220,9 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
         records.set(entry.pr, { state: 'unreadable', reason: unreadable, cardNote });
         continue;
       }
-      records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
+      const record = recordVerdict({ pair, recognisers, cardNote });
+      // ⭐ The low-risk arm lands on a record that READS PASS, never on one that merely exists.
+      records.set(entry.pr, landsOnLowRiskArm(entry) ? lowRiskRecordVerdict(record, pair, recognisers) : record);
     }
   }
   return guardVerdict({ event, repo, governed, unattributed, approvals, enqueues, records, apiCalls, headNotes, lifted });
@@ -2721,6 +2936,10 @@ export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
     return {
       sha,
       body: String(row?.body ?? ''),
+      // The label NAMES (#33501): the low-risk skills arm reads `security` off them. Not a list ⇒ null ⇒ Tier H.
+      labels: Array.isArray(row?.labels) ? row.labels.map((l) => String(l?.name ?? '')) : null,
+      // The FORK predicate off the same object (#33501, S3): a fork head keeps a skills PR Tier H.
+      fork: forkVerdict(row),
       headRef: String(row?.head?.ref ?? ''),
       size: pair === null ? null : { ...pair, source: `GET /repos/${slug}/pulls/${pull}` },
     };
@@ -3067,7 +3286,8 @@ export async function selfTest() {
   // SIZE leg judges (#19036) — `null` unless a fixture hands one in, exactly
   // as the reader answers a pull object without the pair. Spelled once, so a
   // fixture can never disagree with `makePullReader` about what a pull row is.
-  const pull = (sha = HEAD, { body = '', headRef = '', size = null } = {}) => ({ sha, body, headRef, size });
+  const SAME_REPO = Object.freeze({ measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' });
+  const pull = (sha = HEAD, { body = '', headRef = '', size = null, labels = [], fork = SAME_REPO } = {}) => ({ sha, body, headRef, size, labels, fork });
   const authorizedPass = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
@@ -4771,15 +4991,20 @@ export async function selfTest() {
     runGit = null,
     baseRef = null,
     workflowDiff = null,
+    labels = [],
+    extraRows = [],
+    timeline = null,
+    fork = SAME_REPO,
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
     return runGuard({
       repo: REPO,
       event,
-      rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }],
+      rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }, ...extraRows],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
-      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch }); },
+      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch, labels, fork }); },
+      ...(timeline === null ? {} : { fetchTimeline: async () => { if (timeline === 'throw') throw new Error('HTTP 403'); return timeline; } }),
       fetchComments: async (n) => {
         tierApiCalls += 1;
         tierThreadsRead.push(n);
@@ -5547,6 +5772,195 @@ export async function selfTest() {
     const [lostBase] = attachWorkflowReadings([row(7, [WF_PATH], S_SHA)], { event: EVENT_PULL_REQUEST, mergeBase: 'a'.repeat(40), runGit: fakeGit([]) });
     assert('⛔ a-base-git-cannot-read-is-UNMEASURED-and-Tier-H', lostBase.workflowDiff?.measured === false && decomposeGovernedWork([lostBase], REPO).governed[0].tier === TIER_H, JSON.stringify(lostBase.workflowDiff));
     assert('no-rows-attach-nothing', attachWorkflowReadings(undefined, { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit([]) }).length === 0);
+  }
+
+  battery('⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)');
+  {
+    const SK = 'skills/objectstack-data/SKILL.md';
+    const CS = '.changeset/33501-skills-wording.md';
+    const LOW = `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: none\n`;
+    const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
+    // The committed changeset text, by `git show <sha>:<path>`; any other read throws, as git does.
+    // `diff-tree --raw -z` rows: every path the fixtures touch, a MODIFIED regular file unless a case says otherwise.
+    const rawOf = (rows) => rows.map(([st, mode, p, oldMode = '100644']) => `:${oldMode} ${mode} ${'1'.repeat(40)} ${'2'.repeat(40)} ${st}\0${p}\0`).join('');
+    const MODIFIED = rawOf([SK, 'skills/objectstack-data/evals/evals.json', 'skills/objectstack-data/rules/security.md', 'skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', 'skills/a/rules/security.md', 'skills/objectstack-data/hook.mjs'].map((p) => ['M', '100644', p]).concat([['A', '100644', CS]]));
+    const csGit = (text = CS_TEXT, raw = MODIFIED) => (args) => {
+      if (args[0] === 'show' && /^[0-9a-f]{40}:\.changeset\//.test(args[1]) && text !== null) return text;
+      if (args[0] === 'diff-tree' && args.includes('--raw')) {
+        if (raw === null) throw new Error('fatal: bad object');
+        return raw;
+      }
+      throw new Error(`fatal: path not in tree (${args.join(' ')})`);
+    };
+    const arm = { files: [SK, CS], prBody: LOW, comments: [recordComment()], timeline: [], runGit: csGit() };
+    // The decomposition: a catalog entry is NOT MEASURED there (no row carries a body), and it keeps EVERY path of the PR.
+    const split = decomposeGovernedWork([row(33501, [SK, CS, 'packages/spec/src/a.zod.ts'])], REPO).governed[0];
+    assert('the-decomposition-reads-a-catalog-entry-Tier-H-NOT-MEASURED-and-keeps-every-path', split.tier === TIER_H && split.surfaces[0].lowRiskVerdict?.measured === false && split.allPaths.join() === `${SK},${CS},packages/spec/src/a.zod.ts` && split.paths.join() === SK, JSON.stringify(split));
+    assert('M1-the-decomposition-keeps-each-changeset-with-the-commit-it-is-read-at-ungoverned-commits-included', (() => { const e = decomposeGovernedWork([row(9, [SK], '1'.repeat(40)), row(9, [CS, 'docs/x.md'], '2'.repeat(40))], REPO).governed[0]; return e.changesetRefs.length === 1 && e.changesetRefs[0].sha === '2'.repeat(40) && e.changesetRefs[0].path === CS; })());
+    const twoCommits = decomposeGovernedWork([row(9, [SK], '1'.repeat(40)), row(9, ['packages/core/src/x.ts'], '2'.repeat(40))], REPO).governed[0];
+    assert('⛔ an-ungoverned-commit-of-the-same-PR-still-counts-its-published-path-is-in-allPaths', twoCommits.allPaths.includes('packages/core/src/x.ts') && readLowRiskTier(twoCommits, REPO, { body: LOW, labels: [], fork: SAME_REPO }, { timeline: { measured: true, reason: null, events: [] }, runGit: csGit() }).tier === TIER_H, JSON.stringify(twoCommits.allPaths));
+    const untouched = decomposeGovernedWork([row(9, ['AGENTS.md'])], REPO).governed[0];
+    assert('readLowRiskTier-leaves-an-entry-with-no-catalog-row-as-it-was', readLowRiskTier(untouched, REPO, null) === untouched && untouched.tier === TIER_H && !untouched.surfaces.some((s) => s.lowRiskVerdict));
+
+    // ⭐ End to end on the queue leg: pure skills wording + clean changeset, one bare `Clause-②: no`, a same-head PASS record ⇒ the seat's enqueue clears.
+    const pass = await tierRun(arm);
+    assert('⭐ a-pure-skills-PR-on-Clause-2-no-with-a-same-head-PASS-record-CLEARS-with-zero-approvals', pass.exitCode === EXIT_CLEAR && pass.conclusion === 'cleared' && pass.entries[0].tier === TIER_S && pass.entries[0].record.state === 'stands' && pass.entries[0].record.verdict === 'PASS', JSON.stringify(pass.entries[0]));
+    assert('and-the-words-name-the-arm-its-ruling-and-the-PASS-it-read', /low-risk skills arm .*Tier S/.test(renderGuardVerdict(pass)) && renderGuardVerdict(pass).includes(LOW_RISK_ARM_RULING) && /READS PASS, and this one does/.test(renderGuardVerdict(pass)), renderGuardVerdict(pass));
+    const noRecord = await tierRun({ ...arm, comments: [] });
+    assert('⛔ CONTROL: the-same-skills-PR-with-NO-record-is-REFUSED-Tier-S-without-its-record', noRecord.exitCode === EXIT_REFUSED_UNAPPROVED && noRecord.entries[0].tier === TIER_S && noRecord.entries[0].record.state === 'absent');
+    const old = await tierRun({ ...arm, comments: [recordComment({ sha: REF_OLD.slice(0, 12) })] });
+    assert('⛔ a-record-on-an-OLDER-head-is-REFUSED', old.exitCode === EXIT_REFUSED_UNAPPROVED && old.entries[0].record.state === 'absent');
+
+    // ⛔ The verdict: the arm lands on a record that READS PASS, never on one that merely exists.
+    const failRecord = await tierRun({ ...arm, comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
+    assert('⛔ a-same-head-FAIL-record-is-REFUSED-on-the-arm', failRecord.exitCode === EXIT_REFUSED_UNAPPROVED && failRecord.entries[0].tier === TIER_S && failRecord.entries[0].record.state === 'not-pass' && failRecord.entries[0].record.verdict === 'FAIL' && /does not read PASS: it reads FAIL/.test(renderGuardVerdict(failRecord)), renderGuardVerdict(failRecord));
+    const wordless = await tierRun({ ...arm, comments: [recordComment({ verdictWord: 'pending' })] });
+    assert('⛔ a-same-head-record-with-NO-verdict-word-is-REFUSED-on-the-arm', wordless.exitCode === EXIT_REFUSED_UNAPPROVED && wordless.entries[0].record.state === 'not-pass' && /states no verdict/.test(renderGuardVerdict(wordless)));
+    const explicitPass = await tierRun({ ...arm, comments: [recordComment({ verdictWord: '**VERDICT: PASS**' })] });
+    assert('the-template-VERDICT-PASS-line-clears-the-arm', explicitPass.exitCode === EXIT_CLEAR && explicitPass.entries[0].record.verdict === 'PASS');
+    const newestFail = await tierRun({ ...arm, comments: [recordComment({ id: 901, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 902, at: '2026-09-13T14:00:00Z', verdictWord: '**VERDICT: FAIL**' })] });
+    assert('⛔ the-NEWEST-same-head-record-is-the-one-whose-verdict-is-read-an-older-PASS-does-not-clear-a-newer-FAIL', newestFail.exitCode === EXIT_REFUSED_UNAPPROVED && newestFail.entries[0].record.id === 902 && newestFail.entries[0].record.state === 'not-pass');
+    const noReader = await tierRun({ ...arm, recognisers: { ...live, verdictOf: undefined } });
+    assert('⛔ a-recogniser-set-without-the-verdict-reader-REFUSES-the-arm-fail-closed', noReader.exitCode === EXIT_REFUSED_UNAPPROVED && noReader.entries[0].record.state === 'not-pass' && /verdict reader was not loaded/.test(renderGuardVerdict(noReader)));
+    assert('the-live-loader-reaches-the-fleet-verdict-reader', typeof live.verdictOf === 'function' && live.verdictOf('## Contract review\n\n**VERDICT: FAIL**') === 'FAIL');
+    assert('lowRiskRecordVerdict-passes-a-non-standing-record-through-and-reads-the-chosen-comment', (() => {
+      const absent = { state: 'absent' };
+      const pair = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [] };
+      return lowRiskRecordVerdict(absent, pair, live) === absent && lowRiskRecordVerdict({ state: 'stands', id: 5 }, pair, live).verdict === 'PASS' && lowRiskRecordVerdict({ state: 'stands', id: 6 }, pair, live).state === 'not-pass' && lowRiskRecordVerdict({ state: 'stands', id: null }, pair, live).state === 'not-pass';
+    })());
+    // ⛔ A record CARRIED over prose-only hops stands for the arm only when the hops moved no changeset and no catalog path.
+    const armDiffArgs = [];
+    const armCarry = (moved) => {
+      const tree = qgit({ moved, attrs: '', own: { [REF_HEAD]: moved } });
+      return (args) => {
+        if (args[0] === 'show') return CS_TEXT;
+        if (args[0] === 'diff-tree' && args.includes('--raw')) return MODIFIED;
+        if (args.includes('--no-renames')) armDiffArgs.push(args.join(' '));
+        return tree(args.filter((a) => a !== '--no-renames'));
+      };
+    };
+    const carriedDocs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry('content/docs/guides/x.mdx\0'), baseRef: QBASE });
+    assert('SF1-CONTROL-a-PASS-record-carried-over-a-docs-only-hop-still-clears-the-arm', carriedDocs.exitCode === EXIT_CLEAR && carriedDocs.entries[0].record.carriedHops === 1 && carriedDocs.entries[0].record.verdict === 'PASS', JSON.stringify(carriedDocs.entries[0].record));
+    const carriedCs = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry(`${CS}\0`), baseRef: QBASE });
+    assert('⛔ SF1-a-record-carried-over-a-hop-that-rewrote-the-CHANGESET-is-refused-on-the-arm', carriedCs.exitCode === EXIT_REFUSED_UNAPPROVED && carriedCs.entries[0].record.state === 'not-pass' && /over hops that moved \.changeset\/33501-skills-wording\.md/.test(renderGuardVerdict(carriedCs)), JSON.stringify(carriedCs.entries[0].record));
+    const carriedLog = await tierRun({ ...arm, comments: onOldHead, runGit: armCarry('skills/objectstack-data/CHANGELOG.md\0'), baseRef: QBASE });
+    assert('⛔ SF1-a-record-carried-over-a-hop-that-moved-CATALOG-text-a-skill-CHANGELOG-is-refused-on-the-arm', carriedLog.exitCode === EXIT_REFUSED_UNAPPROVED && carriedLog.entries[0].record.state === 'not-pass' && /skills\/objectstack-data\/CHANGELOG\.md/.test(renderGuardVerdict(carriedLog)), JSON.stringify(carriedLog.entries[0].record));
+    assert('⛔ SF1-a-carried-record-whose-hops-cannot-be-diffed-or-with-no-git-reader-is-refused', (() => {
+      const carriedRec = { state: 'stands', id: 5, carriedFrom: REF_OLD, carriedHops: 1 };
+      const rows = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [], headSha: REF_HEAD };
+      return lowRiskRecordVerdict(carriedRec, { ...rows, runGit: () => { throw new Error('fatal: bad object'); } }, live).state === 'not-pass' &&
+        lowRiskRecordVerdict(carriedRec, rows, live).state === 'not-pass' &&
+        lowRiskRecordVerdict(carriedRec, { ...rows, runGit: () => 'docs/x.md\0' }, live).verdict === 'PASS';
+    })());
+    assert('⛔ SF2-the-carry-check-diffs-with-no-renames-so-a-rename-lists-both-paths', armDiffArgs.length > 0 && armDiffArgs.every((a) => a === `diff -z --name-only --no-renames ${REF_OLD} ${REF_HEAD}`), JSON.stringify(armDiffArgs));
+    assert('⛔ SF2-on-REAL-git-a-skill-renamed-out-of-the-catalog-into-docs-refuses-the-carried-record', (() => {
+      const dir = mkdtempSync(join(tmpdir(), 'lowrisk-rename-'));
+      try {
+        // `gitFreeEnv` (GIT_ENV_ISOLATION_RULE): an inherited GIT_DIR or GIT_INDEX_FILE never reaches the real checkout.
+        const g = (args) =>
+          execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], {
+            cwd: dir,
+            encoding: 'utf8',
+            env: gitFreeEnv(),
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+        g(['init', '-q']);
+        mkdirSync(join(dir, 'skills/a/rules'), { recursive: true });
+        writeFileSync(join(dir, 'skills/a/rules/security.md'), 'Never echo a token back.\n'.repeat(20));
+        writeFileSync(join(dir, 'skills/a/rules/guide.md'), 'Grant the narrowest set.\n'.repeat(20));
+        g(['add', '-A']);
+        g(['commit', '-q', '-m', 'a']);
+        const from = g(['rev-parse', 'HEAD']).trim();
+        mkdirSync(join(dir, 'content/docs'), { recursive: true });
+        g(['mv', 'skills/a/rules/security.md', 'content/docs/security.md']);
+        g(['commit', '-q', '-m', 'b']);
+        const to = g(['rev-parse', 'HEAD']).trim();
+        const renamesOn = g(['-c', 'diff.renames=true', 'diff', '-z', '--name-only', from, to]).split('\0').filter(Boolean);
+        const rec = { state: 'stands', id: 5, carriedFrom: from, carriedHops: 1 };
+        const rows = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [], headSha: to, runGit: g };
+        const v = lowRiskRecordVerdict(rec, rows, live);
+        // ⭐ And a rename INTO a security name inside the catalog: `--no-renames` lists BOTH sides, so the
+        // carry check names both and the arm's own name test reads the new name (ruling 「标签和路径都读」).
+        g(['mv', 'skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md']);
+        g(['commit', '-q', '-m', 'c']);
+        const to2 = g(['rev-parse', 'HEAD']).trim();
+        const into = lowRiskRecordVerdict({ ...rec, carriedFrom: to }, { ...rows, headSha: to2 }, live);
+        const bothSides = g(['diff', '-z', '--name-only', '--no-renames', to, to2]).split('\0').filter(Boolean).sort();
+        const intoTier = lowRiskArmVerdict(governedPathsIn(bothSides, REPO), REPO, { measured: true, reason: null, paths: [...bothSides, CS], body: LOW, labels: [], timeline: { measured: true, reason: null, events: [] }, fork: SAME_REPO, changesets: { measured: true, reason: null, files: [{ path: CS, text: CS_TEXT }] } });
+        // The plain diff names the destination alone (the blind spot); the check names the catalog path.
+        return renamesOn.join() === 'content/docs/security.md' && v.state === 'not-pass' && /skills\/a\/rules\/security\.md/.test(v.verdictReason) &&
+          bothSides.join() === 'skills/a/rules/guide.md,skills/a/rules/permission-guide.md' && into.state === 'not-pass' &&
+          /guide\.md/.test(into.verdictReason) && /permission-guide\.md/.test(into.verdictReason) &&
+          intoTier.tier === TIER_H && intoTier.reasons.some((r) => /names security, auth or permission: skills\/a\/rules\/permission-guide\.md/.test(r));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    })());
+    const nonArmFail = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
+    assert('the-other-Tier-S-legs-are-unchanged-here-a-FAIL-record-still-stands-for-them-follow-up-33541', nonArmFail.entries[0].record.state === 'stands' && nonArmFail.entries[0].record.verdict === undefined);
+
+    // ⛔ Each H case, each WITH a valid PASS record: the record leg is never consulted, the entry needs the maintainer.
+    const hCase = async (over) => { const v = await tierRun({ ...arm, ...over }); return [v.exitCode, v.entries[0].tier, v.entries[0].record === undefined]; };
+    const H = JSON.stringify([EXIT_REFUSED_UNAPPROVED, TIER_H, true]);
+    assert('⛔ skills-plus-packages-spec-stays-H', JSON.stringify(await hCase({ files: [SK, CS, 'packages/spec/src/data/field.zod.ts'] })) === H);
+    assert('⛔ skills-with-Clause-2-yes-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: yes\nMetadata-protocol: none\n` })) === H);
+    assert('⛔ skills-with-Clause-2-no-narrowing-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n` })) === H);
+    assert('⛔ skills-with-NO-Clause-2-line-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nMetadata-protocol: none\n` })) === H);
+    assert('⛔ skills-with-the-security-label-stays-H', JSON.stringify(await hCase({ labels: ['security'] })) === H);
+    assert('⛔ skills-beside-AGENTS-md-stays-H', JSON.stringify(await hCase({ files: [SK, CS, 'AGENTS.md'] })) === H);
+    assert('⛔ a-pull-the-leg-could-not-read-is-NOT-MEASURED-and-H', await (async () => { const v = await tierRun({ ...arm, headThrows: true }); return v.exitCode === EXIT_REFUSED_UNAPPROVED && v.entries[0].tier === TIER_H && v.entries[0].surfaces[0].lowRiskVerdict?.measured === false; })());
+    assert('⛔ a-published-path-in-ANOTHER-commit-of-the-same-PR-in-the-group-stays-H', JSON.stringify(await hCase({ extraRows: [row(70, ['ui/packages/react/src/x.tsx'], 'd'.repeat(40), 'y (#70)')] })) === H);
+
+    // ⛔ M1 at the queue: the changesets read at their commits, and the body's `Metadata-protocol: none`.
+    assert('⛔ M1-no-changeset-stays-H', JSON.stringify(await hCase({ files: [SK] })) === H);
+    assert('⛔ M1-a-changeset-releasing-another-package-stays-H', JSON.stringify(await hCase({ runGit: csGit("---\n'@objectstack/skills': patch\n'@objectstack/spec': minor\n---\n\nClause-②: no\nMetadata-protocol: none\n") })) === H);
+    assert('⛔ M1-a-changeset-without-its-declarations-stays-H', JSON.stringify(await hCase({ runGit: csGit("---\n'@objectstack/skills': patch\n---\n\nwording\n") })) === H);
+    assert('⛔ M1-a-changeset-git-cannot-show-at-its-commit-stays-H', JSON.stringify(await hCase({ runGit: csGit(null) })) === H);
+    assert('⛔ M1-no-git-reader-on-the-leg-stays-H', JSON.stringify(await hCase({ runGit: null })) === H);
+    assert('⛔ M1-a-changeset-in-ANOTHER-commit-of-the-PR-is-read-too', JSON.stringify(await hCase({ files: [SK, CS], extraRows: [row(70, ['.changeset/second.md'], 'e'.repeat(40), 'y (#70)')], runGit: (args) => (args[1].endsWith('second.md') ? "---\n'@objectstack/core': patch\n---\n\nClause-②: no\nMetadata-protocol: none\n" : CS_TEXT) })) === H);
+    assert('⛔ M1-a-body-without-Metadata-protocol-none-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: no\n` })) === H);
+
+    // ⛔ S1: a removed `security` label on the timeline the enqueue leg read; an unread timeline.
+    assert('⛔ S1-a-security-label-removed-on-the-timeline-stays-H', JSON.stringify(await hCase({ timeline: [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }] })) === H);
+    assert('⛔ S1-a-timeline-that-threw-or-was-never-read-stays-H', JSON.stringify(await hCase({ timeline: 'throw' })) === H && JSON.stringify(await hCase({ timeline: null })) === H);
+    // ⛔ S2: exactly one bare `Clause-②: no`.
+    assert('⛔ S2-trailing-text-two-lines-or-a-quoted-no-before-a-real-yes-stays-H', JSON.stringify(await hCase({ prBody: `Clause-②: no — wording\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ prBody: `Clause-②: no\nClause-②: no\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ prBody: `> Clause-②: no\n\nClause-②: yes\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ prBody: '```\nClause-②: no\n```\nClause-②: yes\nMetadata-protocol: none\n' })) === H);
+    // ⛔ S3: a fork head.
+    assert('⛔ S3-a-fork-head-or-an-unread-fork-predicate-stays-H', JSON.stringify(await hCase({ fork: { measured: true, isFork: true, headRepo: 'x/fork', baseRepo: 'o/r' } })) === H && JSON.stringify(await hCase({ fork: null })) === H);
+    assert('S3-makePullReader-carries-the-fork-predicate-off-the-same-GET', await (async () => {
+      const respond = (b) => async () => ({ ok: true, status: 200, json: async () => b });
+      const args = { apiUrl: 'https://api', slug: 'o/r', token: 't' };
+      const same = await makePullReader({ ...args, fetchImpl: respond({ head: { sha: HEAD, repo: { full_name: 'o/r' } }, base: { repo: { full_name: 'o/r' } } }) })(7);
+      const forked = await makePullReader({ ...args, fetchImpl: respond({ head: { sha: HEAD, repo: null }, base: { repo: { full_name: 'o/r' } } }) })(7);
+      return same.fork.measured === true && same.fork.isFork === false && forked.fork.isFork === true;
+    })());
+    // ⛔ The security NAME test at the queue (ruling 「标签和路径都读」): the label OR the path; a rename read as both paths.
+    assert('⛔ SEC-a-security-named-skill-file-stays-H-with-a-PASS-record-and-no-label', JSON.stringify(await hCase({ files: ['skills/objectstack-data/rules/security.md', CS] })) === H);
+    assert('⛔ SEC-a-rename-into-or-out-of-a-security-name-in-one-commit-stays-H', JSON.stringify(await hCase({ files: ['skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', CS] })) === H && JSON.stringify(await hCase({ files: ['skills/a/rules/security.md', 'skills/a/rules/guide.md', CS] })) === H);
+    // ⛔ Only a MODIFIED regular catalog file is wording (read off `diff-tree --raw` on each governed commit).
+    assert('⛔ STATUS-a-skill-ADDED-in-the-group-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['A', '100644', SK], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-skill-DELETED-in-the-group-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['D', '000000', SK], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-rename-read-as-delete-plus-add-under-no-renames-stays-H', JSON.stringify(await hCase({ files: ['skills/a/rules/guide.md', 'skills/a/rules/howto.md', CS], runGit: csGit(CS_TEXT, rawOf([['D', '000000', 'skills/a/rules/guide.md'], ['A', '100644', 'skills/a/rules/howto.md'], ['A', '100644', CS]])) })) === H);
+    assert('⛔ STATUS-a-SYMLINK-under-the-catalog-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '120000', SK], ['A', '100644', CS]])) })) === H);
+    // N10 (record 6888217778): the raw line's OLD mode is read too — a symlink turned regular file, however its
+    // status letter reads, and a regular file made executable both change the mode, and any mode change is H.
+    assert('⛔ MODE-a-symlink-turned-regular-file-stays-H-on-its-old-mode-as-M-or-as-T', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '100644', SK, '120000'], ['A', '100644', CS]])) })) === H && JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['T', '100644', SK, '120000'], ['A', '100644', CS]])) })) === H);
+    assert('⛔ MODE-a-regular-file-made-executable-stays-H-and-catalogFilesOf-carries-both-modes', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '100755', SK], ['A', '100644', CS]])) })) === H && JSON.stringify(catalogFilesOf({ shas: ['a'.repeat(40)] }, csGit(CS_TEXT, rawOf([['M', '100755', SK]]))).files) === JSON.stringify([{ path: SK, status: 'modified', oldMode: '100644', mode: '100755' }]));
+    assert('⛔ STATUS-a-status-read-that-throws-or-misses-the-path-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, null) })) === H && JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['A', '100644', CS]])) })) === H);
+    assert('catalogFilesOf-reads-status-and-mode-per-commit-and-fails-closed', (() => {
+      const e = { shas: ['a'.repeat(40), 'b'.repeat(40)] };
+      const per = { ['a'.repeat(40)]: rawOf([['A', '100644', SK]]), ['b'.repeat(40)]: rawOf([['M', '100644', SK]]) };
+      const r = catalogFilesOf(e, (args) => per[args[args.length - 1]]);
+      return r.measured === true && r.files.map((f) => `${f.status}:${f.mode}`).join() === 'added:100644,modified:100644' &&
+        catalogFilesOf(e, null).measured === false && catalogFilesOf({ shas: [] }, () => '').measured === false &&
+        catalogFilesOf(e, () => { throw new Error('x'); }).measured === false;
+    })());
+    // ⛔ S4: under the catalog only Markdown and `evals/*.json`.
+    assert('⛔ S4-a-script-under-skills-stays-H-an-evals-json-does-not', JSON.stringify(await hCase({ files: [SK, CS, 'skills/objectstack-data/hook.mjs'] })) === H && (await tierRun({ ...arm, files: [SK, CS, 'skills/objectstack-data/evals/evals.json'] })).exitCode === EXIT_CLEAR);
+
+    // The pull_request leg reads no body: the early warning says Tier H, NOT MEASURED, and that the queue leg reads it.
+    const early = await tierRun({ ...arm, event: EVENT_PULL_REQUEST });
+    assert('the-pull_request-leg-names-the-arm-NOT-MEASURED-and-never-reddens', early.entries[0].tier === TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderGuardVerdict(early)) && /queue guard reads it on the queue leg/.test(renderGuardVerdict(early)), renderGuardVerdict(early));
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

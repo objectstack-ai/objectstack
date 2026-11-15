@@ -10,7 +10,8 @@ import {
   IDENTITY_IMPORT_BATCH_SIZE,
   IDENTITY_IMPORT_OBJECT,
 } from '../identityImport';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../data-objectstack/src/sharedDiscovery';
 import type { ImportRecordsResult } from '@object-ui/types';
 
 const okResponse = (rows: Array<Record<string, unknown>>, overrides: Record<string, unknown> = {}) => ({
