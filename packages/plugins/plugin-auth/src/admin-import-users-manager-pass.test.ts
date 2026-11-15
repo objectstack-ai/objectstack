@@ -95,6 +95,8 @@ function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
 function makeHarness(opts: {
   seedUsers?: Row[];
   seedMembers?: Row[];
+  /** `sys_scim_subject` rows: a user named here is held by a SCIM directory. */
+  seedScimSubjects?: Row[];
   phoneEnabled?: boolean;
   emailAvailable?: boolean;
   smsInviteAvailable?: boolean;
@@ -105,6 +107,7 @@ function makeHarness(opts: {
   const tables: Record<string, Row[]> = {
     sys_user: (opts.seedUsers ?? []).map((u) => ({ manager_id: null, source: 'env_native', ...u })),
     sys_member: [...(opts.seedMembers ?? [])],
+    sys_scim_subject: [...(opts.seedScimSubjects ?? [])],
     sys_audit_log: [],
   };
 
@@ -459,7 +462,30 @@ describe('import-users manager pass — the refusals are the DELEGATE\'s (#18028
     expect(h.userBy('b@x.co')?.manager_id ?? null).toBeNull();
   });
 
-  it('directory-owned identity — an upsert row the IdP owns is refused', async () => {
+  it('SCIM-held identity — an upsert row a SCIM directory owns is refused', async () => {
+    const h = makeHarness({
+      seedUsers: [
+        { id: 'u_scim', email: 'scim@x.co', name: 'SCIM', source: 'idp_provisioned' },
+        { id: 'u_boss', email: 'boss@x.co', name: 'Boss' },
+      ],
+      seedScimSubjects: [{ id: 'sub_1', user_id: 'u_scim' }],
+    });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', mode: 'upsert', matchBy: 'email', format: 'json',
+      rows: [{ email: 'scim@x.co', name: 'SCIM', manager_id: 'boss@x.co' }],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.rows[0].action).toBe('updated');
+    expect(data.rows[0].manager).toBe('idp_provisioned');
+    expect(String(data.rows[0].error)).toContain('directory');
+    expect(data.summary.manager.refused).toBe(1);
+    expect(h.userBy('scim@x.co')?.manager_id ?? null).toBeNull();
+  });
+
+  it('⭐ SSO-only identity (idp_provisioned, no SCIM subject) — its manager link lands', async () => {
+    // ADR-0135 D4 stamps the mark on any SSO sign-in without a local password;
+    // with no directory behind it, the import links it like any other row.
     const h = makeHarness({
       seedUsers: [
         { id: 'u_sso', email: 'sso@x.co', name: 'SSO', source: 'idp_provisioned' },
@@ -473,9 +499,9 @@ describe('import-users manager pass — the refusals are the DELEGATE\'s (#18028
 
     const data = payload(res);
     expect(data.rows[0].action).toBe('updated');
-    expect(data.rows[0].manager).toBe('idp_provisioned');
-    expect(data.summary.manager.refused).toBe(1);
-    expect(h.userBy('sso@x.co')?.manager_id ?? null).toBeNull();
+    expect(data.rows[0].manager).toBe('linked');
+    expect(data.summary.manager).toEqual({ linked: 1, unresolved: 0, refused: 0 });
+    expect(h.userBy('sso@x.co')?.manager_id).toBe('u_boss');
   });
 
   it('cross-organization — the delegate\'s sys_member screen really runs', async () => {
@@ -517,6 +543,8 @@ describe('import-users manager pass — the refusals are the DELEGATE\'s (#18028
     // And none of the predicates' own machinery.
     expect(IMPORT_USERS_SOURCE).not.toContain('MAX_MANAGER_CHAIN_DEPTH');
     expect(IMPORT_USERS_SOURCE).not.toContain('sys_member');
+    expect(IMPORT_USERS_SOURCE).not.toContain('sys_scim_subject');
+    expect(IMPORT_USERS_SOURCE).not.toContain('isHeldByScimDirectory');
   });
 });
 

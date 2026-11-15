@@ -15,7 +15,8 @@ A specific person · everyone holding a position (e.g. sales managers) · the su
 **Routing to the submitter's manager needs each user's manager set.** This style resolves
 `sys_user.manager_id`, which is not a profile field: editing the user does not set it. A platform
 admin sets it one user at a time from **Setup → Users → ⋯ → Set Manager**, which calls
-`POST /api/v1/auth/admin/set-user-manager`. For many users at once, provisioning fills it: the
+`POST /api/v1/auth/admin/set-user-manager` — for anyone, people who sign in through SSO included,
+except a person a SCIM directory holds, whose manager is changed in that directory. For many users at once, provisioning fills it: the
 admin bulk-import endpoint reads a `manager_id` column, and a seed, or a SCIM / directory-sync
 path your deployment supplies, can write it too. Until it is set, a manager-only approval step
 resolves to nobody and the node's `onEmptyApprovers` policy decides what happens — by default the
