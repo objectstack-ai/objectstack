@@ -30,6 +30,15 @@
  *    likewise when the send was recorded during a still-running resolve and
  *    the create it later makes fails;
  *  - CONTROL: a send in an existing conversation draws and sends as before.
+ *
+ * objectstack#33562 — two sends during one held create, then a failed create:
+ * the box gets both parts back, first part first, and the retry sends the
+ * joined text once (the single-send rollback above is the CONTROL).
+ *
+ * objectstack#33567 — on a link to an existing conversation, a message sent
+ * before that conversation's GET answers is held, drawn, and sent once into it
+ * when the GET answers; no conversation is created (the existing-conversation
+ * send above is the CONTROL).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -320,5 +329,64 @@ describe('the full-page chat — the held first message, more cases (objectstack
     expect(state.creates).toHaveLength(0);
     await waitFor(() => expect(state.sent).toEqual(['add a due date field']));
     expect(drawn('add a due date field')).toBe(1);
+  });
+});
+
+describe.each([
+  ['the full-page chat (/ai/build)', () => mount()],
+  ['the console dock', mountDock],
+])('%s — two sends during a held create, then a failed create (objectstack#33562)', (_host, mountHost) => {
+  it('gives both parts back, first part first, and the retry sends the joined text once', async () => {
+    mountHost();
+    await typeAndSend('first part');
+    await typeAndSend('second part');
+    expect(state.creates).toHaveLength(1);
+
+    await answerCreate(new Response('upstream busy', { status: 503 }));
+
+    const box = await composer();
+    await waitFor(() => expect(box.value).toBe('first part\n\nsecond part'));
+    expect(drawn('first part')).toBe(0);
+    expect(drawn('second part')).toBe(0);
+    expect(screen.getByTestId('chat-send-error')).toBeInTheDocument();
+    expect(state.sent).toEqual([]);
+
+    // Sending what the box holds retries the create and sends it once.
+    await typeAndSend(box.value);
+    await answerCreate(json({ id: 'conv-1', messages: [] }));
+    await waitFor(() => expect(state.sent).toEqual(['first part\n\nsecond part']));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(state.sent).toHaveLength(1);
+    expect(screen.queryByTestId('chat-send-error')).not.toBeInTheDocument();
+  });
+});
+
+describe('the full-page chat — a send before a linked conversation opens (objectstack#33567)', () => {
+  it('is held and drawn while the GET is open, and sent once into that conversation when it answers', async () => {
+    state.holdGet = true;
+    mount('/ai/build/conv-7');
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await typeAndSend('add a due date field');
+
+    // Not lost: drawn at once, not sent yet, and no conversation is created for it.
+    expect(drawn('add a due date field')).toBe(1);
+    expect(state.sent).toEqual([]);
+    expect(state.creates).toHaveLength(0);
+
+    await act(async () => {
+      state.gets.shift()!.answer(json({ id: 'conv-7', messages: [] }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    await waitFor(() => expect(state.sent).toEqual(['add a due date field']));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(state.sent).toHaveLength(1);
+    expect(state.creates).toHaveLength(0);
+    expect(drawn('add a due date field')).toBe(1);
+    expect((await composer()).value).toBe('');
   });
 });

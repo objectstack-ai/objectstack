@@ -574,6 +574,16 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   isLoading?: boolean;
   /** Current streaming/API error */
   error?: Error;
+  /**
+   * objectstack#33562 — the text a not-sent `error` gives back to the
+   * composer, when the host, not the composer, holds what was not sent: e.g.
+   * two messages the host joined into one while it waited to send them. Read
+   * once per not-sent error and only into an empty box, like the composer's
+   * own text, but restored whichever way it was sent: a suggestion chip the
+   * host held comes back too, where the composer alone restores only typed
+   * text. Absent = the text the composer last typed and submitted.
+   */
+  unsentText?: string;
   showTimestamp?: boolean;
   /**
    * Render avatars beside each message (assistant gets a bot glyph, the user
@@ -2433,6 +2443,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       readOnly = false,
       isLoading = false,
       error,
+      unsentText,
       showTimestamp = false,
       showAvatars = false,
       userAvatarUrl,
@@ -3245,13 +3256,19 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           });
         }
       }
-      // Only text the user TYPED here is restorable. `lastSubmittedRef` is
-      // written by `handleSubmit` alone and cleared by every card-driven send,
-      // because those send a canned message the user never typed — leaving the
-      // ref stale refilled the composer with the user's PREVIOUS prompt, a
-      // message that had already been delivered and answered, reading as
-      // "resend this" (objectui#7253).
-      const text = lastSubmittedRef.current;
+      // What is restored is what was NOT sent, never an older delivered prompt.
+      // On its own the composer knows only text the user TYPED here:
+      // `lastSubmittedRef` is written by `handleSubmit` alone and cleared by
+      // every card-driven send (a chip, a plan or changes card), because those
+      // send a canned message — leaving the ref stale refilled the composer
+      // with the user's PREVIOUS prompt, a message that had already been
+      // delivered and answered, reading as "resend this" (objectui#7253).
+      // A host that held the message itself names it as `unsentText`
+      // (objectstack#33562), and that text is restored too, whichever way it
+      // was sent: what the composer last submitted may be only part of it,
+      // and a suggestion chip's text the host held for a create that then
+      // failed is the message that was not sent, not a stale one.
+      const text = unsentText ?? lastSubmittedRef.current;
       if (!text) return;
       const textarea = promptInputWrapRef.current?.querySelector('textarea');
       if (textarea && textarea.value.trim() === '') {
@@ -3260,7 +3277,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.focus();
       }
-    }, [error]);
+    }, [error, unsentText]);
 
     const handleCopy = React.useCallback((message: ChatbotEnhancedMessage) => {
       void navigator.clipboard?.writeText(message.content);
