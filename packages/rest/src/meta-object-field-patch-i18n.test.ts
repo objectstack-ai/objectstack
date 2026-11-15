@@ -25,6 +25,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The read gate loads `@objectstack/spec/ui` with a dynamic import; pay that load at collection.
+import '@objectstack/spec/ui';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { translateMetaDocument, translateMetaList, type MetaListTranslationSources } from './meta-item-read-gate.js';
 
