@@ -76,14 +76,15 @@ import type { Plugin, Rollup } from 'vite';
  *
  * ## Defect 2 — edges the barrel has nothing to do with (three views)
  *
- * `RecordDetailView` is eager for an honest reason and stays eager:
- * `packages/app-shell/src/views/ObjectView.tsx` imports it statically, and
- * `ObjectView` is in AppContent's own "eagerly loaded — always needed" block.
- * Its `lazy()` is defeated by a genuine dependency, not by a barrel. It is
- * therefore PINNED in {@link DECLARED_LAZY_VIEWS_STILL_EAGER} rather than
- * quietly declared pure — and it is not declared pure for a second, independent
- * reason: it carries a bare `import './record-approvals-renderer.js'`, so the
- * claim would be false.
+ * `RecordDetailView` was eager for an honest reason:
+ * `packages/app-shell/src/views/ObjectView.tsx` imported it statically, and
+ * `ObjectView` was in AppContent's own "eagerly loaded — always needed" block.
+ * Its `lazy()` was defeated by a genuine dependency, not by a barrel. Both edges
+ * are now `lazy()` (objectstack#33581: `ObjectView` is a route element and its
+ * record pane loads the view on demand), so its pin is gone. It is still not
+ * declared pure, for a second, independent reason: it carries a bare
+ * `import './record-approvals-renderer.js'`, so the claim would be false — see
+ * {@link DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS}.
  *
  * `RecordFormPage` and `ReportView` are eager for a third reason, and it is the
  * one no `grep` over the source will show: CHUNK CO-TENANCY. Rolldown emits each
@@ -153,10 +154,11 @@ import type { Plugin, Rollup } from 'vite';
  *  1. Every declared view must be found in SOME chunk, eager or lazy. A view
  *     that matches nothing at all means the module-id matcher stopped matching,
  *     not that the bundle improved.
- *  2. `ObjectView` — imported statically by AppContent's always-needed block —
- *     must be found EAGER. It is the positive control in the same query shape:
- *     if the eager walk cannot see a module that is eager by construction, its
- *     zeroes are not measurements.
+ *  2. `ConsoleLayout` — imported statically by AppContent's always-needed
+ *     block — must be found EAGER. It is the positive control in the same query
+ *     shape: if the eager walk cannot see a module that is eager by
+ *     construction, its zeroes are not measurements. (`ObjectView` was the
+ *     control until it became a `lazy()` route element itself, objectstack#33581.)
  */
 
 /** Repo root — this file lives in `scripts/`, one level below it. */
@@ -170,11 +172,12 @@ export const APP_CONTENT_PATH = 'packages/app-shell/src/console/AppContent.tsx';
 
 /**
  * The positive control for the eager walk:
- * `packages/app-shell/src/views/ObjectView.tsx`, statically imported by
- * {@link APP_CONTENT_PATH}'s "eagerly loaded — always needed" block, so it is
- * eager by construction. See counter-probe 2 in the header.
+ * `packages/app-shell/src/layout/ConsoleLayout.tsx`, statically imported by
+ * {@link APP_CONTENT_PATH}'s "eagerly loaded — always needed" block and drawn
+ * around every route, so it is eager by construction. See counter-probe 2 in
+ * the header.
  */
-export const EAGER_WALK_CONTROL = 'packages/app-shell/src/views/ObjectView.tsx';
+export const EAGER_WALK_CONTROL = 'packages/app-shell/src/layout/ConsoleLayout.tsx';
 
 /**
  * Declared-`lazy()` modules that are in the eager closure anyway, with the
@@ -182,13 +185,11 @@ export const EAGER_WALK_CONTROL = 'packages/app-shell/src/views/ObjectView.tsx';
  * (`scripts/__tests__/vite-declared-lazy-views.test.ts` checks that, and that
  * every entry still names a file that exists).
  *
- * ONE entry stands, and it does not stand for the barrel re-export
- * objectui#6535 removed:
- *
- *  - `packages/app-shell/src/views/RecordDetailView.tsx` — a real static edge.
- *    `packages/app-shell/src/views/ObjectView.tsx` imports it by name, and
- *    `ObjectView` sits in AppContent's own "eagerly loaded — always needed"
- *    block. Splitting it would mean giving `ObjectView` a lazy boundary.
+ NO entry stands. The last one was the record view, held by a real static
+ * edge: the object list imported it by name, and the list sat in AppContent's
+ * own "eagerly loaded — always needed" block. objectstack#33581 gave both a
+ * `lazy()` boundary, the `missing` half below fired on that build, and the line
+ * was deleted because the build said so.
  *
  * ## `views/metadata-admin/index.ts` was the third removal — objectui#6776
  *
@@ -277,7 +278,23 @@ export const EAGER_WALK_CONTROL = 'packages/app-shell/src/views/ObjectView.tsx';
  * became lazy" from "the matcher stopped matching", and it ran green on the
  * same build.
  */
-export const DECLARED_LAZY_VIEWS_STILL_EAGER: readonly string[] = Object.freeze([
+export const DECLARED_LAZY_VIEWS_STILL_EAGER: readonly string[] = Object.freeze([]);
+
+/**
+ * Declared-`lazy()` modules this plugin weighs like every other declared view
+ * (one found eager and unpinned still fails the build) but never declares
+ * `moduleSideEffects: false`, because each carries a side effect of its own.
+ * Kept sorted and deduplicated; the plugin refuses an entry whose source no
+ * longer carries a bare side-effect import and that its package's `sideEffects`
+ * array does not name, so a stale entry cannot keep a pure view undeclared.
+ *
+ *  - `packages/app-shell/src/views/RecordDetailView.tsx` — bare-imports
+ *    `./record-approvals-renderer.js`, the `record:approvals` registration.
+ *    It is lazy without the declaration: nothing in the eager graph reaches it
+ *    but the package barrel, which the package's own `sideEffects` array
+ *    already leaves shakeable for it.
+ */
+export const DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS: readonly string[] = Object.freeze([
   'packages/app-shell/src/views/RecordDetailView.tsx',
 ]);
 
@@ -496,6 +513,8 @@ export interface DeclaredLazyViewsOptions {
   readonly appContentPath?: string;
   /** Ledger of declared-lazy views that are eager anyway. */
   readonly pinnedEager?: readonly string[];
+  /** Ledger of declared-lazy views that carry a side effect, never declared pure. */
+  readonly sideEffectfulLazy?: readonly string[];
   /** Repo root the repo-relative paths are resolved against. */
   readonly repoRoot?: string;
 }
@@ -509,6 +528,7 @@ export function viteDeclaredLazyViews(options: DeclaredLazyViewsOptions = {}): P
   const repoRoot = options.repoRoot ?? REPO_ROOT;
   const appContentPath = options.appContentPath ?? APP_CONTENT_PATH;
   const pinnedEager = options.pinnedEager ?? DECLARED_LAZY_VIEWS_STILL_EAGER;
+  const sideEffectfulLazy = options.sideEffectfulLazy ?? DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS;
 
   /** Repo-relative view paths parsed from AppContent, filled in `buildStart`. */
   let declared: string[] = [];
@@ -563,9 +583,33 @@ export function viteDeclaredLazyViews(options: DeclaredLazyViewsOptions = {}): P
       }
 
       const pinnedSet = new Set(pinnedEager);
+      const sideEffectfulSet = new Set(sideEffectfulLazy);
       const next = new Set<string>();
       for (const view of declared) {
         if (pinnedSet.has(view)) continue;
+
+        // A view that carries a side effect is left undeclared, and the entry
+        // must still be true: a view that lost its side effect is declared pure
+        // like the rest, never kept out by a stale line.
+        if (sideEffectfulSet.has(view)) {
+          const owner = nearestPackage(view, repoRoot);
+          const arrayClaim = owner
+            ? declaredSideEffectful(
+                (JSON.parse(fs.readFileSync(abs(owner.packageJsonPath), 'utf8')) as { sideEffects?: unknown })
+                  .sideEffects,
+                owner.packageRelative,
+              )
+            : null;
+          if (!arrayClaim && !bareSideEffectImport(fs.readFileSync(abs(view), 'utf8'))) {
+            this.error(
+              `[declared-lazy-views] \`${view}\` is in DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS but ` +
+                `carries no bare side-effect import and its package's \`sideEffects\` array does ` +
+                `not name it, so nothing stops it being declared pure. Delete the line and say so ` +
+                `in the PR.`,
+            );
+          }
+          continue;
+        }
 
         // Guard 1 — the package's own published claim. Checked FIRST because it
         // is the one that catches a top-level registration CALL, which the

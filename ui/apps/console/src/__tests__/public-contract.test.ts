@@ -144,6 +144,7 @@ const EXPECTED_UNIMPLEMENTED: string[] = [];
  * plugins below, move that tag out of this list — it is still covered.
  */
 const EXPECTED_LAZY = [
+  'list-view',
   'object-kanban',
   'object-calendar',
   'object-gantt',
