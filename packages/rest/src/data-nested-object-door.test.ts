@@ -560,14 +560,14 @@ for (const cell of CELLS) {
         expect(regions.map((r: any) => r.id)).toEqual(['tr_b']);
       });
 
-      it('through one hop and through three: only tenant B\'s case, exactly the two-step route\'s answer — on find and count', async () => {
-        for (const [name, where] of TEN_HOPS) {
+      for (const [name, where] of TEN_HOPS) {
+        it(`${name}: only tenant B's case, exactly the two-step route's answer — on find and count`, async () => {
           const got = (await engine.find(TEN_CASE, { where, context: CALLER_B } as any)).map((r: any) => r.id).sort();
           expect(got, name).toEqual(['tk_b']);
           expect(got, `two-step parity, ${name}`).toEqual(await twoStep(name === 'one hop' ? 1 : 3));
           expect(await engine.count(TEN_CASE, { where, context: CALLER_B } as any), `count, ${name}`).toBe(1);
-        }
-      });
+        });
+      }
 
       it('a read rule the region applies after its driver call gives the two-step route\'s answer', async () => {
         const hook = async (ctx: any) => { ctx.result = (ctx.result as any[]).filter((row) => row.id !== 'tr_b'); };
