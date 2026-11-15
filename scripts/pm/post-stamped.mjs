@@ -4179,6 +4179,16 @@ async function main(argv) {
 // work and must not go red.
 // ---------------------------------------------------------------------------
 
+/** How long a child `--self-test` this self-test spawns may run before it is cut and named (#33603). */
+const CHILD_RUN_TIMEOUT_MS = 120_000;
+
+/** Why a spawned child self-test did not pass, in one line: a timeout or signal, and the child's own ✗ lines. Pure. */
+function childRunDetail(result) {
+  const cut = result?.error?.code === 'ETIMEDOUT' ? `timed out after ${CHILD_RUN_TIMEOUT_MS} ms` : result?.error ? `did not run (${result.error.code ?? result.error.message})` : null;
+  const failures = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('✗ ') && !/ self-test: /u.test(l)).slice(0, 6);
+  return [cut, result?.signal ? `signal ${result.signal}` : null, `exit ${result?.status ?? 'none'}`, failures.join(' | ') || null].filter(Boolean).join('; ');
+}
+
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the token contract: the two spellings, and nothing else': 9,
@@ -4208,7 +4218,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the signature: every body opens with LANE#N · ACCOUNT · SESSION or is refused, beside the stamp contract; one leading signature changes no reading': 11,
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
   'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
-  'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 15,
+  'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 16,
 });
 const SELF_TEST_BATTERY_FLOOR = 29;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -5803,8 +5813,10 @@ export function selfTest() {
       t('⭐ a card BODY is untouched — the check is a record\'s, and a record is a comment', judgeBody(REC(CONTRACT_REVIEW_TIER_NAME), { mode: 'body' }, NOW_MS).ok);
       t('the CLI carries --tier-evidence=PATH on a comment, and leaves it null when absent', parseOptions(['--comment=1', `--tier-evidence=${atTier}`]).options.tierEvidence === atTier && parseOptions(['--comment=1']).options.tierEvidence === null);
       t('⛔ --tier-evidence with --body, or with no path, is refused', parseOptions(['--body=1', '--tier-evidence=x']).ok === false && parseOptions(['--comment=1', '--tier-evidence=']).ok === false);
-      const verifier = spawnSync(process.execPath, [fileURLToPath(new URL('./verify-review-tier.mjs', import.meta.url)), '--self-test'], { encoding: 'utf8' });
-      t('the verifier\'s own --self-test runs HERE, so CI runs it inside check:pm-post-stamped: exit 0 and its success line', verifier.status === 0 && /✓ verify-review-tier self-test: \d+ cases pass/u.test(verifier.stdout));
+      const verifier = spawnSync(process.execPath, [fileURLToPath(new URL('./verify-review-tier.mjs', import.meta.url)), '--self-test'], { encoding: 'utf8', timeout: CHILD_RUN_TIMEOUT_MS });
+      t('the verifier\'s own --self-test runs HERE, so CI runs it inside check:pm-post-stamped: exit 0 and its success line', verifier.status === 0 && /✓ verify-review-tier self-test: \d+ cases pass/u.test(verifier.stdout), childRunDetail(verifier));
+      t('a child self-test that hangs is cut at its timeout and named, and a failing one relays its own ✗ lines', /timed out after \d+ ms/u.test(childRunDetail({ status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' }, stdout: '', stderr: '' })) &&
+        childRunDetail({ status: 1, signal: null, error: undefined, stdout: '  ✓ a\n', stderr: '  ✗ case b\n  ✗ case c\n✗ verify-review-tier self-test: 2 failure(s)\n' }).includes('✗ case b | ✗ case c'));
       const own = readFileSync(SELF_PATH, 'utf8');
       t('structural: the transcript judge is imported from verify-review-tier.mjs, ⛔ never restated here', /import \{[^}]*\bverifyReviewTranscriptFile\b[^}]*\} from '\.\/verify-review-tier\.mjs';/u.test(own) && !/function\s+(judgeReviewTranscript|verifyReviewTranscriptFile)\b/u.test(own));
     } finally {
