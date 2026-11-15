@@ -12976,8 +12976,9 @@ export function contractReviewVerdictLines(body) {
  */
 const CONTRACT_REVIEW_LINE_LEAD = String.raw`^[ \t]*(?:#{1,6}[ \t]+)?(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?[*_]{0,3}[ \t]*`;
 // The verdict word where it is a VALUE (the key's, the cell's): FAIL, FAILED or FAILS, ⛔ never the fail-safe idiom
-// `fail-closed` / `fails closed` / `failed closed` (#33770 N4). `FAIL closed` as a value still reads FAIL.
-const CONTRACT_REVIEW_FAIL_WORD = String.raw`(?:fail(?:ed|s)\b(?![ \t-]+closed\b)|fail\b(?!-closed\b))`;
+// spelled as prose spells it — hyphenated (`fail-closed`, `fails-closed`, `failed-closed`) or `fails closed` with one
+// space (#33770 N4). Every other value reads FAIL: `FAIL closed`, `FAILED closed`, `FAILED - closed`.
+const CONTRACT_REVIEW_FAIL_WORD = String.raw`(?:fails\b(?!-closed\b|[ \t]closed\b)|failed\b(?!-closed\b)|fail\b(?!-closed\b))`;
 const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:[A-Za-z-]+[ \t]+){0,2}verdict(?:[ \t]*\([^)]*\))?[ \t]*[*_]{0,3}[ \t]*(?:[:：=]|[—–]|-(?=[ \t])|(?<=[ \t])-|(?:is|was)(?=[ \t:：])[ \t]*[:：]?)[ \t]*(?:[^\n]*?(?:→|->|⇒|⟶)[ \t]*)?(?:~~[^~\n]*~~[ \t]*)?[*_~` + '`' + String.raw`]{0,3}[ \t]*` + CONTRACT_REVIEW_FAIL_WORD, 'i');
 // A table cell whose word reads FAIL: after any marks (emphasis, a code mark, a symbol) and a struck word (#33770 N3).
 const CONTRACT_REVIEW_FAIL_CELL_WORD = new RegExp(String.raw`^[ \t]*(?:~~[^~]*~~[ \t]*)?[^\p{L}\p{N}]*?` + CONTRACT_REVIEW_FAIL_WORD, 'iu');
@@ -13009,11 +13010,13 @@ function contractReviewFindingContinues(line, next) {
   const unquote = (s) => (quoted ? s.replace(/^[ \t]*(?:>[ \t]?)+/, '') : s);
   const own = unquote(line);
   const body = unquote(next);
-  if (quoted && !/^[ \t]*>/.test(next)) return /\S/.test(next) && !CONTRACT_REVIEW_BLOCK_START.test(next.trimStart()) && !CONTRACT_REVIEW_FINDING_ID_LEAD.test(next);
+  // A line that opens a finding of its own — led by an id, or by a grade with no id (`should-fix: none`) — ends this one.
+  const opensFinding = (s) => CONTRACT_REVIEW_FINDING_ID_LEAD.test(s) || CONTRACT_REVIEW_GRADE_NAMED.test(s);
+  if (quoted && !/^[ \t]*>/.test(next)) return /\S/.test(next) && !CONTRACT_REVIEW_BLOCK_START.test(next.trimStart()) && !opensFinding(next);
   if (!/\S/.test(body)) return false;
   const indent = (s) => /^[ \t]*/.exec(s)[0].replace(/\t/g, '    ').length;
   if (indent(body) > indent(own)) return true;
-  return !CONTRACT_REVIEW_BLOCK_START.test(body.trimStart()) && !CONTRACT_REVIEW_FINDING_ID_LEAD.test(body);
+  return !CONTRACT_REVIEW_BLOCK_START.test(body.trimStart()) && !opensFinding(body);
 }
 const CONTRACT_REVIEW_GRADE_NEGATED = /\b(?:no|nor|neither|zero|0)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?(?:(?:must|should)-fix(?:es)?[ \t]*(?:(?:or|nor|\/)[ \t]*|(?:,|and)[ \t]*(?:no|nor)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?))?$/i;
 const CONTRACT_REVIEW_RECORD_CITATION = /\(record[ \t]+\d{6,}\b[^()]*\)/gi;
@@ -13043,7 +13046,11 @@ export function contractReviewRecordReading(body) {
     else if (!inTable) [inTable, tableVerdictColumn] = [true, cells.findIndex((cell) => /\bverdict\b/i.test(cell))];
     else underVerdictColumn = tableVerdictColumn >= 0 && CONTRACT_REVIEW_FAIL_CELL_WORD.test(cells[tableVerdictColumn] ?? '');
     const explicit = CONTRACT_REVIEW_VERDICT_EXPLICIT.exec(line);
-    if (explicit) verdicts.push(explicit[1]);
+    if (explicit) {
+      verdicts.push(explicit[1]);
+      // The explicit reader stops at the first word, so `**VERDICT: PASS → FAIL**` is ALSO a FAIL spelling (#33770 r2 S1).
+      if (explicit[1] === 'PASS' && CONTRACT_REVIEW_FAIL_KEYED.test(line)) failSpellings.push(line.trim());
+    }
     else if (!heading && (CONTRACT_REVIEW_FAIL_KEYED.test(line) || CONTRACT_REVIEW_FAIL_CELL.test(line) || underVerdictColumn || CONTRACT_REVIEW_FAIL_BARE.test(line))) failSpellings.push(line.trim());
     const cited = [...line.matchAll(CONTRACT_REVIEW_RECORD_CITATION)].map((c) => [c.index, c.index + c[0].length]);
     const named = CONTRACT_REVIEW_GRADE_NAMED.exec(line);
@@ -33125,6 +33132,10 @@ async function selfTest() {
   t43('#33770 N3: FAIL read in a header row\'s verdict column, after an arrow or a struck word, with `was`, `is:` or an unspaced dash, after a mark in a cell, key and value in one cell, title or lower case in a heading tail', ['| Tier | Verdict |\n|---|---|\n| at-tier | FAIL |', 'Verdict: PASS → FAIL', 'Verdict: PASS -> FAIL', 'Verdict: ~~PASS~~ FAIL', 'Verdict was FAIL', 'verdict is: FAIL', 'Verdict -FAIL', '| Verdict | ❌ FAIL |', '| Verdict | ✗ **FAIL** |', '| Verdict: FAIL |', '## Contract review — Fail', '## Contract review — fail'].map((l) => read43(l).failSpellings.length).join(), Array(12).fill('1').join());
   t43('#33770 N4: the fail-safe idiom and a bare FAILED line are not FAIL — `The verdict is fail-closed.`, a `fails closed` cell beside a verdict cell or under a verdict column, `PASS, prior FAIL closed` in a heading tail, `FAILED`', ['The verdict is fail-closed.', '| Verdict | fails closed |', '| Leg | Verdict |\n|---|---|\n| x | fails closed on error |', '## Contract review — PASS, prior FAIL closed', 'FAILED', '- Leg verdict: fail-closed reading holds.'].map((l) => read43(l).failSpellings.length).join(), '0,0,0,0,0,0');
   t43('#33770 N4 CONTROL: the idiom never excuses a verdict VALUE — `Verdict: FAIL closed`, a `FAIL closed` cell, a heading tail opening `FAIL closed` read FAIL; a PASS verdict column and `verdict-failure` do not', ['Verdict: FAIL closed', '| Verdict | FAIL closed |', '## Contract review — FAIL closed', '| Tier | Verdict |\n|---|---|\n| at-tier | PASS |', 'verdict-failure noted'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,0,0');
+  // #33770 round 2 (review 6898558527 of PR #34054): the template's own all-caps key, a grade-led next line, a FAILED value.
+  t43('#33770 r2 S1: the explicit all-caps line read past its first word — `**VERDICT: PASS → FAIL**`, the ASCII arrow, bare, quoted — states PASS AND a FAIL spelling; the plain PASS and FAIL lines stay one word each', ['**VERDICT: PASS → FAIL**', '**VERDICT: PASS -> FAIL**', 'VERDICT: PASS → FAIL', '> **VERDICT: PASS ⇒ FAIL**', '**VERDICT: PASS**', '**VERDICT: FAIL**'].map((l) => { const x = contractReviewRecordReading(PASS43.replace('**VERDICT: PASS**', l)); return `${x.verdicts.join('+')}|${x.failSpellings.length}`; }).join(), 'PASS|1,PASS|1,PASS|1,PASS|1,PASS|0,FAIL|0');
+  t43('#33770 r2 S2: a next line led by a grade with no id ends the finding — `must-fix: none` over `should-fix: none`, bulleted or plain, and a closed finding over one; a body under `must-fix: none` keeps it open', ['must-fix: none\nshould-fix: none', '- must-fix: none\nshould-fix: none', 'S1 (should-fix): closed.\nshould-fix: none', 'must-fix: none\nstill open for X'].map(grades43).join(), '|0,|0,|0,-:must-fix|0');
+  t43('#33770 r2 nit: as a VALUE only the prose idiom is excused — `FAILED - closed`, `FAILED closed`, `FAIL - closed` read FAIL; `fails closed`, `failed-closed` do not', ['Verdict: FAILED - closed', 'Verdict: FAILED closed', 'Verdict: FAIL - closed', 'Verdict: fails closed', 'Verdict: failed-closed'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,0,0');
   t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]}}');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.
