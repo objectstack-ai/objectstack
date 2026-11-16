@@ -160,6 +160,10 @@ const capRemoved = (key: string, mechanism: string) =>
  *   `aggregate()`: the engine ANDs it with method presence, because a driver
  *   can carry `aggregate()` without compiling that key (and a subclass can
  *   inherit a compiler its own transport refuses).
+ * - `readableIdsLeaf` — opt-IN for a nested-relation condition on a read
+ *   verb: the engine plans it as a composed `ReadableIds` leaf (ADR-0139) on
+ *   a driver that declares it, and refuses it up front (`INVALID_FILTER` /
+ *   400) on one that does not, before any related read runs.
  *
  * Everything else IS the method: aggregate pushdown gates on
  * `typeof driver.aggregate === 'function'`, schema sync on
@@ -337,6 +341,36 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
   aggregationFilter: z.boolean().optional().describe('`aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine\'s in-memory answer, except that text compares by the backend collation as in `where` (absence = false: the engine aggregates filtered measures in memory)'),
+
+  /**
+   * This driver compiles (or, in process, evaluates) a composed `ReadableIds`
+   * leaf (ADR-0139 D1/D3): `field IN (SELECT id FROM <related> WHERE <scope>
+   * AND <tenant wall>)` as one statement on the SQL family, a read of the
+   * related rows then a member test in `driver-memory`.
+   *
+   * What the engine does with it: a nested-relation condition on a read verb
+   * (`{ account: { region: 'NA' } }` on `find`, `findOne`, `count`,
+   * `aggregate`) beneath a single-valued relation is planned as that leaf
+   * when this bit is `true`; when it is absent the engine REFUSES the
+   * condition before planning or reading anything, `INVALID_FILTER` / 400,
+   * naming the driver and the two-step route (read the related object, then
+   * match the relation field against its ids). An analytics dimension
+   * through a lookup is refused on such a driver the same way, before any
+   * read (`INVALID_QUERY` / 400). The same bit decides both.
+   *
+   * Why a bit and not method presence: no driver method says whether the
+   * filter compiler understands the leaf — every driver has `find()`. A
+   * driver that cannot compile it (MongoDB, OData) used to be reached with
+   * it and refused from inside the driver as a composition fault
+   * (`INTERNAL_ERROR` / 500), which an author cannot act on.
+   *
+   * ⛔ Not a way to say "this condition, today". It describes the driver's
+   * filter compiler, is read at dispatch time, and a driver whose transport
+   * compiles the leaf only sometimes should not declare it.
+   *
+   * Optional; absence means `false`, like `batchSchemaSync`.
+   */
+  readableIdsLeaf: z.boolean().optional().describe('The filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf (absence = false: the engine refuses a nested-relation condition on a read verb up front, INVALID_FILTER / 400)'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0

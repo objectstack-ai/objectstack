@@ -329,6 +329,24 @@ export function relationConditionError(refusal: RelationConditionRefusal, contex
 }
 
 /**
+ * [#33876] The words of the up-front refusal of a nested-relation condition
+ * on a read verb whose driver compiles no `ReadableIds` leaf (the
+ * `DriverCapabilities.readableIdsLeaf` bit is absent: MongoDB, OData).
+ * Thrown before any related read is planned or run. The short reason and
+ * the two-step route come first — the REST door bounds a 4xx message at 500
+ * characters by truncation — then "NOT applied" and which drivers run it.
+ */
+export function relationSemiJoinDriverRefusal(site: RelationFilterSite, context: string, driverName: string): Error {
+  return invalidFilterError(
+    `${context}: the nested-relation condition at ${site.path} cannot run on this read's driver `
+    + `'${driverName}', which compiles no semi-join of '${site.target}'. Read '${site.target}' with that `
+    + `condition yourself, then match '${site.field}' against its ids: ${idsRoute(site.field, site.multiple)}. `
+    + 'The filter was NOT applied and nothing was read. A driver that declares the readableIdsLeaf '
+    + 'capability (the SQL drivers, the in-memory driver) runs it as one statement.',
+  );
+}
+
+/**
  * The cap refusal: the condition matched more related records than
  * {@link RELATION_FILTER_ID_CAP}, so the filter is refused — `INVALID_FILTER` /
  * 400 — rather than run over a cut-off id list that would silently drop

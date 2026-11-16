@@ -4299,6 +4299,7 @@ export class ObjectQL implements IObjectQLEngine {
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
       relationSemiJoinServes: (...a) => this.relationSemiJoinServes(...a),
+      relationReadDriver: (name) => this.getDriver(name),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
   }
