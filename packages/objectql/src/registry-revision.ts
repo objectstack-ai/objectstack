@@ -32,8 +32,12 @@
  * seals, claims, records an ownership fact or a listener is a `write`.
  *
  * What the counter cannot see: a caller that mutates, in place, an object the
- * registry handed it. That is outside the registry's own code, and the time
- * bound of any cache keyed on this counter covers it (ADR-0156 D1 (b)).
+ * registry handed it. That is outside the registry's own code, and no
+ * confirmation observes it either, so a cache keyed on this counter may serve
+ * the earlier compile until something else moves. The compile cache bounds
+ * it only by its age cap (`META_COMPILE_CACHE_MAX_AGE_BOUNDS`,
+ * `@objectstack/metadata-protocol`); a caller must not edit what the registry
+ * hands out.
  */
 
 import type { SchemaRegistry } from './registry.js';

@@ -48,17 +48,29 @@
  * counters above at their stamp, and a reading of everything outside this
  * process that the bound exists for ({@link readConfirmationMark}):
  *
- *  - the stored rows: the `sys_metadata` row count and its newest
- *    `updated_at` ({@link readStoreMark}), which another writer's insert,
- *    update or delete moves;
+ *  - the stored rows: a digest of every `sys_metadata` row's id, state,
+ *    version, checksum, change time and stored body ({@link readStoreMark}).
+ *    It reads the content itself, so it moves on another writer's insert,
+ *    update or delete whatever that writer did to the bookkeeping columns: a
+ *    write that bypasses the engine and leaves `updated_at` alone, an import
+ *    that preserves timestamps, a node whose clock is behind. One read of the
+ *    whole store per bound per engine, in place of recompiling every entry;
  *  - the metadata service's loaders: `loaderChangeMark()` on the service
  *    (`@objectstack/metadata`), each loader's own reading of its backing
  *    store (the file loader stats the directories and files its reads
  *    touched, so a file a deployment creates, removes or edits under a
  *    running process moves it).
  *
- * Nothing moved: the entries are kept for another bound. Anything moved:
- * every entry goes.
+ * Nothing moved: the entries are kept for another bound, up to
+ * {@link META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds from when each was
+ * compiled. The age cap is the backstop for what no reading sees: a file
+ * edited in place to the same size within the file system's time
+ * granularity, and an object the schema registry handed out that a caller
+ * then edited in place (`registry-revision.ts`). Anything moved: every entry
+ * goes. Either way the overlay row
+ * cache is retired (`retireMetaOverlayCache`), so a recompile under the new
+ * reading reads rows at least as new as the reading, never rows that cache
+ * filled before another writer's change.
  *
  * ⛔ A renewal is a claim about what was looked at (ADR-0156 D5). When the
  * confirmation cannot read one of those (the store cannot be read, the
@@ -73,7 +85,11 @@
  * rare, and a per-entry dependency graph would be the call-site list ADR-0127
  * D2 forbids in another shape. A read in flight across a change is stamped
  * with the counters it STARTED under and is not stored when they moved
- * before it settled.
+ * before it settled. A confirmation moves the stamp too (it retires the
+ * overlay row cache and rebases the bucket on the new generation), so a read
+ * that spans one is never stored: it may have compiled from what the
+ * confirmation found moved, and storing it under the new reading would renew
+ * that old answer for as long as nothing moves again.
  *
  * ## Values are cloned in both directions
  *
@@ -82,7 +98,12 @@
  * entry, and a hit is byte-equivalent to a miss. An envelope that cannot be
  * cloned is not stored. The served row's change time
  * (`servedRowChangedAtOf`, a non-enumerable symbol member) is kept beside the
- * clone and put back on every served copy.
+ * clone and put back on every served copy. The other non-enumerable marks a
+ * compile can leave on an item (`markResolvedPicklistOptions`,
+ * `bindStoredRow`) do not travel on the clone. Each is read inside the
+ * compile, before the store (the diagnostics), or from the registry, never
+ * from a served answer (the flow binding), and each module states that a copy
+ * reads as unmarked and fails toward the safe side.
  *
  * ## Hydration (ADR-0156 D4)
  *
@@ -91,8 +112,9 @@
  * the registry exactly as a miss does.
  */
 
+import { createHash } from 'node:crypto';
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { readOverlayCacheGeneration } from './meta-overlay-cache.js';
+import { readOverlayCacheGeneration, retireMetaOverlayCache } from './meta-overlay-cache.js';
 import { metadataReadFailureError } from './protocol-client-failures.js';
 import { servedRowChangedAtOf, withServedRowChangedAt } from './served-row-changed-at.js';
 
@@ -106,6 +128,14 @@ export const META_COMPILE_CACHE_TTL_ENV = 'OS_METADATA_COMPILE_CACHE_TTL_MS';
  * node's write can stay unseen, as it already is for the row cache.
  */
 export const META_COMPILE_CACHE_DEFAULT_TTL_MS = 30_000;
+
+/**
+ * How many bounds an entry may stand, renewals included, before it is
+ * compiled again whatever the confirmation read. A backstop for the one
+ * change a reading cannot tell apart: one made and undone between two
+ * confirmations, with a compile in between that read the middle state.
+ */
+export const META_COMPILE_CACHE_MAX_AGE_BOUNDS = 10;
 
 /** The types whose served item read is cached: the app bundle's member types. */
 export const META_COMPILE_CACHE_TYPES: ReadonlySet<string> = new Set(['app', 'object', 'view', 'page', 'dashboard']);
@@ -154,10 +184,13 @@ interface CompileEntry {
     /** A private clone of the envelope, the live trailers removed. Never handed out un-cloned. */
     readonly envelope: Record<string, unknown>;
     readonly changedAt: string | undefined;
+    /** When it was compiled: no entry is renewed past {@link META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds. */
+    readonly compiledAt: number;
 }
 
 interface CompileBucket {
-    readonly stamp: CompileStamp;
+    /** Rebased only by a confirmation's own retirement of the overlay row cache ({@link confirm}). */
+    stamp: CompileStamp;
     /** The confirmation reading ({@link readConfirmationMark}) the entries were last confirmed at; `undefined` until the first. */
     mark: string | undefined;
     /** Until when the entries stand without a confirmation. */
@@ -235,45 +268,47 @@ export async function readConfirmationMark(engine: unknown, metadataService: obj
     return JSON.stringify([store, loaders]);
 }
 
+/** The `sys_metadata` columns the store reading digests: identity, state, the bookkeeping columns and the body itself. */
+export const STORE_MARK_FIELDS: readonly string[] = Object.freeze(['id', 'state', 'version', 'checksum', 'updated_at', 'metadata']);
+
 /**
- * The store reading the confirmation compares (ADR-0156 D5): the number of
- * `sys_metadata` rows and the newest `updated_at` among them, read as the
- * system. Another writer's insert moves both, its update moves the second,
- * its delete moves the first.
+ * The store reading the confirmation compares (ADR-0156 D5): a digest of
+ * every `sys_metadata` row's {@link STORE_MARK_FIELDS}, read as the system,
+ * in id order. It reads the stored body, not only the bookkeeping columns, so
+ * it moves on any insert, delete or content change another writer makes:
+ * also one that bypasses the engine and leaves `updated_at`, `version` and
+ * `checksum` alone, an import that preserves timestamps, and a node whose
+ * clock writes an older `updated_at` than the newest already stored. Only the
+ * digest is kept; no row leaves this function.
  *
  * `undefined` when there is nothing to read it with (an engine without
- * `count` / `find`) or no store yet (`sys_metadata` not provisioned, by error
- * type): the bucket's entries then go, and nothing is renewed. Any other
- * failure is thrown as the uncached read throws it
+ * `find`) or no store yet (`sys_metadata` not provisioned, by error type):
+ * the bucket's entries then go, and nothing is renewed. Any other failure is
+ * thrown as the uncached read throws it
  * (`rethrowUnlessMetadataStoreUnprovisioned`): an outage is never read as
  * "nothing moved", and never served from the entries it could not confirm.
  */
 export async function readStoreMark(engine: unknown): Promise<string | undefined> {
-    const ql = engine as {
-        count?: (object: string, query: unknown) => Promise<unknown>;
-        find?: (object: string, query: unknown) => Promise<unknown>;
-    };
-    if (typeof ql?.count !== 'function' || typeof ql?.find !== 'function') return undefined;
+    const ql = engine as { find?: (object: string, query: unknown) => Promise<unknown> };
+    if (typeof ql?.find !== 'function') return undefined;
+    let rows: unknown;
     try {
-        const context = { isSystem: true };
-        const [count, newest] = await Promise.all([
-            ql.count('sys_metadata', { where: {}, context }),
-            ql.find('sys_metadata', {
-                where: {},
-                fields: ['updated_at'],
-                orderBy: [{ field: 'updated_at', order: 'desc' }],
-                limit: 1,
-                context,
-            }),
-        ]);
-        if (typeof count !== 'number') return undefined;
-        const row = Array.isArray(newest) ? newest[0] as { updated_at?: unknown } | undefined : undefined;
-        const at = row?.updated_at instanceof Date ? row.updated_at.toISOString() : String(row?.updated_at ?? '');
-        return JSON.stringify([count, at]);
+        rows = await ql.find('sys_metadata', { where: {}, fields: [...STORE_MARK_FIELDS], context: { isSystem: true } });
     } catch (error) {
         if (isMissingTableError(error, 'sys_metadata')) return undefined;
         throw metadataReadFailureError(error);
     }
+    if (!Array.isArray(rows)) return undefined;
+    const lines = rows.map((row) => {
+        const r = (row ?? {}) as Record<string, unknown>;
+        return JSON.stringify(STORE_MARK_FIELDS.map((field) => {
+            const value = r[field];
+            return value instanceof Date ? value.toISOString() : value ?? null;
+        }));
+    }).sort();
+    const digest = createHash('sha1');
+    for (const line of lines) digest.update(line).update('\n');
+    return `${rows.length}:${digest.digest('hex')}`;
 }
 
 /** Whether this request is one the cache answers. */
@@ -316,7 +351,22 @@ function serve(host: MetaCompileCacheHost, request: MetaCompileCacheRequest, ent
  */
 async function confirm(engine: object, bucket: CompileBucket, ttlMs: number, now: number): Promise<void> {
     const mark = await readConfirmationMark(engine, bucket.stamp.metadataService);
-    if (mark === undefined || bucket.mark !== mark) bucket.entries.clear();
+    if (mark === undefined || bucket.mark !== mark) {
+        bucket.entries.clear();
+    } else {
+        const maxAge = META_COMPILE_CACHE_MAX_AGE_BOUNDS * ttlMs;
+        for (const [key, entry] of bucket.entries) if (now - entry.compiledAt >= maxAge) bucket.entries.delete(key);
+    }
+    // What is compiled under this reading must read rows at least as new as
+    // it: retire the overlay row cache, which may hold rows filled before
+    // another writer's change. Only when no write moved its generation while
+    // the reading was taken: a moved one has retired it already, and resets
+    // this bucket at the stamp check.
+    const overlay = readOverlayCacheGeneration(engine);
+    if (overlay !== undefined && overlay === bucket.stamp.overlay) {
+        const next = retireMetaOverlayCache(engine);
+        if (next !== undefined) bucket.stamp = { ...bucket.stamp, overlay: next };
+    }
     bucket.mark = mark;
     bucket.confirmedUntil = now + ttlMs;
 }
@@ -333,7 +383,7 @@ export async function readThroughMetaCompileCache<T>(
 ): Promise<T> {
     const ttlMs = metaCompileCacheTtlMs();
     if (ttlMs <= 0 || !cacheableRequest(request)) return compute();
-    const stamp = readCompileStamp(host);
+    let stamp = readCompileStamp(host);
     if (stamp === undefined) return compute();
     const engine = host.engine as object;
 
@@ -343,7 +393,10 @@ export async function readThroughMetaCompileCache<T>(
         buckets.set(engine, bucket);
     }
     const now = Date.now();
-    if (now >= bucket.confirmedUntil) await confirm(engine, bucket, ttlMs, now);
+    if (now >= bucket.confirmedUntil) {
+        await confirm(engine, bucket, ttlMs, now);
+        stamp = bucket.stamp;
+    }
 
     const key = entryKey(request);
     const hit = bucket.entries.get(key);
@@ -361,7 +414,7 @@ export async function readThroughMetaCompileCache<T>(
     const copy = cloned(answer) as Record<string, unknown> | undefined;
     if (copy === undefined) return answer;
     for (const trailer of host.liveTrailerKeys) delete copy[trailer];
-    bucket.entries.set(key, { envelope: copy, changedAt: servedRowChangedAtOf(answer) });
+    bucket.entries.set(key, { envelope: copy, changedAt: servedRowChangedAtOf(answer), compiledAt: Date.now() });
     return answer;
 }
 

@@ -16,7 +16,7 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 // The served read reaches a dynamic `import('@objectstack/lint')` (metadata diagnostics): pay its load at collection.
 import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { META_COMPILE_CACHE_TTL_ENV, metaCompileCacheTtlMs } from './meta-compile-cache.js';
+import { META_COMPILE_CACHE_MAX_AGE_BOUNDS, META_COMPILE_CACHE_TTL_ENV, metaCompileCacheTtlMs } from './meta-compile-cache.js';
 import { servedRowChangedAtOf } from './served-row-changed-at.js';
 
 type Row = Record<string, unknown>;
@@ -43,6 +43,13 @@ const storedView = (label: string): Row => ({
     id: 'r_view', type: 'view', name: 'widget_list', state: 'active', package_id: null,
     updated_at: '2026-11-16T00:00:00.000Z',
     metadata: JSON.stringify({ name: 'widget_list', label, object: 'widget' }),
+});
+
+/** A stored row of one of the other cached types, bare body. */
+const storedItem = (type: string, name: string, body: Row): Row => ({
+    id: `r_${type}`, type, name, state: 'active', package_id: null,
+    updated_at: '2026-11-16T00:00:00.000Z',
+    metadata: JSON.stringify({ name, ...body }),
 });
 
 interface HarnessOptions {
@@ -170,17 +177,26 @@ describe('[#34206, ADR-0156] the compiled item answer is cached while every sour
     });
 
     it('cached ≡ uncached: the hit equals the answer the cache-off read gives, for each cached type', async () => {
-        const rows = [storedObject('Widget'), storedView('All widgets')];
-        for (const [type, name] of [['object', 'widget'], ['view', 'widget_list']] as const) {
+        const rows = [
+            storedObject('Widget'), storedView('All widgets'),
+            storedItem('app', 'widget_app', { label: 'Widgets', navigation: [{ id: 'nav_widget', type: 'object', objectName: 'widget' }] }),
+            storedItem('page', 'widget_page', { label: 'Widget page', type: 'record', object: 'widget', regions: [] }),
+            storedItem('dashboard', 'widget_dashboard', { label: 'Widget board', widgets: [] }),
+        ];
+        const types = [['object', 'widget'], ['view', 'widget_list'], ['app', 'widget_app'], ['page', 'widget_page'], ['dashboard', 'widget_dashboard']] as const;
+        for (const [type, name] of types) {
             const cached = harness(rows);
             await read(cached, type, name);
+            const readsBefore = cached.reads.length;
             const hit = await read(cached, type, name);
+            expect(cached.reads.length).toBe(readsBefore);
             vi.stubEnv(META_COMPILE_CACHE_TTL_ENV, '0');
             const uncached = await read(harness(rows), type, name);
             vi.unstubAllEnvs();
             expect(hit).toEqual(uncached);
             expect(servedRowChangedAtOf(hit)).toBe(servedRowChangedAtOf(uncached));
             expect(servedRowChangedAtOf(hit)).toBeDefined();
+            expect(hit.item.name).toBe(name);
         }
     });
 
@@ -420,6 +436,19 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         expect(h.byNameReads('widget')).toBeGreaterThan(before);
     });
 
+    /** Replace the confirmation's store reading (the whole-store `find` over the body column) until the returned restore runs. */
+    const onStoreMark = (h: ReturnType<typeof harness>, impl: (real: () => Promise<unknown>) => Promise<unknown>) => {
+        const find = h.engine.find as (table: string, q?: { where?: Row; fields?: string[] }) => Promise<unknown>;
+        let calls = 0;
+        h.engine.find = (table: string, q: { where?: Row; fields?: string[] } = {}) => {
+            const isMark = table === 'sys_metadata' && Object.keys(q.where ?? {}).length === 0 && (q.fields ?? []).includes('metadata');
+            if (!isMark) return find(table, q);
+            calls += 1;
+            return impl(() => find(table, q));
+        };
+        return { restore: () => { h.engine.find = find; }, get calls() { return calls; } };
+    };
+
     it('an in-process write that lands while the confirmation awaits the store is not hidden by the entry it retires', async () => {
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
@@ -427,33 +456,91 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         clock.pass();
         await read(h);
         // The registry moves while the confirmation's store reading is in flight.
-        const count = h.engine.count as (...a: unknown[]) => Promise<number>;
-        h.engine.count = async (...a: unknown[]) => {
-            h.engine.count = count;
+        const mark = onStoreMark(h, async (real) => {
             (h.registry.revision as number)++;
-            return count(...a);
-        };
+            mark.restore();
+            return real();
+        });
         clock.pass();
         const before = h.byNameReads('widget');
         await read(h);
-        expect(h.engine.count).toBe(count); // non-vacuity: the confirmation ran and saw the move mid-flight
+        expect(mark.calls).toBe(1); // non-vacuity: the confirmation ran and saw the move mid-flight
         expect(h.byNameReads('widget')).toBeGreaterThan(before);
+    });
+
+    it('a compute that spans a confirmation which dropped the entries is not stored under the new reading', async () => {
+        const clock = atBound();
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        await read(h);
+        // Read A's compute is held open after it read the old row.
+        const compute = h.protocol.readMetaItemFace.bind(h.protocol) as (...a: unknown[]) => Promise<unknown>;
+        let release!: () => void;
+        const gate = new Promise<void>((r) => { release = r; });
+        let computed!: () => void;
+        const inCompute = new Promise<void>((r) => { computed = r; });
+        let held = false;
+        h.protocol.readMetaItemFace = async (...a: unknown[]) => {
+            const answer = await compute(...a);
+            if (held) return answer;
+            held = true;
+            computed();
+            await gate;
+            return answer;
+        };
+        (h.registry.revision as number)++; // a fresh bucket, so A misses
+        const a = read(h);
+        await inCompute;
+        // Another writer's change lands, the bound passes, and read B's
+        // confirmation finds the store moved: it drops the entries and stores
+        // the new answer.
+        rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z');
+        clock.pass();
+        expect((await read(h)).item.label).toBe('Gadget');
+        release();
+        expect((await a).item.label).toBe('Widget'); // A answers what it read
+        // A's older answer was not stored over B's under the new reading.
+        expect((await read(h)).item.label).toBe('Gadget');
+    });
+
+    it('another writer\'s change that leaves every bookkeeping column alone is still seen at the bound', async () => {
+        const clock = atBound();
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        await read(h);
+        clock.pass();
+        await read(h);
+        // A write that bypasses the engine: same id, same updated_at, new body.
+        rows[0] = { ...rows[0], metadata: JSON.stringify({ name: 'widget', label: 'Gadget', fields: {}, actions: [] }) };
+        clock.pass();
+        expect((await read(h)).item.label).toBe('Gadget');
+    });
+
+    it('another node\'s write stamped with an OLDER updated_at than the newest stored is still seen at the bound', async () => {
+        const clock = atBound();
+        const rows = [storedObject('Widget', '2026-11-16T05:00:00.000Z'), storedView('All')];
+        const h = harness(rows);
+        await read(h);
+        clock.pass();
+        await read(h);
+        rows[0] = storedObject('Gadget', '2026-11-16T00:00:01.000Z'); // a clock behind the newest row
+        clock.pass();
+        expect((await read(h)).item.label).toBe('Gadget');
     });
 
     it('a store outage at the confirmation fails the read as the uncached read does, and never serves the unconfirmed entry', async () => {
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
         await read(h);
-        const count = h.engine.count as (...a: unknown[]) => Promise<number>;
         const outage = new Error('connect ECONNREFUSED 127.0.0.1:5432');
-        h.engine.count = async () => { throw outage; };
+        const mark = onStoreMark(h, async () => { throw outage; });
         clock.pass();
         const failure = await read(h).then(() => undefined, (e: unknown) => e as Error & { cause?: unknown });
         expect(failure).toBeInstanceOf(Error);
         expect(failure?.cause).toBe(outage);
         // The store is back with the reading the entry was last confirmed at:
         // the confirmation now succeeds, and the answer is right.
-        h.engine.count = count;
+        mark.restore();
         expect((await read(h)).item.label).toBe('Widget');
     });
 
@@ -461,11 +548,42 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
         await read(h);
-        h.engine.count = async () => { throw new Error('SQLITE_ERROR: no such table: sys_metadata'); };
+        const mark = onStoreMark(h, async () => { throw new Error('SQLITE_ERROR: no such table: sys_metadata'); });
         clock.pass();
         const before = h.byNameReads('widget');
         expect((await read(h)).item.label).toBe('Widget');
+        expect(mark.calls).toBe(1);
         expect(h.byNameReads('widget')).toBeGreaterThan(before);
+    });
+
+    it('the recompile after another writer\'s change reads the new row, not the overlay row cache\'s older one', async () => {
+        vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives the compile bound
+        const clock = atBound();
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        await read(h);
+        clock.pass();
+        await read(h);
+        rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z');
+        clock.pass();
+        expect((await read(h)).item.label).toBe('Gadget');
+        clock.pass();
+        expect((await read(h)).item.label).toBe('Gadget');
+    });
+
+    it(`no entry stands past ${META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds, renewals included`, async () => {
+        const clock = atBound();
+        const h = harness([storedObject('Widget')]);
+        await read(h);
+        const compiled = h.byNameReads('widget');
+        for (let i = 1; i < META_COMPILE_CACHE_MAX_AGE_BOUNDS; i++) {
+            clock.pass();
+            await read(h);
+        }
+        expect(h.byNameReads('widget')).toBe(compiled); // renewed every bound so far
+        clock.pass();
+        await read(h);
+        expect(h.byNameReads('widget')).toBeGreaterThan(compiled);
     });
 
     it('⛔ a source the confirmation cannot observe: nothing is renewed, every bound recompiles', async () => {

@@ -98,10 +98,15 @@ export class FilesystemLoader implements MetadataLoader {
   private resolutionEpoch = 0;
   /**
    * [#34206, ADR-0156 D5] Every type directory {@link probeFile} has looked
-   * in, for {@link changeMark}. Never cleared: a directory once asked about
-   * stays observed for the life of the loader.
+   * in, for {@link changeMark}. A directory once asked about stays observed,
+   * up to {@link PROBED_TYPE_DIR_CAP} directories; the type comes from the
+   * read, so past the cap the set starts over. Starting over moves the mark
+   * (fewer paths are read), so a cache confirming on it recompiles, never
+   * renews: the failure direction is a recompile, not a missed change.
    */
   private readonly probedTypeDirs = new Set<string>();
+
+  private static readonly PROBED_TYPE_DIR_CAP = 1_000;
 
   private static readonly RESOLUTION_MEMO_CAP = 10_000;
 
@@ -770,6 +775,9 @@ export class FilesystemLoader implements MetadataLoader {
   /** The disk read behind {@link findFile}: one `fs.access` per resolvable extension, in precedence order. */
   private async probeFile(type: string, name: string): Promise<string | null> {
     const typeDir = path.join(this.rootDir, type);
+    if (!this.probedTypeDirs.has(typeDir) && this.probedTypeDirs.size >= FilesystemLoader.PROBED_TYPE_DIR_CAP) {
+      this.probedTypeDirs.clear();
+    }
     this.probedTypeDirs.add(typeDir);
     const extensions = this.resolvableExtensions();
 
@@ -798,6 +806,10 @@ export class FilesystemLoader implements MetadataLoader {
    * It covers item reads only. It is what lets a cache of an answer this
    * loader contributed to, including a miss it remembered, be renewed on a
    * confirmation instead of recompiled (`MetadataManager.loaderChangeMark`).
+   *
+   * The path set grows as reads probe new directories and resolve new files,
+   * so the mark also moves when nothing on disk did: the first confirmation
+   * after a warm-up usually recompiles. That is conservative, never stale.
    */
   async changeMark(): Promise<string> {
     const files = new Set<string>();

@@ -146,6 +146,16 @@ describe('[#34206] FilesystemLoader#changeMark', () => {
     expect(await loader.changeMark()).not.toBe(before);
   });
 
+  it('the probed type directories are bounded: past the cap the set starts over and the mark moves', async () => {
+    await loader.load('view', 'rv_all');
+    const before = await loader.changeMark();
+    const probed = (loader as unknown as { probedTypeDirs: Set<string> }).probedTypeDirs;
+    for (let i = 0; i < 1_000; i += 1) await loader.load(`t${i}`, 'x');
+    expect(probed.size).toBeLessThanOrEqual(1_000);
+    expect(probed.has(path.join(rootDir, 'view'))).toBe(false);
+    expect(await loader.changeMark()).not.toBe(before);
+  });
+
   it('control: a change in a type directory no read probed leaves it alone', async () => {
     await loader.load('view', 'rv_all');
     const before = await loader.changeMark();
