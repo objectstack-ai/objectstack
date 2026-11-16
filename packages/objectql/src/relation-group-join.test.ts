@@ -125,7 +125,11 @@ describe('relation group join — served as one driver statement whose related h
     expect(joins[0]!.resolvedAlias).toBe('__rg0_resolved');
     expect(isComposedReadableIds(joins[0]!.parent)).toBe(true);
     expect(joins[0]!.parent!.object).toBe(OPP);
-    expect(joins[0]!.parent!.scope).toEqual({ $and: [{ stage: { $ne: 'lost' } }, { owner: 'u_me' }] });
+    // The request's condition as the related read's own doors lowered it
+    // (`$ne` is null-safe), AND the middleware's.
+    expect(joins[0]!.parent!.scope).toEqual({
+      $and: [{ $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] }, { owner: 'u_me' }],
+    });
   });
 
   it('a related read whose planned scope is the deny sentinel hands a null parent: nothing of the related object is readable', async () => {

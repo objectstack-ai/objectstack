@@ -270,8 +270,8 @@ describe('the bind limit: a lookup dimension over more distinct FKs than the dia
     const knex = (driver as unknown as { knex: { batchInsert(t: string, rows: unknown[], n: number): Promise<unknown> } }).knex;
     const opps = Array.from({ length: N }, (_, i) => ({ id: `o${i}`, name: `O${i}`, stage: STAGES[i % 3], owner: 'u_other', organization_id: 'org_A' }));
     const lines = Array.from({ length: N }, (_, i) => ({ id: `l${i}`, opportunity: `o${i}`, region: 'emea', amount: 1, organization_id: 'org_A' }));
-    await knex.batchInsert(OPP, opps, 1000);
-    await knex.batchInsert(LINE, lines, 1000);
+    await knex.batchInsert(OPP, opps, 400);
+    await knex.batchInsert(LINE, lines, 400);
   }, 60_000);
 
   afterAll(async () => {
