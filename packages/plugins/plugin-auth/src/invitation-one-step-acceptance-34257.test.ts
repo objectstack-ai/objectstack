@@ -26,6 +26,7 @@ import {
   USER_ROW_SIGN_IN,
   invitationProofIdentifier,
   oneStepSignInState,
+  readUserRowSignIn,
   type OneStepAccountReading,
   type OneStepSignInState,
   type StandingGrantObject,
@@ -1007,6 +1008,19 @@ describe('#34257 — the door sets a password on an existing account only where 
       ['phone_number_verified', 'verified_phone'],
       ['two_factor_enabled', 'second_factor'],
     ]);
+  });
+
+  it('the user row reading is ok only for the one stored row; no read surface, a failed read or no row is not', async () => {
+    const engine = createMemoryEngine();
+    await engine.insert('sys_user', { id: 'u_row', email: 'row@example.com', phone_number: '+15550134260' });
+    await engine.insert('sys_user', { id: 'u_bare', email: 'bare@example.com' });
+    expect(await readUserRowSignIn(engine, 'u_row')).toEqual({ ok: true, values: { phone_number: '+15550134260' } });
+    expect(await readUserRowSignIn(engine, 'u_bare')).toEqual({ ok: true, values: { phone_number: undefined } });
+    expect(await readUserRowSignIn(engine, 'u_missing')).toEqual({ ok: false });
+    expect(await readUserRowSignIn(undefined, 'u_row')).toEqual({ ok: false });
+    const leave = findThrowsForUserRowSignIn(engine);
+    expect(await readUserRowSignIn(engine, 'u_row')).toEqual({ ok: false });
+    leave();
   });
 
   it('a phone number on the user row answers sign_in with phone sign-in mounted, and is accepted once it is cleared', async () => {
