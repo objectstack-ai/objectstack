@@ -136,8 +136,11 @@ function catalogueOf(hook: Pick<Hook, 'refusals'>): Record<string, DeclaredRefus
   return refusals && typeof refusals === 'object' ? (refusals as Record<string, DeclaredRefusal>) : undefined;
 }
 
-/** The locale the service can answer in for `requested` — `resolveBundleLocale` against what it holds. */
-function negotiatedLocale(service: HookRefusalI18nService, requested: string): string {
+/**
+ * The locale the service can answer in for `requested` — `resolveBundleLocale`
+ * against what it holds. Shared with a hook's declared text (`hook-text.ts`).
+ */
+export function negotiatedLocale(service: HookRefusalI18nService, requested: string): string {
   if (typeof service.getLocales !== 'function') return requested;
   let available: unknown;
   try {
@@ -169,6 +172,24 @@ export function fillHookRefusalParams(
   params: Record<string, unknown> | undefined,
   logger?: { warn?: (...args: any[]) => void },
 ): string {
+  return fillHookTemplateParams(hookName, template, declared, params, logger, 'refusal');
+}
+
+/**
+ * {@link fillHookRefusalParams} for either kind of declared hook sentence: a
+ * refusal (served as written when it cannot render — a refusal stays a
+ * refusal) or, #34374, a text the hook writes into a record (written as
+ * declared when it cannot render, and the hook goes on). One template engine,
+ * one scope rule: only the entry's declared names are in scope.
+ */
+export function fillHookTemplateParams(
+  hookName: string,
+  template: string,
+  declared: readonly string[],
+  params: Record<string, unknown> | undefined,
+  logger: { warn?: (...args: any[]) => void } | undefined,
+  kind: 'refusal' | 'text',
+): string {
   const scope: Record<string, unknown> = {};
   for (const name of declared) {
     scope[name] = params && Object.prototype.hasOwnProperty.call(params, name) ? params[name] : undefined;
@@ -181,8 +202,11 @@ export function fillHookRefusalParams(
   }
   if (result.ok) return String(result.value ?? '');
   logger?.warn?.(
-    `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error?.message ?? 'unknown'}), `
-      + 'so it is served as written.',
+    kind === 'refusal'
+      ? `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error?.message ?? 'unknown'}), `
+        + 'so it is served as written.'
+      : `[BodyRunner] hook '${hookName}': its text did not render (${result.error?.message ?? 'unknown'}), `
+        + 'so it is written as declared.',
   );
   return template;
 }

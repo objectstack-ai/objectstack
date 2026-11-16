@@ -134,6 +134,7 @@
         "manifest.hooks.element",
         "manifest.hooks.element.object",
         "manifest.hooks.element.refusals.valueType",
+        "manifest.hooks.element.texts.valueType",
         "manifest.jobs.element",
         "manifest.jobs.element.schedule.options[0].timezone",
         "manifest.mappings.element",
@@ -315,6 +316,7 @@
         "data.options[1].manifest.hooks.element",
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.hooks.element.refusals.valueType",
+        "data.options[1].manifest.hooks.element.texts.valueType",
         "data.options[1].manifest.jobs.element",
         "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.options[1].manifest.mappings.element",
@@ -465,6 +467,7 @@
         "options[1].manifest.hooks.element",
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.hooks.element.refusals.valueType",
+        "options[1].manifest.hooks.element.texts.valueType",
         "options[1].manifest.jobs.element",
         "options[1].manifest.jobs.element.schedule.options[0].timezone",
         "options[1].manifest.mappings.element",
@@ -554,6 +557,7 @@
         "data.packages.element.options[1].manifest.hooks.element",
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.hooks.element.refusals.valueType",
+        "data.packages.element.options[1].manifest.hooks.element.texts.valueType",
         "data.packages.element.options[1].manifest.jobs.element",
         "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.packages.element.options[1].manifest.mappings.element",
@@ -1041,10 +1045,16 @@
       "sites": [
         "",
         "object",
-        "refusals.valueType"
+        "refusals.valueType",
+        "texts.valueType"
       ]
     },
     "data/HookRefusal": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/HookText": {
       "sites": [
         ""
       ]

@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { installEgressGuard, type EgressPolicy } from '@objectstack/core/egress';
-import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveOrganizationLocale, resolveUserAuthzGrants } from '@objectstack/core';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, readOrganizationTextLocale, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -1582,56 +1582,15 @@ export function i18nServiceReader(ctx: Pick<PluginContext, 'getService'>): () =>
  * else the app's declared `i18n.defaultLocale`).
  *
  * Both services are resolved at QUESTION time, for {@link i18nServiceReader}'s
- * reason. A composition with neither answers `undefined`, and the text is
- * written as authored; a settings read that throws rejects.
+ * reason, by core's `readOrganizationTextLocale` — the reading a hook's or
+ * action's declared text shares (#34374). A composition with neither answers
+ * `undefined`, and the text is written as authored; an unregistered
+ * Localization setting is not set; any other settings read that throws rejects.
  */
 export function organizationLocaleReader(
     ctx: Pick<PluginContext, 'getService'>,
 ): (tenantId: string | undefined) => Promise<string | undefined> {
-    return async (tenantId) => {
-        let settings: unknown;
-        let i18n: unknown;
-        try { settings = ctx.getService('settings'); } catch { settings = undefined; }
-        try { i18n = ctx.getService('i18n'); } catch { i18n = undefined; }
-        return (await resolveOrganizationLocale({ settings: unregisteredSettingIsUnset(settings), i18n, organizationId: tenantId }))?.locale;
-    };
-}
-
-/**
- * The settings service's refusal of a namespace or key nobody REGISTERED —
- * `SETTINGS_UNKNOWN_NAMESPACE` / `SETTINGS_UNKNOWN_KEY`, as `@objectstack/objectql`'s
- * home-localization bridge reads them. A host that loads no `localization`
- * manifest has no setting anybody could have set, so for the organization's
- * language it is "not set", the same as a host with no settings service.
- */
-function isUnregisteredSetting(err: unknown): boolean {
-    const code = (err as { code?: unknown } | null | undefined)?.code;
-    return code === 'SETTINGS_UNKNOWN_NAMESPACE' || code === 'SETTINGS_UNKNOWN_KEY';
-}
-
-/**
- * [ruling 6913660232, review 6924979595 S1] The settings door the reader is
- * handed, with an unregistered `localization.locale` answered as not set, so
- * the next rung (the app's declared default) answers. Any other throw still
- * propagates: the setting may exist and could not be read, and the record
- * node fails rather than store another language over it. Kept here, in the
- * automation bridge, so the shared reader and the seed loader's rung 1 stay
- * as they are.
- */
-function unregisteredSettingIsUnset(settings: unknown): unknown {
-    const door = settings as { get?: unknown } | null | undefined;
-    if (!door || typeof door.get !== 'function') return settings;
-    const get = door.get as (namespace: string, key: string, ctx?: { tenantId?: string }) => Promise<unknown>;
-    return {
-        async get(namespace: string, key: string, ctx?: { tenantId?: string }) {
-            try {
-                return await get.call(settings, namespace, key, ctx);
-            } catch (err: unknown) {
-                if (isUnregisteredSetting(err)) return undefined;
-                throw err;
-            }
-        },
-    };
+    return (tenantId) => readOrganizationTextLocale((name) => ctx.getService(name), tenantId);
 }
 
 /**
