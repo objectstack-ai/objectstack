@@ -2320,6 +2320,9 @@ const es = {
       fieldErrorsToast_many: "{{count}} de ajustes requieren atención: {{settings}}",
       fieldErrorsToast_other: "{{count}} ajustes requieren atención: {{settings}}",
       cryptoRefusalTitle: "Esta instalación no puede cifrar secretos",
+      platformManagedTitle: "Gestionado por la plataforma",
+      platformManagedBody: "La plataforma de alojamiento proporciona y configura esto para este entorno, por lo que no se ajusta aquí.",
+      aiProviderManaged: "El proveedor de IA, su modelo y sus credenciales los gestiona la plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como cifrado, por lo que no se escribió nada.",
       cryptoRefusalNoSubject: "El valor declarado como cifrado fue rechazado, por lo que no se escribió nada.",
       cryptoRefusalToast: "No se pueden cifrar los secretos: {{subject}}",
@@ -2418,6 +2421,8 @@ const es = {
         done: 'Tienes conectado un asistente de IA o una clave de API.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Añade tu primera aplicación', todo: 'Aún no tienes una aplicación propia. Instala una desde el marketplace o crea una, y aparecerá en Inicio.', done: 'Ya tienes una aplicación propia en Inicio.' },
+      firstRecord: { title: 'Añade tu primer registro', todo: 'Nadie ha creado todavía un registro en tus aplicaciones.', done: 'Se ha creado un registro en tus aplicaciones.', action: 'Abrir aplicación' },
     },
     error: {
       connectionFailed: "No se puede conectar al servidor",
@@ -2775,6 +2780,7 @@ const es = {
         retry: "Continuar con el inicio de sesión único",
       },
       ssoHandoff: "Continuar a {{target}}",
+      ssoHandoffClient: "Inicia sesión para continuar en {{clientName}}",
       devAdminHint: {
         title: "Instancia de desarrollo local",
         signIn: "Iniciar sesión como administrador de desarrollo",
@@ -2804,6 +2810,8 @@ const es = {
         directSignInRateLimited: "Se iniciaron demasiados inicios de sesión desde esta red hace un momento. Espera unos segundos y vuelve a intentarlo.",
         networkNotAllowed: "Este sistema no permite iniciar sesión desde tu red. Conéctate desde una red permitida (por ejemplo, la red de la oficina o la VPN de tu organización) o pide ayuda a tu administrador.",
         ssoAccessDenied: "La cuenta con la que iniciaste sesión no tiene acceso a este entorno. Inicia sesión con una cuenta que tenga acceso o pide a un administrador de la organización de este entorno que te añada como miembro.",
+        ssoAccessDeniedNotMember: "La cuenta con la que iniciaste sesión no es miembro de la organización de este entorno. Inicia sesión con una cuenta que lo sea o pide a un administrador de la organización que te invite.",
+        ssoAccessDeniedInvitationPending: "Te han invitado a la organización de este entorno, pero aún no has aceptado la invitación. Acepta la invitación desde tu correo electrónico y vuelve a iniciar sesión.",
         ssoSwitchAccount: "Cambiar de cuenta",
         ssoBackToConsole: "Volver a la consola",
         ssoSwitchAccountHint: "Cambiar de cuenta abre tu servicio de inicio de sesión en una pestaña nueva y cierra allí tu sesión. Después, vuelve a iniciar sesión aquí con una cuenta que tenga acceso.",
@@ -3116,6 +3124,10 @@ const es = {
       granted: "Acceso concedido",
       denied: "Acceso denegado",
       noRedirect: "El servidor no devolvió ninguna URL de redirección.",
+      returnToApp: "Vuelva a {{appName}} para continuar. Puede cerrar esta pestaña.",
+      returnToUnnamedApp: "Vuelva a la aplicación para continuar. Puede cerrar esta pestaña.",
+      openApp: "Abrir {{appName}}",
+      openUnnamedApp: "Abrir la aplicación",
       failed: "Error en el consentimiento",
       footer: "Puede revocar el acceso en cualquier momento desde la configuración de su cuenta.",
     },
@@ -4057,13 +4069,11 @@ const es = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Te queda un {{left}} de tu cuota de IA. Un modelo marcado con ×N la consume N veces más rápido que el modelo predeterminado.',
@@ -4128,6 +4138,7 @@ const es = {
       get_metadata_schema: "Consultar el formato de los metadatos",
       get_package: "Revisar el paquete",
       get_record_history: "Leer el historial del registro",
+      list_flow_runs: "Revisar las ejecuciones del flujo",
       list_metadata: "Listar los metadatos existentes",
       list_objects: "Listar los objetos existentes",
       list_packages: "Listar los paquetes existentes",

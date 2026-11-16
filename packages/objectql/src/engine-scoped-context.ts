@@ -5,8 +5,8 @@
  * transactions" section: the bodies of `ScopedContext`'s methods `object`,
  * `sudo`, `withRunAs`, `[SEED_USER_GRANTS]`, `transaction`,
  * `releaseJoinedHandle`, `txDriver`, `beginTransaction`, `commitTransaction`,
- * `rollbackTransaction`, `serveFormulaField` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs` (its second pass).
+ * `rollbackTransaction`, `serveFormulaField` moved out of `engine.ts` whole (split
+ * by #30264 and #31665, the codemod's second pass).
  * The bodies of `derive` and `[APP_AUTHORED_HOOK_API]` moved by hand
  * (#30975): each writes the private `appAuthored` of the instance it builds,
  * which the codemod refuses to move (`foreign-private`), so each writes it

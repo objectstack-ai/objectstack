@@ -192,10 +192,13 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * (#12017 two-copies failure shape; the #11875 lesson that a hand-written
  * enumeration goes one revision stale).
  *
- * Package-internal on purpose: it is the superRefine's membership test, not a
- * third answer to "is this field multi-valued". That question has exactly one
- * answer — `isMultiValueField` (`field-value.zod.ts`) — and both of the sets
- * this one unions stay untouched.
+ * Exported for ONE reader beside this file's superRefine: the AI blueprint
+ * field (`ai/solution-blueprint.zod.ts`), which refuses `multiple: true` on
+ * exactly the types this file refuses it on, reading this set rather than a
+ * copy. It answers "may an author DECLARE `multiple: true` here", and
+ * is not a third answer to "is this field multi-valued". That question has
+ * exactly one answer — `isMultiValueField` (`field-value.zod.ts`) — and both of
+ * the sets this one unions stay untouched.
  *
  * ⚠️ Computed on FIRST USE, never at module top level. `field-value.zod` reaches
  * back into this module through `shared/strict-object` → `shared/suggestions.zod`,
@@ -206,7 +209,7 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * module has settled) is the same discipline `lazySchema` applies above.
  */
 let multiDeclarableTypes: ReadonlySet<string> | undefined;
-function multiDeclarableTypeSet(): ReadonlySet<string> {
+export function multiDeclarableFieldTypes(): ReadonlySet<string> {
   return (multiDeclarableTypes ??= new Set([...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]));
 }
 
@@ -221,7 +224,7 @@ function multiDeclarableTypeSet(): ReadonlySet<string> {
  */
 let multiDeclarableRemedyTypes: readonly string[] | undefined;
 function multiDeclarableRemedyTypeList(): readonly string[] {
-  return (multiDeclarableRemedyTypes ??= [...multiDeclarableTypeSet()].filter((t) => t !== 'radio'));
+  return (multiDeclarableRemedyTypes ??= [...multiDeclarableFieldTypes()].filter((t) => t !== 'radio'));
 }
 
 /**
@@ -1315,12 +1318,19 @@ const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/
  * - **Operator.** Only the six scalar comparisons
  *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
  *   value: never a member of an `in` / `notIn` list.
+ * - **Where it resolves.** In a record form only, whatever its layout (the
+ *   auto layout, authored or field-group sections, a modal, drawer, tabbed or
+ *   wizard form, a master-detail header form). Every other picker host leaves
+ *   every `{ $record }` entry out — inline edit on a record page, a record
+ *   page's header or related list, an action's parameter dialog, and a
+ *   picker with no single record being edited (a bulk action over selected
+ *   rows).
  * - **An empty value.** When the referenced value is empty (null, unset, an
- *   empty string, or a hop whose lookup is unset), the entry is left out of
- *   the candidate query, so a quote whose account has no market is offered
- *   every book the other entries admit. A picker with no single record being
- *   edited (a bulk-action selection bar, a filter panel) has no value to read
- *   and leaves every `{ $record }` entry out by the same rule.
+ *   empty string, or a hop whose lookup is unset) or cannot be read (the
+ *   hop's row or field does not come back, no object is named for the hop,
+ *   or the host has no single-row reader), the entry is left out of the
+ *   candidate query, so a quote whose account has no market is offered
+ *   every book the other entries admit.
  * - **Re-query.** The picker re-queries its candidates whenever a referenced
  *   field changes — the first segment of the path (`quote_date`, `account`).
  *   Those fields are implied by the `$record` paths. Do NOT list them in
@@ -2251,24 +2261,27 @@ export const FieldSchema = lazySchema(() => {
       'The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a '
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
-      + 'only with eq, ne, gt, lt, gte or lte. [PLANNED — not enforced] The picker does not resolve { $record } yet.',
+      + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
+      + 'value in place of the reference; every other picker host leaves the entry out.',
     ),
     orEmpty: z.boolean().optional().describe(
-      '[PLANNED — not enforced] TRUE: the entry also matches a candidate whose column is null — "valid from the '
-      + 'quote date, or with no start date". Only with eq, ne, gt, lt, gte or lte. The picker does not read it yet.',
+      'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
+      + 'start date". Only with eq, ne, gt, lt, gte or lte. The picker sends the comparison or a null match on the same column.',
     ),
   }).superRefine(refuseMalformedLookupFilterEntry)).optional().describe(
     'Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. '
     + 'Each entry compares a column of the CANDIDATE record (`field`, on the referenced object) with `value`. A value may '
     + 'read the record being edited as { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup '
-    + 'hop): the picker sends that value in its place and re-queries whenever a referenced field changes. Those fields '
+    + 'hop). In a record form, whatever its layout, the picker sends that value in its place and re-queries whenever a '
+    + 'referenced field changes; every other picker host leaves every { $record } entry out: inline edit on a record '
+    + 'page, a record page\'s header or related list, an action\'s parameter dialog, and a picker with no single record '
+    + 'being edited (a bulk action over selected rows). The referenced fields '
     + 'are implied: do not list them in `dependsOn`, which also scopes the candidate query by equality '
     + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
-    + 'empty, and on a picker with no single record being edited (a bulk-action bar, a filter panel), the entry is left '
-    + 'out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
+    + 'empty or cannot be read (the hop\'s row or field does not come back, no object is named for the hop, or the host '
+    + 'has no single-row reader), the entry is left out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
     + 'server unresolved is refused, never read as null. The picker narrows the choice only: a rule the save must '
-    + 'enforce belongs on the server too. [PLANNED — not enforced] { $record } and orEmpty are declared ahead of the '
-    + 'picker that resolves them.',
+    + 'enforce belongs on the server too.',
   ),
   dependsOn: z.array(z.union([z.string(), strictObject({
     surface: 'this dependsOn entry',
@@ -3199,7 +3212,7 @@ export const FieldSchema = lazySchema(() => {
   //
   // `radio` is INSIDE the set and is therefore never refused here — its own
   // narrower #11437 check above owns that pair, so the two never double-fire.
-  if (field.multiple === true && !multiDeclarableTypeSet().has(field.type)) {
+  if (field.multiple === true && !multiDeclarableFieldTypes().has(field.type)) {
     const alternative = REFERENCE_VALUE_TYPES.has(field.type)
       ? 'a `lookup` with `reference` naming the same object (`multiple: true` there stores several related records)'
       : FILE_REFERENCE_TYPES.has(field.type)

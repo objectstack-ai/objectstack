@@ -1373,8 +1373,12 @@ export function buildMcpBridge(
             // [ADR-0150 D5] `namespace` rides through like `confirm`: the whole
             // request object is forwarded, never rebuilt without it.
             input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+            // [#33712] The door's channel to the person's client, set by the
+            // tool only when the client can be elicited (`McpActionCallDoor`).
+            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
+            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
         }),
         // [#15705] `resume_run`: continue the caller's own paused screen run.
         // Admitted by the same gates as `run_action`; see
@@ -1382,8 +1386,10 @@ export function buildMcpBridge(
         resumeRun: async (
             runId: string,
             input: { values?: Record<string, unknown> } & AIActionConfirmation,
+            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
+            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
         }),
         // ── Federation surface (McpFederationBridge, #27745) ───────
         // The `external-datasource` service Studio's datasource page reaches
@@ -1920,9 +1926,11 @@ export async function resumeActionRun(
         /** [#25297] As `invokeBusinessAction`'s: the standalone `action` items that admit the run. */
         readActions?: () => Promise<readonly any[] | undefined>;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+        /** [#33712] As `invokeBusinessAction`'s: the person asked in their client, in place of a hand-off. */
+        elicitConfirmation?: actionExec.ActionConfirmationElicitor;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, readActions, callData } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation } = wiring;
     if (typeof runId !== 'string' || runId === '') {
         throw resumeDoorError(deps, 'runId is required', 400);
     }
@@ -2024,7 +2032,33 @@ export async function resumeActionRun(
     // [#33690] A gated action's resume is handed to the person, after steps 4
     // and 5 so nobody is asked to confirm a resume refused anyway: nothing
     // resumes, the run stays parked, and no invocation row is written.
-    if (handOff) {
+    //
+    // [#33712] Where the person's client can be elicited, they are asked there
+    // instead, after the same steps: `accept` resumes the run below, as any
+    // admitted resume; any other answer refuses the call and the run stays
+    // parked. Nothing is handed off then.
+    if (handOff && elicitConfirmation) {
+        const subject = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        const elicited = await actionExec.elicitActionConfirmation(
+            elicitConfirmation,
+            actionExec.actionConfirmationElicitSubject(
+                action,
+                typeof action?.name === 'string' && action.name ? action.name : String(flowName),
+                objectName, recordId, objectsByName.get(objectName), subject.record,
+            ),
+        );
+        if ('refused' in elicited) {
+            throw resumeDoorError(deps, elicited.refused.message, elicited.refused.status, {
+                code: elicited.refused.code,
+                ...elicited.refused.details,
+            });
+        }
+        // The person answered some time after the gates were read: ask the
+        // admitting action's gates again before the resume below, which reads
+        // the subject and the screen again itself (`continueAdmittedRun`).
+        const regated = resumeAdmissionRefusal(deps, admitted, ec, activationEngine);
+        if (regated instanceof Error) throw regated;
+    } else if (handOff) {
         await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
         const answer = await actionExec.handOffActionConfirmation(deps, context, envId, {
             actionName: typeof action?.name === 'string' && action.name ? action.name : String(flowName),
@@ -2122,7 +2156,7 @@ async function refuseUnresumableAdmittedRun(
         ec: any;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
     },
-): Promise<void> {
+): Promise<actionExec.ActionSubjectRecordLoad> {
     const { objectName, recordId, driver, envId, ec, callData } = admitted;
 
     // ── 4. the subject record, read again in the caller's own scope ──────────
@@ -2140,6 +2174,8 @@ async function refuseUnresumableAdmittedRun(
             409,
         );
     }
+    // [#33712] The subject as read, so an elicitation can name the record by its title.
+    return subject;
 }
 
 /**

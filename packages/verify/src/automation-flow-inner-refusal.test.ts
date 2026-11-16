@@ -50,10 +50,23 @@ const HOOK_USER_TEXT = '该客户名称已被另一位销售代表占用，请�
 
 /** The refusals a `create_record` on `crm_account` meets in production. */
 const REFUSALS: Array<{ label: string; make: () => Error; code: string; marked?: string }> = [
+    // The engine's duplicate declares its end-user sentence, composed in the
+    // writer's locale, as `userMessage`; `message` keeps the diagnostic.
     {
-        label: 'unique (the card\'s measured case)',
-        make: () => new DuplicateRecordError('crm_account', new Error('driver: unique violation'), 'name'),
+        label: 'unique (the card\'s measured case), zh-CN',
+        make: () => new DuplicateRecordError('crm_account', new Error('driver: unique violation'), 'name', {
+            field: '客户名称', messages: { locale: 'zh-CN' },
+        }),
         code: 'UNIQUE_VIOLATION',
+        marked: '已存在相同客户名称的记录',
+    },
+    {
+        label: 'unique (the card\'s measured case), en',
+        make: () => new DuplicateRecordError('crm_account', new Error('driver: unique violation'), 'name', {
+            field: 'Account Name', messages: { locale: 'en' },
+        }),
+        code: 'UNIQUE_VIOLATION',
+        marked: 'A record with this Account Name already exists',
     },
     {
         label: 'validation rule',

@@ -2241,8 +2241,18 @@ export class ActionRunner {
         // An authored `errorMessage` is shown as written — a string, or the
         // `template` envelope's `source` (objectui#13367); no scope is declared
         // for its holes yet. An envelope with no text falls to the error.
+        // Between the two sits the refusal's producer-marked `userMessage`
+        // (objectstack#34215): the handler's words for the user, shown in
+        // place of the platform's `error` text. An authored `errorMessage`
+        // still wins — the spec declares it the override of the raw error,
+        // and an action that sets it keeps the text its author wrote.
+        // Presence is the marking: a blank value is no marking (the predicate
+        // `declaredUserMessage` and `@objectstack/client` apply).
         const authored = actionCopySource(action.errorMessage);
-        const raw: unknown = authored || result.error;
+        const declared = typeof result.userMessage === 'string' && result.userMessage.trim()
+          ? result.userMessage
+          : undefined;
+        const raw: unknown = authored || declared || result.error;
         const message = typeof raw === 'string'
           ? raw
           : (raw && typeof (raw as { message?: unknown }).message === 'string')

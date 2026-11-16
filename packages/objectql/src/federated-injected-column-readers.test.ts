@@ -111,7 +111,7 @@ interface Row {
 }
 
 /**
- * engine.ts and the modules `scripts/codemod-split-engine.mjs` (#29986) split
+ * engine.ts and the modules split by #30012 (the #29986 codemod)
  * out of it. A method there may keep its signature in engine.ts and its body in
  * one of these, so a {@link Row.via} helper is looked up across the set.
  */

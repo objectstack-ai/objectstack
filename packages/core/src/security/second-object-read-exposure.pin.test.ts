@@ -261,6 +261,16 @@ const CALLERS: Record<string, Classification> = {
       '`beforeRelationTarget` hook (the data door hands it `refuseUnservedRelationTarget`). Pinned by ' +
       '`packages/objectql/src/internal-field-evaluation-guard.test.ts` (the refusals assert the driver was never asked)',
   },
+  // Field-level security over a computed field that reads through a reference.
+  'packages/plugins/plugin-security/src/field-masker.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object a computed field's reference points at (`computedHopTargetsOf`), only so the security posture " +
+      "can ask the caller's own read projection of that object which fields it may read there, and WITHHOLD the " +
+      'computed field when one it reads is not among them; it reads no record and serves nothing of the target — the ' +
+      "hop itself is the engine's `resolveFormulaRelated` (its row). Pinned by " +
+      '`packages/plugins/plugin-security/src/formula-reads-hidden-field-masking.test.ts`',
+  },
   // [#29986] The codemod split of engine.ts moved two arbiter callers out of it.
   'packages/objectql/src/engine-security-resolvers.ts': {
     kind: 'not-a-served-read',

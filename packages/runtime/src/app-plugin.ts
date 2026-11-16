@@ -2194,12 +2194,21 @@ export class AppPlugin implements Plugin {
                       // that, at every level; framework#4012 fixed that half, but
                       // the level gate below is what still hides these.) One
                       // labelled entry per config app.
+                      //
+                      // A load the loader REFUSED before any dataset ran (a
+                      // `Seed.dependsOn` it cannot honour) wrote no row, so
+                      // every row counter is zero and the refusal lives only in
+                      // `errors[]`. Counted as rejected, one per error — the
+                      // shape the marketplace sample-data heal records
+                      // (`rejected: summary.errors`) — so the banner's `Seeds:`
+                      // row and the settled message say the seed failed.
+                      const refusedLoad = !result.success && result.results.length === 0 ? result.errors.length : 0;
                       recordSeedOutcome(ctx, {
                           source: String(appId),
                           inserted: totalInserted,
                           updated: totalUpdated,
                           skipped: totalSkipped,
-                          rejected: totalErrored,
+                          rejected: totalErrored + refusedLoad,
                           droppedRefs: totalRefsDropped,
                       });
                       if (result.success) {
