@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from '@objectstack/runtime';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { composeSeedSettledMessage, runtimeSeedSettlementChannels } from './serve.js';
+import { composeSeedSettledMessage } from './seed-settled-message.js';
 import { printSeedResultAfterBanner } from '../utils/format.js';
 
 /**
@@ -17,8 +17,8 @@ import { printSeedResultAfterBanner } from '../utils/format.js';
  * counters alone a source that wrote nothing and rejected nothing is dropped
  * from the `Seeds:` line and leaves `ok: true` — a clean-looking boot that
  * seeded nothing. Driven here end to end: AppPlugin's real boot seed and
- * SeedLoaderService over an in-memory engine, then the CLI's own reader of the
- * `seed-summary` service, the settled message and the banner line. The control
+ * SeedLoaderService over an in-memory engine, then the `seed-summary` service as the
+ * CLI reads it, the settled message and the banner line. The control
  * is the same boot with a load that succeeds.
  */
 
@@ -108,8 +108,9 @@ async function boot(dataset?: Record<string, unknown>) {
     trigger: vi.fn(),
   };
   await new AppPlugin(bundle(dataset) as any).start(ctx);
-  const kernel = { getService: (name: string) => services.get(name) };
-  return { engine, summary: runtimeSeedSettlementChannels(kernel).readSummary() };
+  // What the CLI reads back after `runtime.start()` (`runtimeSeedSettlementChannels`).
+  const recorded = services.get('seed-summary');
+  return { engine, summary: Array.isArray(recorded) && recorded.length > 0 ? (recorded as any[]) : undefined };
 }
 
 describe('a boot seed refused by dependsOn reads as a failed seed (banner and settled message)', () => {

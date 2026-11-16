@@ -76,6 +76,7 @@ import {
   type SeedSuppressionReason,
 } from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
+import { composeSeedSettledMessage } from './seed-settled-message.js';
 // The deployment's product name, for `AuthPlugin` — the same resolver the email
 // capability's template context reads (`resolveEmailCapabilityArg`), so the two
 // cannot disagree. Both moved to `@objectstack/plugin-email` beside the mail
@@ -908,19 +909,9 @@ export function seedingHasSettled(snapshot: SeedSettlementSnapshot | undefined):
   return !snapshot || snapshot.inFlight === 0;
 }
 
-/** Build the message from the two things the kernel already knows. */
-export function composeSeedSettledMessage(
-  snapshot: SeedSettlementSnapshot | undefined,
-  sources: SeedSourceSummary[] | undefined,
-): SeedSettledMessage {
-  const list = sources ?? [];
-  return {
-    type: 'objectstack:seed-settled',
-    ok: list.every((s) => s.rejected === 0 && (s.droppedRefs ?? 0) === 0 && !s.emptyInstall),
-    suppressed: snapshot ? [...snapshot.suppressed] : [],
-    sources: list,
-  };
-}
+// Built in its own module so a test can drive the verdict without loading
+// this file's composition graph; re-exported here, where it always lived.
+export { composeSeedSettledMessage };
 
 /** What {@link createSeedSettlementAnnouncer} needs from its host. */
 export interface SeedSettlementChannels {
