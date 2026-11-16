@@ -151,7 +151,8 @@ describe('#34374 — a hook writes its declared text in the organization\'s lang
   async function qualify(ql: ObjectQL, name: string): Promise<string[]> {
     const CALLER = { context: { userId: 'u_probe', isSystem: true, tenantId: 'org_a', locale: 'en-US' } };
     const lead: any = await ql.insert(LEAD.name, { name, status: 'new' }, CALLER as any);
-    await ql.update(LEAD.name, { status: 'qualified' }, { ...CALLER, where: { id: lead.id } } as any);
+    // The update carries the name, so the hook reads it from its own input.
+    await ql.update(LEAD.name, { name, status: 'qualified' }, { ...CALLER, where: { id: lead.id } } as any);
     const tasks: any[] = await ql.find(TASK.name, { context: { isSystem: true } } as any);
     return tasks.map((t) => t.subject);
   }
