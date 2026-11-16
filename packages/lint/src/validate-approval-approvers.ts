@@ -27,6 +27,7 @@
  * | approval-expression-no-empty-policy        | info     | #3447 P2 empty-slate policy |
  * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
  * | approval-approver-cross-org-unsupported    | error    | ADR-0105 D9 targeting      |
+ * | approval-approver-platform-admin-authored  | error    | save door only (see below) |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -65,6 +66,21 @@ export const APPROVAL_EXPRESSION_INVALID = 'approval-expression-invalid';
 export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty-policy';
 export const APPROVAL_DECISION_OUTPUTS_RESERVED = 'approval-decision-outputs-reserved';
 export const APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED = 'approval-approver-cross-org-unsupported';
+export const APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED = 'approval-approver-platform-admin-authored';
+
+/** What {@link validateApprovalApprovers} needs to know about the door that runs it. */
+export interface ValidateApprovalApproversOptions {
+  /**
+   * True at the runtime publish gate, the save door every flow authored in a
+   * deployment passes (Studio, REST `/meta`, an MCP author). A flow saved there
+   * is never a package's own code, so a `platform_admin` approver in it is
+   * refused at that door ({@link APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED}).
+   * Absent on the CLI commands: they read a package's source tree and cannot
+   * know which door will register it, so they know the type and refuse
+   * nothing. The approval node's refusal at entry is the gate that holds.
+   */
+  atSaveDoor?: boolean;
+}
 
 /**
  * The CLOSED root set an `expression` approver may reference (#3447 P2) —
@@ -155,11 +171,23 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  *     `system-write-guard.ts`, plugin-auth `identity-write-guard.ts`). A
  *     system-context write therefore bypasses the managed-update whitelist by
  *     construction.
- *   - SCIM — NOT here, re-measured and unchanged. The Enterprise `manager`
- *     attribute IS declared (`scim.zod.ts`), but no non-test file under
- *     `packages/plugins` or `packages/runtime` projects it onto the column:
- *     measured 0, against a control (`SysScimGroup`) the same scan does find,
- *     so the scan discriminates.
+ *   - SCIM — AVAILABLE HERE, and the grade this block used to give it ("NOT
+ *     here, 0 projection sites") went stale when the projection landed.
+ *     plugin-auth `scim-manager-projection.ts` carries the Enterprise User
+ *     `manager.value` — the manager's SCIM resource id among the Users the
+ *     same connection provisioned (RFC 7643 §4.3) — onto the column, inside
+ *     the SCIM transaction, through the endpoint's own refusals
+ *     (`screenUserManagerLink`: self-assignment, cycle, depth cap,
+ *     cross-organization, each a SCIM 400 `invalidValue`). It runs only for
+ *     an ACTIVE user whose manager the directory owns (the one predicate the
+ *     endpoint's directory refusal reads), only from the connection that
+ *     holds that user's profile source, and only on a create, replace or
+ *     patch that NAMES the attribute: a write that does not name it leaves
+ *     the column as it is, and an explicit remove (or a replace without it)
+ *     clears it. A reference naming no User is served with the column left
+ *     unchanged and a bounded operator warn (maintainer ruling record
+ *     6909383114). Measured by `scim-manager-projection.test.ts`, end to end
+ *     through the vendor.
  *   - Admin bulk import — AVAILABLE HERE, and the grade this block used to
  *     give it ("NOT here") went stale when the import tier admitted the column.
  *     `POST /api/v1/auth/admin/import-users` (`admin-import-users.ts`) reads a
@@ -178,12 +206,12 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  *     It is the route to name for a whole file; a remedy that said otherwise
  *     sent the author away from a supported path.
  *
- * ⇒ SCIM and directory sync stay NAMED, because a deployment running a real
- * one may well populate the column through it — but named as something the
- * operator's own provisioning supplies, ⛔ never as something this repo gives
- * them. They also now have PRECEDENCE over the endpoint rather than merely
- * sitting beside it: on an identity a SCIM directory holds the endpoint refuses, so
- * the directory is the one authoring surface for those rows.
+ * ⇒ SCIM is NAMED as a route this repo gives, with PRECEDENCE over the
+ * endpoint rather than beside it: on an identity a SCIM directory holds the
+ * endpoint refuses, so the directory's `manager` attribute is the one
+ * authoring surface for those rows. Any other directory sync stays named as
+ * something the operator's own provisioning supplies, ⛔ never as something
+ * this repo gives them.
  *
  * ⛔ WHAT DID NOT CHANGE — and why this rule is not deleted. The dead end the
  * finding reports SURVIVES the write surface: a static check still cannot read
@@ -356,7 +384,10 @@ function stackWiresManagerChain(stack: AnyRec): boolean {
  * Validate the approvers of every Approval node in the stack's flows.
  * Returns findings (empty = clean).
  */
-export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFinding[] {
+export function validateApprovalApprovers(
+  stack: AnyRec,
+  options: ValidateApprovalApproversOptions = {},
+): ApprovalApproverFinding[] {
   const findings: ApprovalApproverFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
@@ -407,6 +438,27 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
         }
 
         const canonical = canonicalApproverType(type);
+
+        // The platform administrators, named in a flow saved at the runtime
+        // door: that flow is authored in this deployment, and only a flow a
+        // package registered in code ships may address them. Early feedback;
+        // the approval node refuses to open on it whatever door it came in by.
+        if (options.atSaveDoor === true && canonical === 'platform_admin') {
+          findings.push({
+            severity: 'error',
+            rule: APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
+            where,
+            path: `${path}.type`,
+            message:
+              "approver type 'platform_admin' addresses the deployment's platform administrators, and a flow " +
+              'saved here is authored in this deployment: only a flow shipped by a package the deployment ' +
+              'registers in code may name them. The approval node would refuse to open on it.',
+            hint:
+              'Route the step to people of the organization (a position, a team, a department or a person), ' +
+              'or ship the flow in a package the deployment registers in code.',
+          });
+          continue;
+        }
 
         // Expression approvers (#3447 P2): the runtime REJECTS an expression
         // that doesn't parse or references a root outside `current`/`trigger`/
@@ -562,6 +614,30 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             hint:
               `Drop 'organization' here. Cross-organization targeting applies to ` +
               `'position', 'org_membership_level', 'department', 'queue' and 'expression' approvers.`,
+          });
+        }
+      }
+
+      // The same save-door refusal for the node's fallback slate, which the
+      // approval node opens on through the same expansion.
+      if (options.atSaveDoor === true && Array.isArray(cfg.fallbackApprovers)) {
+        const fallback = cfg.fallbackApprovers as unknown[];
+        for (let ai = 0; ai < fallback.length; ai++) {
+          const a = fallback[ai] as AnyRec | null;
+          if (!a || typeof a !== 'object' || typeof a.type !== 'string') continue;
+          if (canonicalApproverType(a.type) !== 'platform_admin') continue;
+          findings.push({
+            severity: 'error',
+            rule: APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
+            where,
+            path: `${nodePath}.config.fallbackApprovers[${ai}].type`,
+            message:
+              "fallback approver type 'platform_admin' addresses the deployment's platform administrators, and " +
+              'a flow saved here is authored in this deployment: only a flow shipped by a package the ' +
+              'deployment registers in code may name them. The approval node would refuse to open on it.',
+            hint:
+              'Name people of the organization as the fallback, or ship the flow in a package the deployment ' +
+              'registers in code.',
           });
         }
       }

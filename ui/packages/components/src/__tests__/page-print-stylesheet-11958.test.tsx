@@ -35,6 +35,8 @@ import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, usePrintPage } from '@object-ui/react';
 import '../renderers';
+// `PageRenderer` reaches `react-page.tsx`, which loads this dynamically: pay the load at collection.
+import '@object-ui/react-runtime';
 import { buildPagePrintStylesheet, PRINT_PAGE_ATTRIBUTE, PRINT_RUNNING_ATTRIBUTE } from '../renderers/layout/page-print';
 
 afterEach(() => cleanup());
@@ -84,7 +86,9 @@ describe('buildPagePrintStylesheet — one print-CSS rule per declared key (obje
       expect(css).toContain(`${table} > thead { display: table-header-group !important; }`);
       expect(css).toContain(`${table} > tfoot { display: table-footer-group !important; }`);
     }
-    expect(buildPagePrintStylesheet({})).not.toContain(PRINT_RUNNING_ATTRIBUTE + ']) {');
+    // The running region's block rule, spelled whole: the data-table fit rule
+    // (objectstack#34228) names the attribute too, to exclude that table.
+    expect(buildPagePrintStylesheet({})).not.toContain(`:has(> table[${PRINT_RUNNING_ATTRIBUTE}]) {`);
     expect(buildPagePrintStylesheet({})).not.toContain(`${table} {`);
   });
 

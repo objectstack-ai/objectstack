@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#29520 codemod] The top-level declarations ahead of `SqlDriver` in
-// `sql-driver.ts` that moved out whole by
-// `scripts/codemod-split-sql-driver.mjs` (lever (b) of ruling 6591753301).
+// `sql-driver.ts` that moved out whole
+// (split by #29598; lever (b) of ruling 6591753301).
 //
 // A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text
 // exactly, with the comments above it, in the order it stood there. A LEAF:
