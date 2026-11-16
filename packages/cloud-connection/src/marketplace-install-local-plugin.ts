@@ -27,10 +27,9 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
- *            So is a `namespace` — the package's own and each multi-package
- *            member's — through `ManifestSchema.shape.namespace` (#33922):
- *            absent is admitted, a value the declaration refuses answers
- *            `PLUGIN_MANIFEST_INVALID` the same way.
+ *            So is its `namespace`, through `ManifestSchema.shape.namespace`
+ *            (#33922): absent is admitted, a value the declaration refuses
+ *            answers `PLUGIN_MANIFEST_INVALID` the same way.
  *            A package declaring code this door cannot run answers
  *            `VALIDATION_ERROR` (422) the same way: an enabled job with no
  *            `body`, or one whose `body` the declaration refuses (#21585), and
@@ -956,42 +955,33 @@ function judgeWithheldMaps(
 }
 
 /**
- * [#33922, ADR-0048 §2] The `namespace` of every package this install
- * delivers, parsed through its declaration (`ManifestSchema.shape.namespace`,
- * `NAMESPACE_PATTERN`), by reference: the package's own (where
- * {@link declaredPackageManifest} reads it — the key the writable-holder check
- * and the registry's install-time namespace gate compare), and each
- * `packages[].manifest` of a multi-package artifact, which the registry
- * installs under its own namespace. `null` admits them all; otherwise the
- * refusal sentence for the first one refused.
+ * [#33922, ADR-0048 §2] The package's `namespace`, parsed through its
+ * declaration (`ManifestSchema.shape.namespace`, `NAMESPACE_PATTERN`), by
+ * reference, where {@link declaredPackageManifest} reads it — the key the
+ * writable-holder check and the registry's install-time namespace gate
+ * compare. `null` admits it; otherwise the refusal sentence.
  *
  * Absent is admitted, as the declaration admits it. Without this, `''`,
  * `'QA_N'` or `'9-Bad Ns!'` registered as written: a namespace no author can
  * declare, and a case variant of an owned one (`QA_N` beside `qa_n`) that the
  * gate's uniqueness comparison never reads as the same namespace.
  *
+ * ⛔ Not the members of a multi-package artifact: each `packages[]` entry is
+ * already parsed WHOLE through `ArtifactPackageSchema` (the core's
+ * `resolveArtifactPackageOrder`, reached here through {@link unrunnableCode}
+ * before any write), whose refusal of the same namespace is
+ * `INVALID_ARTIFACT_PACKAGE_ENTRY` / 422. A second judge here would move that
+ * answer, not close a gap.
+ *
  * The sentence is the declaration's own inside the frame an invalid
- * `installModes` is answered with ({@link judgeInstallMode}), the member's
- * position in the `(at …)` suffix; no wording is minted.
+ * `installModes` is answered with ({@link judgeInstallMode}); no wording is
+ * minted.
  */
 function namespaceRefusal(manifest: Record<string, any>, manifestId: string): string | null {
-    const members: Array<{ at: string; body: unknown }> = [{ at: '', body: declaredPackageManifest(manifest) }];
-    if (Array.isArray(manifest.packages)) {
-        manifest.packages.forEach((entry: unknown, index: number) => {
-            if (isPlainObject(entry) && isPlainObject(entry.manifest)) {
-                const nested = isPlainObject(entry.manifest.manifest) ? 'manifest.' : '';
-                members.push({ at: `packages.${index}.manifest.${nested}namespace`, body: declaredPackageManifest(entry.manifest) });
-            }
-        });
-    }
-    for (const { at, body } of members) {
-        const declared = ManifestSchema.shape.namespace.safeParse((body as Record<string, unknown>).namespace);
-        if (declared.success) continue;
-        const [issue] = declared.error.issues;
-        return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}`
-            + `${at !== '' ? ` (at \`${at}\`)` : ''}.`;
-    }
-    return null;
+    const declared = ManifestSchema.shape.namespace.safeParse(declaredPackageManifest(manifest).namespace);
+    if (declared.success) return null;
+    const [issue] = declared.error.issues;
+    return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}.`;
 }
 
 /**

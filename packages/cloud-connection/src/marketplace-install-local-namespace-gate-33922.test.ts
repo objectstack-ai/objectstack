@@ -19,8 +19,9 @@
  *   - each refused value answers `400 PLUGIN_MANIFEST_INVALID` in the declared
  *     envelope, carrying the declaration's own sentence (read from the schema
  *     here, never copied), and nothing is registered, synced or ledgered — on
- *     a flat manifest, a compiled bundle's nested manifest, and a multi-package
- *     artifact's member; a cloud snapshot answers the same code at `502`;
+ *     a flat manifest and a compiled bundle's nested manifest; a cloud snapshot
+ *     answers the same code at `502`; a multi-package artifact's MEMBER keeps
+ *     the refusal the artifact-entry parse already gave it;
  *   - a conforming namespace and an ABSENT one still install (the declaration
  *     makes the key optional);
  *   - over a real engine: `QA_N` beside an owner of `qa_n` is the 400 above and
@@ -180,9 +181,11 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
         expectNothingWritten(h);
     });
 
-    it('refuses a multi-package artifact whose MEMBER declares a refused namespace, naming its position', async () => {
+    it('UNMOVED — an artifact MEMBER\'s refused namespace keeps the artifact-entry parse\'s refusal, nothing written', async () => {
+        // Each `packages[]` entry is parsed whole through `ArtifactPackageSchema`
+        // before any write; this door adds no second judge of it.
         const h = await mount(dir);
-        const res = await h.install({
+        const thrown = await h.install({
             manifest: {
                 id: 'com.qa.suite',
                 version: '1.0.0',
@@ -191,10 +194,10 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
                     { manifest: { id: 'com.qa.two', name: 'qa_two', version: '1.0.0', type: 'module', namespace: 'QA_N', objects: [] } },
                 ],
             },
-        });
-        expectDeclaredRefusal(res, 400);
-        expect(res.payload.error.message).toContain(declaredSentence('QA_N'));
-        expect(res.payload.error.message).toContain('`packages.1.manifest.namespace`');
+        }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
+        expect(thrown?.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+        expect(thrown?.status).toBe(422);
+        expect(thrown?.message).toContain(declaredSentence('QA_N'));
         expectNothingWritten(h);
     });
 
