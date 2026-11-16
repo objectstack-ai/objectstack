@@ -383,6 +383,22 @@ npx @objectstack/scenarios help                                      # the comma
   reads the second NOT MEASURED, never a fail. The `Run-operations` cell adds `confirmed write k/N` beside the
   `asked first` count, and the card states the sum on its own line. A card with no `pending_confirmation` operation
   runs, records and scores exactly as before.
+- **Each operation starts from the seeded rows** (`orchestrate.ts`, `seed.ts`, `app.ts`, `scorecard.ts`): right after
+  the seed loads, the runner reads the rows of every seeded object, and of every object an operation writes or its
+  outcome reads (`restoreObjects`), as the admin. Before each operation it reads them again and compares
+  (`rowDrift`: every column but `created_at`, `updated_at`, `updated_by` and the fields the build computes — formula,
+  summary, autonumber). When an earlier turn moved them (the agent's write, a probe's, a confirmed one, or a question
+  turn that wrote), it puts them back (`restoreSeededRows`): a row a turn added is deleted, a seeded row a turn removed
+  is inserted again with the body the seed sent, and a changed column is set back to the value the seed left, in up to
+  three rounds so a cascade settles. The operation's result then carries `restored` (`deleted`, `reinserted`,
+  `setBack`, each `object/id`), and the `Run-operations` cell adds `N started from restored rows`. Rows that still
+  differ after the rounds make the operation NOT MEASURED (`restore: the rows could not be restored …`, naming what
+  differs and the first refusals), never a pass or a fail on rows the card did not declare. The restore runs before an
+  operation's first turn, never between its ask and its confirmation; questions are untouched (they all run before any
+  operation). A run where no earlier turn moved a row writes nothing and records and scores exactly as before. A
+  replay re-sends each operation's recorded writes against the restored rows, so a recording made before restores
+  whose later operation leaned on an earlier one's write reads NOT MEASURED there (the replay is not faithful), never a
+  fail.
 - **Language and build prompt** (`prompts.ts`, `orchestrate.ts`, `scorecard.ts`, `driver.ts`): `--lang zh|en` renders
   every card-authored text a prompt carries in that language and no other — the build prompt (`prompt.short` or
   `prompt.detailed`), the iterate change (`iterate.change`), and each question's and each operation's `ask` — in every

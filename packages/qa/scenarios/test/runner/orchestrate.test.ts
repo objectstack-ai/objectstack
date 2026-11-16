@@ -154,6 +154,14 @@ class FakeApp implements AppHarness {
     Object.assign(row, patch);
     return { ok: true, status: 200, body: {} };
   }
+  /** A restore's delete: a row an earlier operation added. */
+  async deleteRow(object: string, id: string): Promise<HttpAnswer> {
+    const rows = this.rows[object] ?? [];
+    const i = rows.findIndex((r) => r.id === id);
+    if (i < 0) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    rows.splice(i, 1);
+    return { ok: true, status: 200, body: {} };
+  }
   async listRows(object: string) {
     return { ok: true, status: 200, body: {}, rows: (this.rows[object] ?? []).map((r) => ({ ...r })) };
   }
