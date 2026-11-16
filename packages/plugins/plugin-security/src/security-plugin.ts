@@ -182,6 +182,7 @@ import {
   computeReadableFields,
   resolveCallerPosture,
   resolveProjectionFieldMask,
+  withheldComputedFieldsOf,
   type FieldReadersHost,
 } from './security-plugin-field-readers.js';
 // [#25223 cut 9] The object-level admissions: read, read over resolved sets,
@@ -3262,7 +3263,11 @@ export class SecurityPlugin implements Plugin {
     const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
     if (mask.kind === 'answer') return mask.fields;
     const nonEditable = new Set(this.fieldMasker.getNonEditableFields(mask.fieldPerms));
-    return mask.allFields.filter((f) => !nonEditable.has(f));
+    // Field-level security covers what a value is computed from: a computed
+    // field the read mask deletes for what it reads is no field of this
+    // caller's, on the write side either (no write of it ever stands).
+    const withheld = await withheldComputedFieldsOf(mask);
+    return mask.allFields.filter((f) => !nonEditable.has(f) && !withheld.has(f));
   }
 
   /**
@@ -3319,11 +3324,13 @@ export class SecurityPlugin implements Plugin {
       return { object: objectName, recordId: id, readable: readable ?? [], editable: mask.fields ?? [], writable };
     }
     const forbidden = new Set(await mask.readRowForbiddenWrites(row));
+    // Field-level security covers what a value is computed from (getWritableFields).
+    const withheld = await withheldComputedFieldsOf(mask);
     return {
       object: objectName,
       recordId: id,
       readable: readable ?? [],
-      editable: mask.allFields.filter((f) => !forbidden.has(f)),
+      editable: mask.allFields.filter((f) => !forbidden.has(f) && !withheld.has(f)),
       writable,
     };
   }
@@ -6280,7 +6287,8 @@ export class SecurityPlugin implements Plugin {
    * computed from, on the referenced record too. A computed field reading
    * `record.ref.leaf` is withheld when `leaf` is a field the object `ref`
    * points at declares and the caller is not served WHOLE there — it may not
-   * read it, or is served it masked — judged by that object's own query
+   * read that object at all ({@link canReadObject}), may not read the field,
+   * or is served it masked — judged by that object's own query
    * projection ({@link computeQueryableFields}: readable minus masked, that
    * object's computed fields folded in turn), or not determinable there (fail
    * closed). The engine serves one hop, so the target's projection is asked
@@ -6301,6 +6309,7 @@ export class SecurityPlugin implements Plugin {
       {
         readServedWholeFields: (object: string, ctx: unknown) => this.computeQueryableFields(object, ctx, { ...options, hops: false }),
         readFieldNames: (object: string) => this.getObjectFieldNames(this.metadata, object, this.ql),
+        readObjectAdmitted: (object: string, ctx: unknown) => this.canReadObject(object, ctx),
       },
       secMeta,
       context,

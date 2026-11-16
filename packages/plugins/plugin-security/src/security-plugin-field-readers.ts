@@ -143,6 +143,22 @@ export async function computeReadableFields(
   return mask.allFields.filter((f) => !withheld.has(f) && (mask.fieldPerms[f]?.readable !== false || partialRules[f] !== undefined));
 }
 
+/**
+ * The computed fields the read mask deletes for what they are computed from,
+ * for the caller one projection mask was resolved for — the fold
+ * {@link computeReadableFields} takes, for the projections that answer about
+ * a field without reading it (the write side).
+ */
+export async function withheldComputedFieldsOf(mask: {
+  fieldPerms: Record<string, { readable: boolean; editable: boolean }>;
+  computedFieldInputs: ComputedFieldInputs;
+  readPartialMaskRules: () => Record<string, FieldMaskingRule>;
+  readHopWithheld: () => Promise<Set<string>>;
+}): Promise<Set<string>> {
+  const partialRules = mask.readPartialMaskRules();
+  return foldComputedFieldReads(mask.fieldPerms, mask.computedFieldInputs, Object.keys(partialRules), await mask.readHopWithheld()).withheld;
+}
+
 /** The body of `SecurityPlugin#resolveProjectionFieldMask`; the method's docblock there is its contract. */
 export async function resolveProjectionFieldMask(
   this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,

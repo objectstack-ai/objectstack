@@ -65,6 +65,8 @@ interface BootOptions {
    * through the engine as the middleware does.
    */
   delegatorFields?: FieldEntries;
+  /** `false`: the caller's set grants no read on the referenced object at all. */
+  regionRead?: boolean;
 }
 
 interface Rig { engine: ObjectQL; plugin: SecurityPlugin; sets: Record<string, PermissionSet> }
@@ -99,6 +101,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           // A masking rule with no unmask gate: served masked to every non-system caller.
           code: { name: 'code', type: 'text', maskingRule: { keepHead: 1, keepTail: 1 } },
           code_copy: { name: 'code_copy', type: 'formula', returnType: 'text', expression: cel('record.code') },
+          code_stored: { name: 'code_stored', type: 'text', expression: cel('record.code') },
           plain_copy: { name: 'plain_copy', type: 'formula', returnType: 'text', expression: cel('record.plain') },
         },
       },
@@ -147,6 +150,12 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           region_phone_copy: { name: 'region_phone_copy', type: 'formula', returnType: 'text', expression: cel('record.region.region_phone') },
           region_ghost: { name: 'region_ghost', ...num('record.region.no_such_field * 1.0') },
           region_score_stored: { name: 'region_score_stored', type: 'number', expression: cel('record.region.secret_score * 1.0') },
+          // Stored computed fields over each same-record kind.
+          gated_stored: { name: 'gated_stored', type: 'number', expression: cel('record.gated * 2.0') },
+          phone_stored: { name: 'phone_stored', type: 'text', expression: cel('record.phone') },
+          tier_label_stored: { name: 'tier_label_stored', type: 'text', expression: cel('label(record.tier)') },
+          picked_stored: { name: 'picked_stored', type: 'number', expression: cel('record[record.pick] * 1.0') },
+          load_stored: { name: 'load_stored', type: 'number', expression: cel('record.open_cases_stored * 1.0') },
         },
       },
     ],
@@ -173,7 +182,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   const set = PermissionSetSchema.parse({
     name: SET,
     ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
-    objects: { [OBJ]: grant, [REGION]: grant, [NOTE]: grant },
+    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant },
     ...(opts.fields ? { fields: opts.fields } : {}),
   });
   const second = PermissionSetSchema.parse({
@@ -471,6 +480,80 @@ describe('a formula over a field served masked to every caller (a masking rule w
   });
 });
 
+describe('a STORED computed field over each kind of same-record input is withheld as a formula is', () => {
+  const STORED = ['gated_stored', 'phone_stored', 'tier_label_stored', 'picked_stored', 'load_stored'];
+
+  it('absent from find, not queryable, and refused as a filter, for a caller not served the input whole', async () => {
+    const { engine, plugin } = await boot({ fields: { ...HIDE_OPEN_CASES, ...hide(OBJ, 'tier') } });
+    const one = await findA1(engine);
+    for (const f of STORED) expect(one, f).not.toHaveProperty(f);
+    const queryable = new Set(await plugin.getQueryableFields(OBJ, { ...CALLER }));
+    for (const f of STORED) expect(queryable.has(f), f).toBe(false);
+    // The stored copy of a field served masked is a full value: refused as a predicate.
+    expect(await outcome(findAll(engine, { where: { phone_stored: { $eq: '13812345678' } }, fields: ['id'] })))
+      .toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('control: a caller served every input whole reads and queries each of them', async () => {
+    const { engine, plugin } = await boot({ capabilities: ['qa_fhf_gate', 'qa_fhf_unmask', 'qa_fhf_region_gate'] });
+    expect(await findA1(engine)).toMatchObject({
+      gated_stored: 42, phone_stored: '13812345678', tier_label_stored: 'Gold', picked_stored: 12, load_stored: 6,
+    });
+    const queryable = new Set(await plugin.getQueryableFields(OBJ, { ...CALLER }));
+    for (const f of STORED) expect(queryable.has(f), f).toBe(true);
+  });
+
+  it('a stored copy of a field masked for every caller: absent; control a system context reads it', async () => {
+    const { engine } = await boot();
+    expect(await engine.findOne(NOTE, { where: { id: 'n1' }, context: { ...CALLER } } as never)).not.toHaveProperty('code_stored');
+    expect(await engine.findOne(NOTE, { where: { id: 'n1' }, context: { isSystem: true } } as never)).toMatchObject({ code_stored: 'ABCDEFG' });
+  });
+});
+
+describe('a computed field reading through a reference to an object the caller may not read at all is withheld', () => {
+  it('formula and stored alike: absent from find and the read projection; control a caller who reads the object', async () => {
+    const { engine, plugin } = await boot({ regionRead: false });
+    const one = await findA1(engine);
+    for (const f of ['region_name', 'region_score', 'region_score_stored']) expect(one, f).not.toHaveProperty(f);
+    const readable = new Set(await plugin.getReadableFields(OBJ, { ...CALLER }));
+    for (const f of ['region_name', 'region_score', 'region_score_stored']) expect(readable.has(f), f).toBe(false);
+    const open = await boot();
+    expect(await findA1(open.engine)).toMatchObject({ region_name: 'North', region_score: 7, region_score_stored: 7 });
+  });
+});
+
+describe('the projections that answer about a field without reading it leave a withheld computed field out', () => {
+  const WITHHELD = ['load', 'load_pct', 'open_cases_stored', 'region_score', 'region_score_stored'];
+  const WHO = { fields: { ...HIDE_OPEN_CASES, ...hide(REGION, 'secret_score') } };
+
+  it('getMetadataReadableFields, getWritableFields and getRecordFieldAccess (read and edit halves)', async () => {
+    const { plugin } = await boot(WHO);
+    const metadata = new Set(await plugin.getMetadataReadableFields(OBJ, { ...CALLER }));
+    const writable = new Set(await plugin.getWritableFields(OBJ, { ...CALLER }));
+    const access: any = await plugin.getRecordFieldAccess(OBJ, 'a1', { ...CALLER });
+    for (const f of WITHHELD) {
+      expect(metadata.has(f), `metadata ${f}`).toBe(false);
+      expect(writable.has(f), `writable ${f}`).toBe(false);
+      expect(access.readable, `record readable ${f}`).not.toContain(f);
+      expect(access.editable, `record editable ${f}`).not.toContain(f);
+    }
+    expect(metadata.has('headroom')).toBe(true);
+    expect(access.readable).toContain('headroom');
+  });
+
+  it('control: a caller served every input whole is answered each of them', async () => {
+    const { plugin } = await boot();
+    const metadata = new Set(await plugin.getMetadataReadableFields(OBJ, { ...CALLER }));
+    const writable = new Set(await plugin.getWritableFields(OBJ, { ...CALLER }));
+    const access: any = await plugin.getRecordFieldAccess(OBJ, 'a1', { ...CALLER });
+    for (const f of WITHHELD) {
+      expect(metadata.has(f), `metadata ${f}`).toBe(true);
+      expect(writable.has(f), `writable ${f}`).toBe(true);
+      expect(access.readable, `record readable ${f}`).toContain(f);
+    }
+  });
+});
+
 describe('a computed field whose reads cannot be named is withheld whenever another field is (fail closed)', () => {
   it('end to end: absent for a caller denied any field; served to a caller denied none', async () => {
     const hidden = await boot({ fields: HIDE_OPEN_CASES });
@@ -579,6 +662,13 @@ describe('controls: what the rule leaves unchanged', () => {
   it('a View All holder reads the hidden field and the formulas over it', async () => {
     const { engine } = await boot({ fields: HIDE_OPEN_CASES, viewAllRecords: true });
     expect(await findA1(engine)).toMatchObject({ open_cases: 6, load: 0.5, load_pct: 50, open_cases_stored: 6 });
+  });
+
+  it('a View All holder is still withheld a computed field over a capability-gated or masked field (the vote lifts readable: false only)', async () => {
+    const { engine } = await boot({ fields: HIDE_OPEN_CASES, viewAllRecords: true });
+    const one = await findA1(engine);
+    expect(one).toMatchObject({ open_cases: 6, load: 0.5, phone: '138****5678' });
+    for (const f of ['gated', 'gated_double', 'gated_stored', 'phone_copy', 'phone_stored']) expect(one, f).not.toHaveProperty(f);
   });
 
   it("the aggregate path's input gate is unchanged: the hidden field is refused, a readable one admitted", async () => {

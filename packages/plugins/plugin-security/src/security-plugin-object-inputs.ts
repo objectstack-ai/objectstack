@@ -644,6 +644,7 @@ export async function resolveHopWithheldFields(
   this: {
     readServedWholeFields: (object: string, context: unknown) => Promise<string[] | undefined>;
     readFieldNames: (object: string) => Promise<ReadonlySet<string> | null>;
+    readObjectAdmitted: (object: string, context: unknown) => Promise<boolean>;
   },
   secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
   context: unknown,
@@ -654,15 +655,22 @@ export async function resolveHopWithheldFields(
   // Per target: the fields it declares, and the ones this caller is served
   // WHOLE there (readable and not masked). A leaf the target does not declare
   // is no field to withhold — the engine answers it `null` with its own fault
-  // — so only a DECLARED leaf the caller is not served whole withholds; a
+  // — so only a DECLARED leaf the caller is not served whole withholds. A
+  // target the caller may not read at all serves it no field whole, and a
   // target whose answer cannot be had withholds every computed field reading
   // through it (fail closed).
   const verdicts = new Map<string, Promise<{ declared: ReadonlySet<string>; whole: ReadonlySet<string> } | null>>();
   const verdictOn = (object: string) => {
     let hit = verdicts.get(object);
     if (!hit) {
-      hit = Promise.all([this.readFieldNames(object), this.readServedWholeFields(object, context)]).then(
-        ([declared, fields]) => (declared && Array.isArray(fields) ? { declared, whole: new Set(fields) } : null),
+      hit = Promise.all([
+        this.readFieldNames(object),
+        this.readServedWholeFields(object, context),
+        this.readObjectAdmitted(object, context),
+      ]).then(
+        ([declared, fields, admitted]) => (declared && Array.isArray(fields) && admitted === true
+          ? { declared, whole: new Set(fields) }
+          : null),
         () => null,
       );
       verdicts.set(object, hit);
