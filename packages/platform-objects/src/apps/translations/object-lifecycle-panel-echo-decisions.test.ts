@@ -1286,7 +1286,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 741 since #33657: the hook form's refusal entry offers `reasons` (with
       // its `message`) and `params` — three row labels, authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(741);
+      // 742 since #34167: the skill form offers `mcpPrompt` (the owner's
+      // opt-out of MCP prompt projection) — one field label, authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(742);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
