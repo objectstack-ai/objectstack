@@ -18,8 +18,17 @@
  * The real bridge (`buildMcpBridge`, through `HttpDispatcher`) is driven
  * against a kernel double, so every pin reads what the door made the engine
  * and the service double do, not only what it answered. The acceptance is
- * the card's: the same request sent with `confirm: true` N times executes 0
- * times, and every attempt is held with a pending id.
+ * the card's: the same request sent N times executes 0 times, and every
+ * attempt is held with a pending id.
+ *
+ * [#34209] The MCP tools no longer forward a `confirm` member: `run_action`
+ * and `resume_run` REFUSE a call that carries it at their closed input
+ * (maintainer ruling 6909355256), pinned in `@objectstack/mcp`'s
+ * `mcp-action-confirmation-handoff-33690.test.ts`, which this package does not
+ * depend on. So the primary pins here send the request the tool now forwards,
+ * with no member. The bridge's input type still admits the member, and the
+ * loops marked "below the tool" keep sending it: a bridge caller that is not
+ * the tool still gets nothing for it (defense in depth).
  */
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
@@ -154,7 +163,7 @@ async function refusalOf(p: Promise<unknown>): Promise<{ code: unknown; status: 
 const N = 5;
 
 describe('[#33690] run_action: a declared-gated action is handed to the person, never run on the caller\'s confirm', () => {
-    it(`the same request with confirm: true, sent ${N} times, executes 0 times and is held ${N} times with a pending id`, async () => {
+    it(`the same request, sent ${N} times, executes 0 times and is held ${N} times with a pending id`, async () => {
         const service = makeConfirmationService();
         const h = makeHarness({ service });
         const bridge = h.bridgeAs(PERSON);
@@ -162,7 +171,7 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
         const answers: any[] = [];
         for (let i = 0; i < N; i++) {
             answers.push(await bridge.runAction(GATED.name, {
-                recordId: 'lead_1', params: { note: 'stale' }, [AI_ACTION_CONFIRMATION_MEMBER]: true,
+                recordId: 'lead_1', params: { note: 'stale' },
             }));
         }
 
@@ -185,7 +194,7 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
         expect(ec.userId).toBe('u1');
     });
 
-    it('holds the call with the member and without it alike: the member is not read', async () => {
+    it('below the tool: a bridge caller passing the member is held all the same: the member is not read', async () => {
         for (const extra of [{}, { [AI_ACTION_CONFIRMATION_MEMBER]: false }, { [AI_ACTION_CONFIRMATION_MEMBER]: true }]) {
             const service = makeConfirmationService();
             const h = makeHarness({ service });
@@ -198,7 +207,7 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
     it('a delegated agent (acting for a person) is handed off too, for that person', async () => {
         const service = makeConfirmationService();
         const h = makeHarness({ service });
-        const answer = await h.bridgeAs(DELEGATED).runAction(GATED.name, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true });
+        const answer = await h.bridgeAs(DELEGATED).runAction(GATED.name, { recordId: 'lead_1' });
         expect(answer).toMatchObject({ status: 'pending_confirmation' });
         expect(h.ql.executeAction).not.toHaveBeenCalled();
         expect((service.submit.mock.calls[0] as any[])[1].onBehalfOf.userId).toBe('u1');
@@ -209,11 +218,11 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
         const h = makeHarness({ service });
         const bridge = h.bridgeAs(PERSON);
 
-        const flow = await bridge.runAction(GATED_FLOW.name, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true });
+        const flow = await bridge.runAction(GATED_FLOW.name, { recordId: 'lead_1' });
         expect(flow).toMatchObject({ status: 'pending_confirmation', actionName: GATED_FLOW.name });
         expect(h.automation.execute).not.toHaveBeenCalled();
 
-        const update = await bridge.runAction(GATED_UPDATE.name, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true });
+        const update = await bridge.runAction(GATED_UPDATE.name, { recordId: 'lead_1' });
         expect(update).toMatchObject({ status: 'pending_confirmation', actionName: GATED_UPDATE.name });
     });
 
@@ -221,15 +230,15 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
         const service = makeConfirmationService();
         const h = makeHarness({ service });
 
-        const refused = await refusalOf(h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_2', [AI_ACTION_CONFIRMATION_MEMBER]: true }));
+        const refused = await refusalOf(h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_2' }));
 
         expect({ code: refused.code, status: refused.status }).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
         expect(service.submit).not.toHaveBeenCalled();
         expect(h.ql.executeAction).not.toHaveBeenCalled();
     });
 
-    it('no service registered: refused 428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service, with the member and without it', async () => {
-        for (const extra of [{ [AI_ACTION_CONFIRMATION_MEMBER]: true }, {}]) {
+    it('no service registered: refused 428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service (below the tool: with the member too)', async () => {
+        for (const extra of [{}, { [AI_ACTION_CONFIRMATION_MEMBER]: true }]) {
             const h = makeHarness();
             const refused = await refusalOf(h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1', ...extra }));
             expect({ code: refused.code, status: refused.status }, JSON.stringify(extra)).toEqual({
@@ -249,14 +258,14 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
     it('a service that answers no pending id is a fault, never a hand-off: thrown, and nothing run', async () => {
         const service = { submit: vi.fn(async () => ({})) };
         const h = makeHarness({ service });
-        const thrown: any = await h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true }).catch((e: unknown) => e);
+        const thrown: any = await h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1' }).catch((e: unknown) => e);
         expect(thrown).toBeInstanceOf(Error);
         expect(String(thrown.message)).toContain('pendingId');
         expect(h.ql.executeAction).not.toHaveBeenCalled();
     });
 
-    it('[ADR-0151 D3 rule 3] an AI service account is refused, never handed off: reason service_account, with the member and without it', async () => {
-        for (const extra of [{ [AI_ACTION_CONFIRMATION_MEMBER]: true }, {}]) {
+    it('[ADR-0151 D3 rule 3] an AI service account is refused, never handed off: reason service_account (below the tool: with the member too)', async () => {
+        for (const extra of [{}, { [AI_ACTION_CONFIRMATION_MEMBER]: true }]) {
             const service = makeConfirmationService();
             const h = makeHarness({ service });
             const refused = await refusalOf(h.bridgeAs(ACCOUNT).runAction(GATED.name, { recordId: 'lead_1', ...extra }));
@@ -292,13 +301,13 @@ describe('[#33690] resume_run: a resume of a gated action is handed off carrying
         return started.runId;
     }
 
-    it(`confirm: true sent ${N} times resumes 0 times; each call is held with a pending id carrying its run and values`, async () => {
+    it(`a resume sent ${N} times resumes 0 times; each call is held with a pending id carrying its run and values`, async () => {
         const service = makeConfirmationService();
         const h = makeHarness({ service });
         const runId = await pausedRun(h);
 
         for (let i = 0; i < N; i++) {
-            const answer = await h.bridgeAs(PERSON).resumeRun(runId, { values: { reason: 'dup' }, [AI_ACTION_CONFIRMATION_MEMBER]: true });
+            const answer = await h.bridgeAs(PERSON).resumeRun(runId, { values: { reason: 'dup' } });
             expect(answer).toMatchObject({ status: 'pending_confirmation', pendingId: `pa_${i + 1}`, actionName: GATED_FLOW.name, objectName: OBJECT });
         }
 
@@ -315,7 +324,7 @@ describe('[#33690] resume_run: a resume of a gated action is handed off carrying
     it('no service registered: refused 428, reason no_confirmation_service, and the run stays paused', async () => {
         const h = makeHarness();
         const runId = await pausedRun(h);
-        const refused = await refusalOf(h.bridgeAs(PERSON).resumeRun(runId, { values: { reason: 'x' }, [AI_ACTION_CONFIRMATION_MEMBER]: true }));
+        const refused = await refusalOf(h.bridgeAs(PERSON).resumeRun(runId, { values: { reason: 'x' } }));
         expect({ code: refused.code, status: refused.status }).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
         expect(refused.details).toMatchObject({ actionName: GATED_FLOW.name, objectName: OBJECT, reason: 'no_confirmation_service' });
         expect(h.automation.resume).not.toHaveBeenCalled();
@@ -326,7 +335,7 @@ describe('[#33690] resume_run: a resume of a gated action is handed off carrying
         const service = makeConfirmationService();
         const h = makeHarness({ service });
         const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
-        const refused = await refusalOf(h.bridgeAs(ACCOUNT).resumeRun(started.runId, { values: { reason: 'x' }, [AI_ACTION_CONFIRMATION_MEMBER]: true }));
+        const refused = await refusalOf(h.bridgeAs(ACCOUNT).resumeRun(started.runId, { values: { reason: 'x' } }));
         expect({ code: refused.code, status: refused.status }).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
         expect(refused.details).toMatchObject({ reason: 'service_account' });
         expect(service.submit).not.toHaveBeenCalled();

@@ -418,8 +418,9 @@ can reach is the **default exposure policy (v1)**:
   an organization, re-enabling an OAuth application) are exposed. Destructive
   lifecycle acts (banning a user, revoking a session or an API key, removing a
   member, deleting a team, leaving an organization) are exposed with
-  `ai.requiresConfirmation: true`, so `run_action` refuses them until the call
-  carries `confirm: true`. Acts that mint a credential or a session, change
+  `ai.requiresConfirmation: true`, so `run_action` never runs them on the
+  agent's call: it hands each one to the person in the app, or refuses it
+  (`428`) on a server with no pending-confirmation service. Acts that mint a credential or a session, change
   ownership or a sign-in factor, or destroy an account or an organization
   (impersonating a user, setting a password, creating an API key, transferring
   ownership, deleting an organization) declare nothing and are not listed. The
@@ -430,7 +431,9 @@ can reach is the **default exposure policy (v1)**:
 - **An approver's decisions are exposed to the approver's agent.** The four
   decisions on an approval request (`sys_approval_request`): approve, reject,
   reassign and send back, are exposed with `ai.requiresConfirmation: true`, so
-  `run_action` decides only once the call carries `confirm: true`. Each forwards
+  `run_action` never decides on the agent's call: the approver confirms it in
+  the app, or the call is refused (`428`) on a server with no
+  pending-confirmation service. Once confirmed, each forwards
   to its approvals route as the caller, and the approval service admits the
   same people the console's buttons admit: a current approver of the request,
   and, for approve, reject and reassign, the administrator who may override it.
@@ -597,7 +600,18 @@ drive this MCP server. Same word, different layer.
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
-  actions (`confirmText`, danger variants) default to requiring it.
+  actions (`confirmText`, danger variants) are listed with
+  `requiresConfirmation: true` by default, so a client asks its human first.
+- **A person confirms a declared-gated action, in the app.** When the author
+  declared `ai.requiresConfirmation: true`, `run_action` and `resume_run` do
+  not run the action on the agent's call. They hand it to the person the agent
+  acts for and answer `status: "pending_confirmation"` with a `pendingId`; the
+  person approves or rejects it in the app. A server with no
+  pending-confirmation service refuses the call (`428`
+  `ACTION_CONFIRMATION_REQUIRED`, `details.reason: "no_confirmation_service"`),
+  and the person performs the action in the app. Neither tool takes `confirm`:
+  a call that carries it is refused, on every action, and the agent resends
+  without it.
 - **An AI service account does not confirm an action for itself.** An action
   declaring `ai.requiresConfirmation: true` refuses an AI service account's key
   (`428` `ACTION_CONFIRMATION_REQUIRED`) at `run_action`, `resume_run` and REST
