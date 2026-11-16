@@ -206,6 +206,7 @@ All functions are pure given a pinned `now`, which is what makes
 | `abs(x)` / `round(x)` | number | Numeric helpers |
 | `floor(x)` / `ceil(x)` | number | Round toward −∞ / +∞ (`floor(-1.2) == -2`) — **not** integer-division's round-toward-zero |
 | `min(a, b)` / `max(a, b)` | dyn | Smaller / larger operand (numeric comparison) |
+| `rmbUpper(x)` | string | An amount in Chinese capital numerals (人民币大写), rounded to 分: `rmbUpper(10500.5)` is `壹万零伍佰元伍角` — see [Amount in Chinese capitals](#amount-in-chinese-capitals) |
 | `label(record.f)` | string | A select field's option label in the reader's locale — see [Record name from an option label](#record-name-from-an-option-label) |
 
 Add new helpers in
@@ -594,6 +595,37 @@ Field.formula({
   scale: 2,
 })
 ```
+
+### Amount in Chinese capitals
+
+A Chinese quote, contract or invoice prints its total a second time in capital
+numerals (大写金额), under the figures. `rmbUpper()` writes that line:
+
+```typescript
+Field.formula({
+  label: '大写金额',
+  returnType: 'text',
+  expression: 'rmbUpper(record.total_amount)',
+})
+```
+
+| `total_amount` | `rmbUpper(record.total_amount)` |
+|:---|:---|
+| `245000` | `贰拾肆万伍仟元整` |
+| `10500.5` | `壹万零伍佰元伍角` |
+| `1.05` | `壹元零伍分` |
+| `100000001` | `壹亿零壹元整` |
+| `0` | `零元整` |
+| `-1200` | `负壹仟贰佰元整` |
+| `null` | `''` |
+
+The amount is rounded once to 分, half away from zero, on the decimal it spells
+(`1.005` is `壹元零壹分`), so binary floating point never decides a cent. One `零`
+stands for each run of zeros, a ten is `壹拾`, a whole amount ends in `整` and an
+amount under one yuan is its 角 and 分 alone (`0.5` is `伍角`). A number, a
+currency field and decimal text (`'245000.00'`) are read; any other value, and
+an amount of 10^16 yuan or more, is a runtime error rather than some text; a
+formula field reads that error as `null`.
 
 ### Text Manipulation
 
