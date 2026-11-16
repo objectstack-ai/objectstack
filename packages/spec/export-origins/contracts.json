@@ -109,6 +109,7 @@
     "DelegableScope": "src/contracts/security-service.ts#DelegableScope (interface)",
     "DelegationNarrowing": "src/contracts/security-service.ts#DelegationNarrowing (type)",
     "DeployExecutionResult": "src/contracts/deploy-pipeline-service.ts#DeployExecutionResult (interface)",
+    "DriverAggregateQuery": "src/contracts/data-driver.ts#DriverAggregateQuery (type)",
     "DriverQuery": "src/contracts/data-driver.ts#DriverQuery (type)",
     "EMBEDDER_SERVICE": "src/contracts/embedder.ts#EMBEDDER_SERVICE (const)",
     "EffectiveAccess": "src/contracts/security-service.ts#EffectiveAccess (interface)",
