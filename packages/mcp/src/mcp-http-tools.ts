@@ -3121,12 +3121,25 @@ export function registerObjectTools(
       },
     );
 
+    // When the human's request IS the approval (maintainer ruling
+    // 「点名单条就算确认」): a request naming one record, with exactly one
+    // match, approves that delete; anything less specific is a question first.
+    // Both sentences ride on the tool description AND the confirm member, so a
+    // client that shows only one of them still reads the rule. The gate below
+    // is unchanged: a call without confirm: true is still refused.
+    const deleteNamedRecordIsApproval =
+      'A request in which the human names the record to delete, with exactly one record matching, is the '
+      + 'human\'s approval of that delete: send confirm: true on that call, without asking again.';
+    const deleteAmbiguousAsksFirst =
+      'When the name matches more than one record, or the request does not identify one record, do not delete '
+      + 'yet: list the candidates, ask the human which one, and send confirm: true only after the answer.';
     server.registerTool(
       note('delete_record'),
       {
         description:
           'Delete a record by id. This is destructive. A call is REFUSED unless it also sends ' +
-          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call. ' +
+          'confirm: true; nothing is deleted on a refused call. ' +
+          `${deleteNamedRecordIsApproval} ${deleteAmbiguousAsksFirst} ` +
           `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntryId names the recycle-bin entry; an answer ` +
           'without one means this delete was permanent.',
         inputSchema: strictToolInput(
@@ -3143,8 +3156,9 @@ export function registerObjectTools(
               .boolean()
               .optional()
               .describe(
-                'Set to true only when the human in the loop has approved deleting THIS record. Without it '
-                + 'the call is refused and nothing is deleted.',
+                'Set to true only when the human in the loop has approved deleting THIS record. '
+                + `${deleteNamedRecordIsApproval} ${deleteAmbiguousAsksFirst} `
+                + 'Without it the call is refused and nothing is deleted.',
               ),
           },
         ),
