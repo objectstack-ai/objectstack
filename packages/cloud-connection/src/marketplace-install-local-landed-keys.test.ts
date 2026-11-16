@@ -27,6 +27,7 @@ import { tmpdir } from 'node:os';
 // clocked `it` (`scripts/check-test-source-alias.mjs`): the plugin reaches the
 // seed loader through a dynamic `import()`.
 import '@objectstack/runtime';
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { INSTALLER_ORGANIZATION, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
@@ -54,10 +55,11 @@ function rowMatches(row: Row, where: Record<string, unknown> = {}): boolean {
 
 /**
  * A faithful in-memory engine: `where` filters, ids minted on insert. `store`
- * outlives a boot. Reads and inserts only: every dataset here is `ignore`
- * (create-only), and a person's deletion is a direct edit of `store`, so no
- * load here writes anything but an insert (the owner stamp asks `update` and
- * skips an engine without one; the rows have no owner column anyway).
+ * outlives a boot. Every dataset here is `ignore` (create-only), and a
+ * person's deletion is a direct edit of `store`, so no load here writes
+ * anything but an insert (the owner stamp asks `update` and skips an engine
+ * without one; the rows have no owner column anyway). `delete` is the purge's:
+ * by primary key, under the real dispatch contract.
  */
 function createEngine(store: Record<string, Row[]>) {
     let next = 0;
@@ -73,6 +75,15 @@ function createEngine(store: Record<string, Row[]>) {
             const rows = Array.isArray(data) ? data.map(mint) : [mint(data)];
             (store[object] ??= []).push(...rows);
             return Array.isArray(data) ? rows.map((r) => ({ ...r })) : { ...rows[0] };
+        },
+        async delete(object: string, options?: any) {
+            const dispatch = assertEngineDeleteDispatch(options);
+            if (dispatch.kind !== 'by-id') throw new Error('engine double: the purge deletes by primary key only');
+            const table = store[object] ?? [];
+            const at = table.findIndex((r) => r.id === String(dispatch.id));
+            if (at < 0) return false;
+            table.splice(at, 1);
+            return true;
         },
         async count(object: string, query?: any) {
             return (await engine.find(object, query)).length;
@@ -223,9 +234,10 @@ async function boot(opts: { posture?: 'single' | 'isolated' } = {}) {
         return res;
     };
     const reseed = (manifestId: string) => routes.get(`POST ${ROUTE}/:manifestId/reseed-sample-data`)!(makeC({}, manifestId));
+    const purge = (manifestId: string) => routes.get(`POST ${ROUTE}/:manifestId/purge-sample-data`)!(makeC({}, manifestId));
     /** The per-organization replayer this door registered (no other plugin registers one here). */
     const replayer = () => services['seed-replayer'] as (orgId: string, options?: { userId?: string; reseed?: boolean }) => Promise<any>;
-    return { plugin, ctx, install, reseed, replayer, logger };
+    return { plugin, ctx, install, reseed, purge, replayer, logger };
 }
 
 /** The seed rows of `object` in `org`, by name. */
@@ -327,6 +339,25 @@ describe.each(BUNDLES)('$kind bundle: install-local keeps and honours the record
         await boot();
         expect(names('lk_account')).toEqual(['Acme', 'Globex']);
         expect(names('lk_order')).toEqual(['SO-1', 'SO-2']);
+    });
+
+    it('a purge stays purged across a reinstall and a restart', async () => {
+        const first = await boot();
+        await first.install(body('1.0.0'));
+        const purged = await first.purge(id);
+        expect(purged.status, JSON.stringify(purged.payload)).toBe(200);
+        expect(purged.payload.data).toMatchObject({ deleted: 4, errors: 0 });
+
+        // The reinstall withholds every recorded row (counted in `skipped`).
+        const reinstall = await first.install(body('1.0.0'));
+        expect(reinstall.payload.data.seeded).toMatchObject({ mode: 'inline', inserted: 0, errors: 0 });
+        expect(names('lk_account')).toEqual([]);
+        expect(names('lk_order')).toEqual([]);
+
+        // Every seeded object empty again: the restart's heal runs, and leaves it.
+        await boot();
+        expect(names('lk_account')).toEqual([]);
+        expect(names('lk_order')).toEqual([]);
     });
 
     it('the per-organization replayer honours it per organization, and `{ reseed: true }` brings a removed row back', async () => {
