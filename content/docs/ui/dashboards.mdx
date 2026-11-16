@@ -532,6 +532,13 @@ the base rows whose relationship points at a record it returned:
   condition under `$not` (write `$ne` / `$nin` inside the condition instead), and
   a related field compared with another field (`$field`).
 
+On the native SQL path, too, a row with no related record (an empty
+relationship, or one naming a record that no longer exists) is **not
+selected**, whatever the operator, `$ne`, `$nin`, `$notContains`, `$null: true`
+and `$empty: true` included, so the two paths agree on such rows.
+The same `$or` keeps such rows on both paths. A related record that exists with
+no value in the field still satisfies `$ne` and `$nin`.
+
 A related field in a **dataset's own** `filter`, or in a **measure's** own
 `filter`, is still evaluated only on the native SQL path; the engine-aggregate
 path refuses it (`400 INVALID_FIELD`) rather than count rows it cannot join.
