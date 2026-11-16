@@ -67,7 +67,11 @@
  *     never shown. The CLI's own reading of a turn's duration
  *     (`reportedDurationMs`, `reportedApiDurationMs`) stays on the turn in the
  *     record, beside the runner's clock, and is not summed.
- *   - Run-operations: one per operation; it passes when its grade passes. An
+ *   - Run-operations: one per operation; it passes when its grade passes and,
+ *     for a `pending_confirmation` one that asked first, its confirmation
+ *     turn's write did not fail ({@link confirmedWriteTally}: counted apart,
+ *     beside the `asked first` count; one that measured nothing leaves the
+ *     operation on its first turn alone). An
  *     operation whose grade measured nothing (`OperationGrade.notMeasured`:
  *     the build denies the acting persona the write the card gives it, and
  *     the runner's own probe of the declared write was denied 403 too) is
