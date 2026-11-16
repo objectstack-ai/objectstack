@@ -325,21 +325,44 @@ export async function judgeBareActionRead(
  * the registry's first composite.
  *
  * Judge only: any answer the registry gives leaves the read to its layers,
- * exactly as before. A package-less entry in the registry's bare slot (a
- * hydrated or saved row, or a stamp-less registration) exempts the name from
- * the refusal, and the layers then read it as before: ⛔ they do not serve
- * that entry where the MetadataService holds a holder's copy, which answers
- * first (the holder registered last; the composed artifact rig of
- * runtime's `meta-disabled-holder-artifact-door.test.ts` pins it, measured and
- * unresolved). A package-less row only the store holds is no
+ * exactly as before. A package-less row only the store holds is no
  * exemption, because the layers below do not serve it for a `doc` and would
  * answer a holder by registration order again.
  *
+ * [#34248, ADR-0150 red line 2] Nor is a package-less entry in the registry's
+ * bare slot (a hydrated or saved row, or a stamp-less registration) that is
+ * the copy of a row the layers decline ({@link ProtocolHost.isStoredEntryOfDeclinedName}:
+ * a doc a package ships is sealed, so its package-less row is never served).
+ * The registry exempts the name for such an entry, but the layers do not
+ * serve it: they served the MetadataService's copy, the holder registered
+ * last. So two or more enabled holders beside such an entry are refused here
+ * as without it, naming each holder. An entry the layers would serve keeps
+ * the exemption.
+ *
  * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
  */
-export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): void {
-    const registry = host.engine?.registry as { resolveItem?(type: string, name: string, caller: null, member?: string): unknown } | undefined;
-    if (typeof registry?.resolveItem === 'function') registry.resolveItem('doc', name, null, member);
+export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine' | 'isStoredEntryOfDeclinedName'>, name: string, member: string | undefined): void {
+    const registry = host.engine?.registry as {
+        resolveItem?(type: string, name: string, caller: null, member?: string): unknown;
+        packageScopedHoldersOf?(type: string, name: string): string[] | undefined;
+    } | undefined;
+    if (typeof registry?.resolveItem !== 'function') return;
+    const answer = registry.resolveItem('doc', name, null, member);
+    // The registry's answer naming no package is the exempting entry (or a
+    // name one package or none holds, which the count below leaves alone).
+    if (answer === undefined || answer === null || storedItemPackageId(answer) !== undefined) return;
+    if (!host.isStoredEntryOfDeclinedName('doc', answer)) return;
+    const holders = registry.packageScopedHoldersOf?.('doc', name) ?? [];
+    if (holders.length < 2) return;
+    const refused: Omit<PackageScopedRefusal, 'message'> = {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'doc' as PackageScopedRefusal['type'],
+        name,
+        callerPackageId: null,
+        candidates: holders.map((packageId) => ({ kind: 'package' as const, packageId })),
+    };
+    throw new PackageScopedNameRefusedError({ ...refused, message: packageScopedRefusalMessage(refused) });
 }
 
 /**
@@ -699,7 +722,9 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [ADR-0150 D1 bucket 1, ruling 6893582352 option A] A `doc` name two or
     // more enabled packages hold is refused here when the read names no
     // package, naming each, before any layer is read; the environment's own
-    // item still answers first ({@link refuseAmbiguousBareDocRead}).
+    // item still answers first ({@link refuseAmbiguousBareDocRead}), [#34248]
+    // when the layers serve it: a package-less entry that copies a row they
+    // decline is refused as without it.
     if (!request.packageId && request.type === 'doc') refuseAmbiguousBareDocRead(host, request.name, member);
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
