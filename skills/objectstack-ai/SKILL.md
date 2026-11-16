@@ -167,9 +167,9 @@ is listed in Studio's **AI Pending Actions** inbox (or via
 person the call ran as approves or rejects the item, in the app on their
 signed-in session. Another user's `ai:approve` does not decide it; an API key
 or token (even the person's own) is refused, and so is an AI identity and any
-call that arrives through an AI door. Neither the model's own confirmation nor
-the caller's `confirm` counts. So an operator script lists items and never
-decides them; a second approver goes through the approvals engine (the `held`
+call that arrives through an AI door. The model's own confirmation does not
+decide the item, and neither does a `confirm` on the call: the item waits for
+the person. So an operator script lists items and never decides them; a second approver goes through the approvals engine (the `held`
 outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both

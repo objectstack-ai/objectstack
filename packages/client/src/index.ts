@@ -7718,8 +7718,8 @@ export class ObjectStackClient {
      * Deciding (approve or reject) is the person's own act: only the person
      * the call ran as decides their item, and only on their signed-in session
      * to the app. Another user's `ai:approve` does not decide it; a client on
-     * an API key or token (even the person's own) is refused, and so is an AI
-     * identity: such a client can list and get, never decide.
+     * an API key or token (even the person's own) can list and get, never
+     * decide; an AI identity is refused too.
      */
     pendingActions: {
       /** Queued actions, newest first. */

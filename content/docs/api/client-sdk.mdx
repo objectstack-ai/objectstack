@@ -420,8 +420,8 @@ await client.ai.pendingActions.get('pa_1');
 // Listing takes `ai:read`. Deciding (approve or reject) is the person's own
 // act: only the person the call ran as decides their item, on their signed-in
 // session to the app. Another user's `ai:approve` does not decide it; a client
-// on an API key or token (even the person's own) is refused, and so is an AI
-// identity: such a client lists, it does not decide. Handle the refusal.
+// on an API key or token (even the person's own) lists, it does not decide; an
+// AI identity is refused too. Handle the refusal.
 const outcome = await client.ai.pendingActions.approve('pa_1');
 // CHECK `outcome.status`: approve runs the tool, and a tool that fails comes
 // back { status: 'failed', error } on HTTP 200 — the approval succeeded, the
