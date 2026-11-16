@@ -125,6 +125,9 @@ function escalationFlow(nodeType: WriteNode, fields: Record<string, unknown>) {
   if (nodeType === 'update_record') config.filter = { id: 'case_1' };
   return {
     name: 'case_escalation', label: 'Case Escalation', type: 'record_change',
+    // A record-change run of a system write holds no trigger user; the write
+    // runs as the system, as such a flow declares.
+    runAs: 'system',
     nodes: [
       { id: 'start', type: 'start', label: 'Start', config: { objectName: 'crm_case', triggerType: 'record-after-update' } },
       { id: 'set_reason', type: nodeType, label: 'Set reason', config },
@@ -220,13 +223,13 @@ describe.each(NODE_TYPES)('%s — a field value marked as text is written in the
       defaultLocale: 'zh-CN',
       bundles: { 'zh-CN': { flows: { case_escalation: { records: { set_reason: { fields: { escalation_reason: ZH, status: '已升级', internal_note: '内部' } } } } } } },
     });
-    automation.registerFlow('case_escalation', escalationFlow(nodeType, { ...MARKED, internal_note: 'Raised by {{ record.priority }}' }));
+    automation.registerFlow('case_escalation', escalationFlow(nodeType, { ...MARKED, internal_note: 'Raised by hand' }));
 
     const result = await automation.execute('case_escalation', recordChange());
 
     expect(result.success, result.error).toBe(true);
     expect(writes[0].data.status).toBe('escalated');
-    expect(writes[0].data.internal_note).toBe('Raised by {{ record.priority }}');
+    expect(writes[0].data.internal_note).toBe('Raised by hand');
     // CONTROL: the marked field beside them in the same write IS translated.
     expect(writes[0].data.escalation_reason).toBe('自动升级：High 优先级');
   });
@@ -255,5 +258,12 @@ describe.each(NODE_TYPES)('%s — a field value marked as text is written in the
     expect(result.success, result.error).toBe(true);
     expect(writes[0].data.status).toBe('escalated');
     expect(settings!.asked).toEqual([]);
+  });
+
+  it('a single-brace token in the marked text is refused at registerFlow, located at the field, as a text slot', async () => {
+    const { automation } = await makeStack({ defaultLocale: 'zh-CN' });
+    expect(() => automation.registerFlow('case_escalation', escalationFlow(nodeType, {
+      escalation_reason: { dialect: 'template', source: 'Escalated {record.priority}' },
+    }))).toThrow(`node 'set_reason' (${nodeType}) ${nodeType} field text at config.fields.escalation_reason`);
   });
 });

@@ -73,6 +73,8 @@ const fixtureStack = defineStack({
   flows: [
     {
       name: ON_CHANGE, label: 'Escalate on create', type: 'record_change', status: 'active',
+      // The case is inserted by a system write, so the run holds no trigger user.
+      runAs: 'system',
       variables: [{ name: 'priority', type: 'text' }],
       nodes: [
         { id: 'start', type: 'start', label: 'Start', config: { objectName: CASE, triggerType: 'record-after-create' } },
