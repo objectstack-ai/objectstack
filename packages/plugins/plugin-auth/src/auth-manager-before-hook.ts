@@ -157,6 +157,7 @@ export interface BeforeHookHost {
   resolveActor: AuthManager['resolveActor'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
+  ssoDiscoveryTrustedOrigins: AuthManager['ssoDiscoveryTrustedOrigins'];
   validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
 
@@ -544,11 +545,13 @@ export async function globalBeforeHook(
       // Ruling record 6866334319: the sign-out switch, as on update-provider.
       await this.assertSsoSignOutOfIdpSupported(ctx);
     }
-    // A known IdP's companion origins (Microsoft Entra ID's userinfo on
-    // graph.microsoft.com), trusted for this endpoint's discovery validation
-    // only: the router's origin check has already run, so the CSRF allow-list
-    // never carries them (`sso-discovery-companion-origins.ts`).
-    return ssoDiscoveryCompanionContext(ctx);
+    // The origins the body names (its issuer and any explicit `oidcConfig`
+    // endpoint) and a known IdP's companion origins (Microsoft Entra ID's
+    // userinfo on graph.microsoft.com), trusted for this endpoint's discovery
+    // fetch and validation only: the router's origin check has already run
+    // against the configured trusted origins alone, and never sees them
+    // (`sso-discovery-companion-origins.ts`).
+    return ssoDiscoveryCompanionContext(ctx, await this.ssoDiscoveryTrustedOrigins(ctx?.body));
   }
 
   // ── D5.1: cloud-as-IdP authorization gate ───────────────────

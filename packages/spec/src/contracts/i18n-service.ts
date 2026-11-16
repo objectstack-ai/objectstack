@@ -46,14 +46,17 @@ export interface II18nService {
     getLocales(): string[];
 
     /**
-     * Get the current default locale
+     * Get the current default locale — the language a user who has not chosen
+     * one is served (`i18n.defaultLocale`).
      *
-     * [#15711] Also the language the deployment's metadata labels are
-     * authored in: the serving layer threads it into the document
-     * translators' `ResolveOptions.defaultLocale` (`@objectstack/spec/system`),
-     * so a request for the default locale answers with the authored label
-     * instead of walking the declared fallback chain — the authored label IS
-     * the default locale's text. Absent, no request is treated as the default.
+     * [#15711 · #33634] Also the language the deployment's metadata labels are
+     * authored in UNLESS the deployment declared otherwise: the serving layer
+     * threads the authored language into the document translators'
+     * `ResolveOptions.defaultLocale` (`@objectstack/spec/system`) as
+     * {@link getSourceLocale} when that answers, else this, so a request for
+     * the authored language answers with the authored label instead of
+     * walking the declared fallback chain — the authored label IS that
+     * language's text. Absent both, no request is treated as the authored one.
      * @returns BCP-47 locale code
      */
     getDefaultLocale?(): string;
@@ -137,6 +140,66 @@ export interface II18nService {
      * @param locale - BCP-47 locale code
      */
     setFallbackLocale?(locale: string): void;
+
+    /**
+     * The language the deployment's inline metadata text is written in — the
+     * DECLARED `i18n.sourceLocale`, the locale a plain-string `label:` IS the
+     * text of.
+     *
+     * [#33634] Declared so the serving layer can thread the authored language
+     * into the metadata-document translators' `ResolveOptions.defaultLocale`
+     * (`@objectstack/spec/system`). Every caller that builds those options
+     * holds only this service, and {@link getDefaultLocale} answers a
+     * different question — which language a user who has not chosen one gets.
+     * The two coincide for most stacks; for an app authored in English that
+     * defaults its users to `zh-CN` they do not, and before this accessor an
+     * `en` request walked the declared fallback chain (`zh-CN`) ahead of the
+     * English inline label and was served the Chinese bundle row.
+     *
+     * Contract for the value: `undefined` means NOTHING was declared — a
+     * provider that was never told omits the method or answers `undefined`,
+     * and the serving layer then reads {@link getDefaultLocale} as the
+     * authored language, exactly as a stack that declares no `sourceLocale`
+     * always has. ⛔ A provider never answers this from `defaultLocale` itself:
+     * that collapse is the CALLER's (`getSourceLocale?.() ?? getDefaultLocale?.()`),
+     * so the accessor reports only what the deployment declared — the same
+     * "report, never invent" stance {@link getFallbackLocale} takes.
+     *
+     * @returns BCP-47 locale code, or `undefined` when no source locale is declared
+     */
+    getSourceLocale?(): string | undefined;
+
+    /**
+     * Set the language the deployment's inline metadata text is written in —
+     * the app's DECLARED `i18n.sourceLocale`.
+     *
+     * [#33634] The INJECTION counterpart of {@link getSourceLocale}, threaded
+     * by `AppPlugin.loadTranslations` beside `setDefaultLocale` and
+     * {@link setFallbackLocale}, for the same reason: the declaration lives on
+     * the stack artifact, which only the runtime app-plugin layer can see.
+     *
+     * Semantics implementations must honour:
+     * - Never called means no declaration, which must keep the provider's
+     *   existing behaviour exactly: {@link getSourceLocale} keeps answering
+     *   `undefined`. An app that declares no `i18n.sourceLocale` is not opting
+     *   into anything.
+     * - The value changes no `t()` lookup. It is the authored language of the
+     *   METADATA labels the document translators resolve, not a locale in the
+     *   message chain — `t()` keeps consulting the requested locale, then
+     *   {@link getFallbackLocale}.
+     *
+     * ⛔ Implementing this does NOT oblige implementing {@link getSourceLocale},
+     * the same per-value stance the fallback pair takes: they answer
+     * different questions — what the provider was TOLD versus what the
+     * serving layer may ASK it. A provider that implements one without the
+     * other leaves the serving layer reading {@link getDefaultLocale} as the
+     * authored language; the in-repo providers (`FileI18nAdapter`, the
+     * kernel's in-memory fallback) implement both, because the getter answers
+     * only what the setter was told and so never has to invent a value.
+     *
+     * @param locale - BCP-47 locale code
+     */
+    setSourceLocale?(locale: string): void;
 
     /**
      * Narrow what `getLocales()` reports to the locales the APP declared

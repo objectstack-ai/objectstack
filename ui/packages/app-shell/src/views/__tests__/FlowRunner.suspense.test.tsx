@@ -27,14 +27,25 @@ import userEvent from '@testing-library/user-event';
 let releaseForm: () => void = () => {};
 const formLoaded = new Promise<void>((resolve) => { releaseForm = resolve; });
 
+const FormBody = lazy(async () => {
+  await formLoaded;
+  return { default: ({ schema }: any) => <button onClick={() => schema?.onSuccess?.({ id: 'rec_1' })}>Save &amp; Continue</button> };
+});
+
+// `ObjectForm` is a component that suspends inside, as the real one does
+// through its field widgets — not a `lazy()` itself: ScreenView takes it as the
+// resolved value of its own `lazy()` (objectstack#33581), and React refuses a
+// lazy that resolves to another lazy.
 vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ObjectForm: lazy(async () => {
-    await formLoaded;
-    return { default: ({ schema }: any) => <button onClick={() => schema?.onSuccess?.({ id: 'rec_1' })}>Save &amp; Continue</button> };
-  }),
+  ObjectForm: (props: any) => <FormBody {...props} />,
 }));
 
+// ScreenView now loads the form package itself, through `lazy()`, the first
+// time a form screen is drawn (objectstack#33581). Its cold load is not what
+// this pins, and it outlasts `waitFor`'s budget, so the (mocked) package is
+// loaded here first; the body above still suspends on `formLoaded`.
+await import('@object-ui/plugin-form');
 const { FlowRunner } = await import('../FlowRunner');
 
 const OBJECT_FORM_STATE = {

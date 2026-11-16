@@ -188,6 +188,9 @@ describe('#11321 SQLite builtin audit columns take the canonical NOW() default',
           `"when" datetime default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), ` +
           `primary key ("id"))`,
       );
+      // [#33695] The default-order index the first sync of this release builds,
+      // so the drift read below is about the audit DEFAULTS alone.
+      await raw.raw(`create index "idx_legacy_t_created_at_id" on "legacy_t" ("created_at", "id")`);
 
       // Introspection DOES surface the legacy default — so a green below is
       // drift declining to compare it, not drift failing to see it.

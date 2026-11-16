@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { RestServer } from '@objectstack/rest';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { runAdminImportUsers, IMPORT_USERS_MAX_ROWS, type IdentityImportDeps } from './admin-import-users.js';
 import { settleImportResetDelivery } from './account-invitation-marker.js';
 import type { AdminActor } from './admin-user-endpoints.js';
@@ -951,5 +952,33 @@ describe('[#22800] the identity import asks each lookup target its declared expo
     expect(await rowVerdicts(h)).toEqual([OK, OK, OK]);
     expect(h.getMetaItem).not.toHaveBeenCalled();
     expect(targetReads(h)).toEqual([]);
+  });
+});
+
+describe('runAdminImportUsers — an unclassified internal failure is answered with the generic message and logged once', () => {
+  const MARKER = 'unclassified-failure-marker-e8d3';
+
+  it('a length-range read that fails without a vendor code answers INTERNAL_ERROR in the generic words, logs once, and writes nothing', async () => {
+    const m = makeDeps();
+    const thrown = new Error(`auth context unavailable ${MARKER}`);
+    const error = vi.fn();
+    const deps: IdentityImportDeps = {
+      ...m.deps,
+      getAuthContext: async () => {
+        throw thrown;
+      },
+      logger: { warn: m.warn, error },
+    };
+    const res = await runAdminImportUsers(
+      deps,
+      makeRequest({ passwordPolicy: 'temporary', format: 'json', rows: [{ email: 'a@b.co' }] }),
+      ACTOR,
+    );
+    expect(res.status).toBe(500);
+    expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE });
+    expect(JSON.stringify(res)).not.toContain(MARKER);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith('[AuthPlugin] import-users failed', thrown);
+    expect(m.createUser).not.toHaveBeenCalled();
   });
 });

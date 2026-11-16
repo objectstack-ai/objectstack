@@ -258,7 +258,7 @@ export async function runCrm(
     work?: string;
     date?: string;
     iterateRun?: boolean;
-    modes?: Array<'scratch' | 'template'>;
+    modes?: Array<'scratch' | 'template' | 'ask'>;
     /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[];
     /** The package source the record states; default published 18.3.0. */ packages?: PackageSource;
     /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;
