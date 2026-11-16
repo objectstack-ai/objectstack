@@ -10,11 +10,13 @@
  * reaches a released driver, its `sys_job_run` row's terminal write fails and
  * the row stays `running` for good.
  *
- * The harness below models exactly that order: `teardown()` awaits
- * `DbJobAdapter.destroy()` and then releases the engine. Every engine call
- * after the release is RECORDED and throws, the way a released driver answers
+ * The harness below models exactly that order: each case awaits
+ * `DbJobAdapter.destroy()` and then releases the engine. Every WRITE after the
+ * release is RECORDED and throws, the way a released driver answers
  * (`No driver available for object …`), so "nothing touched the driver after
- * shutdown" is a count, not an absence of log lines alone.
+ * shutdown" is a count, not an absence of log lines alone. `find` stays a plain
+ * double: every path that settles a run ends in a write (`finishRun` updates,
+ * `bumpJob` finds and then updates, `startRun` inserts), so the writes see it.
  *
  * Both timer adapters are covered: `IntervalJobAdapter` (the no-cron fallback,
  * where `DbJobAdapter`'s own `inner` owns the timer) and `CronJobAdapter` (the
@@ -35,7 +37,7 @@ const DRAIN = 2_000;
 /** The lines a run that outlived its kernel used to leave. */
 const DRIVER_FAILURE = /failed to update sys_job_run|bumpJob failed|failed to insert sys_job_run/;
 
-/** An engine double that a "driver release" turns into a refusing one. */
+/** An engine double whose writes a "driver release" turns into refusals. */
 function makeReleasableEngine() {
   const tables = new Map<string, any[]>();
   let released = false;
@@ -51,7 +53,6 @@ function makeReleasableEngine() {
     release() { released = true; },
     rows(table: string) { return tables.get(table) ?? []; },
     async find(table: string, opts: any = {}) {
-      guard('find', table);
       const t = tables.get(table) ?? [];
       const matched = opts.where
         ? t.filter((r) => Object.entries(opts.where).every(([k, v]) => {
