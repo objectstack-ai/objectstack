@@ -311,8 +311,11 @@ and a session for that account. The proof is never at rest in clear, the stored 
 bound to the invitation, its address and its expiry; a resend retires the old one. It is spent only by a request that
 passed every gate, and one server process serializes concurrent redemptions of it; across processes, single use is
 as strong as the store's consume. Every proof that does not admit gets one refusal that does not say which check
-failed. An address whose account is verified, is linked to a provider, or otherwise takes no password from this door
-is answered "sign in", with the proof unspent. A cloud-managed environment sets no local password, so there the door
+failed. The door sets a password on an existing account only when it reads that the mailbox is the account's one
+claim: the address is not verified, the account's only sign-in account is its email and password one or it has none,
+it has no second factor and no verified phone number, its identity source is local, and the server allows a local
+password here (not SSO-only, email and password on). Every other account, including one in a state no rule names,
+answers `sign_in`, and the proof stays unspent. A cloud-managed environment sets no local password, so there the door
 refuses every request that carries a proof. It carries a rate limit per client network address and per invitation,
 as ADR-0121 D6 requires. Enforced by
 `packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`, ledgered in

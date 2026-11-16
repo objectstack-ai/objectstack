@@ -2455,6 +2455,8 @@ export class AuthManager {
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
       resolveMembershipRole: (...a) => this.resolveMembershipRole(...a),
       resolveTwoFactorAccountLockout: (...a) => this.resolveTwoFactorAccountLockout(...a),
+      assertPasswordNotReused: (...a) => this.assertPasswordNotReused(...a),
+      recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
       stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
       storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
       validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...a),

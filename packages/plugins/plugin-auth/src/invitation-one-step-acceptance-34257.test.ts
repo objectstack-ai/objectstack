@@ -19,6 +19,8 @@ import {
   ACCEPT_INVITATION_ONE_STEP_PATH,
   ONE_STEP_SIGN_IN_STATES,
   invitationProofIdentifier,
+  oneStepSignInState,
+  type OneStepAccountReading,
   type OneStepSignInState,
 } from './invitation-mailbox-proof';
 import { BREACH_CHECK_VENDOR_DEFAULT_PATHS } from './auth-manager-plugin-list';
@@ -698,6 +700,16 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
         };
       },
     },
+    verified_phone: {
+      options: { plugins: { phoneNumber: true } },
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.phone_number = '+15550134257';
+        userRow(engine, email)!.phone_number_verified = true;
+        return () => {
+          userRow(engine, email)!.phone_number_verified = false;
+        };
+      },
+    },
     idp_provisioned: {
       enter: async ({ engine }, email) => {
         userRow(engine, email)!.source = 'idp_provisioned';
@@ -729,7 +741,53 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
         return () => manager.applyConfigPatch({ emailAndPassword: { enabled: true } } as never);
       },
     },
+    // An identity source no rule names: a mark the judge cannot read as local.
+    unrecognised: {
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.source = 'directory_federated';
+        return () => {
+          userRow(engine, email)!.source = 'env_native';
+        };
+      },
+    },
   };
+
+  // The allow-list read: the one reading that lets the password be set, and
+  // one step off it on each value the judge reads answers a reason.
+  const ALLOWED: OneStepAccountReading = {
+    emailVerified: false,
+    accountProviders: ['credential'],
+    twoFactorEnabled: false,
+    phoneNumberVerified: undefined,
+    source: { ok: true, value: 'env_native' },
+    ssoOnly: false,
+    emailPasswordEnabled: true,
+  };
+
+  it('the judge lets the password be set only on the reading that carries no other claim', () => {
+    expect(oneStepSignInState(ALLOWED)).toBeUndefined();
+    expect(oneStepSignInState({ ...ALLOWED, accountProviders: [], source: { ok: true, value: null }, twoFactorEnabled: null })).toBeUndefined();
+  });
+
+  it.each<[string, Partial<OneStepAccountReading>, OneStepSignInState]>([
+    ['an address verified', { emailVerified: true }, 'verified'],
+    ['a verified flag stored in no form the judge reads', { emailVerified: 0 }, 'unrecognised'],
+    ['a provider account', { accountProviders: ['credential', 'github'] }, 'linked_provider'],
+    ['an account with no provider recorded', { accountProviders: [undefined] }, 'linked_provider'],
+    ['a second factor', { twoFactorEnabled: true }, 'second_factor'],
+    ['a second-factor flag stored in no form the judge reads', { twoFactorEnabled: 'true' }, 'unrecognised'],
+    ['a verified phone number', { phoneNumberVerified: true }, 'verified_phone'],
+    ['a phone flag stored in no form the judge reads', { phoneNumberVerified: 1 }, 'unrecognised'],
+    ['an identity-provider source', { source: { ok: true, value: 'idp_provisioned' } }, 'idp_provisioned'],
+    ['a pending single sign-on', { source: { ok: true, value: 'idp_pending' } }, 'pending_sso'],
+    ['an unreadable source', { source: { ok: false } }, 'source_unreadable'],
+    ['a source no rule names', { source: { ok: true, value: 'directory_federated' } }, 'unrecognised'],
+    ['SSO-only mode', { ssoOnly: true }, 'sso_only'],
+    ['email and password off', { emailPasswordEnabled: false }, 'email_password_off'],
+    ['email and password not declared on', { emailPasswordEnabled: undefined }, 'email_password_off'],
+  ])('the judge answers sign_in for %s', (_label, change, reason) => {
+    expect(oneStepSignInState({ ...ALLOWED, ...change })).toBe(reason);
+  });
 
   it('every state the closing rule names has a case, and no case names another state', () => {
     expect(Object.keys(CASES).sort()).toEqual([...ONE_STEP_SIGN_IN_STATES].sort());
@@ -776,6 +834,21 @@ describe('#34257 — a password the door sets starts the password-age clock and 
     await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'H', password: NEW_PASSWORD }));
     expect(user.must_change_password).toBe(false);
     expect(new Date(user.password_changed_at).getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('a password in the history is refused with the proof unspent, and the replaced one is recorded', async () => {
+    const { engine, manager, invite } = await boot({ passwordHistoryCount: 3 });
+    const { invitation, proof } = await invite('history@example.com');
+    const { userId } = await signUp(manager, engine, 'history@example.com');
+    const credential = () => (engine.tables.get('sys_account') ?? []).find((a) => a.user_id === userId && a.provider_id === 'credential');
+    const replacedHash = credential()!.password;
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'H', password: PASSWORD }), 400, 'PASSWORD_REUSE');
+    expect(writtenState(engine)).toBe(before);
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'H', password: NEW_PASSWORD }));
+    expect(JSON.parse(credential()!.previous_password_hashes)).toEqual([replacedHash]);
   });
 
   it('the sessions the door ends are ledgered with the reason a password reset records', () => {

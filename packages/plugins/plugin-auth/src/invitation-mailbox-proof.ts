@@ -57,17 +57,25 @@
  *
  * ## Which existing account the door sets a password on
  *
- * The closing rule: the door sets a password on an existing account only when
- * the mailbox the proof establishes is the account's one and only claim, and
- * the server lets a local password be set here at all. Every other existing
- * account answers `sign_in` with the proof unspent. The states, each one a
- * reason the account holds a claim the proof does not outrank or the server
- * sets no local password, are {@link ONE_STEP_SIGN_IN_STATES}, judged by
- * {@link oneStepSignInState}; the card's test pins one case per state.
+ * The door sets a password on an existing account only when it reads that the
+ * mailbox is the account's one claim: the address is not verified, the
+ * account's only sign-in account is its email and password one or it has
+ * none, it has no second factor and no verified phone number, its identity
+ * source is local, and the server allows a local password here (not SSO-only,
+ * email and password on). Every other account, including one in a state no
+ * rule names, answers `sign_in`, and the proof stays unspent.
+ *
+ * The judge, {@link oneStepSignInState}, is an allow-list: it lets the
+ * password be set only when every value it reads is positively the one that
+ * carries no other claim, and a value no rule names answers `sign_in` as
+ * `unrecognised`. Its reasons are {@link ONE_STEP_SIGN_IN_STATES}; the card's
+ * test pins one case per reason.
  *
  * An account that passes gets the typed password in place of its own, and
  * every one of its sessions is revoked with the reason a password reset
- * records (`session-tombstone.ts`). A new account is created through the
+ * records (`session-tombstone.ts`). The password history is consulted before
+ * the proof is spent and extended after, as the reset door does (ADR-0069
+ * D1): a reused password is refused with the proof unspent. A new account is created through the
  * internal adapter, so the sign-up gates that run on every creation (audience
  * admission and the database hooks) run here too; the door itself refuses
  * where email sign-up is off. Either way the password-age stamp and the
@@ -198,12 +206,26 @@ export interface InvitationProofDoorHost {
   counterStore?: () => Promise<CounterStore>;
   /** The ADR-0069 D1 after-effects of a password set (`AuthManager#stampPasswordChangedAt`). */
   stampPasswordChangedAt(userId: string): Promise<void>;
+  /**
+   * ADR-0069 D1, the reset door's reuse check (`AuthManager#assertPasswordNotReused`):
+   * throws `PASSWORD_REUSE`, or answers the current hash for the history.
+   */
+  assertPasswordNotReused(
+    userId: string,
+    candidate: string,
+    verify?: (data: { password: string; hash: string }) => Promise<boolean>,
+  ): Promise<string | undefined>;
+  /** ADR-0069 D1, the reset door's history append (`AuthManager#recordPasswordHistory`). */
+  recordPasswordHistory(userId: string, oldHash: string): Promise<void>;
 }
 
 /**
- * The states of an existing account that answer `sign_in`, in the order they
- * are judged. Each is either a claim on the account the mailbox proof does not
- * outrank, or a server that sets no local password here.
+ * Why an existing account answers `sign_in`. The judge
+ * ({@link oneStepSignInState}) is an allow-list: these name the reasons it
+ * reports, and `unrecognised` is every value it does not positively read as
+ * carrying no other claim. Each named state is either a claim on the account
+ * the mailbox proof does not outrank, or a server that sets no local password
+ * here.
  */
 export const ONE_STEP_SIGN_IN_STATES = [
   /** The address is already verified: its holder signs in. */
@@ -212,6 +234,8 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'linked_provider',
   /** The account has a second factor enrolled. */
   'second_factor',
+  /** The account has a verified phone number. */
+  'verified_phone',
   /** The account is provisioned by an identity provider. */
   'idp_provisioned',
   /** The account is waiting for its first single sign-on. */
@@ -222,27 +246,58 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'sso_only',
   /** Email and password sign-in is off. */
   'email_password_off',
+  /** A stored value the judge does not read as carrying no other claim, such as an identity source no rule names. */
+  'unrecognised',
 ] as const;
 
 export type OneStepSignInState = (typeof ONE_STEP_SIGN_IN_STATES)[number];
 
-/** The first state of {@link ONE_STEP_SIGN_IN_STATES} the account is in, or `undefined` when the door may set its password. */
-export function oneStepSignInState(account: {
-  emailVerified: boolean;
-  linkedProvider: boolean;
-  twoFactorEnabled: boolean;
+/** The `sys_user.source` values of a local account: the declared one, and none recorded. */
+const LOCAL_SOURCES: ReadonlySet<string | null> = new Set<string | null>(['env_native', null]);
+
+/** A flag that is positively off: false, or absent because its plugin is not mounted. */
+function isOff(value: unknown): boolean {
+  return value === false || value === null || value === undefined;
+}
+
+/** What the judge reads of an existing account and the server. */
+export interface OneStepAccountReading {
+  /** `user.emailVerified`, as stored. */
+  emailVerified: unknown;
+  /** The `providerId` of each of the user's account rows. */
+  accountProviders: readonly unknown[];
+  /** `user.twoFactorEnabled`, as stored (absent without the plugin). */
+  twoFactorEnabled: unknown;
+  /** `user.phoneNumberVerified`, as stored (absent without the plugin). */
+  phoneNumberVerified: unknown;
+  /** `sys_user.source`, or `ok: false` when it cannot be read. */
   source: { ok: true; value: string | null } | { ok: false };
+  /** SSO-only mode. */
   ssoOnly: boolean;
-  emailPasswordEnabled: boolean;
-}): OneStepSignInState | undefined {
-  if (account.emailVerified) return 'verified';
-  if (account.linkedProvider) return 'linked_provider';
-  if (account.twoFactorEnabled) return 'second_factor';
-  if (account.source.ok && isIdpProvisionedSource(account.source.value)) return 'idp_provisioned';
-  if (account.source.ok && isPendingSsoSource(account.source.value)) return 'pending_sso';
+  /** `emailAndPassword.enabled`. */
+  emailPasswordEnabled: unknown;
+}
+
+/**
+ * The judge of the closing rule, an allow-list: `undefined` (the door may set
+ * the password) only when every reading is positively the no-other-claim
+ * value, and otherwise the reason the account answers `sign_in`. A value no
+ * rule here names is `unrecognised`, never a pass.
+ */
+export function oneStepSignInState(account: OneStepAccountReading): OneStepSignInState | undefined {
+  if (account.emailVerified !== false) return account.emailVerified === true ? 'verified' : 'unrecognised';
+  if (!account.accountProviders.every((providerId) => providerId === 'credential')) return 'linked_provider';
+  if (!isOff(account.twoFactorEnabled)) return account.twoFactorEnabled === true ? 'second_factor' : 'unrecognised';
+  if (!isOff(account.phoneNumberVerified)) return account.phoneNumberVerified === true ? 'verified_phone' : 'unrecognised';
   if (!account.source.ok) return 'source_unreadable';
-  if (account.ssoOnly) return 'sso_only';
-  if (!account.emailPasswordEnabled) return 'email_password_off';
+  const source = account.source.value;
+  if (!LOCAL_SOURCES.has(source)) {
+    if (isIdpProvisionedSource(source)) return 'idp_provisioned';
+    if (isPendingSsoSource(source)) return 'pending_sso';
+    return 'unrecognised';
+  }
+  if (account.ssoOnly !== false) return 'sso_only';
+  if (account.emailPasswordEnabled !== true) return 'email_password_off';
   return undefined;
 }
 
@@ -352,12 +407,13 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       const existing = found?.user;
       if (existing) {
         const state = oneStepSignInState({
-          emailVerified: existing.emailVerified === true,
-          linkedProvider: (found.accounts ?? []).some((a: any) => a?.providerId !== 'credential'),
-          twoFactorEnabled: existing.twoFactorEnabled === true,
+          emailVerified: existing.emailVerified,
+          accountProviders: (found.accounts ?? []).map((a: any) => a?.providerId),
+          twoFactorEnabled: existing.twoFactorEnabled,
+          phoneNumberVerified: existing.phoneNumberVerified,
           source: await readUserSource(host.getDataEngine() as never, String(existing.id)),
           ssoOnly: host.isSsoOnlyMode(),
-          emailPasswordEnabled: Boolean(ctx.context.options.emailAndPassword?.enabled),
+          emailPasswordEnabled: ctx.context.options.emailAndPassword?.enabled,
         });
         if (state) return ctx.json({ success: true, data: { outcome: 'sign_in' } });
       }
@@ -390,6 +446,14 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         }
       }
 
+      // ADR-0069 D1, as the reset door: the password history is consulted
+      // before the proof is spent, so a reused password leaves it usable.
+      let historyHash: string | undefined;
+      if (existing) {
+        const pw = ctx.context.password;
+        historyHash = await host.assertPasswordNotReused(String(existing.id), password, pw.verify.bind(pw));
+      }
+
       // Hashed before the proof is spent: a password the hash step refuses
       // (a breached one) leaves the proof usable.
       const passwordHash = await ctx.context.password.hash(password);
@@ -406,6 +470,7 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         await internal.deleteUserSessions(userId);
         if (await internal.findCredentialAccount(userId)) {
           await internal.updatePassword(userId, passwordHash);
+          if (historyHash) await host.recordPasswordHistory(userId, historyHash);
         } else {
           await internal.createAccount({ userId, providerId: 'credential', accountId: userId, password: passwordHash });
         }

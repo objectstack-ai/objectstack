@@ -132,6 +132,8 @@ export interface PluginListHost {
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
   resolveTwoFactorAccountLockout: AuthManager['resolveTwoFactorAccountLockout'];
+  assertPasswordNotReused: AuthManager['assertPasswordNotReused'];
+  recordPasswordHistory: AuthManager['recordPasswordHistory'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
   storedRecipientLocale: AuthManager['storedRecipientLocale'];
   validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
@@ -308,6 +310,8 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       getDataEngine: () => this.getDataEngine(),
       counterStore: () => this.config.sharedCounterStore?.() ?? Promise.reject(new Error('no shared counter store')),
       stampPasswordChangedAt: (userId) => this.stampPasswordChangedAt(userId),
+      assertPasswordNotReused: (userId, candidate, verify) => this.assertPasswordNotReused(userId, candidate, verify),
+      recordPasswordHistory: (userId, oldHash) => this.recordPasswordHistory(userId, oldHash),
     }));
   }
 
