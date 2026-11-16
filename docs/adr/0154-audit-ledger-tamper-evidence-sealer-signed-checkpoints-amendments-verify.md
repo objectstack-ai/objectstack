@@ -232,3 +232,21 @@ Ruling record 6885005594 (E + B).
 - **Unchanged.** The cluster lock `audit.sealer`, the unique `(chain, sequence)` index, and D7's order — the amendment is written before the row is rewritten ([D7](#d7--redaction-writes-a-signed-amendment-before-the-rewrite)) — all stay. The migrations' dry-run default is unchanged.
 - **The build pins in tests** that the lock is taken on the datasource holding the audit rows (the hot store, where it differs from the primary), and that the command's wait timeout outlasts a normal sealer pass.
 - **Not taken.** Composing `os serve`'s cluster driver into the one-shot boot of the migrate commands (the area's option A); a lock that excludes nothing (option D, ruled out by the red line); option C, because it would reopen D7.
+
+---
+
+## Note (2026-11-16, #34164): the chain column, `lifecycle.seal.chainField` (D10), and how D5 reads
+
+**Status of this note**: a seat ruling by the owning seat (`domain:server#5`) on card [#34164](https://github.com/objectstack-ai/objectstack/issues/34164), recorded with the card's claim [`6906547049`](https://github.com/objectstack-ai/objectstack/issues/34164#issuecomment-6906547049), which names this note as the governed change it ships with, for this card only. `docs/adr/**` is a Tier H governed surface (Prime Directive #14): this note is accepted by the merge that lands it. **Change**: no decision above is reversed and no sentence above is edited. The note adds one optional key to D10's `lifecycle.seal` and records how D5's wording reads with it. Its consumer is cloud#4128, where Enterprise's `sys_ai_audit_log` opts in as D10 says it will. That object's organization lives in the tenant column the registry injects (ADR-0131 `organization_id`), and it has no `tenant_id`.
+
+### D10 — the chain column
+
+- **The key.** `lifecycle.seal = { valueFields, chainField? }`. `chainField` names the column whose value is the organization chain a sealed row joins ([D5](#d5--rows-about-no-organization-seal-into-a-deployment-chain)). It is optional, and when absent the chain column is `tenant_id`, as before the key existed.
+- **It names a field the object has.** The field may be declared, or it may be a column the registry injects, the ADR-0131 tenant column `organization_id` included. A named column the object does not have is refused at authoring, with the reason, at `lifecycle.seal.chainField`.
+- **One reader.** The sealer, the live check of [D9](#d9--os-audit-verify) and the proof bundle it writes read a row's chain value through one function (`chainValueOf` in `@objectstack/plugin-audit`). The key and its reader land together, as an ADR-0049 pair, declaring `Metadata-protocol: added`.
+- **The chain column is a clear column of the leaf** ([D1](#d1--canonical-form-each-row-is-one-leaf-value-columns-enter-as-salted-commitments)), like every other declared column, so a row moved to another organization reads `modified`.
+
+### D5, read with it
+
+- D5's "a row whose `tenant_id` is NULL" and "the organization its `tenant_id` names" read as the sealed object's **chain column**: `tenant_id`, unless `chainField` names another. A row whose chain value is empty seals into the deployment chain.
+- [D4](#d4--checkpoints-one-merkle-root-per-chain-per-window-chained-and-signed) is unchanged. It defines a checkpoint's chain as an organization id, not a column, so the signed body's member keeps its name `tenant_id` and carries the chain column's value. The leaf input, the signed body and the root of an object chained by `tenant_id` are byte for byte what they were before this note.
