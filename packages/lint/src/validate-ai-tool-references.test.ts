@@ -57,6 +57,23 @@ describe('validate-ai-tool-references', () => {
     ]);
   });
 
+  it('checks the tools of a skill its owner keeps out of MCP (mcpPrompt: false) exactly as without the key (#34167)', () => {
+    // The opt-out narrows MCP prompt projection only: the binding is still the
+    // in-product agent's tool set, and still checked in both distributions.
+    const stack = (mcpPrompt?: boolean) => ({
+      skills: [
+        {
+          name: 'record_writing',
+          tools: ['create_record', 'update_record', 'open_record_card'],
+          ...(mcpPrompt === undefined ? {} : { mcpPrompt }),
+        },
+      ],
+    });
+    const undeclared = validateAiToolReferences(stack());
+    expect(undeclared).toHaveLength(1);
+    expect(validateAiToolReferences(stack(false))).toEqual(undeclared);
+  });
+
   it('resolves declared stack.tools records (the optional refinement layer)', () => {
     const stack = {
       tools: [{ name: 'quote_discount', label: 'Quote', description: 'x' }],

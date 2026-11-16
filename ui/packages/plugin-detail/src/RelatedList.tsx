@@ -100,6 +100,7 @@ import {
   RelatedEnlargeContext,
   RelatedListCompactContext,
   RelatedListEnlargedContext,
+  RelatedListTotalReportContext,
   useSeenOnce,
 } from './relatedListCompact';
 import { relatedCardId } from './synth/relatedArrangement';
@@ -3065,6 +3066,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   React.useEffect(() => {
     onEmptyChange?.(emptyAnswer);
   }, [emptyAnswer, onEmptyChange]);
+  // objectstack#34250 — the number this list holds, said to the `page:tabs`
+  // panel around it when `record:related_list` hands down a reporter (its
+  // parent is bound by `parentDataSource`; see `RelatedListTotalReportContext`).
+  // The header's own count, said once the read has settled: a list still
+  // reading, whose read failed, or whose filter was refused holds no number
+  // yet, and says none.
+  const reportTotal = React.useContext(RelatedListTotalReportContext);
+  const settledTotal = loading || loadFailure || filterRefusal ? null : recordCount;
+  React.useEffect(() => {
+    if (settledTotal !== null) reportTotal?.(settledTotal);
+  }, [reportTotal, settledTotal]);
   React.useEffect(() => {
     if (enlargedFace && enlargedChip === 'all' && !filterActive && !loading && !loadFailure) setAllCount(recordCount);
   }, [enlargedFace, enlargedChip, filterActive, loading, loadFailure, recordCount]);
