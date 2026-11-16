@@ -296,7 +296,11 @@ describe('diffUnbuildableIndexes — only a column that will NEVER materialize (
       { fields: ['code'] },
     ];
     const args = { table: T, fields, tenantField: null, declaredIndexes, physicalColumns: physical('status') };
-    expect(expectedIndexes(args).map((i) => i.name)).toEqual([buildIndexName(T, ['status'], true)]);
+    expect(expectedIndexes(args).map((i) => i.name)).toEqual([
+      buildIndexName(T, ['status'], true),
+      // [#33695] The implicit default-order key: both builtin columns are physical.
+      buildIndexName(T, ['created_at', 'id'], false),
+    ]);
     expect(ops(diffUnbuildableIndexes(args)).map((o) => o.indexName)).toEqual([
       buildIndexName(T, ['statsu'], true),
       buildIndexName(T, ['doubled'], false),

@@ -1647,7 +1647,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1687,7 +1687,7 @@
           "evidence": "the refusal body, plus the GET /packages/:id and GET /packages reads taken after it"
         },
         {
-          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the protocol version it was judged against (`protocolVersion`, the protocol major padded to a semver such as '18.0.0' — never the runtime's package version; packages/metadata-core/src/protocol-handshake.ts ProtocolIncompatibleDiagnostic), and the remedy, which depends on the direction: a declared target major AT OR BELOW the runtime's carries a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>`; a target major ABOVE the runtime's carries NO `migrateCommand`, because `migrate meta` only moves metadata forward, and its `message` names the two remedies that apply instead, upgrading the runtime to protocol <targetMajor> or installing a build of the package for this runtime's protocol (checkProtocolCompat, #26480) — an author refused at the boundary is told which key to fix and which command or upgrade resolves it",
+          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the protocol version it was judged against (`protocolVersion`, the protocol major padded to a semver such as '18.0.0' — never the runtime's package version; packages/metadata-core/src/protocol-handshake.ts ProtocolIncompatibleDiagnostic), and the remedy, which depends on the direction and on the migrate-meta support floor (16, `MIGRATION_SUPPORT_FLOOR`, ADR-0087 D3): a declared target major AT OR ABOVE the floor and AT OR BELOW the runtime's carries a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>`; a target major BELOW the floor carries NO `migrateCommand`, because `migrate meta --from N` refuses every N under the floor, and its `message` names the two remedies that apply instead, installing a build of the package for this runtime's protocol or bringing its metadata to protocol 16 by another path and then running `objectstack migrate meta --from 16` (checkProtocolCompat, #33466); a target major ABOVE the runtime's carries NO `migrateCommand`, because `migrate meta` only moves metadata forward, and its `message` names the two remedies that apply instead, upgrading the runtime to protocol <targetMajor> or installing a build of the package for this runtime's protocol (checkProtocolCompat, #26480) — every refusal carries `targetMajor` whichever direction it takes, and an author refused at the boundary is told which key to fix and which command or upgrade resolves it",
           "oracle": "api",
           "verify": "read the named fields off the captured refusal body; the migrateCommand's --from must be the major of the DECLARED range, not the runtime's. On the AHEAD probe (steps[2], ^(RT+1)) the body carries targetMajor RT+1 and NO migrateCommand member at all, and its message names the runtime upgrade; a `migrate meta` command offered there is a FAIL, since it cannot resolve that refusal",
           "evidence": "both refusal bodies (the older and the AHEAD probe) with every named field shown"
@@ -1797,6 +1797,12 @@
           "date": "2026-11-14",
           "change": "steps[0] names where RT is read (stale read, card #33330, row 68 of the #32908 close-out ledger; QA run #33025 comment 6844741021 on #32908). GET /api/v1/meta has no protocol field; the major comes from GET /api/v1's version, which DiscoverySchema (packages/spec/src/api/discovery.zod.ts) declares and metadata-protocol's discovery-version.ts fills with the runtime's version, whose major equals the protocol major because protocol-version.test.ts holds PROTOCOL_VERSION in lockstep with the spec package major. No clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-15",
+          "change": "acceptance[1] scopes migrateCommand to the migrate-meta support floor. Loose end of #33031 (PR #33466): the clause said every declared target major at or below the runtime's carries `objectstack migrate meta --from <targetMajor>`, but checkProtocolCompat (packages/metadata-core/src/protocol-handshake.ts) leaves migrateCommand out when the target major is below MIGRATE_META_SUPPORT_FLOOR (16, held equal to the spec's MIGRATION_SUPPORT_FLOOR) and its message names the two remedies that apply. The clause also says every refusal carries targetMajor. The steps' probes (^(RT-1), ^(RT+1)) and the verify text are unchanged: on an 18 runtime ^(RT-1) targets 17, above the floor. Read from source at base 895783a1e8, not driven live",
+          "ref": "#33618"
         }
       ]
     },

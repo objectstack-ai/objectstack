@@ -123,6 +123,7 @@ export {
   buildIndexName,
   diffManagedIndexes,
   expectedIndexes,
+  implicitReferenceIndexes,
   isIndexDriftOp,
   isInPlaceSchemaWork,
   isRefusedSchemaWork,
