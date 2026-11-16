@@ -61,6 +61,11 @@ const RETIRED_BITS = [
  *
  * `aggregationFilter` is the fifth, under the same rule: `engine.aggregate`
  * reads it (with method presence) to send a per-measure filter to the driver.
+ *
+ * [#33876] `readableIdsLeaf` is the sixth, under the same rule: no method
+ * says whether a driver's filter compiler understands a composed `ReadableIds`
+ * leaf (every driver has `find()`), and the engine's nested-relation lowering
+ * reads it to plan the semi-join or refuse the condition up front.
  */
 const LIVE_BITS = [
   'queryDateGranularity',
@@ -68,6 +73,7 @@ const LIVE_BITS = [
   'batchSchemaSync',
   'transactionsUnsupported',
   'aggregationFilter',
+  'readableIdsLeaf',
 ] as const;
 
 describe('DriverCapabilitiesSchema', () => {
@@ -78,6 +84,7 @@ describe('DriverCapabilitiesSchema', () => {
       batchSchemaSync: true,
       transactionsUnsupported: true,
       aggregationFilter: true,
+      readableIdsLeaf: true,
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -95,13 +102,20 @@ describe('DriverCapabilitiesSchema', () => {
     expect(parsed).not.toHaveProperty('transactionsUnsupported');
     // Absent = the engine aggregates a filtered measure in memory, as before the bit.
     expect(parsed).not.toHaveProperty('aggregationFilter');
+    // [#33876] Absent = no semi-join leaf: the engine refuses a nested-relation
+    // condition on a read verb up front.
+    expect(parsed).not.toHaveProperty('readableIdsLeaf');
   });
 
   it('refuses a non-boolean aggregationFilter', () => {
     expect(DriverCapabilitiesSchema.safeParse({ aggregationFilter: 'yes' }).success).toBe(false);
   });
 
-  it('declares exactly the audited shape: 5 live bits + 31 tombstones', () => {
+  it('refuses a non-boolean readableIdsLeaf', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ readableIdsLeaf: 'yes' }).success).toBe(false);
+  });
+
+  it('declares exactly the audited shape: 6 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
