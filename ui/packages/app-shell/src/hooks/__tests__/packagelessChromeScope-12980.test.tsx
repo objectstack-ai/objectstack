@@ -48,7 +48,13 @@ function makeAdapter(calls: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : [];
           const items = options?.packageId ? all.filter((o) => o._packageId === options.packageId) : all;
@@ -106,7 +112,9 @@ describe('package-less app: the chrome readers read the names-only scope (object
 
     expect(read().presence.presence).toBe('present');
     expect(objectCalls(calls)).not.toContain('object');
-    expect([...objectCalls(calls)].sort()).toEqual(['object/note', 'object/sys_activity']);
+    // objectstack#34244 — `note` is the entry's `requiresObject`: asked by name
+    // once the `?names=` presence read has answered it served.
+    expect([...objectCalls(calls)].sort()).toEqual(['object/note', 'object/sys_activity', 'object?names=note'].sort());
   });
 
   it('(a) an object the deployment does not have reads absent, by name, with no whole-registry read', async () => {
@@ -159,5 +167,27 @@ describe('package-less app: the chrome readers read the names-only scope (object
 
     expect(read().served.objects).toHaveLength(OBJECTS.length);
     expect(read().presence.presence).toBe('present');
+  });
+});
+
+describe('objectstack#34244 — the served view items ask no required object the host lacks by name', () => {
+  /** An app whose entries open the object they require: `note` is registered, `gone_obj` is not. */
+  const GATED_APP = {
+    name: 'notes',
+    navigation: [
+      { id: 'nav_note', type: 'object', objectName: 'note', requiresObject: 'note' },
+      { id: 'nav_gone', type: 'object', objectName: 'gone_obj', requiresObject: 'gone_obj' },
+    ],
+  };
+
+  it('asks both in the presence read, and by name only the one it serves', async () => {
+    const calls: string[] = [];
+    const read = mount(GATED_APP, calls);
+    await waitFor(() => expect(isServedView(read().served, 'note', 'note.recent')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(objectCalls(calls)).toContain('object?names=note,gone_obj');
+    expect(objectCalls(calls)).toContain('object/note');
+    expect(objectCalls(calls)).not.toContain('object/gone_obj');
   });
 });

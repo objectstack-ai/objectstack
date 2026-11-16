@@ -558,6 +558,7 @@ const es = {
       succeeded: "Correctos {{count}} / {{total}}",
       resultFailed: " · Fallidos {{count}}",
       succeededRecords: "Registros correctos",
+      aggregateNotCompleted: "La acción no se completó para los registros seleccionados. Es posible que algunos registros ya se hayan modificado; al cerrar, la lista muestra sus valores actuales.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",
@@ -5232,6 +5233,25 @@ const es = {
     sourceRequired: "Una página {{kind}} requiere un {{source}} no vacío.",
     loading: "Cargando el entorno de ejecución de React…",
     error: "Error en la página React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicación móvil",
+    subtitle: "Conecta la aplicación móvil de ObjectOS a este servidor",
+    scanHint: "Abre la aplicación móvil de ObjectOS y escanea este código para conectarla a este servidor.",
+    qrAlt: "Código QR que conecta la aplicación móvil de ObjectOS a este servidor",
+    linkLabel: "Enlace de conexión",
+    copy: "Copiar enlace",
+    copied: "Enlace copiado",
+    privacy: "El código solo contiene la dirección de este servidor, nunca tu cuenta.",
+    loadFailed: "No se pudo leer la dirección pública de este servidor. Recarga la página para volver a intentarlo.",
+    unreachableTitle: "Un teléfono no puede acceder a la dirección de este servidor",
+    unreachableBody: "La dirección de este servidor es {{address}}, una dirección local o privada que un teléfono no puede abrir, así que no se muestra ningún código. Establece {{setting}} en el servidor con su dirección pública, por ejemplo {{example}}, y reinícialo.",
+    insecureTitle: "La dirección de este servidor no usa HTTPS",
+    insecureBody: "La dirección de este servidor es {{address}}. La aplicación móvil inicia sesión a través de ella, por lo que debe usar HTTPS, y no se muestra ningún código. Sirve este servidor por HTTPS, establece {{setting}} con su dirección https://, por ejemplo {{example}}, y reinícialo.",
+    unpublishedTitle: "Este servidor no publica su dirección pública",
+    unpublishedBody: "No se muestra ningún código: este servidor todavía no ofrece su dirección pública a la aplicación móvil. Actualiza el servidor a una versión que lo admita.",
   },
 };
 

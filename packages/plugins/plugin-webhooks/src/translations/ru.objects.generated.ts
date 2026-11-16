@@ -53,7 +53,6 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Метод HTTP",
         help: "Метод HTTP для запроса обратного вызова",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",
