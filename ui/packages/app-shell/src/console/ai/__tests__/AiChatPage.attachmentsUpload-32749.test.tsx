@@ -26,7 +26,9 @@
  *  - an over-cap image and an unsupported type are not uploaded and are named
  *    in the turn's text;
  *  - a failed upload is named in the turn's text, and the turn still sends
- *    the file that did upload.
+ *    the file that did upload;
+ *  - a spreadsheet beside an image: the sheet is parsed, the image uploaded,
+ *    and one turn carries both.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -279,5 +281,14 @@ describe('AiChatPage — image and PDF attachments ride the turn as stored file 
     expect(state.uploads).toEqual(['broken.png', 'ok.png']);
     expect(turn.files.map((p) => p.providerMetadata?.objectstack?.fileId)).toEqual(['file-ok.png']);
     expect(turn.text).toMatch(/上传失败,内容未读取:broken\.png/);
+  });
+
+  it('parses a spreadsheet and uploads an image attached beside it, in one turn', async () => {
+    const turn = await send('Claims and a receipt', [file('claims.csv', 'text/csv'), file('receipt.jpg', 'image/jpeg')]);
+
+    expect(parseSpreadsheetFile).toHaveBeenCalledTimes(1);
+    expect(state.uploads).toEqual(['receipt.jpg']);
+    expect(turn.files.map((p) => p.providerMetadata?.objectstack?.fileId)).toEqual(['file-receipt.jpg']);
+    expect(turn.text).toContain('[附件表格 claims.csv');
   });
 });

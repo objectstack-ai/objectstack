@@ -2489,7 +2489,7 @@ export function ChatPane({
         onSent(merged);
       })();
     },
-    [resetSuppression, sendMessage, onSent, sendNonSheetAttachments],
+    [resetSuppression, sendMessage, onSent, sendNonSheetAttachments, setPendingSheet],
   );
 
   // Guards the empty-state first send against the conversation-id remount race:
