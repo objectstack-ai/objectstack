@@ -5151,6 +5151,25 @@ const zh = {
     loading: '正在加载 React 运行时…',
     error: 'React 页面错误',
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "移动应用",
+    subtitle: "将 ObjectOS 移动应用连接到此服务器",
+    scanHint: "打开 ObjectOS 移动应用，扫描此二维码即可连接到此服务器。",
+    qrAlt: "用于将 ObjectOS 移动应用连接到此服务器的二维码",
+    linkLabel: "连接链接",
+    copy: "复制链接",
+    copied: "链接已复制",
+    privacy: "二维码只包含此服务器的地址，不包含你的账号。",
+    loadFailed: "无法读取此服务器的公开地址。请刷新页面重试。",
+    unreachableTitle: "手机无法访问此服务器的地址",
+    unreachableBody: "此服务器的地址是 {{address}}，这是手机无法打开的本机或内网地址，因此不显示二维码。请在服务器上将 {{setting}} 设为它的公开地址（例如 {{example}}），然后重启服务器。",
+    insecureTitle: "此服务器的地址未使用 HTTPS",
+    insecureBody: "此服务器的地址是 {{address}}。移动应用会通过它登录，因此它必须使用 HTTPS，此处不显示二维码。请让此服务器通过 HTTPS 提供服务，将 {{setting}} 设为它的 https:// 地址（例如 {{example}}），然后重启服务器。",
+    unpublishedTitle: "此服务器未公布其公开地址",
+    unpublishedBody: "不显示二维码：此服务器尚未向移动应用提供其公开地址。请将服务器升级到支持此功能的版本。",
+  },
 } as const;
 
 export default zh;

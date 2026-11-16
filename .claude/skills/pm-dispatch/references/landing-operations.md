@@ -1,7 +1,5 @@
 # 入队与落地细则
 
-执行席在落地窗口(ACCEPT 之后至 MERGED)读本文;入队与落地条款与 A–D 操作细则都在此。
-
 ## 入队与落地
 
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
@@ -42,7 +40,9 @@
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
-- K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
+- K ≥ 15 ⇒ 先 merge main 等重跑绿,`behind` 例外;任何 K 同:标签 PR 的 PRBASE 后 main 落新语种包;
+- 或共享预算 PR 遇 `git diff --name-only PRBASE..origin/main` 碰同本输入或账本;封闭两本,输入:账本:
+- `skills/**`:`scripts/check-skills-token-ratchet.mjs`;`ui/**/locales/en.ts`:`ui/scripts/check-eager-closure-budget.mjs`
 - 标签即 `check-generated-translation-bundles`、`check-no-new-untranslated-declared-labels` 所计显示标签。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成

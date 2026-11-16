@@ -82,7 +82,13 @@ function makeAdapter(calls: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string) => {
+        getItems: (type: string, options?: { names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           calls.push(type);
           const all = type === 'object' ? OBJECTS : type === 'view' ? VIEWS : type === 'app' ? [NOTES_APP, CRM_APP] : [];
           return Promise.resolve({ type, items: structuredClone(all) });
@@ -156,7 +162,9 @@ describe('a package-less app’s object route keeps its views served (objectstac
     expect(isServedView(read().served, 'note', 'mine')).toBe(true);
     const scoped = labels(read());
     expect(scoped).toEqual({ mine: 'My notes (served)', 'note.all': 'All notes (served)' });
-    expect(calls.filter((c) => !c.includes('/'))).toEqual(['app']);
+    // objectstack#34244 — the one list-shaped read is the presence read of the
+    // app list's `requiresObject` names (the sidebar gate's), never a list.
+    expect(calls.filter((c) => !c.includes('/'))).toEqual(['app', 'object?names=crm_account']);
     expect(read().ctx.getTypeStatus!('object')).toBe('idle');
 
     // CONTROL: the same tree once the whole registry is loaded, which is what
