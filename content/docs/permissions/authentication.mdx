@@ -1316,7 +1316,8 @@ in the directory.
 
 A host can be told about people as they come and go: the `environmentUserHost`
 option of the auth plugin is called after a person is added, and before a
-person is deactivated (`admin/ban-user`) or reactivated (`admin/unban-user`).
+person is deactivated (`admin/ban-user`), reactivated (`admin/unban-user`) or,
+while still pending, removed (`admin/remove-sso-user`).
 It is never called inside a database transaction. Each event names the
 administrator who acted, the administrator at the keyboard when the session
 is an impersonation (`impersonatedBy`), and, when the acting administrator
@@ -1335,6 +1336,43 @@ blocks an add or a reactivation: the answer carries `host: { notified: false,
 reason }`. Adding a person who is still pending again tells the host again
 and changes nothing else: positions, permission sets or a manager sent with
 it are listed on the answer as `notApplied`; set them on the person's record.
+
+A pending person who never signs in, for example one added with a mistyped
+address, can be removed: `POST /api/v1/auth/admin/remove-sso-user` takes
+`{ userId }`, removes the person with their positions, permission sets and
+membership, and cancels their invitation at the host. The host is asked
+first, through its `userRemoved` member; a host without that member is asked
+through `userDeactivated` for the pending person instead, which means the same
+thing, but a host should implement `userRemoved`. A host's refusal leaves the
+person as they are. A host that cannot be reached refuses the removal too,
+with `503` and nothing removed, as it refuses a deactivation: the door calls
+the host once and keeps no record to ask again from, so try again once the
+host is back. A person who is not pending (they have signed in, or were not
+added this way) is refused with `409`: deactivate them instead. That holds at
+the removal itself: the person is checked again inside the removal's unit of
+work and the delete carries `source: 'idp_pending'`, so a person whose first
+sign-in lands while the host is asked is not removed either, and the answer
+says the host was already told. Because `sys_user` has cascading lookups, the
+engine deletes the row by id after walking them, so a first sign-in that
+commits in that narrow window is not yet refused. A record that
+still points at the person through a lookup that restricts deletes refuses the
+removal with that lookup's own answer, and nothing is removed; when the host
+had already cancelled the invitation of a person who is still pending and not
+deactivated, the door sends the invitation again through `userAdded`, once,
+and the answer says whether that worked. Like the add doors, it is
+platform-admin gated and answers `409` off a managed environment.
+
+A deactivated person is never sent an invitation: adding a deactivated pending
+person again calls no host and answers `host: { notified: false, reason:
+'deactivated' }`; reactivating them is what tells the host again.
+
+Each door calls the host once and keeps no record of the call. Delivering it
+durably, and keeping each person's invitation status, is the host's job: a
+host may queue and retry a call it could not complete. A call can reach a host
+more than once (adding a person who is still pending again tells the host
+again), so a host should treat a repeat as harmless, and should cancel an
+invitation by the event's `userId`, never by its email address, which an
+administrator may have typed wrong and may type again for someone else.
 
 `admin/ban-user` and `admin/unban-user` work without the admin plugin: on a
 deployment without it the ban is written by the platform, and a banned user is
