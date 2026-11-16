@@ -390,6 +390,23 @@ function measureColumnOf(
 }
 
 /**
+ * The leaf operators whose compiled clause a NULL column can satisfy, so a
+ * joined column's NULL from a row the `LEFT JOIN` reached no parent for would
+ * select that row ({@link NativeSQLStrategy}'s `compileFilterNode` leaf arm):
+ *
+ * - `notSet` — `col IS NULL`, the escape arm of the negative operators' NULL
+ *   guard, `$null: true` and `$eq: null`;
+ * - `empty` — `col IS NULL OR …` (`empty-operator-sql.ts`);
+ * - `notContains` — the constant TRUE on a column that stores no text
+ *   (`non-text-column.ts`), and `NOT EXISTS (… json_each(col) …)` on a
+ *   JSON-stored one (`contains-membership-sql.ts`), both TRUE on a NULL.
+ *
+ * Every other operator of the normalized vocabulary compiles to a comparison
+ * that is UNKNOWN on a NULL, or to `IS NOT NULL`, and selects no such row.
+ */
+const NULL_SATISFIED_LEAF_OPERATORS: ReadonlySet<string> = new Set(['notSet', 'empty', 'notContains']);
+
+/**
  * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
  * and the object it reads — the object {@link resolvePathHops} named for that
  * hop, which `generateSql` then scopes the alias as. One value for both, so
@@ -2035,6 +2052,29 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * The key column of the row a filter member's relationship path reaches, as
+   * {@link qualifyAndRegisterJoin} joined it (`"order"."id"`, or
+   * `"account__owner"."id"` for two hops), or `null` for a base-table column or
+   * an SQL expression. The hops are {@link resolvePathHops}'s, the one resolver
+   * the join itself reads; every hop joins `ON … = "<alias>"."id"`, so the last
+   * hop's key is NULL exactly when the chain reached no row. Read after the
+   * leaf resolved, so the join is registered.
+   */
+  private joinedParentKey(
+    cube: Cube,
+    member: string,
+    parentTable: string,
+    joins: StatementJoins,
+  ): string | null {
+    const rawSql = this.lookupFilterMember(cube, member)?.sql ?? member;
+    if (!rawSql.includes('.') || !IDENTIFIER_PATH.test(rawSql)) return null;
+    const hops = rawSql.split('.').slice(0, -1);
+    const resolved = resolvePathHops(cube, parentTable, hops, joins.referenceOf);
+    const last = resolved[resolved.length - 1];
+    return last && joins.has(last.alias) ? `"${last.alias}"."id"` : null;
+  }
+
+  /**
    * Resolve the (object, column) a filter member binds against, so its
    * comparand can be coerced to that column's on-disk storage form.
    *
@@ -2201,7 +2241,34 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // Resolve the (object, column) this member binds against so the value
       // can be coerced to the column's storage form (see buildFilterClause).
       const target = this.resolveStorageTarget(cube, node.member, parentTable, joins.referenceOf);
-      return this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+      const clause = this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+      // A leaf on a joined column is evaluated on an EXISTING parent. The
+      // `LEFT JOIN` gives a detail row with no parent a NULL in every joined
+      // column, and a leaf a NULL satisfies read that NULL as "the parent's
+      // value is missing", selecting the orphan: the escape the shared lowering
+      // lays around `$ne` / `$nin` / `$notContains` (`col IS NULL OR …`),
+      // `$null: true`, `$eq: null`, `$empty: true`. The engine path and the
+      // `/data` nested-relation filter read the parent first, so no parent
+      // never matches, whatever the operator (`cross-object-where.ts`); this
+      // conjunct is that rule here. Only the operators of
+      // {@link NULL_SATISFIED_LEAF_OPERATORS} take it: every other clause is
+      // UNKNOWN on a NULL and already leaves the orphan out. A parent that
+      // exists with a NULL value still answers its own polarity (#5298). Added
+      // only around a clause that bound, so `params` stays aligned.
+      //
+      // The conjunct is `key = key`, never `key IS NOT NULL`: it is TRUE for an
+      // existing parent and UNKNOWN (not FALSE) for an orphan, so the leaf is
+      // UNKNOWN there. A `$not` operand reaches this arm with the same leaves
+      // (the lowering leaves `$null` / `$empty` / a null `$eq` alone under
+      // `$not`, and escapes `$ne` / `$nin` / `$notContains`), and a FALSE leaf
+      // would let the `NOT` select the orphan. Under Kleene logic, turning TRUE
+      // into UNKNOWN can never turn a FALSE row TRUE, at any depth of `NOT`,
+      // `AND` or `OR`, so no row this compile left out before is selected now.
+      // Outside a `NOT`, UNKNOWN selects exactly what FALSE selects.
+      const parentKey = clause !== null && NULL_SATISFIED_LEAF_OPERATORS.has(node.operator)
+        ? this.joinedParentKey(cube, node.member, parentTable, joins)
+        : null;
+      return parentKey ? `(${clause} AND ${parentKey} = ${parentKey})` : clause;
     }
 
     if (node.kind === 'not') {

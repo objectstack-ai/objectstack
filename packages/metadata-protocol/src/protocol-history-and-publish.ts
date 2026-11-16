@@ -5,7 +5,7 @@
  * `ObjectStackProtocolImplementation`: the bodies of `historyMetaItem`,
  * `publishMetaItem`, `publishMetaItemUnaudited`, `promoteDraftForPublish`,
  * `runPublishSideEffects`, `publishPackageDrafts`, `discardPackageDrafts` moved
- * out of `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
+ * out of `protocol.ts` whole (split by #29998 and #32068).
  *
  * A MOVE, not a redesign. `ProtocolHistoryAndPublishFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class

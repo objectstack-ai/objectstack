@@ -5,7 +5,7 @@
  * context" section: the bodies of `ObjectRepository`'s methods `find`,
  * `findOne`, `insert`, `create`, `update`, `updateById`, `delete`,
  * `deleteById`, `count`, `aggregate`, `execute` moved out of `engine.ts` whole
- * by `scripts/codemod-split-engine.mjs` (its second pass).
+ * (split by #30264, the codemod's second pass).
  *
  * A MOVE, not a redesign. {@link ObjectRepositoryFacet} is a stateless facet of
  * `ObjectRepository`: each static method of it is the body of the

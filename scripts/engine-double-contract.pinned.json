@@ -5747,6 +5747,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-job/src/shutdown-drain-34046.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-knowledge/src/__tests__/reap-guard.test.ts",
       "verb": "delete",
       "pinned": 1
