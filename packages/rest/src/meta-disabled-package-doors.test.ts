@@ -569,10 +569,11 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
         expect([read.status, read.body?.code], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         expect([...(read.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
             .toEqual([OTHER_PKG, THIRD_PKG].sort());
-        // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders (#32622).
+        // [#32622, ADR-0150 D5] The layered door names the same served holders as `details.candidates`.
         const layers = await host.layers('dashboard', 'three_rows_dash');
-        expect(layers.status, JSON.stringify(layers.body)).toBe(409);
-        for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(layers.body)).toContain(pkg);
+        expect([layers.status, layers.body?.code], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect([...(layers.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(layers.body))
+            .toEqual([OTHER_PKG, THIRD_PKG].sort());
         // [contract review S3] Bare /published asks the plain read first and answers its refusal.
         const published = await host.published('dashboard', 'three_rows_dash');
         expect([published.status, published.body?.code ?? published.body?.error?.code], JSON.stringify(published.body))

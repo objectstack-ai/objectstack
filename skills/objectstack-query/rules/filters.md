@@ -163,8 +163,7 @@ where: {
   period boundaries like `{current_month_start}`, `{last_quarter_end}`,
   `{next_year_start}` (and bare aliases like `{month_start}`).
 - **Parameterised tokens:** `{N_<unit>_ago}` / `{N_<unit>_from_now}` with
-  units `minute|hour|day|week|month|year` — e.g. `{30_days_ago}`,
-  `{2_weeks_from_now}`.
+  units `minute|hour|day|week|month|year` — e.g. `{2_weeks_from_now}`.
 - **Both spellings parse:** `{today}` and `${today}` are the same token
   (`DATE_MACRO_WRAPPED_RE` is `/^\$?\{([a-zA-Z0-9_]+)\}$/`, and the context
   tokens share it).
@@ -174,7 +173,7 @@ where: {
 user's id and the active organization id.
 
 ```typescript
-where: { owner: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
+where: { owner_id: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
 ```
 
 **Scope:** tokens expand on **both** sides of the wire — client-side by

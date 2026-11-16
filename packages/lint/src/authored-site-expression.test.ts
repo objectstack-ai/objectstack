@@ -720,6 +720,19 @@ describe('judgeAuthoredSiteExpression at a flow condition — every gate pass is
     expect(flowEntryOn([withOwn, BAL], "record.title == 'x'")).toEqual([]);
   });
 
+  // [#33435] The entry strips the injected columns and runs the walk as a flow
+  // write, so the build's injected-column null guard reaches it: an unguarded
+  // ordering over `owner_id` comes back with the publish gate's finding (it
+  // answered clean before), and the guarded spelling stays clean.
+  it('an unguarded ordering over an injected column returns the publish gate\'s null-guard finding (#33435)', () => {
+    const served = applyInjectedSystemColumns(FLOW_OBJ);
+    const entry = flowEntryOn([served], "record.owner_id > 'a'");
+    expect(entry).toHaveLength(1);
+    expect(entry[0]![1]).toContain('`record.owner_id`');
+    expect(entry).toEqual(flowGateOn([served], "record.owner_id > 'a'"));
+    expect(flowEntryOn([served], "record.owner_id != null && record.owner_id > 'a'")).toEqual([]);
+  });
+
   it('answers nothing when the object is not among the definitions', () => {
     expect(judgeAuthoredSiteExpression({ site: 'flow_condition', objectName: 'nope', expression: 'record.days > 3', objects: [FLOW_OBJ] }))
       .toEqual([]);

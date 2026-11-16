@@ -184,6 +184,39 @@ function nonUserRecipientTypeRemedy(value: unknown): string {
 }
 
 /**
+ * [ADR-0111 D7] A share a non-system caller grants is always a MANUAL share.
+ * Only the platform's own paths — the sharing-rule evaluator, team and system
+ * machinery, each running under a system context — write a share with another
+ * `source` or with a `sourceId`.
+ *
+ * So the non-system path refuses, rather than rewrites, an input whose
+ * `source` is present and is not `'manual'`, and an input that carries any
+ * `sourceId`: a caller that sent a source learns it was not honoured. An
+ * absent `source` (`undefined` or `null`, which `grant` reads as `'manual'`)
+ * and an explicit `'manual'` with no `sourceId` pass unchanged.
+ *
+ * Called before any read or write, so a refused caller pays nothing.
+ */
+function assertDirectGrantIsManual(input: GrantShareInput): void {
+  const source: unknown = input.source;
+  if (source != null && source !== 'manual') {
+    throw new Error(
+      `VALIDATION_FAILED: a share granted directly is a manual share — send no source, or source 'manual' `
+        + `(received ${JSON.stringify(source)}); a share with any other source is written only by the `
+        + `platform's own sharing-rule, team and system paths (ADR-0111 D7)`,
+    );
+  }
+  const sourceId: unknown = input.sourceId;
+  if (sourceId != null) {
+    throw new Error(
+      `VALIDATION_FAILED: a share granted directly is a manual share and carries no sourceId `
+        + `(received ${JSON.stringify(sourceId)}); a share with a sourceId is written only by the `
+        + `platform's own sharing-rule, team and system paths (ADR-0111 D7)`,
+    );
+  }
+}
+
+/**
  * Owner field convention. Hard-coded to `owner_id` for MVP — the
  * sharing model in Salesforce / ServiceNow / Dynamics all assume a
  * single owner field, and customising it is a follow-up. Objects
@@ -1992,6 +2025,9 @@ export class SharingService implements ISharingService {
       this.assertNotInertGrant(input.object);
       organizationId = await this.resolveSystemGrantOrganization(input, context);
     } else {
+      // [ADR-0111 D7] A direct grant is a manual share — refused here, ahead
+      // of every read, so a refused caller pays nothing.
+      assertDirectGrantIsManual(input);
       this.assertSharingEnforced(input.object);
       await this.assertCanManageShares(input.object, input.recordId, context);
       organizationId = await this.resolveDirectGrantOrganization(input, context);
