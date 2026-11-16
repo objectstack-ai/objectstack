@@ -36,7 +36,7 @@
  */
 
 import { normalizeFilterComparandTypes } from '@objectstack/spec/data';
-import type { EngineAggregateOptions, EngineDeleteOptions, HookContext, QueryAST } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineDeleteOptions, FilterCondition, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
 import { assertHavingTemporalComparandsInterpretable, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
@@ -79,6 +79,12 @@ import {
   writeFailureLogMeta,
 } from './engine-top-level.js';
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
+import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
+import {
+  assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
+  RELATION_GROUP_JOINS, relationGroupByRequestOf, relationGroupJoinsAtBoundary, relationGroupRegistryDecline,
+  type PlannedRelationGroup,
+} from './relation-group-join.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
@@ -125,6 +131,7 @@ export interface DeleteAndAggregateHost {
   recomputeSummaries: ObjectQLClass['recomputeSummaries'];
   rejectCredentialAggregation: ObjectQLClass['rejectCredentialAggregation'];
   readonly relatedSchemaOf: ObjectQLClass['relatedSchemaOf'];
+  relationSemiJoinServes: ObjectQLClass['relationSemiJoinServes'];
   releaseSecretHandles: ObjectQLClass['releaseSecretHandles'];
   resolveObjectName: ObjectQLClass['resolveObjectName'];
   resolveWhereTokens: ObjectQLClass['resolveWhereTokens'];
@@ -914,8 +921,30 @@ export class DeleteAndAggregateFacet {
   }
 
   /** The body of `ObjectQL#aggregate`; the method's docblock there is its contract. */
-  static async aggregate(this: Pick<DeleteAndAggregateHost, '_registry' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandSearchOnOptions' | 'getDriver' | 'logger' | 'rejectCredentialAggregation' | 'relatedSchemaOf' | 'resolveObjectName' | 'resolveWhereTokens'>, object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
+  static async aggregate(this: Pick<DeleteAndAggregateHost, '_registry' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandSearchOnOptions' | 'facade' | 'getDriver' | 'logger' | 'rejectCredentialAggregation' | 'relatedSchemaOf' | 'relationSemiJoinServes' | 'resolveObjectName' | 'resolveWhereTokens'>, object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
       object = this.resolveObjectName(object);
+      // [relation group join] The engine-internal request to group by a
+      // related record's attributes (`relation-group-join.ts`). The registry
+      // half of its decline is judged first: a driver that compiles no join,
+      // a field that is not a single-valued relation to the named object, a
+      // related read the semi-join rule keeps out — declined before anything
+      // is read, so the caller's own path runs the doors below itself.
+      const relationGroup = relationGroupByRequestOf(options);
+      if (relationGroup !== undefined) {
+          const reason = relationGroupRegistryDecline.call({
+              getObjectSchema: (name: string) => this._registry.getObject(name),
+              getDriver: (name: string) => this.getDriver(name) as { readonly name?: unknown; readonly aggregate?: unknown } | undefined,
+              relationSemiJoinServes: (o: string, t: string) => this.relationSemiJoinServes(o, t),
+          }, object, relationGroup);
+          if (reason !== undefined) {
+              declineRelationGroup(relationGroup, reason);
+              return [];
+          }
+      }
+      // [relation group join] A PLANNED read (`relation-semi-join.ts`): the
+      // related read a relation group join is built from is this verb,
+      // stopped at its driver call. Only the engine's own planner sets it.
+      const scopePlan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
@@ -1250,6 +1279,19 @@ export class DeleteAndAggregateFacet {
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
+      // [relation group join] Every door above has judged the base query;
+      // now the request's shape against the row it adds columns to, then
+      // each related read, planned as the caller.
+      let plannedRelationGroups: PlannedRelationGroup[] | null = null;
+      if (relationGroup !== undefined) {
+          assertRelationGroupRequestShape(object, relationGroup, aggregatedRowColumns(query.groupBy, query.aggregations));
+          plannedRelationGroups = await planRelationGroups.call(
+              { aggregate: (o, q, opts) => this.facade.aggregate(o, q as EngineAggregateOptions, opts as EngineReadOptions) },
+              relationGroup,
+              mergeReadContext(query?.context, options?.context),
+          );
+          if (plannedRelationGroups === null) return [];
+      }
 
       const opCtx: OperationContext = {
         object,
@@ -1329,6 +1371,12 @@ export class DeleteAndAggregateFacet {
         // are the related read's own (`relation-semi-join.ts`).
         const aggregateOptions = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
         const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context, aggregateOptions);
+        // [relation group join] A planned read hands its final `where` and
+        // driver options to the planner in place of the driver call.
+        if (scopePlan !== undefined) {
+            scopePlan.capture(ast.where as FilterCondition | undefined, aggregateOptions);
+            return scopePlan.rows;
+        }
 
         // Prefer driver.aggregate() when available — driver.find() in many
         // drivers (e.g. driver-sql) does not honor `groupBy` / `aggregations`
@@ -1385,7 +1433,24 @@ export class DeleteAndAggregateFacet {
                 return f != null && typeof f === 'object' && Object.keys(f).length > 0;
             });
         const aggregationFilterNative = drv?.supports?.aggregationFilter === true;
-        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative)) {
+        const nativeAggregate = typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative);
+        // [relation group join] Served only as the driver's own statement:
+        // the rows path below cannot join. Each planned related read is
+        // answered at this boundary, under these driver options, by the rule
+        // the semi-join's leaf is (`plannedRelationLeafVerdict`).
+        if (relationGroup !== undefined && plannedRelationGroups !== null) {
+            if (!nativeAggregate) {
+                declineRelationGroup(relationGroup, `this aggregate of '${object}' is not one its driver answers natively`);
+                return [];
+            }
+            const joins = relationGroupJoinsAtBoundary(relationGroup, plannedRelationGroups, aggregateOptions);
+            if (joins === null) return [];
+            const joined = await drv.aggregate(object, { ...ast, [RELATION_GROUP_JOINS]: joins }, aggregateOptions);
+            assertRelationGroupRowsJoined(object, drv.name, joined, joins);
+            relationGroup.outcome = { kind: 'joined' };
+            return applyHaving(joined, ast.having, havingColumnClasses);
+        }
+        if (nativeAggregate) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over
             // the aggregated row's own columns (aggregation aliases + groupBy
             // projections), identically on both paths. No driver implements it
