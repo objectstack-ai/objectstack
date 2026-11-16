@@ -311,7 +311,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 ```text
 Claim: PM loop round N
 Session: `session_<id>`
-Thread session: `session_<id>` (mode:thread only: the card thread's own session, which knocks the seat mailbox as its delegate; omit otherwise)
+Thread session: `session_<id>` (mode:thread only: the card thread's own session, which knocks the seat mailbox as its delegate; nothing after the id; omit otherwise)
 Account: `<github-login>` (the seat's linked user as `GET /user` answers it; always the card's assignee)
 Branch: `claude/issue-<n>-<slug>`
 Worktree: `<repo>-issue-<n>`
