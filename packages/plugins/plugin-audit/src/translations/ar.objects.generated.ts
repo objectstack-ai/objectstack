@@ -45,7 +45,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "استخدام بيانات الاعتماد",
           scim_refused: "رفض طلب SCIM",
           audit_signing_key_change: "تغيير مفتاح توقيع التدقيق",
-          dataset_query: "استعلام مجموعة بيانات"
+          dataset_query: "استعلام مجموعة بيانات",
+          scim_manager_unresolved: "تعذّر تحديد مدير SCIM"
         }
       },
       user_id: {

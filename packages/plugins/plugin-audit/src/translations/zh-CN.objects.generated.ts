@@ -45,7 +45,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "凭据使用",
           scim_refused: "SCIM 请求被拒",
           audit_signing_key_change: "审计签名密钥变更",
-          dataset_query: "数据集查询"
+          dataset_query: "数据集查询",
+          scim_manager_unresolved: "SCIM 上级无法解析"
         }
       },
       user_id: {
