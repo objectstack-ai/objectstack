@@ -216,7 +216,10 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null or an empty selection. A multi-select (`multiple: true`) reads each selected label in stored order, joined with `, `. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
-`double(x)`, `timestamp(s)`, `duration(s)`.
+`double(x)`, `timestamp(s)`, `duration(s)`. `timestamp()` parses only a full
+ISO instant, so over a `date` field (`YYYY-MM-DD`) the build refuses it
+(`date-text-call`), `+ duration(…)` included; shift a date with
+`isoDate(addDays(record.d, n))`.
 
 > Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
