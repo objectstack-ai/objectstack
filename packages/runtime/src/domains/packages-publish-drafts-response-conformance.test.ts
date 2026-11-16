@@ -32,6 +32,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PublishPackageDraftsResponseSchema } from '@objectstack/spec/api';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// The dispatcher reaches `import('@objectstack/metadata')` inside a handler; this pays that
+// first load during collection instead of inside a case's clocked window.
+import '@objectstack/metadata';
 
 /**
  * [#7033 / #7023] `/packages` demands `manage_metadata` on every

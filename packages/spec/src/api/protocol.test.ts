@@ -1507,7 +1507,7 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
         severity: 'error',
         artifact: { type: 'dashboard', name: 'sales_overview' },
         ref: { type: 'dataset', name: 'deal_metrics', member: 'revenue_by_month' },
-        code: 'empty_query',
+        code: 'empty_query', // adr0112-ok: D6c build-probe diagnostics code
         message: 'Dashboard "sales_overview" widget "revenue_by_month" returns NO data from dataset "deal_metrics" although object "crm_deal" has rows — the widget will render empty for every user.',
         fix: 'Run the dataset query directly to see the compiled strategy/SQL; check the dataset\'s measure/dimension field bindings against object "crm_deal".',
         userMessage: 'The widget "Revenue by month" on dashboard "Sales overview" shows no data, although "Deals" has records.',
@@ -1532,7 +1532,7 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
     }
     // The finding is `RuntimeBuildIssueSchema` by reference, so a lossy one
     // fails the whole parse instead of surviving with members dropped.
-    const lossy = { issues: [{ code: 'empty_query', severity: 'error' }], checked: { seeds: 0, views: 0, widgets: 1, objects: 0 } };
+    const lossy = { issues: [{ code: 'empty_query', severity: 'error' }], checked: { seeds: 0, views: 0, widgets: 1, objects: 0 } }; // adr0112-ok: D6c build-probe diagnostics code
     expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, probes: lossy }).success).toBe(false);
   });
 
@@ -1633,7 +1633,7 @@ describe('RuntimeBuildIssueSchema / BuildProbeReportSchema (the ADR-0038 L3 prob
     severity: 'error',
     artifact: { type: 'seed', name: 'crm_deal_sample' },
     ref: { type: 'object', name: 'crm_deal' },
-    code: 'seed_not_applied',
+    code: 'seed_not_applied', // adr0112-ok: D6c build-probe diagnostics code
     message: 'Seed "crm_deal_sample" was published but object "crm_deal" has no rows — the sample data never materialized.',
     fix: 'Check the publish response\'s seedApplied for the load error, fix the seed rows (field names/types), and republish the seed.',
   };
@@ -1653,7 +1653,7 @@ describe('RuntimeBuildIssueSchema / BuildProbeReportSchema (the ADR-0038 L3 prob
       layer: 'runtime',
       severity: 'warning',
       artifact: { type: 'dashboard', name: 'sales_overview, ops_overview' },
-      code: 'probes_unavailable',
+      code: 'probes_unavailable', // adr0112-ok: D6c build-probe diagnostics code
       message: '3 dashboard widget(s) could not be probed: no analytics service is mounted on this kernel.',
     };
     expect(RuntimeBuildIssueSchema.parse(bare)).toEqual(bare);
