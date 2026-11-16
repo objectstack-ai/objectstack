@@ -1891,7 +1891,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             // [#30281] No user starts a boot heal: the setting, then this
             // package's declared default locale.
-            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
+            // [#34405] Honouring the landed-key record, as the runtime's boot
+            // seed does: a new database holds no record and is healed whole,
+            // while seed rows a person deleted from every seeded object stay
+            // deleted.
+            const summary = await this.runInlineSeed(ctx, datasets, 'honour', undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -2131,7 +2135,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
         // [#30281] `options.userId` is the organization's founder when the
         // org-scoping middleware knows one — the AppPlugin replayer's shape.
-        return async (organizationId: string, options?: { userId?: string }) => {
+        // [#34405] `options.reseed` is the deliberate re-seed the AppPlugin
+        // replayer takes too: every missing row, whatever the landed-key record
+        // says. Every other replay honours that record.
+        return async (organizationId: string, options?: { userId?: string; reseed?: boolean }) => {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
@@ -2157,7 +2164,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // [#30324] The founder owns the rows: the organization's first
             // admin, the one person this door is handed. With none, the rows
             // keep no owner, as before.
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+            const s = await this.runInlineSeed(ctx, datasetsNow, options?.reseed === true ? 'reseed' : 'honour', organizationId, { userId: options?.userId }, {
                 userId: options?.userId ?? null,
                 door: 'per-organization seed replay',
                 none: `the replay of organization ${organizationId} names no founder`,
@@ -3289,6 +3296,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
         // is what made older ledgers claim "no sample data" over a seeded DB.
+        // [#34405] A row the landed-key record keeps out (a person deleted it)
+        // is in `skipped` too; the listing reads the rows, not this flag.
         const seededRows = (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) + (seededSummary.seeded.skipped ?? 0);
         if (seededSummary.seeded.mode === 'inline' && seededRows > 0) {
             entry.withSampleData = true;
@@ -5371,7 +5380,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             organizationId = resolved;
         }
         try {
-            const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+            const s = await this.runInlineSeed(ctx, datasets, door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                 ...(userId ? { userId } : {}),
                 app,
             }, {
@@ -7132,7 +7141,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (!multiTenant || organizationId) {
                         // [#30281] The installing (or reseeding) user and this
                         // package's own declared default locale.
-                        const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                        // [#34405] The reseed re-seeds; the install and the
+                        // upgrade honour the landed-key record.
+                        const s = await this.runInlineSeed(ctx, datasets, opts.door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                             userId: opts.userId,
                             app: manifest,
                         }, {
@@ -7245,10 +7256,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * A, maintainer, 2026-11-05: the install paths
      * pick datasets by locale). Nothing answers ⇒ no locale, and every dataset
      * loads as before. A dataset without `locale` loads whatever it answers.
+     *
+     * [#34405, #31021] `landedKeys` is the loader's own option, passed by every
+     * caller, never defaulted: each load keeps the record of which seed rows
+     * landed in the organization it seeds (`sys_seed_landed_key`). `'honour'`
+     * — the install, the upgrade, the restart heal, the per-organization
+     * replay and an unmanaged copy's first load — does not insert again a
+     * recorded row that is now gone, because a person removed it; a key never
+     * recorded still lands, so a row an upgrade adds is inserted. `'reseed'` —
+     * the sample-data reseed and the replayer's `{ reseed: true }` — is the
+     * deliberate re-seed: it inserts every missing row and records it again.
+     * A row the record keeps out is counted in `skipped`.
      */
     private runInlineSeed = async (
         ctx: PluginContext,
         datasets: any[],
+        landedKeys: 'honour' | 'reseed',
         organizationId?: string,
         localeFrom: { userId?: string; app?: unknown } = {},
         owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
@@ -7269,7 +7292,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
-        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
