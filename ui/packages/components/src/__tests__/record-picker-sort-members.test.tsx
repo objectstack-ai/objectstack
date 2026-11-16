@@ -44,6 +44,9 @@ import { ComponentRegistry } from '@object-ui/core';
 // Registers `element:record_picker` at module scope, not in a hook
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../renderers';
+// The page renderer loads `@object-ui/react-runtime` lazily; loading it here
+// pays that transform during collection, not inside a case's clocked window.
+import '@object-ui/react-runtime';
 
 const makeAdapter = () => ({
   find: vi.fn().mockResolvedValue({ data: [] }),

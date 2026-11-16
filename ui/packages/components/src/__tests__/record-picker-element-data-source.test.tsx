@@ -28,6 +28,9 @@ import { AdapterCtx, SchemaRenderer } from '@object-ui/react';
 // Registers `element:record_picker` at module scope (not in a hook) — the
 // objectui#3010 rule.
 import '../renderers';
+// The page renderer loads `@object-ui/react-runtime` lazily; loading it here
+// pays that transform during collection, not inside a case's clocked window.
+import '@object-ui/react-runtime';
 
 const HOT_VIEW = {
   name: 'hot',
