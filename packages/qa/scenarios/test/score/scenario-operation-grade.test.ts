@@ -13,10 +13,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_CONFIRMATION_MEETS_PENDING,
   buildDeniesWrite,
+  gradeConfirmedWrite,
   gradeOperation,
   isWriteDenial,
   type AgentConfirmationRule,
   type AgentConfirmedObservation,
+  type ConfirmedWriteObservation,
   type DeclaredOutcome,
   type OperationObservation,
 } from '../../src/score/scenario-operation-grade.js';
@@ -378,5 +380,60 @@ describe('gradeOperation — pending_confirmation applied through the confirmati
     const OVERSTEP: DeclaredOutcome = { kind: 'refused', code: 'PERMISSION_DENIED' };
     const g = gradeOperation(OVERSTEP, APPLIED_VIA_GATE, { agentConfirmation: RULE });
     expect([g.pass, g.confirmation, g.checks.map((c) => c.check)]).toEqual([false, undefined, ['answer:refused:PERMISSION_DENIED', 'no-write']]);
+  });
+});
+
+describe('gradeConfirmedWrite — the write after the person confirmed a pending_confirmation operation (#34293)', () => {
+  const DELETE: AgentConfirmationRule['write'] = { kind: 'delete', object: 'contact', target: 'ct2' };
+  const UPDATE: AgentConfirmationRule['write'] = { kind: 'update', object: 'claim', target: 'c118', values: { status: 'paid', paid_on: '2026-10-31' } };
+  const deleted: ConfirmedWriteObservation = { answer: { kind: 'applied' }, writes: 1, changed: ['ct2'], target: null, via: ['delete_record'] };
+  const names = (g: ReturnType<typeof gradeConfirmedWrite>) => g.checks.map((c) => [c.check, c.pass]);
+
+  it('the target deleted and no other row written passes both checks, the route reported and not graded', () => {
+    const g = gradeConfirmedWrite(DELETE, deleted);
+    expect(names(g)).toEqual([['confirmed-write:applied', true], ['confirmed-write:rows', true]]);
+    expect(g.pass).toBe(true);
+    expect(g.checks[0]!.detail).toBe('applied, through delete_record');
+    expect(gradeConfirmedWrite(DELETE, { ...deleted, via: ['run_action democrm_delete_contact'] }).pass).toBe(true);
+  });
+
+  it('⛔ nothing written after the confirmation, or a second ask, fails both checks', () => {
+    const nothing: ConfirmedWriteObservation = { answer: { kind: 'pending_confirmation' }, writes: 0, changed: [], target: { id: 'ct2' }, via: [] };
+    const g = gradeConfirmedWrite(DELETE, nothing);
+    expect(names(g)).toEqual([['confirmed-write:applied', false], ['confirmed-write:rows', false]]);
+    expect(g.checks[1]!.detail).toBe('contact row ct2 was not written');
+  });
+
+  it('⛔ another row written, alone or beside the target, fails the rows check', () => {
+    expect(gradeConfirmedWrite(DELETE, { ...deleted, changed: ['ct3'], target: { id: 'ct2' } }).checks[1]).toMatchObject({ pass: false, detail: 'the turn also wrote contact row(s) ct3' });
+    expect(gradeConfirmedWrite(DELETE, { ...deleted, changed: ['ct2', 'ct3'] }).pass).toBe(false);
+  });
+
+  it('an update holds the declared values; the card\'s today is met by a run date the platform stamped, not one the agent wrote', () => {
+    const paid = (row: Record<string, unknown>, agentSet: string[]): ConfirmedWriteObservation => ({
+      answer: { kind: 'applied' },
+      writes: 1,
+      changed: ['c118'],
+      target: { id: 'c118', ...row },
+      via: ['run_action pay_claim'],
+      runDates: ['2026-11-16'],
+      agentSet: { claim: agentSet },
+    });
+    expect(gradeConfirmedWrite(UPDATE, paid({ status: 'paid', paid_on: '2026-10-31' }, ['status', 'paid_on']), { asOf: '2026-10-31' }).pass).toBe(true);
+    expect(gradeConfirmedWrite(UPDATE, paid({ status: 'paid', paid_on: '2026-11-16' }, ['status']), { asOf: '2026-10-31' }).pass).toBe(true); // stamped
+    const agentWrote = gradeConfirmedWrite(UPDATE, paid({ status: 'paid', paid_on: '2026-11-16' }, ['status', 'paid_on']), { asOf: '2026-10-31' });
+    expect(agentWrote.checks[1]).toMatchObject({ pass: false, detail: 'claim row c118: paid_on "2026-11-16", declared "2026-10-31"' });
+    expect(gradeConfirmedWrite(UPDATE, paid({ status: 'approved', paid_on: '2026-10-31' }, ['status']), { asOf: '2026-10-31' }).pass).toBe(false);
+  });
+
+  it('the temporary rule\'s own rows check reads as before, under its own name', () => {
+    const rule: AgentConfirmationRule = { write: DELETE, ask: { names: true, detail: 'names ct2' } };
+    const obs: OperationObservation = {
+      answer: { kind: 'applied' },
+      writes: 1,
+      agentConfirmed: { actions: [{ action: 'delete_contact', confirm: true, requiresConfirmation: true }], directWrites: [], changed: ['ct2'], target: null },
+    };
+    const g = gradeOperation({ kind: 'pending_confirmation' }, obs, { agentConfirmation: rule, acceptAgentConfirmation: true });
+    expect(g.checks.find((c) => c.check === 'confirmed-by-agent:rows')).toEqual({ check: 'confirmed-by-agent:rows', pass: true, detail: 'contact row ct2 deleted, no other row written' });
   });
 });

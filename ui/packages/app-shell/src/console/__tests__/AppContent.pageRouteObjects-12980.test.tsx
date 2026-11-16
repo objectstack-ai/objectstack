@@ -100,6 +100,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   };
 });
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { useActionModal } from '../../hooks/useActionModal';
@@ -168,7 +172,13 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : type === 'page' ? server.pages : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -286,7 +296,11 @@ describe('a page route reads the objects its page binds, never the whole registr
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
     await waitFor(() => expect(screen.getByTestId('cloud-only-entry')).toHaveTextContent('false'));
 
-    expect([...objectCalls()].sort()).toEqual([`object?package=${CRM}`, 'object/cloud_only', 'object/sys_user'].sort());
+    // objectstack#34244 — the `requiresObject` entry and the lookup target in
+    // presence reads; the unregistered `cloud_only` is never asked by name.
+    expect([...objectCalls()].sort()).toEqual(
+      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user', 'object/sys_user'].sort(),
+    );
   });
 
   it('(c) an object a block asks about outside the read set is read by name, and its link appears when it lands', async () => {

@@ -10,7 +10,9 @@
  *             → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, `askRepeats` times
  *             each, every operation once as its persona, each over the app's
- *             own MCP, and a probed
+ *             own MCP; a `pending_confirmation` operation the agent met by
+ *             asking first gets a second turn carrying the person's
+ *             confirmation, whose write is graded on its own; and a probed
  *             operation's declared write — the validation operation's and
  *             each permission overstep's — re-sent by the runner itself as
  *             that persona, `observeProbe`; an `applied` operation's too
@@ -47,16 +49,22 @@ import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
+  askedFirst,
+  flowRefusalOf,
   gradeCardAnswer,
   gradeCardInjection,
+  gradeConfirmedWrite,
   buildDeniesWrite,
   gradeCardOperation,
   INJECTION_AS_DATA_CHECK,
   isWriteDenial,
   readArtifactFacts,
+  refusalCodeOf,
   scoreCardArtifact,
   type CardTurn,
   type CheckResult,
+  type ConfirmedWriteGrade,
+  type ConfirmedWriteObservation,
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
@@ -64,12 +72,13 @@ import {
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
-import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
+import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
+  confirmPrompt,
   iteratePrompt,
   operationPrompt,
   personaHandles,
@@ -273,8 +282,41 @@ export interface OperationResult {
   observation?: OperationObservation;
   grade?: OperationGrade;
   turn?: TurnSummary;
+  /**
+   * The second turn of a `pending_confirmation` operation, sent only when the
+   * first one passed by asking first (`OperationGrade.confirmation` is
+   * `asked first`): the person confirms, and the turn's write is graded on
+   * its own ({@link ConfirmTurnResult}). Absent on every other operation, and
+   * on one whose first turn wrote, failed or measured nothing.
+   */
+  confirmTurn?: ConfirmTurnResult;
   error?: string;
 }
+
+/**
+ * The confirmation turn of a `pending_confirmation` operation
+ * ({@link OperationResult.confirmTurn}): a fresh turn as the same persona whose
+ * prompt carries the first turn's ask and reply and then the person's
+ * confirmation (`confirmPrompt`), its write observed and graded against the
+ * operation's declared write (`gradeCardConfirmedWrite`). Its own grade, never
+ * merged into the first turn's, so neither half hides the other.
+ */
+export interface ConfirmTurnResult {
+  /**
+   * Why the confirmed write measured nothing: the replayed recording holds no
+   * confirmation turn ({@link confirmationNotRecorded}), or the replay of it
+   * was not faithful (`ReplayNotFaithfulError`). Never a fail; the operation
+   * is then scored on its first turn alone, as before.
+   */
+  notMeasured?: string;
+  observation?: ConfirmedWriteObservation;
+  grade?: ConfirmedWriteGrade;
+  turn?: TurnSummary;
+  error?: string;
+}
+
+/** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
+export const confirmationNotRecorded = 'the recording holds no confirmation turn for this operation, so the confirmed write was not replayed';
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -772,6 +814,45 @@ export function actionGatesOf(built: unknown, op: Operation): Record<string, boo
   return gates;
 }
 
+/**
+ * The confirmation turn of a `pending_confirmation` operation, as the grader's
+ * `ConfirmedWriteObservation` (`gradeConfirmedWrite`), read the way
+ * `observe.ts` reads the first turn: the door's answer by its ordered rules
+ * (`observedAnswer`), the ids of the operation object's rows the turn added,
+ * removed or changed (keyed by `id`, every column but the clock), the target
+ * after it, the write doors that applied a write there (`run_action <name>`
+ * for a business action; reported, never graded), the dates the platform's
+ * clock read and the fields the turn's own writes set.
+ */
+export function observeConfirmedWrite(op: CardOperation, turn: ParsedTurn, before: readonly Row[], after: readonly Row[], runDates?: readonly string[]): ConfirmedWriteObservation {
+  const writes = countWrites(before, after);
+  const was = new Map(before.map((r) => [String(r.id), fingerprint(r)]));
+  const now = new Map(after.map((r) => [String(r.id), fingerprint(r)]));
+  const changed = [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
+  const applied = writeCallsOn(turn, op.object).filter(
+    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined,
+  );
+  const via = applied.map((c) => {
+    if (c.name !== 'run_action') return c.name;
+    let action: unknown;
+    try {
+      action = (JSON.parse(typeof c.output === 'string' ? c.output : JSON.stringify(c.output)) as { action?: unknown }).action;
+    } catch {
+      action = undefined;
+    }
+    return typeof action === 'string' ? `run_action ${action}` : c.name;
+  });
+  return {
+    answer: observedAnswer(turn, op.object, writes),
+    writes,
+    changed,
+    target: (op.target !== undefined ? after.find((r) => String(r.id) === op.target) : undefined) ?? null,
+    via,
+    ...(runDates !== undefined ? { runDates } : {}),
+    agentSet: agentSetOf(op, turn),
+  };
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -960,7 +1041,10 @@ export async function seedApp(
  * key is the one a single ask has. Every question is asked before any
  * operation writes, so each ask reads the same rows. A turn the seed takes out
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
- * once. The guardrails are graded over every turn that ran, each ask included.
+ * once; a `pending_confirmation` one the agent met by asking first is followed
+ * by its confirmation turn ({@link OperationResult.confirmTurn}). The
+ * guardrails are graded over every turn that ran, each ask and each
+ * confirmation turn included.
  * Every question and operation turn is sent in the prompt choice `choice`
  * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
@@ -1097,6 +1181,42 @@ export async function runHalf(
         if (res.grade.notMeasured !== undefined) res.notMeasured = res.grade.notMeasured;
         if (op.kind !== 'delete' && res.grade.checks.some((c) => c.notMeasured?.startsWith(buildDeniesWrite))) {
           res.buildDenial = { persona: op.actingAs, object: op.object, verb: op.kind };
+        }
+        // The agent asked first and wrote nothing: the person confirms, in a
+        // turn of its own, and that turn's write is graded on its own.
+        if (op.outcome.kind === 'pending_confirmation' && res.grade.confirmation === askedFirst) {
+          const confirmed: ConfirmTurnResult = {};
+          try {
+            const beforeConfirm = (await app.listRows(op.object)).rows as Row[];
+            const startedConfirm = new Date();
+            let second: ParsedTurn | undefined;
+            try {
+              second = await driver.ask({
+                ...ref,
+                step: op.id,
+                persona: op.actingAs,
+                confirmation: true,
+                prompt: confirmPrompt(card, op.id, turn.replyText, choice),
+                ...doorOf(op.actingAs),
+              });
+            } catch (e) {
+              if (e instanceof MissingRecordingError) confirmed.notMeasured = confirmationNotRecorded;
+              else if (e instanceof ReplayNotFaithfulError) {
+                confirmed.turn = summarize(e.turn);
+                confirmed.notMeasured = replayNotFaithful(e);
+              } else throw e;
+            }
+            if (second !== undefined) {
+              turns.push({ step: op.id, persona: op.actingAs, turn: second });
+              confirmed.turn = summarize(second);
+              const afterConfirm = (await app.listRows(op.object)).rows as Row[];
+              confirmed.observation = observeConfirmedWrite(op, second, beforeConfirm, afterConfirm, clockDates(startedConfirm, new Date()));
+              confirmed.grade = gradeConfirmedWrite(op, confirmed.observation, card.asOf !== undefined ? { asOf: card.asOf } : {});
+            }
+          } catch (e) {
+            confirmed.error = errText(e);
+          }
+          res.confirmTurn = confirmed;
         }
       } catch (e) {
         res.error = errText(e);

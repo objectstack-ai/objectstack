@@ -18,6 +18,7 @@ export const jaJP: TranslationData = {
         grp_account_developer: { label: '開発者' },
         grp_account_ai_assistant: { label: 'AI アシスタント' },
         nav_account_profile: { label: 'プロフィール' },
+        nav_account_mobile_app: { label: 'モバイルアプリ' },
         nav_account_notifications: { label: '通知' },
         nav_account_approvals: { label: '承認待ち' },
         nav_account_memberships: { label: '所属組織' },
