@@ -21,6 +21,9 @@
 // test reads the store back afterwards.
 
 import { describe, it, expect, vi } from 'vitest';
+// The protocol module reaches `@objectstack/lint` by a dynamic import; its first
+// load is paid here, at collection, not inside a case's clocked window.
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
