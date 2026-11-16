@@ -24,8 +24,6 @@ import {
 } from './lookupRecordReference.js';
 import type { RecordPickerFilterColumn } from './RecordPickerDialog.js';
 
-/** The record a host that edits none hands `{ $record }` resolution: nothing to read. */
-const NO_EDITED_RECORD: Readonly<Record<string, unknown>> = Object.freeze({});
 import { PeoplePicker } from './PeoplePicker.js';
 import { useRecordQuery } from './useRecordQuery.js';
 import { objectResolvesSearch } from './searchOffer.js';
@@ -49,6 +47,9 @@ import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useH
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
+
+/** The record a host that edits none hands `{ $record }` resolution: nothing to read. */
+const NO_EDITED_RECORD: Readonly<Record<string, unknown>> = Object.freeze({});
 
 export interface LookupOption {
   value: string | number;
