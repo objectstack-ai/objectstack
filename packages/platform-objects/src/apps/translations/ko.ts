@@ -18,6 +18,7 @@ export const ko: TranslationData = {
         grp_account_developer: { label: '개발자' },
         grp_account_ai_assistant: { label: 'AI 어시스턴트' },
         nav_account_profile: { label: '프로필' },
+        nav_account_mobile_app: { label: '모바일 앱' },
         nav_account_notifications: { label: '알림' },
         nav_account_approvals: { label: '내 승인 대기' },
         nav_account_memberships: { label: '내 조직' },
