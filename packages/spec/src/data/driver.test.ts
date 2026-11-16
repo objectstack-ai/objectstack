@@ -61,6 +61,10 @@ const RETIRED_BITS = [
  *
  * `aggregationFilter` is the fifth, under the same rule: `engine.aggregate`
  * reads it (with method presence) to send a per-measure filter to the driver.
+ *
+ * [#33697] `zonedDateBucketing` is the sixth, under the same rule:
+ * `engine.aggregate` reads it (with method presence) to send a date bucket in
+ * a non-UTC reference zone to the driver (ADR-0053 Phase 2 D2 as amended).
  */
 const LIVE_BITS = [
   'queryDateGranularity',
@@ -68,6 +72,7 @@ const LIVE_BITS = [
   'batchSchemaSync',
   'transactionsUnsupported',
   'aggregationFilter',
+  'zonedDateBucketing',
 ] as const;
 
 describe('DriverCapabilitiesSchema', () => {
@@ -78,6 +83,7 @@ describe('DriverCapabilitiesSchema', () => {
       batchSchemaSync: true,
       transactionsUnsupported: true,
       aggregationFilter: true,
+      zonedDateBucketing: true,
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -95,13 +101,19 @@ describe('DriverCapabilitiesSchema', () => {
     expect(parsed).not.toHaveProperty('transactionsUnsupported');
     // Absent = the engine aggregates a filtered measure in memory, as before the bit.
     expect(parsed).not.toHaveProperty('aggregationFilter');
+    // [#33697] Absent = the engine buckets a non-UTC zone in memory, as before the bit.
+    expect(parsed).not.toHaveProperty('zonedDateBucketing');
   });
 
   it('refuses a non-boolean aggregationFilter', () => {
     expect(DriverCapabilitiesSchema.safeParse({ aggregationFilter: 'yes' }).success).toBe(false);
   });
 
-  it('declares exactly the audited shape: 5 live bits + 31 tombstones', () => {
+  it('refuses a non-boolean zonedDateBucketing', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ zonedDateBucketing: 'postgres' }).success).toBe(false);
+  });
+
+  it('declares exactly the audited shape: 6 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -202,7 +214,7 @@ describe('tsc channel: the retired bits are unwritable in DriverCapabilities', (
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
     // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
-    // plus the live bits (5 since `aggregationFilter`).
+    // plus the live bits (6 since `zonedDateBucketing`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];
