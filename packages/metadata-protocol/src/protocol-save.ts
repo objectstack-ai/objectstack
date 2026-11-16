@@ -89,7 +89,7 @@ import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-ob
 import { servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessContentPackage, shippingPackageIds } from './protocol-environment-rows.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { PackageScopedNameRefusedError } from '@objectstack/core';
+import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
@@ -2862,9 +2862,10 @@ export class ProtocolSaveFacet {
 /**
  * [#32605, epic ruling 6781691009 on #32354, ADR-0150 D3/D4/D5] THE WRITE
  * ADDRESS of a publish-mode save naming no package, for a name a DISABLED
- * package also holds: the address the read naming no package serves, so the
- * save writes exactly the row the next read answers. A disabled package holds
- * nothing an address reaches, so it is never the address and never named.
+ * package also holds: in the cells below, the address the read naming no
+ * package serves, so the save writes the row the next read answers. A
+ * disabled package holds nothing an address reaches, so it is never the
+ * address and never named.
  *
  *  - The read's own judgment first ({@link servedAddressJudgment}, the one
  *    #32183 and #32354 gave the reads): its served holder is the address; its
@@ -2877,9 +2878,15 @@ export class ProtocolSaveFacet {
  *    the package-unbound row when one is stored (the save edits it, as the
  *    read serves it), else the one enabled package that ships the name (the
  *    read's content package, {@link packagelessContentPackage}).
- *  - `undefined` leaves the address to {@link packagelessAddress}, as before:
- *    no disabled holder, or one only disabled packages hold (no served holder
- *    to take the write; the save keeps naming that package, as it did).
+ *  - `undefined` leaves the address to {@link packagelessAddress} and
+ *    {@link packagelessHolderRefusal}: no disabled holder, or one only
+ *    disabled packages hold (no served holder to take the write; that judgment
+ *    refuses it naming no package).
+ *
+ * Known gap: two or more ENABLED packages hold the name and the stored rows
+ * are bound to a disabled package and to exactly one of them. The enabled
+ * bindings above pick that one (the save answers 200) where the read refuses
+ * `409` naming every enabled holder. A follow-up card is filed.
  *
  * Without it the save door counted the disabled holder as a holder: over no
  * stored row it wrote a package-unbound row (an environment-own item that
@@ -2944,8 +2951,10 @@ export function disabledHoldersOnlyRefusal(
  * [ADR-0150 D3/D5 and red line 2] THE HOLDERS a write naming no package
  * counts before it takes its address from the stored rows' bindings
  * ({@link packagelessAddress}): the holders the read naming no package
- * counts, so the bare save (publish and draft mode) and the bare delete answer
- * the name as the bare read does.
+ * counts, so the bare save (publish and draft mode), the bare delete and the
+ * bare draft discard answer as the bare read does in the two states below,
+ * whether or not a row is stored at the address (over none, the delete and
+ * the discard are refused too, not answered the no-op receipt).
  * Asked after {@link servedPackagelessSaveAddress} (a name an enabled and a
  * disabled package both hold) and after the rows' own refusal (two or more
  * bindings), so neither answer moves.
@@ -2964,6 +2973,11 @@ export function disabledHoldersOnlyRefusal(
  *    row stored at the address or the environment's own item (ADR-0150 D3
  *    (a): the row the write edits), a type the registry does not read by
  *    package, or a registry without the reads.
+ *
+ * Known gap: with an enabled and a disabled holder, the draft save and the
+ * delete have no {@link servedPackagelessSaveAddress} step and still take
+ * their address from the rows, and that step's own gap stands for the publish
+ * save. A follow-up card is filed.
  */
 export function packagelessHolderRefusal(
     host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf'>,
@@ -2984,9 +2998,10 @@ export function packagelessHolderRefusal(
         try {
             registry.resolveItem(type, name, null, member);
         } catch (error) {
-            if (!(error instanceof PackageScopedNameRefusedError)) throw error;
-            const held = error.refusal.reason === 'ambiguous-in-environment'
-                ? error.refusal.candidates.flatMap((candidate) => (candidate.kind === 'package' ? [candidate.packageId] : []))
+            const refusal = packageScopedRefusalOf(error);
+            if (refusal === undefined) throw error;
+            const held = refusal.reason === 'ambiguous-in-environment'
+                ? refusal.candidates.flatMap((candidate) => (candidate.kind === 'package' ? [candidate.packageId] : []))
                 : [];
             if (held.length > 1) return packagelessAddressAmbiguityRefusal(verb, shownType, name, held);
         }

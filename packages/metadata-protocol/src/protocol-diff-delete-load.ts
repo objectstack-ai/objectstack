@@ -735,8 +735,10 @@ export class ProtocolDiffDeleteLoadFacet {
                 // read naming no package counts, as the save door asks them
                 // ({@link packagelessHolderRefusal}): two or more enabled holders
                 // are refused naming them, and a name only disabled packages hold
-                // is refused naming none, never one row removed. A package-unbound row at the address is
-                // the environment's own, and its removal is left as it was.
+                // is refused naming none, never one row removed. Over no stored
+                // row too (the delete and the draft discard answered the no-op
+                // receipt). A package-unbound row at the address is the
+                // environment's own, and its removal is left as it was.
                 if (request.packageId == null) {
                     const holderRefusal = packagelessHolderRefusal(
                         host, 'delete', request.type, singularTypeForRepo, request.name, member, rowsAtAddress,
