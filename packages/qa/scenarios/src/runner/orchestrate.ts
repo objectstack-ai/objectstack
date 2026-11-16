@@ -5,7 +5,9 @@
  *
  *   scratch   scaffold → the agent builds from the card prompt → `os validate`,
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
- *             artifact → boot, seed, one user + key per persona → the Run half
+ *             artifact (with a failed check per roll-up it leaves readable
+ *             over child data the card withholds, `rollupSourceCharges`)
+ *             → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, `askRepeats` times
  *             each, every operation once as its persona, each over the app's
  *             own MCP, and a probed
@@ -38,6 +40,9 @@
  * Scoring is `@objectstack/scenarios/score` (ruling D on #30291) and nothing
  * else; this module only gathers what the graders take.
  */
+
+import { resolveStackCollection } from '@objectstack/core';
+import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
 
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
@@ -199,7 +204,32 @@ export interface BuildHalf {
   score: ScenarioArtifactScore | null;
   /** The card's reference cycles this build made required on every side: its seed cannot load them (a Build finding). */
   requiredCycles?: SeedLookup[][];
+  /**
+   * Each roll-up the build leaves readable to a persona over child data the
+   * card withholds from that persona ({@link rollupSourceCharges}): a failed
+   * Build check apiece, out of passed and in total, and a Build finding.
+   * Absent when there is none.
+   */
+  rollupSourceUnreadable?: RollupSourceCharge[];
   error?: string;
+}
+
+/**
+ * One standing `security-rollup-source-unreadable` finding charged to the
+ * build ({@link rollupSourceCharges}): the persona whose permission set reads
+ * the roll-up, the roll-up column, and what of its child the card withholds
+ * from that persona. `finding` is the rule's own report, carried verbatim.
+ */
+export interface RollupSourceCharge {
+  persona: string;
+  permissionSet: string;
+  /** The roll-up column, `parent.field`. */
+  rollup: string;
+  /** The roll-up's child object. */
+  child: string;
+  /** What the card withholds from the persona: the child object, or one child field (`child.field`). */
+  withheld: { object: string } | { field: string };
+  finding: Pick<RollupSourceVisibilityFinding, 'rule' | 'where' | 'path' | 'message'>;
 }
 
 export interface QuestionResult {
@@ -443,6 +473,105 @@ export function requiredCyclesOf(scenario: LoadedScenario, artifact: unknown): S
   return required ? seedPlan(scenario.card, required).unseedable : [];
 }
 
+/** An object or field machine name, as the spec spells one (snake_case). */
+const ITEM = '[a-z_][a-z0-9_]*';
+
+/**
+ * `security-rollup-source-unreadable`'s report, read against the rule's own
+ * wording (`validate-rollup-source-visibility.ts` in `@objectstack/lint`):
+ * `where` names the set and the roll-up column; the message's first clause
+ * names the roll-up's child, and which of it the set cannot read — the child
+ * object (`… cannot read object "C"`), the aggregated child field (`… summarizes
+ * "C.f", which permission set "S" cannot read`) or a child field the roll-up's
+ * filter tests (`… filtered on "C.f", which …`). The suite runs the rule
+ * itself on each arm, so a change of wording fails there.
+ */
+const ROLLUP_WHERE = new RegExp(`^permission set "([^"]+)" · summary field "(${ITEM}\\.${ITEM})"$`);
+const ROLLUP_OBJECT_GATE = new RegExp(`^"${ITEM}\\.${ITEM}" (?:summarizes "(${ITEM})\\.(${ITEM})"|counts "(${ITEM})" records), and permission set "[^"]+" cannot read object "(${ITEM})"`);
+const ROLLUP_FIELD_GATE = new RegExp(
+  `^"${ITEM}\\.${ITEM}" (?:summarizes "(${ITEM})\\.(${ITEM})"(?: over rows filtered on "(${ITEM})\\.(${ITEM})")?|counts "(${ITEM})" records filtered on "(${ITEM})\\.(${ITEM})"), which permission set "[^"]+" cannot read`,
+);
+
+/** One `security-rollup-source-unreadable` finding, read: the set, the roll-up, its child, and what of the child the set cannot read. */
+export interface RollupSourceReading {
+  permissionSet: string;
+  rollup: string;
+  child: string;
+  /** The child fields the finding names the roll-up reading: the aggregated one, and the filtered one the set cannot read. */
+  childFields: string[];
+  /** The child object, or the one child field, the set cannot read. */
+  unreadable: { object: string } | { field: string };
+}
+
+/**
+ * Read a `security-rollup-source-unreadable` finding against the rule's
+ * wording; throws, naming the finding, when it does not read — a finding the
+ * runner cannot read is never silently left uncharged.
+ */
+export function readRollupSourceFinding(f: Pick<RollupSourceVisibilityFinding, 'where' | 'message'>): RollupSourceReading {
+  const where = ROLLUP_WHERE.exec(f.where);
+  const object = ROLLUP_OBJECT_GATE.exec(f.message);
+  if (where && object) {
+    const child = object[4]!;
+    const aggregated = object[1] === child ? object[2] : undefined;
+    return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: aggregated ? [aggregated] : [], unreadable: { object: child } };
+  }
+  const field = ROLLUP_FIELD_GATE.exec(f.message);
+  if (where && field) {
+    if (field[5] !== undefined) {
+      // A filtered count: the set cannot read the filtered field.
+      return { permissionSet: where[1]!, rollup: where[2]!, child: field[6]!, childFields: [field[7]!], unreadable: { field: field[7]! } };
+    }
+    const [child, aggregated, filteredChild, filtered] = [field[1]!, field[2]!, field[3], field[4]];
+    // `… over rows filtered on "C.g", which …`: the set reads the aggregated field and cannot read the filtered one.
+    if (filteredChild !== undefined && filtered !== undefined) {
+      return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: [aggregated, filtered], unreadable: { field: filtered } };
+    }
+    return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: [aggregated], unreadable: { field: aggregated } };
+  }
+  throw new Error(`a ${SECURITY_ROLLUP_SOURCE_UNREADABLE} finding the runner cannot read (the rule's wording moved?): ${f.where}: ${f.message}`);
+}
+
+/**
+ * The standing `security-rollup-source-unreadable` findings a build is charged
+ * for (the maintainer's ruling on #33818: the build's fault, charged on the
+ * Build side). The rule (`@objectstack/lint` `validateRollupSourceVisibility`)
+ * runs on the built artifact itself — its `objects`, `objectExtensions` and
+ * `permissions`, read through `resolveStackCollection` as the scorer reads
+ * them — so nothing depends on how much of `os build`'s output was kept, and
+ * no model or network is consulted (cloud#3600). Deterministic.
+ *
+ * A finding is charged when the set it names is a card persona's own
+ * (`permissionSetName`) and that persona's `hidden` withholds the roll-up's
+ * child object, or a child field the finding names the roll-up reading and the
+ * set not reading: the aggregated field when the set cannot read the child
+ * object or that field, the filtered field when it cannot read that one. Any
+ * other finding — a set no persona holds, a child the card lets the persona
+ * read, the `info` row-scope arm — is not charged.
+ */
+export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown): RollupSourceCharge[] {
+  const card = scenario.card;
+  const personas = new Map(card.run.personas.map((p) => [permissionSetName(card, p.id), p] as const));
+  const stack = {
+    objects: resolveStackCollection(artifact, 'objects'),
+    objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
+    permissions: resolveStackCollection(artifact, 'permissions'),
+  };
+  const out: RollupSourceCharge[] = [];
+  for (const f of validateRollupSourceVisibility(stack)) {
+    if (f.rule !== SECURITY_ROLLUP_SOURCE_UNREADABLE) continue;
+    const r = readRollupSourceFinding(f);
+    const persona = personas.get(r.permissionSet);
+    if (!persona) continue;
+    const named = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
+    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && named.includes(h.field));
+    const withheld = (persona.hidden.objects ?? []).includes(r.child) ? { object: r.child } : hiddenField ? { field: `${hiddenField.object}.${hiddenField.field}` } : undefined;
+    if (!withheld) continue;
+    out.push({ persona: persona.id, permissionSet: r.permissionSet, rollup: r.rollup, child: r.child, withheld, finding: { rule: f.rule, where: f.where, path: f.path, message: f.message } });
+  }
+  return out;
+}
+
 /**
  * The values a persona's hidden fields hold in the seed — the leak grader's
  * `hidden.values`, which it leaves to the caller to compute. Only distinctive
@@ -684,7 +813,11 @@ async function authorInto(half: BuildHalf, author: () => Promise<ParsedTurn>): P
   }
 }
 
-/** Score `artifact` against `scoreAgainst`, and name the card's reference cycles it made required on every side. */
+/**
+ * Score `artifact` against `scoreAgainst`, name the card's reference cycles it
+ * made required on every side, and charge each roll-up it leaves readable over
+ * child data the card withholds ({@link rollupSourceCharges}).
+ */
 function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: LoadedScenario, artifact: unknown): void {
   try {
     half.score = scoreCardArtifact(scoreAgainst, artifact);
@@ -693,6 +826,12 @@ function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: Loaded
   }
   const cycles = requiredCyclesOf(seeded, artifact);
   if (cycles.length) half.requiredCycles = cycles;
+  try {
+    const charges = rollupSourceCharges(scoreAgainst, artifact);
+    if (charges.length) half.rollupSourceUnreadable = charges;
+  } catch (e) {
+    half.error = half.error ?? `rollup-source: ${errText(e)}`;
+  }
 }
 
 async function buildHalf(
@@ -999,9 +1138,13 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
  */
 export const modeDir = (card: { id: string }, mode: ModeRun['mode']): string => `${card.id.replace(/_/g, '-')}-${mode}`;
 
-/** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
+/**
+ * Did the build pass — every counted check of the card's `expect`, no bare
+ * item name, and no roll-up left readable over child data the card withholds
+ * ({@link BuildHalf.rollupSourceUnreadable})?
+ */
 export const buildPassed = (b: BuildHalf | undefined): boolean =>
-  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass);
+  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass) && !b.rollupSourceUnreadable?.length;
 
 async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<{ mode: ModeRun; verified?: unknown }> {
   const mode: ModeRun = { mode: 'scratch', findings: [] };

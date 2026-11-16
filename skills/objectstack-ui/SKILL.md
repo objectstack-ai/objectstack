@@ -101,8 +101,9 @@ every behaviour is derived from the DATA MODEL — computed columns, catalog
 typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
 stack: **objectstack-data → Relationships → Inline Editing**. Three things are
 authored on this side: a trailing **ghost** row always exists, so never add an
-"Add line" button (typing in the ghost materialises a row; an untouched one is
-never persisted); `autofill: false` opts one column out of the typeahead copy;
+"Add line" button to the grid (typing in the ghost materialises a row; an
+untouched one is never persisted; a record-header action that inserts a priced
+line is [Actions](./rules/actions.md)); `autofill: false` opts one column out of the typeahead copy;
 and the form's `taxRateField` overrides which parent field drives the totals.
 
 **Read side — the record page.** Child relationships are related lists on the

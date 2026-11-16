@@ -20,7 +20,6 @@
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_webhook.fields.id.label": "9a4c8ec2a2567b95",
   "objects.sys_webhook.fields.method.options.delete": "f59e059ed51f9bfc",
-  "objects.sys_webhook.fields.method.options.get": "470848255971c548",
   "objects.sys_webhook.fields.method.options.patch": "7de3603749decb30",
   "objects.sys_webhook.fields.method.options.post": "004b24eab36d26a4",
   "objects.sys_webhook.fields.method.options.put": "04d929ecae7aa435",

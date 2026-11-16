@@ -61,6 +61,32 @@
  * carries a clash is refused until the clash is fixed. Nothing on the boot or
  * registration path runs the author-time rules, so an app that is already
  * installed keeps loading and serving.
+ *
+ * ## The `object_extension` door
+ *
+ * An extension published at runtime (Studio's add-field on a `.custom` pair,
+ * the `/meta` doors, an MCP or AI author) adds fields to an object it does not
+ * own, so it can add one under a label the target already shows, `owner_id`
+ * included, or two of its own fields under one label the target does not
+ * show; both are refused. The door hands the gate the written entry as the stack's only
+ * `objectExtensions` member and the live objects as the registry serves them,
+ * the target without the written package's own stored extension (which the
+ * write replaces), so the fold below judges the target as it will be served
+ * after the write. Two inputs make that the build's fold: the target's OTHER
+ * packages' extensions with their priorities (`storedObjectExtensions`), so a
+ * field two packages tie on is left out as the build leaves it out, and the
+ * injected columns read back to the platform's own definitions
+ * (`stripInjectedSystemColumns`, as the expression rule reads the served
+ * objects there), so `owner_id` is named as the platform's column. The write
+ * is charged only with a clash its entry creates: a clash the target already
+ * carried is in the gate's baseline too, with the same message, and a group
+ * every member of which already shared the label on the target (what is left
+ * of a clash after the entry took a member out, by a new label, `hidden: true`
+ * or a tie at the deciding priority) is not reported, since its message names
+ * fewer fields than the baseline's and would otherwise read as new. The door
+ * carries no `translations`, so it compares the authored labels and the
+ * platform's own translations of its columns only; a clash a translation
+ * bundle creates is the build's to find, and the hint offers no bundle.
  */
 
 import {
@@ -69,7 +95,14 @@ import {
   type ObjectLike,
   type TranslationBundle,
 } from '@objectstack/spec/system';
-import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
+import {
+  objectExtensionsByTarget,
+  objectsAsServed,
+  objectsWithoutTiedFields,
+  recordsOf,
+  type StoredObjectExtension,
+} from './object-graph.js';
 import { injectedColumnDefsFor } from './system-fields.js';
 
 type AnyRec = Record<string, unknown>;
@@ -160,51 +193,120 @@ function quoteList(names: readonly string[]): string {
   return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
 }
 
+/** What the `object_extension` publish door states beyond the stack (see the module note). */
+export interface DuplicateFieldLabelOptions {
+  /**
+   * The written extension's target's other packages' published extensions,
+   * folded among the written entry by priority. Stated by the door only.
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
+  /**
+   * The publish door's `object_extension` write: the objects are the
+   * registry's SERVED definitions (the injected columns carried as declared
+   * fields), read back to the authored shape first; and a group the written
+   * entry did not create (every member already shared the label on the
+   * target) is not reported. Set by the door on that write only.
+   */
+  extensionWrite?: boolean;
+}
+
 /**
  * Report every object that serves two or more visible fields under one label.
  * Returns a (possibly empty) list of findings; never throws.
  */
 export function lintDuplicateFieldLabels(stack: AnyRec): DuplicateFieldLabelFinding[] {
+  return duplicateFieldLabelFindings(stack);
+}
+
+/**
+ * One object's clashing label groups per pass (the authored pass, then each
+ * locale), over `servedObj`'s fields with the injected columns beneath them.
+ */
+function clashPassesOf(
+  obj: AnyRec,
+  objectName: string,
+  servedObj: AnyRec | undefined,
+  bundle: TranslationBundle,
+): { injectedNames: Set<string>; passes: Map<string, Map<string, string[]>> } {
+  // The injected columns first, so an authored field of the same name
+  // replaces the platform's definition, as it does at registration.
+  const fields: Record<string, AnyRec> = {};
+  const injectedNames = new Set<string>();
+  for (const [name, def] of injectedColumnDefsFor(obj)) {
+    fields[name] = { ...def };
+    injectedNames.add(name);
+  }
+  for (const f of recordsOf(servedObj?.fields)) {
+    if (typeof f.name !== 'string') continue;
+    fields[f.name] = f;
+    injectedNames.delete(f.name);
+  }
+  const passes = new Map<string, Map<string, string[]>>();
+  passes.set(AUTHORED, clashes(visibleLabels(fields)));
+  for (const locale of localesOf(bundle)) {
+    const doc = translateObject({ name: objectName, fields } as ObjectLike, bundle, { locale });
+    passes.set(locale, clashes(visibleLabels((doc.fields ?? {}) as Record<string, AnyRec>)));
+  }
+  return { injectedNames, passes };
+}
+
+/**
+ * {@link lintDuplicateFieldLabels} with what the `object_extension` publish
+ * door states beyond the stack. The registry entry calls this; it is not on
+ * the package's entries, so the published signature is unchanged.
+ */
+export function duplicateFieldLabelFindings(
+  stack: AnyRec,
+  options: DuplicateFieldLabelOptions = {},
+): DuplicateFieldLabelFinding[] {
   const findings: DuplicateFieldLabelFinding[] = [];
   if (!isRec(stack)) return findings;
+  const extensionWrite = options.extensionWrite === true;
+  if (extensionWrite) {
+    stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
+  }
+  const stored = options.storedObjectExtensions ?? [];
   const declared = recordsOf(stack.objects);
-  const served = objectsWithoutTiedFields(objectsAsServed(stack));
+  const served = objectsWithoutTiedFields(objectsAsServed(stack, stored));
+  // On an extension write, each target as served WITHOUT the written entry:
+  // the same objects and stored extensions, no `objectExtensions` of the
+  // stack's own. Index-aligned with `declared` (the fold maps one to one).
+  // Read only for the objects the written entry extends: any other object's
+  // clashes are the same before and after the write, and the gate's
+  // differential already leaves them uncharged.
+  const before = extensionWrite
+    ? objectsWithoutTiedFields(objectsAsServed({ objects: stack.objects }, stored))
+    : undefined;
+  const writtenTargets = extensionWrite ? new Set(objectExtensionsByTarget(stack).keys()) : undefined;
 
   declared.forEach((obj, i) => {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     if (!objectName) return;
 
-    // The injected columns first, so an authored field of the same name
-    // replaces the platform's definition, as it does at registration.
-    const fields: Record<string, AnyRec> = {};
-    const injectedNames = new Set<string>();
-    for (const [name, def] of injectedColumnDefsFor(obj)) {
-      fields[name] = { ...def };
-      injectedNames.add(name);
-    }
-    for (const f of recordsOf(served[i]?.fields)) {
-      if (typeof f.name !== 'string') continue;
-      fields[f.name] = f;
-      injectedNames.delete(f.name);
-    }
-
     const bundle = fieldBundleFor(stack, objectName);
+    const { injectedNames, passes: candidatePasses } = clashPassesOf(obj, objectName, served[i], bundle);
+    const beforePasses =
+      before && writtenTargets?.has(objectName) ? clashPassesOf(obj, objectName, before[i], bundle).passes : undefined;
+
     // group key (sorted field names + label) → the passes it clashes in.
     const groups = new Map<string, { names: string[]; label: string; passes: string[] }>();
-    const record = (pass: string, labels: ReadonlyMap<string, string>): void => {
-      for (const [label, names] of clashes(labels)) {
+    for (const [pass, clashing] of candidatePasses) {
+      for (const [label, names] of clashing) {
+        // [#33644] On an extension write a group every member of which
+        // already shared this label on the target in this pass is no clash
+        // the entry created: it is the target's own, or what is left of it
+        // after the entry took a member out (relabelled, hidden, or tied at
+        // the deciding priority). The gate's differential compares whole
+        // messages, which name every member, so a shrunken group would
+        // otherwise read as new.
+        const prior = beforePasses?.get(pass)?.get(label);
+        if (prior && names.every((n) => prior.includes(n))) continue;
         const sorted = [...names].sort();
         const key = `${sorted.join('\u0000')}\u0001${label}`;
         const group = groups.get(key) ?? { names: sorted, label, passes: [] };
         group.passes.push(pass);
         groups.set(key, group);
       }
-    };
-
-    record(AUTHORED, visibleLabels(fields));
-    for (const locale of localesOf(bundle)) {
-      const doc = translateObject({ name: objectName, fields } as ObjectLike, bundle, { locale });
-      record(locale, visibleLabels((doc.fields ?? {}) as Record<string, AnyRec>));
     }
 
     for (const { names, label, passes } of groups.values()) {
@@ -228,7 +330,10 @@ export function lintDuplicateFieldLabels(stack: AnyRec): DuplicateFieldLabelFind
             : ''),
         hint:
           'Give each visible field its own label' +
-          (authored ? '' : ' (in the translation bundle too, for a locale only a translation clashes in)') +
+          // The extension door reads no translation bundle (the clash it finds
+          // in a locale is the platform's own translation), so its hint
+          // offers none: a bundle is judged at `os build` / `os validate`.
+          (authored || extensionWrite ? '' : ' (in the translation bundle too, for a locale only a translation clashes in)') +
           ', or set `hidden: true` on the one readers should not see, or drop the duplicate field' +
           (injected.length > 0
             ? ` and use the platform's ${quoteList(injected)} instead of declaring a second field for the same thing.`

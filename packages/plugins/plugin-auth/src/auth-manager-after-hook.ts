@@ -43,7 +43,8 @@
 import { codeSelfServiceRefusal } from './account-self-service-refusal-code.js';
 import { BANNED_USER_CODE, causeBannedUserRefusal } from './banned-user-refusal-cause.js';
 import type { AuthManager } from './auth-manager.js';
-import { refusalCodeOf, SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
+import { refusalCodeOf } from './auth-session-audit.js';
+import { passwordSignInDoorOf } from './auth-manager-sign-in-lockout.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
@@ -235,6 +236,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   if (ctx?.path === '/sso/register' || ctx?.path === '/sso/update-provider') await this.settleSsoSignOutOfIdp(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
+  // On every password door (`/sign-in/email`, `/sign-in/phone-number`).
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
   // the after-hook with it on `ctx.context.returned`; a success leaves
   // the session payload there. The gate stamped this attempt as a
@@ -243,8 +245,9 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // names is neither: the password passed and a policy then refused the
   // sign-in, so the stamp is handed back and the counter is left as it
   // stood. Its `login_failed` row is still written below.
-  if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-    const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
+  const passwordDoor = passwordSignInDoorOf(ctx);
+  if (passwordDoor) {
+    const { door, identifier: email } = passwordDoor;
     if (email) {
       let succeeded = true;
       try {
@@ -260,14 +263,17 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
           : await refusedAfterTheCredential(ctx?.context?.returned)
             ? 'refused-after-credential'
             : 'refused',
+        door,
       );
       // A refused sign-in writes `login_failed`, and the one that
       // stamped the lockout also writes `account_locked`. A successful
       // one is recorded as `login` by the session hook, unchanged. A
       // sign-in refused because the account is locked had its row
       // written by the gate, with the lock as its reason.
-      if (!succeeded && !settlement.refusedByLock) await this.auditRefusedSignIn(ctx, email, settlement);
-      if (succeeded) {
+      if (!succeeded && !settlement.refusedByLock) await this.auditRefusedSignIn(ctx, email, settlement, door);
+      // The session controls and the last-login stamp below are the email
+      // door's, as before.
+      if (succeeded && door === 'email') {
         const uid = ctx?.context?.returned?.user?.id;
         // [ADR-0069 TL;DR 6] The cap of the organization the new session
         // was scoped to at creation (ADR-0093 D9), never above the
@@ -297,9 +303,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     // `details.cause: 'scim_deactivated'`; an administrator's ban is
     // answered as before. See `banned-user-refusal-cause.ts`. It throws
     // on a match, so it stays after the settlement and the refusal's
-    // `login_failed` row above.
-    await causeBannedUserRefusal(ctx);
-    return;
+    // `login_failed` row above. The phone door goes on to the hooks below,
+    // as before.
+    if (door === 'email') {
+      await causeBannedUserRefusal(ctx);
+      return;
+    }
   }
 
   // ── ADR-0069 D1: on a successful change/reset — stamp
