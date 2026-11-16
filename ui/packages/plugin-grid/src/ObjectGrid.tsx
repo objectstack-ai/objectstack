@@ -1096,6 +1096,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     recordIds: pageRecordIds,
     update: canEdit || inlineEditable,
     delete: canDelete,
+    // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
+    updateOnMount: inlineEditable,
   });
 
   // The projection keys and the filter, sort, search and server-paging state,
