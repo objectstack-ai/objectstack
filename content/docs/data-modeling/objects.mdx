@@ -244,13 +244,23 @@ lifecycle: {
   `organization_id` counts unless the object opts out of the tenant column
   (`systemFields: false`, `systemFields.tenant: false` or
   `tenancy.enabled: false`). Any other name is refused at parse time, at
-  `lifecycle.seal.chainField`. An object that names no chain column and has
+  `lifecycle.seal.chainField`, and so is a column that cannot name an
+  organization: one whose value is not one text on every store (a number,
+  currency, percent, rating, slider, progress, summary, boolean, toggle, date,
+  datetime, JSON-shaped or multi-value column, the injected `updated_at`
+  included), `id` or `created_at` (they order the rows), and a column
+  `valueFields` also lists (the chain value travels in clear in every
+  checkpoint). Name a text or lookup column holding the organization id. An object that names no chain column and has
   no `tenant_id` field still parses, but it is not sealed: the sealer reports
   it at `error`. So is an object chained by `organization_id` that its
   deployment declares platform-global, which withholds that column. A row whose chain column is empty is
   sealed with the rows about no organization. `os audit verify --org <id>`
   reads the same column, so it reports that organization's rows whichever
-  column holds it.
+  column holds it. The chain column is fixed once the object has
+  checkpoints: after a change, the last sealed hour's rows are sealed again
+  under the new column, `os audit verify` reports them `listed_twice`, and
+  verifying one organization with `--org` reads the rows sealed before the
+  change as `late` and unsealed. Both fail the check.
 - Every column must have a type with one canonical spelling. A column of type
   `password`, `secret`, `formula`, `summary`, `image`, `file`, `avatar`,
   `video` or `audio` has none, and an object that declares one is not sealed.

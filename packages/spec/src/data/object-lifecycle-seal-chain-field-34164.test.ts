@@ -126,7 +126,7 @@ describe('lifecycle.seal.chainField — a column whose value is not one text on 
     ['date', { type: 'date' }],
     ['datetime', { type: 'datetime' }],
     ['json', { type: 'json' }],
-    ['multiselect', { type: 'multiselect', options: [{ label: 'A', value: 'a' }] }],
+    ['multiselect', { type: 'multiselect', options: [{ label: 'A', value: 'opt_a' }] }],
   ])('refuses a declared %s column, at the key', (type, def) => {
     const [issue, ...rest] = issues(withField('org_ref', def, { valueFields: [], chainField: 'org_ref' }));
     expect(rest).toEqual([]);

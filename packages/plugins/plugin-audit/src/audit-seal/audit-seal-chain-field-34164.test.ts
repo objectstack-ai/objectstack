@@ -9,11 +9,13 @@ import type { CryptoContext, CryptoHandle, IAuditCheckpointSigner, IClusterServi
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuditPlugin } from '../audit-plugin.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
+import { FieldType, ObjectSchema } from '@objectstack/spec/data';
 import { canonicalJsonBytes } from './jcs.js';
-import { leafInput } from './canonical.js';
+import { AUDIT_SEAL_TYPE_RULES, leafInput } from './canonical.js';
 import { AUDIT_SEALER_LOCK, AuditSealer } from './sealer.js';
 import { checkpointBodyFromRow, signedBodyBytes } from './signed-body.js';
 import { columnSaltsOf } from './seed.js';
+import { LocalCheckpointSigner } from './signer.js';
 import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
 import { verifyAuditLedger } from './verifier.js';
 
@@ -259,5 +261,93 @@ describe('a chain column the object does not have, on a definition that skipped 
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("'ledger_probe'");
     expect(errors[0]).toContain("'org_ref'");
+  });
+});
+
+// ── 4. which column types may name the chain: the sealer's own rules decide ──
+
+/**
+ * The authoring refusal of a non-text chain column (spec, `nonTextChainColumnType`)
+ * is derived from the field-value classes; this holds it to the sealer's own
+ * per-type rules (`AUDIT_SEAL_TYPE_RULES`): a type whose canonical rule is `text`
+ * is read as text on every store, so `chainValueOf` can read a chain from it, and
+ * every other rule (`number`, `boolean`, `date`, `datetime`, `json`) is a type a
+ * store hands back as something else. A type with no rule (`null`) is not sealed
+ * at all, so its object never reaches `chainValueOf` and the authoring answer is
+ * not judged here.
+ */
+describe('a chain column type is refused at authoring exactly where the sealer reads its value as other than text', () => {
+  const refusedAtChainField = (def: Record<string, unknown>): boolean => {
+    const parsed = ObjectSchema.safeParse({
+      name: 'chain_type_probe',
+      fields: { action: { type: 'text', label: 'Action' }, org_ref: { label: 'Org', ...def } },
+      lifecycle: { class: 'audit', retention: { maxAge: '90d' }, seal: { valueFields: [], chainField: 'org_ref' } },
+    });
+    return !parsed.success && parsed.error.issues.some(
+      (i) => i.path.join('.') === 'lifecycle.seal.chainField' && /whose value is not one text on every store/.test(i.message),
+    );
+  };
+  const minimalDef = (type: string): Record<string, unknown> => {
+    if (type === 'lookup' || type === 'master_detail' || type === 'tree') return { type, reference: 'sys_organization' };
+    if (type === 'select' || type === 'radio' || type === 'multiselect' || type === 'checkboxes') return { type, options: [{ label: 'A', value: 'opt_a' }] };
+    if (type === 'formula') return { type, expression: 'action' };
+    if (type === 'summary') return { type };
+    return { type };
+  };
+
+  it.each(FieldType.options.filter((t) => AUDIT_SEAL_TYPE_RULES[t] !== null))('%s', (type) => {
+    expect(refusedAtChainField(minimalDef(type))).toBe(AUDIT_SEAL_TYPE_RULES[type] !== 'text');
+  });
+
+  it.each(['select', 'radio', 'lookup', 'user'] as const)('%s declared multiple: true reads as json, and is refused', (type) => {
+    expect(AUDIT_SEAL_TYPE_RULES[type]).toBe('text');
+    expect(refusedAtChainField({ ...minimalDef(type), multiple: true })).toBe(true);
+  });
+});
+
+// ── 5. changing the chain column of an object that already has checkpoints ──
+
+describe('changing chainField on an object that already has checkpoints (ADR-0154 D10 note)', () => {
+  it('re-seals the last sealed window under the new chain, and the check fails closed (listed_twice; late under --org)', async () => {
+    const object = {
+      name: 'ledger_probe',
+      fields: { id: { type: 'text' }, created_at: { type: 'datetime' }, action: { type: 'text' }, tenant_id: { type: 'lookup' }, org_ref: { type: 'text' }, payload: { type: 'textarea' } },
+      lifecycle: { class: 'audit', retention: { maxAge: '90d' }, seal: { valueFields: ['payload'] } as Record<string, unknown> },
+    };
+    const store = memoryEngine([object, { name: 'sys_audit_amendment', fields: {} }] as never);
+    const crypto = bindingCrypto();
+    const signer = new LocalCheckpointSigner({ engine: store.engine, crypto });
+    const clock = { now: DAY0 + 12 * H + 30 * 60_000 };
+    const run = () => new AuditSealer({ engine: store.engine, crypto, signer: () => signer, logger: recordingLogger(), now: () => clock.now }).runPass();
+    const ledger = store.hot.table('ledger_probe');
+    ledger.push(
+      { id: 'r1', created_at: at(8, 10), action: 'update', tenant_id: 'org_a', org_ref: 'org_b', payload: 'one' },
+      { id: 'r2', created_at: at(10, 5), action: 'update', tenant_id: 'org_a', org_ref: 'org_b', payload: 'two' },
+    );
+    await run();
+    const sealed = () => store.hot.table('sys_audit_checkpoint').map((r) => {
+      const body = checkpointBodyFromRow(r);
+      return [r.chain_key, body.kind, body.row_ids.join(',')].join(' ');
+    });
+    const before = sealed();
+
+    object.lifecycle.seal = { valueFields: ['payload'], chainField: 'org_ref' };
+    ledger.push({ id: 'r3', created_at: at(13, 10), action: 'update', tenant_id: 'org_a', org_ref: 'org_b', payload: 'three' });
+    clock.now = DAY0 + 14 * H + 30 * 60_000;
+    await run();
+    const after = sealed();
+
+    const report = await verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now });
+    const scoped = await verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now, orgs: ['org_b'] });
+    // The rows sealed by tenant_id stay in org_a's chain. The new chain starts from the object's
+    // floor, the last sealed window, so that window's r2 is sealed again under org_b.
+    expect(before).toEqual(['org:org_a window r1', 'org:org_a window r2']);
+    expect(after).toEqual([...before, 'org:org_b window r2', 'org:org_b window r3']);
+    // The whole ledger: r2 listed by two checkpoints is a fault, so the check fails closed.
+    expect(report.faults.map((f) => `${f.chain}#${f.sequence ?? '-'}:${f.kind}`)).toEqual(['org:org_b#0:listed_twice']);
+    expect(report.ok).toBe(false);
+    // Scoped to the new chain: r1, held only by org_a's chain, reads late and unsealed; it fails closed too.
+    expect(scoped.rows.map((r) => [r.chain, r.row, r.verdict, r.sealed])).toEqual([['org:org_b', 'r1', 'late', false]]);
+    expect(scoped.ok).toBe(false);
   });
 });

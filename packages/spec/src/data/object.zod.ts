@@ -3027,6 +3027,9 @@ function nonTextChainColumnType(def: unknown): string | null {
   const { type, multiple } = def as { type?: unknown; multiple?: unknown };
   if (typeof type !== 'string') return null;
   if (isNonTextChainValueType(type)) return type;
+  // An inherently multi-value type (`multiselect`, `checkboxes`, `tags`) is named as it is; a
+  // multi-capable one is named for the `multiple: true` that makes it store a list.
+  if (isMultiValueField({ type, multiple: false })) return type;
   return isMultiValueField({ type, multiple: multiple === true }) ? `${type} (multi-value)` : null;
 }
 
