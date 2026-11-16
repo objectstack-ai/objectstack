@@ -2760,6 +2760,7 @@ export class AuthPlugin implements Plugin {
               '/sign-up/email': { window, max },
               '/request-password-reset': { window, max },
               '/reset-password': { window, max },
+              '/organization/accept-invitation-with-proof': { window, max },
               // #2780 — OTP endpoints cost an SMS per hit (pumping abuse);
               // the per-number cooldown (otp-send-guard.ts) is always on,
               // this adds the operator-tuned per-IP dimension. The plugin

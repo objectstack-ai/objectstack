@@ -58,6 +58,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { ACCEPT_INVITATION_WITH_PROOF_PATH } from './invitation-mailbox-proof.js';
 import { isCloudManaged } from '@objectstack/core';
 import { VENDOR_ROLE_SCALAR_ADMIN_PATHS } from './admin-impersonate-endpoint.js';
 import { setAuthActorResolver } from './auth-actor-attribution.js';
@@ -335,7 +336,8 @@ export async function globalBeforeHook(
   if (
     ctx?.path === '/sign-up/email' ||
     ctx?.path === '/reset-password' ||
-    ctx?.path === '/change-password'
+    ctx?.path === '/change-password' ||
+    ctx?.path === ACCEPT_INVITATION_WITH_PROOF_PATH
   ) {
     const candidate =
       (typeof ctx?.body?.password === 'string' && ctx.body.password) ||

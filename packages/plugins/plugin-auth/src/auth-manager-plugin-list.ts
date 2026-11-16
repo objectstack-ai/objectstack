@@ -64,6 +64,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 import { applyPlatformAdminImpersonation } from './admin-impersonate-endpoint.js';
 import { requireSecondFactorAtCodeAndLinkDoors } from './second-factor-code-and-link-doors.js';
 import { buildOrganizationPlugin, type OrganizationPluginHost } from './auth-manager-organization-plugin.js';
+import { ACCEPT_INVITATION_WITH_PROOF_PATH, buildInvitationProofDoorPlugin } from './invitation-mailbox-proof.js';
 import {
   OAUTH_ORGANIZATION_CLAIM,
   assertScimAdminCoherence,
@@ -121,7 +122,9 @@ export interface PluginListHost {
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
   getMcpResourceUrl: AuthManager['getMcpResourceUrl'];
+  getApi: AuthManager['getApi'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
+  isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
   jwtSigningFailureReported: AuthManager['jwtSigningFailureReported'];
   multiOrgPostureEffective: AuthManager['multiOrgPostureEffective'];
   orgRolesMap: AuthManager['orgRolesMap'];
@@ -130,6 +133,7 @@ export interface PluginListHost {
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
   resolveTwoFactorAccountLockout: AuthManager['resolveTwoFactorAccountLockout'];
   storedRecipientLocale: AuthManager['storedRecipientLocale'];
+  validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
 
 /**
@@ -276,6 +280,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       };
       return buildOrganizationPlugin.call(host);
     });
+    // [#34257] The one-step acceptance door for the invitation mail's mailbox
+    // proof (`invitation-mailbox-proof.ts`), beside the plugin it accepts through.
+    plugins.push(await buildInvitationProofDoorPlugin({
+      getApi: () => this.getApi(),
+      validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...(a as Parameters<AuthManager['validateAudienceAdmission']>)),
+      isSsoOnlyMode: () => this.isSsoOnlyMode(),
+      getDataEngine: () => this.getDataEngine(),
+      counterStore: () => this.config.sharedCounterStore?.() ?? Promise.reject(new Error('no shared counter store')),
+    }));
   }
 
   if (enabled.twoFactor) {
@@ -301,6 +314,18 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.passwordRejectBreached) {
     const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
     plugins.push(haveIBeenPwned({
+      // The plugin's own default doors, plus the invitation proof door, which
+      // sets a password too.
+      paths: [
+        '/sign-up/email',
+        '/change-password',
+        '/reset-password',
+        '/email-otp/reset-password',
+        '/phone-number/reset-password',
+        '/admin/create-user',
+        '/admin/set-user-password',
+        ACCEPT_INVITATION_WITH_PROOF_PATH,
+      ],
       customPasswordCompromisedMessage:
         'This password has appeared in a known data breach. Please choose a different one.',
     }));

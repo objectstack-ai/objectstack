@@ -60,6 +60,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { mintInvitationProof, withInvitationProof } from './invitation-mailbox-proof.js';
 import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import { isCloudManaged } from '@objectstack/core';
 import { MEMBERSHIP_ROLE_DELEGATED_ADMIN, MEMBERSHIP_ROLE_EXTERNAL } from '@objectstack/spec';
@@ -647,11 +648,18 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
         if (this.config.logger) this.config.logger.warn(msg, meta);
         else console.warn(msg, meta);
       }
+      // [#34257] The mail's link carries the invitation's mailbox proof; the
+      // copied link and the stored mail row never do. Minted only for a send
+      // that goes out; one that cannot be minted goes out as today's link.
+      const proof = expiry.expiresAt === undefined
+        ? undefined
+        : await mintProofForSend({ id: String(invitation.id), email: recipientEmail, expiresAt: invitation.expiresAt });
       try {
         await emailService.sendTemplate({
           template: 'auth.invitation',
           to: recipientEmail,
           ...mailLocale,
+          ...(proof ? { deliverOnly: { acceptUrl: withInvitationProof(acceptUrl, proof) } } : {}),
           data: {
             inviter: {
               name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
@@ -736,6 +744,28 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
  * than rendered as `Invalid Date`; the template declares the variable
  * required, so that send is refused rather than sent with a dangling sentence.
  */
+/**
+ * Mint the invitation's mailbox proof through the verification store of the
+ * request that sends the mail (better-auth calls `sendInvitationEmail` inside
+ * invite-member, a resend included). No endpoint context, or a store that
+ * refuses the write: no proof, and the mail carries today's link.
+ */
+async function mintProofForSend(invitation: { id: string; email: string; expiresAt: unknown }): Promise<string | undefined> {
+  try {
+    const { getCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    const ctx: any = getCurrentAuthEndpointContext();
+    const store = ctx?.context?.internalAdapter;
+    if (!store) return undefined;
+    return await mintInvitationProof(store, invitation);
+  } catch (err: any) {
+    console.warn(
+      `[AuthManager] invitation mail: no mailbox proof for invitation '${invitation.id}' (${err?.message ?? err}); ` +
+        'the mail carries the accept link without it',
+    );
+    return undefined;
+  }
+}
+
 function invitationExpiryArg(expiresAt: unknown): { expiresAt?: string } {
   if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return {};
   const instant = new Date(expiresAt);

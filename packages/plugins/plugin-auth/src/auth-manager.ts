@@ -2436,7 +2436,9 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
       getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
+      getApi: (...a) => this.getApi(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
       set jwtSigningFailureReported(v) { writeJwtSigningFailureReported(v); },
       multiOrgPostureEffective: (...a) => this.multiOrgPostureEffective(...a),
@@ -2447,6 +2449,7 @@ export class AuthManager {
       resolveMembershipRole: (...a) => this.resolveMembershipRole(...a),
       resolveTwoFactorAccountLockout: (...a) => this.resolveTwoFactorAccountLockout(...a),
       storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+      validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...a),
     };
     return buildPluginList.call(host);
   }
