@@ -634,9 +634,9 @@ export async function declaredMemberOverrideAddressOf(
  * whichever packages are installed, and a dependent of a dependent is an
  * addition to it. The arm applies only to a bundled type the registry reads
  * by package, for a name no package ships (a shipped name is the shipper's
- * already), with no environment item at the member and no disabled package
- * among the row-holding packages (the served-holder judgment above reads
- * those).
+ * already), at a named member other than the canonical one, with no
+ * environment item at the member and no disabled package among the
+ * row-holding packages (the served-holder judgment above reads those).
  */
 export async function rowHeldBaseAddressOf(
     host: ServedRowHost,
@@ -645,7 +645,14 @@ export async function rowHeldBaseAddressOf(
     const registry: any = host.engine?.registry;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    if (overlayMemberValue(singular, member) === undefined) return undefined;
+    // [#33210 contract review S1] A NAMED non-canonical member only.
+    // `overlayMemberValue` answers null for the canonical member, named or
+    // not, and the read naming no member addresses it (reachable without
+    // `?member=` and from `/published`). That mirror is left as it was: with
+    // a shipped base holding only another member, its answers move across a
+    // reboot and the read naming no member serves the base's other member,
+    // so there is no one shipped answer to align it with.
+    if (typeof overlayMemberValue(singular, member) !== 'string') return undefined;
     if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size > 0) return undefined;
     if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
         return undefined;

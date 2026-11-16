@@ -659,6 +659,110 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
             await down(booted);
         }
     }, 240_000);
+
+    // [#33210 contract review M1] Two dependents, each adding a member of its
+    // own (D1 `fr-FR`, D2 `de-DE`) over A's `en-US`: each dependent is judged
+    // against its own closure, so A is the base at both members and each
+    // answers 404 naming no package, as with a shipped base. FROM (head
+    // b959edb979, `bases.length === 1`): the read at `fr-FR` found A and D2
+    // with no row there and served D1's row (200), and likewise at `de-DE`.
+    const D1 = 'com.qa.mailrowfr';
+    const D2 = 'com.qa.mailrowde';
+    const ADDED: Record<string, { locale: string; subject: string }> = {
+        [D1]: { locale: 'fr-FR', subject: 'addon fr' },
+        [D2]: { locale: 'de-DE', subject: 'addon de' },
+    };
+    it.each([
+        { order: 'row-held base, registered and saved A, D1, D2', ships: false, registered: [A, D1, D2] },
+        { order: 'row-held base, registered and saved D2, D1, A', ships: false, registered: [D2, D1, A] },
+        { order: 'shipped base (CONTROL), registered A, D1, D2', ships: true, registered: [A, D1, D2] },
+        { order: 'shipped base (CONTROL), registered D2, D1, A', ships: true, registered: [D2, D1, A] },
+    ])('M1 two dependents, $order: each dependent\'s added member answers 404 naming no package and is served at its own address, before and after a reboot', async ({ ships, registered }) => {
+        const file = freshFile();
+        const manifestOf = (id: string) => (id === A
+            ? appManifest(A, ships ? { emailTemplates: [{ name: 'twomail', ...template('en-US', 'base en') }] } : {})
+            : appManifest(id, { dependencies: { [A]: '*' } }));
+        const manifests = registered.map(manifestOf);
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            for (const id of [D1, D2]) {
+                const { locale, subject } = ADDED[id];
+                const where = `${locale}, ${leg}`;
+                const read = await get(b.kernel, '/meta/email_template/twomail', { member: locale });
+                const layers = await get(b.kernel, '/meta/email_template/twomail/layers', { member: locale });
+                const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'twomail', member: locale });
+                expect([where, read.status, codeOf(read.body), layers.status, codeOf(layers.body), executed?.item ?? null], JSON.stringify([read.body, layers.body]))
+                    .toEqual([where, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
+                const own = await get(b.kernel, '/meta/email_template/twomail', { member: locale, package: id });
+                expect([where, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([where, 200, subject, id]);
+            }
+            // CONTROL: the base's own `en-US` stays the base's.
+            const en = await get(b.kernel, '/meta/email_template/twomail', { member: 'en-US' });
+            expect([leg, en.status, unwrap(en.body)?.item?.subject], JSON.stringify(en.body)).toEqual([leg, 200, 'base en']);
+        };
+        try {
+            for (const id of registered) {
+                if (id === A && ships) continue;
+                await layRow(booted.engine, 'email_template', 'twomail', id, id === A ? template('en-US', 'base en') : template(ADDED[id].locale, ADDED[id].subject));
+            }
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#33210 contract review S1] The canonical-member mirror is left as it
+    // was: a dependent's row of the CANONICAL member (`en-US`) over a base that
+    // holds the name only as a stored row of another member (`fr-FR`). The
+    // read naming no member addresses the canonical member, and the arm moves
+    // only a named non-canonical member, so every door serves the dependent's
+    // row as on `main`, in both save orders, before and after a reboot. FROM
+    // (head b959edb979, arm unguarded): the read naming no member, `/published`,
+    // `/layers` and the execution face answered 404 before a reboot, and the
+    // plain read and the execution face served A's `fr-FR` after it. No
+    // shipped CONTROL is pinned: with A shipping only `fr-FR`, the read naming
+    // no member serves A's `fr-FR`, and `/published` and `/layers` move across
+    // a reboot (200 then 404), so there is no one shipped answer to align with.
+    it.each([
+        { order: 'A saved first', saved: [A, D] },
+        { order: 'D saved first', saved: [D, A] },
+    ])('S1, $order: a dependent\'s canonical member over a row-held base of another member is served on every door naming no package, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const manifests = [appManifest(A), appManifest(D, { dependencies: { [A]: '*' } })];
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            const read = await get(b.kernel, '/meta/email_template/canmail');
+            const named = await get(b.kernel, '/meta/email_template/canmail', { member: 'en-US' });
+            const layers = await get(b.kernel, '/meta/email_template/canmail/layers');
+            const published = await get(b.kernel, '/meta/email_template/canmail/published');
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'canmail' });
+            expect([leg, read.status, unwrap(read.body)?.item?.subject, named.status, unwrap(named.body)?.item?.subject,
+                layers.status, unwrap(layers.body)?.effective?.subject, published.status, unwrap(published.body)?.subject, executed?.item?.subject],
+            JSON.stringify([read.body, named.body, layers.body, published.body]))
+                .toEqual([leg, 200, 'addon en', 200, 'addon en', 200, 'addon en', 200, 'addon en', 'addon en']);
+            // CONTROL: the base's own `fr-FR` stays the base's.
+            const fr = await get(b.kernel, '/meta/email_template/canmail', { member: 'fr-FR' });
+            expect([leg, fr.status, unwrap(fr.body)?.item?.subject], JSON.stringify(fr.body)).toEqual([leg, 200, 'base fr']);
+        };
+        try {
+            for (const id of saved) await layRow(booted.engine, 'email_template', 'canmail', id, id === A ? template('fr-FR', 'base fr') : template('en-US', 'addon en'));
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
 });
 
 // ---------------------------------------------------------------------------
