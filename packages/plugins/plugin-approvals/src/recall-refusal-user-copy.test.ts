@@ -344,7 +344,7 @@ describe('[#34454] the recall refusal override is asked with the negotiated loca
   const asked: string[] = [];
   const exactMatchI18n = {
     getLocales: () => Object.keys(PACKS),
-    t: (key: string, locale: string) => {
+    t: (key: string, locale: string, _params?: Record<string, unknown>) => {
       asked.push(`${key}@${locale}`);
       return PACKS[locale]?.[key] ?? key;
     },
