@@ -35,8 +35,10 @@
  *
  * ## What holds now
  *
- * A leaf on a joined column is evaluated on an existing parent: the native
- * compile conjoins `"<hop alias>"."id" IS NOT NULL` to it. A parent that exists
+ * A joined leaf that a NULL column satisfies (`notSet`, `empty`, `notContains`)
+ * is evaluated on an existing parent: the native compile conjoins the last
+ * hop's `"ALIAS"."id" IS NOT NULL` to it. Every other leaf is UNKNOWN on a NULL
+ * and its statement does not move. A parent that exists
  * with a NULL `status` still satisfies `$ne` (the #5298 ruling, unchanged), and
  * an author who wants the orphans says so on the base relation field
  * (`{ order: { $null: true } }`), which reads no join.
@@ -91,7 +93,7 @@ const quiet = { debug() {}, info() {}, warn() {}, error() {}, trace() {}, fatal(
 
 type Face = 'native' | 'objectql';
 
-describe('a one-hop cross-object leaf never selects an orphan detail row, on the native strategy as on the engine', () => {
+describe('a cross-object leaf never selects an orphan detail row, on the native strategy as on the engine', () => {
   let engine: ObjectQL;
   const services: Partial<Record<Face, AnalyticsService>> = {};
 
@@ -205,9 +207,9 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
     const { sql } = await services.native!.generateSql(query as never);
     const res = await services.native!.query(query as never);
     expect(sql).toContain('LEFT JOIN "os33792_order" "order" ON');
-    // The lowering's NULL-safe escape and the comparison, each on an existing parent.
-    expect(sql).toContain('"order"."id" IS NOT NULL AND "order"."status" IS NULL');
-    expect(sql).toContain('"order"."id" IS NOT NULL AND "order"."status" != $');
+    // The lowering's NULL-safe escape is evaluated on an existing parent; the
+    // comparison, UNKNOWN on a NULL, is left as it was.
+    expect(sql).toContain('(("order"."id" IS NOT NULL AND "order"."status" IS NULL) OR "order"."status" != $1)');
     expect(Number((res.rows as Array<Record<string, unknown>>)[0]?.count)).toBe(4);
 
     // Two hops: the key of the last hop's join alias.
@@ -217,6 +219,10 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
       where: { 'order.customer.tier': { $ne: 'gold' } },
     } as never);
     expect(twoHop.sql).toContain('"order__customer"."id" IS NOT NULL AND "order__customer"."tier" IS NULL');
+
+    // A positive leaf takes no conjunct: its statement is the one it always was.
+    const positive = await services.native!.generateSql({ cube: LINE, measures: ['count'], where: { 'order.status': 'open' } } as never);
+    expect(positive.sql).toMatch(/ WHERE "order"\."status" = \$1$/);
   });
 
   it('an author keeps the rows with an empty relation by naming the base relation field, which reads no join', async () => {

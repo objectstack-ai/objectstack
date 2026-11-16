@@ -390,6 +390,23 @@ function measureColumnOf(
 }
 
 /**
+ * The leaf operators whose compiled clause a NULL column can satisfy, so a
+ * joined column's NULL from a row the `LEFT JOIN` reached no parent for would
+ * select that row ({@link NativeSQLStrategy}'s `compileFilterNode` leaf arm):
+ *
+ * - `notSet` — `col IS NULL`, the escape arm of the negative operators' NULL
+ *   guard, `$null: true` and `$eq: null`;
+ * - `empty` — `col IS NULL OR …` (`empty-operator-sql.ts`);
+ * - `notContains` — the constant TRUE on a column that stores no text
+ *   (`non-text-column.ts`), and `NOT EXISTS (… json_each(col) …)` on a
+ *   JSON-stored one (`contains-membership-sql.ts`), both TRUE on a NULL.
+ *
+ * Every other operator of the normalized vocabulary compiles to a comparison
+ * that is UNKNOWN on a NULL, or to `IS NOT NULL`, and selects no such row.
+ */
+const NULL_SATISFIED_LEAF_OPERATORS: ReadonlySet<string> = new Set(['notSet', 'empty', 'notContains']);
+
+/**
  * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
  * and the object it reads — the object {@link resolvePathHops} named for that
  * hop, which `generateSql` then scopes the alias as. One value for both, so
@@ -2227,16 +2244,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const clause = this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
       // A leaf on a joined column is evaluated on an EXISTING parent. The
       // `LEFT JOIN` gives a detail row with no parent a NULL in every joined
-      // column, and the NULL-polarity escape the shared lowering lays around a
-      // negative leaf (`$ne`, `$nin`, `$notContains` → `col IS NULL OR …`), a
-      // `$null: true` or an `$empty` reads that NULL as "the parent's value is
-      // missing" — selecting the orphan. The engine path and the `/data`
-      // nested-relation filter read the parent first, so no parent never
-      // matches, whatever the operator (`cross-object-where.ts`); this conjunct
-      // is that rule here. A parent that exists with a NULL value still answers
-      // its own polarity (#5298). Added only around a clause that bound, so
-      // `params` stays aligned (`null` is TRUE and binds nothing).
-      const parentKey = clause === null ? null : this.joinedParentKey(cube, node.member, parentTable, joins);
+      // column, and a leaf a NULL satisfies read that NULL as "the parent's
+      // value is missing", selecting the orphan: the escape the shared lowering
+      // lays around `$ne` / `$nin` / `$notContains` (`col IS NULL OR …`),
+      // `$null: true`, `$eq: null`, `$empty: true`. The engine path and the
+      // `/data` nested-relation filter read the parent first, so no parent
+      // never matches, whatever the operator (`cross-object-where.ts`); this
+      // conjunct is that rule here. Only the operators of
+      // {@link NULL_SATISFIED_LEAF_OPERATORS} take it: every other clause is
+      // UNKNOWN on a NULL and already leaves the orphan out. A parent that
+      // exists with a NULL value still answers its own polarity (#5298). Added
+      // only around a clause that bound, so `params` stays aligned.
+      const parentKey = clause !== null && NULL_SATISFIED_LEAF_OPERATORS.has(node.operator)
+        ? this.joinedParentKey(cube, node.member, parentTable, joins)
+        : null;
       return parentKey ? `(${parentKey} IS NOT NULL AND ${clause})` : clause;
     }
 
