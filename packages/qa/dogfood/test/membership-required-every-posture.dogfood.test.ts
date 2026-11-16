@@ -242,7 +242,7 @@ describe.each(['single', 'isolated', 'group'] as const)(
       const noteId = String(createdBody?.data?.id ?? createdBody?.id ?? createdBody?.record?.id);
       expect((await readNotes(asMember)).ids).toContain(noteId);
 
-      await ql.delete('sys_member', row.id, { context: SYS });
+      await ql.delete('sys_member', { where: { id: row.id }, context: SYS });
       expect(await findRows(ql, 'sys_member', { user_id: userId }, 5)).toEqual([]);
 
       const token = await stack.signIn(email, PASSWORD);
