@@ -8,7 +8,7 @@
 
 feat(automation): `IAutomationService.dryRun` runs an unpublished flow definition once, unarmed, as a named user
 
-Clause-②: yes
+Clause-②: yes (widening) — `AutomationEngine.dryRun` admits a `runAs: 'system'` self-triggered draft for the named user (ruling B); `@objectstack/core` exports the shared flow-start rules (`aiAccountElevatedStartRefusal`, `requiredPermissionsStartRefusal`, `requiredPermissionsRefusal`, `missingCapabilities`, `isAiServiceAccount`, `AI_ACCOUNT_ELEVATED_START_REFUSAL`, `FlowStartPermissionRefusal`); plugin-security's registered `security` service serves `canWriteObject`
 Metadata-protocol: none
 
 The automation service now implements `dryRun(definition, { userId, record, … })`, the method the `IAutomationService` contract declares. A dry run admits the definition by the checks `registerFlow` asks, then by the rules that admit a start by name, and then runs it once against the supplied record as the named user. It registers nothing and arms no trigger, and it writes, sends and pauses nothing:
