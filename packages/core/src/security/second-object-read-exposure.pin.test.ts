@@ -242,6 +242,14 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",
   },
+  // [#33795] The batch scope's rule-read test (ruling 6928862195 B).
+  'packages/objectql/src/summary-rule-reads.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object a validation rule's or a computed field's one hop reaches, from the declarations in the " +
+      'registry, only to decide whether a roll-up recompute inside a bulk update runs at once or at the end of the ' +
+      'batch; it reads no record and serves nothing of the target to any caller',
+  },
   // ADR-0100: the credential-column guard's filter / sort half.
   'packages/objectql/src/credential-evaluation-guard.ts': {
     kind: 'not-a-served-read',
