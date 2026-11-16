@@ -35,6 +35,8 @@ import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, usePrintPage } from '@object-ui/react';
 import '../renderers';
+// `PageRenderer` reaches `react-page.tsx`, which loads this dynamically: pay the load at collection.
+import '@object-ui/react-runtime';
 import { buildPagePrintStylesheet, PRINT_PAGE_ATTRIBUTE, PRINT_RUNNING_ATTRIBUTE } from '../renderers/layout/page-print';
 
 afterEach(() => cleanup());

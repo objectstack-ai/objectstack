@@ -28,6 +28,8 @@ import { render, cleanup } from '@testing-library/react';
 import React from 'react';
 import { SchemaRenderer } from '@object-ui/react';
 import '../renderers';
+// `PageRenderer` reaches `react-page.tsx`, which loads this dynamically: pay the load at collection.
+import '@object-ui/react-runtime';
 import {
   buildPagePrintStylesheet,
   PRINT_PAGE_ATTRIBUTE,
