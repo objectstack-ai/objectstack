@@ -206,6 +206,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # t
 pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # the effort every turn asks for (default: the CLI's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
+pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
@@ -332,6 +333,27 @@ npx @objectstack/scenarios help                                      # the comma
   without repeats still replays. `--ask-repeats` is not a live-only flag: with `--driver recorded:F` it decides how
   many recorded asks of each question turn are read (the first N), and an N larger than the recording holds of any
   question turn is refused before any card runs, naming the turn and the count found.
+- **Language and build prompt** (`prompts.ts`, `orchestrate.ts`, `scorecard.ts`, `driver.ts`): `--lang zh|en` renders
+  every card-authored text a prompt carries in that language and no other — the build prompt (`prompt.short` or
+  `prompt.detailed`), the iterate change (`iterate.change`), and each question's and each operation's `ask` — in every
+  mode (scratch, template and ask) and at every ask of `--ask-repeats`. The runner's own text around it (the preamble,
+  the data contract, the naming rule, the answer instructions) stays in English, and so do the plain strings it quotes
+  from the card (a persona's role, an action's summary); a Chinese wrapper is not offered. **No silent fallback**: a
+  card that lacks one of the texts the run's modes render in that language (scratch: the build prompt `--prompt` names,
+  the iterate change, every question and operation; template: all but the build prompt; ask: the questions and
+  operations) is skipped before the first card runs, before any scaffold or boot, with a line naming each missing text
+  (``skipped crm_account_with_contacts: … no zh text for `prompt.detailed`, `iterate.change`, …``), and the other cards
+  run; with none left the run exits 2. `--prompt short|detailed` picks the card prompt the build turn is given; the
+  iterate turn is given `iterate.change` either way. With neither flag nothing changes, byte for byte: each text in
+  English when the card has it, else in Chinese, the build turn given `prompt.detailed`, and the record, the scorecard
+  and the recording carry no trace of the choice. With either flag, the run's record states it (`promptChoice` on the
+  card's run and on the scorecard, only the flags given) and the scorecard says `prompts: language zh · build prompt
+  short`. A recording made under a choice carries it (`promptChoice`), and `--driver recorded:F` under another choice
+  is refused before any card runs, naming both and the flags to replay it with: the recorded answers answered the
+  recorded prompts, and a replay sends none. `--prompt detailed` is the default's own prompt, so it replays a recording
+  made without flags; `--lang en` is another choice than none, refused alike. The grader reads a reply in either
+  language (`来源：` and `Source:` lines, Chinese measure words and declines), so a Chinese turn grades as an English
+  one does.
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn

@@ -63,7 +63,21 @@ import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTa
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
-import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
+import {
+  buildPrompt,
+  iteratePrompt,
+  operationPrompt,
+  personaHandles,
+  personaRecords,
+  promptLanguageRefusal,
+  statedPromptChoice,
+  questionPrompt,
+  rowOwner,
+  templateIteratePrompt,
+  userHandleFields,
+  verifyArgs,
+  type PromptChoice,
+} from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
@@ -109,6 +123,16 @@ export interface RunOptions {
    * the rows the first one changed.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice (`--lang`, `--prompt`, {@link PromptChoice}), sent in
+   * every mode: the build turn, the iterate turn (scratch and template), and
+   * every question and operation turn, each ask of a repeated one included.
+   * Absent ⇒ today's prompts, byte for byte. A card that lacks a text the
+   * run would render in the chosen language is refused before any mode
+   * runs ({@link promptLanguageRefusal}); the CLI skips it before the first
+   * card instead.
+   */
+  promptChoice?: PromptChoice;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -294,6 +318,12 @@ export interface CardRun {
    * reader may hold exact.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice the run was given ({@link RunOptions.promptChoice}),
+   * when a flag set one; absent ⇒ the default prompts. Outside `counts`, like
+   * `askRepeats`, so a default record keeps its bytes.
+   */
+  promptChoice?: PromptChoice;
   modes: ModeRun[];
 }
 
@@ -792,6 +822,8 @@ export async function seedApp(
  * operation writes, so each ask reads the same rows. A turn the seed takes out
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
  * once. The guardrails are graded over every turn that ran, each ask included.
+ * Every question and operation turn is sent in the prompt choice `choice`
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -801,6 +833,7 @@ export async function runHalf(
   objectLabels?: Record<string, string[]>,
   built?: unknown,
   askRepeats = 1,
+  choice?: PromptChoice,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -841,7 +874,7 @@ export async function runHalf(
             continue;
           }
           try {
-            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id, choice), ...doorOf(persona) });
             turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
             res.turn = summarize(turn);
             res.grade = gradeCardAnswer(scenario, {
@@ -873,7 +906,7 @@ export async function runHalf(
         const started = new Date();
         let turn: ParsedTurn;
         try {
-          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), ...doorOf(op.actingAs) });
+          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id, choice), ...doorOf(op.actingAs) });
         } catch (e) {
           if (!(e instanceof ReplayNotFaithfulError)) throw e;
           half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
@@ -988,14 +1021,14 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
-  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card), tier: card.tier })).turn, scenario);
+  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card, opts.promptChoice), tier: card.tier })).turn, scenario);
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice));
 
   const iterated = iteratedScenario(scenario);
-  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
+  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
   if (build.notMeasured) {
     mode.iterate = { build };
     return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -1003,7 +1036,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -1079,7 +1112,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
   await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline }) => {
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
-    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }), tier: card.tier })).turn);
+    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }, opts.promptChoice), tier: card.tier })).turn);
     if (build.notMeasured) {
       mode.iterate = { build };
       return;
@@ -1088,7 +1121,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
   });
   return mode;
 }
@@ -1109,7 +1142,7 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
   const labels = citationLabels(original);
   const mode: ModeRun = { mode: 'ask', findings: [] };
   await withInstalledBuild(original, ops, mode, verified, async (app) => {
-    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats);
+    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice);
   });
   return mode;
 }
@@ -1130,6 +1163,9 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
   const { card } = scenario;
   const askRepeats = opts.askRepeats ?? 1;
   assertAskRepeats(askRepeats);
+  const languageRefusal = promptLanguageRefusal(card, opts.promptChoice, opts.modes);
+  if (languageRefusal) throw new Error(`${card.id}: ${languageRefusal}`);
+  const stated = statedPromptChoice(opts.promptChoice);
   const questionTurns = card.run.questions.reduce((n, q) => n + (q.personas?.length ? q.personas.length : 1), 0);
   const out: CardRun = {
     card: card.id,
@@ -1137,6 +1173,7 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
     capabilities: card.capabilities,
     counts: { questions: card.run.questions.length, questionTurns, operations: card.run.operations.length, personas: card.run.personas.length },
     ...(askRepeats > 1 ? { askRepeats } : {}),
+    ...(stated !== undefined ? { promptChoice: stated } : {}),
     modes: [],
   };
   const refusal = askModeRefusal(opts.modes, opts.templateArtifact !== undefined);
