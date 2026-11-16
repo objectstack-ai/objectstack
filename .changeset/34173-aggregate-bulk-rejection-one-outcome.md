@@ -7,7 +7,7 @@
 
 fix(plugin-grid): a rejected aggregate bulk action reports one outcome for the selection and refreshes the list
 
-Clause-②: no — the dialog reports an aggregate outcome truthfully; no surface added
+Clause-②: yes (widening) — optional member userMessage on ActionResult (@object-ui/types) and ActionResponseOutcome (@object-ui/core); nothing removed or renamed
 Metadata-protocol: none
 
 An aggregate bulk action (`bulkActionDefs` entry with `execution: 'aggregate'`) is one call for the whole selection. When that call rejected, the result dialog printed the rejection's platform `message` against every selected record, read "Succeeded 0 / N" even when the handler had already changed some of them, and the list kept showing the old values until a manual reload.
