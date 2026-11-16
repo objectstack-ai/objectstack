@@ -56,6 +56,33 @@ const CONNECTION = 'entra-scim-mgr';
 const OTHER_CONNECTION = 'okta-scim-mgr';
 const DEFAULT_ORG = 'org_default';
 
+// The grant tables a SCIM deployment registers beside the identity objects;
+// the last-administrator guard reads them on every user update.
+const sysPermissionSet = {
+  name: 'sys_permission_set',
+  label: 'Permission Set',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+    label: { name: 'label', type: 'text' as const },
+    active: { name: 'active', type: 'boolean' as const },
+  },
+};
+
+const sysUserPermissionSet = {
+  name: 'sys_user_permission_set',
+  label: 'User Permission Set',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    user_id: { name: 'user_id', type: 'text' as const },
+    permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    permission_set: { name: 'permission_set', type: 'text' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+    valid_from: { name: 'valid_from', type: 'datetime' as const },
+    valid_until: { name: 'valid_until', type: 'datetime' as const },
+  },
+};
+
 async function bootEngine(): Promise<BootedSqliteEngine> {
   const engine = new ObjectQL();
   const driver = new SqlDriver({
@@ -65,7 +92,7 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
   });
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const object of authIdentityObjects) {
+  for (const object of [...authIdentityObjects, sysPermissionSet, sysUserPermissionSet]) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
