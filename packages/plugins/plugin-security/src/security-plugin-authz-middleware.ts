@@ -870,7 +870,7 @@ export function registerAuthzMiddleware(
     // reader that needs them — the query guards (2.5b, 2.9) and step 4.
     let hopWithheldMemo: Promise<Set<string>> | undefined;
     const hopWithheld = (): Promise<Set<string>> =>
-      (hopWithheldMemo ??= this.resolveHopWithheldFields(secMeta, opCtx.context, { fallbackOnEmptySets: false, visited: new Set([opCtx.object]) }));
+      (hopWithheldMemo ??= this.resolveHopWithheldFields(secMeta, opCtx.context, { fallbackOnEmptySets: false }));
 
     // [#3545] Fail CLOSED when the object's own posture could not be resolved.
     // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata

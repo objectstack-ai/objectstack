@@ -72,6 +72,7 @@ import {
   resolveUnresolvedCause,
   warnAuthoredTenantPolicyOnce,
   writeCheckFieldOptions,
+  type HopTarget,
   type ObjectInputsHost,
   type FieldWriteRow,
 } from './security-plugin-object-inputs.js';
@@ -3232,7 +3233,7 @@ export class SecurityPlugin implements Plugin {
   private computeReadableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
+    options: { fallbackOnEmptySets: boolean },
   ): Promise<string[] | undefined> {
     // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
     const host: Pick<FieldReadersHost, 'resolveProjectionFieldMask'> = {
@@ -3396,20 +3397,16 @@ export class SecurityPlugin implements Plugin {
   /**
    * The body of {@link getQueryableFields}: every schema field the query-guard
    * derivation does not mark non-queryable — the fields this caller is served
-   * WHOLE (readable, and not masked). `hops: false` leaves out the computed
-   * fields withheld for what they read through a reference: the target-side
-   * ask of {@link resolveHopWithheldFields}, one hop and never two.
+   * WHOLE (readable, and not masked).
    */
   private async computeQueryableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
+    options: { fallbackOnEmptySets: boolean },
   ): Promise<string[] | undefined> {
-    const mask = await this.resolveProjectionFieldMask(object, context, {
-      fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited, memo: options.memo,
-    });
+    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets });
     if (mask.kind === 'answer') return mask.fields;
-    const queryGuard = mask.readQueryGuardPerms(options.hops === false ? [] : await mask.readHopWithheld());
+    const queryGuard = mask.readQueryGuardPerms(await mask.readHopWithheld());
     return mask.allFields.filter((f) => queryGuard[f]?.readable !== false);
   }
 
@@ -3425,7 +3422,7 @@ export class SecurityPlugin implements Plugin {
   private resolveProjectionFieldMask(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
+    options: { fallbackOnEmptySets: boolean },
   ): Promise<
     | { kind: 'answer'; fields: string[] | undefined }
     | {
@@ -3439,6 +3436,8 @@ export class SecurityPlugin implements Plugin {
       readRowForbiddenWrites: (row: Record<string, unknown>) => Promise<string[]>;
       /** What each computed field of the object is computed from (the posture's `computedFieldInputs`). */
       computedFieldInputs: ComputedFieldInputs;
+      /** The object each reference a computed field reads through points at (the posture's `computedHopTargets`). */
+      computedHopTargets: Record<string, string>;
       /** The computed fields withheld for what they read through a reference ({@link resolveHopWithheldFields}). */
       readHopWithheld: () => Promise<Set<string>>;
     }
@@ -6296,12 +6295,15 @@ export class SecurityPlugin implements Plugin {
    * points at declares and the caller is not served WHOLE there — it may not
    * read that object at all ({@link canReadObject}), may not read the field,
    * or is served it masked — judged by that object's own query
-   * projection ({@link computeQueryableFields}: readable minus masked, that
-   * object's computed fields folded in turn), or not determinable there (fail
-   * closed). The target's projection folds the target's own reads through
-   * its references in turn — a stored field there holds a value its writer
-   * computed — once per object on the path (`visited`): an object already on
-   * the path is asked without them, so a cycle of references terminates.
+   * query-guard map (readable minus masked, that object's computed fields
+   * folded in turn), or not determinable there (fail
+   * closed). The referenced object's own computed fields reading through ITS
+   * references are judged the same way — a stored field there holds a value
+   * its writer computed — over every object the references reach, each
+   * resolved once: a field withheld anywhere along a chain withholds every
+   * computed field reading it, however long the chain and wherever it comes
+   * back to (the withheld sets grow until none grows; the walk ends because
+   * they only grow).
    *
    * Every reader of the field map takes this set beside the posture: the
    * result masker (step 4), the query guard (steps 2.5b and 2.9,
@@ -6311,32 +6313,39 @@ export class SecurityPlugin implements Plugin {
   private resolveHopWithheldFields(
     secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
     context: any,
-    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
+    options: { fallbackOnEmptySets: boolean },
   ): Promise<Set<string>> {
     if (!postureHasComputedHops(secMeta)) return Promise.resolve(new Set());
-    // One answer per referenced object (and whether its own references are
-    // followed) for the whole walk, however many paths reach it.
-    const memo = options.memo ?? new Map<string, Promise<string[] | undefined>>();
     return resolveHopWithheldFields.call(
       {
-        // A referenced object's own reads through ITS references are judged
-        // too (a stored field there carries a value its writer computed),
-        // once per object on the path: an object already on it is asked
-        // without them, so a cycle of references terminates.
-        readServedWholeFields: (object: string, ctx: unknown) => {
-          const hops = !(options.visited?.has(object) ?? false);
-          const key = `${object}|${hops}`;
-          let hit = memo.get(key);
-          if (!hit) {
-            hit = this.computeQueryableFields(object, ctx, {
-              fallbackOnEmptySets: options.fallbackOnEmptySets, hops, visited: options.visited, memo,
-            });
-            memo.set(key, hit);
+        // Each referenced object once, as this caller is served it: its own
+        // query-guard map, asked again for every set of its computed fields
+        // the walk finds withheld for what they read through a reference.
+        readHopTarget: async (object: string, ctx: unknown): Promise<HopTarget | null> => {
+          const [declared, admitted, mask] = await Promise.all([
+            this.getObjectFieldNames(this.metadata, object, this.ql),
+            this.canReadObject(object, ctx),
+            this.resolveProjectionFieldMask(object, ctx, { fallbackOnEmptySets: options.fallbackOnEmptySets }),
+          ]);
+          if (!declared) return null;
+          if (mask.kind === 'answer') {
+            const fields = mask.fields;
+            return {
+              declared, admitted: admitted === true, inputs: {}, hopTargets: {},
+              servedWhole: () => (Array.isArray(fields) ? new Set(fields) : null),
+            };
           }
-          return hit;
+          return {
+            declared,
+            admitted: admitted === true,
+            inputs: mask.computedFieldInputs,
+            hopTargets: mask.computedHopTargets,
+            servedWhole: (hopWithheld) => {
+              const queryGuard = mask.readQueryGuardPerms(hopWithheld);
+              return new Set(mask.allFields.filter((f) => queryGuard[f]?.readable !== false));
+            },
+          };
         },
-        readFieldNames: (object: string) => this.getObjectFieldNames(this.metadata, object, this.ql),
-        readObjectAdmitted: (object: string, ctx: unknown) => this.canReadObject(object, ctx),
       },
       secMeta,
       context,

@@ -49,7 +49,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MatchesFilterOptions } from '@objectstack/formula';
 import type { FieldConditionVerdict } from '@objectstack/core';
 import { intersectFieldMasks } from './explain-engine.js';
-import { computedFieldsNotServedWhole, foldComputedFieldReads } from './field-masker.js';
+import { computedFieldsNotServedWhole, foldComputedFieldReads, type ComputedFieldInputs } from './field-masker.js';
 import { storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { FieldConditionJudge } from './permission-evaluator.js';
 import type { RlsFieldGuard } from './rls-compiler.js';
@@ -349,9 +349,7 @@ export async function computeForbiddenFieldWrites(
   const fields = await fieldEditVerdict.call(this, objectName, data, secMeta, permissionSets, delegatorSets, row);
   // Field-level security covers what a value is computed from, on the write
   // side too: a computed field this caller is not served whole is not
-  // nameable in its payload. A stored one's write never stands (the engine
-  // recomputes it), and whether the engine reported it replaced would tell
-  // the caller whether its guess equalled the value it is withheld.
+  // nameable in its payload, whatever value the payload carries for it.
   const inputs = secMeta.computedFieldInputs ?? {};
   if (Object.keys(inputs).length === 0) return fields;
   const named = new Set<string>();
@@ -359,9 +357,7 @@ export async function computeForbiddenFieldWrites(
     if (payload && typeof payload === 'object') for (const key of Object.keys(payload)) if (key in inputs) named.add(key);
   }
   if (named.size === 0) return fields;
-  const hopWithheld = await this.resolveHopWithheldFields(
-    secMeta, row.context, { fallbackOnEmptySets: false, visited: new Set([objectName]) },
-  );
+  const hopWithheld = await this.resolveHopWithheldFields(secMeta, row.context, { fallbackOnEmptySets: false });
   const notWhole = computedFieldsNotServedWhole(
     inputs,
     this.computeQueryGuardFieldPerms(objectName, secMeta, permissionSets, delegatorSets, hopWithheld),
@@ -688,57 +684,92 @@ export function extractTargetField(
 }
 
 /**
+ * One object a computed field reads through a reference, as the caller is
+ * served it: the fields it declares, whether the caller may read it at all,
+ * what its own computed fields read (on its record and through its own
+ * references), and the fields served WHOLE there given the computed fields of
+ * it withheld for what they read through a reference. `servedWhole` answers
+ * `null` when it cannot be determined.
+ */
+export interface HopTarget {
+  readonly declared: ReadonlySet<string>;
+  readonly admitted: boolean;
+  readonly inputs: ComputedFieldInputs;
+  readonly hopTargets: Readonly<Record<string, string>>;
+  servedWhole(hopWithheld: ReadonlySet<string>): ReadonlySet<string> | null;
+}
+
+/**
  * The body of `SecurityPlugin#resolveHopWithheldFields`; the method's docblock there is its contract.
  */
 export async function resolveHopWithheldFields(
-  this: {
-    readServedWholeFields: (object: string, context: unknown) => Promise<string[] | undefined>;
-    readFieldNames: (object: string) => Promise<ReadonlySet<string> | null>;
-    readObjectAdmitted: (object: string, context: unknown) => Promise<boolean>;
-  },
+  this: { readHopTarget: (object: string, context: unknown) => Promise<HopTarget | null> },
   secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
   context: unknown,
 ): Promise<Set<string>> {
-  const out = new Set<string>();
-  const inputs = secMeta.computedFieldInputs ?? {};
-  const targets = secMeta.computedHopTargets ?? {};
-  // Per target: the fields it declares, and the ones this caller is served
-  // WHOLE there (readable and not masked). A leaf the target does not declare
-  // is no field to withhold — the engine answers it `null` with its own fault
-  // — so only a DECLARED leaf the caller is not served whole withholds. A
-  // target the caller may not read at all serves it no field whole, and a
-  // target whose answer cannot be had withholds every computed field reading
-  // through it (fail closed).
-  const verdicts = new Map<string, Promise<{ declared: ReadonlySet<string>; whole: ReadonlySet<string> } | null>>();
-  const verdictOn = (object: string) => {
-    let hit = verdicts.get(object);
-    if (!hit) {
-      hit = Promise.all([
-        this.readFieldNames(object),
-        this.readServedWholeFields(object, context),
-        this.readObjectAdmitted(object, context),
-      ]).then(
-        ([declared, fields, admitted]) => (declared && Array.isArray(fields) && admitted === true
-          ? { declared, whole: new Set(fields) }
-          : null),
-        () => null,
-      );
-      verdicts.set(object, hit);
+  // Every object reachable through the references computed fields read,
+  // asked once each. An object whose answer cannot be had is `null`; an
+  // object the caller may not read is not followed further (every computed
+  // field reading through it is withheld whatever it reads there).
+  const nodes = new Map<string, HopTarget | null>();
+  const pending: string[] = [];
+  const reach = (inputs: ComputedFieldInputs | undefined, targets: Readonly<Record<string, string>> | undefined) => {
+    for (const input of Object.values(inputs ?? {})) {
+      for (const ref of input.hops?.keys() ?? []) {
+        const target = targets?.[ref];
+        if (target && !nodes.has(target) && !pending.includes(target)) pending.push(target);
+      }
     }
-    return hit;
   };
-  for (const [field, input] of Object.entries(inputs)) {
-    for (const [ref, leaves] of input.hops ?? []) {
-      const target = targets[ref];
-      if (!target) continue;
-      const verdict = await verdictOn(target);
-      if (verdict === null || [...leaves].some((leaf) => verdict.declared.has(leaf) && !verdict.whole.has(leaf))) {
-        out.add(field);
-        break;
+  reach(secMeta.computedFieldInputs, secMeta.computedHopTargets);
+  while (pending.length > 0) {
+    const object = pending.shift()!;
+    const node = await this.readHopTarget(object, context).catch(() => null);
+    nodes.set(object, node);
+    if (node?.admitted === true) reach(node.inputs, node.hopTargets);
+  }
+
+  // Per object, the computed fields withheld for what they read through a
+  // reference: a leaf the referenced object declares that the caller is not
+  // served whole there — or a referenced object the caller may not read, or
+  // whose answer cannot be had (fail closed). A leaf it does not declare is
+  // no field to withhold (the engine answers it `null` with its own fault).
+  const served = new Map<string, ReadonlySet<string> | null>();
+  const withheldThrough = (inputs: ComputedFieldInputs | undefined, targets: Readonly<Record<string, string>> | undefined) => {
+    const out = new Set<string>();
+    for (const [field, input] of Object.entries(inputs ?? {})) {
+      for (const [ref, leaves] of input.hops ?? []) {
+        const target = targets?.[ref];
+        if (!target) continue;
+        const node = nodes.get(target);
+        const whole = served.get(target);
+        if (!node || node.admitted !== true || !whole || [...leaves].some((leaf) => node.declared.has(leaf) && !whole.has(leaf))) {
+          out.add(field);
+          break;
+        }
+      }
+    }
+    return out;
+  };
+
+  // A withheld field withholds every computed field reading it, however long
+  // the chain and wherever it returns: grow each object's withheld set from
+  // empty until no object's set grows (each step only adds, so it ends).
+  const hopWithheld = new Map<string, Set<string>>([...nodes.keys()].map((o) => [o, new Set<string>()]));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [object, node] of nodes) {
+      served.set(object, node && node.admitted === true ? node.servedWhole(hopWithheld.get(object)!) : null);
+    }
+    for (const [object, node] of nodes) {
+      if (!node || node.admitted !== true) continue;
+      const held = hopWithheld.get(object)!;
+      for (const field of withheldThrough(node.inputs, node.hopTargets)) {
+        if (!held.has(field)) { held.add(field); grew = true; }
       }
     }
   }
-  return out;
+  return withheldThrough(secMeta.computedFieldInputs, secMeta.computedHopTargets);
 }
 
 /** Does any computed field of this posture read through a reference? */

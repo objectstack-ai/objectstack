@@ -442,7 +442,7 @@ export async function explainAccessForCaller(
       // from the enforcement composition itself.
       getComputedFieldsWithheld: async (o, mask, partial, c) => {
         const meta = await this.getObjectSecurityMeta(o);
-        const hop = await this.resolveHopWithheldFields(meta, c, { fallbackOnEmptySets: false, visited: new Set([o]) });
+        const hop = await this.resolveHopWithheldFields(meta, c, { fallbackOnEmptySets: false });
         return foldComputedFieldReads(mask as Record<string, { readable: boolean; editable: boolean }>, meta.computedFieldInputs, Object.keys(partial), hop).withheld;
       },
       baselinePermissionSets: this.baselinePermissionSets,

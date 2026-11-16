@@ -115,11 +115,9 @@ export async function computeReadableFields(
   this: Pick<FieldReadersHost, 'resolveProjectionFieldMask'>,
   object: string,
   context: any,
-  options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
+  options: { fallbackOnEmptySets: boolean },
 ): Promise<string[] | undefined> {
-  const mask = await this.resolveProjectionFieldMask(object, context, {
-    fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited, memo: options.memo,
-  });
+  const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets });
   if (mask.kind === 'answer') return mask.fields;
 
   // [#8993] A field this caller sees PARTIALLY MASKED is still a served
@@ -133,9 +131,8 @@ export async function computeReadableFields(
   // Field-level security covers what a value is computed from: a computed
   // field the read mask deletes for what it reads — on this record, through
   // another computed field, or through a reference — leaves the projection
-  // too (`foldComputedFieldReads`, the fold step 4 takes). `hops: false` is
-  // the target-side ask of `resolveHopWithheldFields`: one hop, never two.
-  const hopWithheld = options.hops === false ? [] : await mask.readHopWithheld();
+  // too (`foldComputedFieldReads`, the fold step 4 takes).
+  const hopWithheld = await mask.readHopWithheld();
   const { withheld } = foldComputedFieldReads(mask.fieldPerms, mask.computedFieldInputs, Object.keys(partialRules), hopWithheld);
 
   // Readable = every schema field NOT masked non-readable. A field with no
@@ -150,7 +147,7 @@ export async function resolveProjectionFieldMask(
   this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context: any,
-  options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
+  options: { fallbackOnEmptySets: boolean },
 ): Promise<
   | { kind: 'answer'; fields: string[] | undefined }
   | {
@@ -167,6 +164,8 @@ export async function resolveProjectionFieldMask(
     readRowForbiddenWrites: (row: Record<string, unknown>) => Promise<string[]>;
     /** What each computed field of the object is computed from (the posture's `computedFieldInputs`). */
     computedFieldInputs: ComputedFieldInputs;
+    /** The object each reference a computed field reads through points at (the posture's `computedHopTargets`). */
+    computedHopTargets: Record<string, string>;
     /** The computed fields withheld for what they read through a reference (`resolveHopWithheldFields`). */
     readHopWithheld: () => Promise<Set<string>>;
   }
@@ -251,11 +250,8 @@ export async function resolveProjectionFieldMask(
       objectName, secMeta, permissionSets, delegatorSets, hopWithheld,
     ),
     computedFieldInputs: secMeta.computedFieldInputs,
-    readHopWithheld: () => this.resolveHopWithheldFields(secMeta, context, {
-      fallbackOnEmptySets: options.fallbackOnEmptySets,
-      visited: new Set([...(options.visited ?? []), objectName]),
-      memo: options.memo,
-    }),
+    computedHopTargets: secMeta.computedHopTargets,
+    readHopWithheld: () => this.resolveHopWithheldFields(secMeta, context, { fallbackOnEmptySets: options.fallbackOnEmptySets }),
     // [#26594 / ruling of record 6457467702] The record-scoped projection's
     // edit half is the step 2.5 gate ITSELF, asked over these sets, this
     // posture and this delegator's sets, as an update by id of `row` (the

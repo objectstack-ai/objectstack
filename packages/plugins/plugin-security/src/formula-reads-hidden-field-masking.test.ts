@@ -43,6 +43,7 @@ const SOURCE = 'qa_fhf_source';
 const RELAY = 'qa_fhf_relay';
 const VAULT = 'qa_fhf_vault';
 const LOOP = 'qa_fhf_loop';
+const CYCLE = 'qa_fhf_cycle';
 const SET = 'qa_fhf_reader';
 const SECOND = 'qa_fhf_second';
 const DELEGATOR_SET = 'qa_fhf_delegator';
@@ -114,6 +115,19 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           source: { name: 'source', type: 'lookup', reference: SOURCE },
           // A stored field over a field of the record ITS reference points at.
           t: { name: 't', type: 'number', expression: cel('record.source.secret * 1.0') },
+          cycle: { name: 'cycle', type: 'lookup', reference: CYCLE },
+          // Over a field of the record that points BACK here: the chain returns to the relay.
+          w: { name: 'w', type: 'number', expression: cel('record.cycle.u * 1.0') },
+        },
+      },
+      {
+        name: CYCLE,
+        label: 'Cycle',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          relay: { name: 'relay', type: 'lookup', reference: RELAY },
+          u: { name: 'u', type: 'number', expression: cel('record.relay.t * 1.0') },
         },
       },
       {
@@ -210,6 +224,8 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           // Through a reference to a stored field that reads through a reference of its own.
           relay_stored: { name: 'relay_stored', type: 'number', expression: cel('record.relay.t * 1.0') },
           relay_formula: { name: 'relay_formula', ...num('record.relay.t * 1.0') },
+          // Through a chain that returns to an object other than this one (relay, cycle, relay).
+          relay_w: { name: 'relay_w', type: 'number', expression: cel('record.relay.w * 1.0') },
           // A stored copy of a field served masked on the referenced object.
           region_phone_stored: { name: 'region_phone_stored', type: 'text', expression: cel('record.region.region_phone') },
           // Stored computed fields over each same-record kind.
@@ -227,6 +243,8 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   await engine.insert(NOTE, [{ id: 'n1', plain: 'open', code: 'ABCDEFG' }], SYS);
   await engine.insert(SOURCE, [{ id: 's1', secret: 5 }], SYS);
   await engine.insert(RELAY, [{ id: 'rl1', source: 's1' }], SYS);
+  await engine.insert(CYCLE, [{ id: 'cy1', relay: 'rl1' }], SYS);
+  await engine.update(RELAY, { cycle: 'cy1' }, { where: { id: 'rl1' }, context: { isSystem: true } } as never);
   await engine.insert(VAULT, [{ id: 'v1', secret: 'S' }], SYS);
   await engine.insert(REGION, [{ id: 'r1', name: 'North', secret_score: 7, gated_score: 3, region_phone: '13900001111' }], SYS);
   if (opts.delegatorFields) {
@@ -253,7 +271,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     name: SET,
     ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
     // No grant on VAULT: its records are read only by name, through `referenceNameVisible`.
-    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant, [LOOP]: grant },
+    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant, [CYCLE]: grant, [LOOP]: grant },
     ...(opts.fields ? { fields: opts.fields } : {}),
   });
   const second = PermissionSetSchema.parse({
@@ -690,20 +708,28 @@ describe('a payload naming a computed field the caller is not served whole is re
   });
 });
 
-describe('a chain of references that returns to an object: the walk ends, and judges that object without its own references', () => {
-  it('a field of the returned object withheld for a reason on its own record withholds the chain; one withheld only for what it reads through a reference does not', async () => {
-    const { engine } = await boot({ fields: { ...HIDE_OPEN_CASES, ...hide(REGION, 'secret_score') } });
+describe('a chain of references that returns to an object withholds as any chain does, however it returns', () => {
+  it('back to the record read: a field withheld there for what it reads through a reference withholds the chain, as one withheld on its own record does', async () => {
+    const { engine, plugin } = await boot({ fields: { ...HIDE_OPEN_CASES, ...hide(REGION, 'secret_score') } });
     const one = await findA1(engine);
-    // Kept: `open_cases` is withheld on the account itself.
     expect(one).not.toHaveProperty('loop_v');
-    // The stated limit: `region_score_stored` is withheld on the account only for
-    // what it reads through ITS reference, and the account is judged without those.
-    expect(one).toMatchObject({ loop_u: 7 });
+    expect(one).not.toHaveProperty('loop_u');
+    expect(new Set(await plugin.getQueryableFields(OBJ, { ...CALLER })).has('loop_u')).toBe(false);
   });
 
-  it('control: a caller served every input whole reads both', async () => {
-    const { engine } = await boot();
-    expect(await findA1(engine)).toMatchObject({ loop_u: 7, loop_v: 6 });
+  it('back to an object along the chain: the field withheld there withholds the chain', async () => {
+    const { engine, plugin } = await boot({ fields: hide(SOURCE, 'secret') });
+    expect(await findA1(engine)).not.toHaveProperty('relay_w');
+    expect(new Set(await plugin.getQueryableFields(OBJ, { ...CALLER })).has('relay_w')).toBe(false);
+    expect(await outcome(findAll(engine, { where: { relay_w: { $eq: 5 } }, fields: ['id'] })))
+      .toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('control: a caller served every input whole reads each of them', async () => {
+    const { engine, plugin } = await boot();
+    expect(await findA1(engine)).toMatchObject({ loop_u: 7, loop_v: 6, relay_w: 5 });
+    const queryable = new Set(await plugin.getQueryableFields(OBJ, { ...CALLER }));
+    for (const f of ['loop_u', 'relay_w']) expect(queryable.has(f), f).toBe(true);
   });
 });
 
