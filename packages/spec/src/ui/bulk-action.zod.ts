@@ -121,6 +121,64 @@ export const BulkActionExecutionSchema = z.enum(['perRecord', 'aggregate']);
 export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
 
 /**
+ * The per-row outcome an `execution: 'aggregate'` handler MAY resolve with
+ * (#34216, seat ruling 6905490575, option A).
+ *
+ * An aggregate dispatch is ONE call carrying the whole selection in
+ * `params._selectedIds`, so the call's own success or failure is one outcome
+ * for N rows. A handler that writes row by row can move some rows and fail on
+ * others; without a declared answer the console could only say "not all
+ * completed", never which rows changed. This is that answer.
+ *
+ * **Resolve value only — never a rejection.** The object IS the handler's
+ * whole resolve value (no wrapper key), and a run that moved some rows and
+ * refused others still RESOLVES with it: a non-empty `failed` is a legal
+ * success answer, the way `BatchUpdateResponseSchema` (`api/batch.zod.ts`)
+ * reports per-row results in the success body. A rejection keeps meaning "the
+ * handler could not produce an outcome" and stays the one-outcome report: the
+ * `/actions` door carries no structured body on a script or flow arm's throw
+ * (the shared resolver's `details` is a closed list, and the sandbox passes
+ * only `code`, `fields`, `status` and `userMessage` out of a body), so a
+ * per-row result attached to a throw would be dropped.
+ *
+ * **Optional.** A handler that resolves with anything else (nothing, a
+ * summary, an artifact link) keeps today's one-outcome report: the reader
+ * parses the value against this schema only on an `execution: 'aggregate'`
+ * dispatch, and a value that does not parse falls back to that report.
+ * Members beyond `succeeded` / `failed` are tolerated (`looseObject`, a wire
+ * shape written by a handler, not by an author) and carry no meaning to the
+ * reader, so a handler may return a summary beside the two lists.
+ *
+ * **Ids come from the selection.** Every id in `succeeded` and `failed` must
+ * be one of the dispatched `params._selectedIds`. An id outside the selection
+ * is a handler bug: the reader drops it and counts it nowhere.
+ */
+export const BulkActionResultSchema = lazySchema(() => z.looseObject({
+  succeeded: z.array(z.string()).describe(
+    'Ids of the selected rows the handler wrote. Each must be one of the dispatched `params._selectedIds`; '
+    + 'an id outside the selection is a handler bug, and the reader drops it and counts it nowhere.',
+  ),
+  failed: z.array(z.looseObject({
+    id: z.string().describe('Id of a selected row the handler did not write: one of the dispatched `params._selectedIds`.'),
+    message: z.string().describe('Why this row was not written, as the person running the action should read it.'),
+  })).describe(
+    'One entry per selected row the handler did not write, each with its own reason. Ids outside '
+    + '`params._selectedIds` are a handler bug, and the reader drops them and counts them nowhere.',
+  ),
+}).describe(
+  'The per-row outcome an `execution: \'aggregate\'` bulk action handler MAY resolve with: '
+  + '`{ succeeded: [ids], failed: [{ id, message }] }` as its whole resolve value, never attached to a '
+  + 'rejection (a rejection stays one outcome for the selection). A run that wrote some rows and refused '
+  + 'others still resolves, with a non-empty `failed`. Optional: a value that does not parse keeps the '
+  + 'one-outcome report, and members beyond the two lists are tolerated and carry no meaning. Every id must be '
+  + 'one of the dispatched `params._selectedIds`; an id outside the selection is a handler bug, and the reader '
+  + 'drops it.',
+));
+export type BulkActionResult = z.input<typeof BulkActionResultSchema>;
+/** Post-parse shape of {@link BulkActionResult} — defaults applied, transforms run (ADR-0122). */
+export type BulkActionResultParsed = z.infer<typeof BulkActionResultSchema>;
+
+/**
  * Keys a widget on this path really reads off the field bag — and which this
  * shape nevertheless does NOT declare, so their rejection has to carry the
  * reason rather than a bare "unknown key".
