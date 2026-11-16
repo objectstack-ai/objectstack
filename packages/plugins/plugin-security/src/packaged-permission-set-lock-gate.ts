@@ -77,10 +77,10 @@ import {
  * `protocol-packaged-base-refusal.ts`).
  */
 function overridesDeclaredSet(ql: any, writer: string, declarer: string, name: string): boolean {
-  const registry = ql?.registry as (InstalledPackageSource & { getPackage?: (id: string) => any }) | undefined;
-  if (isPairOf(writer, declarer, installedManifestsOf(registry))) return true;
+  const installed = installedManifestsOf(ql?.registry as InstalledPackageSource | undefined);
+  if (isPairOf(writer, declarer, installed)) return true;
   const namespaceOf = (packageId: string): string | undefined => {
-    const namespace = registry?.getPackage?.(packageId)?.manifest?.namespace;
+    const namespace = installed(packageId)?.namespace;
     return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
   };
   return permissionSetHoldersMeet(namespaceOf(writer), namespaceOf(declarer), name);
