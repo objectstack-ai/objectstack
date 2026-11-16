@@ -2035,6 +2035,29 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * The key column of the row a filter member's relationship path reaches, as
+   * {@link qualifyAndRegisterJoin} joined it (`"order"."id"`, or
+   * `"account__owner"."id"` for two hops), or `null` for a base-table column or
+   * an SQL expression. The hops are {@link resolvePathHops}'s, the one resolver
+   * the join itself reads; every hop joins `ON … = "<alias>"."id"`, so the last
+   * hop's key is NULL exactly when the chain reached no row. Read after the
+   * leaf resolved, so the join is registered.
+   */
+  private joinedParentKey(
+    cube: Cube,
+    member: string,
+    parentTable: string,
+    joins: StatementJoins,
+  ): string | null {
+    const rawSql = this.lookupFilterMember(cube, member)?.sql ?? member;
+    if (!rawSql.includes('.') || !IDENTIFIER_PATH.test(rawSql)) return null;
+    const hops = rawSql.split('.').slice(0, -1);
+    const resolved = resolvePathHops(cube, parentTable, hops, joins.referenceOf);
+    const last = resolved[resolved.length - 1];
+    return last && joins.has(last.alias) ? `"${last.alias}"."id"` : null;
+  }
+
+  /**
    * Resolve the (object, column) a filter member binds against, so its
    * comparand can be coerced to that column's on-disk storage form.
    *
@@ -2201,7 +2224,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // Resolve the (object, column) this member binds against so the value
       // can be coerced to the column's storage form (see buildFilterClause).
       const target = this.resolveStorageTarget(cube, node.member, parentTable, joins.referenceOf);
-      return this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+      const clause = this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
+      // A leaf on a joined column is evaluated on an EXISTING parent. The
+      // `LEFT JOIN` gives a detail row with no parent a NULL in every joined
+      // column, and the NULL-polarity escape the shared lowering lays around a
+      // negative leaf (`$ne`, `$nin`, `$notContains` → `col IS NULL OR …`), a
+      // `$null: true` or an `$empty` reads that NULL as "the parent's value is
+      // missing" — selecting the orphan. The engine path and the `/data`
+      // nested-relation filter read the parent first, so no parent never
+      // matches, whatever the operator (`cross-object-where.ts`); this conjunct
+      // is that rule here. A parent that exists with a NULL value still answers
+      // its own polarity (#5298). Added only around a clause that bound, so
+      // `params` stays aligned (`null` is TRUE and binds nothing).
+      const parentKey = clause === null ? null : this.joinedParentKey(cube, node.member, parentTable, joins);
+      return parentKey ? `(${parentKey} IS NOT NULL AND ${clause})` : clause;
     }
 
     if (node.kind === 'not') {

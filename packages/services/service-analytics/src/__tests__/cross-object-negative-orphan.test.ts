@@ -156,11 +156,7 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
   }
 
   it('the native statement evaluates the joined leaf on an existing parent', async () => {
-    const { sql } = await services.native!.generateSql({
-      cube: DATASET.name,
-      measures: ['n'],
-      where: { 'order.status': { $ne: 'open' } },
-    } as never).catch(async () => (await totals('native', { 'order.status': { $ne: 'open' } })) as { sql: string });
+    const { sql } = await totals('native', { 'order.status': { $ne: 'open' } });
     expect(sql).toContain('LEFT JOIN "os33792_order" "order" ON');
     expect(sql).toContain('"order"."id" IS NOT NULL AND "order"."status" IS NULL');
   });
