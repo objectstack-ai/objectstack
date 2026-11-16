@@ -22,6 +22,10 @@
  *                      seed's second pass, `seedApp` in `orchestrate.ts`; read from the
  *                      route's source, `packages/rest/src/crud-routes.ts`, not yet
  *                      measured live)
+ *   a restored row     DELETE /api/v1/data/:object/:id (a row an earlier operation added,
+ *                      deleted before the next one runs, `restoreSeededRows` in
+ *                      `orchestrate.ts`; read from the same route source, not yet
+ *                      measured live)
  *   rows               GET  /api/v1/data/:object?limit=…
  *   the audit actor    GET  /api/v1/data/sys_audit_log?record_id=… (`user_id`)
  *   unmanaged install  POST /api/v1/marketplace/install-local { packageId, manifest,
@@ -125,6 +129,13 @@ export interface AppHarness {
   insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer>;
   /** Set fields on a row already in (the seed's second pass: the lookups that close a reference cycle). */
   updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer>;
+  /**
+   * Delete a row, as the admin (a restore: a row an earlier operation added).
+   * Optional, so a harness written before restores keeps compiling; without it
+   * a restore that needs a delete cannot be done, and the operation is not
+   * measured.
+   */
+  deleteRow?(object: string, id: string): Promise<HttpAnswer>;
   listRows(object: string): Promise<HttpAnswer & { rows: Array<Record<string, unknown>> }>;
   /** The `user_id` the newest audit row for this record names; `null` when none names one. */
   auditActorUserId(object: string, recordId: string): Promise<string | null>;
@@ -270,6 +281,10 @@ export class HttpApp implements AppHarness {
 
   updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
     return this.call('PATCH', `/api/v1/data/${encodeURIComponent(object)}/${encodeURIComponent(id)}`, patch, { session: this.admin });
+  }
+
+  deleteRow(object: string, id: string): Promise<HttpAnswer> {
+    return this.call('DELETE', `/api/v1/data/${encodeURIComponent(object)}/${encodeURIComponent(id)}`, undefined, { session: this.admin });
   }
 
   async listRows(object: string): Promise<HttpAnswer & { rows: Array<Record<string, unknown>> }> {

@@ -119,10 +119,14 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
 
   it('carries the multiOrgEnabled gate, lowered as the platform lowers its own', () => {
     const changeSlug = actions.find((a) => a.name === 'change_slug');
-    const leave = actions.find((a) => a.name === 'leave_organization');
+    const setActive = actions.find((a) => a.name === 'set_active_organization');
     expect(changeSlug?.visible).toEqual({ dialect: 'cel', source: featureGatePredicate('multiOrgEnabled') });
-    // The platform's own multi-org action, gated by nothing else, serves the same predicate.
-    expect(changeSlug?.visible).toEqual(leave?.visible);
+    // The reference is `set_active_organization`: of the platform's own
+    // `sys_organization` actions it is the one whose only gate is
+    // `requiresFeature: 'multiOrgEnabled'` (no `visible` of its own, no
+    // membership reach), so its served predicate is the multi-org gate exactly
+    // as the platform lowers it, and nothing else.
+    expect(changeSlug?.visible).toEqual(setActive?.visible);
   });
 
   it('the gate admits it with multi-org on and hides it with multi-org off', () => {

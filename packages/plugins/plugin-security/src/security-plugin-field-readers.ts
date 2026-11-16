@@ -68,6 +68,7 @@ import type { SecurityPlugin } from './security-plugin.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
 import { delegatedOrganizationRefusal, intersectFieldMasks } from './explain-engine.js';
+import { foldComputedFieldReads, type ComputedFieldInputs } from './field-masker.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -91,6 +92,7 @@ export interface FieldReadersHost {
   resolveCallerPosture: SecurityPlugin['resolveCallerPosture'];
   resolveDelegatorForContext: SecurityPlugin['resolveDelegatorForContext'];
   resolveFallbackPermissionSets: SecurityPlugin['resolveFallbackPermissionSets'];
+  resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
   resolveProjectionFieldMask: SecurityPlugin['resolveProjectionFieldMask'];
 }
@@ -115,7 +117,7 @@ export async function computeReadableFields(
   context: any,
   options: { fallbackOnEmptySets: boolean },
 ): Promise<string[] | undefined> {
-  const mask = await this.resolveProjectionFieldMask(object, context, options);
+  const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets });
   if (mask.kind === 'answer') return mask.fields;
 
   // [#8993] A field this caller sees PARTIALLY MASKED is still a served
@@ -126,16 +128,23 @@ export async function computeReadableFields(
   // deleted, hence out of the projection.
   const partialRules = mask.readPartialMaskRules();
 
-  // Readable = every schema field NOT explicitly masked non-readable. A field
-  // with no permission entry passes through (the field allow-list only
-  // enumerates fields it names) — the exact complement of maskResults' delete
-  // set, so the export header matches list's readable columns by construction.
-  return mask.allFields.filter((f) => mask.fieldPerms[f]?.readable !== false || partialRules[f] !== undefined);
+  // Field-level security covers what a value is computed from: a computed
+  // field the read mask deletes for what it reads — on this record, through
+  // another computed field, or through a reference — leaves the projection
+  // too (`foldComputedFieldReads`, the fold step 4 takes).
+  const hopWithheld = await mask.readHopWithheld();
+  const { withheld } = foldComputedFieldReads(mask.fieldPerms, mask.computedFieldInputs, Object.keys(partialRules), hopWithheld);
+
+  // Readable = every schema field NOT masked non-readable. A field with no
+  // permission entry passes through (the field allow-list only enumerates
+  // fields it names) — the exact complement of maskResults' delete set, so
+  // the export header matches list's readable columns by construction.
+  return mask.allFields.filter((f) => !withheld.has(f) && (mask.fieldPerms[f]?.readable !== false || partialRules[f] !== undefined));
 }
 
 /** The body of `SecurityPlugin#resolveProjectionFieldMask`; the method's docblock there is its contract. */
 export async function resolveProjectionFieldMask(
-  this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context: any,
   options: { fallbackOnEmptySets: boolean },
@@ -147,12 +156,18 @@ export async function resolveProjectionFieldMask(
     fieldPerms: Record<string, { readable: boolean; editable: boolean }>;
     readPartialMaskRules: () => Record<string, FieldMaskingRule>;
     /** [#20935] The middleware's query-guard map for these sets (computeQueryGuardFieldPerms). */
-    readQueryGuardPerms: () => Record<string, { readable: boolean; editable: boolean }>;
+    readQueryGuardPerms: (hopWithheld?: Iterable<string>) => Record<string, { readable: boolean; editable: boolean }>;
     /**
      * [#26594] The write gate's verdict (computeForbiddenFieldWrites) on an
      * update of `row` naming every field: the fields it refuses there.
      */
     readRowForbiddenWrites: (row: Record<string, unknown>) => Promise<string[]>;
+    /** What each computed field of the object is computed from (the posture's `computedFieldInputs`). */
+    computedFieldInputs: ComputedFieldInputs;
+    /** The object each reference a computed field reads through points at (the posture's `computedHopTargets`). */
+    computedHopTargets: Record<string, string>;
+    /** The computed fields withheld for what they read through a reference (`resolveHopWithheldFields`). */
+    readHopWithheld: () => Promise<Set<string>>;
   }
 > {
   const objectName = String(object ?? '');
@@ -231,9 +246,12 @@ export async function resolveProjectionFieldMask(
     readPartialMaskRules: () => this.computeReadPartialMaskRules(
       secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
     ),
-    readQueryGuardPerms: () => this.computeQueryGuardFieldPerms(
-      objectName, secMeta, permissionSets, delegatorSets,
+    readQueryGuardPerms: (hopWithheld?: Iterable<string>) => this.computeQueryGuardFieldPerms(
+      objectName, secMeta, permissionSets, delegatorSets, hopWithheld,
     ),
+    computedFieldInputs: secMeta.computedFieldInputs,
+    computedHopTargets: secMeta.computedHopTargets,
+    readHopWithheld: () => this.resolveHopWithheldFields(secMeta, context, { fallbackOnEmptySets: options.fallbackOnEmptySets }),
     // [#26594 / ruling of record 6457467702] The record-scoped projection's
     // edit half is the step 2.5 gate ITSELF, asked over these sets, this
     // posture and this delegator's sets, as an update by id of `row` (the
@@ -270,6 +288,8 @@ export async function resolveCallerPosture(
     requiredPermissions: EMPTY_REQUIRED_PERMISSIONS,
     fieldRequiredPermissions: posture.fieldRequiredPermissions,
     fieldMaskingRules: posture.fieldMaskingRules,
+    computedFieldInputs: posture.computedFieldInputs,
+    computedHopTargets: posture.computedHopTargets,
     unresolved: posture.unresolved,
     // [#10401] Explanation only, and present only on the refusing path.
     unresolvedCause: posture.unresolvedCause,

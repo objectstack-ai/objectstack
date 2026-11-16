@@ -125,6 +125,7 @@ import {
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
+import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -435,6 +436,11 @@ export interface McpActionBridge {
    * the host hands it to the person and resolves to the contract's
    * `ActionConfirmationPending` (`status: 'pending_confirmation'`), which the
    * tool relays as its successful result; the request's `confirm` is not read.
+   * [#33712] When the tool passes `door` (the client advertised
+   * `elicitation` on a door that can carry a request to it), the host asks
+   * the person through `door.elicitConfirmation` first, once every admission
+   * gate has passed: `accept` runs the call, any other answer refuses it, and
+   * nothing is handed off. Without `door` the call is handed off as above.
    */
   runAction(
     name: string,
@@ -449,6 +455,7 @@ export interface McpActionBridge {
       recordId?: string;
       params?: Record<string, unknown>;
     } & AIActionConfirmation,
+    door?: McpActionCallDoor,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -475,7 +482,9 @@ export interface McpActionBridge {
    * pauses on its next screen comes back paused again. Throws on refusal, with
    * the ADR-0112 `code` / `status` on the thrown value. [#33690] A resume of a
    * gated action resolves to `ActionConfirmationPending` instead, as
-   * {@link runAction} does, and the run stays parked.
+   * {@link runAction} does, and the run stays parked. [#33712] `door` as on
+   * {@link runAction}: an elicited `accept` resumes the run, any other
+   * answer refuses it and the run stays parked.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -483,6 +492,7 @@ export interface McpActionBridge {
   resumeRun?(
     runId: string,
     input: { values?: Record<string, unknown> } & AIActionConfirmation,
+    door?: McpActionCallDoor,
   ): Promise<unknown>;
 }
 
@@ -3379,6 +3389,11 @@ export function registerActionTools(
         'Nothing has run then; do not retry, tell the user to approve it. Where the server cannot hand it off, ' +
         'the call is refused ACTION_CONFIRMATION_REQUIRED (details.reason "no_confirmation_service"): the user ' +
         'performs the action in the app. ' +
+        // [#33712] Step 1: a client that supports elicitation is asked in place.
+        'When your client supports elicitation and this connection can carry it, the user is asked in your ' +
+        'client instead: accept runs the action once; decline, dismissing it or no answer in time refuses it ' +
+        '(ACTION_CONFIRMATION_REQUIRED, details.reason "declined", "cancelled" or "timed_out"); do not retry ' +
+        'unless the user asks. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
         'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
         'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
@@ -3470,7 +3485,7 @@ export function registerActionTools(
       // is further surfaced via `requiresConfirmation` in list_actions.
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async (args) => {
+    async (args, extra) => {
       const { recordId, params } = args;
       let { actionName, objectName, namespace } = args;
       // Read off the constant, so the member's spelling has exactly one
@@ -3509,7 +3524,7 @@ export function registerActionTools(
             return errorResult(systemObjectActionRefusal(actionName, objectName));
           }
         }
-        const result = await bridge.runAction(actionName, {
+        const request = {
           objectName,
           // [ADR-0150 D5] Forwarded only when given: a call that names no
           // namespace reaches the bridge exactly as before.
@@ -3520,7 +3535,15 @@ export function registerActionTools(
           // key above are the two halves of one change: dropping either one
           // restores the strip that made the gate unsatisfiable.
           [AI_ACTION_CONFIRMATION_MEMBER]: confirm,
-        });
+        };
+        // [#33712] Step 1 of the amended confirmation contract: a client that
+        // advertised `elicitation` on a server that read its `initialize` (the
+        // stdio door) is asked in place. Otherwise the bridge is called
+        // exactly as before and hands a gated call off.
+        const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
+        const result = elicitConfirmation
+          ? await bridge.runAction(actionName, request, { elicitConfirmation })
+          : await bridge.runAction(actionName, request);
         return textResult(result);
       } catch (err) {
         return landedWriteResultOrError(
@@ -3560,7 +3583,9 @@ export function registerActionTools(
           'change that: it is handed to the person you act for, who approves or rejects it in the app, and you ' +
           'are answered status "pending_confirmation" with a pendingId; the run stays paused until they ' +
           'approve. Where the server cannot hand it off, the call is refused ACTION_CONFIRMATION_REQUIRED and ' +
-          'the run stays paused. Under an AI service account\'s own key the call is refused ' +
+          'the run stays paused. When your client supports elicitation and this connection can carry it, the ' +
+          'user is asked in your client instead: accept continues the run; any other answer refuses the call ' +
+          'and the run stays paused. Under an AI service account\'s own key the call is refused ' +
           'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
           'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
           'in the error message.',
@@ -3612,18 +3637,23 @@ export function registerActionTools(
         // as `run_action`: the client should confirm before calling it.
         annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       },
-      async (args) => {
+      async (args, extra) => {
         const { runId, values } = args;
         const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
         if (!runId || typeof runId !== 'string') {
           return errorResult('runId is required');
         }
         try {
-          const result = await resumeRun(runId, {
+          const request = {
             values,
             // Forwarded, never rebuilt without it: see `run_action` above.
             [AI_ACTION_CONFIRMATION_MEMBER]: confirm,
-          });
+          };
+          // [#33712] As `run_action`: asked in place where the client can be.
+          const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
+          const result = elicitConfirmation
+            ? await resumeRun(runId, request, { elicitConfirmation })
+            : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
           return errorResultFromThrown(err, `resume_run ${runId}`);

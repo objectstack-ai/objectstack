@@ -21,7 +21,11 @@
  *      `403 PERMISSION_DENIED` and nothing lands, and the key they minted is
  *      refused; a flow they launch that runs as them reads none of the
  *      organization's data and writes nothing; the other person — still a
- *      member — is served throughout, by the same doors and the same flows.
+ *      member — is served throughout, by the same doors and the same flows;
+ *   4. a third person whose membership row is taken away by no door at all
+ *      (under the system context) signs in to no active organization, adopts
+ *      no membership, and reads and writes none of the organization's data,
+ *      their own note included.
  *
  * The posture is read off the `tenancy` service, not assumed: a degraded boot
  * resolves to `single`, and a matrix whose walled legs were really `single`
@@ -217,6 +221,47 @@ describe.each(['single', 'isolated', 'group'] as const)(
     it('an API key follows its owner\'s membership: the removed person\'s key is refused, the member\'s is admitted', async () => {
       expect(await readNotesByKey(leaves.key)).toBe(401);
       expect(await readNotesByKey(stays.key)).toBe(200);
+    });
+
+    it('a person whose membership row is gone by no door signs in to no active organization and reads and writes none of its data', async () => {
+      // The row is taken away under the system context, not through any
+      // membership door: the state of a person the environment holds no
+      // membership for, however they arrived there. The person first writes a
+      // note as a member and reads it back, so the empty read below is
+      // measured against their own row.
+      const email = `membership.${posture}.no-row@example.com`;
+      await stack.signUp(email, PASSWORD, 'Membership no-row');
+      const [u] = await findRows(ql, 'sys_user', { email }, 1);
+      const userId = String(u.id);
+      if (posture !== 'single') await ql.insert('sys_member', { user_id: userId, organization_id: orgId, role: 'member' }, { context: SYS });
+      const row = await waitForMembership(ql, userId, orgId);
+      const asMember = await stack.signIn(email, PASSWORD);
+      const created = await stack.apiAs(asMember, 'POST', `/data/${NOTE}`, { title: 'no-row note, written as a member' });
+      expect(created.status, await created.clone().text()).toBe(201);
+      const createdBody: any = await created.json();
+      const noteId = String(createdBody?.data?.id ?? createdBody?.id ?? createdBody?.record?.id);
+      expect((await readNotes(asMember)).ids).toContain(noteId);
+
+      await ql.delete('sys_member', { where: { id: row.id }, context: SYS });
+      expect(await findRows(ql, 'sys_member', { user_id: userId }, 5)).toEqual([]);
+
+      const token = await stack.signIn(email, PASSWORD);
+      const me = await stack.apiAs(token, 'GET', '/auth/get-session');
+      expect(me.status, await me.clone().text()).toBe(200);
+      const meBody: any = await me.json();
+      expect(meBody?.session?.activeOrganizationId ?? null, JSON.stringify(meBody?.session)).toBeNull();
+      // Signing in adopted no membership either.
+      expect(await findRows(ql, 'sys_member', { user_id: userId }, 5)).toEqual([]);
+
+      const read = await readNotes(token);
+      expect(read.status).toBe(200);
+      expect(read.ids).toEqual([]);
+      expect((await stack.apiAs(token, 'GET', `/data/${NOTE}/${noteId}`)).status).toBe(404);
+
+      const write = await stack.apiAs(token, 'POST', `/data/${NOTE}`, { title: 'written with no membership row' });
+      expect(write.status).toBe(403);
+      expect(errorCodeOf(await write.json())).toBe('PERMISSION_DENIED');
+      expect(await findRows(ql, NOTE, { title: 'written with no membership row' }, 5)).toEqual([]);
     });
 
     it('CONTROL: the person who is still a member is served — reads its note, and its write lands', async () => {

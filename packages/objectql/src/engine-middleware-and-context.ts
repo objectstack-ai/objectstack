@@ -8,8 +8,8 @@
  * `executeWithMiddleware`, `buildReferentialFieldClear`,
  * `claimReferentialCascadeDelete`, `probeInstallOrganizations`,
  * `invalidateOrganizationProbe`, `resolveSystemInsertOrganization`,
- * `transactionCoversDriverFor` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `transactionCoversDriverFor` moved out of `engine.ts` whole (split
+ * by #30012).
  *
  * A MOVE, not a redesign. {@link MiddlewareAndContextFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`

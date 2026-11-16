@@ -188,7 +188,7 @@ describe('exportGallery — one passing, generic app', () => {
         capabilities: [...fx.scenario.card.capabilities].sort(),
         screenshots: [],
         qa: { questions: 14, turns: 16, personas: 2 },
-        operations: 5,
+        operations: 6,
         framework: { version: '18.3.0', runner: 'abc1234' },
         runDate: '2026-11-06',
         run: `2026-11-06-scenario-${CARD_ID}`,

@@ -195,6 +195,18 @@ export interface SummaryBackfillOptions {
    * exactly the `count`/`sum` backfill it always was.
    */
   recomputeUndefinedOnEmpty?: string[];
+  /**
+   * [#34096] Write each recomputed parent with `skipAutomations: true` on the
+   * system context, so its metadata-bound hooks and record-change flows do not
+   * run (the seed-loader rule: end-state data, not user events). The engine's
+   * own roll-up recompute is not an automation and still runs, so a parent
+   * that is itself a child of another roll-up still moves its own parent.
+   * Set by the install door's walk (`summary-install-materialise.ts`), which
+   * runs with no operator choosing the moment. Omitted, the write context is
+   * exactly the bare system context it always was, so `os migrate
+   * summary-nulls` keeps firing them, at the time the operator picks.
+   */
+  skipAutomations?: boolean;
   /** Safety bound on parent rows read per object. */
   maxRecordsPerObject?: number;
   /** Retry policy for one row's aggregate + update; defaults to the transient
@@ -326,6 +338,9 @@ export async function backfillSummaryNulls(
   options: SummaryBackfillOptions = {},
 ): Promise<SummaryBackfillReport> {
   const apply = options.apply === true;
+  // The parent write's context: the bare system context unless the caller
+  // asked for automations to stay off (see `skipAutomations`).
+  const writeCtx = options.skipAutomations === true ? { ...SYSTEM_CTX, skipAutomations: true } : { ...SYSTEM_CTX };
   const maxPerObject = options.maxRecordsPerObject ?? 100_000;
   const candidates =
     options.objects ??
@@ -412,7 +427,7 @@ export async function backfillSummaryNulls(
                 await engine.update(
                   desc.parentObject,
                   { id: parentId, [desc.summaryField]: computed },
-                  { context: { ...SYSTEM_CTX } },
+                  { context: { ...writeCtx } },
                 );
               }, options.retry ?? {});
               if (undefinedOnEmpty && computed == null) {

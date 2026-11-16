@@ -1318,12 +1318,19 @@ const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/
  * - **Operator.** Only the six scalar comparisons
  *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
  *   value: never a member of an `in` / `notIn` list.
+ * - **Where it resolves.** In a record form only, whatever its layout (the
+ *   auto layout, authored or field-group sections, a modal, drawer, tabbed or
+ *   wizard form, a master-detail header form). Every other picker host leaves
+ *   every `{ $record }` entry out — inline edit on a record page, a record
+ *   page's header or related list, an action's parameter dialog, and a
+ *   picker with no single record being edited (a bulk action over selected
+ *   rows).
  * - **An empty value.** When the referenced value is empty (null, unset, an
- *   empty string, or a hop whose lookup is unset), the entry is left out of
- *   the candidate query, so a quote whose account has no market is offered
- *   every book the other entries admit. A picker with no single record being
- *   edited (a bulk-action selection bar, a filter panel) has no value to read
- *   and leaves every `{ $record }` entry out by the same rule.
+ *   empty string, or a hop whose lookup is unset) or cannot be read (the
+ *   hop's row or field does not come back, no object is named for the hop,
+ *   or the host has no single-row reader), the entry is left out of the
+ *   candidate query, so a quote whose account has no market is offered
+ *   every book the other entries admit.
  * - **Re-query.** The picker re-queries its candidates whenever a referenced
  *   field changes — the first segment of the path (`quote_date`, `account`).
  *   Those fields are implied by the `$record` paths. Do NOT list them in
@@ -2254,27 +2261,30 @@ export const FieldSchema = lazySchema(() => {
       'The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a '
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
-      + 'only with eq, ne, gt, lt, gte or lte. A { $record } that reaches a server unresolved is refused '
-      + '(INVALID_FILTER), never read as null. [PLANNED — not enforced] The picker does not resolve { $record } yet.',
+      + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
+      + 'value in place of the reference; every other picker host leaves the entry out. A { $record } that reaches a '
+      + 'server unresolved is refused (INVALID_FILTER), never read as null.',
     ),
     orEmpty: z.boolean().optional().describe(
-      '[PLANNED — not enforced] TRUE: the entry also matches a candidate whose column is null — "valid from the '
-      + 'quote date, or with no start date". Only with eq, ne, gt, lt, gte or lte. The picker does not read it yet.',
+      'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
+      + 'start date". Only with eq, ne, gt, lt, gte or lte. The picker sends the comparison or a null match on the same column.',
     ),
   }).superRefine(refuseMalformedLookupFilterEntry)).optional().describe(
     'Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. '
     + 'Each entry compares a column of the CANDIDATE record (`field`, on the referenced object) with `value`. A value may '
     + 'read the record being edited as { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup '
-    + 'hop): the picker sends that value in its place and re-queries whenever a referenced field changes. Those fields '
+    + 'hop). In a record form, whatever its layout, the picker sends that value in its place and re-queries whenever a '
+    + 'referenced field changes; every other picker host leaves every { $record } entry out: inline edit on a record '
+    + 'page, a record page\'s header or related list, an action\'s parameter dialog, and a picker with no single record '
+    + 'being edited (a bulk action over selected rows). The referenced fields '
     + 'are implied: do not list them in `dependsOn`, which also scopes the candidate query by equality '
     + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
-    + 'empty, and on a picker with no single record being edited (a bulk-action bar, a filter panel), the entry is left '
-    + 'out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
+    + 'empty or cannot be read (the hop\'s row or field does not come back, no object is named for the hop, or the host '
+    + 'has no single-row reader), the entry is left out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
     + 'server unresolved is refused (INVALID_FILTER), never read as null: by name, naming the field and the path, when '
     + 'it arrives as the eq shorthand on a column other than a date, datetime or time column; any other operator, and '
-    + 'eq on a date, datetime or time column, is refused earlier, in generic words. The '
-    + 'picker narrows the choice only: a rule the save must enforce belongs on the server too. [PLANNED — not '
-    + 'enforced] The picker does not resolve { $record } or read orEmpty yet.',
+    + 'eq on a date, datetime or time column, is refused earlier, in generic words. The picker narrows the choice only: '
+    + 'a rule the save must enforce belongs on the server too.',
   ),
   dependsOn: z.array(z.union([z.string(), strictObject({
     surface: 'this dependsOn entry',

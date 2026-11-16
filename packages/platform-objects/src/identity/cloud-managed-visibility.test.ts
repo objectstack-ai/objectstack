@@ -200,3 +200,96 @@ describe('features.cloudManaged offers the two doors that add a pending person',
     expect(offeredSites).toEqual(SIX.map(([site]) => site));
   });
 });
+
+/**
+ * Membership and roles on a cloud-managed environment are managed by the
+ * organisation that hosts it, so the three row actions that change them are
+ * hidden while the flag is on: Change Role and Make Owner (both call
+ * update-member-role) and Remove Member (remove-member), each of whose doors
+ * refuses there. Each is offered as before when the flag is off. Add Member
+ * stays offered to a platform administrator on a managed environment: its
+ * door is the one left open, to restore a membership the environment lost.
+ */
+describe('features.cloudManaged hides the row actions that change a membership or its role', () => {
+  const MEMBER_ROW = { id: 'mem_1', user_id: 'u_member', organization_id: 'org_1', role: 'member' };
+  const THREE: ReadonlyArray<[string]> = [['update_member_role'], ['remove_member'], ['transfer_ownership']];
+
+  const rowOffered = (name: string, features: Record<string, unknown>): boolean | string => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visibleOf(SysMember, name) },
+      { record: MEMBER_ROW, extra: { current_user: ADMIN, user: ADMIN, ctx: { user: ADMIN }, features } },
+    );
+    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
+    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+  };
+
+  it.each(THREE)('sys_member.%s is hidden while the environment is cloud-managed', (name) => {
+    expect(rowOffered(name, { ...OTHER_FLAGS, cloudManaged: true })).toBe(false);
+  });
+
+  it.each(THREE)('sys_member.%s is offered to the owner as before when the flag is off', (name) => {
+    expect(rowOffered(name, { ...OTHER_FLAGS, cloudManaged: false })).toBe(true);
+  });
+
+  it.each(THREE)('sys_member.%s keeps its organization gate: off hides it whatever cloudManaged says', (name) => {
+    expect(rowOffered(name, { organization: false, admin: true, cloudManaged: false })).toBe(false);
+  });
+
+  it('sys_member.add_member stays offered to a platform administrator while the environment is cloud-managed', () => {
+    expect(rowOffered('add_member', { ...OTHER_FLAGS, cloudManaged: true })).toBe(true);
+  });
+});
+
+/**
+ * The rest of the membership census: every other action whose door writes or
+ * deletes a membership row is hidden while the flag is on, each offered as
+ * before when it is off. Leave Organization ends the caller's membership,
+ * Create Organization makes the caller an owner, Delete Organization ends
+ * every membership of the organization, and Accept Invitation creates one.
+ * Decline Invitation writes no membership, so it is not gated.
+ */
+describe('features.cloudManaged hides every other action whose door writes or deletes a membership row', () => {
+  const ORG_ROW = { id: 'org_1', name: 'Org', slug: 'org' };
+  const INVITATION_ROW = { id: 'inv_1', email: ADMIN.email, status: 'pending', role: 'member', organization_id: 'org_1' };
+  const MULTI = { ...OTHER_FLAGS, multiOrgEnabled: true };
+  const FOUR: ReadonlyArray<[string, { actions?: unknown }, string, Record<string, unknown>]> = [
+    ['sys_organization.leave_organization', SysOrganization, 'leave_organization', ORG_ROW],
+    ['sys_organization.create_organization', SysOrganization, 'create_organization', {}],
+    ['sys_organization.delete_organization', SysOrganization, 'delete_organization', ORG_ROW],
+    ['sys_invitation.accept_invitation', SysInvitation, 'accept_invitation', INVITATION_ROW],
+  ];
+
+  const offeredOn = (def: { actions?: unknown }, name: string, record: Record<string, unknown>, features: Record<string, unknown>): boolean | string => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visibleOf(def, name) },
+      { record, extra: { current_user: ADMIN, user: ADMIN, ctx: { user: ADMIN }, features } },
+    );
+    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
+    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+  };
+
+  it.each(FOUR)('%s is hidden while the environment is cloud-managed', (_site, def, name, record) => {
+    expect(offeredOn(def, name, record, { ...MULTI, cloudManaged: true })).toBe(false);
+  });
+
+  it.each(FOUR)('%s is offered as before when the flag is off', (_site, def, name, record) => {
+    expect(offeredOn(def, name, record, { ...MULTI, cloudManaged: false })).toBe(true);
+  });
+
+  // Each keeps its other gate: the three organization actions their
+  // `multiOrgEnabled` gate, Accept Invitation its pending-row predicate.
+  const OTHER_GATE_OFF: ReadonlyArray<[string, { actions?: unknown }, string, Record<string, unknown>, Record<string, unknown>]> = [
+    ['sys_organization.leave_organization', SysOrganization, 'leave_organization', ORG_ROW, { ...OTHER_FLAGS, multiOrgEnabled: false, cloudManaged: false }],
+    ['sys_organization.create_organization', SysOrganization, 'create_organization', {}, { ...OTHER_FLAGS, multiOrgEnabled: false, cloudManaged: false }],
+    ['sys_organization.delete_organization', SysOrganization, 'delete_organization', ORG_ROW, { ...OTHER_FLAGS, multiOrgEnabled: false, cloudManaged: false }],
+    ['sys_invitation.accept_invitation', SysInvitation, 'accept_invitation', { ...INVITATION_ROW, status: 'accepted' }, { ...MULTI, cloudManaged: false }],
+  ];
+
+  it.each(OTHER_GATE_OFF)('%s keeps its other gate: closed, it hides the action whatever cloudManaged says', (_site, def, name, record, features) => {
+    expect(offeredOn(def, name, record, features)).toBe(false);
+  });
+
+  it('sys_invitation.reject_invitation, which writes no membership, stays offered while the environment is cloud-managed', () => {
+    expect(offeredOn(SysInvitation, 'reject_invitation', INVITATION_ROW, { ...MULTI, cloudManaged: true })).toBe(true);
+  });
+});
