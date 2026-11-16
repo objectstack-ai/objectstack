@@ -243,7 +243,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     },
   ], SYS);
   await engine.insert(LOOP, [{ id: 'l1', back: 'a1' }], SYS);
-  await engine.update(OBJ, { loop: 'l1' }, { where: { id: 'a1' }, ...SYS } as never);
+  await engine.update(OBJ, { loop: 'l1' }, { where: { id: 'a1' }, context: { isSystem: true } } as never);
 
   const grant = {
     allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
