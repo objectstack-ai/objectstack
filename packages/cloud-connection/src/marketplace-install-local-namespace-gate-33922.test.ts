@@ -19,7 +19,8 @@
  *   - each refused value answers `400 PLUGIN_MANIFEST_INVALID` in the declared
  *     envelope, carrying the declaration's own sentence (read from the schema
  *     here, never copied), and nothing is registered, synced or ledgered — on
- *     a flat manifest and a compiled bundle's nested manifest; a cloud snapshot
+ *     a flat manifest and a compiled bundle's nested manifest, judged on the
+ *     body registration reads (its top-level `namespace`); a cloud snapshot
  *     answers the same code at `502`; a multi-package artifact's MEMBER keeps
  *     the refusal the artifact-entry parse already gave it;
  *   - a conforming namespace and an ABSENT one still install (the declaration
@@ -55,6 +56,15 @@ const REFUSED: ReadonlyArray<readonly [string, string]> = [
     ['upper case (a case variant of an owned namespace)', 'QA_N'],
     ['a digit-initial value with a hyphen, spaces and punctuation', '9-Bad Ns!'],
 ];
+
+/**
+ * A compiled body whose own manifest still carries a nested `manifest` object
+ * after the door's one-level normalization: registration reads the outer
+ * body's top-level `namespace`, so that is the key the gate must judge.
+ */
+const stillNested = (id: string, namespace: string): Bag => ({
+    manifest: { id, name: 'p', version: '1.0.0', type: 'app', namespace, manifest: { namespace: 'qa_ok' } },
+});
 
 /** The declaration's own sentence for a value, read from the schema — never a copy of it. */
 function declaredSentence(value: unknown): string {
@@ -217,6 +227,14 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
         expect(readdirSync(dir)).toEqual(['com.qa.suite.json']);
     });
 
+    it('judges the namespace on the body registration reads, not a nested `manifest` it still carries', async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: stillNested('com.qa.p-up', 'QA_N') });
+        expectDeclaredRefusal(res, 400);
+        expect(res.payload.error.message).toContain(declaredSentence('QA_N'));
+        expectNothingWritten(h);
+    });
+
     it('lit control — a conforming namespace still installs', async () => {
         const h = await mount(dir);
         const res = await h.install({ manifest: { id: 'com.qa.p-ok', version: '1.0.0', type: 'app', namespace: 'qa_ok', objects: [] } });
@@ -241,6 +259,22 @@ describe('install-local parses the cloud snapshot\'s `namespace` through the sam
         vi.stubEnv('OS_CLOUD_API_KEY', 'svc-test-key');
         const fetchMock = vi.fn(async () => new Response(
             JSON.stringify({ data: { manifest: { id: 'com.qa.p-up', version: '1.0.0', namespace: 'QA_N', objects: [] }, version: '1.0.0', version_id: 'ver_1' } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ));
+        vi.stubGlobal('fetch', fetchMock);
+        const h = await mount(dir, { controlPlaneUrl: 'http://cloud.test' });
+        const res = await h.install({ packageId: 'pkg_qa' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expectDeclaredRefusal(res, 502);
+        expect(res.payload.error.message).toContain(declaredSentence('QA_N'));
+        expectNothingWritten(h);
+    });
+
+    it('judges a snapshot\'s namespace on the body registration reads too — 502, nothing written', async () => {
+        vi.stubEnv('OS_MARKETPLACE_PUBLIC_BASE_URL', 'off');
+        vi.stubEnv('OS_CLOUD_API_KEY', 'svc-test-key');
+        const fetchMock = vi.fn(async () => new Response(
+            JSON.stringify({ data: { manifest: stillNested('com.qa.p-up', 'QA_N'), version: '1.0.0', version_id: 'ver_1' } }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
         ));
         vi.stubGlobal('fetch', fetchMock);
@@ -306,6 +340,15 @@ describe('over a real engine, the case variant never reaches the registry\'s nam
         expect(res.payload.error.message).toContain(declaredSentence('QA_N'));
         expect(ql.registry.getPackage('com.qa.p-up')).toBeUndefined();
         expect(ql.registry.getNamespaceOwners('qa_n')).toEqual([HOLDER.id]);
+        expect(ledgerIds()).toEqual([HOLDER.id]);
+    });
+
+    it('the same refusal on the body registration reads: the registry holds nothing under that namespace', async () => {
+        const { ql, install } = await bootPlugin();
+        const res = await install({ manifest: stillNested('com.qa.p-up', 'QA_N') });
+        expectDeclaredRefusal(res, 400);
+        expect(ql.registry.getPackage('com.qa.p-up')).toBeUndefined();
+        expect(ql.registry.getNamespaceOwners('QA_N')).toEqual([]);
         expect(ledgerIds()).toEqual([HOLDER.id]);
     });
 

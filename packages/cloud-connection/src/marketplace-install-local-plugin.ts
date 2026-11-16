@@ -957,9 +957,13 @@ function judgeWithheldMaps(
 /**
  * [#33922, ADR-0048 §2] The package's `namespace`, parsed through its
  * declaration (`ManifestSchema.shape.namespace`, `NAMESPACE_PATTERN`), by
- * reference, where {@link declaredPackageManifest} reads it — the key the
- * writable-holder check and the registry's install-time namespace gate
- * compare. `null` admits it; otherwise the refusal sentence.
+ * reference, ON THE BODY REGISTRATION READS: `manifest` is the body this door
+ * hands `manifest.register` (after `normalizeBundle`), and the registry
+ * installs it under that body's own top-level `namespace` — the key its install-time namespace
+ * gate compares. ⛔ Never a nested read ({@link declaredPackageManifest}): a
+ * judge reading any other key than the one registration reads answers about
+ * a namespace nothing installs under. `null` admits it; otherwise the refusal
+ * sentence.
  *
  * Absent is admitted, as the declaration admits it. Without this, `''`,
  * `'QA_N'` or `'9-Bad Ns!'` registered as written: a namespace no author can
@@ -978,7 +982,7 @@ function judgeWithheldMaps(
  * minted.
  */
 function namespaceRefusal(manifest: Record<string, any>, manifestId: string): string | null {
-    const declared = ManifestSchema.shape.namespace.safeParse(declaredPackageManifest(manifest).namespace);
+    const declared = ManifestSchema.shape.namespace.safeParse(manifest.namespace);
     if (declared.success) return null;
     const [issue] = declared.error.issues;
     return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}.`;
@@ -2525,9 +2529,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // 1b″. [#33922, ADR-0048 §2] ⭐ THE DOOR PARSES THE PACKAGE NAMESPACE —
         //      through its declaration, `ManifestSchema.shape.namespace`, by
         //      reference ({@link namespaceRefusal}), right after the id and at
-        //      the same converged point, so no later step — the writable-holder
-        //      check, the registry's install-time namespace gate, the ledger
-        //      write — ever sees a namespace no author can declare. Before
+        //      the same converged point, judged on the body registration reads,
+        //      so neither the registry's install-time namespace gate nor the
+        //      ledger write ever sees a namespace no author can declare. Before
         //      this, `''`, `'QA_N'` and `'9-Bad Ns!'` installed with a 200, and
         //      `QA_N` beside an owner of `qa_n` passed the gate, whose
         //      uniqueness comparison never read the two as one namespace. An
