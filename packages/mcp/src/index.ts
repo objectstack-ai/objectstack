@@ -55,6 +55,18 @@ export type {
   RegisterActionToolsOptions,
   McpFederationBridge,
 } from './mcp-http-tools.js';
+// [#33712] Step 1 of the amended confirmation contract: the person asked in their client.
+export {
+  ACTION_CONFIRMATION_ELICITATION_TIMEOUT_MS,
+  actionConfirmationElicitorFor,
+  actionConfirmationQuestion,
+} from './action-confirmation-elicitation.js';
+export type {
+  McpActionCallDoor,
+  McpActionConfirmationAnswer,
+  McpActionConfirmationElicitor,
+  McpActionConfirmationSubject,
+} from './action-confirmation-elicitation.js';
 // The portable `SKILL.md` distributable (ADR-0036 Amendment C) — NOT the
 // `skill` metadata type; that one is projected onto MCP prompts just below.
 export {
