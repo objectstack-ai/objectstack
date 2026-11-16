@@ -13,7 +13,10 @@
  * reference is served (maintainer ruling record 6909383114): each shape
  * asserts the write landed, the column did not move, and the operator warn.
  * The two doors (this projection and the admin endpoint) read one ownership
- * predicate (seat ruling record 6907953084), pinned from both sides.
+ * predicate (seat ruling record 6907953084), pinned from both sides. The
+ * ledger half of the ruling, one bounded `scim_manager_unresolved` event per
+ * admitted warn, is pinned on the `audit` slot the door hands it to; the row
+ * the writer builds from it is pinned in plugin-audit's `scim-refusal-audit.test.ts`.
  */
 
 import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
@@ -125,15 +128,20 @@ interface Harness {
   send: (request: Request) => Promise<Response>;
   /** The operator warns the projection said about an unresolvable reference. */
   unresolvedWarns: () => string[];
+  /** The `scim_manager_unresolved` events handed to the `audit` slot, after the responses settle. */
+  unresolvedEvents: () => Promise<Array<Record<string, unknown>>>;
 }
 
 async function boot(): Promise<Harness> {
   const engine = await enginePool.take();
   const warn = vi.fn();
+  const recordScimManagerUnresolved = vi.fn(async () => undefined);
+  const auditSink = { recordAuthEvent: vi.fn(async () => undefined), recordScimManagerUnresolved };
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine as never,
+    getAuditSink: () => auditSink,
     logger: { info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() },
     getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
     plugins: { scim: true, organization: true },
@@ -149,7 +157,13 @@ async function boot(): Promise<Harness> {
   const unresolvedWarns = () => warn.mock.calls
     .map(([message]) => String(message))
     .filter((message) => message.includes('manager reference that names no User'));
-  return { engine, token, otherToken, send: (request) => manager.handleRequest(request), unresolvedWarns };
+  const unresolvedEvents = async () => {
+    // The hand-off runs after the response (`setImmediate`); let it run.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    return recordScimManagerUnresolved.mock.calls.map((call) => (call as unknown[])[0] as Record<string, unknown>);
+  };
+  return { engine, token, otherToken, send: (request) => manager.handleRequest(request), unresolvedWarns, unresolvedEvents };
 }
 
 function scimRequest(token: string, method: string, path: string, body?: unknown): Request {
@@ -394,6 +408,103 @@ describe('SCIM manager projection: a reference that names no User is served, and
   });
 });
 
+describe('[#33918] SCIM manager projection: an unresolvable reference leaves one bounded audit row per warn', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('a served write hands the slot ONE event: the connection, its organization, the user and the reference, nothing else', async () => {
+    const h = await boot();
+    const emp = await provision(h, 'emp', { value: 'no-such-scim-id' });
+    expect(await h.unresolvedEvents()).toEqual([
+      { connectionId: CONNECTION, organizationId: ORG, userId: emp.userId, referenceKind: 'id', reference: 'no-such-scim-id' },
+    ]);
+  });
+
+  it('an unreadable $ref is recorded as such, with the $ref as the directory sent it', async () => {
+    const h = await boot();
+    const emp = await provision(h, 'emp', { $ref: 'https://idp.example/people/r1' });
+    expect(await h.unresolvedEvents()).toEqual([
+      { connectionId: CONNECTION, organizationId: ORG, userId: emp.userId, referenceKind: 'unreadable', reference: 'https://idp.example/people/r1' },
+    ]);
+  });
+
+  it('the reference is capped, and nothing of the body rides with it', async () => {
+    const h = await boot();
+    const long = `r${'x'.repeat(400)}`;
+    await provision(h, 'emp', { value: long });
+    const [event] = await h.unresolvedEvents();
+    expect(String(event?.reference)).toBe(long.slice(0, 257));
+    const carried = JSON.stringify(event);
+    for (const value of ['emp@acme.com', 'ext-emp', 'emp Test', 'givenName']) {
+      expect(carried.includes(value), `the event carries ${value}: ${carried}`).toBe(false);
+    }
+  });
+
+  it('rows follow the warn\'s rate: one per connection per window, and the next carries the dropped count', async () => {
+    const h = await boot();
+    await provision(h, 'a', { value: 'no-such-1' });
+    await provision(h, 'b', { value: 'no-such-2' });
+    await provision(h, 'c', { value: 'no-such-3' });
+    expect(await h.unresolvedEvents()).toHaveLength(1);
+    expect(h.unresolvedWarns()).toHaveLength(1);
+
+    const later = Date.now() + 11 * 60_000;
+    vi.spyOn(Date, 'now').mockReturnValue(later);
+    const d = await provision(h, 'd', { value: 'no-such-4' });
+    const events = await h.unresolvedEvents();
+    expect(events).toHaveLength(2);
+    expect(events[1]).toEqual({
+      connectionId: CONNECTION, organizationId: ORG, userId: d.userId, referenceKind: 'id', reference: 'no-such-4', suppressed: 2,
+    });
+    expect(h.unresolvedWarns()).toHaveLength(2);
+  });
+
+  it('no row on the served-unchanged paths: a resolved manager re-sent, a write that names none, a dangling one left alone', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const emp = await provision(h, 'emp', { value: boss.scimId });
+    const resent = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp.scimId}`, userBody('emp', { value: boss.scimId })));
+    expect(resent.status, await resent.clone().text()).toBe(200);
+    const gone = await h.send(scimRequest(h.token, 'DELETE', `/Users/${boss.scimId}`));
+    expect(gone.status, await gone.clone().text()).toBe(204);
+    const renamed = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: 'displayName', value: 'Emp Renamed' },
+    ])));
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+    expect(await h.unresolvedEvents()).toEqual([]);
+  });
+
+  it('no row on the structural refusals: the write was refused and rolled back', async () => {
+    const h = await boot();
+    const a = await provision(h, 'a');
+    const b = await provision(h, 'b', { value: a.scimId });
+    const self = await h.send(scimRequest(h.token, 'PATCH', `/Users/${a.scimId}`, patch([
+      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: a.scimId } },
+    ])));
+    await expectInvalidValue(self, 'INVALID_FIELD', /cannot be their own manager/);
+    const cycle = await h.send(scimRequest(h.token, 'PATCH', `/Users/${a.scimId}`, patch([
+      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: b.scimId } },
+    ])));
+    await expectInvalidValue(cycle, 'RESOURCE_CONFLICT', /close a loop/);
+    expect(await h.unresolvedEvents()).toEqual([]);
+  });
+
+  it('a request refused after the warn admitted its reference records nothing', async () => {
+    const recordScimManagerUnresolved = vi.fn(async () => undefined);
+    const { observeScimManagerUnresolved } = await import('./scim-manager-projection.js');
+    const note = { userId: 'usr_emp', referenceKind: 'id' as const, reference: 'no-such', suppressed: 0 };
+    observeScimManagerUnresolved({ recordScimManagerUnresolved } as never, 409, { connectionId: CONNECTION, userManagerUnresolved: note });
+    observeScimManagerUnresolved({ recordScimManagerUnresolved } as never, 500, { connectionId: CONNECTION, userManagerUnresolved: note });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(recordScimManagerUnresolved).not.toHaveBeenCalled();
+
+    // Control: the same note on a served answer is handed over.
+    observeScimManagerUnresolved({ recordScimManagerUnresolved } as never, 200, { connectionId: CONNECTION, userManagerUnresolved: note });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(recordScimManagerUnresolved).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('SCIM manager projection: silence is not a clear, and one predicate decides which door owns the column', () => {
   it('a write that does not name manager keeps a value the admin route set; a replace without it clears it', async () => {
     const h = await boot();
@@ -594,8 +705,10 @@ describe('readScimManagerReference', () => {
     expect(readScimManagerReference(JSON.stringify({ schemas: [USER_SCHEMA] }))).toEqual({ kind: 'none' });
     expect(readScimManagerReference(attrs({ value: 'v1', $ref: 'https://x/Users/r1' }))).toEqual({ kind: 'id', id: 'v1' });
     expect(readScimManagerReference(attrs({ $ref: 'https://x/scim/v2/Users/r%201' }))).toEqual({ kind: 'id', id: 'r 1' });
-    expect(readScimManagerReference(attrs({ $ref: 'https://x/people/r1' }))).toEqual({ kind: 'unreadable' });
-    expect(readScimManagerReference(attrs({ $ref: 'https://x/scim/v2/Users/%E0%A4%A' }))).toEqual({ kind: 'unreadable' });
+    expect(readScimManagerReference(attrs({ $ref: 'https://x/people/r1' })))
+      .toEqual({ kind: 'unreadable', ref: 'https://x/people/r1' });
+    expect(readScimManagerReference(attrs({ $ref: 'https://x/scim/v2/Users/%E0%A4%A' })))
+      .toEqual({ kind: 'unreadable', ref: 'https://x/scim/v2/Users/%E0%A4%A' });
   });
 });
 

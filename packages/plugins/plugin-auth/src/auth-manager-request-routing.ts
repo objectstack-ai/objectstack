@@ -298,6 +298,13 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
           const { translateScimConflictDetail } = await import('./scim-conflict-detail.js');
           scimResponse = await translateScimConflictDetail(scimResponse);
         }
+        // [#33918] A served write whose manager reference named no User: one
+        // bounded `scim_manager_unresolved` row, after the response and outside
+        // the SCIM transaction (`scim-manager-projection.ts`).
+        if (scope.userManagerUnresolved) {
+          const { observeScimManagerUnresolved } = await import('./scim-manager-projection.js');
+          observeScimManagerUnresolved(this.config.getAuditSink?.(), scimResponse.status, scope);
+        }
         if (scimResponse.status >= 400) {
           const { observeScimRefusal, scimRefusalConnectionResolver } = await import('./scim-refusal-audit.js');
           observeScimRefusal(

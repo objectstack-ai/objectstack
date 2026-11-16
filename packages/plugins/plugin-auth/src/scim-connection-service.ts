@@ -129,6 +129,27 @@ export interface ScimRequestScope {
    * outside a user create, replace or patch.
    */
   userManagerIntent?: 'named' | 'silent';
+  /**
+   * [#33918] A manager reference this request's write could not resolve, set by
+   * the manager projection only when its operator warn's bound admitted the
+   * event. Read after the vendor answers: a request served below 400 hands it
+   * to the `audit` slot as one `scim_manager_unresolved` row
+   * (`observeScimManagerUnresolved`, `scim-manager-projection.ts`); a refused
+   * one wrote nothing, so it records nothing.
+   */
+  userManagerUnresolved?: ScimManagerUnresolvedNote;
+}
+
+/** [#33918] What the manager projection noted of an unresolvable reference; never the request body. */
+export interface ScimManagerUnresolvedNote {
+  /** The `sys_user` id the write was about. */
+  userId: string;
+  /** `id`: a value that named no User; `unreadable`: a `$ref` with no readable `/Users/{id}` segment. */
+  referenceKind: 'id' | 'unreadable';
+  /** The reference as the directory sent it, already capped. */
+  reference: string;
+  /** Unresolvable references of the connection the warn's bound dropped since its last notice. */
+  suppressed: number;
 }
 
 /** Is the current async chain inside an authenticated SCIM protocol request? */

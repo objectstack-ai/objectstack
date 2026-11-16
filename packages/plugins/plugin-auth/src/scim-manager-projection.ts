@@ -79,7 +79,16 @@
  * write. The write lands, `manager_id` stays as it was, and an operator warn
  * names the connection, bounded per connection
  * ({@link SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW} per window, with the count
- * it dropped). The check runs after the unchanged-manager short-circuit, and a
+ * it dropped). The same admission records the event once in the compliance
+ * ledger: the projection notes it on the request's scope, and
+ * {@link observeScimManagerUnresolved} hands it to the `audit` slot's
+ * `recordScimManagerUnresolved` after the response, outside the SCIM
+ * transaction, and only for a request answered below 400 — one
+ * `scim_manager_unresolved` row per warn, carrying the warn's dropped count,
+ * the user's id and the reference capped at
+ * {@link SCIM_MANAGER_REFERENCE_AUDIT_LIMIT} characters, and nothing else of
+ * the request. No `audit` slot, or one without the member: no row, and the
+ * answer is the same. The check runs after the unchanged-manager short-circuit, and a
  * write that does not name the attribute never reaches it, so a report whose
  * manager was deleted keeps working. The four structural refusals are the
  * admin endpoint's own, from {@link screenUserManagerLink} (self-assignment,
@@ -97,7 +106,9 @@ import {
   writeUserManagerLink,
   type SetUserManagerDeps,
 } from './admin-set-user-manager.js';
-import { scimRequestScope } from './scim-connection-service.js';
+import type { AuthEventAuditSurface } from './auth-session-audit.js';
+import { runAfterResponse } from './run-after-response.js';
+import { scimRequestScope, type ScimManagerUnresolvedNote, type ScimRequestScope } from './scim-connection-service.js';
 import { ScimRefusalAuditBound } from './scim-refusal-audit.js';
 
 /** The SCIM Enterprise User extension the attribute lives in. */
@@ -109,6 +120,9 @@ const SYSTEM_READ_CTX = { isSystem: true, positions: [], permissions: [] } as co
 
 /** Operator warns one connection gets per 10-minute window for unresolvable references. */
 export const SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW = 1;
+
+/** The most characters of an unresolvable reference handed to the ledger. */
+export const SCIM_MANAGER_REFERENCE_AUDIT_LIMIT = 256;
 
 /** The vendor-side `scimUser` row fields this module reads. */
 interface ScimUserRow {
@@ -212,7 +226,7 @@ export async function scimUserManagerIntentOf(
 export type ScimManagerReference =
   | { kind: 'none' }
   | { kind: 'id'; id: string }
-  | { kind: 'unreadable' };
+  | { kind: 'unreadable'; ref: string };
 
 /**
  * The manager reference in a `scimUser` row's stored canonical attributes:
@@ -232,11 +246,11 @@ export function readScimManagerReference(serializedAttributes: unknown): ScimMan
   if (typeof manager.value === 'string' && manager.value !== '') return { kind: 'id', id: manager.value };
   if (typeof manager.$ref === 'string' && manager.$ref !== '') {
     const match = /\/Users\/([^/?#]+)\/?$/.exec(manager.$ref);
-    if (!match) return { kind: 'unreadable' };
+    if (!match) return { kind: 'unreadable', ref: manager.$ref };
     try {
       return { kind: 'id', id: decodeURIComponent(match[1]) };
     } catch {
-      return { kind: 'unreadable' };
+      return { kind: 'unreadable', ref: manager.$ref };
     }
   }
   return { kind: 'none' };
@@ -280,9 +294,23 @@ export type ScimManagerProjection = (state: SCIMIdentityState, context: SCIMTran
 export function createScimManagerProjection(deps: ScimManagerProjectionDeps): ScimManagerProjection {
   const bound = deps.warnBound ?? new ScimRefusalAuditBound({ rowsPerKey: SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW });
 
-  const warnUnresolved = (connectionId: string, userId: string): void => {
+  const warnUnresolved = (
+    scope: ScimRequestScope,
+    connectionId: string,
+    userId: string,
+    reference: Exclude<ScimManagerReference, { kind: 'none' }>,
+  ): void => {
     const admitted = bound.admit(connectionId);
     if (!admitted) return;
+    // The ledger row rides the same admission, so it follows the warn's rate.
+    const raw = reference.kind === 'id' ? reference.id : reference.ref;
+    scope.userManagerUnresolved = {
+      userId,
+      referenceKind: reference.kind,
+      // One character past the cap survives, so the writer can say the row's copy was truncated.
+      reference: raw.slice(0, SCIM_MANAGER_REFERENCE_AUDIT_LIMIT + 1),
+      suppressed: admitted.suppressed,
+    };
     deps.logger?.warn(
       `[auth] SCIM connection '${connectionId}' sent an Enterprise User manager reference that names no User `
         + `it provisioned (user '${userId}'): the user write was served and sys_user.manager_id was left as it `
@@ -339,7 +367,7 @@ export function createScimManagerProjection(deps: ScimManagerProjectionDeps): Sc
     const current = text((Array.isArray(rows) ? (rows[0] as { manager_id?: unknown } | undefined) : undefined)?.manager_id);
     if (managerId !== undefined && current === (managerId ?? '')) return;
     if (managerId === undefined) {
-      warnUnresolved(connectionId, state.userId);
+      warnUnresolved(scope, connectionId, state.userId, reference as Exclude<ScimManagerReference, { kind: 'none' }>);
       return;
     }
 
@@ -352,4 +380,57 @@ export function createScimManagerProjection(deps: ScimManagerProjectionDeps): Sc
     // request, and joined to its transaction.
     await writeUserManagerLink(engine, state.userId, managerId);
   };
+}
+
+// ---------------------------------------------------------------------------
+// The ledger row of an unresolvable reference, after the response
+// ---------------------------------------------------------------------------
+
+/** The `audit` slot member this module hands its event to, declared locally (`AuthEventAuditSurface` note). */
+interface ScimManagerUnresolvedAuditSurface {
+  recordScimManagerUnresolved?(event: {
+    connectionId: string;
+    organizationId?: string;
+    userId: string;
+    referenceKind: 'id' | 'unreadable';
+    reference: string;
+    suppressed?: number;
+  }): Promise<unknown>;
+}
+
+/**
+ * Hand the request's noted unresolvable reference, if any, to the sink's
+ * `recordScimManagerUnresolved`, after the response. Only a request answered
+ * below 400 records one: a refused request rolled its write back. Called by
+ * `handleRequest` outside `scimRequestScope`, so the row is never written
+ * inside the vendor's transaction. Never throws, and never delays or changes
+ * the answer.
+ */
+export function observeScimManagerUnresolved(
+  sink: AuthEventAuditSurface | undefined,
+  status: number,
+  scope: Pick<ScimRequestScope, 'connectionId' | 'organizationId' | 'userManagerUnresolved'>,
+): void {
+  try {
+    const note: ScimManagerUnresolvedNote | undefined = scope.userManagerUnresolved;
+    if (!note || status >= 400 || !scope.connectionId) return;
+    const writer = (sink as ScimManagerUnresolvedAuditSurface | undefined)?.recordScimManagerUnresolved;
+    if (typeof writer !== 'function') return;
+    const event = {
+      connectionId: scope.connectionId,
+      ...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
+      userId: note.userId,
+      referenceKind: note.referenceKind,
+      reference: note.reference,
+      ...(note.suppressed > 0 ? { suppressed: note.suppressed } : {}),
+    };
+    runAfterResponse(
+      () => writer.call(sink, event),
+      () => {
+        /* the writer reports its own lost rows; the SCIM answer is already given */
+      },
+    );
+  } catch {
+    /* bookkeeping never changes a SCIM answer */
+  }
 }
