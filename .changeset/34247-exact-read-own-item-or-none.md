@@ -33,7 +33,7 @@ Skills-docs: none — no skill teaches a moved answer: `skills/**` teaches `?pac
 - Any read naming no package other than the bare doc case above.
 - `object`, and the covered types (`action`, `hook`, `job`, `sharing_rule`, `queue`, `assignment_rule`), whose exact qualifier already refuses 409 `not-held-by-qualifier`.
 - The security catalog types `position` and `capability`: the registry keeps one package holder of such a name, so `?package=` of another package keeps the code layers' answer (that holder's item).
-- One enabled holder beside a stamp-less bare entry: the bare doors serve the holder's doc while the registry and `MetadataFacade.get` serve the entry (measured, unresolved here; the entry answers first beside two or more holders only).
+- One enabled holder beside a stamp-less bare entry: the bare doors serve the holder's doc while the registry and `MetadataFacade.get` serve the entry (measured, unresolved here; the entry answers first beside two or more holders only). Follow-up card #34452 carries this cell; it needs a ruling first on whether the environment's entry answers first beside one holder, before any reader moves.
 
 **No migration.** No schema key, stored row or registry slot changes; nothing is rewritten.
 
