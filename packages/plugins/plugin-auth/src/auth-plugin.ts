@@ -191,11 +191,6 @@ import {
 } from './admin-ban-endpoints.js';
 import { engineUserBanWriter, type UserBanEngine } from './user-ban-write.js';
 import type { EnvironmentUserHostAccessor } from './environment-user-host.js';
-import {
-  bootEnvironmentUserOutbox,
-  type EnvironmentUserOutboxWorker,
-  type OutboxHookEngine,
-} from './environment-user-outbox.js';
 
 
 /**
@@ -401,8 +396,6 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * (a refused add is taken back out); any other failure refuses a
    * deactivation (`503`) and is reported on an add, a reactivation or a
    * removal as `host: { notified: false, reason }`, which it never undoes.
-   * On a cloud-managed kernel those calls are recorded in the
-   * environment-user outbox and retried (`environment-user-outbox.ts`).
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 
@@ -680,8 +673,6 @@ export class AuthPlugin implements Plugin {
 
   private options: AuthPluginOptions;
   private authManager: AuthManager | null = null;
-  /** The environment-user outbox worker: running only on a cloud-managed kernel with a host wired. */
-  private environmentUserOutbox: EnvironmentUserOutboxWorker | null = null;
   /**
    * Whether a route registration mounted direct sign-in's start door. The
    * door is mounted from the manager's setting and `/auth/config` advertises
@@ -2294,28 +2285,6 @@ export class AuthPlugin implements Plugin {
           packageId: IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
           logger: ctx.logger,
         });
-        // The environment-user outbox (`environment-user-outbox.ts`): on a
-        // cloud-managed kernel with a host wired, a pending person's
-        // invitation reads `accepted` once they sign in, and the worker
-        // retries every recorded call the host did not take. The doors
-        // record only on a cloud-managed kernel, so elsewhere neither runs.
-        // A boot that fails is logged here, never left to the catch below:
-        // the rows it would drain wait for the next boot.
-        if (!this.environmentUserOutbox) {
-          try {
-            this.environmentUserOutbox = bootEnvironmentUserOutbox(engine as unknown as OutboxHookEngine, {
-              host: this.options.environmentUserHost,
-              isCloudManaged,
-              logger: ctx.logger,
-            }) ?? null;
-          } catch (e) {
-            ctx.logger.error(
-              '[AuthPlugin] the environment-user outbox worker did not start, so invitations and cancellations '
-                + 'the hosting organisation did not take are not retried until the next boot. Cause: '
-                + `${e instanceof Error ? e.message : String(e)}`,
-            );
-          }
-        }
         try {
           await refreshAllMappingMatches(engine);
         } catch (e) {
@@ -3146,16 +3115,8 @@ export class AuthPlugin implements Plugin {
 
   async destroy(): Promise<void> {
     // Cleanup if needed
-    const outbox = this.environmentUserOutbox;
-    this.environmentUserOutbox = null;
-    await outbox?.stop();
     this.authManager = null;
   }
-
-  /** Wake the outbox worker for a call due at `atMs`; nothing when it is not running. */
-  private wakeEnvironmentUserOutbox = (atMs: number): void => {
-    this.environmentUserOutbox?.wakeAt(atMs);
-  };
 
   /**
    * Provision the stack's `demoStaff` (`demo-staff.ts` holds the three gates
@@ -4965,8 +4926,6 @@ export class AuthPlugin implements Plugin {
         },
         ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
         getDataEngine: () => this.authManager!.getDataEngine(),
-        wakeOutbox: this.wakeEnvironmentUserOutbox,
-        isCloudManaged: () => isCloudManaged(),
         logger: ctx.logger,
       });
 
@@ -5251,7 +5210,6 @@ export class AuthPlugin implements Plugin {
           return session?.session?.activeOrganizationId ?? null;
         },
         ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
-        wakeOutbox: this.wakeEnvironmentUserOutbox,
         logger: ctx.logger,
       });
 

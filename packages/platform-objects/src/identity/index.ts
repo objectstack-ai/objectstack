@@ -57,5 +57,3 @@ export { SysScimSubject } from './sys-scim-subject.object.js';
 export { SysScimUser } from './sys-scim-user.object.js';
 // The identity-provider group → permission-set mapping the SCIM projection reads.
 export { SysIdpGroupMapping } from './sys-idp-group-mapping.object.js';
-// The record of each call to the environment-user host (invitations sent and cancelled).
-export { SysEnvironmentUserOutbox } from './sys-environment-user-outbox.object.js';

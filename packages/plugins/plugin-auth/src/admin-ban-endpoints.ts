@@ -110,18 +110,7 @@ import {
   type EnvironmentUserHostAccessor,
   type EnvironmentUserHostOutcome,
   type EnvironmentUserHostRefused,
-  type EnvironmentUserEvent,
 } from './environment-user-host.js';
-import {
-  insertOutboxRow,
-  newOutboxId,
-  outboxDoc,
-  outboxNextAttemptAt,
-  OUTBOX_UNSENT_STATUSES,
-  supersedeOpenOutboxRows,
-  type OutboxBirth,
-} from './environment-user-outbox.js';
-import { isPendingSsoSource } from './pending-sso-marker.js';
 
 /**
  * Minimal better-auth `$context` surface these two routes touch. Mirrors what
@@ -148,25 +137,11 @@ export interface AdminBanEndpointDeps {
   host?: EnvironmentUserHostAccessor;
   /** Reads the row's `source` and the administrator's linked cloud account for the host event. */
   getDataEngine?(): any;
-  /** Wakes the outbox worker for a reactivation queued for retry (`environment-user-outbox.ts`). */
-  wakeOutbox?(atMs: number): void;
-  /**
-   * Whether the kernel is cloud-managed. Only there does the outbox worker
-   * run, so only there is a call recorded; absent reads as not managed.
-   */
-  isCloudManaged?(): boolean;
-  logger?: { warn(msg: string): void; error?(msg: string, err?: Error): void };
+  logger?: { warn(msg: string): void };
 }
 
 async function banWriterFor(deps: AdminBanEndpointDeps, ctx: AuthBanContextLike): Promise<UserBanWriter> {
   return (await deps.getBanWriter?.()) ?? ctx.internalAdapter;
-}
-
-/** One ask of the host: its answer, and the event and delivery id it was asked with. */
-interface HostAsk {
-  outcome: EnvironmentUserHostOutcome | EnvironmentUserHostRefused;
-  event: EnvironmentUserEvent;
-  deliveryId: string;
 }
 
 /**
@@ -179,68 +154,25 @@ async function askHost(
   user: unknown,
   userId: string,
   actor: AdminActor & EnvironmentUserActor,
-): Promise<HostAsk | undefined> {
+): Promise<EnvironmentUserHostOutcome | EnvironmentUserHostRefused | undefined> {
   if (!deps.host) return undefined;
   const row = (user && typeof user === 'object' ? user : {}) as { email?: unknown; name?: unknown };
   const engine = deps.getDataEngine?.();
   const source = engine ? await readUserSource(engine, userId) : undefined;
   const attribution = await environmentUserAttribution(engine, actor, deps.logger);
-  const event: EnvironmentUserEvent = {
-    userId,
-    email: typeof row.email === 'string' ? row.email : '',
-    name: typeof row.name === 'string' ? row.name : '',
-    source: source?.ok && typeof source.value === 'string' ? source.value : null,
-    ...attribution,
-    occurredAt: new Date().toISOString(),
-  };
-  const deliveryId = newOutboxId();
-  const outcome = await notifyEnvironmentUserHost(deps.host, kind, { ...event, deliveryId }, deps.logger, {
-    retried: deps.isCloudManaged?.() === true,
-  });
-  return { outcome, event, deliveryId };
-}
-
-/**
- * Record an ask in the outbox after the door's write
- * (`environment-user-outbox.ts`): a deactivation of a pending person as the
- * cancelled invitation (and every invitation or reactivation still waiting
- * for them stops), a reactivation as sent, or queued for the worker when the
- * host could not be reached. A failure to record is logged at `error`: the
- * door's write stands, and a queued reactivation would not be retried.
- */
-async function recordAsk(
-  deps: AdminBanEndpointDeps,
-  kind: 'deactivated' | 'reactivated',
-  ask: HostAsk,
-): Promise<{ id: string; status: 'sent' | 'pending' } | undefined> {
-  // Off a cloud-managed kernel no worker drains the outbox, so nothing is recorded.
-  if (deps.isCloudManaged?.() !== true) return undefined;
-  const engine = deps.getDataEngine?.();
-  if (!engine || 'refused' in ask.outcome) return undefined;
-  const outcome = ask.outcome;
-  if (!outcome.notified && outcome.reason === 'no_host') return undefined;
-  try {
-    if (kind === 'deactivated') {
-      await supersedeOpenOutboxRows(engine, ask.event.userId, ['added', 'reactivated'], OUTBOX_UNSENT_STATUSES);
-      if (!outcome.notified || !isPendingSsoSource(ask.event.source)) return undefined;
-    } else {
-      await supersedeOpenOutboxRows(engine, ask.event.userId, ['reactivated']);
-    }
-    const birth: OutboxBirth = outcome.notified
-      ? { status: 'sent' }
-      : { status: 'pending', lastError: 'The hosting organisation could not be reached, or failed to take the call.' };
-    await insertOutboxRow(engine, outboxDoc(ask.deliveryId, kind, ask.event, birth));
-    if (birth.status === 'pending') deps.wakeOutbox?.(outboxNextAttemptAt(1, Date.now()));
-    return { id: ask.deliveryId, status: birth.status };
-  } catch (error) {
-    const message =
-      `[AuthPlugin] user ${ask.event.userId} was ${kind}, but the record of telling the environment-user host could `
-      + `not be written to the outbox${outcome.notified ? '' : ', so the call the host did not take will not be retried'}. `
-      + `Repeat the action to tell the host again. Cause: ${error instanceof Error ? error.message : String(error)}`;
-    if (deps.logger?.error) deps.logger.error(message);
-    else deps.logger?.warn(message);
-    return undefined;
-  }
+  return notifyEnvironmentUserHost(
+    deps.host,
+    kind,
+    {
+      userId,
+      email: typeof row.email === 'string' ? row.email : '',
+      name: typeof row.name === 'string' ? row.name : '',
+      source: source?.ok && typeof source.value === 'string' ? source.value : null,
+      ...attribution,
+      occurredAt: new Date().toISOString(),
+    },
+    deps.logger,
+  );
 }
 
 /** The door's answer for a host's typed refusal: its status, code and sentence; nothing was written. */
@@ -347,8 +279,7 @@ export async function runAdminBanUser(
   }
 
   // The host first: an organization owner or admin it refuses is not deactivated at all.
-  const ask = await askHost(deps, 'deactivated', target, userId, actor);
-  const host = ask?.outcome;
+  const host = await askHost(deps, 'deactivated', target, userId, actor);
   if (isRefused(host)) return hostRefusal(host);
   // A wired host that did not answer: the owner / admin question is open, so
   // the deactivation does not happen (ruling 5).
@@ -360,7 +291,6 @@ export async function runAdminBanUser(
   });
   // Sign the banned user out everywhere, exactly as the vendor handler does.
   await ctx.internalAdapter.deleteUserSessions(userId);
-  const invitation = ask ? await recordAsk(deps, 'deactivated', ask) : undefined;
 
   return {
     status: 200,
@@ -372,7 +302,6 @@ export async function runAdminBanUser(
         banReason,
         ...(banExpires ? { banExpires: banExpires.toISOString() } : {}),
         ...(host ? { host } : {}),
-        ...(invitation ? { invitation } : {}),
       },
     },
   };
@@ -394,16 +323,10 @@ export async function runAdminUnbanUser(
   if (!target) return notFound();
 
   // The host first: a reactivation it refuses (the member cap) leaves the person deactivated.
-  const ask = await askHost(deps, 'reactivated', target, userId, actor);
-  const host = ask?.outcome;
+  const host = await askHost(deps, 'reactivated', target, userId, actor);
   if (isRefused(host)) return hostRefusal(host);
 
   await applyUserUnban(await banWriterFor(deps, ctx), userId);
-  // A reactivation the host did not take is queued and retried (ruling 5: it re-sends the invitation).
-  const invitation = ask ? await recordAsk(deps, 'reactivated', ask) : undefined;
 
-  return {
-    status: 200,
-    body: { success: true, data: { userId, banned: false, ...(host ? { host } : {}), ...(invitation ? { invitation } : {}) } },
-  };
+  return { status: 200, body: { success: true, data: { userId, banned: false, ...(host ? { host } : {}) } } };
 }

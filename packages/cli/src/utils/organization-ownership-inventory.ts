@@ -768,14 +768,6 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       'read by key id under the system context, never by organization',
   },
   {
-    object: 'sys_environment_user_outbox',
-    census: PMAIN,
-    fate: 'column-drop',
-    citation:
-      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the record of each call to the environment-user host about ` +
-      'one person, who is the environment\'s and not an organization\'s, written and drained under the system context',
-  },
-  {
     object: 'sys_lifecycle_state',
     census: PMAIN,
     fate: 'column-drop',

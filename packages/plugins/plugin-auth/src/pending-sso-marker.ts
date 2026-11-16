@@ -43,11 +43,11 @@ export const PENDING_SSO_MESSAGES = {
     + "organisation's identity provider, so they cannot be removed here. Deactivate them instead. No one was removed.",
   removeRefused: 'This person could not be removed, and no one was removed.',
   removeRefusedReinvited:
-    'Their invitation had already been cancelled at the hosting organisation, so it is being sent again and they '
-    + 'stay pending as before.',
+    'Their invitation had already been cancelled at the hosting organisation, so it was sent again and they stay '
+    + 'pending as before.',
   removeRefusedNotReinvited:
-    'Their invitation had already been cancelled at the hosting organisation, and a new one could not be queued: '
-    + 'add them again to send it.',
+    'Their invitation had already been cancelled at the hosting organisation, and sending it again did not '
+    + 'succeed, so they stay pending with no invitation: add them again to send one.',
   removeHostCancelled:
     'The hosting organisation had already been told to cancel their invitation, and it is not sent again.',
   removeHostUnconfirmed:

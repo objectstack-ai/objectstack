@@ -5,10 +5,9 @@
  * environment) is told when a person is added, deactivated, reactivated or,
  * while still pending, removed, so it can forward an invitation or cancel
  * one. See `pending-sso-users.ts` for the add and remove halves and
- * `admin-ban-endpoints.ts` for the deactivate / reactivate half. Every call
- * is recorded, and retried when the host did not take it, by the outbox
- * (`environment-user-outbox.ts`): delivery is at least once, and the event's
- * `deliveryId` lets a host drop a repeat.
+ * `admin-ban-endpoints.ts` for the deactivate / reactivate half. Each door
+ * calls the host once: a host that must not lose a call (an unreachable
+ * mail relay, an outage of its own) queues and retries it on its side.
  *
  * Two kinds of host failure are told apart:
  *
@@ -64,13 +63,6 @@ export interface EnvironmentUserEvent {
    * reactivation.
    */
   occurredAt: string;
-  /**
-   * The outbox row this call is recorded in (`sys_environment_user_outbox`).
-   * A call the host did not take is sent again under the same id, so a host
-   * can drop a repeat of a call it already took. Absent only on a call made
-   * outside the outbox.
-   */
-  deliveryId?: string;
 }
 
 /**
@@ -79,8 +71,7 @@ export interface EnvironmentUserEvent {
  * ban, unban or removal is written. A member that throws
  * {@link EnvironmentUserHostRefusal} refuses the operation. Any other throw
  * refuses a deactivation (`503`) and is reported on the answer for an add, a
- * reactivation or a removal, which it never undoes or blocks; the outbox
- * retries those.
+ * reactivation or a removal, which it never undoes or blocks.
  */
 export interface EnvironmentUserHost {
   /** A person was added (or re-added while still pending) to this environment. */
@@ -141,10 +132,15 @@ export function isEnvironmentUserHostRefusal(error: unknown): error is Environme
   return (status === 403 || status === 409) && typeof code === 'string' && code.length > 0 && typeof message === 'string';
 }
 
-/** What a door answers about the host call, on the row it concerns. */
+/**
+ * What a door answers about the host call, on the row it concerns.
+ * `deactivated`: the person is deactivated, so the host was not asked to
+ * invite them (a re-add of a deactivated pending person); reactivating them
+ * is what sends the invitation again.
+ */
 export type EnvironmentUserHostOutcome =
   | { notified: true }
-  | { notified: false; reason: 'no_host' | 'host_failed' };
+  | { notified: false; reason: 'no_host' | 'host_failed' | 'deactivated' };
 
 /** A host's typed refusal, as the door answers it. */
 export interface EnvironmentUserHostRefused {
@@ -236,16 +232,13 @@ export async function environmentUserAttribution(
 /**
  * Tell the host, once. Never throws. A typed refusal is answered as
  * `{ refused }` for the door to return; any other failure as `host_failed`
- * on the caller's row, logged at `warn` with its message. `opts.retried`
- * says the caller records the call in the outbox, so the log may say it is
- * retried; a caller that records nothing leaves it unset.
+ * on the caller's row, logged at `warn` with its message.
  */
 export async function notifyEnvironmentUserHost(
   accessor: EnvironmentUserHostAccessor | undefined,
   kind: EnvironmentUserEventKind,
   event: EnvironmentUserEvent,
   logger?: { warn(msg: string): void },
-  opts: { retried?: boolean } = {},
 ): Promise<EnvironmentUserHostOutcome | EnvironmentUserHostRefused> {
   let host: EnvironmentUserHost | undefined;
   try {
@@ -269,7 +262,7 @@ export async function notifyEnvironmentUserHost(
     logger?.warn(
       `[AuthPlugin] the environment-user host refused or failed to take the news that user ${event.userId} was `
         + `${kind}. ${goesAhead(kind)} The answer says so. `
-        + (opts.retried && kind !== 'deactivated' ? 'The call is retried. ' : '')
+        + (kind === 'added' ? 'Adding the person again while they are still pending tells the host again. ' : '')
         + `Cause: ${describe(error)}`,
     );
     return { notified: false, reason: 'host_failed' };

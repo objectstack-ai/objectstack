@@ -54,7 +54,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_device_code',
     'sys_email',
     'sys_email_template',
-    'sys_environment_user_outbox',
     'sys_exchange_rate',
     'sys_identity_email',
     'sys_idp_group_mapping',

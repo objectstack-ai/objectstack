@@ -1174,17 +1174,17 @@ describe('[#33759] Ban / Unban are offered and work without the admin plugin', (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Removing a pending person, and the outbox the invitation calls are recorded in
+// Removing a pending person, which cancels their invitation at the host
 // ─────────────────────────────────────────────────────────────────────────────
 
-const outboxRows = (s: Awaited<ReturnType<typeof stage>>) =>
-  ((s.engine.tables.get('sys_environment_user_outbox') ?? []) as any[]);
-
 /** A recording host with a `userRemoved` member, unless `withRemoved` is false. */
-function removingHost(opts: { withRemoved?: boolean; removed?: () => void } = {}) {
+function removingHost(opts: { withRemoved?: boolean; removed?: () => void; added?: () => void } = {}) {
   const told: Array<{ kind: string; event: EnvironmentUserEvent }> = [];
   const host: EnvironmentUserHost = {
-    userAdded: (event) => void told.push({ kind: 'added', event }),
+    userAdded: (event) => {
+      told.push({ kind: 'added', event });
+      opts.added?.();
+    },
     userDeactivated: (event) => void told.push({ kind: 'deactivated', event }),
     userReactivated: (event) => void told.push({ kind: 'reactivated', event }),
     ...(opts.withRemoved === false
@@ -1210,123 +1210,18 @@ async function addPending(s: Awaited<ReturnType<typeof stage>>, email: string): 
   return String(s.row(email)!.id);
 }
 
-describe('[#33228] every invitation call about a person is recorded in the outbox', () => {
-  it('an add records its invitation sent, under the delivery id the host was told', async () => {
-    const s = await managedStage();
-    const res = await s.fire('/admin/add-sso-user', { email: 'outbox.add@example.com', name: 'Outbox' }, s.bearers.admin);
-    const body: any = await res.json();
-    expect(res.status).toBe(201);
-    const [row] = outboxRows(s);
-    expect(row).toMatchObject({ kind: 'added', status: 'sent', attempts: 1, user_id: body.data.userId, email: 'outbox.add@example.com' });
-    expect(body.data.invitation).toEqual({ id: row.id, status: 'sent' });
-    expect(s.told[0]!.event.deliveryId).toBe(row.id);
-    expect(JSON.parse(row.event_json)).toMatchObject({ userId: body.data.userId, actorId: s.ids.admin, source: PENDING_SSO_SOURCE });
-  });
-
-  it('a host that fails leaves the invitation pending for the worker, due after the first wait', async () => {
-    const s = await managedStage({
-      host: {
-        userAdded: () => {
-          throw new Error('host down');
-        },
-        userDeactivated: () => {},
-        userReactivated: () => {},
-      },
-    });
-    const before = Date.now();
-    const body: any = await (await s.fire('/admin/add-sso-user', { email: 'outbox.retry@example.com', name: 'Retry' }, s.bearers.admin)).json();
-    expect(body.data.host).toEqual({ notified: false, reason: 'host_failed' });
-    const [row] = outboxRows(s);
-    expect(row).toMatchObject({ status: 'pending', attempts: 1, claim_token: null });
-    expect(row.next_attempt_at).toBeGreaterThanOrEqual(before + 60_000);
-    expect(body.data.invitation).toEqual({ id: row.id, status: 'pending' });
-  });
-
-  it('a member-cap 403 on an add records the refusal; the person is taken back out as before', async () => {
-    const { host } = refusingHost(MEMBER_CAP, { added: () => true });
-    const s = await managedStage({ host });
-    await s.fire('/admin/add-sso-user', { email: 'outbox.cap@example.com', name: 'Cap' }, s.bearers.admin);
-    expect(s.row('outbox.cap@example.com')).toBeUndefined();
-    expect(outboxRows(s)).toEqual([expect.objectContaining({ status: 'failed', refusal_code: MEMBER_CAP.code, last_error: MEMBER_CAP.message })]);
-  });
-
-  it('a re-add is the re-send: an older invitation still waiting is superseded by a fresh row', async () => {
-    let fail = true;
-    const s = await managedStage({
-      host: {
-        userAdded: () => {
-          if (fail) throw new Error('host down');
-        },
-        userDeactivated: () => {},
-        userReactivated: () => {},
-      },
-    });
-    const email = 'outbox.resend@example.com';
-    await s.fire('/admin/add-sso-user', { email, name: 'Resend' }, s.bearers.admin);
-    fail = false;
-    const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Resend' }, s.bearers.admin)).json();
-    expect(body.data.alreadyPending).toBe(true);
-    expect(outboxRows(s).map((r) => r.status)).toEqual(['superseded', 'sent']);
-    expect(body.data.invitation).toEqual({ id: outboxRows(s)[1].id, status: 'sent' });
-  });
-
-  it('deactivating a pending person records the cancelled invitation and stops a retry still waiting', async () => {
-    let fail = true;
-    const s = await managedStage({
-      host: {
-        userAdded: () => {
-          if (fail) throw new Error('host down');
-        },
-        userDeactivated: () => {},
-        userReactivated: () => {},
-      },
-    });
-    const id = await addPending(s, 'outbox.deact@example.com');
-    fail = false;
-    const res = await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin);
-    const body: any = await res.json();
-    expect(res.status, JSON.stringify(body)).toBe(200);
-    expect(outboxRows(s).map((r) => [r.kind, r.status])).toEqual([
-      ['added', 'superseded'],
-      ['deactivated', 'sent'],
-    ]);
-    expect(body.data.invitation).toEqual({ id: outboxRows(s)[1].id, status: 'sent' });
-  });
-
-  it('CONTROL: deactivating a person who is not pending records no row', async () => {
-    const s = await managedStage();
-    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
-    expect(outboxRows(s)).toEqual([]);
-  });
-
-  it('a reactivation the host did not take goes ahead and is queued for the worker', async () => {
-    const s = await managedStage({
-      host: {
-        userAdded: () => {},
-        userDeactivated: () => {},
-        userReactivated: () => {
-          throw new Error('host down');
-        },
-      },
-    });
-    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
-    const body: any = await (await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).json();
-    expect(body.data).toMatchObject({ banned: false, host: { notified: false, reason: 'host_failed' } });
-    expect(outboxRows(s)).toEqual([expect.objectContaining({ kind: 'reactivated', status: 'pending', attempts: 1, user_id: s.ids.member })]);
-    expect(body.data.invitation).toEqual({ id: outboxRows(s)[0].id, status: 'pending' });
-  });
-
-  it('CONTROL: with no host wired nothing is recorded', async () => {
-    const s = await managedStage({ host: 'none' });
-    await s.fire('/admin/add-sso-user', { email: 'outbox.nohost@example.com', name: 'No Host' }, s.bearers.admin);
-    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
-    expect((await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
-    expect(outboxRows(s)).toEqual([]);
-  });
-});
+/** Make the delete of `sys_user` answer a `restrict` refusal, as the engine's delete walk does (`DELETE_RESTRICTED`, 409). */
+const RESTRICTED = 'This User cannot be deleted because an Approval Rule still refers to it.';
+function restrictDelete(s: Awaited<ReturnType<typeof stage>>): void {
+  const realDelete = s.engine.delete.bind(s.engine);
+  s.engine.delete = async (name: string, q: any = {}) => {
+    if (name === 'sys_user') throw Object.assign(new Error(RESTRICTED), { code: 'DELETE_RESTRICTED', status: 409 });
+    return realDelete(name, q);
+  };
+}
 
 describe('[#33228] admin/remove-sso-user removes a pending person and cancels their invitation', () => {
-  it('removes the row, its grants and membership, tells the host userRemoved first, and records it', async () => {
+  it('removes the row, its grants and membership, and tells the host userRemoved first', async () => {
     const { host, told } = removingHost();
     const s = await managedStage({ host });
     const id = await addPending(s, 'typo@exmaple.com');
@@ -1335,16 +1230,13 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
     const body: any = await res.json();
 
     expect(res.status, JSON.stringify(body)).toBe(200);
-    expect(body.data).toMatchObject({ userId: id, email: 'typo@exmaple.com', removed: true, host: { notified: true } });
+    expect(body.data).toEqual({ userId: id, email: 'typo@exmaple.com', removed: true, host: { notified: true } });
     expect(s.row('typo@exmaple.com')).toBeUndefined();
     for (const table of ['sys_user_position', 'sys_user_permission_set', 'sys_member']) {
       expect(s.rowsOf(table, id), table).toHaveLength(0);
     }
-    const removal = told.find((t) => t.kind === 'removed')!;
-    expect(removal.event).toMatchObject({ userId: id, email: 'typo@exmaple.com', source: PENDING_SSO_SOURCE, actorId: s.ids.admin });
-    const row = outboxRows(s).find((r) => r.kind === 'removed');
-    expect(row).toMatchObject({ status: 'sent', user_id: id, id: removal.event.deliveryId });
-    expect(body.data.invitation).toEqual({ id: row.id, status: 'sent' });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+    expect(told[1]!.event).toMatchObject({ userId: id, email: 'typo@exmaple.com', source: PENDING_SSO_SOURCE, actorId: s.ids.admin });
   });
 
   it('a host without userRemoved is told userDeactivated for the pending person instead', async () => {
@@ -1356,7 +1248,7 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
 
     expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated']);
     expect(told[1]!.event).toMatchObject({ userId: id, source: PENDING_SSO_SOURCE });
-    expect(outboxRows(s).find((r) => r.user_id === id && r.kind === 'removed')).toMatchObject({ status: 'sent' });
+    expect(s.row('fallback@example.com')).toBeUndefined();
   });
 
   it('refuses a person who is not pending with 409, calls no host and removes no one', async () => {
@@ -1373,7 +1265,7 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
     expect(told).toEqual([]);
   });
 
-  it('a host\'s typed refusal leaves the person as they are: nothing removed, nothing recorded', async () => {
+  it('a host\'s typed refusal leaves the person as they are: nothing removed', async () => {
     const { host } = removingHost({
       removed: () => {
         throw new EnvironmentUserHostRefusal(409, OWNER_CONFLICT.code, OWNER_CONFLICT.message);
@@ -1387,64 +1279,69 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
     expect(v.status, v.text).toBe(409);
     expect(v.code).toBe(OWNER_CONFLICT.code);
     expect(v.message).toBe(OWNER_CONFLICT.message);
-    expect(s.row('refused.remove@example.com')).toBeDefined();
-    expect(outboxRows(s).filter((r) => r.kind === 'removed')).toEqual([]);
+    expect(s.row('refused.remove@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
   });
 
-  it('a host that cannot be reached does not block the removal; the cancellation is queued', async () => {
-    const { host } = removingHost({
+  it('a host that cannot be reached does not block the removal, and the answer says host_failed', async () => {
+    const { host, told } = removingHost({
       removed: () => {
         throw new Error('host down');
       },
     });
     const s = await managedStage({ host });
-    const id = await addPending(s, 'queued.remove@example.com');
+    const id = await addPending(s, 'unreached.remove@example.com');
 
     const body: any = await (await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).json();
 
-    expect(body.data).toMatchObject({ removed: true, host: { notified: false, reason: 'host_failed' } });
-    expect(s.row('queued.remove@example.com')).toBeUndefined();
-    expect(outboxRows(s).find((r) => r.kind === 'removed')).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(body.data).toEqual({ userId: id, email: 'unreached.remove@example.com', removed: true, host: { notified: false, reason: 'host_failed' } });
+    expect(s.row('unreached.remove@example.com')).toBeUndefined();
+    // Asked once: the door retries nothing.
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
   });
 
-  it('with no host wired the person is removed, the answer says no_host and nothing is recorded', async () => {
+  it('with no host wired the person is removed and the answer says no_host', async () => {
     const s = await managedStage({ host: 'none' });
     const id = await addPending(s, 'nohost.remove@example.com');
     const body: any = await (await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).json();
-    expect(body.data).toMatchObject({ removed: true, host: { notified: false, reason: 'no_host' } });
-    expect(body.data.invitation).toBeUndefined();
+    expect(body.data).toEqual({ userId: id, email: 'nohost.remove@example.com', removed: true, host: { notified: false, reason: 'no_host' } });
     expect(s.row('nohost.remove@example.com')).toBeUndefined();
-    expect(outboxRows(s)).toEqual([]);
   });
 
-  it('a record that restricts the delete refuses it with the engine\'s answer; the person stays and is re-invited', async () => {
-    const { host } = removingHost();
+  it('a record that restricts the delete refuses it with the engine\'s answer; the person stays and is re-invited inline', async () => {
+    const { host, told } = removingHost();
     const s = await managedStage({ host });
     const id = await addPending(s, 'held@example.com');
-    // The engine's delete walk refuses a person a `restrict` lookup still
-    // points at (`DELETE_RESTRICTED`, 409); this double answers the same.
-    const realDelete = s.engine.delete.bind(s.engine);
-    s.engine.delete = async (name: string, q: any = {}) => {
-      if (name === 'sys_user') {
-        throw Object.assign(new Error('This User cannot be deleted because an Approval Rule still refers to it.'), {
-          code: 'DELETE_RESTRICTED',
-          status: 409,
-        });
-      }
-      return realDelete(name, q);
-    };
+    restrictDelete(s);
 
     const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
 
     expect(v.status, v.text).toBe(409);
     expect(v.code).toBe('DELETE_RESTRICTED');
-    expect(v.message).toBe(
-      `${PENDING_SSO_MESSAGES.removeRefused} This User cannot be deleted because an Approval Rule still refers to it. `
-        + PENDING_SSO_MESSAGES.removeRefusedReinvited,
-    );
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeRefusedReinvited}`);
     expect(s.row('held@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
-    expect(outboxRows(s).filter((r) => r.kind === 'removed')).toEqual([]);
-    expect(outboxRows(s).filter((r) => r.kind === 'added').map((r) => r.status)).toEqual(['sent', 'pending']);
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed', 'added']);
+    expect(told[2]!.event).toMatchObject({ userId: id, email: 'held@example.com', source: PENDING_SSO_SOURCE });
+  });
+
+  it('a re-invite the host does not take is said truthfully: the person stays pending with no invitation', async () => {
+    let calls = 0;
+    const { host } = removingHost({
+      added: () => {
+        calls += 1;
+        if (calls > 1) throw new Error('host down');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.unsent@example.com');
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeRefusedNotReinvited}`);
+    expect(s.row('held.unsent@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(calls).toBe(2);
   });
 
   it('refuses an unknown id 404, a missing id or an unknown key 400, and a non-admin 403', async () => {
@@ -1470,23 +1367,35 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
 });
 
 describe('[#33228] a deactivated person is never sent an invitation, and a removal is held to pending people', () => {
-  /** Make the delete of `sys_user` answer a `restrict` refusal, as the engine's delete walk does. */
-  const restrictDelete = (s: Awaited<ReturnType<typeof stage>>) => {
-    const realDelete = s.engine.delete.bind(s.engine);
-    s.engine.delete = async (name: string, q: any = {}) => {
-      if (name === 'sys_user') {
-        throw Object.assign(new Error('This User cannot be deleted because an Approval Rule still refers to it.'), {
-          code: 'DELETE_RESTRICTED',
-          status: 409,
-        });
-      }
-      return realDelete(name, q);
-    };
-  };
-  const RESTRICTED = 'This User cannot be deleted because an Approval Rule still refers to it.';
+  it('re-adding a deactivated pending person does not invite them: host reads deactivated', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.banned@example.com';
+    const id = await addPending(s, email);
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    const res = await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ userId: id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated']);
+  });
+
+  it('CONTROL: re-adding a pending person who is not deactivated invites them again', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.active@example.com';
+    const id = await addPending(s, email);
+
+    const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin)).json();
+
+    expect(body.data).toMatchObject({ userId: id, alreadyPending: true, host: { notified: true } });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'added']);
+  });
 
   it('a refused removal of a deactivated pending person sends no new invitation, and says the old one is cancelled', async () => {
-    const { host } = removingHost();
+    const { host, told } = removingHost();
     const s = await managedStage({ host });
     const id = await addPending(s, 'held.banned@example.com');
     expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
@@ -1496,12 +1405,11 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
 
     expect(v.status, v.text).toBe(409);
     expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
-    expect(outboxRows(s).filter((r) => r.kind === 'added' && r.status === 'pending')).toEqual([]);
-    expect(outboxRows(s).find((r) => r.kind === 'removed')).toMatchObject({ status: 'sent', user_id: id });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated', 'removed']);
   });
 
   it('a refused removal the host never took sends no new invitation, and says the cancellation was not confirmed', async () => {
-    const { host } = removingHost({
+    const { host, told } = removingHost({
       removed: () => {
         throw new Error('host down');
       },
@@ -1514,22 +1422,10 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
 
     expect(v.status, v.text).toBe(409);
     expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostUnconfirmed}`);
-    expect(outboxRows(s).map((r) => [r.kind, r.status])).toEqual([['added', 'sent']]);
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
   });
 
-  it('deactivating a pending person stops an invitation whose sender died mid-call, so it is not sent when its claim lapses', async () => {
-    const s = await managedStage();
-    const id = await addPending(s, 'stranded@example.com');
-    const [sent] = outboxRows(s);
-    outboxRows(s).push({ ...sent, id: 'stranded_row', status: 'in_flight', claim_token: 'dead', claimed_until: Date.now() + 60_000 });
-
-    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
-
-    expect(outboxRows(s).find((r) => r.id === 'stranded_row')).toMatchObject({ status: 'superseded' });
-    expect(outboxRows(s).find((r) => r.id === sent.id)).toMatchObject({ status: 'sent' });
-  });
-
-  it('a person who signs in while the host is asked is not removed: 409, and the call the host took is recorded', async () => {
+  it('a person who signs in while the host is asked is not removed: 409, and the answer says the host was told', async () => {
     const email = 'signs.in@example.com';
     let s!: Awaited<ReturnType<typeof stage>>;
     const { host } = removingHost({
@@ -1547,22 +1443,6 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
     expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
     expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
     expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
-    expect(outboxRows(s).find((r) => r.kind === 'removed')).toMatchObject({ status: 'sent', user_id: id });
-  });
-
-  it('off a cloud-managed kernel a wired host is still asked, but nothing is recorded and no retry is claimed', async () => {
-    const { host, told } = removingHost();
-    host.userReactivated = () => {
-      throw new Error('host down');
-    };
-    const s = await stage({ host });
-    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
-    const body: any = await (await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).json();
-
-    expect(told.map((t) => t.kind)).toEqual(['deactivated']);
-    expect(body.data).toMatchObject({ banned: false, host: { notified: false, reason: 'host_failed' } });
-    expect(body.data.invitation).toBeUndefined();
-    expect(outboxRows(s)).toEqual([]);
   });
 });
 
