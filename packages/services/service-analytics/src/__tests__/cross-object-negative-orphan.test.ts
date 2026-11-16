@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A one-hop cross-object leaf (`'order.status'`) never selects a detail row
- * that has no parent — on the native SQL strategy as on the engine path and
+ * A cross-object leaf (`'order.status'`, and through two hops) never selects a
+ * detail row that has no parent — on the native SQL strategy as on the engine path and
  * the `/data` nested-relation filter — whatever the operator.
  *
  * ## What was wrong
@@ -18,14 +18,20 @@
  * never matches, whatever the operator"), so the same widget answered a
  * different total once a time bucket routed it to the engine.
  *
- * Measured on `origin/main` `5a755791a9` with this fixture, before the change:
+ * Measured on `origin/main` `5a755791a9` with this fixture (two orphans: `l7`
+ * with an empty relation, `l8` naming a parent that is gone), before the
+ * change, as `count / sum(amount)`:
  *
- * | `where`                               | native  | engine | `/data` |
- * |:--|:--|:--|:--|
- * | `order.status $ne 'open'`             | 5 / 1600 | 4 / 600 | 4 |
- * | `order.status $nin ['open']`          | 5 / 1600 | 4 / 600 | 4 |
- * | `order.status $notContains 'pe'`      | 5 / 1600 | 4 / 600 | 4 |
- * | `order.status $null true`             | 2 / 1100 | 1 / 100 | 1 |
+ * | `where` on `order.status`        | native, before | engine and `/data` (and native, now) |
+ * |:--|:--|:--|
+ * | `$ne 'open'`, `$nin ['open']`, `$notContains 'pe'` | 6 / 6600 | 4 / 600 |
+ * | `$null: true`, `$eq: null`, `$empty: true`         | 3 / 6300 | 1 / 300 |
+ * | `$ne 'cancelled'`                                   | 5 / 6302 | 3 / 302 |
+ * | two hops, `order.customer.tier $ne 'gold'`          | 6 / 6600 | 3 / 300 |
+ * | two hops, `order.customer.tier $null: true`         | 3 / 6300 | 0 / 0   |
+ *
+ * `$eq 'cancelled'` agreed before and after (3 / 300): a positive comparison is
+ * UNKNOWN on a NULL, so it never selected an orphan.
  *
  * ## What holds now
  *
@@ -44,13 +50,19 @@ import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
+const CUSTOMER = 'os33792_customer';
 const ORDER = 'os33792_order';
 const LINE = 'os33792_line';
 
+const CUSTOMERS = [
+  { id: 'c1', tier: 'gold' },
+  { id: 'c2', tier: 'silver' },
+] as const;
 const ORDERS = [
-  { id: 'o1', status: 'open' },
-  { id: 'o2', status: 'cancelled' },
-  { id: 'o3' }, // exists, with no status: `$ne` selects its lines (#5298)
+  { id: 'o1', status: 'open', customer: 'c1' },
+  { id: 'o2', status: 'cancelled', customer: 'c2' },
+  { id: 'o3' }, // exists, with no status and no customer: `$ne` selects its lines (#5298)
+  { id: 'o9', status: 'cancelled' }, // removed after its line is written, leaving `l8` naming no record
 ] as const;
 const LINES = [
   { id: 'l1', amount: 1, order: 'o1' },
@@ -59,17 +71,18 @@ const LINES = [
   { id: 'l4', amount: 100, order: 'o2' },
   { id: 'l5', amount: 100, order: 'o2' },
   { id: 'l6', amount: 300, order: 'o3' },
-  { id: 'l7', amount: 1000 }, // the orphan: no parent
+  { id: 'l7', amount: 1000 }, // an orphan: no parent
+  { id: 'l8', amount: 5000, order: 'o9' }, // an orphan: its parent is removed below, behind the engine
 ] as const;
 
 const DATASET = DatasetSchema.parse({
   name: 'os33792_lines',
   label: 'Lines',
   object: LINE,
-  include: ['order'],
+  include: ['order', 'order.customer'],
   dimensions: [{ name: 'amount', field: 'amount', type: 'number' }],
   measures: [
-    { name: 'n', aggregate: 'count' },
+    { name: 'line_count', aggregate: 'count' },
     { name: 'total', aggregate: 'sum', field: 'amount' },
   ],
 });
@@ -83,9 +96,9 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
   const services: Partial<Record<Face, AnalyticsService>> = {};
 
   const totals = async (face: Face, where: Record<string, unknown>) => {
-    const res = await services[face]!.queryDataset(DATASET, { measures: ['n', 'total'], runtimeFilter: where } as never);
+    const res = await services[face]!.queryDataset(DATASET, { measures: ['line_count', 'total'], runtimeFilter: where } as never);
     const [row] = res.rows as Array<Record<string, unknown>>;
-    return { n: Number(row?.n ?? 0), total: Number(row?.total ?? 0), sql: (res as { sql?: string }).sql };
+    return { n: Number(row?.line_count ?? 0), total: Number(row?.total ?? 0) };
   };
   const dataIds = async (where: Record<string, unknown>) =>
     ((await engine.find(LINE, { where } as never)) as Array<{ id: string }>).map((r) => r.id).sort();
@@ -96,9 +109,17 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
     engine.registerDriver(driver as never, true);
     await engine.init();
     engine.registry.registerObject({
+      name: CUSTOMER,
+      label: 'Customer',
+      fields: { tier: { name: 'tier', type: 'text' } },
+    } as never);
+    engine.registry.registerObject({
       name: ORDER,
       label: 'Order',
-      fields: { status: { name: 'status', type: 'text' } },
+      fields: {
+        status: { name: 'status', type: 'text' },
+        customer: { name: 'customer', type: 'lookup', reference: CUSTOMER },
+      },
     } as never);
     engine.registry.registerObject({
       name: LINE,
@@ -110,8 +131,12 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
     } as never);
     await engine.syncSchemas();
     await installDefaultOrganization(engine as never);
+    for (const row of CUSTOMERS) await engine.insert(CUSTOMER, { ...row } as never);
     for (const row of ORDERS) await engine.insert(ORDER, { ...row } as never);
     for (const row of LINES) await engine.insert(LINE, { ...row } as never);
+    // A reference the engine would refuse to write, reached the way a stored row
+    // reaches it: the parent goes away underneath (an import, a direct write).
+    expect(await driver.delete(ORDER, 'o9')).toBeTruthy();
 
     for (const [face, caps] of [
       ['native', undefined],
@@ -140,7 +165,11 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
     ["$nin ['open']", { 'order.status': { $nin: ['open'] } }, { order: { status: { $nin: ['open'] } } }, ['l3', 'l4', 'l5', 'l6']],
     ["$notContains 'pe'", { 'order.status': { $notContains: 'pe' } }, { order: { status: { $notContains: 'pe' } } }, ['l3', 'l4', 'l5', 'l6']],
     ['$null true', { 'order.status': { $null: true } }, { order: { status: { $null: true } } }, ['l6']],
+    ['$eq null', { 'order.status': { $eq: null } }, { order: { status: { $eq: null } } }, ['l6']],
+    ['$empty true', { 'order.status': { $empty: true } }, { order: { status: { $empty: true } } }, ['l6']],
     ["$ne 'cancelled'", { 'order.status': { $ne: 'cancelled' } }, { order: { status: { $ne: 'cancelled' } } }, ['l1', 'l2', 'l6']],
+    // A positive operator never selected an orphan: the comparison is UNKNOWN on a NULL. Unchanged.
+    ["$eq 'cancelled'", { 'order.status': { $eq: 'cancelled' } }, { order: { status: { $eq: 'cancelled' } } }, ['l3', 'l4', 'l5']],
   ];
   const sumOf = (ids: string[]) => LINES.filter((l) => ids.includes(l.id)).reduce((s, l) => s + l.amount, 0);
 
@@ -149,23 +178,53 @@ describe('a one-hop cross-object leaf never selects an orphan detail row, on the
       expect(await dataIds(nested), '/data').toEqual(expected);
       const want = { n: expected.length, total: sumOf(expected) };
       for (const face of ['native', 'objectql'] as const) {
-        const got = await totals(face, where);
-        expect({ n: got.n, total: got.total }, `${face}${got.sql ? `: ${got.sql}` : ''}`).toEqual(want);
+        expect.soft(await totals(face, where), face).toEqual(want);
       }
     });
   }
 
-  it('the native statement evaluates the joined leaf on an existing parent', async () => {
-    const { sql } = await totals('native', { 'order.status': { $ne: 'open' } });
+  // Two hops: the leaf is evaluated on the record the LAST hop reaches, so a line
+  // whose order has no customer is not selected either (`l6`, on `o3`).
+  const TWO_HOP: Array<[string, Record<string, unknown>, Record<string, unknown>, string[]]> = [
+    ["$ne 'gold'", { 'order.customer.tier': { $ne: 'gold' } }, { order: { customer: { tier: { $ne: 'gold' } } } }, ['l3', 'l4', 'l5']],
+    ['$null true', { 'order.customer.tier': { $null: true } }, { order: { customer: { tier: { $null: true } } } }, []],
+  ];
+  for (const [label, where, nested, expected] of TWO_HOP) {
+    it(`order.customer.tier ${label}: native, engine and /data select the same lines`, async () => {
+      expect(await dataIds(nested), '/data').toEqual(expected);
+      const want = { n: expected.length, total: sumOf(expected) };
+      for (const face of ['native', 'objectql'] as const) {
+        expect.soft(await totals(face, where), face).toEqual(want);
+      }
+    });
+  }
+
+  it('the native statement over the inferred cube evaluates the joined leaf on an existing parent', async () => {
+    // A cube query with no time bucket, served natively: the statement, and its answer.
+    const query = { cube: LINE, measures: ['count'], where: { 'order.status': { $ne: 'open' } } };
+    const { sql } = await services.native!.generateSql(query as never);
+    const res = await services.native!.query(query as never);
     expect(sql).toContain('LEFT JOIN "os33792_order" "order" ON');
+    // The lowering's NULL-safe escape and the comparison, each on an existing parent.
     expect(sql).toContain('"order"."id" IS NOT NULL AND "order"."status" IS NULL');
+    expect(sql).toContain('"order"."id" IS NOT NULL AND "order"."status" != $');
+    expect(Number((res.rows as Array<Record<string, unknown>>)[0]?.count)).toBe(4);
+
+    // Two hops: the key of the last hop's join alias.
+    const twoHop = await services.native!.generateSql({
+      cube: LINE,
+      measures: ['count'],
+      where: { 'order.customer.tier': { $ne: 'gold' } },
+    } as never);
+    expect(twoHop.sql).toContain('"order__customer"."id" IS NOT NULL AND "order__customer"."tier" IS NULL');
   });
 
-  it('CONTROL: an author keeps the orphans by naming the base relation field, which reads no join', async () => {
+  it('an author keeps the rows with an empty relation by naming the base relation field, which reads no join', async () => {
     const where = { $or: [{ 'order.status': { $ne: 'open' } }, { order: { $null: true } }] };
     const expected = ['l3', 'l4', 'l5', 'l6', 'l7'];
+    expect(await dataIds({ $or: [{ order: { status: { $ne: 'open' } } }, { order: { $null: true } }] }), '/data').toEqual(expected);
     for (const face of ['native', 'objectql'] as const) {
-      expect(await totals(face, where), face).toMatchObject({ n: expected.length, total: sumOf(expected) });
+      expect.soft(await totals(face, where), face).toEqual({ n: expected.length, total: sumOf(expected) });
     }
   });
 });
