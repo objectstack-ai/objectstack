@@ -41,6 +41,7 @@ describe('[#34199] SqlDriver — an unresolved { $record } comparand', () => {
           id: { type: 'text', name: 'id' },
           cb_market: { type: 'text', name: 'cb_market' },
           owner: { type: 'text', name: 'owner' },
+          attachment: { type: 'json', name: 'attachment' },
         },
       } as any,
     ]);
@@ -80,6 +81,24 @@ describe('[#34199] SqlDriver — an unresolved { $record } comparand', () => {
       expect(err.status).toBe(400);
     });
   }
+
+  it('control — a { $record } inside a deep-equality comparand reaches the driver unchanged and is answered as before', async () => {
+    // Not a field's comparand: the no-`$` object beneath `attachment` is a
+    // deep-equality literal. The token pass hands it over by reference, so
+    // this driver gives the answer it gave before the pass learned the
+    // reference, whatever that answer is.
+    const where = { attachment: { meta: { $record: 'x' } } };
+    expect(resolveFilterTokens(where, { userId: 'usr_1' })).toBe(where);
+    const answer = async (w: unknown) => {
+      try {
+        return { rows: await driver.find('price_book', { fields: ['id'], where: w as FilterCondition }) };
+      } catch (e) {
+        const { code, status } = e as Refusal;
+        return { code, status };
+      }
+    };
+    expect(await answer(seamed(where))).toEqual(await answer(where));
+  });
 
   it('control — an ordinary filter and a string token run through the same seam as before', async () => {
     const ids = async (where: unknown) =>

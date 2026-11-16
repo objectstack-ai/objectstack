@@ -38,10 +38,11 @@ describe('[#34199] InMemoryDriver — an unresolved { $record } comparand', () =
         id: { type: 'text', name: 'id' },
         cb_market: { type: 'text', name: 'cb_market' },
         owner: { type: 'text', name: 'owner' },
+        attachment: { type: 'file', name: 'attachment' },
       },
     });
-    await driver.create('price_book', { id: '1', cb_market: 'export', owner: 'usr_1' });
-    await driver.create('price_book', { id: '2', cb_market: null, owner: 'usr_2' });
+    await driver.create('price_book', { id: '1', cb_market: 'export', owner: 'usr_1', attachment: { meta: { $record: 'x' } } });
+    await driver.create('price_book', { id: '2', cb_market: null, owner: 'usr_2', attachment: { meta: { other: 1 } } });
   });
 
   const refusalOf = async (read: () => Promise<unknown>): Promise<Refusal> => {
@@ -76,6 +77,20 @@ describe('[#34199] InMemoryDriver — an unresolved { $record } comparand', () =
       driver.find('price_book', { fields: ['id'], where: { cb_market: { $record: 'account.cb_market' } } as unknown as FilterCondition }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
+  });
+
+  it('control — a { $record } inside a deep-equality comparand reaches the driver unchanged and is answered as before', async () => {
+    // Not a field's comparand: the no-`$` object beneath `attachment` is a
+    // deep-equality literal, which this driver compares whole. The token pass
+    // hands it over by reference, so the driver answers exactly as it did
+    // before the pass learned the reference: the one row holding that value.
+    const where = { attachment: { meta: { $record: 'x' } } };
+    const find = vi.spyOn(driver, 'find');
+    const seam = seamed(where);
+    expect(seam).toBe(where);
+    const rows = (await driver.find('price_book', { fields: ['id'], where: seam })) as Array<{ id: string }>;
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(rows.map((r) => String(r.id))).toEqual(['1']);
   });
 
   it('control — an ordinary filter and a string token run through the same seam as before', async () => {
