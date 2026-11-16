@@ -374,6 +374,10 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: "names the object a validation rule's own one-hop relation path reaches, to judge whether it reads a summary field; it reads no row",
   },
+  'summary-rule-reads.ts#keysReadFrom :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "names the object a computed field's own one-hop expression reaches, to judge whether a rule reads a summary through it; it reads no row",
+  },
   'engine-summaries-and-expansion.ts#buildSummaryIndex :: referenceCarrierOf()': {
     disposition: 'author-declared',
     why:
