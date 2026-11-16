@@ -142,7 +142,7 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
 // A mailbox message's `To:` line names a SEAT, spelled as the mailbox opener spells a seat — its
 // `seatKey`, imported, ⛔ never a second seat shape. That file imports nothing of this graph's
 // top-level-await half (only the relay validator and `gh-pages.mjs`), so the edge adds no cycle.
-import { MAILBOX_LABEL, mailboxBody, mailboxOwner, seatKey } from './mailbox-open.mjs';
+import { MAILBOX_LABEL, isL2ReviewLane, L2_REVIEW_LANE_WORDS, mailboxBody, mailboxOwner, seatKey } from './mailbox-open.mjs';
 // Who may ring a mailbox: the relay's identity (`RELAY_COMMENT_AUTHOR`, the op table's — that file is already
 // in this graph through `mailbox-open.mjs`) and the maintainers (`GOVERNED_APPROVERS`), judged by the queue
 // guard's own author predicate, ⛔ never a second list of logins. The guard imports nothing of this graph at
@@ -854,20 +854,20 @@ export function localRunsStand(reading) {
 
 /**
  * The `Contract-review-handoff:` key line -- the ONE way a dispatching seat
- * hands its contract review to a review seat or a sibling seat of its lane,
+ * hands its contract review to an L2 seat or a sibling seat of its lane,
  * read with `Reviewed-by:`'s own key discipline.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the seat that dispatched the work runs the review in
+ * 〈L2 归属与资格〉): the seat that dispatched the work runs the review in
  * its own seat at the contract-review tier. ONLY when that tier's call is
  * quota-refused does the seat hand the review over -- it never reviews at a
  * lower tier -- and the hand-off is one PR comment carrying this line beside
  * the existing `needs:contract-review` label:
  *
- *   Contract-review-handoff: review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
+ *   Contract-review-handoff: l2-review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
  *
- * Three facts, each required: the TARGET (a review seat `review#N`, or a
- * sibling seat of the lane `domain:<lane>#N` while no review seat is seated --
+ * Three facts, each required: the TARGET (an L2 seat `l2-review#N` -- old spelling `review#N`, still read -- or a
+ * sibling seat of the lane `domain:<lane>#N` while no L2 seat is seated --
  * the closed set of two shapes; ⛔ never `triage`, which takes no contract
  * review, so a line naming it is unreadable), the TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
  * spells it, ⛔ never a model id -- with its reason and UTC time in the
@@ -885,15 +885,15 @@ export const CONTRACT_REVIEW_HANDOFF_KEY = 'Contract-review-handoff';
  * The line exactly as the rule text prints it, placeholders included. This file's self-test pins it
  * VERBATIM in `references/contract-review.md`, so the text and `HANDOFF_TARGET` cannot drift apart.
  */
-export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
+export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <l2-review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
 const CONTRACT_REVIEW_HANDOFF_LINE = keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY);
 /** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
 const CONTRACT_REVIEW_HANDOFF_MARKER = new RegExp(CONTRACT_REVIEW_HANDOFF_LINE.source, 'm');
 /**
- * The target -- `review#N` or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
+ * The target -- `l2-review#N` (or its old spelling `review#N`: the opener's two L2 lane words) or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
  * hyphen pair, a hyphen or a colon), then the rest. `triage` and every other seat word match nothing.
  */
-const HANDOFF_TARGET = /^(review#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
+const HANDOFF_TARGET = new RegExp(`^((?:${L2_REVIEW_LANE_WORDS.join('|')})#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \\t]*(?:—|--|-|:)?[ \\t]*(.*)$`, 'i');
 /** `(reason, UTC time)` then ` · head SHA` -- the time is the LAST comma-separated item in the parentheses. */
 const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t]+`?([0-9a-fA-F]{7,40})`?[ \t]*$/;
 
@@ -903,7 +903,7 @@ const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t
  * @returns {{ state: 'missing' }
  *          | { state: 'unreadable', line: string }
  *          | { state: 'read', to: string, tier: string, reason: string, at: string, head: string }}
- *          `to` is the target seat, lower-cased (`review#1`, `domain:ui#2`).
+ *          `to` is the target seat, lower-cased (`l2-review#1`, `review#1`, `domain:ui#2`).
  */
 export function readContractReviewHandoff(text) {
   for (const line of String(text ?? '').split(/\r?\n/)) {
@@ -967,10 +967,10 @@ export function contractReviewHandoff(rows, headSha) {
 
 /**
  * The `Contract-review-claim:` key line -- who has STARTED the contract review
- * of one head, posted by that reviewer before it starts, lane seat or review seat.
+ * of one head, posted by that reviewer before it starts, lane seat or L2 seat.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the lane reviews its own; a review seat, or a sibling
+ * 〈L2 归属与资格〉): the lane reviews its own; an L2 seat, or a sibling
  * lane seat, takes one only when it is handed over or nobody is doing it. Before starting, every reviewer reads the PR:
  * a record or a LIVE claim on the current head means do not start. Otherwise it
  * posts ONE comment carrying this line first, then reviews:
@@ -1067,8 +1067,8 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  * Who holds this pull request's current head, read off its comment thread:
  *
  *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
- *               posted, a review seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
- *               keeps two review seats off one head), except that a legacy `triage#N` claim yields to
+ *               posted, an L2 seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
+ *               keeps two L2 seats off one head), except that a legacy `triage#N` claim yields to
  *               any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
@@ -1076,7 +1076,7 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  *
  * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
  * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
- * one signed `review#N · …` is the `review` side (`lanes/review.md`), and every other claim -- a
+ * one signed `l2-review#N · …` (or the old spelling `review#N · …`) is the `review` side (the L2 seat's, `lanes/l2-review.md`), and every other claim -- a
  * lane seat's, a sibling lane seat's, an unsigned one -- is the `lane` side. Between the review
  * and lane sides there is no precedence: the earliest posted holds. Unreadable claim lines are
  * returned by comment id and hold nothing.
@@ -1104,7 +1104,7 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
     const stamped = Date.parse(row?.created_at ?? '');
     const postedAt = Number.isFinite(stamped) ? stamped : line.at;
     const signedLane = readSignatureLine(row?.body)?.lane ?? null;
-    const side = signedLane === 'triage' ? 'triage' : signedLane === 'review' ? 'review' : 'lane';
+    const side = signedLane === 'triage' ? 'triage' : isL2ReviewLane(signedLane) ? 'review' : 'lane';
     const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
     claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
   }
@@ -1126,7 +1126,7 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
  * the triage seat claimed under gap rule (b) and then had to withdraw.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉, beside the claim line): the holding lane posts ONE comment
+ * 〈L2 归属与资格〉, beside the claim line): the holding lane posts ONE comment
  * carrying this line --
  *
  *   Contract-review-hold: session_01QSeKYmhU5KEj1nukYhp1Tg · head 3beee64f · the stack still lands under it · until the last sibling merges
@@ -1347,13 +1347,13 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * or a patrol takes; nothing here changes an exit.
  */
 export const MAILBOX_KEYS = Object.freeze([
-  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'a review seat (`review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
+  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'an L2 seat (`l2-review#N`; a seat seated under the old spelling keeps `review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
   { id: 'request:triage', kind: 'Request', key: 'triage', from: 'lane', to: 'triage', when: 'a question about a card\'s fate, route or grade', template: 'Request: triage · #n · ONE-LINE-QUESTION' },
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
   { id: 'notify:main-green', kind: 'Notify', key: 'main-green', from: 'triage, or the director when triage is absent', to: 'the seat of each open PR whose body carries a line-leading `Waits-on: main-red #n` naming the closed anchor', when: 'the main-red anchor card closes: one knock per held PR, all in the same round, the count in the round record; the seat merges `origin/main`, drops the line and resumes its landing', template: 'Notify: main-green · anchor #n · PR #m' },
-  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
+  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the L2 seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'the release-board producer (the director seat in this repository; the whole-repository seat in cloud)', to: 'the lane the card sits in', when: 'a card is raised to `priority:p0` as a release blocker inside the release window (the only release-blocker mark; ⛔ never a `target:` label)', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
   { id: 'notify:ruling', kind: 'Notify', key: 'ruling', from: 'the seat that recorded a maintainer ruling', to: 'the seat whose card or draft it changes', when: 'the ruling is recorded', template: 'Notify: ruling · #n · LETTER · record ID' },
@@ -2047,9 +2047,9 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
  * paraphrased because it IS the operative criterion, and untranslated because
  * rewriting a quoted ruling rewrites the ruling:
  *
- *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *   > L2 记录 = 一条评论落 PR 或卡,席内与各子代理同形
  *
- * — `references/contract-review.md` 〈复核归属与资格〉, with SKILL.md
+ * — `references/contract-review.md` 〈L2 归属与资格〉, with SKILL.md
  * 〈入队与落地〉 saying the same in the same words
  * (「记录 = 同形评论落 PR 或卡」) and the landing check's own ① repeating it
  * (「即 PR 或卡上同形的复核记录」). Two carriers, one record.
@@ -3215,7 +3215,8 @@ export async function selfTest() {
   t('⛔ the target is the closed set of two shapes and the tier is the constant\'s NAME — `triage`, `director`, a seat with no number, the default tier or a model id is unreadable', [`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: director — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: domain:ui — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${TIER_DEFAULT_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
   t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`) — the template and `HANDOFF_TARGET` cannot drift apart', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_HANDOFF_TEMPLATE}\``) && CONTRACT_REVIEW_HANDOFF_TEMPLATE.startsWith(`${CONTRACT_REVIEW_HANDOFF_KEY}: `); })());
   t('⛔ the TEMPLATE sent verbatim is unreadable — a placeholder names no seat and no head', readContractReviewHandoff(CONTRACT_REVIEW_HANDOFF_TEMPLATE).state === 'unreadable' && contractReviewHandoff([HO_ROW(CONTRACT_REVIEW_HANDOFF_TEMPLATE, 4407)], HO_HEAD).state === 'unreadable');
-  t('⭐ a sibling seat of the lane is a target while no review seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
+  t('⭐ the L2 seat is a target under its new word and under the old one: `l2-review#N` reads, lower-cased, and hands the head to it; `review#N` still reads; `l2-review` with no number, `l2#1` and `l1-review#1` are unreadable', (() => { const line = (to) => `${CONTRACT_REVIEW_HANDOFF_KEY}: ${to} — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line('L2-Review#2'))], HO_HEAD); return r.state === 'handed' && r.to === 'l2-review#2' && readContractReviewHandoff(line('l2-review#12')).to === 'l2-review#12' && readContractReviewHandoff(line('review#1')).to === 'review#1' && ['l2-review', 'l2#1', 'l1-review#1'].every((to) => readContractReviewHandoff(line(to)).state === 'unreadable'); })());
+  t('⭐ a sibling seat of the lane is a target while no L2 seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
   t('⛔ a line still naming `triage` hands the review to NOBODY: newest on the thread it is unreadable, never handed — triage takes no contract review', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, 4406)], HO_HEAD); return r.state === 'unreadable' && r.gaps[0].includes('4406'); })());
   t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
   t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');
@@ -3261,9 +3262,10 @@ export async function selfTest() {
   const CL_REVIEW2_SESSION = 'session_01ReviewSeatTwoFixt9Zz';
   const CL_REVIEW_SIG = `review#1 · os-zhuang · ${CL_REVIEW_SESSION}`;
   const CL_REVIEW2_SIG = `review#2 · os-tesla · ${CL_REVIEW2_SESSION}`;
-  t('⭐ a `review#N`-signed claim is the review side, and between a review seat and a lane seat the EARLIEST posted holds with no tie — the review seat first ⇒ the review seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
-  t('…and the lane seat first ⇒ the lane seat holds: a review seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
-  t('⭐ two review seats on one head: the EARLIEST posted holds, the later withdraws — the rule the review seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
+  t('⭐ an `l2-review#N`-signed claim is the review side exactly as a `review#N`-signed one is — the L2 seat under either lane word — and it holds against a later lane claim with no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(`l2-review#1 · os-zhuang · ${CL_REVIEW_SESSION}`, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('⭐ a `review#N`-signed claim is the review side, and between an L2 seat and a lane seat the EARLIEST posted holds with no tie — the L2 seat first ⇒ the L2 seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('…and the lane seat first ⇒ the lane seat holds: an L2 seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
+  t('⭐ two L2 seats on one head: the EARLIEST posted holds, the later withdraws — the rule the L2 seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
   t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
   t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');
@@ -3495,6 +3497,12 @@ export async function selfTest() {
     t('⛔ RESIDUAL, pinned: a fleet session that COPIES a seat\'s whole public signature line reads `listed` — byte-identical to that seat\'s own knock — so `listed` is a consistency reading inside the fleet\'s trust root, never proof of who rang', (() => { const line = posts[0].body.split('\n')[0]; const forged = DB_ROW(`${line}\n${MSG('Notify: landed · #28562', 'domain:skills#2')}`, 9001); const own = KNOCK('domain:skills#1', S1); return line === SIG('domain:skills#1', S1) && forged.body === own.body && SAME(read(forged), read(own)) && read(forged).signature.state === 'listed'; })());
     t('⛔ a row lists only when its `state` READS `open` — a seat post or a mailbox with no `state` at all lists nobody, failing closed', (() => { const { state: _p, ...noStatePost } = posts[1]; const { state: _m, ...noStateBox } = mailboxes[1]; const r = seatSessionRoster({ posts: [noStatePost], mailboxes: [noStateBox] }); return r.state === 'read' && r.seats.size === 0 && read(KNOCK('domain:skills#2', S2), r).signature.state === 'unlisted' && read(KNOCK('triage#1', TRI), r).signature.state === 'unlisted'; })());
     t('`--mailbox-keys` tells a sender the signature rule, naming the unlisted reading and that a listed one is no proof', mailboxKeyLines().some((l) => l.includes('Successor-of:') && l.includes(MAILBOX_UNVERIFIED_SIGNATURE) && l.includes('not proof')));
+    // H72's signature row (check-half-states.mjs), driven end-to-end: the REAL roster read off the listings the sweep
+    // hands it (`h72RosterListings`), the REAL reader, and the patrol's predicate over what they made.
+    const NOW_H72 = Date.parse('2026-10-28T08:00:00Z');
+    const ROWS_H72 = [{ ...KNOCK('domain:skills#1', S1), id: 8201 }, { ...KNOCK('domain:skills#1', STRAY), id: 8202 }, DB_ROW(DB.ut, 8203, '2026-10-28T07:00:00Z', GOVERNED_APPROVERS[0]), DB_ROW(DRIVE_BY, 8204, '2026-10-28T07:00:00Z', 'drive-by-commenter')];
+    t('⭐ H72 lists the REAL reader\'s `unlisted` knock for the seat the mailbox serves — by comment id, naming the stray session — and not the listed knock, the maintainer\'s or the drive-by', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, { number: 1, state: 'open', labels: [{ name: 'pm:queue' }] }], [...mailboxes, { number: 2, state: 'open', labels: [] }])); const row = String(hs.h72UnlistedKnockLines(mailboxEvents(ROWS_H72, r), r, NOW_H72) ?? ''); return r.state === 'read' && row.includes('1 knock(s)') && row.includes('comment 8202') && row.includes(`${STRAY} is not a session domain:skills#1 lists`) && !['comment 8201', 'comment 8203', 'comment 8204'].some((c) => row.includes(c)); })());
+    t('⛔ …and a TRUNCATED `pm:seat` listing makes the real roster unreadable, so the reader reads every relay knock `unlisted` (fail closed) while H72 lists NONE of them — unjudged, never a finding against a roster nobody read', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings(posts, mailboxes, [hs.H72_ROSTER_LISTINGS.posts])); const reading = mailboxEvents(ROWS_H72, r); return r.state === 'unreadable' && SAME(reading.unlisted, [8201, 8202]) && hs.h72UnlistedKnockLines(reading, r, NOW_H72) === null; })());
   }
 
   // -- the signature line (#27113) ----------------------------------------------

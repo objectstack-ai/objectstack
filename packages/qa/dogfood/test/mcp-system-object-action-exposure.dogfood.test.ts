@@ -280,13 +280,17 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     expect(await isBanned(targetUserId)).toBe(false);
   }, 120_000);
 
-  it('the confirmed administrator call runs through every gate and bans the user', async () => {
-    const ran = await tool(admin, 'run_action', {
+  it('[#33690] the administrator\'s call carrying confirm: true clears every gate and still bans nobody: the caller\'s confirm never counts', async () => {
+    // Before the amended confirmation contract this call banned the user. The
+    // stack registers no pending-confirmation service, so the call is refused
+    // at confirmation, after every other gate, and nothing is forwarded.
+    const refused = await tool(admin, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId, params: { banReason: 'dogfood' }, confirm: true,
     });
-    expect(ran.isError, ran.text).toBe(false);
-    expect(ran.payload).toMatchObject({ ok: true, action: 'ban_user', objectName: 'sys_user', recordId: targetUserId });
-    expect(await isBanned(targetUserId)).toBe(true);
+    expect(refused.isError, refused.text).toBe(true);
+    expect(refused.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+    expect(refused.payload?.error?.details?.reason, refused.text).toBe('no_confirmation_service');
+    expect(await isBanned(targetUserId)).toBe(false);
   }, 120_000);
 
   // ── The OAuth-connected agent: one case per bucket ───────────────────────
@@ -351,20 +355,19 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     expect(messageOf(scoped)).toContain('system object "sys_user" is not exposed via MCP');
   }, 120_000);
 
-  it('C: the agent\'s unconfirmed ban_user is refused 428 before any forward; confirmed, it is served as the agent (#28367) and bans the user', async () => {
-    const unconfirmed = await tool(agent, 'run_action', {
-      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' },
-    });
-    expect(unconfirmed.isError).toBe(true);
-    expect(unconfirmed.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
-    expect(await isBanned(agentTargetUserId)).toBe(false);
-
-    const confirmed = await tool(agent, 'run_action', {
-      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' }, confirm: true,
-    });
-    expect(confirmed.isError, confirmed.text).toBe(false);
-    expect(confirmed.payload).toMatchObject({ ok: true, action: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId });
-    expect(await isBanned(agentTargetUserId)).toBe(true);
+  it('C: [#33690] the agent\'s ban_user is refused 428 before any forward, with confirm: true and without it, and bans nobody', async () => {
+    // Before the amended confirmation contract the confirmed call was served as
+    // the agent (#28367) and banned the user. The agent's own `confirm: true`
+    // never counts now, and the stack registers no pending-confirmation service.
+    for (const extra of [{}, { confirm: true }]) {
+      const refused = await tool(agent, 'run_action', {
+        actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' }, ...extra,
+      });
+      expect(refused.isError, refused.text).toBe(true);
+      expect(refused.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+      expect(refused.payload?.error?.details?.reason, refused.text).toBe('no_confirmation_service');
+      expect(await isBanned(agentTargetUserId)).toBe(false);
+    }
   }, 120_000);
 
   it('H: impersonate_user is absent from the agent\'s listing and refused by name', async () => {

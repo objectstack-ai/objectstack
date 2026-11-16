@@ -225,7 +225,14 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34188 — the `?names=` read answers the asked names it
+          // holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? server.objects.filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all: Doc[] =
             type === 'object' ? server.objects : type === 'app' ? [OPS_APP, REQUIRES_APP, CRM_APP] : type === 'page' ? server.pages : [];
@@ -321,7 +328,7 @@ describe('a package-less app’s record route with no declared record page reads
 
     expect(objectCalls()).not.toContain('object');
     // Every bundled object is answered from the bundle; the lookup target outside it is asked by name.
-    expect(objectCalls()).toEqual(['object/sys_user']);
+    expect(objectCalls()).toEqual(['object?names=sys_user', 'object/sys_user']);
     expect(sorted((screen.getByTestId('record-view').textContent ?? '').split(','))).toEqual(
       sorted(['crm_account', 'crm_activity', 'crm_contact', 'crm_lead', 'crm_opportunity', 'sys_user']),
     );
@@ -360,7 +367,7 @@ describe('a package-less app’s record route with no declared record page reads
     land();
     await waitFor(() => expect(screen.getByTestId('record-view')).toHaveTextContent('crm_activity'));
     await settle();
-    expect(objectCalls()).toEqual(['object/sys_user']);
+    expect(objectCalls()).toEqual(['object?names=sys_user', 'object/sys_user']);
   });
 });
 
@@ -566,7 +573,7 @@ describe('a tracked object’s record route asks sys_audit_log by name (objectst
 
     expect(firstRender()).toContain('sys_audit_log');
     expect(objectCalls()).not.toContain('object');
-    expect(sorted(objectCalls())).toEqual(sorted(['object/sys_user', 'object/sys_audit_log']));
+    expect(sorted(objectCalls())).toEqual(sorted(['object?names=sys_user', 'object/sys_user', 'object/sys_audit_log']));
     expect(drawnRelated()).toEqual(registryRelated('crm_account'));
   });
 
