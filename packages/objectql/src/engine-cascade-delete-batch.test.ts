@@ -196,6 +196,46 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     expect(ids(driver.rowsOf('acct'))).toEqual([]);
   });
 
+  it('dispatch.scope is one object for every child of the chunk, both phases; each phase is a fresh context', async () => {
+    const probe = async (deleteMany: boolean) => {
+      const { engine } = await makeEngine({ deleteMany });
+      const scopes: Array<{ event: string; id: string; scope: unknown; stashed: unknown; keyed: unknown }> = [];
+      engine.on('beforeDelete', 'line', (ctx: any) => {
+        ctx.stashedOnCtx = ctx.input.id;
+        ctx.dispatch.scope[`seen:${String(ctx.input.id)}`] = 'before';
+        scopes.push({ event: 'before', id: String(ctx.input.id), scope: ctx.dispatch.scope, stashed: undefined, keyed: undefined });
+      });
+      engine.on('afterDelete', 'line', (ctx: any) => {
+        scopes.push({
+          event: 'after', id: String(ctx.input.id), scope: ctx.dispatch.scope,
+          stashed: ctx.stashedOnCtx, keyed: ctx.dispatch.scope[`seen:${String(ctx.input.id)}`],
+        });
+      });
+      await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
+      return scopes;
+    };
+
+    // Batched: ONE scope object across the chunk's six dispatches; a value
+    // left on ctx in beforeDelete does not reach that child's afterDelete,
+    // and the remedy (keep it in dispatch.scope keyed by input.id) does.
+    const batched = await probe(true);
+    expect(batched).toHaveLength(6);
+    expect(new Set(batched.map((s) => s.scope)).size).toBe(1);
+    for (const s of batched.filter((x) => x.event === 'after')) {
+      expect(s.stashed, `${s.id}: a ctx stash does not cross phases on a per-row dispatch`).toBeUndefined();
+      expect(s.keyed, `${s.id}: dispatch.scope keyed by input.id does`).toBe('before');
+    }
+
+    // Control, today's by-id shape: one scope per child, the same context in
+    // both phases, so the ctx stash arrives.
+    const byId = await probe(false);
+    expect(new Set(byId.map((s) => s.scope)).size).toBe(3);
+    for (const s of byId.filter((x) => x.event === 'after')) {
+      expect(s.stashed).toBe(s.id);
+      expect(s.scope).toBe(byId.find((x) => x.event === 'before' && x.id === s.id)!.scope);
+    }
+  });
+
   it('a before-delete hook counting remaining siblings now sees them all present', async () => {
     const { engine } = await makeEngine();
     const remaining: number[] = [];
