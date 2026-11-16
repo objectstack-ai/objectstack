@@ -35,8 +35,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
+import { ObjectQLPlugin, DuplicateRecordError } from '@objectstack/objectql';
+import { HonoServerPlugin, declaredEnvelopeForThrow } from '@objectstack/plugin-hono-server';
+import { actionsDoorAnswerOf } from '@objectstack/types';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
@@ -277,5 +278,47 @@ describe('CONTROL', () => {
     expect(row?.success, JSON.stringify(body)).toBe(false);
     expect(row.errors?.[0]?.code).not.toBe('UNIQUE_VIOLATION');
     expect(row.errors[0]).not.toHaveProperty('userMessage');
+  });
+});
+
+/**
+ * The two boundaries this rig does not drive over HTTP, asked with the
+ * engine's own class in the writer's locale: the Hono handler-throw seam
+ * (`declaredEnvelopeForThrow`) and the MCP tool error result, which answers
+ * from the actions-door resolver (`actionsDoorAnswerOf`). Neither was
+ * changed; both forward the declared `userMessage`.
+ */
+describe('the boundaries asked directly', () => {
+  const refusal = () =>
+    new DuplicateRecordError(OBJECT, new Error('driver refusal'), undefined, {
+      object: '周成本',
+      uniqueFields: [
+        { name: 'plant', label: '工厂' },
+        { name: 'carbon_grade', label: '牌号' },
+        { name: 'cost_week', label: '成本周次' },
+      ],
+      messages: { locale: 'zh-CN' },
+    });
+
+  it('the producer declares the sentence on the marked channel; `message` stays the diagnostic', () => {
+    const e = refusal();
+    expect(e.userMessage).toBe(ZH);
+    expect(e.endUserMessage).toBe(ZH);
+    expect(e.message).toMatch(DIAGNOSTIC);
+  });
+
+  it('Hono handler-throw seam: `error.userMessage`', () => {
+    const answer = declaredEnvelopeForThrow(refusal());
+    expect(answer?.status).toBe(409);
+    expect((answer?.body as any)?.error?.code).toBe('UNIQUE_VIOLATION');
+    expect((answer?.body as any)?.error?.userMessage).toBe(ZH);
+    expect((answer?.body as any)?.error?.message).toMatch(DIAGNOSTIC);
+  });
+
+  it('MCP tool error result (the actions-door resolver): `userMessage`', () => {
+    const answer = actionsDoorAnswerOf(refusal(), OBJECT);
+    expect(answer.status).toBe(409);
+    expect(answer.userMessage).toBe(ZH);
+    expect(answer.message).toMatch(DIAGNOSTIC);
   });
 });
