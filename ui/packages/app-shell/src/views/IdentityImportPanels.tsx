@@ -14,6 +14,7 @@ import { Download, KeyRound, ShieldAlert } from 'lucide-react';
 import type { ImportRecordsResult } from '@object-ui/types';
 import type { ImportWizardProps } from '@object-ui/plugin-grid';
 import { useSafeTranslate } from '@object-ui/i18n';
+import { csvBlob } from '@object-ui/core';
 import {
   buildTemporaryPasswordCsv,
   collectTemporaryPasswords,
@@ -84,7 +85,7 @@ export function IdentityImportResultExtra({ serverResult }: { serverResult?: Imp
 
   const handleDownload = () => {
     const csv = buildTemporaryPasswordCsv(entries);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = csvBlob(csv);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
