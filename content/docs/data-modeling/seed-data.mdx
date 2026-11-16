@@ -163,16 +163,16 @@ organization. A row an upgrade adds to the seed has never landed, so it
 is still inserted. A reference to the deleted row from another seed row is left
 unwritten rather than reported as an error.
 
-The record is kept and honoured only where AppPlugin runs the load for a known
-organization: the single-tenant boot seed (`objectstack serve`, `os start`, on
-every restart; a multi-tenant boot seeds through the per-organization replay
-instead), the per-organization replay (`seed-replayer`), and the dev hot reload.
-A seed publish, a package install or upgrade (`os package install`, the
-marketplace install, its heal and its sample-data reseed) keep no record, so a
-deleted row comes back on those. So do a load with no organization, a
-composition that does not register `sys_seed_landed_key`
-(`@objectstack/platform-objects`), and the marketplace's fallback
-`seed-replayer`, which it registers when no app has seed data.
+The record is kept and honoured where a load seeds a known organization: the
+single-tenant boot seed (`objectstack serve`, `os start`, on every restart; a
+multi-tenant boot seeds through the per-organization replay instead), the
+per-organization replay (`seed-replayer`, the marketplace's fallback one
+included, which it registers when no app has seed data), the dev hot reload,
+and a package install or upgrade (`os package install`, the marketplace
+install, into the installing person's organization) with its restart heal. A
+seed publish keeps no record, so a deleted row comes back on that. So do a load
+with no organization and a composition that does not register
+`sys_seed_landed_key` (`@objectstack/platform-objects`).
 
 A row deleted before your runtime had this rule comes back once, on the first
 replay after the upgrade, and stays deleted from then on.
@@ -184,6 +184,10 @@ To bring the deleted rows back on purpose, a host or plugin calls the
 const replay = ctx.getService('seed-replayer');   // ctx: the plugin's context
 await replay(organizationId, { reseed: true });   // inserts every missing seed row
 ```
+
+For an installed package, the sample-data reseed
+(`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`) does
+the same in the caller's organization.
 
 ---
 

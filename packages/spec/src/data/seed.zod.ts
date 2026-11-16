@@ -180,16 +180,17 @@ export const SeedSchema = lazySchema(() => strictObject({
    * A row a person deleted is not brought back by every replay. The loads
    * AppPlugin (`@objectstack/runtime`) runs for an organization — the
    * single-tenant boot seed, the per-organization replay (the `seed-replayer`
-   * service) and the dev hot reload, where the composition registers
-   * `sys_seed_landed_key` (`@objectstack/platform-objects`) — record, per
-   * organization, the key of every keyed row an `ignore` or `upsert` dataset
-   * landed, and do not insert again a recorded row that is now gone. A key
-   * never recorded still lands, so a row an upgrade adds to the seed is
-   * inserted. A seed publish and a package
-   * install or upgrade (`os package install`, the marketplace install) keep no
-   * record, so the row comes back on those. The deliberate re-seed,
-   * `seed-replayer(organizationId, { reseed: true })`, inserts every missing
-   * row whatever the record says.
+   * service) and the dev hot reload — and the package install or upgrade
+   * (`os package install`, the marketplace install) with its restart heal,
+   * where the composition registers `sys_seed_landed_key`
+   * (`@objectstack/platform-objects`), record, per organization, the key of
+   * every keyed row an `ignore` or `upsert` dataset landed, and do not insert
+   * again a recorded row that is now gone. A key never recorded still lands,
+   * so a row an upgrade adds to the seed is inserted. A seed publish keeps no
+   * record, so the row comes back on that. The deliberate re-seed —
+   * `seed-replayer(organizationId, { reseed: true })`, or the installed
+   * package's sample-data reseed — inserts every missing row whatever the
+   * record says.
    *
    * An author who wants a replay to refresh the rows — reference data the
    * package keeps current — declares `mode: 'upsert'`, and can still exempt
@@ -213,9 +214,10 @@ export const SeedSchema = lazySchema(() => strictObject({
       'declare it for reference data the package keeps current. `update` writes matched rows only, ' +
       '`insert` inserts every record with no match, so each replay inserts them again, and `replace` does the ' +
       'same and deletes nothing: it is for a table the caller cleared. On the loads AppPlugin runs for an ' +
-      'organization (the boot seed, the seed-replayer replay, the dev hot reload), an `ignore` or `upsert` row ' +
-      'that landed once and was later deleted is not inserted again; a publish or package install keeps no such ' +
-      'record, and seed-replayer called with { reseed: true } inserts every missing row.',
+      'organization (the boot seed, the seed-replayer replay, the dev hot reload) and on a package install or ' +
+      'upgrade, an `ignore` or `upsert` row that landed once and was later deleted is not inserted again; a ' +
+      'publish keeps no such record, and seed-replayer called with { reseed: true } or the sample-data reseed ' +
+      'inserts every missing row.',
     ),
 
   /**
