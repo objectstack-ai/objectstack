@@ -3077,8 +3077,8 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     };
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     expect(opOf(run, 'add_contact').restored).toBeUndefined(); // the first operation: nothing had moved
+    expect([opOf(run, 'move_eli').grade?.pass, opOf(run, 'move_eli').error]).toEqual([true, undefined]);
     expect(opOf(run, 'move_eli').restored).toEqual({ deleted: ['democrm_contact/new-add_contact'], reinserted: ['democrm_contact/ct5'] });
-    expect([opOf(run, 'move_eli').grade!.pass, opOf(run, 'move_eli').error]).toEqual([true, undefined]);
     expect(opOf(run, 'move_eli').observation!.writes).toBe(1);
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0, restored: 3 });
   });
