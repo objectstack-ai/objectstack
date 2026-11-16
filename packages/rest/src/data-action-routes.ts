@@ -193,6 +193,13 @@ const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
 type ExportFormatServed = typeof EXPORT_FORMATS[number];
 
 /**
+ * [#34163] The UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF) a csv export
+ * opens with. Spelled as an escape on purpose: the literal character is
+ * invisible in review and in a diff.
+ */
+const UTF8_BOM = '\uFEFF';
+
+/**
  * [#27500] The export's `?format=`: absent is csv, a served format is itself,
  * anything else (the empty value included) is `undefined`, which the route
  * refuses.
@@ -1215,6 +1222,10 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // re-imports to the stored value (one exception: `unmarkCsvTextCell`).
     // xlsx and json are unaffected.
     //
+    // [#34163] csv only: the body opens with one UTF-8 byte-order mark
+    // (`UTF8_BOM`), so Excel reads the saved file as UTF-8. json and xlsx
+    // carry none.
+    //
     // [#24945] Boolean / toggle cells are written in the language of the
     // header row: `templateText(locale).booleanWords` (yes / no, or 是 / 否 for
     // a `zh*` locale), for the locale the header labels are translated to
@@ -1662,6 +1673,16 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     // runs at least once (`limit` is at least 1), so the
                     // closing `]` below always has its opener.
                     if (format === 'json' && firstChunk) res.write('[');
+                    // [#34163] csv opens with the UTF-8 byte-order mark,
+                    // once, ahead of everything else in the body: the header
+                    // row, the first data row under `header=false`, or nothing
+                    // on an empty file. The response's `charset=utf-8` does not
+                    // travel with the saved file, and Excel reads a csv without
+                    // the mark in the system ANSI code page, so every non-ASCII
+                    // header and cell opened garbled. Written after the first
+                    // read for json's reason above. The csv import strips one
+                    // leading mark (`parseCsvToRows`), so the file re-imports.
+                    if (format === 'csv' && firstChunk) res.write(UTF8_BOM);
                     // [#27755] The xlsx workbook writer opens after the first
                     // read for the same reason: opening it commits the stream
                     // too, so a refused query answered 200 instead of the 400
