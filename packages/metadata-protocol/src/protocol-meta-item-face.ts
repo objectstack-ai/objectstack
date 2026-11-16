@@ -274,7 +274,12 @@ const SERVED_HOLDER_JUDGED_ELSEWHERE: ReadonlySet<string> = new Set(['object', '
  * it: {@link servedHolderAddressOf} and `packagelessContentPackage` judge
  * it), and when no package-less row and no
  * environment item is stored (a customization of no one holder, judged as
- * before). Then the holders are the registry's served holders and the
+ * before). [#33210] On the item face (`options.refuseWithoutDisabled`) a
+ * package-less row, or the registry's environment item, beside rows bound to
+ * two or more packages with no disabled package among them is judged with
+ * those rows instead ({@link storedRowHoldersRefusal}), so it is refused
+ * naming them; beside one holder, none, or a disabled holder the read is left
+ * as it was. Then the holders are the registry's served holders and the
  * packages the active rows are bound to, less every disabled package:
  *
  *  - one → `{ kind: 'served' }`, read at its address, as the registry's
@@ -613,16 +618,25 @@ export async function declaredMemberOverrideAddressOf(
  * bindings at the member.
  *
  * Judged at the rows' grain, as the registry judges an addition
- * (`isBundleAddition`). Every active row at the member is bound to a package,
- * and none is declined ({@link ObjectStackProtocolImplementation.declinesStoredRow}).
- * Over the name's active rows, exactly one other package B holds members. B is
- * in each such package's declared dependency closure, the package is not in
- * B's, it is no customization pair of B (`pairsOf`: a pair's added member is
- * served on its base's address already, #28802 ruling A), and none of its
- * members is one B holds. The arm applies only to a bundled type the registry
- * reads by package, for a name no package ships (a shipped name is the
- * shipper's already), with no environment item at the member and no disabled
- * package among them (the served-holder judgment above reads those).
+ * (`isBundleAddition`, read by `packageScopedHoldersOf`). Every active row at
+ * the member is bound to a package, and none is declined
+ * ({@link ObjectStackProtocolImplementation.declinesStoredRow}). Each package
+ * holding members of the name as active rows is judged against its OWN
+ * declared dependency closure: it is an addition when some other row-holding
+ * package B is in that closure, it is not in B's, and none of its members is
+ * one B holds. The base is the one row-holding package that is no addition;
+ * the read is moved only when there is exactly one, it holds no row at the
+ * member, and no package at the member is a customization pair of another
+ * row-holding package (`pairsOf`: a pair's added member is served on its
+ * base's address already, #28802 ruling A). So a second dependent adding a
+ * member of its own (D1 `fr-FR`, D2 `de-DE` over A's `en-US`) leaves A the
+ * base at each dependent's member, as the registry names A the one holder
+ * whichever packages are installed, and a dependent of a dependent is an
+ * addition to it. The arm applies only to a bundled type the registry reads
+ * by package, for a name no package ships (a shipped name is the shipper's
+ * already), with no environment item at the member and no disabled package
+ * among the row-holding packages (the served-holder judgment above reads
+ * those).
  */
 export async function rowHeldBaseAddressOf(
     host: ServedRowHost,
@@ -660,20 +674,25 @@ export async function rowHeldBaseAddressOf(
         members.add(typeof stored === 'string' && stored !== '' ? stored : null);
         membersOf.set(packageId, members);
     }
-    const additions = new Set(atMember.map((row) => packageOf(row)!));
-    const bases = [...membersOf.keys()].filter((id) => !additions.has(id));
-    if (bases.length !== 1) return undefined;
-    const [base] = bases;
-    if (typeof registry.isPackageDisabled === 'function' && [base, ...additions].some((id) => registry.isPackageDisabled(id) === true)) {
+    const holders = [...membersOf.keys()];
+    if (typeof registry.isPackageDisabled === 'function' && holders.some((id) => registry.isPackageDisabled(id) === true)) {
         return undefined;
     }
-    const installed = installedManifestsOfEngine(host.engine);
     const closure = (id: string): readonly string[] => packageDependencyClosure(id, registry as PackageClosureRegistry)?.dependencies ?? [];
-    const baseMembers = membersOf.get(base)!;
-    const isAddition = (id: string): boolean => closure(id).includes(base) && !closure(base).includes(id)
-        && !pairsOf(base, installed).includes(id)
-        && ![...membersOf.get(id)!].some((held) => baseMembers.has(held));
-    return [...additions].every(isAddition) ? base : undefined;
+    // [#33210 contract review M1] Each package against its own closure, as
+    // `isBundleAddition` judges it: an addition to ANY other holder it
+    // declares, never to one base every package must share.
+    const isAdditionTo = (id: string, other: string): boolean => other !== id
+        && closure(id).includes(other) && !closure(other).includes(id)
+        && ![...membersOf.get(id)!].some((held) => membersOf.get(other)!.has(held));
+    const bases = holders.filter((id) => !holders.some((other) => isAdditionTo(id, other)));
+    if (bases.length !== 1) return undefined;
+    const [base] = bases;
+    const additions = new Set(atMember.map((row) => packageOf(row)!));
+    if (additions.has(base)) return undefined;
+    const installed = installedManifestsOfEngine(host.engine);
+    const isPairOfAHolder = (id: string): boolean => holders.some((other) => other !== id && pairsOf(other, installed).includes(id));
+    return [...additions].some(isPairOfAHolder) ? undefined : base;
 }
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
