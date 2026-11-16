@@ -235,9 +235,12 @@ with the app's own authority.
 **ObjectOS** — the in-product chat runtime adds a *server-side*
 approval queue for its own `action_<name>` tools: a gated tool call is
 persisted as pending and returned to the model as
-`{ status: 'pending_approval', … }` instead of executing, and an operator
-resolves it from the **AI Pending Actions** Studio inbox (approve re-runs the
-same dispatcher; reject records a reason).
+`{ status: 'pending_approval', … }` instead of executing, and only the person
+the call ran as decides it in the **AI Pending Actions** inbox, on their own
+signed-in session to the app (another
+user's `ai:approve` does not decide it, and an API key or token is refused);
+approve runs the action as that person with every gate re-checked, reject
+records a reason.
 A dedicated queue (rather than the multi-step `IApprovalService`) fits AI
 tool-call HITL: the subject is the proposed *call*, there is no predefined
 process, and operators expect single-click yes/no. See the
