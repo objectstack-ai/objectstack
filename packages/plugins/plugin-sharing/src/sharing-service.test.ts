@@ -754,7 +754,11 @@ describe('buildSharingMiddleware (engine integration)', () => {
     await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { isSystem: true });
     const mw = buildSharingMiddleware(svc);
     const passes = (operation: 'update' | 'delete', id: string, userId: string) =>
-      mw({ object: 'account', operation, data: { id }, context: { userId } } as any, async () => {}).then(() => true, (e: any) => {
+      // Each verb in the shape the engine hands its middleware: an update binds the payload id, a delete `where.id`.
+      mw({
+        object: 'account', operation, context: { userId },
+        ...(operation === 'update' ? { data: { id } } : { options: { where: { id } } }),
+      } as any, async () => {}).then(() => true, (e: any) => {
         expect(e).toMatchObject({ code: 'FORBIDDEN', status: 403 });
         return false;
       });
