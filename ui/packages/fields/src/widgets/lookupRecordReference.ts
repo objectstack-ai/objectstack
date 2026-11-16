@@ -16,10 +16,15 @@
  * Invariants:
  * - A path is a field of the edited record (`quote_date`) or one lookup hop
  *   from it (`account.cb_market`).
+ * - The picker resolves a reference only where its host SAYS a single record
+ *   is being edited: a record form stamps that on the field it hands the
+ *   widget (`withRecordBeingEdited`). Every other host — a bulk action over
+ *   selected rows, an action's parameter dialog, a filter panel — leaves every
+ *   `{ $record }` entry out, whatever values it passes the widget: the values
+ *   such a host passes are not the record the author's path names.
  * - An entry whose referenced value is empty — null, unset, `''`, an empty
  *   list, a hop whose lookup is unset — is left out of the query, the rule an
- *   unset `dependsOn` parent follows. A host that holds no single record
- *   passes none, so every `{ $record }` entry is left out there.
+ *   unset `dependsOn` parent follows.
  * - A hop whose row cannot be read is left out the same way: the picker
  *   narrows the choice only, and the save is the server's to judge.
  * - ⛔ No `{ $record }` value ever reaches the wire: `lookupFiltersToRecord`
@@ -33,13 +38,22 @@ import type { Field as SpecField, LookupFilterRecordReference } from '@objectsta
 export type LookupFilterEntry = NonNullable<SpecField['lookupFilters']>[number];
 
 /**
- * The key a record form stamps, on a lookup field it hands a widget, the
- * object each `{ $record }` hop's lookup points at (`{ account: 'account' }`):
- * a widget receives one field, not the object it is drawn for, so it could
- * not otherwise name the object to read `account`'s id from. The same
- * hand-off shape as `FOLLOWED_PARENT_OBJECT_KEY` (`currency.ts`).
+ * The key a record form stamps on a lookup field whose `lookupFilters` read
+ * `{ $record }`, the host's statement that a single record is being edited
+ * here. Its value names the object each hop's lookup points at
+ * (`{ hopObjects: { account: 'account' } }`): a widget receives one field,
+ * not the object it is drawn for, so it could not otherwise name the object
+ * to read `account`'s row from. The same hand-off shape as
+ * `FOLLOWED_PARENT_OBJECT_KEY` (`currency.ts`) and `FORM_OBJECT_KEY`.
+ *
+ * ⛔ Opt-in: a widget whose field carries no stamp resolves no `{ $record }`.
  */
-export const RECORD_HOP_OBJECTS_KEY = 'recordHopObjects';
+export const RECORD_BEING_EDITED_KEY = 'recordBeingEdited';
+
+/** What a record form stamps under {@link RECORD_BEING_EDITED_KEY}. */
+export interface RecordBeingEdited {
+  hopObjects: Readonly<Record<string, string>>;
+}
 
 /** One `{ $record }` hop: the lookup on the edited record and the field read on its target. */
 export interface RecordReferenceHop {
@@ -101,28 +115,33 @@ function referencedId(v: unknown): string | undefined {
 }
 
 /**
- * `def` with the object each `{ $record }` hop's lookup references stamped
- * under {@link RECORD_HOP_OBJECTS_KEY}, or `def` itself when its filters name
- * no hop or the object declares none of the hop fields as a relation.
+ * `def` stamped under {@link RECORD_BEING_EDITED_KEY}: the record form's
+ * statement that the widget is drawn for a single record being edited, with
+ * the object each `{ $record }` hop's lookup references (read off `fields`,
+ * the edited object's field map). `def` itself when its filters read no
+ * record. Only a host that edits one record calls this.
  */
-export function withRecordHopObjects<T extends object>(
+export function withRecordBeingEdited<T extends object>(
   def: T,
   fields: Readonly<Record<string, unknown>> | null | undefined,
 ): T {
-  const hops = recordReferenceHops((def as { lookupFilters?: LookupFilterEntry[] }).lookupFilters);
-  if (hops.length === 0) return def;
-  const objects: Record<string, string> = {};
-  for (const { via } of hops) {
+  const filters = (def as { lookupFilters?: LookupFilterEntry[] }).lookupFilters;
+  if (!readsRecord(filters)) return def;
+  const hopObjects: Record<string, string> = {};
+  for (const { via } of recordReferenceHops(filters)) {
     const reference = (fields?.[via] as { reference?: unknown } | undefined)?.reference;
-    if (typeof reference === 'string' && reference !== '') objects[via] = reference;
+    if (typeof reference === 'string' && reference !== '') hopObjects[via] = reference;
   }
-  return Object.keys(objects).length > 0 ? { ...def, [RECORD_HOP_OBJECTS_KEY]: objects } : def;
+  const stamp: RecordBeingEdited = { hopObjects };
+  return { ...def, [RECORD_BEING_EDITED_KEY]: stamp };
 }
 
-/** The hop objects a form stamped on `field`, or `undefined`. */
-export function readRecordHopObjects(field: unknown): Readonly<Record<string, string>> | undefined {
-  const value = (field as Record<string, unknown> | null | undefined)?.[RECORD_HOP_OBJECTS_KEY];
-  return isRow(value) ? (value as Record<string, string>) : undefined;
+/** The record-being-edited stamp a form put on `field`, or `undefined` when none did. */
+export function readRecordBeingEdited(field: unknown): RecordBeingEdited | undefined {
+  const value = (field as Record<string, unknown> | null | undefined)?.[RECORD_BEING_EDITED_KEY];
+  if (!isRow(value)) return undefined;
+  const hopObjects = isRow(value.hopObjects) ? (value.hopObjects as Record<string, string>) : {};
+  return { hopObjects };
 }
 
 /**
@@ -190,7 +209,7 @@ function warnUnreadableHop(via: string, field: string, object: string | undefine
       + (object
         ? `no data source here can read ${object} rows.`
         : `the record holds "${via}" as an id, and this host did not name the object it points at `
-          + `(a record form stamps it with withRecordHopObjects).`),
+          + `(a record form stamps it with withRecordBeingEdited).`),
   );
 }
 

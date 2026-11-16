@@ -7,11 +7,13 @@
  */
 
 /**
- * A record form names, on a lookup it draws, the object each `{ $record }`
- * hop of its `lookupFilters` points at (`withRecordHopObjects`), so the
- * picker reads `account.cb_market` for the account id the form holds. Both
- * field builders stamp it: the auto-layout `ObjectForm` and the authored
- * sections (`buildSectionFields`, through `ModalForm`).
+ * A record form stamps, on a lookup it draws whose `lookupFilters` read
+ * `{ $record }`, that one record is being edited here, with the object each
+ * hop's lookup points at (`withRecordBeingEdited`). The picker resolves the
+ * references only on that stamp, and reads `account.cb_market` for the
+ * account id the form holds. Both field builders stamp it: the auto-layout
+ * `ObjectForm` and the authored sections (`buildSectionFields`, through
+ * `ModalForm`).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, waitFor, cleanup, fireEvent, act } from '@testing-library/react';
@@ -77,7 +79,7 @@ async function openPriceBook() {
   });
 }
 
-describe('record forms name the object a { $record } hop reads (#34197)', () => {
+describe('record forms say a record is being edited, and name the object a { $record } hop reads (#34197)', () => {
   it('auto-layout ObjectForm: the picker queries with the hop value read for the account the form holds', async () => {
     const { ds, priceBookFilters } = dataSource();
     render(

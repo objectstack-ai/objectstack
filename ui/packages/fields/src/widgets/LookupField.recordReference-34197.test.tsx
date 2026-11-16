@@ -16,6 +16,11 @@
  * value is empty, re-queries when a referenced field changes, and sends
  * `orEmpty: true` as an `$or` with a null match on the same column. Literal
  * entries and `dependsOn` query exactly as before.
+ *
+ * Resolution is opt-in by the host: only a field a record form stamped
+ * (`withRecordBeingEdited`) reads the values it is handed. A host that edits
+ * no single record — a bulk action dialog handing the widget its sibling
+ * parameters — leaves every `{ $record }` entry out.
  */
 
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -23,7 +28,7 @@ import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LookupField } from './LookupField';
 import { lookupFiltersToRecord } from './RecordPickerDialog';
-import { resolveLookupFilters, withRecordHopObjects } from './lookupRecordReference';
+import { RECORD_BEING_EDITED_KEY, resolveLookupFilters, withRecordBeingEdited } from './lookupRecordReference';
 
 const books = [{ id: 'b1', name: 'Standard 2026' }];
 
@@ -40,6 +45,11 @@ function candidateFilters(ds: { find: { mock: { calls: any[][] } } }): unknown[]
 
 function priceBookField(lookupFilters: unknown[], extra: Record<string, unknown> = {}) {
   return { name: 'price_book', label: 'Price Book', reference: 'price_book', lookupFilters, ...extra } as any;
+}
+
+/** The field as a record form hands it: stamped as drawn for a single record being edited. */
+function formField(lookupFilters: unknown[], objectFields: Record<string, unknown> = {}) {
+  return withRecordBeingEdited(priceBookField(lookupFilters), objectFields);
 }
 
 async function openPopover() {
@@ -61,7 +71,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
     const ds = makeDataSource();
     render(
       <LookupField
-        field={priceBookField([{ field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } }])}
+        field={formField([{ field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } }])}
         value={undefined}
         onChange={vi.fn()}
         dataSource={ds}
@@ -75,8 +85,8 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
 
   it('reads a one-hop path off the row the lookup points at, and queries once with its value', async () => {
     const ds = makeDataSource({ 'account:a1': { id: 'a1', cb_market: 'm9' } });
-    const field = withRecordHopObjects(
-      priceBookField([{ field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } }]),
+    const field = formField(
+      [{ field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } }],
       { account: { type: 'lookup', reference: 'account' } },
     );
     render(
@@ -92,7 +102,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
     const ds = makeDataSource();
     render(
       <LookupField
-        field={priceBookField([{ field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } }])}
+        field={formField([{ field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } }])}
         value={undefined}
         onChange={vi.fn()}
         dataSource={ds}
@@ -114,7 +124,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
     const ds = makeDataSource();
     const { unmount } = render(
       <LookupField
-        field={priceBookField(filters)}
+        field={formField(filters)}
         value={undefined}
         onChange={vi.fn()}
         dataSource={ds}
@@ -127,7 +137,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
     unmount();
 
     const bare = makeDataSource();
-    render(<LookupField field={priceBookField(filters)} value={undefined} onChange={vi.fn()} dataSource={bare} />);
+    render(<LookupField field={formField(filters)} value={undefined} onChange={vi.fn()} dataSource={bare} />);
     await openPopover();
     await waitFor(() => expect(candidateFilters(bare)).toHaveLength(1));
     expect(candidateFilters(bare)[0]).toEqual({ is_active: true });
@@ -135,7 +145,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
 
   it('re-queries once when a referenced field changes, and not when another field does', async () => {
     const ds = makeDataSource();
-    const field = priceBookField([{ field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } }]);
+    const field = formField([{ field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } }]);
     const { rerender } = render(
       <LookupField field={field} value={undefined} onChange={vi.fn()} dataSource={ds} dependentValues={{ quote_date: '2026-11-01', subject: 'a' }} />,
     );
@@ -163,7 +173,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
     const ds = makeDataSource();
     render(
       <LookupField
-        field={priceBookField([
+        field={formField([
           { field: 'is_active', operator: 'eq', value: true },
           { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true },
           { field: 'valid_to', operator: 'gte', value: { $record: 'quote_date' }, orEmpty: true },
@@ -189,7 +199,7 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
     const ds = makeDataSource();
     render(
       <LookupField
-        field={priceBookField([{ field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true }])}
+        field={formField([{ field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true }])}
         value={undefined}
         onChange={vi.fn()}
         dataSource={ds}
@@ -205,6 +215,53 @@ describe('LookupField — { $record } lookupFilters values (#34197)', () => {
         $and: [{ $or: [{ valid_from: { $lte: '2026-11-01' } }, { valid_from: { $null: true } }] }],
       });
     }
+  });
+
+  it('a host that does not say a record is being edited leaves every { $record } entry out, even when its values hold one of that name', async () => {
+    // The bulk action dialog's shape: the widget is handed the dialog's sibling
+    // parameter values, and its field carries no record-form stamp.
+    const filters = [
+      { field: 'is_active', operator: 'eq', value: true },
+      { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } },
+      { field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } },
+    ];
+    const ds = makeDataSource({ 'account:a1': { id: 'a1', cb_market: 'm9' } });
+    render(
+      <LookupField
+        field={priceBookField(filters)}
+        value={undefined}
+        onChange={vi.fn()}
+        dataSource={ds}
+        dependentValues={{ quote_date: '2026-11-01', account: { id: 'a1', cb_market: 'm7' } }}
+      />,
+    );
+    await openPopover();
+    await waitFor(() => expect(candidateFilters(ds)).toHaveLength(1));
+    expect(candidateFilters(ds)[0]).toEqual({ is_active: true });
+    expect(ds.findOne).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the same field and values on a record-form host resolve', async () => {
+    const filters = [
+      { field: 'is_active', operator: 'eq', value: true },
+      { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } },
+      { field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } },
+    ];
+    const ds = makeDataSource();
+    const field = formField(filters, { account: { type: 'lookup', reference: 'account' } });
+    expect(field[RECORD_BEING_EDITED_KEY]).toEqual({ hopObjects: { account: 'account' } });
+    render(
+      <LookupField
+        field={field}
+        value={undefined}
+        onChange={vi.fn()}
+        dataSource={ds}
+        dependentValues={{ quote_date: '2026-11-01', account: { id: 'a1', cb_market: 'm7' } }}
+      />,
+    );
+    await openPopover();
+    await waitFor(() => expect(candidateFilters(ds)).toHaveLength(1));
+    expect(candidateFilters(ds)[0]).toEqual({ is_active: true, valid_from: { $lte: '2026-11-01' }, cb_market: 'm7' });
   });
 
   it('CONTROL: a literal entry and a dependsOn entry query exactly as before', async () => {

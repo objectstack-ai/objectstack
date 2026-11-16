@@ -18,7 +18,7 @@ import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@objec
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
-import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, withRecordHopObjects, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, withRecordBeingEdited, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
@@ -1021,11 +1021,13 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // A `permission-ref` field also carries the object this form edits
           // (objectstack#32795), so the widget tells the grant's name column
           // from a column of the same name on another object.
-          // A lookup whose `lookupFilters` read a `{ $record }` hop also
-          // carries the object each hop's lookup points at, so its picker can
-          // read the hop for the id the form holds.
+          // A lookup whose `lookupFilters` read `{ $record }` also carries the
+          // form's statement that one record is being edited here, with the
+          // object each hop's lookup points at: its picker resolves the
+          // references only on that stamp, and reads a hop for the id the
+          // form holds.
           field: withFormObject(
-            withRecordHopObjects(
+            withRecordBeingEdited(
               withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
               objectSchema.fields,
             ),

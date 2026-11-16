@@ -16,13 +16,16 @@ import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
 import {
-  readRecordHopObjects,
+  readRecordBeingEdited,
   readsRecord,
   resolveLookupFilters,
   useRecordHopRows,
   type LookupFilterEntry,
 } from './lookupRecordReference.js';
 import type { RecordPickerFilterColumn } from './RecordPickerDialog.js';
+
+/** The record a host that edits none hands `{ $record }` resolution: nothing to read. */
+const NO_EDITED_RECORD: Readonly<Record<string, unknown>> = Object.freeze({});
 import { PeoplePicker } from './PeoplePicker.js';
 import { useRecordQuery } from './useRecordQuery.js';
 import { objectResolvesSearch } from './searchOffer.js';
@@ -550,18 +553,26 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
    * values, so the candidates re-query; a change to any other field of the
    * record leaves the resolved list, and so every query, as it was.
    *
+   * Opt-in by the host: only a field a record form stamped
+   * (`withRecordBeingEdited`) resolves against the values it is handed. On any
+   * other host — a bulk action over selected rows, an action's parameter
+   * dialog — those values are not the record the path names, so every
+   * `{ $record }` entry is left out, as on a picker given no record at all.
+   *
    * Filters that read no record pass through as authored, the same array.
    */
   const filtersReadRecord = readsRecord(lookupFilters);
+  const recordBeingEdited = readRecordBeingEdited(fieldMeta);
+  const editedRecord = recordBeingEdited ? resolvedDependentValues : NO_EDITED_RECORD;
   const recordHops = useRecordHopRows(
     filtersReadRecord ? lookupFilters : undefined,
-    resolvedDependentValues,
-    readRecordHopObjects(fieldMeta),
+    editedRecord,
+    recordBeingEdited?.hopObjects,
     dataSource,
   );
   const recordReadsPending = recordHops.pending;
   const resolvedFiltersKey = filtersReadRecord && lookupFilters
-    ? JSON.stringify(resolveLookupFilters(lookupFilters, resolvedDependentValues, recordHops.rows))
+    ? JSON.stringify(resolveLookupFilters(lookupFilters, editedRecord, recordHops.rows))
     : '';
   const resolvedRecordFilters = useMemo<LookupFilterEntry[] | undefined>(
     () => (resolvedFiltersKey ? (JSON.parse(resolvedFiltersKey) as LookupFilterEntry[]) : undefined),
