@@ -251,7 +251,10 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/accept-invitation',
       recordIdParam: 'invitationId',
-      visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending'",
+      // Hidden while cloud-managed: accepting creates a membership, which is
+      // the hosting organisation's there; the door refuses (409
+      // RESOURCE_CONFLICT). Decline stays: it writes no membership.
+      visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending' && features.cloudManaged != true",
       successMessage: 'Invitation accepted',
       refreshAfter: true,
       // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.

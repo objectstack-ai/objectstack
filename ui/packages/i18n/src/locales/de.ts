@@ -2254,6 +2254,9 @@ const de = {
       fieldErrorsToast_one: "{{count}} Einstellung muss überprüft werden: {{settings}}",
       fieldErrorsToast_other: "{{count}} Einstellungen müssen überprüft werden: {{settings}}",
       cryptoRefusalTitle: "Diese Installation kann keine Geheimnisse verschlüsseln",
+      platformManagedTitle: "Von der Plattform verwaltet",
+      platformManagedBody: "Die Hosting-Plattform stellt dies für diese Umgebung bereit und konfiguriert es, daher wird es hier nicht eingestellt.",
+      aiProviderManaged: "Der KI-Anbieter, sein Modell und seine Zugangsdaten werden von der Plattform verwaltet.",
       cryptoRefusalSubjectSuffix: "ist als verschlüsselt deklariert, daher wurde nichts geschrieben.",
       cryptoRefusalNoSubject: "Der als verschlüsselt deklarierte Wert wurde abgelehnt, daher wurde nichts geschrieben.",
       cryptoRefusalToast: "Geheimnisse können nicht verschlüsselt werden: {{subject}}",
@@ -2707,6 +2710,7 @@ const de = {
         retry: "Mit Single Sign-on fortfahren",
       },
       ssoHandoff: "Weiter zu {{target}}",
+      ssoHandoffClient: "Melden Sie sich an, um mit {{clientName}} fortzufahren",
       devAdminHint: {
         title: "Lokale Entwicklungsinstanz",
         signIn: "Als Entwickler-Admin anmelden",
@@ -2736,6 +2740,8 @@ const de = {
         directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
         networkNotAllowed: "Dieses System erlaubt keine Anmeldung aus Ihrem Netzwerk. Verbinden Sie sich über ein zugelassenes Netzwerk (zum Beispiel das Büronetz oder VPN Ihrer Organisation), oder wenden Sie sich an Ihren Administrator.",
         ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
+        ssoAccessDeniedNotMember: "Das Konto, mit dem Sie sich angemeldet haben, ist kein Mitglied der Organisation dieser Umgebung. Melden Sie sich mit einem Konto an, das Mitglied ist, oder bitten Sie einen Administrator der Organisation, Sie einzuladen.",
+        ssoAccessDeniedInvitationPending: "Sie wurden in die Organisation dieser Umgebung eingeladen, haben die Einladung aber noch nicht angenommen. Nehmen Sie die Einladung aus Ihrer E-Mail an und melden Sie sich dann erneut an.",
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
@@ -3048,6 +3054,10 @@ const de = {
       granted: "Zugriff gewährt",
       denied: "Zugriff verweigert",
       noRedirect: "Der Server hat keine Weiterleitungs-URL zurückgegeben.",
+      returnToApp: "Kehren Sie zu {{appName}} zurück, um fortzufahren. Sie können diesen Tab schließen.",
+      returnToUnnamedApp: "Kehren Sie zur Anwendung zurück, um fortzufahren. Sie können diesen Tab schließen.",
+      openApp: "{{appName}} öffnen",
+      openUnnamedApp: "Anwendung öffnen",
       failed: "Zustimmung fehlgeschlagen",
       footer: "Sie können den Zugriff jederzeit in Ihren Kontoeinstellungen widerrufen.",
     },
@@ -3985,13 +3995,11 @@ const de = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: '{{left}} deines KI-Kontingents sind noch übrig. Ein mit ×N markiertes Modell verbraucht es N-mal so schnell wie das Standardmodell.',
@@ -4056,6 +4064,7 @@ const de = {
       get_metadata_schema: "Das Metadatenformat nachlesen",
       get_package: "Das Paket ansehen",
       get_record_history: "Den Verlauf des Datensatzes lesen",
+      list_flow_runs: "Die Flow-Ausführungen prüfen",
       list_metadata: "Vorhandene Metadaten auflisten",
       list_objects: "Vorhandene Objekte auflisten",
       list_packages: "Vorhandene Pakete auflisten",

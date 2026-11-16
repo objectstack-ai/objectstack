@@ -324,6 +324,7 @@ import { publicBaseUrlOf } from './public-base-url.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
 import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
 import type { OrganizationBoundaryJudge } from './scim-group-projection.js';
+import type { OidcAuthorizeGateAnswer, OidcAuthorizeGateRefusal } from './oauth-authorize-refusal.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -971,8 +972,13 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * may only obtain a code for an env client (`project_<envId>`) of an org
    * they belong to. Unset (open editions / self-host, where the OP is not a
    * multi-tenant issuer) = allow. Host is expected to fail CLOSED on error.
+   *
+   * In place of `false` the gate may answer an {@link OidcAuthorizeGateRefusal}
+   * (`{ allowed: false, reason, message }`) to say why: the refusal then
+   * carries the reason and the host's sentence to the caller
+   * (`oauth-authorize-refusal.ts`). A boolean is answered as it always was.
    */
-  oidcAuthorizeGate?: (params: { userId: string; clientId: string }) => boolean | Promise<boolean>;
+  oidcAuthorizeGate?: (params: { userId: string; clientId: string }) => OidcAuthorizeGateAnswer | Promise<OidcAuthorizeGateAnswer>;
 
   /**
    * The host's own check on `POST /organization/delete`: answer a

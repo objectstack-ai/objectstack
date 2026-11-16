@@ -263,6 +263,10 @@ const ADMITTED = [
   // `pending-sso-users.test.ts`.
   'POST /api/v1/auth/admin/add-sso-user',
   'POST /api/v1/auth/admin/import-sso-users',
+  // Remove a pending person (cancels their invitation): the same gate first,
+  // and off a managed environment the same `409 RESOURCE_CONFLICT`; its effect
+  // is pinned in plugin-auth's `pending-sso-users.test.ts`.
+  'POST /api/v1/auth/admin/remove-sso-user',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
   'POST /api/v1/auth/admin/impersonate-user',
   'POST /api/v1/auth/admin/sso/register',
@@ -760,6 +764,9 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       'POST /api/v1/auth/admin/import-sso-users': {
         body: { rows: [{ email: 'standing.sweep.pending.import@example.com', name: 'Sweep Pending Import' }] },
       },
+      // A valid remove body naming a person who is not pending, so even a
+      // managed boot would refuse it 409 and remove no one.
+      'POST /api/v1/auth/admin/remove-sso-user': { body: { userId: targetUserId } },
       // #16678. The CLEAR, not a set: it is idempotent, so the sweep leaves
       // `manager_id` as it found it, and it still reaches a 2xx rather than a
       // semantic error — measured 200 `{"success":true,...,"managerId":null}`.

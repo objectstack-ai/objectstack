@@ -155,3 +155,136 @@ export function recordingLogger() {
     error: (message: string) => void lines.push({ level: 'error', message }),
   };
 }
+
+/** A statement one session of a {@link sessionLockDatabase} ran. */
+export interface SessionStatement {
+  readonly session: number;
+  readonly sql: string;
+  readonly bindings: readonly unknown[];
+}
+
+/**
+ * A database that keeps session locks the way Postgres keeps advisory locks
+ * (and MySQL `GET_LOCK`): held by the session that took them, until that
+ * session unlocks or ends. A blocking lock really waits, until the lock is
+ * free or the session's `lock_timeout` runs out (`55P03`). It answers the
+ * statements `@objectstack/objectql`'s database session lock runs, and
+ * nothing else.
+ *
+ * `face` is what a SQL driver adds to a store (`dialectName`, `getKnex()`):
+ * on a {@link MemoryStore} ({@link lockableStore}), that store is a datasource
+ * the lock can be taken on. `kill(session)` ends a session as a dropped
+ * connection would, which releases every lock it held.
+ */
+export function sessionLockDatabase(dialect: 'postgres' | 'mysql' = 'postgres') {
+  const holders = new Map<string, number>();
+  const sessions = new Map<number, { alive: boolean; lockTimeoutMs: number }>();
+  const statements: SessionStatement[] = [];
+  let next = 1;
+  const shape = (row: Row) => (dialect === 'mysql' ? [[row], []] : { rows: [row] });
+  const end = (id: number) => {
+    const session = sessions.get(id);
+    if (session) session.alive = false;
+    for (const [key, holder] of holders) if (holder === id) holders.delete(key);
+  };
+  const take = (id: number, key: string): boolean => {
+    const holder = holders.get(key);
+    if (holder !== undefined && holder !== id) return false;
+    holders.set(key, id);
+    return true;
+  };
+  const wait = async (id: number, key: string, timeoutMs: number): Promise<boolean> => {
+    const until = Date.now() + timeoutMs;
+    for (;;) {
+      if (!sessions.get(id)?.alive) throw new Error('Connection terminated unexpectedly');
+      if (take(id, key)) return true;
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+  };
+  const run = async (id: number, sql: string, bindings: readonly unknown[]): Promise<unknown> => {
+    const session = sessions.get(id);
+    if (!session?.alive) throw new Error('Connection terminated unexpectedly');
+    statements.push({ session: id, sql, bindings });
+    const key = String(bindings[0]);
+    switch (sql) {
+      case 'select pg_try_advisory_lock(?::bigint) as locked':
+        return shape({ locked: take(id, key) });
+      case 'select GET_LOCK(?, 0) as locked':
+        return shape({ locked: take(id, key) ? 1 : 0 });
+      // A run's session marker, and the check that the session holding a lock here holds a marker.
+      case 'select pg_try_advisory_lock(?::bigint) as marked':
+        return shape({ marked: take(id, key) });
+      case 'select GET_LOCK(?, 0) as marked':
+        return shape({ marked: take(id, key) ? 1 : 0 });
+      case 'select IS_USED_LOCK(?) = IS_USED_LOCK(?) as seen': {
+        const [marker, lock] = [holders.get(key), holders.get(String(bindings[1]))];
+        return shape({ seen: marker === undefined || lock === undefined ? null : Number(marker === lock) });
+      }
+      case 'select pg_advisory_lock(?::bigint)':
+        if (await wait(id, key, session.lockTimeoutMs)) return shape({});
+        throw Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
+      case 'select GET_LOCK(?, ?) as locked':
+        return shape({ locked: (await wait(id, key, Number(bindings[1]) * 1000)) ? 1 : 0 });
+      case 'select pg_advisory_unlock(?::bigint)':
+      case 'select RELEASE_LOCK(?)':
+        if (holders.get(key) === id) holders.delete(key);
+        return shape({});
+      case 'select 1 as held':
+        return shape({ held: 1 });
+      default: {
+        if (sql.startsWith('select exists (select 1 from pg_locks m join pg_locks l on l.pid = m.pid')) {
+          // classid and objid, the high and low 32 bits of each key, back to the key.
+          const keyOf = (high: unknown, low: unknown) => BigInt.asIntN(64, (BigInt(String(high)) << 32n) | BigInt(String(low))).toString();
+          const [marker, lock] = [holders.get(keyOf(bindings[0], bindings[1])), holders.get(keyOf(bindings[2], bindings[3]))];
+          return shape({ seen: marker !== undefined && marker === lock });
+        }
+        const timeout = /^set lock_timeout = (\d+)$/.exec(sql);
+        if (timeout) {
+          session.lockTimeoutMs = Number(timeout[1]);
+          return shape({});
+        }
+        throw new Error(`sessionLockDatabase: no answer for ${sql}`);
+      }
+    }
+  };
+  const knex = {
+    client: {
+      async acquireRawConnection(): Promise<{ id: number }> {
+        const id = next++;
+        sessions.set(id, { alive: true, lockTimeoutMs: Number.POSITIVE_INFINITY });
+        return { id };
+      },
+      async destroyRawConnection(connection: unknown): Promise<void> {
+        end((connection as { id: number }).id);
+      },
+    },
+    raw: (sql: string, bindings: readonly unknown[] = []) => ({
+      connection: (connection: unknown) => run((connection as { id: number }).id, sql, bindings),
+    }),
+  };
+  return {
+    statements,
+    face: { dialectName: dialect, getKnex: () => knex },
+    /** The session holding the lock under `key` (a Postgres key, or a MySQL name), if any. */
+    holder: (key: string): number | undefined => holders.get(key),
+    /** Every session opened and not yet ended. */
+    open: (): number[] => [...sessions].filter(([, s]) => s.alive).map(([id]) => id),
+    kill: end,
+    /** Take the lock under `key` on a session of the test's own, as another process would. */
+    async hold(key: string): Promise<{ session: number; release(): void }> {
+      const { id } = await knex.client.acquireRawConnection();
+      if (!take(id, key)) throw new Error(`sessionLockDatabase: '${key}' is already held`);
+      return { session: id, release: () => end(id) };
+    },
+  };
+}
+
+/**
+ * `store`, made a datasource the database session lock can be taken on: `db`'s
+ * `face` on it. A face naming another dialect (`'sqlite'`) makes a datasource
+ * that offers no session lock.
+ */
+export function lockableStore<T extends object>(store: T, db: { face: { dialectName: string; getKnex(): unknown } }): T {
+  return Object.assign(store, db.face);
+}

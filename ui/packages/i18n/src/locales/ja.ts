@@ -2256,6 +2256,9 @@ const ja = {
       fieldErrorsToast_one: "{{count}} 件の設定を確認してください：{{settings}}",
       fieldErrorsToast_other: "{{count}} 件の設定を確認してください：{{settings}}",
       cryptoRefusalTitle: "このデプロイメントはシークレットを暗号化できません",
+      platformManagedTitle: "プラットフォームが管理しています",
+      platformManagedBody: "ホスティングプラットフォームがこの環境向けに提供・設定しているため、ここでは設定しません。",
+      aiProviderManaged: "AI プロバイダー、モデル、認証情報はプラットフォームが管理しています。",
       cryptoRefusalSubjectSuffix: "は暗号化対象として宣言されているため、何も書き込まれませんでした。",
       cryptoRefusalNoSubject: "暗号化対象として宣言された値は拒否され、何も書き込まれませんでした。",
       cryptoRefusalToast: "シークレットを暗号化できません: {{subject}}",
@@ -2709,6 +2712,7 @@ const ja = {
         retry: "シングルサインオンで続行",
       },
       ssoHandoff: "{{target}} に進む",
+      ssoHandoffClient: "{{clientName}} に進むにはサインインしてください",
       devAdminHint: {
         title: "ローカル開発インスタンス",
         signIn: "開発用管理者でサインイン",
@@ -2738,6 +2742,8 @@ const ja = {
         directSignInRateLimited: "このネットワークから短時間に多くのサインインが開始されました。数秒待ってから、もう一度お試しください。",
         networkNotAllowed: "このシステムは、現在のネットワークからのサインインを許可していません。許可されたネットワーク（組織のオフィスネットワークや VPN など）から接続するか、管理者に問い合わせてください。",
         ssoAccessDenied: "サインインしたアカウントには、この環境へのアクセス権がありません。アクセス権のあるアカウントでサインインするか、この環境の組織の管理者にメンバーとして追加するよう依頼してください。",
+        ssoAccessDeniedNotMember: "サインインしたアカウントは、この環境の組織のメンバーではありません。メンバーのアカウントでサインインするか、組織の管理者に招待を依頼してください。",
+        ssoAccessDeniedInvitationPending: "この環境の組織に招待されていますが、招待はまだ承認されていません。メールから招待を承認してから、もう一度サインインしてください。",
         ssoSwitchAccount: "アカウントを切り替える",
         ssoBackToConsole: "コンソールに戻る",
         ssoSwitchAccountHint: "「アカウントを切り替える」を選ぶと、新しいタブでサインインサービスが開き、そこでサインアウトします。その後、アクセス権のあるアカウントでここから再度サインインしてください。",
@@ -3050,6 +3056,10 @@ const ja = {
       granted: "アクセスを許可しました",
       denied: "アクセスが拒否されました",
       noRedirect: "サーバーからリダイレクト URL が返されませんでした。",
+      returnToApp: "{{appName}} に戻って続行してください。このタブは閉じてかまいません。",
+      returnToUnnamedApp: "アプリケーションに戻って続行してください。このタブは閉じてかまいません。",
+      openApp: "{{appName}} を開く",
+      openUnnamedApp: "アプリケーションを開く",
       failed: "同意に失敗しました",
       footer: "アクセス権はアカウント設定からいつでも取り消せます。",
     },
@@ -3987,13 +3997,11 @@ const ja = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 利用枠の残りは {{left}} です。×N と表示されたモデルは、既定のモデルの N 倍の速さで利用枠を消費します。',
@@ -4058,6 +4066,7 @@ const ja = {
       get_metadata_schema: "メタデータの形式を調べる",
       get_package: "パッケージの情報を確認する",
       get_record_history: "このレコードの履歴を読む",
+      list_flow_runs: "フローの実行履歴を確認する",
       list_metadata: "既存のメタデータを一覧表示する",
       list_objects: "既存のオブジェクトを一覧表示する",
       list_packages: "既存のパッケージを一覧表示する",

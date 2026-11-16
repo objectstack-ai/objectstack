@@ -2010,6 +2010,9 @@ const zhHant = {
       fieldErrorsToast_one: '{{count}} 項設定需要處理：{{settings}}',
       fieldErrorsToast_other: '{{count}} 項設定需要處理：{{settings}}',
       cryptoRefusalTitle: '此部署無法加密機密資訊',
+      platformManagedTitle: '此項由平台託管',
+      platformManagedBody: '託管平台為此環境提供並配置此項，因此無需在此設定。',
+      aiProviderManaged: 'AI 提供商、模型與憑據由平台託管。',
       cryptoRefusalSubjectSuffix: '被宣告為加密欄位，因此未寫入任何內容。',
       cryptoRefusalNoSubject: '宣告為加密的值被拒絕，因此未寫入任何內容。',
       cryptoRefusalToast: '無法加密機密資訊：{{subject}}',
@@ -2786,6 +2789,7 @@ const zhHant = {
         retry: "繼續單點登入",
       },
       ssoHandoff: '繼續前往 {{target}}',
+      ssoHandoffClient: "登入以繼續前往 {{clientName}}",
       devAdminHint: {
         title: '本地開發實例',
         signIn: '以開發管理員登入',
@@ -2808,6 +2812,8 @@ const zhHant = {
         directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
         networkNotAllowed: "本系統不允許從你當前的網路登入。請從允許的網路（例如組織的辦公網路或 VPN）連線，或聯絡管理員。",
         ssoAccessDenied: "你登入所用的賬號無權訪問本系統。請使用有權訪問的賬號登入，或請本系統所屬組織的管理員將你新增為成員。",
+        ssoAccessDeniedNotMember: "你登入所用的賬號不是本系統所屬組織的成員。請使用該組織成員的賬號登入，或請該組織的管理員邀請你。",
+        ssoAccessDeniedInvitationPending: "你已受邀加入本系統所屬組織，但尚未接受邀請。請先在郵件中接受邀請，然後重新登入。",
         ssoSwitchAccount: "切換賬號",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切換賬號”會在新標籤頁中開啟你的登入服務並在那裡退出登入。之後請在此處使用有權訪問的賬號重新登入。",
@@ -3130,6 +3136,10 @@ const zhHant = {
       granted: '已授予訪問權限',
       denied: '訪問被拒絕',
       noRedirect: '伺服器未返回跳轉地址。',
+      returnToApp: '返回 {{appName}} 繼續操作。您可以關閉此標籤頁。',
+      returnToUnnamedApp: '返回該應用繼續操作。您可以關閉此標籤頁。',
+      openApp: '開啟 {{appName}}',
+      openUnnamedApp: '開啟該應用',
       failed: '授權失敗',
       footer: '您可以隨時在賬戶設定中撤銷訪問權限。',
     },
@@ -4233,13 +4243,11 @@ const zhHant = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 額度還剩 {{left}}。標有 ×N 的模型消耗額度的速度是預設模型的 N 倍。',
@@ -4304,6 +4312,7 @@ const zhHant = {
       get_metadata_schema: '查閱中繼資料的格式',
       get_package: '檢視應用包資訊',
       get_record_history: '讀取這條記錄的修改歷史',
+      list_flow_runs: '檢視自動化執行記錄',
       list_metadata: '列出已有中繼資料',
       list_objects: '列出已有物件',
       list_packages: '列出已有應用包',
