@@ -17,11 +17,12 @@ import { describe, expect, it } from 'vitest';
 import { exportGallery, scratchProjectDir, type ExportOptions } from '../../src/export/exporter.js';
 import { GALLERY_GUARD, type GalleryGuard } from '../../src/export/generic.js';
 import { GalleryIndexSchema, parseIndex } from '../../src/export/manifest.js';
-import { judgeRecord } from '../../src/export/pass.js';
+import { ASK_MODE_NOT_EXPORTED, judgeRecord } from '../../src/export/pass.js';
 import { readRunRecords, redactWorkDir, ScenarioRunRecordSchema, type ScenarioRunRecord } from '../../src/export/record.js';
+import { buildTranscript, mergeRecordings, renderTranscript } from '../../src/export/transcript.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
 import { main, parseExportArgs, renderSummary } from '../../src/export/cli.js';
-import type { Recording } from '../../src/runner/driver.js';
+import { stepKey, type Recording } from '../../src/runner/driver.js';
 import type { LoadedScenario } from '../../src/loader.js';
 import type { ScenarioOrigin, ScenarioTier } from '../../src/schema.js';
 import { CARD_ID, loadAllCards, loadCrm, runCrm, tempDir, writeRecord, type FixtureRun } from './fixture.js';
@@ -602,5 +603,80 @@ describe('export-gallery CLI', () => {
     expect(errors).toContainEqual(expect.stringMatching(new RegExp(`${CARD_ID}\\.json: origin: a \`generic\` card does not belong in the private overlay`)));
     expect(errors).toContainEqual(`refused  ${CARD_ID} · no loaded card \`${CARD_ID}\` (removed, renamed, or refused by the loader)`);
     expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
+  });
+});
+
+describe('buildTranscript — a run that asked each question turn more than once (`--ask-repeats`, #33741)', () => {
+  it('N = 1: the record, the recording and every exported byte are those of a run that never heard of repeats', async () => {
+    const work = tempDir('work');
+    const once = await runCrm({ work });
+    const one = await runCrm({ work, askRepeats: 1 });
+    const written = JSON.stringify(one.record);
+    expect(written).toBe(JSON.stringify(once.record));
+    expect(written).not.toContain('"repeat"');
+    expect(written).not.toContain('askRepeats');
+    expect(Object.keys(one.recording.turns)).toEqual(Object.keys(once.recording.turns));
+    expect(Object.keys(one.recording.turns).some((k) => k.includes('/repeat-'))).toBe(false);
+    const a = await setup(once);
+    const b = await setup(one);
+    await exportGallery(a.opts());
+    await exportGallery(b.opts());
+    expect(tree(b.out)).toEqual(tree(a.out));
+  });
+
+  it('N = 3: each ask joins the reply recorded under its own key, so an ask that answered otherwise shows its own reply and grade, never a refusal', async () => {
+    const ask2 = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'sdr', repeat: 2 });
+    const fx = await runCrm({
+      modes: ['scratch'],
+      iterateRun: false,
+      askRepeats: 3,
+      wrap: (scripted) => ({
+        info: () => scripted.info(),
+        author: (task) => scripted.author(task),
+        ask: async (task) => (stepKey(task) === ask2 ? { replyText: 'I could not find that.', toolCalls: [], meta: { resultSubtype: 'success' } } : scripted.ask(task)),
+      }),
+    });
+    const record = asRecord(fx.record); // the record reader takes it: the repeat count is outside the exact `counts`
+    expect(record.cardRun.askRepeats).toBe(3);
+    const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
+    expect(t.halves.map((h) => h.turns.length)).toEqual([27]);
+    const asks = t.halves[0]!.turns.filter((x) => x.question === 'account_count' && x.persona === 'sdr');
+    const base = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'sdr' });
+    expect(asks.map((x) => x.answer!.replyText)).toEqual([fx.recording.turns[base]!.replyText, 'I could not find that.', fx.recording.turns[`${base}/repeat-3`]!.replyText]);
+    expect(asks.map((x) => x.grade!.correct)).toEqual([true, false, true]);
+  });
+});
+
+describe('exportGallery — a record that holds an ask mode (`--modes ask`, #33742)', () => {
+  it('reads it, judges and exports the scratch run as before, and the transcript states why the ask mode is not shown', async () => {
+    const fx = await runCrm({ modes: ['scratch', 'template', 'ask'] });
+    const record = asRecord(fx.record); // never refused over the mode
+    expect(record.cardRun.modes.map((m) => m.mode)).toEqual(['scratch', 'template', 'ask']);
+    const j = judgeRecord(record);
+    expect(j.passed).toBe(true);
+    expect(j.halves.some((h) => h.id.includes('.ask.'))).toBe(false);
+
+    const { out, opts } = await setup(fx);
+    const summary = await exportGallery(opts());
+    expect(summary.exported.map((e) => e.id)).toEqual([CARD_ID]);
+    const transcript = JSON.parse(readFileSync(join(out, 'apps', CARD_ID, 'transcript.json'), 'utf8'));
+    expect(transcript.halves.map((h: { mode: string; phase: string }) => `${h.mode}/${h.phase}`)).toEqual(['scratch/run', 'scratch/iterate-run', 'template/iterate-run']);
+    expect(transcript.notShown).toEqual([{ mode: 'ask', reason: ASK_MODE_NOT_EXPORTED }]);
+    expect(readFileSync(join(out, 'apps', CARD_ID, 'transcript.md'), 'utf8')).toContain(`\n_ask mode: ${ASK_MODE_NOT_EXPORTED}._\n`);
+    // Without an ask mode the transcript carries no note: the field is absent, and the Markdown ends as before.
+    const plain = buildTranscript(fx.scenario, asRecord((await runCrm()).record), mergeRecordings([fx.recording]));
+    expect('notShown' in plain).toBe(false);
+    expect(renderTranscript(plain, 'x')).not.toContain('ask mode');
+  });
+
+  it('an ask mode’s failing half or not-measured turn does not fail the record: it says nothing about the build the gallery ships', async () => {
+    const fx = await runCrm({ modes: ['scratch', 'ask'] });
+    const edited = JSON.parse(JSON.stringify(fx.record)) as { results: Array<{ id: string; verdict: string }>; cardRun: { modes: Array<{ mode: string; run: { questions: Array<{ notMeasured?: string }> } }> } };
+    edited.results.find((r) => r.id === `${CARD_ID}.ask.run-ask`)!.verdict = 'fail';
+    edited.cardRun.modes.find((m) => m.mode === 'ask')!.run.questions[0]!.notMeasured = 'seed: its expected answer changes without democrm_contact ct4, which the app refused';
+    expect(judgeRecord(asRecord(edited)).passed).toBe(true);
+    // The same edit on the scratch mode fails it, as before.
+    edited.cardRun.modes.find((m) => m.mode === 'scratch')!.run.questions[0]!.notMeasured = 'seed: refused';
+    expect(judgeRecord(asRecord(edited)).reasons).toEqual([`${CARD_ID}.scratch.run question tech_accounts: not measured — seed: refused`]);
   });
 });

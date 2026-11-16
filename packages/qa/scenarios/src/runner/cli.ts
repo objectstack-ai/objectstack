@@ -9,7 +9,12 @@
  *                        any other directory is loaded as the private overlay,
  *                        where a `generic` card is refused (`libraryOf`)
  *   --only ID[,ID]       run only these cards
- *   --modes M[,M]        scratch, template (default: both)
+ *   --modes M[,M]        scratch, template, ask (default: scratch,template);
+ *                        ask runs only the questions and operations on a
+ *                        verified build — --template F, else this run's
+ *                        scratch build when it passed — and authors nothing,
+ *                        so ask without --template and without scratch is
+ *                        refused before any card runs
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver codex       the local OpenAI Codex CLI on your own ChatGPT plan
  *                        login (`drivers/codex.ts`); it has no turn cap and no
@@ -31,6 +36,12 @@
  *                        half not measured
  *   --ask-max-turns N    the live driver's turn cap per question or operation
  *                        turn (default 12)
+ *   --ask-repeats N      ask each (question, persona) turn N times on the same
+ *                        booted app, each ask a fresh agent session, and score
+ *                        k/N per turn (default 1); operations run once. Any
+ *                        driver: a replay (`recorded:`) reads the first N asks
+ *                        the recording holds of each question turn, and an N
+ *                        it holds fewer of is refused before any card runs
  *   --model M            the model every live turn asks for, an alias (`sonnet`)
  *                        or a name (`claude-sonnet-4-5`), as `claude --model`
  *                        takes it (default: the login's own)
@@ -49,7 +60,8 @@
  *   --ask-effort L       the effort for question and operation turns, in place
  *                        of --effort; the record and the scorecard state the
  *                        effort each turn asked for beside its served model
- *   --template F         a verified build (dist/objectstack.json) for template mode
+ *   --template F         a verified build (dist/objectstack.json) for template
+ *                        and ask modes
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored;
  *                        ./scenario-runs when run from the published package)
@@ -77,7 +89,7 @@ import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } f
 import { CodexDriver } from './drivers/codex.js';
 import { ExternalDriver } from './drivers/external.js';
 import { CAPABILITY_AREAS_DIR, locateLibraryRoot } from './library.js';
-import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
+import { askModeRefusal, minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { rebaseScenario } from './run-date.js';
@@ -99,7 +111,7 @@ export function findUp(start: string, test: (dir: string) => boolean): string {
 export interface CliArgs {
   cards?: string;
   only?: string[];
-  modes: Array<'scratch' | 'template'>;
+  modes: Array<'scratch' | 'template' | 'ask'>;
   driver: string;
   record?: string;
   template?: string;
@@ -110,6 +122,8 @@ export interface CliArgs {
   authorMaxTurns?: number;
   /** Turns per question or operation turn (`--ask-max-turns`); the driver's default when absent. */
   askMaxTurns?: number;
+  /** How many times each (question, persona) turn is asked (`--ask-repeats`); once when absent. Not a live-only flag: a replay reads that many recorded asks. */
+  askRepeats?: number;
   /** The model every live turn asks for (`--model`); the login's default when absent. */
   model?: string;
   /** The model an authoring turn asks for (`--author-model`), in place of `model`. */
@@ -158,7 +172,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--only') a.only = val().split(',');
     else if (flag === '--modes') {
       const modes = val().split(',');
-      for (const m of modes) if (m !== 'scratch' && m !== 'template') throw new Error(`unknown mode \`${m}\` (scratch, template)`);
+      for (const m of modes) if (m !== 'scratch' && m !== 'template' && m !== 'ask') throw new Error(`unknown mode \`${m}\` (scratch, template, ask)`);
       a.modes = modes as CliArgs['modes'];
     } else if (flag === '--driver') a.driver = val();
     else if (flag === '--record') a.record = val();
@@ -172,6 +186,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
     else if (flag === '--author-max-turns') a.authorMaxTurns = turns();
     else if (flag === '--ask-max-turns') a.askMaxTurns = turns();
+    else if (flag === '--ask-repeats') {
+      const raw = val();
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) throw new Error(`--ask-repeats takes a whole number of asks above 0, not \`${raw}\``);
+      a.askRepeats = n;
+    }
     else if (flag === '--model') a.model = model();
     else if (flag === '--author-model') a.authorModel = model();
     else if (flag === '--ask-model') a.askModel = model();
@@ -187,6 +207,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       a.packages = p as PackagesMode;
     } else throw new Error(`unknown flag \`${flag}\``);
   }
+  const askRefusal = askModeRefusal(a.modes, a.template !== undefined);
+  if (askRefusal) throw new Error(askRefusal);
   if (a.packages === 'workspace' && a.createVersion !== undefined) {
     throw new Error('--create-version names a published create-objectstack; --packages workspace scaffolds with the one this checkout builds');
   }
@@ -296,6 +318,8 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const live = makeDriver(args.driver, args);
+  // A replay reads the first N asks of each question turn: refused here, before any card runs, when it holds fewer.
+  if (args.askRepeats !== undefined && live instanceof RecordedDriver) live.assertAskRepeats(args.askRepeats, chosen.map((c) => c.card));
   const driver = args.record ? new RecordingDriver(live) : live;
   const info = driver.info();
   console.log(
@@ -308,6 +332,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       (info.authorEffort ? ` · author effort: ${info.authorEffort}` : '') +
       (info.askEffort ? ` · ask effort: ${info.askEffort}` : ''),
   );
+  if (args.askRepeats !== undefined && args.askRepeats > 1) console.log(`ask repeats: each question turn asked ${args.askRepeats} times, operations once`);
 
   // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
   const workspace = args.packages === 'workspace' ? await prepareWorkspacePackages(repo, join(work, 'workspace-packages')) : undefined;
@@ -355,7 +380,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
     }
     publishedVersions = new Set();
-    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}) });
+    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
     const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);

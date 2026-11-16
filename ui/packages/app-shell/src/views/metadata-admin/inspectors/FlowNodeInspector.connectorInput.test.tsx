@@ -16,6 +16,9 @@
  * undeclared extras and their order all survive).
  */
 
+// The source loads this lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 
@@ -46,6 +49,12 @@ const SLACK_POST_MESSAGE = {
     thread_ts: { type: 'string', description: 'Thread root ts to reply into' },
     blocks: { type: 'array', description: 'Block Kit blocks' },
   },
+};
+
+/** The slack schema without `blocks` (which no field can type) — CLOSED, every declared key typed. */
+const SLACK_TYPED_ONLY = {
+  ...SLACK_POST_MESSAGE,
+  properties: Object.fromEntries(Object.entries(SLACK_POST_MESSAGE.properties).filter(([k]) => k !== 'blocks')),
 };
 
 function mockRegistry(actions: unknown[]) {
@@ -168,7 +177,7 @@ describe('#4305 — the Input section derives typed fields from the descriptor i
     expect(patchedInput(onPatch)).toEqual({ channel: 'C123', legacy_note: 'keep me', text: 'hello' });
   });
 
-  it('an undeclared stored key stays editable in the extras repeater (schema is OPEN)', async () => {
+  it('an undeclared stored key stays editable in the extras repeater (never hidden or dropped)', async () => {
     mockRegistry([{ key: 'chat.postMessage', label: 'Post Message', inputSchema: SLACK_POST_MESSAGE }]);
     renderInspector(makeDraft());
 
@@ -199,12 +208,12 @@ describe('#4305 — the Input section derives typed fields from the descriptor i
     expect(patchedInput(onPatch)).toEqual({ channel: 'C123', legacy_note: 'edited' });
   });
 
-  it('a CLOSED schema (additionalProperties:false) drops the repeater', async () => {
+  it('a CLOSED schema whose every declared key is typed drops the repeater', async () => {
     mockRegistry([
       {
         key: 'chat.postMessage',
         label: 'Post Message',
-        inputSchema: { ...SLACK_POST_MESSAGE, additionalProperties: false },
+        inputSchema: SLACK_TYPED_ONLY,
       },
     ]);
     renderInspector(makeDraft({ channel: 'C123' }));
@@ -230,6 +239,50 @@ describe('#4305 — the Input section derives typed fields from the descriptor i
     // The legacy key the closed schema does not declare is still reachable…
     expect(screen.getByDisplayValue('legacy_note')).toBeTruthy();
     expect(typedFieldInput('Channel').value).toBe('C123');
+  });
+});
+
+describe('objectstack#33838 — the extras repeater follows the run\'s declared-keys rule', () => {
+  it('a stored key a CLOSED schema does not declare is shown and marked as refused by the run', async () => {
+    mockRegistry([{ key: 'chat.postMessage', label: 'Post Message', inputSchema: SLACK_TYPED_ONLY }]);
+    const { onPatch } = renderInspector(makeDraft());
+
+    await screen.findByText('Channel');
+    await waitFor(() => expect(screen.queryByDisplayValue('channel')).toBeNull());
+    expect(screen.getByDisplayValue('legacy_note')).toBeTruthy();
+    const marks = screen.getAllByTestId('flow-kv-key-refusal');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].getAttribute('role')).toBe('alert');
+    // Marked, not dropped: rendering alone writes nothing.
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+
+  it('an OPEN schema (a key-admitting `allOf`) keeps the repeater and marks no key', async () => {
+    mockRegistry([
+      { key: 'chat.postMessage', label: 'Post Message', inputSchema: { ...SLACK_TYPED_ONLY, allOf: [{ type: 'object' }] } },
+    ]);
+    renderInspector(makeDraft());
+
+    await screen.findByText('Channel');
+    await waitFor(() => expect(screen.queryByDisplayValue('channel')).toBeNull());
+    expect(screen.getByDisplayValue('legacy_note')).toBeTruthy();
+    expect(screen.queryByTestId('flow-kv-key-refusal')).toBeNull();
+  });
+
+  it('a declared key no field types (an openapi `body: {}`) is offered by the repeater and not marked', async () => {
+    mockRegistry([
+      {
+        key: 'chat.postMessage',
+        label: 'Post Message',
+        inputSchema: { type: 'object', properties: { channel: { type: 'string' }, body: {} } },
+      },
+    ]);
+    renderInspector(makeDraft({ channel: 'C123', body: '{"a":1}' }));
+
+    await screen.findByText('Channel');
+    await waitFor(() => expect(screen.queryByDisplayValue('channel')).toBeNull());
+    expect(screen.getByDisplayValue('body')).toBeTruthy();
+    expect(screen.queryByTestId('flow-kv-key-refusal')).toBeNull();
   });
 });
 
