@@ -184,7 +184,7 @@ export class ManagedDriftFacet {
     // [#31882] The implicit `(column)` index on each authored single-valued
     // reference column, from the same composition the differ expects, so the
     // boot sync and `os migrate plan` agree on what should exist.
-    const implicit = implicitReferenceIndexes({ table: tableName, fields, tenantField, declaredIndexes: declared }).map(
+    const implicit = implicitReferenceIndexes({ table: tableName, fields, tenantField, declaredIndexes: declared, physicalColumns }).map(
       (i) => ({ name: i.name, fields: i.columns, unique: false as const }),
     );
     if (fromFields.length === 0 && declared.length === 0 && implicit.length === 0) return;

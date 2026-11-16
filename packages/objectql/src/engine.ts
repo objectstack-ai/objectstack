@@ -621,6 +621,7 @@ export class ObjectQL implements IObjectQLEngine {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
@@ -2544,6 +2545,7 @@ export class ObjectQL implements IObjectQLEngine {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   }): void {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
     return ReferencesAndMasterDetailFacet.setI18nService.call(referencesAndMasterDetailHost.of(this), service);
