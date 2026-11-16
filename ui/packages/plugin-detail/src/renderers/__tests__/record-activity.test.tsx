@@ -372,7 +372,9 @@ describe('record:activity — a types list without comment offers no comment com
   });
 
   const withheldWarnings = () =>
-    warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('offers no comment composer'));
+    (warn.mock.calls as unknown[][])
+      .map((c: unknown[]) => String(c[0]))
+      .filter((m: string) => m.includes('offers no comment composer'));
 
   it('the HotCRM shape (types: [task]) draws no composer and no Comments-only option', async () => {
     mountBlock(HOTCRM_LEAD_ACTIVITY);
