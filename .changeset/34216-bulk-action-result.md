@@ -5,7 +5,7 @@
 feat(spec): `BulkActionResultSchema`, the per-row outcome an `execution: 'aggregate'` bulk action handler may resolve with
 
 Clause-②: yes (widening) — a new optional public shape and its three exports (`BulkActionResultSchema`, `BulkActionResult`, `BulkActionResultParsed`) from `@objectstack/spec/ui`; nothing an author writes is accepted or refused differently
-Metadata-protocol: none
+Metadata-protocol: added
 
 An aggregate bulk action is ONE dispatch for the whole selection, with every id in `params._selectedIds`. A handler that writes row by row can move some rows and fail on others, and until now the action contract had no declared way to say which: the grid could only report one outcome for the selection.
 
