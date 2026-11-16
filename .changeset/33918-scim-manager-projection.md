@@ -17,7 +17,7 @@ Metadata-protocol: none
 
 - **Silence is not a clear.** A create or PATCH that does not name the attribute leaves `manager_id` as it is. An explicit PATCH `remove`, or a replace without the attribute, clears it.
 - **One owner per identity.** The projection writes only on an identity whose manager the directory owns, which is exactly the set the admin endpoint refuses (one shared predicate). On any other identity, for example one holding a local password, the admin endpoint owns the column and the projection writes nothing.
-- **A reference that names no User is served.** An unknown id, an `externalId` or email, another connection's id, or a `$ref` with no readable `/Users/{id}` segment does not fail the write: the user is saved, `manager_id` stays as it was, and the server logs one operator warning per connection per window, with the count it held back.
+- **A reference that names no User is served.** An unknown id, an `externalId` or email, another connection's id, or a `$ref` with no readable `/Users/{id}` segment does not fail the write: the user is saved, `manager_id` stays as it was, and the event is recorded with one operator warning and one `scim_manager_unresolved` audit row (when `@objectstack/plugin-audit` is installed), both once per connection per window, carrying the count held back. The row names the connection, the user and the reference, cut to 256 characters, and nothing else from the request; a request that is refused writes none.
 - **An unchanged manager is not judged again**, so a write is never refused over a chain other links have since reshaped, and a report whose manager was deleted keeps working.
 
 **Where it does not project, and why.**
