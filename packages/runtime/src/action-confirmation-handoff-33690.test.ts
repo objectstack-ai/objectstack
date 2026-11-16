@@ -36,6 +36,7 @@ import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 
 import { ACTION_CONFIRMATION_SERVICE, AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
+import { ANONYMOUS_DENY_CODE } from '@objectstack/core';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import { actionConfirmationElicitSubject, actionConfirmationRefusal } from './action-execution.js';
@@ -77,7 +78,7 @@ function makeConfirmationService() {
     return { submit: vi.fn(async (_handOff: unknown, _ec: unknown) => ({ pendingId: `pa_${++n}` })) };
 }
 
-function makeHarness(opts: { service?: unknown } = {}) {
+function makeHarness(opts: { service?: unknown; audit?: unknown } = {}) {
     const leads = [
         { id: 'lead_1', owner: 'u1', name: 'Ada', status: 'open' },
         { id: 'lead_2', owner: 'u2', name: 'Grace', status: 'open' },
@@ -135,6 +136,8 @@ function makeHarness(opts: { service?: unknown } = {}) {
     const services: Record<string, unknown> = {
         objectql: ql, data: ql, metadata, automation,
         ...(opts.service ? { [ACTION_CONFIRMATION_SERVICE]: opts.service } : {}),
+        // [#34386] The audit slot's invocation writer, when a pin reads the row.
+        ...(opts.audit ? { audit: opts.audit } : {}),
     };
     const resolve = (name: string) => services[name] ?? null;
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
@@ -606,7 +609,8 @@ describe('[#34386] dispatchActionResume: approving a handed-off resume_run resum
 
     it('the approving person resumes THAT parked run once, with the values the hand-off carried', async () => {
         const service = makeConfirmationService();
-        const h = makeHarness({ service });
+        const audit = { recordActionInvocation: vi.fn(async (_event: unknown) => undefined) };
+        const h = makeHarness({ service, audit });
         const run = await handedOffResume(h, service);
 
         const answer: any = await h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, confirm: true });
@@ -622,6 +626,15 @@ describe('[#34386] dispatchActionResume: approving a handed-off resume_run resum
         // Never a new run, and never handed off again.
         expect(h.automation.execute).not.toHaveBeenCalled();
         expect(service.submit).not.toHaveBeenCalled();
+        // One invocation row, as the host action door writes it: no surface,
+        // because the call came through neither REST nor MCP.
+        expect(audit.recordActionInvocation).toHaveBeenCalledTimes(1);
+        const event = audit.recordActionInvocation.mock.calls[0][0] as any;
+        expect(event).toMatchObject({
+            actionName: GATED_FLOW.name, objectName: OBJECT, recordId: 'lead_1', branch: 'flow', runId: run.runId, outcome: 'succeeded',
+        });
+        expect(event.context.userId).toBe('u1');
+        expect(event.context).not.toHaveProperty('surface');
     });
 
     it('another person is refused with the one not-found answer, and the run stays parked', async () => {
@@ -699,7 +712,7 @@ describe('[#34386] dispatchActionResume: approving a handed-off resume_run resum
     it('an anonymous caller is refused 401 before anything is read', async () => {
         const h = makeHarness({ service: makeConfirmationService() });
         const refused: any = await h.resumeAsHost({}, { runId: 'run_1', confirm: true });
-        expect(refused.status).toBe(401);
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 401, code: ANONYMOUS_DENY_CODE });
         expect(h.automation.getRun).not.toHaveBeenCalled();
     });
 });
