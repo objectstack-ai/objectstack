@@ -31,12 +31,7 @@ import type { IScopedContext } from '../contracts/scoped-context';
 // reads too, so this schema's import graph is unchanged.
 import {
   HOOK_REFUSAL_CODE_PATTERN,
-  HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
-  HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE,
-  HOOK_REFUSAL_PARAM_PATTERN,
-  HOOK_REFUSAL_REASON_PATTERN,
   HOOK_TEXT_KEY_PATTERN,
-  HOOK_TEXT_MESSAGE_HOLE_REFUSED,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
   hookRefusalsWithoutSandboxedBody,
@@ -46,11 +41,9 @@ import {
   undeclaredHookRefusalReasonAtSave,
   undeclaredHookTextKeyAtSave,
 } from './hook-refusal-codes';
-// [#33214] The closed-scope `{{ }}` judge a refusal message with declared
-// `params` is read by — the one the action copy slots and a bulk action's
-// `confirmText` use, over the same hole grammar the flow `end` refusal
-// renders. It imports nothing outside its own leaf.
-import { closedScopeTemplateRefusal } from '../automation/flow-text-slot-template';
+// [#34273] One entry shape for a hook's and an action's refusal catalogue, and
+// for a hook's declared texts (#34374) — the shared declared-entry factory.
+import { declaredRefusalEntrySchema, declaredTextEntrySchema } from './declared-entry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -373,149 +366,17 @@ function refuseUndeclaredLiteralTextKey(
 }
 
 /**
- * One sentence under a declared refusal code (#33214, ruling 6879477573,
- * S1): the sentence the user reads when the hook throws the code with this
- * reason. Translated through `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`.
- * Its `{{ }}` holes are judged against the entry's `params`, like the entry's
- * own message. Not exported: it is published as part of {@link HookRefusalSchema}.
- */
-const HookRefusalReasonSchema = lazySchema(() => strictObject(
-  {
-    surface: 'this hook refusal reason',
-    history: 'Closed from the day it was declared — a key this reason does not declare would be served nowhere.',
-    aliases: { text: 'message', description: 'message' },
-    guidance: {
-      code:
-        'A reason has no `code` of its own — it sits under the code it refines (`refusals.CODE.reasons.REASON`), and '
-        + 'the wire code is that code.',
-      status:
-        'A reason has no `status` of its own — the code it sits under decides the status. Declare a second code if '
-        + 'the status differs.',
-    },
-  },
-  {
-    message: z.string().trim().min(1).describe(
-      'The sentence the user reads when the hook throws this reason under its code — in the source locale, '
-      + 'translated through hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message in the caller\'s locale; its {{ }} '
-      + 'holes follow the entry\'s message rule',
-    ),
-  },
-));
-
-/** The slot a refusal message's `{{ }}` holes are judged in, as a sentence names it. */
-const HOOK_REFUSAL_MESSAGE_SLOT = 'A hook refusal `message`';
-
-/**
- * Why `message` is refused as a sentence of an entry declaring `params`, or
- * `undefined`. No params: the plain-text rule (a hole is refused). Params: the
- * closed-scope template rule over the declared names (a hole over a declared
- * param only, a single-brace token prescribed its hole).
- */
-function hookRefusalMessageRefusal(message: string, params: readonly string[] | undefined): string | undefined {
-  if (!params || params.length === 0) {
-    return HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE.test(message) ? undefined : HOOK_REFUSAL_MESSAGE_HOLE_REFUSED;
-  }
-  return closedScopeTemplateRefusal(message, { slot: HOOK_REFUSAL_MESSAGE_SLOT, roots: params });
-}
-
-/**
  * One entry of a hook's refusal catalogue (#26170): the sentence the user
  * reads when the hook throws this entry's code, and the status the refusal is
- * answered with.
- *
- * The message is handed over in the source locale and replaced whole by its
- * translation, `hooks.<hook>.refusals.<CODE>.message` — the validation-rule
- * message's posture (`objects.<object>._validations.<rule>.message`).
- *
- * [#33214, ruling 6879477573] Two optional parts, both declared and counted:
- *
- *  - `reasons` — further sentences under the SAME code, keyed by a snake_case
- *    reason. The hook throws `{ code, reason }`; the runtime answers with the
- *    reason's sentence, the code's status and the code on the wire, unchanged.
- *    A reason the code does not declare is refused loudly, like a code. Under
- *    a code that declares no `reasons`, a thrown `reason` is not read, as before.
- *  - `params` — the names the entry's sentences may fill. The hook throws
- *    `{ code, params: { NAME: value } }`, and each `{{ NAME }}` hole renders
- *    through the template engine the flow `end` refusal renders with. A hole
- *    over a name the entry does not declare is refused at parse; a hole
- *    holding logic, an unknown formatter, an empty hole and a `currency`
- *    formatter with no code (a hook refusal carries no default currency) are
- *    refused where the sentence is compiled — `os validate`, `compile` and the
- *    publish gate (`@objectstack/lint` `validate-hook-refusal-templates.ts`).
- *    An entry that declares no `params` is plain text and every `{{ }}` hole
- *    in it is refused, as before.
+ * answered with. The message is translated whole through
+ * `hooks.<hook>.refusals.<CODE>.message`; `reasons` and `params` (#33214,
+ * ruling 6879477573) are documented on the shared factory
+ * (`declared-entry.zod.ts`), which builds `ActionSchema`'s catalogue
+ * entry (#34273) from the same rules, so the two cannot drift.
  */
-export const HookRefusalSchema = lazySchema(() => strictObject(
-  {
-    surface: 'this hook refusal',
-    history: 'Closed from the day it was declared — a key this entry does not declare would be served nowhere.',
-    aliases: {
-      text: 'message', reason: 'message', description: 'message', httpStatus: 'status', statusCode: 'status',
-      variants: 'reasons', messages: 'reasons', placeholders: 'params', parameters: 'params', variables: 'params',
-    },
-    guidance: {
-      code:
-        '`code` is not a refusal key — the code is the entry\'s KEY in `refusals` '
-        + '(`refusals: { CLEAN_VERSION_REQUIRED: { message } }`), and the body throws it.',
-      title:
-        'A hook refusal has no heading — the caller reads the `message` alone. Write the sentence in `message`.',
-    },
-  },
-  {
-    message: z.string().trim().min(1).describe(
-      'The sentence the user reads when the hook throws this code — in the source locale, translated whole through '
-      + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale. With no params every {{ }} hole is refused; '
-      + 'with params a hole is a path over one of them with an optional known formatter, and a hole over another name, '
-      + 'a hole holding logic, an unknown formatter, an empty hole and a currency formatter with no code are refused',
-    ),
-    status: z.number().int().min(400).max(499).optional().describe(
-      'HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the '
-      + 'body itself sets on the throw is not read — the catalogue decides',
-    ),
-    reasons: z.record(
-      z.string().regex(HOOK_REFUSAL_REASON_PATTERN, {
-        message: 'A refusal reason is snake_case (e.g. plan_locked) — the reason the hook throws beside the code',
-      }),
-      HookRefusalReasonSchema,
-    ).optional().describe(
-      'Further sentences under this same code, keyed by the snake_case reason the hook throws beside the code '
-      + '({ code, reason }): { message }. The wire code and status stay this entry\'s. A reason not declared here '
-      + 'is refused loudly. Absent: the code has the one sentence, and a thrown reason is not read',
-    ),
-    params: z.array(
-      z.string().regex(HOOK_REFUSAL_PARAM_PATTERN, {
-        message: 'A refusal param is an identifier (e.g. state) — the root a {{ }} hole names',
-      }),
-    ).optional().describe(
-      'The names this entry\'s sentences may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value '
-      + 'the hook throws in `params` ({ code, params: { NAME: value } }). A hole over any other name, logic, an '
-      + 'unknown formatter, an empty hole and a currency formatter with no code are refused. Absent: the sentences '
-      + 'are plain text and a {{ }} hole is refused',
-    ),
-  },
-).superRefine((entry, ctx) => {
-  const params = entry.params;
-  if (params) {
-    const seen = new Set<string>();
-    params.forEach((name, i) => {
-      if (seen.has(name)) {
-        ctx.addIssue({ code: 'custom', path: ['params', i], message: `\`params\` names '${name}' twice — declare each once.` });
-      }
-      seen.add(name);
-    });
-  }
-  const own = hookRefusalMessageRefusal(entry.message, params);
-  if (own !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: own });
-  for (const [reason, sentence] of Object.entries(entry.reasons ?? {})) {
-    const refusal = hookRefusalMessageRefusal(sentence.message, params);
-    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['reasons', reason, 'message'], message: refusal });
-  }
-}));
+export const HookRefusalSchema = declaredRefusalEntrySchema('hook');
 
 export type HookRefusal = z.input<typeof HookRefusalSchema>;
-
-/** The slot a hook text's `{{ }}` holes are judged in, as a sentence names it. */
-const HOOK_TEXT_MESSAGE_SLOT = 'A hook text `message`';
 
 /**
  * One declared text of a hook (#34374, ruling 6913660232 parameter 7): a
@@ -533,56 +394,11 @@ const HOOK_TEXT_MESSAGE_SLOT = 'A hook text `message`';
  * `os validate`, `compile` and the publish gate (`@objectstack/lint`
  * `validate-hook-refusal-templates.ts`, which judges `texts` beside
  * `refusals`). A translation whose holes do not render at run time is dropped
- * for this `message`, filled.
+ * for this `message`, filled. Built by the shared declared-entry factory
+ * (`declared-entry.zod.ts`), the refusal entry's core with no `status` or
+ * `reasons`, which the action half of #34374 reuses.
  */
-export const HookTextSchema = lazySchema(() => strictObject(
-  {
-    surface: 'this hook text',
-    history: 'Closed from the day it was declared — a key this entry does not declare would be served nowhere.',
-    aliases: {
-      text: 'message', template: 'message', value: 'message', description: 'message',
-      placeholders: 'params', parameters: 'params', variables: 'params',
-    },
-    guidance: {
-      locale:
-        'A hook text has no language of its own — the runtime picks the organization\'s language. Write the sentence '
-        + 'in the source locale in `message` and translate it through `hooks.HOOK.texts.KEY.message`.',
-    },
-  },
-  {
-    message: z.string().trim().min(1).describe(
-      'The sentence the hook writes into a record — in the source locale, translated whole through '
-      + 'hooks.<hook>.texts.<key>.message in the organization\'s language when the hook asks for it (ctx.text). '
-      + 'With no params every {{ }} hole is refused; with params a hole is a path over one of them with an optional '
-      + 'known formatter',
-    ),
-    params: z.array(
-      z.string().regex(HOOK_REFUSAL_PARAM_PATTERN, {
-        message: 'A text param is an identifier (e.g. lead) — the root a {{ }} hole names',
-      }),
-    ).optional().describe(
-      'The names this text may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value the hook passes '
-      + 'in ctx.text(KEY, { NAME: value }). A hole over any other name is refused at parse; a hole holding logic, an '
-      + 'unknown formatter, an empty hole and a currency formatter with no code are refused where the text is compiled '
-      + '(os validate, compile, the publish gate). Absent: the sentence is plain text and a {{ }} hole is refused',
-    ),
-  },
-).superRefine((entry, ctx) => {
-  const params = entry.params;
-  if (params) {
-    const seen = new Set<string>();
-    params.forEach((name, i) => {
-      if (seen.has(name)) {
-        ctx.addIssue({ code: 'custom', path: ['params', i], message: `\`params\` names '${name}' twice — declare each once.` });
-      }
-      seen.add(name);
-    });
-  }
-  const refusal = !params || params.length === 0
-    ? (HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE.test(entry.message) ? undefined : HOOK_TEXT_MESSAGE_HOLE_REFUSED)
-    : closedScopeTemplateRefusal(entry.message, { slot: HOOK_TEXT_MESSAGE_SLOT, roots: params });
-  if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: refusal });
-}));
+export const HookTextSchema = declaredTextEntrySchema('hook');
 
 export type HookText = z.input<typeof HookTextSchema>;
 
