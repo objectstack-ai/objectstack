@@ -320,7 +320,7 @@ describe('#34257 — accepting with the proof', () => {
     const { engine, manager, invite } = await boot();
     const { invitation, proof } = await invite('guarded@example.com');
     await expectRefused(
-      await door(manager, { invitationId: invitation.id, proof: `${proof.slice(0, -1)}x`, name: 'G', password: PASSWORD }),
+      await door(manager, { invitationId: invitation.id, proof: `${proof.slice(0, -1)}${proof.endsWith('x') ? 'y' : 'x'}`, name: 'G', password: PASSWORD }),
     );
     expect(userRow(engine, 'guarded@example.com')).toBeUndefined();
     const good = await door(manager, { invitationId: invitation.id, proof, name: 'G', password: PASSWORD });
