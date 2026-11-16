@@ -662,7 +662,23 @@ export const CEILINGS = new Map([
   // raise path is the standing 2026-10-27 ruling, verbatim and untranslated:
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
   ['skills/objectstack-data/SKILL.md', 6665],
-  ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
+  // 5997 -> 6008 (the formula skills follow-ups of PRs #34443 and #34447): the
+  // `label(record.f)` row teaches a multi-select (`multiple: true`) reading each
+  // selected label in stored order, joined with `, `, and the built-ins line
+  // teaches that `timestamp()` over a `date` field is refused (`date-text-call`)
+  // and that a date shifts with `isoDate(addDays(record.d, n))`. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST — three restatements cut, each keeping its other
+  // home (listed in the PR body): the `has()` paragraph's null-check sentence
+  // (the cheat-sheet `Null check` row), the template section's
+  // `shared/expression.zod.ts` sentence (Core contract and See also), and the
+  // translation-table note's per-matched-row clause (§5's table). Arithmetic in
+  // priced bytes (stamp line excluded), against `main`'s 23952 (headroom 9): the
+  // text adds 321, the cuts remove 243, so the LANDED priced text is 24030
+  // bytes -> ceil(24030 / 4) = 6008; the ceiling moves +11, the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24030 / 4)
+  ['skills/objectstack-formula/SKILL.md', 6008], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an

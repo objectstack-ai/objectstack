@@ -91,8 +91,7 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 ### `has()` is NOT a null check
 
 `has(record.x)` is **true whenever the key exists**, even when its value is
-`null`. To check for "value present and non-blank" use the stdlib helper
-`isBlank()` or compare to `null` explicitly.
+`null`.
 
 Every server-evaluated predicate — validation rules, `requiredWhen`, option
 `visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
@@ -402,7 +401,7 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 
 > ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which is `null` on an
 > insert event and **fails the write** there unless guarded by `previous != null
-> &&`; on update and delete events it is bound per matched row — see §5.
+> &&` (§5).
 
 > ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
 > trigger record's fields, nulls included, to top level wherever no flow variable
@@ -466,7 +465,6 @@ a bare string (auto-wrapped) or their helper, and read the same variable scope.
 | `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron, or one of `@yearly` `@annually` `@monthly` `@weekly` `@daily` `@hourly` `@reboot` | `Job.schedule.expression` (canonical) |
 | `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (a save and `os validate` refuse it; move it to `nameField`, ADR-0079) |
 
-`shared/expression.zod.ts` declares both surfaces and their carriers.
 Missing template paths render as the empty string. Move logic into a CEL field.
 A `currency` argument is a
 literal code (`currency:EUR`); only an email template may read it from the send's
