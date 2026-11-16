@@ -35,6 +35,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 import { MobileAppPage } from './MobileAppPage';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { getAppComponent } from '../../services/componentRegistry';
+// The registry check below loads every built-in page, which reaches the
+// metadata admin's dynamic `@objectstack/lint` import: pay that load at
+// collection, never inside a test's clocked window.
+import '@objectstack/lint';
 import '../../services/builtinComponents';
 
 function serving(features: Record<string, unknown> | undefined) {
