@@ -2579,8 +2579,13 @@ export function ChatPane({
   // b6bl_quote_item · line_total · currency」). A name the published registry
   // does not know is read from the draft overlay (`useChangeCardLabels`); one
   // the change is about to create answers undefined, and the card then shows
-  // the name as given.
-  const { resolveObjectLabel, resolveFieldLabel } = useChangeCardLabels(metadata, metadataClient);
+  // the name as given. The revision moves when a message lands or a turn
+  // starts or ends, which is when a change may have drafted a new name.
+  const { resolveObjectLabel, resolveFieldLabel } = useChangeCardLabels(
+    metadata,
+    metadataClient,
+    `${shownMessages.length}:${isLoading ? 'turn' : 'idle'}`,
+  );
   const metadataLocale = useMetadataLocale();
   const resolveFieldTypeLabel = useCallback(
     (type: string) => {
