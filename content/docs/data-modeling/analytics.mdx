@@ -275,8 +275,8 @@ is one of the dataset's `measures[].name`, and each `dimensions` entry and
 Anything else — the ad-hoc `count`, a raw field such as `amount`, a suffix
 spelling such as `amount_sum`, a `<dataset>.revenue` spelling, a raw field named
 as a dimension — is refused with `400 INVALID_FIELD` before anything is read.
-The refusal names the member (`member`, `param`, `cube`), lists the measures
-and dimensions you may use, and the fix is to select one of them or declare the
+The refusal's message names every undeclared member, lists the measures and
+dimensions you may use, and the fix is to select one of them or declare the
 member on the dataset. An inline `dataset` is judged against its own
 `measures` and `dimensions`. The cube query (`POST {basePath}/analytics/query`)
 is not a dataset and keeps its ad-hoc members.
