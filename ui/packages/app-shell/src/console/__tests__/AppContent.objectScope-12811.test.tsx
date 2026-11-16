@@ -91,6 +91,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { useActionModal } from '../../hooks/useActionModal';
