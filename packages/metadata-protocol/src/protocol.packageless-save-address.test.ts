@@ -332,6 +332,131 @@ describe('a package-less direct save of an item ONE package owns writes that pac
     });
 });
 
+/**
+ * [ADR-0150 D4, ruling 6902014292] An ACTION is keyed `(package, objectName,
+ * name)`, so the re-address above (the generic one, pinned for a type-agnostic
+ * item) does not reach an action body bound to an object no package binds the
+ * name to: that save writes the environment's own row on that object, and the
+ * package's item stays where it is. Save, read and execution then key the
+ * action alike.
+ *
+ * FROM (main): the save was re-addressed into the one holder, so its receipt
+ * named the package and the package's action moved to the other object.
+ */
+describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder does not bind', () => {
+    const action = (name: string, label: string, objectName?: string) => ({
+        name, label, type: 'url', target: `https://example.invalid/${label}`, ...(objectName ? { objectName } : {}),
+    });
+    const NAME = 'approve_p';
+    /** The stored rows of the action, by binding: `[package or null, objectName, label]`. */
+    const stored = (rows: Row[]) => rows
+        .map((r) => [r.package_id ?? null, JSON.parse(r.metadata).objectName ?? null, JSON.parse(r.metadata).label])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+    it('FROM/TO: P holds the name on `invoice`; the save on `task` writes the environment\'s row, and P\'s row is untouched', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+        // FROM: `(env-wide, package=com.qa.lanebapp, …)` and ONE row, P's, on `task`.
+        expect(saved.message).toBe(`Saved action '${NAME}' (env-wide, state=active) [seq=${saved.seq}]`);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'task', 'env']]);
+    });
+
+    it('the read after the save: `?package=P` still answers P\'s item on `invoice`', async () => {
+        const { protocol } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+        // FROM: `['task', 'env']`, the environment's body under P. The bare
+        // read is pinned over HTTP on a real boot (its served item is the
+        // registry's), `action-save-packageless-other-object.dogfood.test.ts`.
+        const atPackage = (await protocol.getMetaItem({ type: 'action', name: NAME, packageId: WRITABLE })).item;
+        expect([atPackage.objectName, atPackage.label]).toEqual(['invoice', 'p']);
+    });
+
+    it('a second package-less save on `task` edits the environment\'s row again; P\'s row is still untouched', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env2', 'task') });
+
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'task', 'env2']]);
+    });
+
+    it('an object-less body is its own key too: the environment\'s row, P\'s row untouched', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env') });
+
+        expect(saved.message).not.toContain('package=');
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, null, 'env']]);
+    });
+
+    it('two packages holding the name on two other objects: the environment\'s row (FROM: 409 naming both)', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'product'), packageId: OTHER_WRITABLE });
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+        expect(saved.success).toBe(true);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q'], [null, 'task', 'env']]);
+    });
+
+    describe('CONTROLs (unchanged)', () => {
+        it('the same save on `invoice`, the object P binds: re-addressed into P, as the generic pin above', async () => {
+            const { protocol, rows } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+
+            const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'invoice') });
+
+            expect(saved.message).toBe(`Saved action '${NAME}' (env-wide, package=${WRITABLE}, state=active) [seq=${saved.seq}]`);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'edited']]);
+        });
+
+        it('with the environment\'s row on `task` stored too, a save on `invoice` is still P\'s customization', async () => {
+            const { protocol, rows } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'invoice') });
+
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'edited'], [null, 'task', 'env']]);
+        });
+
+        it('a package on `invoice` and another on `task`: the save on `task` is still refused 409 naming both', async () => {
+            const { protocol, rows, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'task'), packageId: OTHER_WRITABLE });
+            const before = metadataWrites().length;
+
+            const envelope = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') })));
+
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(metadataWrites()).toHaveLength(before);
+            expect(stored(rows('action', NAME))).toEqual([[OTHER_WRITABLE, 'task', 'q'], [WRITABLE, 'invoice', 'p']].sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+        });
+
+        it('a managed (code) package\'s action on `invoice`: the package-less save on `task` is still refused 403 NOT_OVERRIDABLE, and nothing is written', async () => {
+            const item: Record<string, unknown> = action('showcase_approve', 'managed', 'invoice');
+            applyProtection(item, { packageId: CODE_PACKAGE, packageVersion: '1.0.0' });
+            const { protocol, rows, metadataWrites } = makeProtocol([{ type: 'action', item }]);
+
+            const envelope = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
+                type: 'action', name: 'showcase_approve', item: action('showcase_approve', 'env', 'task'),
+            })));
+
+            expect([envelope.status, envelope.code]).toEqual([403, 'NOT_OVERRIDABLE']);
+            expect(rows('action', 'showcase_approve')).toEqual([]);
+            expect(metadataWrites()).toEqual([]);
+        });
+    });
+});
+
 describe('an item TWO packages hold: a save naming neither is refused', () => {
     async function twoPackageItem(name: string) {
         const fixture = makeProtocol();

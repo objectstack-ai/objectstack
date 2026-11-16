@@ -88,6 +88,8 @@ import { saveRegistryQuestion } from './registry-question.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import { servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessContentPackage, shippingPackageIds } from './protocol-environment-rows.js';
+import { boundObjectOf } from '@objectstack/metadata/stored-item-package';
+import { storedRowDocument, type StoredOverlayRow } from './item-lock.js';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
@@ -812,15 +814,26 @@ export class ProtocolSaveFacet {
             const address = await host.packagelessAddress(
                 writeType, request.name, itemDiscriminator(writeType, request.item),
             );
+            // [ADR-0150 D4, ruling 6902014292] An action is keyed
+            // `(package, objectName, name)`: when every package that holds the
+            // name binds it to an object other than the one this body binds,
+            // no package holds this item, so the save writes the
+            // environment's own row on this object and every package's item
+            // stays where it is ({@link actionHeldOnlyOnOtherObjects}).
+            const environmentOwnAction = await actionHeldOnlyOnOtherObjects(
+                host, writeType, request.name, request.item, address,
+            );
             // [#32605, epic ruling 6781691009] A name a disabled package also
             // holds is written where the read naming no package serves it
             // ({@link servedPackagelessSaveAddress}): never the disabled
             // package's row, never a new package-unbound row beside an
             // enabled holder, and a refusal names only the served holders.
-            const served = await servedPackagelessSaveAddress(
+            const served = environmentOwnAction ? undefined : await servedPackagelessSaveAddress(
                 host, writeType, request.name, itemDiscriminator(writeType, request.item), address,
             );
-            if (served !== undefined) {
+            if (environmentOwnAction) {
+                // The package-unbound row: `packageId` stays empty.
+            } else if (served !== undefined) {
                 if (served.packageId !== null) request = { ...request, packageId: served.packageId };
             } else {
                 if (address.candidates.length > 1) {
@@ -2848,4 +2861,55 @@ async function servedPackagelessSaveAddress(
     const shippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].filter((id) => !disabled(id));
     const content = packagelessContentPackage({ packageId: null, candidates: [] }, shippers.map((id) => ({ _packageId: id })));
     return typeof content === 'string' ? { packageId: content } : undefined;
+}
+
+/**
+ * [ADR-0150 D4, ruling 6902014292] Whether a publish-mode save of an `action`
+ * naming no package writes the ENVIRONMENT'S OWN item: every package the
+ * item's active rows are bound to (`address.candidates`,
+ * {@link packagelessAddress}) binds the name to an object other than the one
+ * `item` binds ({@link boundObjectOf}; object-less is its own key).
+ *
+ * D4 keys an action `(package, objectName, name)`, so a package's action on
+ * object A is not the item a body bound to object B addresses. ADR-0150's
+ * "a package-less row that bears a package-held name is a customization"
+ * (D4, R15) is read at that key for an action: such a body customizes no
+ * package's item, and re-addressing it into the one holder moved that
+ * package's declaration onto B. The read side and the execution route
+ * already key an action this way (`lookupArtifactItem`'s owner key).
+ *
+ * `false` — the address stands, as before — for every other type, for a
+ * name no package's row holds, and as soon as one holder binds the name to
+ * `item`'s object: the same-object save is still that package's
+ * customization, and two such holders are still refused. A stored body that
+ * does not parse is read as binding `item`'s object, so it never drops a
+ * holder from the key.
+ */
+async function actionHeldOnlyOnOtherObjects(
+    host: Pick<ProtocolHost, 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    type: string, name: string, item: unknown,
+    address: { readonly candidates: readonly string[] },
+): Promise<boolean> {
+    if (type !== 'action' || address.candidates.length === 0) return false;
+    const object = boundObjectOf(item);
+    let activeRows: readonly StoredOverlayRow[];
+    try {
+        activeRows = await host.readItemActiveRows(type, name);
+    } catch (error) {
+        // [#5532] An unprovisioned store holds no row; any other failure is a
+        // read that did not happen, never "no holder on this object".
+        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        activeRows = [];
+    }
+    const bindsObject = (row: StoredOverlayRow): boolean => {
+        let document: unknown;
+        try {
+            document = storedRowDocument(row);
+        } catch {
+            return true;
+        }
+        return boundObjectOf(document) === object;
+    };
+    const atObject = await host.packagelessAddress(type, name, undefined, 'active', activeRows.filter(bindsObject));
+    return atObject.candidates.length === 0;
 }
