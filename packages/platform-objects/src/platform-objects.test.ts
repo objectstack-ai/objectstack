@@ -781,9 +781,11 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysSsoProvider', SysSsoProvider, 'edit_sso_groups_claim', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'show_sso_attribute_mapping', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'edit_sso_attribute_mapping', STANDING],
-    ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
-    ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
-    ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
+    // Hidden while cloud-managed: membership and its tiers are the hosting
+    // organisation's there, and both doors refuse.
+    ['SysMember', SysMember, 'update_member_role', `((${MANAGED}) && ${ADMINS}) && ${ORG}`],
+    ['SysMember', SysMember, 'remove_member', `((${MANAGED}) && ${ADMINS}) && ${ORG}`],
+    ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner' && ${MANAGED}) && ${OWNER}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
     ['SysInvitation', SysInvitation, 'resend_invitation', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
