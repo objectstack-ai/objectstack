@@ -12,12 +12,12 @@ Skills-docs: none — no skill under `skills/**` teaches where a package-less sa
 
 **BREAKING** (ADR-0150 D4, maintainer ruling 6902014292): an action is keyed `(package, objectName, name)`. A package-less `PUT /api/v1/meta/action/NAME` (no `?package=`) whose body binds an object that no package holding the name binds it to now writes the environment's own action on that object. Every package's action of that name stays where it is.
 
-FROM → TO, writable package `P` holding `approve` on `invoice`:
+The moved answers, for a writable package `P` holding `approve` on `invoice`:
 
-- package-less save of `approve` bound to `task`: FROM written into `P` (receipt `package=P`), moving `P`'s action from `invoice` to `task` · TO the environment's own row on `task` (receipt with no package); `P`'s action on `invoice` is untouched, `GET /meta/action/approve?package=P` still serves it, and `/actions/invoice/approve` still runs it.
-- the same save object-less: the same move · TO the environment's own object-less row.
-- two packages holding `approve` on two other objects: FROM `409 RESOURCE_CONFLICT` naming both · TO the environment's own row.
+- a package-less save of `approve` bound to `task` was written into `P` (receipt `package=P`) and moved `P`'s action from `invoice` to `task`; it now writes the environment's own row on `task` (a receipt with no package), and `P`'s action on `invoice` is untouched: `GET /meta/action/approve?package=P` still serves it and `/actions/invoice/approve` still runs it.
+- the same save with an object-less body: it now writes the environment's own object-less row.
+- with two packages holding `approve` on two other objects, the save was refused `409 RESOURCE_CONFLICT` naming both; it now writes the environment's own row.
 
 Unchanged: the same save on `invoice` (the object `P` binds) is still `P`'s customization; a package on `invoice` and another on `task` still answer a save on `task` with `409` naming both; a managed (code) package's action name is still refused `403 NOT_OVERRIDABLE`; every type other than `action`; a draft save (`?mode=draft`) still inherits the package of the item's active rows.
 
-What to do: to move a package's own action to another object, save it naming the package (`?package=P`). A row an older build moved into a package is not moved back; save it again naming the package with its original object to restore it.
+Nothing to do for the environment's own actions. A package's own action is moved to another object by a save naming the package (`?package=P`), as before. A package's action that an older build moved to another object stays where it was stored.
