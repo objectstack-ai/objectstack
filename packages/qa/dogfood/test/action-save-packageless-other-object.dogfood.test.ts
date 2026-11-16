@@ -77,12 +77,21 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
     expect(saved.message).not.toContain('package=');
     // FROM: `['showcase_task', 'env', PKG]`, the environment's body under P.
     expect(await read(`/meta/action/${name}?package=${PKG}`)).toEqual(['showcase_invoice', 'pkg', PKG]);
-    // The by-name read naming no package is not pinned here: with P's row and
-    // the environment's row both stored it serves P's item, in either save
-    // order (the read side's own seam, not this save door's).
     expect(await routeTarget(`/actions/showcase_invoice/${name}`)).toEqual([400, 'pkg']);
     expect(await routeTarget(`/actions/showcase_task/${name}`)).toEqual([400, 'env']);
     // FROM: 404, the environment held no item of the name.
+    expect(await routeTarget(`/actions/_env/showcase_task/${name}`)).toEqual([400, 'env']);
+
+    // FROM pins: what does NOT move yet (#33904, the read, list and delete
+    // half). Each turns when that card keys its door by object.
+    // FROM: the by-name read naming no package serves P's item, never the
+    // environment's row on `showcase_task`.
+    expect(await read(`/meta/action/${name}`)).toEqual(['showcase_invoice', 'pkg', PKG]);
+    // FROM: a package-less DELETE of the name removes P's row on
+    // `showcase_invoice`, and leaves the environment's row.
+    const deleted = await stack.apiAs(admin, 'DELETE', `/meta/action/${name}`);
+    expect(deleted.status, await deleted.clone().text()).toBe(200);
+    expect((await stack.apiAs(admin, 'GET', `/meta/action/${name}?package=${PKG}`)).status).toBe(404);
     expect(await routeTarget(`/actions/_env/showcase_task/${name}`)).toEqual([400, 'env']);
   }, 120_000);
 

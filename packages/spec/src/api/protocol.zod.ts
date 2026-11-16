@@ -1215,7 +1215,12 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'creates the package-unbound draft. It is refused `409 RESOURCE_CONFLICT` '
     + 'when the active rows (or, with none and no package-unbound draft, the '
     + 'drafts) are bound to two or more packages, as that publish is (see '
-    + '`PublishMetaItemRequestSchema.packageId`). The row written is also the one the parent-version '
+    + '`PublishMetaItemRequestSchema.packageId`). An `action` is keyed by the '
+    + 'object it binds (ADR-0150 D4): its rows are read at the body\'s object '
+    + 'only, so a body bound to an object no package\'s active row binds the '
+    + 'name to writes the environment\'s own row (or draft, which the per-item '
+    + 'publish naming no package promotes there), never a package\'s item. '
+    + 'The row written is also the one the parent-version '
     + 'resolution reads: an unpinned save takes its version as the parent '
     + '(last-write-wins), a pinned one is judged against it, and the item '
     + 'read at the same scope serves it as `version`.',
