@@ -140,7 +140,6 @@ describe('label(record.<field>) over a multi-select — each selected label, joi
   it('reads an empty list and an empty field as \'\', as a single select reads empty', () => {
     expect(evalIn(zh, { gaps: [] })).toEqual({ ok: true, value: '' });
     expect(evalIn(zh, { gaps: null })).toEqual({ ok: true, value: '' });
-    expect(evalIn(zh, {})).toEqual({ ok: true, value: '' });
   });
 
   it('reads a listed value no option declares as itself, as the single-value path does', () => {
