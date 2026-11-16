@@ -1458,6 +1458,14 @@ interface CubeScope {
   getCompiledDataset(name: string): CompiledDataset | undefined;
   /** Record a cube this call minted — `ensureCube`'s inference or augmentation. */
   register(cube: Cube): void;
+  /**
+   * [ADR-0021, ADR-0149 D1] True for one `queryDataset` call's scope: the
+   * dataset door answers only the members its dataset declares, so its
+   * source-field refusals must not tell the author that an undeclared member is
+   * inferred or allowed. Absent on the shared scope and on the ad-hoc doors,
+   * which keep their ad-hoc members and their hint.
+   */
+  readonly datasetDoor?: boolean;
 }
 
 /** The strategy context's three name-keyed reads, answered from one {@link CubeScope}. */
@@ -2812,6 +2820,7 @@ export class AnalyticsService implements IAnalyticsService {
       register: (cube) => {
         cubes.set(cube.name, cube);
       },
+      datasetDoor: compiled !== undefined,
     };
   }
 
@@ -3146,8 +3155,8 @@ export class AnalyticsService implements IAnalyticsService {
             // (`bogus`) is refused `INVALID_FIELD` / 400 with the same message,
             // where the evaluator grouped every row under one `null` key. One
             // that names a real field (`amount`) groups by it, here as there.
-            this.assertMeasureFields(q, cube, Object.keys(compiled.cube.measures));
-            this.assertDimensionFields(q, cube, Object.keys(compiled.cube.dimensions));
+            this.assertMeasureFields(q, cube, Object.keys(compiled.cube.measures), true);
+            this.assertDimensionFields(q, cube, Object.keys(compiled.cube.dimensions), true);
             // [#28257] …and the structured-JSON dimension door (#20807): a
             // grouped dimension over a `json` column is refused there, where
             // the evaluator grouped by each row's object value.
@@ -4036,6 +4045,7 @@ export class AnalyticsService implements IAnalyticsService {
   private ensureCube(query: AnalyticsQuery, scope: CubeScope): void {
     const name = query.cube!;
     let cube = scope.getCube(name);
+    const datasetDoor = scope.datasetDoor === true;
 
     if (!cube) {
       // [#3867] Auto-inference below sets `cube.sql = name`, so from here on
@@ -4050,12 +4060,12 @@ export class AnalyticsService implements IAnalyticsService {
       // is registered — a rejected query must leave no trace in the registry
       // (same rule the #3867 gate above keeps), or a retry would find a
       // "registered" cube carrying the bogus measure and sail straight to SQL.
-      this.assertMeasureFields(query, cube, Object.keys(cube.measures));
+      this.assertMeasureFields(query, cube, Object.keys(cube.measures), datasetDoor);
       // [#5520] …and the dimensions', for exactly the same reason. On this path
       // `cube.dimensions` was minted from the query moments ago, so the bogus
       // spelling is in there — which is why the suggestion list is computed by
       // subtraction inside the gate rather than echoed verbatim.
-      this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      this.assertDimensionFields(query, cube, Object.keys(cube.dimensions), datasetDoor);
       // [#20807] …and a grouped dimension's column must not be structured JSON.
       this.assertDimensionsGroupScalarColumns(query, cube);
       // [#21044] …and a measure's aggregate must be one the aggregate ×
@@ -4132,11 +4142,11 @@ export class AnalyticsService implements IAnalyticsService {
       // vocabulary. Snapshot the declared list BEFORE registering the augmented
       // cube so the rejection can suggest what the caller could have meant —
       // and so a rejected query leaves the registry as it found it.
-      this.assertMeasureFields(query, augmented, Object.keys(cube.measures));
+      this.assertMeasureFields(query, augmented, Object.keys(cube.measures), datasetDoor);
       // [#5520] Dimensions are never augmented (nothing infers one), so the
       // authored/compiled list IS the vocabulary a caller may name — and the one
       // the rejection suggests.
-      this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions));
+      this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions), datasetDoor);
       this.assertDimensionsGroupScalarColumns(query, augmented);
       // [#21044] Judged on the AUGMENTED cube: a suffix-inferred measure and an
       // authored one are one population for the aggregate × field-type table.
@@ -4154,8 +4164,8 @@ export class AnalyticsService implements IAnalyticsService {
     } else {
       // No inference happened — every measure is declared. Still validate: an
       // authored cube can declare a measure over a field the object dropped.
-      this.assertMeasureFields(query, cube, Object.keys(cube.measures));
-      this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      this.assertMeasureFields(query, cube, Object.keys(cube.measures), datasetDoor);
+      this.assertDimensionFields(query, cube, Object.keys(cube.dimensions), datasetDoor);
       this.assertDimensionsGroupScalarColumns(query, cube);
       this.assertMeasureFieldTypes(query, cube);
       this.assertRecordCurrencyGrouped(query, cube);
@@ -4326,8 +4336,14 @@ export class AnalyticsService implements IAnalyticsService {
    * What changed is what can reach it: a dotted measure is now either a
    * `<cube>.` qualifier or a key the cube itself declares, because every other
    * dotted spelling is refused at the mint before this gate runs.
+   *
+   * [ADR-0021, ADR-0149 D1] `datasetDoor` words the remedy for a dataset
+   * query, which reaches this gate only through a DECLARED measure (an
+   * undeclared one is refused first, as undeclared): the hint about
+   * suffix-inferred measures is true of the cube door alone, so on the dataset
+   * door the refusal points at the measure's declared field instead.
    */
-  private assertMeasureFields(query: AnalyticsQuery, cube: Cube, declaredMeasures: string[]): void {
+  private assertMeasureFields(query: AnalyticsQuery, cube: Cube, declaredMeasures: string[], datasetDoor = false): void {
     const probe = this.getObjectFieldNames;
     if (!probe) return;
     const measures = query.measures ?? [];
@@ -4372,9 +4388,13 @@ export class AnalyticsService implements IAnalyticsService {
         `Measure '${measure}' on cube '${cube.name}' aggregates field '${source}', which object ` +
           `'${object}' does not have. ` +
           `Valid measures: ${usable.join(', ') || '(none)'}. ` +
-          `Other measures are inferred from the object's OWN fields as ` +
-          `'<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct', so check the spelling of ` +
-          `'${source}' — known fields: ${[...fieldNames].sort().join(', ')}.`,
+          (datasetDoor
+            ? `The dataset declares this measure over '${source}': point its \`field\` at one of the ` +
+              `object's fields, or remove the measure`
+            : `Other measures are inferred from the object's OWN fields as ` +
+              `'<field>_sum' / '_avg' / '_min' / '_max' / '_count_distinct', so check the spelling of ` +
+              `'${source}'`) +
+          ` — known fields: ${[...fieldNames].sort().join(', ')}.`,
       ) as Error & { code?: string; status?: number; field?: string; object?: string; param?: string; measure?: string };
       err.code = 'INVALID_FIELD';
       err.status = 400;
@@ -4436,8 +4456,14 @@ export class AnalyticsService implements IAnalyticsService {
    * Runs after the measure gate and before the `where` gate on each `ensureCube`
    * path, so a query that gets several wrong is answered about its measure
    * first — one rejection at a time, naming a real mistake either way.
+   *
+   * [ADR-0021, ADR-0149 D1] On the dataset door (`datasetDoor`) an undeclared
+   * dimension is refused first, as undeclared, so this gate meets only a
+   * DECLARED one, and "the object's own fields may be used without declaring
+   * them" is false there: the refusal points at the dimension's declared
+   * field instead. The cube door keeps the hint.
    */
-  private assertDimensionFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[]): void {
+  private assertDimensionFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[], datasetDoor = false): void {
     const probe = this.getObjectFieldNames;
     if (!probe) return;
     /** Every dimension this query names, tagged with the request key it came from. */
@@ -4486,9 +4512,12 @@ export class AnalyticsService implements IAnalyticsService {
         `${kind} '${member}' on cube '${cube.name}' ${verb} field '${source}', which object ` +
           `'${object}' does not have. ` +
           `Valid dimensions: ${usable.join(', ') || '(none)'}. ` +
-          `Any of the object's OWN fields may also be used as a dimension without the cube ` +
-          `declaring it, so check the spelling of ` +
-          `'${source}' — known fields: ${[...fieldNames].sort().join(', ')}.`,
+          (datasetDoor
+            ? `The dataset declares this dimension over '${source}': point its \`field\` at one of the ` +
+              `object's fields, or remove the dimension`
+            : `Any of the object's OWN fields may also be used as a dimension without the cube ` +
+              `declaring it, so check the spelling of '${source}'`) +
+          ` — known fields: ${[...fieldNames].sort().join(', ')}.`,
       ) as Error & { code?: string; status?: number; field?: string; object?: string; param?: string; dimension?: string };
       err.code = 'INVALID_FIELD';
       err.status = 400;

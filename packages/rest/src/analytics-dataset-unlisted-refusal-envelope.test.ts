@@ -401,5 +401,7 @@ describe('[#5716] the two sites this route cannot show, and why', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('INVALID_FIELD');
     expect(String(res.body.message)).toMatch(/aggregates field 'profit', which object 'crm_opportunity' does not have/);
+    expect(String(res.body.message)).toContain("The dataset declares this measure over 'profit': point its `field` at one of the object's fields, or remove the measure");
+    expect(String(res.body.message)).not.toMatch(/inferred from the object's OWN fields/);
   });
 });

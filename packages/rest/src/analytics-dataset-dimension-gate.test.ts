@@ -200,6 +200,10 @@ describe('[#5520] a bogus selection dimension answers 400 INVALID_FIELD, end to 
     expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
     expect(String(res.body.message)).toMatch(/groups by field 'bogus_dim'/);
     expect(String(res.body.message)).toMatch(/object 'crm_account' does not have/);
+    // [ADR-0021, ADR-0149 D1] The dataset door's remedy is the declared field,
+    // never the cube door's "own fields need no declaration" hint.
+    expect(String(res.body.message)).toContain("The dataset declares this dimension over 'bogus_dim': point its `field` at one of the object's fields, or remove the dimension");
+    expect(String(res.body.message)).not.toMatch(/without the cube declaring it/);
   });
 
   it('carries no generated SQL — because the statement was never built', async () => {

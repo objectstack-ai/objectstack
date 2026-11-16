@@ -145,6 +145,35 @@ describe('[#28172] an undeclared measure on the native, ObjectQL and draft-previ
     });
   }
 
+  it('a stale DECLARED measure over a field the object does not have: one dataset-door remedy on every face, the draft preview included', async () => {
+    // [ADR-0021, ADR-0149 D1] The source-field gate meets a dataset only
+    // through a declared member, so its refusal points at the declared field
+    // and never offers the cube door's suffix-inferred measures.
+    const stale = DatasetSchema.parse({ ...DATASET, measures: [...DATASET.measures, { name: 'ghost_total', aggregate: 'sum', field: 'ghost' }] });
+    const refusals = await Promise.all(
+      FACES.map((face) =>
+        refusalOf(
+          services[face === 'preview' ? 'objectql' : face]!.queryDataset(
+            stale,
+            { dimensions: ['region'], measures: ['ghost_total'] } as never,
+            undefined,
+            face === 'preview' ? { previewDrafts: true } : undefined,
+          ),
+        ),
+      ),
+    );
+    for (const err of refusals) {
+      expect(err.code, err.message).toBe('INVALID_FIELD');
+      expect(err.status).toBe(400);
+      expect(err.field).toBe('ghost');
+      expect(err.message).toContain("The dataset declares this measure over 'ghost': point its `field` at one of the object's fields, or remove the measure");
+      expect(err.message).not.toMatch(/inferred from the object's OWN fields/);
+    }
+    const [native, objectql, preview] = refusals;
+    expect(preview.message).toBe(native.message);
+    expect(objectql.message).toBe(native.message);
+  });
+
   it("CONTROL: 'total' serves the same values on every face", async () => {
     for (const face of FACES) {
       const result = await ask(face, 'total');

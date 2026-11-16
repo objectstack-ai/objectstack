@@ -209,3 +209,66 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(out).toBeDefined();
   });
 });
+
+/**
+ * [ADR-0021, ADR-0149 D1] The source-field gates' remedy on each door. A
+ * dataset reaches them only through a DECLARED member whose field the object
+ * does not have (a stale declaration): an undeclared one is refused first,
+ * above. Their cube-door hint — measures are inferred from the object's own
+ * fields as `FIELD_sum` …, and any own field may be used as a dimension
+ * without declaring it — is false on the dataset door, so there the refusal
+ * points at the member's declared field. The cube door keeps its hint.
+ */
+describe('the source-field gates word their remedy for the door that asked', () => {
+  const STALE: Dataset = DatasetSchema.parse({
+    name: 'stale_pipeline',
+    label: 'Stale pipeline',
+    object: 'crm_opp',
+    dimensions: [
+      { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
+      { name: 'ghost_dim', label: 'Ghost', field: 'ghost', type: 'string' },
+    ],
+    measures: [
+      { name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' },
+      { name: 'ghost_total', label: 'Ghost total', aggregate: 'sum', field: 'ghost' },
+    ],
+  });
+  const MEASURE_HINT = /inferred from the object's OWN fields/;
+  const DIMENSION_HINT = /without the cube declaring it/;
+
+  it('the dataset door: a stale declared measure names its field and the fix, never the inferred-measure hint', async () => {
+    const { service, reads } = await boot();
+    const e = await service.queryDataset(STALE, { measures: ['ghost_total'] } as never, ADMIN).catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'ghost', param: 'measures' });
+    expect(messageOf(e)).toMatch(/aggregates field 'ghost', which object 'crm_opp' does not have/);
+    expect(messageOf(e)).toContain("The dataset declares this measure over 'ghost': point its `field` at one of the object's fields, or remove the measure");
+    expect(messageOf(e)).not.toMatch(MEASURE_HINT);
+    expect(reads).toEqual([]);
+  });
+
+  it('the dataset door: a stale declared dimension names its field and the fix, never the undeclared-dimension hint', async () => {
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(STALE, { measures: ['revenue'], dimensions: ['ghost_dim'] } as never, ADMIN)
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'ghost', param: 'dimensions' });
+    expect(messageOf(e)).toMatch(/groups by field 'ghost', which object 'crm_opp' does not have/);
+    expect(messageOf(e)).toContain("The dataset declares this dimension over 'ghost': point its `field` at one of the object's fields, or remove the dimension");
+    expect(messageOf(e)).not.toMatch(DIMENSION_HINT);
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: the cube door keeps both hints, because there they are true', async () => {
+    const { service } = await boot();
+    const measure = await service.query({ cube: 'crm_opp', measures: ['ghost_sum'] } as never, ADMIN).catch((err) => err);
+    expect(measure).toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'ghost' });
+    expect(messageOf(measure)).toMatch(MEASURE_HINT);
+    expect(messageOf(measure)).not.toContain('The dataset declares');
+    const dimension = await service
+      .query({ cube: 'crm_opp', measures: ['count'], dimensions: ['ghost'] } as never, ADMIN)
+      .catch((err) => err);
+    expect(dimension).toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'ghost' });
+    expect(messageOf(dimension)).toMatch(DIMENSION_HINT);
+    expect(messageOf(dimension)).not.toContain('The dataset declares');
+  });
+});
