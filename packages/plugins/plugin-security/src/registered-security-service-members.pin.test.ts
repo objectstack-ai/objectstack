@@ -90,11 +90,17 @@ const DECLARED_MEMBERS = {
 /**
  * Members the registered service serves that are deliberately NOT part of the
  * contract — plugin-internal, no caller outside this package — each with the
- * reason. Empty: every served member is declared. An entry here is a decision
- * that a member stays off the contract; a member another package calls is a
- * contract, and belongs on `ISecurityService` instead.
+ * reason. An entry here is a decision that a member stays off the contract; a
+ * member another package calls is a contract, and belongs on
+ * `ISecurityService` instead.
  */
-const SERVED_NOT_DECLARED: Readonly<Record<string, string>> = {};
+const SERVED_NOT_DECLARED: Readonly<Record<string, string>> = {
+  canWriteObject:
+    'the object-level write check a flow dry run asks (`@objectstack/service-automation`). The ' +
+    '`IAutomationService.dryRun` contract (`FlowDryRunWritePermission`, packages/spec/src/contracts/' +
+    'automation-service.ts) names it a method of this plugin\'s service and NOT of ISecurityService, so a ' +
+    'kernel without this plugin has none and every write step answers `not_judged`',
+};
 
 /**
  * OPTIONAL members this plugin must SERVE, each with the reason its absence is
