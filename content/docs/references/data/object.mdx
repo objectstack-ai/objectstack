@@ -82,7 +82,7 @@ const result = ApiMethod.parse(data);
 | **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
-| **seal** | `{ valueFields: string[] }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` `onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A deployment with no crypto provider seals nothing and reports that at error. |
+| **seal** | `{ valueFields: string[]; chainField?: string }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` `onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A deployment with no crypto provider seals nothing and reports that at error. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 ### Nested Shape: `Lifecycle.retention`
@@ -121,6 +121,7 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valueFields** | `string[]` | ✅ | Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never carries their values; every other declared column enters in clear. Each must name a declared field other than `id` and `created_at`, which order the leaves. |
+| **chainField** | `string` | optional | The column whose value names the organization chain each sealed row joins (default `tenant_id`); a row whose value is empty seals into the deployment chain. It must name a declared field or a column the platform injects, such as the tenant column `organization_id`, whose value is one text on every store (not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which order the leaves; and not a `valueFields` member. Fixed once the object has checkpoints. |
 
 
 ---
@@ -366,7 +367,7 @@ const result = ApiMethod.parse(data);
 | **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
-| **seal** | `{ valueFields: string[] }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` `onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A deployment with no crypto provider seals nothing and reports that at error. |
+| **seal** | `{ valueFields: string[]; chainField?: string }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` `onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A deployment with no crypto provider seals nothing and reports that at error. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 ### Nested Shape: `Object.activityMilestones[number]`
