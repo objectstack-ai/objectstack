@@ -32,6 +32,9 @@ import { IntervalJobAdapter } from './interval-job-adapter.js';
 const TICK = 1_000;
 const DRAIN = 2_000;
 
+/** The lines a run that outlived its kernel used to leave. */
+const DRIVER_FAILURE = /failed to update sys_job_run|bumpJob failed|failed to insert sys_job_run/;
+
 /** An engine double that a "driver release" turns into a refusing one. */
 function makeReleasableEngine() {
   const tables = new Map<string, any[]>();
@@ -165,7 +168,7 @@ describe.each(LEGS)('shutdown with a scheduled run in flight — $label', (leg) 
     await vi.advanceTimersByTimeAsync(TICK * 5);
     expect(handler).toHaveBeenCalledTimes(1);
     expect(engine.afterRelease).toEqual([]);
-    expect(logger.warns.filter((w) => w.startsWith('DbJobAdapter:'))).toEqual([]);
+    expect(logger.warns.filter((w) => DRIVER_FAILURE.test(w))).toEqual([]);
   });
 
   it('records a run still going past the drain bound as interrupted, never leaves it running', async () => {
@@ -199,8 +202,34 @@ describe.each(LEGS)('shutdown with a scheduled run in flight — $label', (leg) 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(engine.afterRelease).toEqual([]);
     expect(engine.rows('sys_job_run').map((r) => r.status)).toEqual(['failed']);
-    expect(logger.warns.filter((w) => /failed to update sys_job_run|bumpJob failed|failed to insert sys_job_run/.test(w)))
-      .toEqual([]);
+    expect(logger.warns.filter((w) => DRIVER_FAILURE.test(w))).toEqual([]);
+  });
+
+  it('starts no retry attempt once shutdown has begun', async () => {
+    vi.useFakeTimers({ now: new Date('2026-01-01T00:00:00.000Z') });
+    const engine = makeReleasableEngine();
+    const logger = makeLogger();
+    const db = leg.build(engine, logger);
+    const handler = vi.fn(async () => { throw new Error('first attempt fails'); });
+    // The retry is due 5 s after the first attempt fails — past the drain bound.
+    await db.schedule('rp_tick', leg.schedule, handler, {
+      retryPolicy: { maxRetries: 1, backoffMs: DRAIN * 2.5, backoffMultiplier: 1, maxRetryDelayMs: 30_000, jitter: false },
+    });
+
+    await vi.advanceTimersByTimeAsync(leg.firstFireAfter);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(engine.rows('sys_job_run').map((r) => r.status)).toEqual(['failed']);
+
+    const destroying = db.destroy();
+    await vi.advanceTimersByTimeAsync(DRAIN);
+    await destroying;
+    engine.release();
+
+    await vi.advanceTimersByTimeAsync(DRAIN * 5);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(engine.afterRelease).toEqual([]);
+    expect(engine.rows('sys_job_run').map((r) => r.status)).toEqual(['failed']);
+    expect(logger.warns.filter((w) => DRIVER_FAILURE.test(w))).toEqual([]);
   });
 });
 
