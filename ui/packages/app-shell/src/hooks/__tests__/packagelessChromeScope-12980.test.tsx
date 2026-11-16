@@ -169,3 +169,25 @@ describe('package-less app: the chrome readers read the names-only scope (object
     expect(read().presence.presence).toBe('present');
   });
 });
+
+describe('objectstack#34244 — the served view items ask no required object the host lacks by name', () => {
+  /** An app whose entries open the object they require: `note` is registered, `gone_obj` is not. */
+  const GATED_APP = {
+    name: 'notes',
+    navigation: [
+      { id: 'nav_note', type: 'object', objectName: 'note', requiresObject: 'note' },
+      { id: 'nav_gone', type: 'object', objectName: 'gone_obj', requiresObject: 'gone_obj' },
+    ],
+  };
+
+  it('asks both in the presence read, and by name only the one it serves', async () => {
+    const calls: string[] = [];
+    const read = mount(GATED_APP, calls);
+    await waitFor(() => expect(isServedView(read().served, 'note', 'note.recent')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(objectCalls(calls)).toContain('object?names=note,gone_obj');
+    expect(objectCalls(calls)).toContain('object/note');
+    expect(objectCalls(calls)).not.toContain('object/gone_obj');
+  });
+});
