@@ -723,12 +723,19 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
     const AUTH_F = 'com.qa.save_authored_gamma';
     const BOTH_SHIP = ['ship_none_dash', 'ship_drow_dash', 'ship_de_dash', 'ship_ed_dash'];
     const E_SHIPS = ['e_only_dash', 'e_authored_drow_dash', 'e_unbound_drow_dash', 'e_two_authored_dash'];
+    // [#33955] Names two ENABLED packages ship (neither disabled), and [#34144] names only D ships.
+    const TWO_SHIP = ['two_none_dash', 'two_erow_dash', 'two_drow_dash', 'two_rows_dash', 'two_unbound_dash', 'two_draft_dash', 'two_del_dash', 'two_norow_dash'];
+    const D_SHIPS = ['d_none_dash', 'd_drow_dash', 'd_unbound_dash', 'd_draft_dash', 'd_del_dash', 'd_norow_dash'];
+    const MAIL = 'save_beta_welcome';
+    const mailAt = (locale: string, subject: string) => ({ name: MAIL, label: 'Welcome', locale, subject, bodyHtml: `<p>${subject}</p>` });
     const savePackageOf = (id: string) => ({
         id, name: id.split('.').pop(), namespace: id.split('.').pop(), version: '1.0.0', type: 'app', objects: [],
-        dashboards: [...BOTH_SHIP, ...(id === CODE_E ? E_SHIPS : [])].map((name) => ({ name, label: `${id} code`, widgets: [] })),
+        dashboards: [...BOTH_SHIP, ...TWO_SHIP, ...(id === CODE_E ? E_SHIPS : D_SHIPS)].map((name) => ({ name, label: `${id} code`, widgets: [] })),
+        // [#34262] A bundled name D alone ships, at one member (`en-US`).
+        ...(id === CODE_D ? { emailTemplates: [mailAt('en-US', 'D en')] } : {}),
     });
 
-    interface SaveBooted extends Booted { put(name: string, label: string): Promise<{ status: number | undefined; body: any }> }
+    interface SaveBooted extends Booted { put(name: string, label: string, query?: Record<string, string>): Promise<{ status: number | undefined; body: any }> }
 
     async function bootSaveKernel(order: readonly string[], transport: 'dispatcher' | 'rest'): Promise<SaveBooted> {
         const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
@@ -755,14 +762,15 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
         if (transport === 'dispatcher') {
             return {
                 kernel, engine, root,
-                put: async (name, label) => {
+                put: async (name, label, query = {}) => {
                     const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
                     (dispatcher as any).timedResolveExecutionContext = async () => ({ ...CALLER });
-                    const request = new Request(`http://localhost/api/v1/meta/dashboard/${name}`, {
+                    const search = new URLSearchParams(query).toString();
+                    const request = new Request(`http://localhost/api/v1/meta/dashboard/${name}${search ? `?${search}` : ''}`, {
                         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body(name, label)),
                     });
                     try {
-                        const out: any = await dispatcher.dispatch('PUT', `/meta/dashboard/${name}`, body(name, label), {}, { request } as any, '/api/v1');
+                        const out: any = await dispatcher.dispatch('PUT', `/meta/dashboard/${name}`, body(name, label), query, { request } as any, '/api/v1');
                         return { status: out.response?.status as number | undefined, body: out.response?.body };
                     } catch (e) {
                         const thrown = resolveThrownHttpError(e);
@@ -780,7 +788,7 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
         rest.resolveExecCtx = async () => ({ ...CALLER });
         return {
             kernel, engine, root,
-            put: async (name, label) => {
+            put: async (name, label, query = {}) => {
                 const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
                 res.status = (code: number) => { res.statusCode = code; return res; };
                 res.json = (payload: any) => { res.body = payload; return res; };
@@ -791,7 +799,7 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
                 res.write = () => true;
                 await route.handler({
                     method: 'PUT', path: `/api/v1/meta/dashboard/${name}`, params: { type: 'dashboard', name },
-                    headers: {}, query: {}, body: body(name, label),
+                    headers: {}, query, body: body(name, label),
                 }, res);
                 return { status: res.statusCode, body: res.body };
             },
@@ -817,6 +825,23 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
     const expectRefusedNamingBoth = (answer: { status: number | undefined; body: any }, e: string, d: string) => {
         expect([answer.status, codeOf(answer.body)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         for (const id of [e, d]) expect(JSON.stringify(answer.body)).toContain(id);
+    };
+    /** [#34144] Refused with the `?package=` remedy, naming none of `ids`. */
+    const expectRefusedNamingNone = (answer: { status: number | undefined; body: any }, ids: readonly string[]) => {
+        expect([answer.status, codeOf(answer.body)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(JSON.stringify(answer.body)).toContain('?package=');
+        for (const id of ids) expect(JSON.stringify(answer.body)).not.toContain(id);
+    };
+    /** Every stored row of the dashboard, active and draft: `state:binding:label`. */
+    const everyRow = async (engine: ObjectQL, name: string) => ((await engine.find('sys_metadata', { where: { type: 'dashboard', name }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[])
+        .map((row) => `${row.state}:${row.package_id ?? null}:${JSON.parse(String(row.metadata)).label}`).sort();
+    /** What `call` rejects with, or `{ resolved }` when it resolves. */
+    const refusalOf = (call: Promise<unknown>): Promise<any> => call.then((resolved) => ({ resolved }), (error: unknown) => error);
+    /** [#34144] An in-process delete refused with the `?package=` remedy, naming none of `ids`. */
+    const expectDeleteRefusedNamingNone = (refusal: any, ids: readonly string[]) => {
+        expect([refusal?.code, refusal?.status], JSON.stringify(refusal?.resolved ?? String(refusal?.message))).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(String(refusal?.message)).toContain('?package=');
+        for (const id of ids) expect(String(refusal?.message)).not.toContain(id);
     };
 
     describe.each([
@@ -965,14 +990,160 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
             });
         });
 
-        it('CONTROL: a name only the disabled D holds (its row alone) is saved as before, at D\'s address (no served holder takes it)', async () => {
+        // [#34144, ruling A, ADR-0150 D3] A name only disabled packages hold:
+        // the bare read answers the missing name, so the bare save is refused
+        // with the `?package=` remedy and names no package. It edited D's row
+        // (200), or stored a package-unbound row every read then withholds.
+        it('ruling A: a name only the disabled D holds (its row alone): the bare save is refused naming no package and D\'s row is byte-unchanged; ?package=D saves as before, and re-enabled the bare save is D\'s again (CONTROL)', async () => {
             await layRow(booted!.engine, 'authored_donly_dash', AUTH_D, 'disabled row');
+            const before = await storedRows(booted!.engine, 'authored_donly_dash');
             await withDisabled(AUTH_D, async () => {
-                const saved = await booted!.put('authored_donly_dash', 'edited');
-                expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-                const rows = await storedRows(booted!.engine, 'authored_donly_dash');
-                expect([Object.keys(rows), rows[AUTH_D]?.label]).toEqual([[AUTH_D], 'edited']);
+                expect((await get(booted!.kernel, '/meta/dashboard/authored_donly_dash')).status).toBe(404);
+                expectRefusedNamingNone(await booted!.put('authored_donly_dash', 'edited'), [AUTH_D, CODE_D, CODE_E]);
+                expect(await storedRows(booted!.engine, 'authored_donly_dash')).toEqual(before);
+                // CONTROL: the address naming D, unchanged.
+                const named = await booted!.put('authored_donly_dash', 'named', { package: AUTH_D });
+                expect(named.status, JSON.stringify(named.body)).toBe(200);
+                expect((await storedRows(booted!.engine, 'authored_donly_dash'))[AUTH_D]?.label).toBe('named');
             });
+            // CONTROL: re-enabled, the bare save writes D's row, as before.
+            const saved = await booted!.put('authored_donly_dash', 'edited');
+            expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+            const rows = await storedRows(booted!.engine, 'authored_donly_dash');
+            expect([Object.keys(rows), rows[AUTH_D]?.label]).toEqual([[AUTH_D], 'edited']);
+        });
+
+        it.each([
+            { rows: 'no stored row', name: 'd_none_dash', laid: false },
+            { rows: 'D\'s row', name: 'd_drow_dash', laid: true },
+        ])('ruling A: only the disabled D ships it ($rows): the bare save is refused naming no package and nothing is written; re-enabled, it saves as before (CONTROL)', async ({ name, laid }) => {
+            if (laid) await layRow(booted!.engine, name, CODE_D, 'disabled row');
+            const before = await everyRow(booted!.engine, name);
+            await withDisabled(CODE_D, async () => {
+                expect((await get(booted!.kernel, `/meta/dashboard/${name}`)).status).toBe(404);
+                expectRefusedNamingNone(await booted!.put(name, 'edited'), [CODE_D, CODE_E]);
+                expect(await everyRow(booted!.engine, name)).toEqual(before);
+            });
+            const saved = await booted!.put(name, 'edited');
+            expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+            expect(Object.values(await storedRows(booted!.engine, name)).map((row) => row.label)).toEqual(['edited']);
+        });
+
+        it('ruling A, aligned: the bare draft save and the bare delete of a name only the disabled D holds are refused naming no package, and nothing moves; the delete naming D removes D\'s row as before (CONTROL)', async () => {
+            await layRow(booted!.engine, 'd_del_dash', CODE_D, 'disabled row');
+            const before = { draft: await everyRow(booted!.engine, 'd_draft_dash'), del: await everyRow(booted!.engine, 'd_del_dash') };
+            const protocol = booted!.kernel.getService<any>('protocol');
+            await withDisabled(CODE_D, async () => {
+                expectRefusedNamingNone(await booted!.put('d_draft_dash', 'drafted', { mode: 'draft' }), [CODE_D, CODE_E]);
+                expectDeleteRefusedNamingNone(await refusalOf(protocol.deleteMetaItem({ type: 'dashboard', name: 'd_del_dash' })), [CODE_D, CODE_E]);
+                expect({ draft: await everyRow(booted!.engine, 'd_draft_dash'), del: await everyRow(booted!.engine, 'd_del_dash') }).toEqual(before);
+                expect(await protocol.deleteMetaItem({ type: 'dashboard', name: 'd_del_dash', packageId: CODE_D })).toMatchObject({ success: true });
+                expect(await everyRow(booted!.engine, 'd_del_dash')).toEqual([]);
+            });
+        });
+
+        // [#34144 review#1 S2, ruling A] Over NO stored row the bare delete and
+        // the bare draft discard answered the no-op receipt (`success: true,
+        // reset: false`). They are refused as the bare save is.
+        it('ruling A, no stored row: the bare delete and the bare draft discard of a name only the disabled D holds are refused naming no package, not answered the no-op receipt; naming D, the receipt as before (CONTROL)', async () => {
+            const protocol = booted!.kernel.getService<any>('protocol');
+            await withDisabled(CODE_D, async () => {
+                expectDeleteRefusedNamingNone(await refusalOf(protocol.deleteMetaItem({ type: 'dashboard', name: 'd_norow_dash' })), [CODE_D, CODE_E]);
+                expectDeleteRefusedNamingNone(await refusalOf(protocol.deleteMetaItem({ type: 'dashboard', name: 'd_norow_dash', state: 'draft' })), [CODE_D, CODE_E]);
+                expect(await everyRow(booted!.engine, 'd_norow_dash')).toEqual([]);
+                expect(await protocol.deleteMetaItem({ type: 'dashboard', name: 'd_norow_dash', packageId: CODE_D })).toMatchObject({ success: true, reset: false });
+            });
+        });
+
+        it('CONTROL: the environment\'s own items save as before beside a disabled D: a name no package holds, and the package-unbound row of a name only D ships (which the bare read withholds)', async () => {
+            await layRow(booted!.engine, 'env_only_dash', null, 'environment row');
+            await layRow(booted!.engine, 'd_unbound_dash', null, 'environment row');
+            await withDisabled(CODE_D, async () => {
+                for (const name of ['env_only_dash', 'd_unbound_dash']) {
+                    const saved = await booted!.put(name, 'edited');
+                    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+                    const rows = await storedRows(booted!.engine, name);
+                    expect([Object.keys(rows), rows.null?.label]).toEqual([['null'], 'edited']);
+                }
+            });
+        });
+
+        // [#33955, ADR-0150 D3/D5, red line 2] Two ENABLED packages ship the
+        // name: the bare read refuses 409 naming both, so the bare save does
+        // too, never a guess. It answered 200, writing a package-unbound row
+        // over no stored row and updating the one package's row over one.
+        it.each([
+            { rows: 'no stored row', name: 'two_none_dash', laid: [] as string[] },
+            { rows: 'E\'s row', name: 'two_erow_dash', laid: [CODE_E] },
+            { rows: 'D\'s row', name: 'two_drow_dash', laid: [CODE_D] },
+            { rows: 'a row of each (CONTROL: refused before too)', name: 'two_rows_dash', laid: [CODE_E, CODE_D] },
+        ])('two enabled packages ship it, $rows: the bare save refuses 409 naming both, as the bare read does, and nothing is written', async ({ name, laid }) => {
+            for (const id of laid) await layRow(booted!.engine, name, id, `${id} row`);
+            const before = await everyRow(booted!.engine, name);
+            expectRefusedNamingBoth(await get(booted!.kernel, `/meta/dashboard/${name}`), CODE_E, CODE_D);
+            expectRefusedNamingBoth(await booted!.put(name, 'edited'), CODE_E, CODE_D);
+            expect(await everyRow(booted!.engine, name)).toEqual(before);
+        });
+
+        it('two enabled packages ship it, aligned: the bare draft save and the bare delete refuse naming both and nothing moves; ?package=E saves and deletes E\'s row as before (CONTROL)', async () => {
+            await layRow(booted!.engine, 'two_del_dash', CODE_E, 'E row');
+            const protocol = booted!.kernel.getService<any>('protocol');
+            const before = { draft: await everyRow(booted!.engine, 'two_draft_dash'), del: await everyRow(booted!.engine, 'two_del_dash') };
+            expectRefusedNamingBoth(await booted!.put('two_draft_dash', 'drafted', { mode: 'draft' }), CODE_E, CODE_D);
+            let refusal: any;
+            try { await protocol.deleteMetaItem({ type: 'dashboard', name: 'two_del_dash' }); } catch (error) { refusal = error; }
+            expect([refusal?.code, refusal?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+            for (const id of [CODE_E, CODE_D]) expect(String(refusal?.message)).toContain(id);
+            expect({ draft: await everyRow(booted!.engine, 'two_draft_dash'), del: await everyRow(booted!.engine, 'two_del_dash') }).toEqual(before);
+            const named = await booted!.put('two_draft_dash', 'named', { package: CODE_E });
+            expect(named.status, JSON.stringify(named.body)).toBe(200);
+            expect(await everyRow(booted!.engine, 'two_draft_dash')).toEqual([`active:${CODE_E}:named`]);
+            expect(await protocol.deleteMetaItem({ type: 'dashboard', name: 'two_del_dash', packageId: CODE_E })).toMatchObject({ success: true });
+            expect(await everyRow(booted!.engine, 'two_del_dash')).toEqual([]);
+        });
+
+        // [#33955 review#1 S2] Over NO stored row the bare delete and the bare
+        // draft discard answered the no-op receipt. They are refused naming
+        // both, as the bare read is.
+        it('two enabled packages ship it, no stored row: the bare delete and the bare draft discard refuse naming both, not answered the no-op receipt; naming E, the receipt as before (CONTROL)', async () => {
+            const protocol = booted!.kernel.getService<any>('protocol');
+            for (const state of [undefined, 'draft'] as const) {
+                const refusal = await refusalOf(protocol.deleteMetaItem({ type: 'dashboard', name: 'two_norow_dash', ...(state ? { state } : {}) }));
+                expect([refusal?.code, refusal?.status], JSON.stringify(refusal?.resolved ?? String(refusal?.message))).toEqual(['RESOURCE_CONFLICT', 409]);
+                for (const id of [CODE_E, CODE_D]) expect(String(refusal?.message)).toContain(id);
+            }
+            expect(await everyRow(booted!.engine, 'two_norow_dash')).toEqual([]);
+            expect(await protocol.deleteMetaItem({ type: 'dashboard', name: 'two_norow_dash', packageId: CODE_E })).toMatchObject({ success: true, reset: false });
+        });
+
+        it('CONTROL: two enabled packages ship it and the environment\'s package-unbound row is stored: the bare save edits that row and the bare delete removes it, as before', async () => {
+            await layRow(booted!.engine, 'two_unbound_dash', null, 'environment row');
+            const saved = await booted!.put('two_unbound_dash', 'edited');
+            expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+            expect(await everyRow(booted!.engine, 'two_unbound_dash')).toEqual(['active:null:edited']);
+            expect(await booted!.kernel.getService<any>('protocol').deleteMetaItem({ type: 'dashboard', name: 'two_unbound_dash' })).toMatchObject({ success: true });
+            expect(await everyRow(booted!.engine, 'two_unbound_dash')).toEqual([]);
+        });
+
+        // [#34262, ruling A] Every holder of a bundled name disabled: the bare
+        // save at a member D never ships was accepted and stored (200), then
+        // withheld by every read until D was enabled again. It is refused as
+        // any bare save of a name only disabled packages hold is.
+        it('ruling A: every holder of a bundled name disabled, the bare save at a member D never ships (and at the one it ships) is refused naming no package and stores nothing; re-enabled, the unshipped member saves (CONTROL)', async () => {
+            const protocol = booted!.kernel.getService<any>('protocol');
+            const mailRows = async () => ((await booted!.engine.find('sys_metadata', { where: { type: 'email_template', name: MAIL }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[]).length;
+            await withDisabled(CODE_D, async () => {
+                for (const locale of ['fr-FR', 'en-US']) {
+                    let refusal: any;
+                    try { await protocol.saveMetaItem({ type: 'email_template', name: MAIL, item: mailAt(locale, `saved ${locale}`) }); } catch (error) { refusal = error; }
+                    expect([refusal?.code, refusal?.status], String(refusal?.message)).toEqual(['RESOURCE_CONFLICT', 409]);
+                    expect(String(refusal?.message)).toContain('?package=');
+                    expect(String(refusal?.message)).not.toContain(CODE_D);
+                }
+                expect(await mailRows()).toBe(0);
+            });
+            expect(await protocol.saveMetaItem({ type: 'email_template', name: MAIL, item: mailAt('fr-FR', 'saved fr-FR') })).toMatchObject({ success: true });
+            expect(await mailRows()).toBe(1);
         });
     });
 });
