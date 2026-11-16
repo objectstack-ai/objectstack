@@ -1220,7 +1220,8 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'only, so a body bound to an object no package\'s active row binds the '
     + 'name to writes the environment\'s own row (or draft, which the per-item '
     + 'publish naming no package promotes there), never a package\'s item; '
-    + 'until the read naming no package keys an action by object (#33904), '
+    // The read half that keys an action by object is #33904.
+    + 'until the read naming no package keys an action by object, '
     + 'the version it serves is the package\'s item\'s, so a save carrying '
     + 'it as the parent is refused as a version conflict. '
     + 'The row written is also the one the parent-version '
