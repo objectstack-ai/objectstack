@@ -305,7 +305,10 @@
           "writeRequiresMasterRead: true"
         ],
         "must_not_contain": [
-          "sharing: { writeRequiresMasterRead"
+          "sharing: { writeRequiresMasterRead",
+          "ownerMayEdit: true, writeRequiresMasterRead: true",
+          "writeRequiresMasterRead: true, ownerMayEdit: true",
+          "required: true, writeRequiresMasterRead"
         ]
       }
     },
