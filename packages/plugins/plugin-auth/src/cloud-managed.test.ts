@@ -908,6 +908,149 @@ describe('on a cloud-managed environment, membership and roles are managed by th
     expectManagedRefusal(v, 'invitation');
     expect(s.invitationsOf('newcomer.membership@example.com')).toHaveLength(0);
   }, 120_000);
+
+  it('add-member admits exactly a platform administrator there: an ordinary member hears 403 PERMISSION_DENIED and nothing is written', async () => {
+    const s = await stage();
+    const row = memberRow(s);
+    s.engine.tables.set(
+      'sys_member',
+      ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.id !== row.id),
+    );
+    const before = structuredClone(memberships(s));
+    setManaged(true);
+    const v = await verdict(
+      await s.fire('/organization/add-member', { userId: s.ids.member, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.member),
+    );
+    expect(v.status, v.text).toBe(403);
+    expect(v.code, v.text).toBe('PERMISSION_DENIED');
+    expect(memberships(s)).toEqual(before);
+  }, 120_000);
+
+  // ── leave: a member ends their own membership ─────────────────────────────
+
+  it('leave answers 409 RESOURCE_CONFLICT to a member, and their membership row is unchanged', async () => {
+    const s = await stage();
+    memberRow(s);
+    const before = structuredClone(memberships(s));
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/leave', { organizationId: DEFAULT_ORG }, s.bearers.member));
+    expectManagedRefusal(v, 'leaveOrganization');
+    expect(memberships(s)).toEqual(before);
+  }, 120_000);
+
+  it('CONTROL: self-hosted, leave answers 200 and ends the membership as before', async () => {
+    const s = await stage();
+    memberRow(s);
+    const v = await verdict(await s.fire('/organization/leave', { organizationId: DEFAULT_ORG }, s.bearers.member));
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+  }, 120_000);
+
+  // ── accept-invitation: an invitation still pending from before ────────────
+
+  /** The ordinary user, with no membership, holding a pending invitation issued while unmanaged. */
+  const pendingInvitationFor = async (s: Staged): Promise<string> => {
+    const row = memberRow(s);
+    s.engine.tables.set(
+      'sys_member',
+      ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.id !== row.id),
+    );
+    const email = String(s.users().find((u) => String(u.id) === s.ids.member)!.email);
+    const issued = await verdict(
+      await s.fire('/organization/invite-member', { email, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.admin),
+    );
+    expect(issued.status, `fixture: the invitation is issued while unmanaged — ${issued.text}`).toBe(200);
+    const [invitation] = s.invitationsOf(email);
+    expect(invitation?.status, 'fixture: the invitation is pending').toBe('pending');
+    return String(invitation.id);
+  };
+
+  it('accept-invitation answers 409 RESOURCE_CONFLICT to the invitee: no membership is created and the invitation stays pending', async () => {
+    const s = await stage();
+    const invitationId = await pendingInvitationFor(s);
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/accept-invitation', { invitationId }, s.bearers.member));
+    expectManagedRefusal(v, 'acceptInvitation');
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+    const invitation = ((s.engine.tables.get('sys_invitation') ?? []) as any[]).find((r) => String(r.id) === invitationId);
+    expect(invitation?.status).toBe('pending');
+  }, 120_000);
+
+  it('CONTROL: self-hosted, accept-invitation answers 200 and creates the membership as before', async () => {
+    const s = await stage();
+    const invitationId = await pendingInvitationFor(s);
+    const v = await verdict(await s.fire('/organization/accept-invitation', { invitationId }, s.bearers.member));
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)?.role).toBe('member');
+  }, 120_000);
+
+  // ── create and delete: an organization's owner membership, and every one ──
+
+  const organizations = (s: Staged) => (s.engine.tables.get('sys_organization') ?? []) as any[];
+  const allMemberships = (s: Staged) => (s.engine.tables.get('sys_member') ?? []) as any[];
+  const SECOND_ORG = { name: 'Second Org', slug: 'second-org-membership' };
+
+  it('create answers 409 RESOURCE_CONFLICT to the owner: no organization and no owner membership are written', async () => {
+    const s = await stage();
+    const orgsBefore = structuredClone(organizations(s));
+    const membersBefore = structuredClone(allMemberships(s));
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expectManagedRefusal(v, 'createOrganization');
+    expect(organizations(s)).toEqual(orgsBefore);
+    expect(allMemberships(s)).toEqual(membersBefore);
+  }, 120_000);
+
+  it('CONTROL: self-hosted, create answers 200 and makes the caller the new organization\'s owner as before', async () => {
+    const s = await stage();
+    const v = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
+    expect(org, v.text).toBeDefined();
+    const owner = allMemberships(s).find((m) => m.organization_id === org.id && String(m.user_id) === s.ids.admin);
+    expect(owner?.role).toBe('owner');
+  }, 120_000);
+
+  it('delete answers 409 RESOURCE_CONFLICT to the owner, ahead of the records arm: the organization and its memberships remain', async () => {
+    const s = await stage();
+    const created = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expect(created.status, `fixture: the organization is created while unmanaged — ${created.text}`).toBe(200);
+    const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
+    const orgsBefore = structuredClone(organizations(s));
+    const membersBefore = structuredClone(allMemberships(s));
+    const recordsArm = vi.spyOn(s.manager as any, 'assertOrganizationDeletable');
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/delete', { organizationId: org.id }, s.bearers.admin));
+    expectManagedRefusal(v, 'deleteOrganization');
+    expect(recordsArm).not.toHaveBeenCalled();
+    expect(organizations(s)).toEqual(orgsBefore);
+    expect(allMemberships(s)).toEqual(membersBefore);
+  }, 120_000);
+
+  it('CONTROL: self-hosted, delete answers 200 and ends the organization\'s memberships as before', async () => {
+    const s = await stage();
+    const created = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
+    expect(created.status, `fixture: the organization is created — ${created.text}`).toBe(200);
+    const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
+    expect(allMemberships(s).some((m) => m.organization_id === org.id), 'fixture: the owner membership exists').toBe(true);
+    const recordsArm = vi.spyOn(s.manager as any, 'assertOrganizationDeletable');
+    const v = await verdict(await s.fire('/organization/delete', { organizationId: org.id }, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    expect(recordsArm).toHaveBeenCalled();
+    expect(organizations(s).some((o) => o.id === org.id)).toBe(false);
+    expect(allMemberships(s).some((m) => m.organization_id === org.id)).toBe(false);
+  }, 120_000);
+
+  // ── the rest of the family writes no membership row ───────────────────────
+
+  it('CONTROL: reject-invitation, which writes no membership, answers the invitee as before', async () => {
+    const s = await stage();
+    const invitationId = await pendingInvitationFor(s);
+    setManaged(true);
+    const v = await verdict(await s.fire('/organization/reject-invitation', { invitationId }, s.bearers.member));
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+  }, 120_000);
 });
 
 describe('[#25083] what a host that mounts its own twin of a door imports', () => {

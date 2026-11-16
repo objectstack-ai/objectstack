@@ -303,16 +303,23 @@ export const PUBLIC_AUTH_FEATURES = {
       // Hidden in the console only: the server keeps answering it on an
       // `env_native` row, so the break-glass admin stays editable.
       'sys_user.actions.set_user_password',
-      // Membership and roles are managed by the hosting organisation: the two
-      // doors that change them refuse, and Make Owner rides update-member-role.
+      // Membership and its tiers are managed by the hosting organisation:
+      // every door that writes or deletes a membership row refuses (Make
+      // Owner rides update-member-role; create makes the caller an owner;
+      // delete ends every membership), add-member alone excepted.
       'sys_member.actions.update_member_role',
       'sys_member.actions.remove_member',
       'sys_member.actions.transfer_ownership',
+      'sys_organization.actions.leave_organization',
+      'sys_organization.actions.create_organization',
+      'sys_organization.actions.delete_organization',
+      'sys_invitation.actions.accept_invitation',
     ],
     notes:
       'Served from the one isCloudManaged() accessor in @objectstack/core. ' +
-      'Each gated input is also gated on `organization` or `admin`, so its ' +
-      '`visible` predicate carries two gates. Also read straight off ' +
+      'Each gated input but sys_invitation.actions.accept_invitation is also ' +
+      'gated on `organization`, `multiOrgEnabled` or `admin`, so its `visible` ' +
+      'predicate carries two gates. Also read straight off ' +
       '/auth/config by objectui (the Setup → Users copy, the password reminder).',
   },
   phoneNumberOtp: {
