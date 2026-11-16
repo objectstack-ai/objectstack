@@ -4254,6 +4254,7 @@ const fr = {
         seeds_many: "{{count}} de jeux de données d’exemple",
         seeds_other: "{{count}} jeux de données d’exemple",
         verified: "Vérifié : {{checks}}",
+        seedFailed: "Les données d’exemple n’ont pas pu être chargées.",
       },
       unknownPhase: "Phase de création inconnue",
       nextStepsLead: "Ensuite, vous pouvez dire : {{steps}}",

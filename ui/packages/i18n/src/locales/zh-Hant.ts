@@ -4412,6 +4412,7 @@ const zhHant = {
         seeds_one: '{{count}} 組示例資料',
         seeds_other: '{{count}} 組示例資料',
         verified: '已核對 {{checks}}',
+        seedFailed: '示例資料未能載入。',
       },
       unknownPhase: '未知的構建階段',
       nextStepsLead: '接下來可以說：{{steps}}',

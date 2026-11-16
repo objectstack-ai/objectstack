@@ -5095,6 +5095,7 @@ const en = {
         seeds_one: '{{count}} sample data set',
         seeds_other: '{{count}} sample data sets',
         verified: '{{checks}} verified',
+        seedFailed: 'Sample data failed to load.',
       },
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',

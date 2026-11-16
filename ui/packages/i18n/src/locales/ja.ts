@@ -4166,6 +4166,7 @@ const ja = {
         seeds_one: "{{count}} 件のサンプルデータセット",
         seeds_other: "{{count}} 件のサンプルデータセット",
         verified: "{{checks}} を確認済み",
+        seedFailed: "サンプルデータを読み込めませんでした。",
       },
       unknownPhase: "不明なビルドフェーズ",
       nextStepsLead: "次はこう話しかけられます：{{steps}}",

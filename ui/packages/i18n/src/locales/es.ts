@@ -4258,6 +4258,7 @@ const es = {
         seeds_many: "{{count}} de conjuntos de datos de ejemplo",
         seeds_other: "{{count}} conjuntos de datos de ejemplo",
         verified: "Verificado: {{checks}}",
+        seedFailed: "No se pudieron cargar los datos de ejemplo.",
       },
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",

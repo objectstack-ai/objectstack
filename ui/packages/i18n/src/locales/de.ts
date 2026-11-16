@@ -4164,6 +4164,7 @@ const de = {
         seeds_one: "{{count}} Beispieldatenpaket",
         seeds_other: "{{count}} Beispieldatenpakete",
         verified: "{{checks}} geprüft",
+        seedFailed: "Die Beispieldaten konnten nicht geladen werden.",
       },
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",

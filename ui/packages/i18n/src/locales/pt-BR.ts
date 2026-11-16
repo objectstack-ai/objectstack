@@ -4253,6 +4253,7 @@ const pt = {
         seeds_many: "{{count}} de conjuntos de dados de exemplo",
         seeds_other: "{{count}} conjuntos de dados de exemplo",
         verified: "Verificado: {{checks}}",
+        seedFailed: "Não foi possível carregar os dados de exemplo.",
       },
       unknownPhase: "Fase de criação desconhecida",
       nextStepsLead: "Em seguida, você pode dizer: {{steps}}",
