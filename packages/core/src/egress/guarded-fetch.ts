@@ -9,8 +9,11 @@ import { createEnvEgressPolicy, EGRESS_ALLOWED_TARGETS_ENV, type EgressContext, 
  * The guarded outbound fetch: every connection a request opens — the first
  * hop and every redirect hop — goes through one connector that resolves the
  * host, hands EACH address to the {@link EgressPolicy}, and connects the socket
- * to the address it judged (never re-resolving), then re-judges the socket's
- * own remote address. A literal-IP url is judged the same way.
+ * to an address it judged (never re-resolving), then re-judges the connected
+ * socket's own remote address. A literal-IP url is judged the same way. The
+ * judged addresses are dialled in the order the resolver gave them, moving to
+ * the next on a connect error, so a target that answers on only some of its
+ * addresses is still reached, as the bare fetch reached it.
  *
  * The request itself is `globalThis.fetch` with this connector's dispatcher:
  * never a bare fetch. A refused connect rejects with a `fetch failed` whose
@@ -148,6 +151,33 @@ export function createEgressGuard(options: EgressGuardOptions = {}): EgressGuard
     const connectorFor = (ctx: EgressContext) => (opts: ConnectOptions, callback: ConnectCallback): void => {
         const hostname = stripBrackets(opts.hostname);
         const port = opts.port ? Number(opts.port) : undefined;
+        const servername = opts.servername || (isIP(hostname) ? undefined : hostname);
+        // Dial the judged addresses in turn: a connect error moves to the next
+        // one, a refusal of the connected socket ends the attempt.
+        const dial = (addresses: readonly string[], index: number, lastError: Error | null): void => {
+            if (index >= addresses.length) {
+                callback(lastError ?? new Error(`egress: connect to ${hostname} failed`), null);
+                return;
+            }
+            base({ ...opts, hostname: addresses[index]!, servername }, (err, socket) => {
+                if (err || !socket) {
+                    dial(addresses, index + 1, err ?? new Error(`egress: connect to ${hostname} failed`));
+                    return;
+                }
+                // Every connected socket's own remote address is judged again.
+                const remote = (socket as Socket).remoteAddress;
+                if (!remote) {
+                    socket.destroy();
+                    callback(new Error(`egress: the socket to ${hostname} closed before its address could be judged`), null);
+                    return;
+                }
+                void judge(policy, remote, hostname, port, ctx).then((decision) => {
+                    if (decision.allow) return callback(null, socket);
+                    socket.destroy();
+                    callback(refuse(hostname, decision, ctx), null);
+                });
+            });
+        };
         void (async () => {
             const addresses = await resolveAll(hostname, resolve);
             if (addresses.length === 0) throw new Error(`egress: ${hostname} resolved to no address`);
@@ -155,27 +185,9 @@ export function createEgressGuard(options: EgressGuardOptions = {}): EgressGuard
                 const decision = await judge(policy, address, hostname, port, ctx);
                 if (!decision.allow) throw refuse(hostname, decision, ctx);
             }
-            return addresses[0]!;
+            return addresses;
         })().then(
-            (address) => {
-                base(
-                    {
-                        ...opts,
-                        hostname: address,
-                        servername: opts.servername || (isIP(hostname) ? undefined : hostname),
-                    },
-                    (err, socket) => {
-                        if (err || !socket) return callback(err ?? new Error('egress: connect failed'), null);
-                        const remote = (socket as Socket).remoteAddress;
-                        if (!remote || remote === address) return callback(null, socket);
-                        void judge(policy, remote, hostname, port, ctx).then((decision) => {
-                            if (decision.allow) return callback(null, socket);
-                            socket.destroy();
-                            callback(refuse(hostname, decision, ctx), null);
-                        });
-                    },
-                );
-            },
+            (addresses) => dial(addresses, 0, null),
             (err: Error) => callback(err, null),
         );
     };
@@ -258,13 +270,23 @@ export function installEgressGuard(options: { policy?: EgressPolicy; logger: Egr
     return guard;
 }
 
-const logged = new WeakMap<EgressGuard, EgressGuard>();
+const logged = new WeakMap<EgressGuard, WeakMap<EgressLogger, EgressGuard>>();
 
+/**
+ * The shared default guard bound to one installer's logger: each installer
+ * gets its own binding over the one shared policy, so a refusal is logged to
+ * the plugin that made the request, never to whichever plugin installed first.
+ */
 function withLogger(guard: EgressGuard, logger: EgressLogger): EgressGuard {
-    let bound = logged.get(guard);
+    let byLogger = logged.get(guard);
+    if (!byLogger) {
+        byLogger = new WeakMap();
+        logged.set(guard, byLogger);
+    }
+    let bound = byLogger.get(logger);
     if (!bound) {
         bound = createEgressGuard({ policy: guard.policy, logger });
-        logged.set(guard, bound);
+        byLogger.set(logger, bound);
     }
     return bound;
 }

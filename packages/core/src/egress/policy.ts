@@ -14,19 +14,20 @@ import {
 } from './address.js';
 
 /**
- * EgressPolicy — the host-injectable gate every outbound request a tenant can
- * aim is judged by, at the moment its socket connects. The shape mirrors
- * `DatasourceConnectPolicy` (`@objectstack/service-datasource`): one decision
- * method, sync or async, a verdict with a privileged `reason`, and fail-closed
- * on a throw.
+ * EgressPolicy — the host-injectable gate a guarded outbound request is judged
+ * by, at the moment its socket connects. Today the guarded requests are
+ * webhook deliveries (the messaging HTTP outbox) and the flow `http` node,
+ * inline and `durable: true`. The shape mirrors `DatasourceConnectPolicy`
+ * (`@objectstack/service-datasource`): one decision method, sync or async, a
+ * verdict with a privileged `reason`, and fail-closed on a throw.
  *
- * The rule it carries: an outbound request a tenant can point somewhere never
- * reaches a private, loopback, link-local or metadata address unless the
- * operator allowlists the target, and a metadata address can never be
- * allowlisted. The open-core default ({@link createEnvEgressPolicy}) reads the
- * operator's allowlist from `OS_EGRESS_ALLOWED_TARGETS`; a multi-tenant host
- * binds a stricter policy — per organization, per source — through the same
- * seam, since every decision is handed both.
+ * The rule it carries: a webhook delivery or a flow `http` node request
+ * reaches only public addresses unless the operator allowlists the target,
+ * and a link-local or cloud metadata address can never be allowlisted. The
+ * open-core default ({@link createEnvEgressPolicy}) reads the operator's
+ * allowlist from `OS_EGRESS_ALLOWED_TARGETS`; a multi-tenant host binds a
+ * stricter policy — per organization, per source — through the same seam,
+ * since every decision is handed both.
  */
 
 /** Where the request comes from. Open: a host may route its own sources through the guard. */
@@ -206,15 +207,18 @@ const CLASS_TEXT: Record<EgressDenyClass, string> = {
     'link-local': 'a link-local',
     multicast: 'a multicast',
     broadcast: 'a broadcast',
-    reserved: 'a reserved',
+    reserved: 'a reserved (not globally reachable)',
+    documentation: 'a documentation',
+    benchmarking: 'a benchmarking',
     'unique-local': 'a unique-local',
     'nat64-local': 'a local-use NAT64',
     metadata: 'a cloud metadata',
 };
 
 /**
- * The open-core default: refuse every non-public class, open what the
- * allowlist names, and never open a link-local or metadata address. Throws
+ * The open-core default: refuse every address that is not public (every
+ * class {@link classifyAddress} names), open what the allowlist names, and
+ * never open a link-local or metadata address. Throws
  * {@link EgressAllowlistError} on a malformed allowlist — the boot refuses it.
  *
  * It reads only the allowlist; the organization and source handed to every

@@ -376,6 +376,21 @@ export class WebhookOutboxPlugin implements Plugin {
     }
 
     /**
+     * The boot census of stored webhook targets against the outbound-request
+     * guard — said once, in the background, so the boot never waits on DNS.
+     */
+    private async bootEgressCensus(ctx: PluginContext): Promise<WebhookEgressCensus | undefined> {
+        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
+        if (!engine || !this.egress) return undefined;
+        try {
+            return await censusWebhookEgressTargets(engine, this.egress, ctx.logger as any);
+        } catch (err) {
+            ctx.logger.warn?.('[webhook] egress census failed', { error: (err as Error)?.message ?? String(err) });
+            return undefined;
+        }
+    }
+
+    /**
      * The `sys_webhook` table's write doors, its legacy-secret sweep, and the
      * declared-webhook reader.
      *
@@ -394,17 +409,6 @@ export class WebhookOutboxPlugin implements Plugin {
      * dispatches nothing. Runs before {@link bootAutoEnqueue}, which reads the
      * reader bound here.
      */
-    private async bootEgressCensus(ctx: PluginContext): Promise<WebhookEgressCensus | undefined> {
-        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
-        if (!engine || !this.egress) return undefined;
-        try {
-            return await censusWebhookEgressTargets(engine, this.egress, ctx.logger as any);
-        } catch (err) {
-            ctx.logger.warn?.('[webhook] egress census failed', { error: (err as Error)?.message ?? String(err) });
-            return undefined;
-        }
-    }
-
     private async bootWebhookTable(ctx: PluginContext): Promise<void> {
         const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
         if (!engine) {

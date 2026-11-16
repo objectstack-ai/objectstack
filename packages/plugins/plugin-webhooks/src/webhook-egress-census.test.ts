@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEgressGuard, createEnvEgressPolicy } from '@objectstack/core/egress';
 import { LiteKernel } from '@objectstack/core';
-import { censusWebhookEgressTargets } from './webhook-egress-census.js';
+import { CENSUS_MAX_ROWS, CENSUS_PAGE_SIZE, censusWebhookEgressTargets } from './webhook-egress-census.js';
 import { WebhookOutboxPlugin } from './webhook-outbox-plugin.js';
 
 /**
@@ -107,5 +107,51 @@ describe('the census runs at boot', () => {
         } finally {
             await kernel.shutdown();
         }
+    });
+});
+
+describe('the census read is projected and bounded', () => {
+    /** An engine holding `total` rows that answers each page as asked, recording every query. */
+    function pagedEngine(total: number) {
+        const queries: Array<Record<string, unknown>> = [];
+        const engine = {
+            async find(_object: string, query: Record<string, unknown>) {
+                queries.push(query);
+                const offset = (query.offset as number) ?? 0;
+                const limit = (query.limit as number) ?? total;
+                const end = Math.min(total, offset + limit);
+                return Array.from({ length: Math.max(0, end - offset) }, (_, i) => ({ id: `w${offset + i}`, url: '' }));
+            },
+        };
+        return { engine: engine as any, queries };
+    }
+
+    it('reads only the id, url and organization of each row, in ordered pages', async () => {
+        const { engine, queries } = pagedEngine(CENSUS_PAGE_SIZE * 2 + 7);
+        const census = await censusWebhookEgressTargets(engine, guard(), capture().logger);
+        expect(census).toEqual({ scanned: CENSUS_PAGE_SIZE * 2 + 7, refused: 0 });
+        expect(queries).toHaveLength(3);
+        for (const q of queries) {
+            expect(q.fields).toEqual(['id', 'url', 'organization_id']);
+            expect(q.orderBy).toEqual([{ field: 'id', order: 'asc' }]);
+            expect(q.limit).toBe(CENSUS_PAGE_SIZE);
+        }
+        expect(queries.map((q) => q.offset)).toEqual([0, CENSUS_PAGE_SIZE, CENSUS_PAGE_SIZE * 2]);
+    });
+
+    it('stops at the bound and says the count is of the first rows only', async () => {
+        const { engine, queries } = pagedEngine(CENSUS_MAX_ROWS + 50);
+        const { lines, logger } = capture();
+        const census = await censusWebhookEgressTargets(engine, guard(), logger);
+        expect(census).toEqual({ scanned: CENSUS_MAX_ROWS, refused: 0, truncated: true });
+        expect(queries).toHaveLength(CENSUS_MAX_ROWS / CENSUS_PAGE_SIZE);
+        expect(lines[0]!.msg).toContain(`0 of the first ${CENSUS_MAX_ROWS} sys_webhook row(s)`);
+    });
+
+    it('CONTROL: a table under the bound is read whole and not marked truncated', async () => {
+        const { engine } = pagedEngine(3);
+        const census = await censusWebhookEgressTargets(engine, guard(), capture().logger);
+        expect(census).toEqual({ scanned: 3, refused: 0 });
+        expect(census).not.toHaveProperty('truncated');
     });
 });

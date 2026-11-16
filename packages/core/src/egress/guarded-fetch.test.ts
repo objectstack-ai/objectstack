@@ -184,3 +184,80 @@ describe('the boot', () => {
         }
     });
 });
+
+describe('the judged addresses are dialled in turn', () => {
+    it('a target whose first address refuses the connection is reached on its second', async () => {
+        // Nothing listens on 127.0.0.2 at this port: the receiver is bound to 127.0.0.1 alone.
+        const g = guard('127.0.0.0/8', { 'multi.example': ['127.0.0.2', '127.0.0.1'] });
+        const res = await g.fetch(`http://multi.example:${port}/ok`, {}, ctx);
+        expect(res.status).toBe(200);
+        expect(await res.text()).toBe('body of /ok');
+        expect(hits).toEqual([`multi.example:${port} /ok`]);
+    });
+
+    it('CONTROL: a target none of whose addresses accepts fails as a connect error, not a refusal', async () => {
+        const g = guard('127.0.0.0/8', { 'dead.example': ['127.0.0.2', '127.0.0.3'] });
+        const err = await g.fetch(`http://dead.example:${port}/ok`, {}, ctx).then(
+            () => {
+                throw new Error('the request was sent');
+            },
+            (e: unknown) => e,
+        );
+        expect(findEgressRefusal(err)).toBeUndefined();
+        expect(hits).toEqual([]);
+    });
+
+    it('every address is judged before any is dialled: one refused address refuses the target', async () => {
+        await refusal(guard('127.0.0.2', { 'multi.example': ['127.0.0.2', '127.0.0.1'] }).fetch(`http://multi.example:${port}/ok`, {}, ctx));
+        expect(hits).toEqual([]);
+    });
+});
+
+describe("the connected socket's own remote address is judged again", () => {
+    it('a policy that allows the resolved address but refuses the connected socket stops the request', async () => {
+        const seen: string[] = [];
+        const g = createEgressGuard({
+            policy: {
+                canConnect: (target) => {
+                    seen.push(target.address);
+                    return seen.length === 1 ? { allow: true } : { allow: false, reason: 'refused at the socket' };
+                },
+            },
+            resolve: resolver(),
+        });
+        const refused = await refusal(g.fetch(`http://hooks.example:${port}/x`, {}, ctx));
+        expect(refused.decision.reason).toBe('refused at the socket');
+        // Asked twice: once for the resolved address, once for the socket's remote address.
+        expect(seen).toEqual(['127.0.0.1', '127.0.0.1']);
+        expect(hits).toEqual([]);
+    });
+
+    it('CONTROL: a policy that allows both delivers, and was asked about the socket too', async () => {
+        const seen: string[] = [];
+        const g = createEgressGuard({
+            policy: { canConnect: (target) => { seen.push(target.address); return { allow: true }; } },
+            resolve: resolver(),
+        });
+        const res = await g.fetch(`http://hooks.example:${port}/x`, {}, ctx);
+        expect(await res.text()).toBe('body of /x');
+        expect(seen).toEqual(['127.0.0.1', '127.0.0.1']);
+    });
+});
+
+describe('the shared default guard logs to the plugin that installed it', () => {
+    it("each installer's refusals go to its own logger, not the first installer's", async () => {
+        vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '');
+        try {
+            const first = { info: vi.fn(), warn: vi.fn() };
+            const second = { info: vi.fn(), warn: vi.fn() };
+            installEgressGuard({ logger: first });
+            const g = installEgressGuard({ logger: second });
+            await refusal(g.fetch(`http://127.0.0.1:${port}/x`, {}, ctx));
+            expect(second.warn).toHaveBeenCalledTimes(1);
+            expect(String(second.warn.mock.calls[0]![0])).toMatch(/^\[egress\] refused an outbound connect to 127\.0\.0\.1/);
+            expect(first.warn).not.toHaveBeenCalled();
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+});

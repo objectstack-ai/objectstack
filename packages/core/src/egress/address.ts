@@ -18,9 +18,10 @@ export interface ParsedAddress {
 }
 
 /**
- * The address classes the guard refuses by default. Each names a range a
- * request a tenant can aim must not reach unless the operator allowlists it —
- * except the two {@link NEVER_ALLOWLISTABLE_CLASSES}, which no allowlist opens.
+ * The address classes the guard refuses by default — together, every address
+ * that is not public. Each names a range a guarded request must not reach
+ * unless the operator allowlists it — except the two
+ * {@link NEVER_ALLOWLISTABLE_CLASSES}, which no allowlist opens.
  */
 export type EgressDenyClass =
     | 'unspecified'
@@ -31,6 +32,8 @@ export type EgressDenyClass =
     | 'multicast'
     | 'broadcast'
     | 'reserved'
+    | 'documentation'
+    | 'benchmarking'
     | 'unique-local'
     | 'nat64-local'
     | 'metadata';
@@ -39,14 +42,33 @@ export type EgressDenyClass =
 export const NEVER_ALLOWLISTABLE_CLASSES: ReadonlySet<EgressDenyClass> = new Set(['link-local', 'metadata']);
 
 /**
- * Named instance-metadata addresses outside the link-local ranges. Never
- * allowlistable, whatever range they sit in (`100.100.100.200` is inside
- * CGNAT space, `fd00:ec2::254` inside unique-local space).
+ * Named instance-metadata and host-platform addresses outside the link-local
+ * ranges. Never allowlistable, whatever range they sit in. Every cloud's
+ * IPv4 instance-metadata endpoint inside `169.254.0.0/16` (`169.254.169.254`,
+ * `169.254.170.2`, `169.254.170.23`, `169.254.0.23`) and every IPv6 one inside
+ * `fe80::/10` is already covered by the link-local tier; these are the ones
+ * outside it:
+ *
+ * - `fd00:ec2::254` — the AWS instance metadata service over IPv6.
+ * - `fd00:ec2::23` — the AWS EKS Pod Identity agent over IPv6.
+ * - `fd20:ce::254` — the Google Cloud metadata server over IPv6.
+ * - `fd00:c1::a9fe:a9fe` — the Oracle Cloud instance metadata service over IPv6.
+ * - `100.100.100.200` — the Alibaba Cloud metadata service (inside CGNAT space).
+ * - `192.0.0.192` — the Oracle Cloud legacy metadata address.
+ * - `168.63.129.16` — the Azure host-platform endpoint (inside public space).
+ *
+ * An IPv6 form carrying one of the IPv4 members is judged as that member
+ * ({@link unwrapEmbeddedV4}), and so is an RFC 6052 form under the local-use
+ * NAT64 prefix ({@link nat64LocalCandidates}).
  */
 export const METADATA_ADDRESSES: readonly string[] = Object.freeze([
     'fd00:ec2::254',
+    'fd00:ec2::23',
+    'fd20:ce::254',
+    'fd00:c1::a9fe:a9fe',
     '100.100.100.200',
     '192.0.0.192',
+    '168.63.129.16',
 ]);
 
 const V4_BITS = 32n;
@@ -161,6 +183,14 @@ function must(network: string, prefix: number): CidrBlock {
  * The refused ranges, first match wins (narrower rows above the wider ones
  * that contain them). Judged AFTER {@link unwrapEmbeddedV4}, so an IPv6 form
  * carrying an IPv4 address is judged as that IPv4 address.
+ *
+ * Together with {@link GLOBAL_UNICAST_V6} this answers "a public address": the
+ * IANA special-purpose ranges that are not globally reachable are refused —
+ * documentation, benchmarking and IETF protocol-assignment blocks included —
+ * and an IPv6 address outside global unicast `2000::/3` is refused whatever
+ * it is. A few anycast service addresses inside the refused protocol blocks
+ * are refused with them: the safe direction for a rule that promises only
+ * public addresses are reached.
  */
 const DENY_TABLE: ReadonlyArray<readonly [CidrBlock, EgressDenyClass]> = [
     [must('255.255.255.255', 32), 'broadcast'],
@@ -170,7 +200,13 @@ const DENY_TABLE: ReadonlyArray<readonly [CidrBlock, EgressDenyClass]> = [
     [must('127.0.0.0', 8), 'loopback'],
     [must('169.254.0.0', 16), 'link-local'],
     [must('172.16.0.0', 12), 'private'],
+    [must('192.0.0.0', 24), 'reserved'],
+    [must('192.0.2.0', 24), 'documentation'],
+    [must('192.88.99.0', 24), 'reserved'],
     [must('192.168.0.0', 16), 'private'],
+    [must('198.18.0.0', 15), 'benchmarking'],
+    [must('198.51.100.0', 24), 'documentation'],
+    [must('203.0.113.0', 24), 'documentation'],
     [must('224.0.0.0', 4), 'multicast'],
     [must('240.0.0.0', 4), 'reserved'],
     [must('::', 128), 'unspecified'],
@@ -179,7 +215,14 @@ const DENY_TABLE: ReadonlyArray<readonly [CidrBlock, EgressDenyClass]> = [
     [must('fc00::', 7), 'unique-local'],
     [must('ff00::', 8), 'multicast'],
     [must('64:ff9b:1::', 48), 'nat64-local'],
+    [must('2001:2::', 48), 'benchmarking'],
+    [must('2001:db8::', 32), 'documentation'],
+    [must('2001::', 23), 'reserved'],
+    [must('3fff::', 20), 'documentation'],
 ];
+
+/** IPv6 global unicast; an IPv6 address outside it (after unwrapping) is refused as `reserved`. */
+const GLOBAL_UNICAST_V6 = must('2000::', 3);
 
 /** The never-allowlistable ranges, as blocks (the link-local rows plus each metadata address). */
 export const NEVER_ALLOWLISTABLE_BLOCKS: readonly CidrBlock[] = Object.freeze([
@@ -216,9 +259,36 @@ export function unwrapEmbeddedV4(address: ParsedAddress): ParsedAddress {
     return address;
 }
 
-/** Whether no allowlist entry may open this (already unwrapped) address. */
+const NAT64_LOCAL = must('64:ff9b:1::', 48);
+
+/**
+ * The IPv4 addresses an address under the local-use NAT64 prefix
+ * (`64:ff9b:1::/48`, RFC 8215) may carry, one per RFC 6052 layout a
+ * translator under that prefix can use (/48, /56, /64 and /96 network
+ * prefixes). The prefix length is the translator's configuration, which this
+ * guard cannot see, so every layout is a candidate. Empty for any other
+ * address.
+ */
+export function nat64LocalCandidates(address: ParsedAddress): ParsedAddress[] {
+    if (address.family !== 6 || !cidrContains(NAT64_LOCAL, address)) return [];
+    const v = address.value;
+    const v4 = (value: bigint): ParsedAddress => ({ family: 4, value: value & 0xffffffffn });
+    return [
+        v4((((v >> 64n) & 0xffffn) << 16n) | ((v >> 40n) & 0xffffn)), // /48: bits 48-63, then 72-87
+        v4((((v >> 64n) & 0xffn) << 24n) | ((v >> 32n) & 0xffffffn)), // /56: bits 56-63, then 72-95
+        v4(v >> 24n), // /64: bits 72-103
+        v4(v), // /96: bits 96-127
+    ];
+}
+
+/**
+ * Whether no allowlist entry may open this (already unwrapped) address: it
+ * lies in a never-allowlistable block, or it sits under the local-use NAT64
+ * prefix in a layout that carries an IPv4 address in one.
+ */
 export function isNeverAllowlistable(address: ParsedAddress): boolean {
-    return NEVER_ALLOWLISTABLE_BLOCKS.some((block) => cidrContains(block, address));
+    const inNever = (a: ParsedAddress) => NEVER_ALLOWLISTABLE_BLOCKS.some((block) => cidrContains(block, a));
+    return inNever(address) || nat64LocalCandidates(address).some(inNever);
 }
 
 /**
@@ -233,5 +303,6 @@ export function classifyAddress(address: ParsedAddress): EgressDenyClass | null 
     for (const [block, cls] of DENY_TABLE) {
         if (cidrContains(block, effective)) return cls;
     }
+    if (effective.family === 6 && !cidrContains(GLOBAL_UNICAST_V6, effective)) return 'reserved';
     return null;
 }

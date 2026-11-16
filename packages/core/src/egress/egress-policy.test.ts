@@ -5,11 +5,12 @@ import { classifyAddress, parseAddress, unwrapEmbeddedV4, formatAddress } from '
 import { createEnvEgressPolicy, EgressAllowlistError, parseEgressAllowlist } from './policy.js';
 
 /**
- * The rule: an outbound request a tenant can aim never reaches a private,
- * loopback, link-local or metadata address unless the operator allowlists the
- * target, and a metadata address can never be allowlisted. These pins hold
- * the policy half — each refused class, the IPv6 forms that carry an IPv4
- * address, and the allowlist's strict grammar.
+ * The rule: a webhook delivery or a flow `http` node request reaches only
+ * public addresses unless the operator allowlists the target, and a
+ * link-local or cloud metadata address can never be allowlisted. These pins
+ * hold the policy half — each refused class, the IPv6 forms that carry an
+ * IPv4 address, the never-allowlistable tier, and the allowlist's strict
+ * grammar.
  */
 
 const ctx = { source: 'webhook' } as const;
@@ -145,6 +146,11 @@ describe('a malformed or over-broad allowlist refuses to build', () => {
         'fe80::/64',
         'fd00:ec2::254',
         '100.100.100.200',
+        '168.63.129.16',
+        'fd00:ec2::23',
+        'fd20:ce::254',
+        'fd00:c1::a9fe:a9fe',
+        '::ffff:168.63.129.16',
         '::ffff:0:0/96',
         '[::1]',
     ];
@@ -177,4 +183,105 @@ describe('a malformed or over-broad allowlist refuses to build', () => {
         expect(parseEgressAllowlist(undefined)).toEqual([]);
         expect(parseEgressAllowlist('  ')).toEqual([]);
     });
+});
+
+describe('every cloud metadata address is refused by default and under a covering allowlist entry', () => {
+    // [member, a covering allowlist entry, a neighbour that entry does open]
+    const members: Array<[string, string, string]> = [
+        ['fd00:ec2::254', 'fd00::/8', 'fd00:ec2::253'],
+        ['fd00:ec2::23', 'fd00::/8', 'fd00:ec2::22'],
+        ['fd20:ce::254', 'fd20::/16', 'fd20:ce::253'],
+        ['fd00:c1::a9fe:a9fe', 'fd00::/8', 'fd00:c1::a9fe:a9fd'],
+        ['100.100.100.200', '100.64.0.0/10', '100.100.100.201'],
+        ['192.0.0.192', '192.0.0.0/24', '192.0.0.193'],
+        ['168.63.129.16', '168.63.0.0/16', '168.63.129.17'],
+    ];
+    for (const [member, covering, neighbour] of members) {
+        it(`${member} is refused by default`, () => {
+            expect(verdict(member)).toMatchObject({ allow: false, denyClass: 'metadata' });
+        });
+        it(`${member} is refused under '${covering}'`, () => {
+            expect(verdict(member, covering)).toMatchObject({ allow: false, denyClass: 'metadata' });
+            expect(verdict(member, `meta.internal,${covering}`, 'meta.internal')).toMatchObject({ allow: false });
+        });
+        it(`CONTROL: its neighbour ${neighbour} is opened by '${covering}'`, () => {
+            expect(verdict(neighbour, covering)).toMatchObject({ allow: true });
+        });
+    }
+
+    it('CONTROL: the Azure neighbour is public and allowed with no allowlist at all', () => {
+        expect(verdict('168.63.129.17')).toMatchObject({ allow: true });
+    });
+
+    // An IPv6 form of an IPv4 member, under an allowlist that covers the form.
+    const forms: Array<[string, string, string]> = [
+        ['::ffff:168.63.129.16', '168.63.0.0/16', 'IPv4-mapped'],
+        ['::ffff:6464:64c8', '100.64.0.0/10', 'IPv4-mapped, hex spelling'],
+        ['64:ff9b::a83f:8110', '168.63.0.0/16', 'NAT64 well-known prefix'],
+        ['2002:a83f:8110::1', '168.63.0.0/16', '6to4'],
+        ['::192.0.0.192', '192.0.0.0/24', 'IPv4-compatible'],
+    ];
+    for (const [address, covering, form] of forms) {
+        it(`${form}: ${address} is refused by default and under '${covering}'`, () => {
+            expect(verdict(address)).toMatchObject({ allow: false, denyClass: 'metadata' });
+            expect(verdict(address, covering)).toMatchObject({ allow: false, denyClass: 'metadata' });
+        });
+    }
+});
+
+describe('an address under the local-use NAT64 prefix that carries a never-allowlistable IPv4 address is never opened', () => {
+    // 169.254.169.254 and 168.63.129.16 in each RFC 6052 layout a translator under 64:ff9b:1::/48 can use.
+    const layouts: Array<[string, string]> = [
+        ['64:ff9b:1::a9fe:a9fe', '/96'],
+        ['64:ff9b:1:0:a9:fea9:fe00:0', '/64'],
+        ['64:ff9b:1:a9:fe:a9fe::', '/56'],
+        ['64:ff9b:1:a9fe:a9:fe00::', '/48'],
+        ['64:ff9b:1::a83f:8110', '/96, the Azure host-platform address'],
+    ];
+    for (const [address, layout] of layouts) {
+        it(`${layout}: ${address} is refused by default and under '64:ff9b:1::/48'`, () => {
+            expect(verdict(address)).toMatchObject({ allow: false, denyClass: 'nat64-local' });
+            expect(verdict(address, '64:ff9b:1::/48')).toMatchObject({ allow: false });
+        });
+    }
+
+    it("CONTROL: a private IPv4 address under the prefix is opened by '64:ff9b:1::/48'", () => {
+        expect(verdict('64:ff9b:1::a00:1', '64:ff9b:1::/48')).toMatchObject({ allow: true, allowlisted: true });
+    });
+});
+
+describe('only public addresses: every special-purpose range that is not globally reachable is refused', () => {
+    const refused: Array<[string, string]> = [
+        ['192.0.2.1', 'documentation'],
+        ['198.51.100.7', 'documentation'],
+        ['203.0.113.9', 'documentation'],
+        ['::ffff:192.0.2.1', 'documentation'],
+        ['198.18.0.1', 'benchmarking'],
+        ['198.19.255.254', 'benchmarking'],
+        ['192.0.0.9', 'reserved'],
+        ['192.88.99.1', 'reserved'],
+        ['2001:db8::1', 'documentation'],
+        ['3fff::1', 'documentation'],
+        ['2001:2::1', 'benchmarking'],
+        ['2001:10::1', 'reserved'],
+        ['100::1', 'reserved'],
+        ['4000::1', 'reserved'],
+        ['5f00::1', 'reserved'],
+    ];
+    for (const [address, cls] of refused) {
+        it(`${address} is refused as ${cls}`, () => {
+            expect(verdict(address)).toMatchObject({ allow: false, denyClass: cls });
+        });
+    }
+
+    it('an allowlist entry opens a refused special-purpose range (it is not in the never tier)', () => {
+        expect(verdict('192.0.2.1', '192.0.2.0/24')).toMatchObject({ allow: true, allowlisted: true });
+    });
+
+    for (const address of ['192.0.3.1', '198.17.255.254', '198.20.0.1', '198.51.101.1', '203.0.114.1', '192.88.100.1', '2001:200::1', '2001:db9::1', '3fff:1000::1', '2c0f::1']) {
+        it(`CONTROL: the neighbouring public address ${address} is allowed`, () => {
+            expect(verdict(address).allow).toBe(true);
+            expect(classifyAddress(parseAddress(address)!)).toBeNull();
+        });
+    }
 });
