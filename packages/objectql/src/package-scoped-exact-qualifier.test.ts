@@ -27,6 +27,7 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
 import { ENGINE_FUNCTION_TYPE, NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { MetadataTypeSchema } from '@objectstack/spec/kernel';
 
 /** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
 const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
@@ -746,6 +747,90 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
 });
 
 /**
+ * [#34040, ADR-0150 D3, red line 2] The same read for every type the registry
+ * does not read by package. The MetadataService keeps such a type by name alone
+ * (the package registered last), and its copy answers before the registry. A
+ * covered type's copy of another package is replaced by the exact qualifier
+ * after the layers. A type outside the covered set has no exact qualifier, so
+ * step 2 declines that copy and the registry answers X's own item.
+ *
+ * BASE (measured before the fix on the composed artifact rig and here):
+ * `?package=alpha` of a `doc` two packages ship answered beta's body, the
+ * service's copy, in the order that registered beta last.
+ */
+describe('[#34040] the exact read never serves the service\'s copy of another package, for every type the registry does not read by package', () => {
+  /**
+   * The enumeration: every declared metadata type the registry does not read by
+   * package, as the exact qualifier sees it. A new type lands in one of these
+   * lists or this pin goes red.
+   */
+  const NOT_READ_BY_PACKAGE = MetadataTypeSchema.options.filter((type) => !(PACKAGE_SCOPED_READ_TYPES as readonly string[]).includes(type));
+  /** Judged by the exact qualifier after the layers (ADR-0150 D5). */
+  const COVERED = NOT_READ_BY_PACKAGE.filter((type) => (PACKAGE_SCOPED_TYPES as readonly string[]).includes(type));
+  /** Not judged by it: step 2 declines another package's copy. */
+  const OUTSIDE = NOT_READ_BY_PACKAGE.filter((type) => !(PACKAGE_SCOPED_TYPES as readonly string[]).includes(type));
+  /** Of them, the types the registry keeps one package holder of (the security catalog). */
+  const ONE_HOLDER = ['position', 'capability'];
+  /** `object`: one package owns the name, and the registry's read (`getObject`) does not read by package. */
+  const NOT_JUDGED = ['object'];
+
+  it('the enumeration: the types outside the exact qualifier, each one pinned below or named as one-holder or not judged', () => {
+    expect([...COVERED].sort()).toEqual([...UNWIRED_COVERED_TYPES].sort());
+    expect([...OUTSIDE].sort()).toEqual(
+      ['capability', 'datasource', 'doc', 'external_catalog', 'field', 'object', 'object_extension', 'position', 'seed', 'translation', 'view'],
+    );
+  });
+
+  /** Ship an item that parses: a shipped action is stored as its schema parse, which wants a target. */
+  const shipParsed = (type: string, name: string, packageId: string) => registry.registerItem(
+    type,
+    { name, label: `${packageId.split('.').pop()} ${type}`, ...(type === 'action' ? { type: 'url', target: 'https://example.com' } : {}) },
+    'name' as never,
+    packageId,
+  );
+
+  const servedWith = (wrongBody: Record<string, unknown>) => {
+    const metadata = {
+      get: vi.fn(async () => wrongBody),
+      getDiagnosed: vi.fn(async () => ({ data: wrongBody, degraded: false, errors: [] })),
+    };
+    const served = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', metadata]]));
+    return { served, metadata };
+  };
+
+  it.each([...NOT_READ_BY_PACKAGE].filter((type) => !ONE_HOLDER.includes(type) && !NOT_JUDGED.includes(type)))(
+    '%s: `?package=` of each holder serves that holder\'s body, whichever holder\'s copy the service keeps',
+    async (type) => {
+      shipParsed(type, 'shared', A);
+      shipParsed(type, 'shared', B);
+      for (const kept of [A, B]) {
+        const { served, metadata } = servedWith({ name: 'shared', label: `${kept.split('.').pop()} ${type}`, _packageId: kept });
+        for (const [packageId, label] of [[A, `alpha ${type}`], [B, `beta ${type}`]] as const) {
+          const answer = await served.getMetaItem({ type, name: 'shared', packageId });
+          expect(labelOf(answer), `${type} at ${packageId}, the service keeping ${kept}'s`).toBe(label);
+        }
+        expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it.each(OUTSIDE.filter((type) => !NOT_JUDGED.includes(type)))('CONTROL — %s: the service\'s copy is served at its own holder\'s address, and a copy bound to no package at any address', async (type) => {
+    shipParsed(type, 'shared', A);
+    const own = servedWith({ name: 'shared', label: 'service copy', _packageId: A });
+    expect(labelOf(await own.served.getMetaItem({ type, name: 'shared', packageId: A })), `${type} at its holder`).toBe('service copy');
+    const unbound = servedWith({ name: 'shared', label: 'service copy' });
+    for (const packageId of [A, B]) {
+      expect(labelOf(await unbound.served.getMetaItem({ type, name: 'shared', packageId })), `${type} at ${packageId}`).toBe('service copy');
+    }
+  });
+
+  it.each(ONE_HOLDER)('%s keeps one package holder: a second package\'s registration of the name is refused', (type) => {
+    ship(type, 'shared', A);
+    expect(() => ship(type, 'shared', B)).toThrow();
+  });
+});
+
+/**
  * [#31699 F2, the epic's ruling on the contract review] Two packages of one
  * App share the App's customization pair, so a locale Studio added there with
  * no `overrides` cannot say whose template it extends. Serving it on both
@@ -1460,8 +1545,15 @@ describe('[#33817] a package holding the name only through a stored row that is 
  * its namespace path and `_env` refuse 409 naming X. The round-3 head served
  * the pair's row at the first two and at `_env`. TO: the first two answer 404
  * (row 17: an exact address of such a name serves only a row stored under
- * its own package); `_env` keeps `main`'s 409 (R4-B2: with no served holder,
- * its admission judges every holder).
+ * its own package); `_env` kept `main`'s 409 (R4-B2: with no served holder,
+ * its admission judged every holder).
+ *
+ * [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] At each door `_env`
+ * moves FROM that 409 naming X TO 404: the protocol's refusal is marked as a
+ * name only disabled packages hold, and the doors admit it when the read
+ * naming no package withholds the name, which it does here (the pair's row is
+ * withheld with its disabled holder, #32814). The REST and runtime pins of
+ * the 404 live with those doors.
  */
 describe('[#32183] a name only a disabled package holds, at an address that neither holds it nor pairs a holder', () => {
   const APP = 'com.acme.suite';
@@ -1513,10 +1605,19 @@ describe('[#32183] a name only a disabled package holds, at an address that neit
     expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
   });
 
-  it('X disabled: `_env` at that member refuses 409 naming X, as on main (R4-B2)', async () => {
+  it('[#33385, row 17 / R4-B2] X disabled: `_env` at that member refuses naming X, MARKED as a name only disabled packages hold, and the read naming no package withholds it, so each door answers 404', async () => {
     registry.disablePackage(X);
-    const err = await refusalOf(atEnvironment);
+    const err = await refusalOf(() => served.admitEnvironmentQualifier({ type: 'email_template', name: 'welcome', member: 'fr-FR' }));
     expect([err.status, err.refusal.reason, err.refusal.candidates]).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: X }]]);
+    expect((err as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal')]).toBe(true);
+    const bare = await served.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+    expect(bare?.item).toBeUndefined();
+    expect(JSON.stringify(bare ?? null)).not.toContain('pair fr-FR');
+  });
+
+  it('CONTROL — X enabled: `_env` refuses naming X, unmarked', async () => {
+    const err = await refusalOf(() => served.admitEnvironmentQualifier({ type: 'email_template', name: 'welcome', member: 'fr-FR' }));
+    expect((err as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal')]).toBeUndefined();
   });
 
   it('CONTROL — X disabled: a row stored under Y\'s own package is served at Y', async () => {
@@ -2935,4 +3036,175 @@ describe('[#32814] the read naming no package withholds a pair row of a name onl
       expect(JSON.stringify(neither ?? null)).not.toContain('pair fr-FR');
     },
   );
+});
+
+/**
+ * [#33401, ADR-0150 D4] The read naming no package, at a member only a
+ * PACKAGE-LESS stored row carries, of a key whose every holder is disabled.
+ * Seat ruling 6882483833 on #32814: a package-less row whose key an installed
+ * package holds is that holder's overlay, owned over every holder, disabled
+ * included; the member is not part of the key, so a locale the holder never
+ * shipped is still its customization. With every holder disabled the read
+ * answers as if no row were stored; the row is kept and served on re-enable.
+ *
+ * FROM (`main` 1e65a389, measured on this fixture and on the REST door): the
+ * row (200), on the served and the execution face, in every order below,
+ * stored or hydrated. A row the holder's own member overlays was already
+ * withheld (CONTROL below). TO: the holder's withheld item, the answer with
+ * no row stored.
+ */
+describe('[#33401] the read naming no package withholds a package-less row of a key only disabled packages hold', () => {
+  const custom = (name: string, locale: string) => rows.push({
+    id: `row_${name}_${locale}`, type: 'email_template', name, state: 'active', package_id: null, bundle_member: locale,
+    metadata: JSON.stringify({ name, label: `custom ${locale}`, locale, subject: `custom ${locale}`, bodyHtml: '<p>c</p>' }),
+  });
+  const tpl = (packageId: string, name = 'welcome') => registry.registerItem('email_template', {
+    name, label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const bare = (member = 'fr-FR', name = 'welcome') => protocol.getMetaItem({ type: 'email_template', name, member } as never);
+  const bareForExecution = (member = 'fr-FR', name = 'welcome') =>
+    protocol.getMetaItemForExecution({ type: 'email_template', name, member } as never);
+  /** The boot's hydration: the list read lays the stored row into the registry's slot. */
+  const hydrate = () => protocol.getMetaItems({ type: 'email_template' } as never);
+
+  const ORDERS = [
+    ['the holder registered, then the row saved', false],
+    ['the row saved, then the holder registered', true],
+  ] as const;
+  const DISABLE = [['the holder disabled last', false], ['the holder disabled first', true]] as const;
+  const CASES = ORDERS.flatMap(([order, rowFirst]) => DISABLE.map(([when, disableFirst]) => [order, when, rowFirst, disableFirst] as const));
+
+  it.each(CASES)('%s, %s: the bare read at a locale the holder never shipped answers its withheld item (BASE: the row), on both faces; re-enabled, the row', async (_order, _when, rowFirst, disableFirst) => {
+    if (rowFirst) custom('welcome', 'fr-FR');
+    tpl(A);
+    if (disableFirst) registry.disablePackage(A);
+    if (!rowFirst) custom('welcome', 'fr-FR');
+    if (!disableFirst) registry.disablePackage(A);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect((answer as { packageId?: string } | undefined)?.packageId).toBe(A);
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom fr-FR');
+    const executed = await bareForExecution();
+    expect(executed?.item).toBeUndefined();
+    expect(JSON.stringify(executed ?? null)).not.toContain('custom fr-FR');
+    // CONTROL — re-enabled: the row is served again, untouched.
+    registry.enablePackage(A);
+    expect(labelOf(await bare())).toBe('custom fr-FR');
+    expect(labelOf(await bareForExecution())).toBe('custom fr-FR');
+  });
+
+  // `version` is left out of the comparison, as in the #32814 pin above.
+  it('the holder disabled: the answer with the package-less row stored is the answer with none', async () => {
+    tpl(A);
+    registry.disablePackage(A);
+    const { version: _noRowVersion, ...withoutRow } = (await bare()) as Record<string, unknown>;
+    custom('welcome', 'fr-FR');
+    const { version: _rowVersion, ...withRow } = (await bare()) as Record<string, unknown>;
+    expect(withRow).toEqual(withoutRow);
+  });
+
+  it('two holders, both disabled: withheld too; both re-enabled: the read\'s own refusal naming both, as before the disable', async () => {
+    tpl(A);
+    tpl(B);
+    custom('welcome', 'fr-FR');
+    registry.disablePackage(A);
+    registry.disablePackage(B);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom fr-FR');
+    registry.enablePackage(A);
+    registry.enablePackage(B);
+    const err = await refusalOf(bare);
+    expect([err.status, err.refusal.candidates]).toEqual([409, [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]]);
+  });
+
+  it('CONTROL — the holder enabled: the row is served, on both faces', async () => {
+    tpl(A);
+    custom('welcome', 'fr-FR');
+    expect(labelOf(await bare())).toBe('custom fr-FR');
+    expect(labelOf(await bareForExecution())).toBe('custom fr-FR');
+  });
+
+  it('CONTROL — the environment\'s own item (no package holds its key) is served while another package\'s same-type item is disabled', async () => {
+    tpl(A);
+    custom('farewell', 'fr-FR');
+    registry.disablePackage(A);
+    expect(labelOf(await bare('fr-FR', 'farewell'))).toBe('custom fr-FR');
+    expect(labelOf(await bareForExecution('fr-FR', 'farewell'))).toBe('custom fr-FR');
+  });
+
+  it.each([['stored', false], ['stored and hydrated', true]] as const)('CONTROL — a package-less row at the member the holder ships (%s): withheld, as on BASE', async (_state, hydrated) => {
+    tpl(A);
+    custom('welcome', 'en-US');
+    if (hydrated) await hydrate();
+    registry.disablePackage(A);
+    const answer = await bare('en-US');
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom en-US');
+  });
+
+  /**
+   * [review L2 S1] The card's CONTROL "a same-name item on another object is
+   * still served". An action is keyed `(package, object, name)`, and since
+   * #33898 the bare read grafts a holder's envelope only onto the item it
+   * holds at that `(object, name)`, so a package-less action reaches this arm
+   * unstamped. On another object it binds to no holder (`overlayRowBinding`
+   * answers `null`): the environment's own item, served. On the holder's own
+   * object it is that holder's customization: the read grafts the holder's
+   * envelope onto it, so it reaches the face stamped and is withheld by the
+   * face's rules for an item stamped with a disabled package
+   * (`isActionWithheldByDisabledPackage`, `isItemOfDisabledPackage`), as on
+   * `main`; this PR's arm does not decide it (measured: the arm ablated
+   * leaves that leg green, the two stamped-item rules ablated turn it red).
+   * Both registration orders; re-enabled is the CONTROL.
+   */
+  describe('[review L2 S1] a package-less action of a name only a disabled package holds', () => {
+    const actionBody = (label: string, objectName: string) => ({ name: 'approve', label, objectName, type: 'url', target: 'https://example.com' });
+    const shipAction = () => registry.registerItem('action', actionBody('alpha action', 'account'), 'name' as never, A);
+    const envAction = (objectName: string) => {
+      registry.registerItem('action', { ...actionBody('env action', objectName), _provenance: 'org' }, 'name' as never);
+      rows.push({
+        id: 'row_env_action', type: 'action', name: 'approve', state: 'active', package_id: null,
+        bundle_member: null, metadata: JSON.stringify(actionBody('env action', objectName)),
+      });
+    };
+    const readAction = () => protocol.getMetaItem({ type: 'action', name: 'approve' } as never);
+    const LEGS = [
+      ['another object (`contact`): no holder binds its key, so it is the environment\'s own item and is served', 'contact', true],
+      ['the holder\'s own object (`account`): the holder\'s customization under its envelope, withheld', 'account', false],
+    ] as const;
+    const ORDERS_ACTION = [['the holder registered first', false], ['the environment\'s item registered first', true]] as const;
+    const CELLS = LEGS.flatMap(([leg, objectName, served]) => ORDERS_ACTION.map(([order, envFirst]) => [leg, order, objectName, served, envFirst] as const));
+
+    it.each(CELLS)('%s; %s', async (_leg, _order, objectName, served, envFirst) => {
+      if (envFirst) envAction(objectName);
+      shipAction();
+      if (!envFirst) envAction(objectName);
+      registry.disablePackage(A);
+      const answer = await readAction();
+      if (served) {
+        expect(labelOf(answer)).toBe('env action');
+        expect((answer as { item?: { _packageId?: unknown } } | undefined)?.item?._packageId ?? null).toBeNull();
+      } else {
+        expect(answer?.item).toBeUndefined();
+        expect(JSON.stringify(answer ?? null)).not.toContain('env action');
+      }
+      // CONTROL — re-enabled: the environment's item is served on either object,
+      // under the holder's envelope only on the holder's own object.
+      registry.enablePackage(A);
+      const enabled = await readAction();
+      expect(labelOf(enabled)).toBe('env action');
+      expect((enabled as { item?: { _packageId?: unknown } } | undefined)?.item?._packageId ?? null).toBe(served ? null : A);
+    });
+  });
+
+  it('the fr-FR row stored and hydrated into the registry: withheld too (BASE: the row)', async () => {
+    tpl(A);
+    custom('welcome', 'fr-FR');
+    await hydrate();
+    registry.disablePackage(A);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom fr-FR');
+  });
 });

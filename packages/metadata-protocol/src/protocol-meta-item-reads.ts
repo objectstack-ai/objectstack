@@ -25,11 +25,12 @@ import {
     packageScopedRefusalMessage,
     type PackageScopedRefusal,
 } from '@objectstack/core';
-import { itemDiscriminator } from '@objectstack/metadata-core';
+import { isPairOf, itemDiscriminator } from '@objectstack/metadata-core';
 import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
 import { storedDraftChanges } from './draft-changes.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { type StoredOverlayRow, resolveItemLock, storedRowDocument } from './item-lock.js';
 import {
     type MetadataDiagnostics,
@@ -324,11 +325,15 @@ export async function judgeBareActionRead(
  * the registry's first composite.
  *
  * Judge only: any answer the registry gives leaves the read to its layers,
- * exactly as before. The environment's own item answers first where the
- * registry holds it (its package-less bare slot: a hydrated or saved row);
- * a package-less row only the store holds is no exemption, because the
- * layers below do not serve it for a `doc` and would answer a holder by
- * registration order again.
+ * exactly as before. A package-less entry in the registry's bare slot (a
+ * hydrated or saved row, or a stamp-less registration) exempts the name from
+ * the refusal, and the layers then read it as before: ⛔ they do not serve
+ * that entry where the MetadataService holds a holder's copy, which answers
+ * first (the holder registered last; the composed artifact rig of
+ * runtime's `meta-disabled-holder-artifact-door.test.ts` pins it, measured and
+ * unresolved). A package-less row only the store holds is no
+ * exemption, because the layers below do not serve it for a `doc` and would
+ * answer a holder by registration order again.
  *
  * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
  */
@@ -391,6 +396,42 @@ export async function servedFromDisabledHolder(
         if (atHolder !== undefined && atHolder !== null && sameStoredItem(atHolder, data)) return true;
     }
     return false;
+}
+
+/**
+ * [ADR-0150 D3, red line 2] Is the MetadataService's answer to a read that
+ * names a package (`?package=X`) another package's item? Asked only where the
+ * exact qualifier admitted no address ({@link admitExactQualifier}: a type
+ * outside the set ADR-0150 addresses by `(package, name)`, a `doc` among
+ * them), so no check below the layers replaces such an answer.
+ *
+ * The service keeps such a type by name alone: the item of the package
+ * registered last. Served at step 2, it answered X's address with that
+ * package's body whenever two packages ship the name, in the order that put
+ * the other package last. Not served, the read falls through to the
+ * registry, whose read naming X answers X's own item first.
+ *
+ * Another package's item is one stamped with a package the registry holds
+ * that is neither X nor a customization pair of X or of which X is the pair.
+ * A copy bound to no package (no stamp, `''`, the `sys_metadata` sentinel), a
+ * copy stamped X, and a stamp the registry does not know are served as before.
+ * ⛔ Not an `object`: one package owns an object name, and the registry's read
+ * of it (`getObject`) does not read by package, so it has no item of X's to
+ * answer in its place.
+ */
+export function serviceCopyOfAnotherPackage(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; packageId?: string },
+    data: unknown,
+): boolean {
+    const packageId = request.packageId;
+    if (!packageId || request.type === 'object') return false;
+    const served = storedItemPackageId(data);
+    if (served === undefined || served === packageId) return false;
+    const registry = host.engine?.registry as { getPackage?(id: string): unknown } | undefined;
+    if (typeof registry?.getPackage !== 'function' || registry.getPackage(served) === undefined) return false;
+    const installed = installedManifestsOfEngine(host.engine);
+    return !isPairOf(served, packageId, installed) && !isPairOf(packageId, served, installed);
 }
 
 /** The same item: one object, or (a loader's fresh copy) the same JSON. */
@@ -1105,6 +1146,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // purpose — see the branch that reads it after step 3 for why the
     // verdict cannot be acted on here.
     let serviceDegraded: { degraded: boolean; errors: string[] } | undefined;
+    // [ADR-0150 D3] Step 2 declined the service's copy as another package's.
+    let anotherPackagesCopy = false;
     if (item === undefined) {
         try {
             // Threads the caller's package id (ADR-0048) so a single-item
@@ -1119,9 +1162,16 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
             // or it is a disabled package's customization
             // ({@link servedFromDisabledHolder}).
+            // [ADR-0150 D3, red line 2] …or, at an address naming a package
+            // the exact qualifier does not judge, it is another package's item
+            // ({@link serviceCopyOfAnotherPackage}): step 3 answers the
+            // package's own item from the registry.
+            anotherPackagesCopy = exactAddress === undefined && fromService.data !== undefined && fromService.data !== null
+                && serviceCopyOfAnotherPackage(host, request, fromService.data);
             if (fromService.data !== undefined && fromService.data !== null
                 && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
-                    || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
+                    || await servedFromDisabledHolder(host, request.name, fromService.data)))
+                && !anotherPackagesCopy) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
@@ -1185,7 +1235,20 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         } else if (bareActionAnswer) {
             item = bareActionAnswer.item;
         } else {
-            item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
+            // [ADR-0150 D3, red line 2] With another package's copy declined
+            // at step 2, the package named answers its own item: the
+            // registry's package slot ({@link serviceCopyOfAnotherPackage}),
+            // never `getItem`'s bare slot first, which a package-less entry of
+            // a name two packages hold fills, so the package registered first
+            // answered that entry and the one registered last its own item.
+            // A package that holds no item of the name reads `getItem`, as before.
+            if (anotherPackagesCopy && request.packageId) {
+                const scoped = host.engine.registry as { getPackageScopedItem?(type: string, name: string, packageId: string, member?: string): unknown };
+                if (typeof scoped.getPackageScopedItem === 'function') {
+                    item = scoped.getPackageScopedItem(request.type, request.name, request.packageId, member);
+                }
+            }
+            if (item === undefined) item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
             if (item === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) item = host.engine.registry.getItem(alt, request.name, request.packageId, member);

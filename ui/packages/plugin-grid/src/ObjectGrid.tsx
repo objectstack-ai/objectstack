@@ -1096,6 +1096,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     recordIds: pageRecordIds,
     update: canEdit || inlineEditable,
     delete: canDelete,
+    // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
+    updateOnMount: inlineEditable,
   });
 
   // The projection keys and the filter, sort, search and server-paging state,
@@ -2183,8 +2185,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     } as any);
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
+    // The refusal's producer-marked `userMessage` rides on the rejection, as
+    // on the aggregate path below: the row shows it, and `message` stays the
+    // whole text the error CSV keeps (objectstack#34215).
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
 
@@ -2217,7 +2223,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       toast: { showOnSuccess: false, showOnError: false },
     } as any);
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      // The refusal's producer-marked `userMessage` rides on the rejection,
+      // so the result reports the ONE outcome for the selection in the words
+      // the handler wrote for the user (objectstack#34173). `message` stays
+      // the whole text.
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
   const handleBulkDialogClose = (result?: BulkResult | null) => {
@@ -2231,6 +2242,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     if (result && result.succeeded > 0) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
+      setRefreshKey(k => k + 1);
+    } else if (result?.aggregateRejection) {
+      // A rejected aggregate run (objectstack#34173) is ONE call that may have
+      // written some rows before it stopped, so the grid re-reads them by the
+      // same path. The selection stays: re-running the whole action is the
+      // retry, as for a total failure.
       setRefreshKey(k => k + 1);
     }
   };

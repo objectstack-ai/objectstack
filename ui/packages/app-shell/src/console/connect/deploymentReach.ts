@@ -4,10 +4,8 @@
  * Whether a client that connects from its vendor's cloud (claude.ai on the
  * web, Doubao Work's cloud tasks) can reach this deployment at the address
  * Connect an Agent shows. Only a public HTTPS address is reachable from
- * there: an `http://` address, `localhost`, a single-label or `.local` host
- * name, and a loopback, private, link-local or carrier-grade NAT IP literal
- * are not. A host name with a dot is taken as public: the page cannot see
- * how the reader's DNS resolves it.
+ * there: an `http://` address, and any address {@link isPublicHostAddress}
+ * refuses, are not.
  */
 export function isPublicHttpsAddress(address: string): boolean {
   let url: URL;
@@ -16,7 +14,25 @@ export function isPublicHttpsAddress(address: string): boolean {
   } catch {
     return false;
   }
-  if (url.protocol !== 'https:') return false;
+  return url.protocol === 'https:' && isPublicHostAddress(address);
+}
+
+/**
+ * Whether an `http(s)` address names a host a device outside this network
+ * can open. `localhost`, a single-label or `.local` / `.internal` host name,
+ * and a loopback, private, link-local or carrier-grade NAT IP literal do
+ * not; neither does a value that is not an absolute `http(s)` URL. A host
+ * name with a dot is taken as public: the page cannot see how the reader's
+ * DNS resolves it.
+ */
+export function isPublicHostAddress(address: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!host) return false;
   if (host.includes(':')) return !isNonPublicIpv6(host);

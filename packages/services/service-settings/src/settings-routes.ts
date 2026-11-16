@@ -59,6 +59,19 @@ import { SettingsService } from './settings-service.js';
 // nothing that leaves over HTTP may carry it. See the module header for the
 // mask shape and why it mirrors ADR-0100's encrypted-field convention.
 import { dropEchoedSecretMasks, redactSecretValues } from './settings-secret-redaction.js';
+// [#33891] What a cloud-managed environment does not offer at these doors: one
+// table, asked by every route below and by the data-API read door.
+import {
+  SETTINGS_CLOUD_MANAGED_CODE,
+  SETTINGS_CLOUD_MANAGED_STATUS,
+  SettingsCloudManagedError,
+  assertActionServed,
+  assertNamespaceServed,
+  assertWriteServed,
+  projectKeyed,
+  projectManifest,
+  projectManifestList,
+} from './cloud-managed-settings.js';
 import { DEPLOYMENT_NOTICE_CAPABILITY, type DeploymentNoticeDoor } from './deployment-notice.js';
 import {
   SettingsCryptoUnavailableError,
@@ -277,6 +290,12 @@ export function registerSettingsRoutes(
       } catch (err: any) {
         if (relayAuthzStoreOutage(res, err)) return;
         if (relayApiKeyLifecycleRefusal(res, err)) return;
+        // [#33891] One spelling for every route: the hosted refusal is the
+        // runtime's state, answered alike wherever it is met.
+        if (err instanceof SettingsCloudManagedError) {
+          sendError(res, SETTINGS_CLOUD_MANAGED_STATUS, SETTINGS_CLOUD_MANAGED_CODE, err.message, { details: err.details });
+          return;
+        }
         route.refuse(res, err);
       }
     }) satisfies RouteHandler);
@@ -286,7 +305,8 @@ export function registerSettingsRoutes(
     async serve(req, res, ctx) {
       // Served as the namespace read serves them: a sourced key's options.
       const manifests = service.listManifests(ctx, { locale: requestLocaleOf(req) });
-      sendOk(res, { manifests });
+      // [#33891] A hosted caller is not offered what the platform manages.
+      sendOk(res, { manifests: projectManifestList(manifests) });
     },
     refuse(res, err) {
       if (err instanceof SettingsForbiddenError) {
@@ -300,6 +320,9 @@ export function registerSettingsRoutes(
   mountFamilyRoute('get', `${base}/:namespace`, {
     async serve(req, res, ctx) {
       const ns = req.params.namespace;
+      // [#33891] Asked first: a namespace the platform manages whole is not a
+      // page here, whoever asks.
+      assertNamespaceServed(ns, 'read');
       // The request's language names a served option no longer offered.
       const payload = await service.getNamespace(ns, ctx, { locale: requestLocaleOf(req) });
       // The page states what is LIVE, not only what is stored: the owning
@@ -321,11 +344,12 @@ export function registerSettingsRoutes(
       // and every `cascadeChain` entry of a secret-backed key are masked;
       // `source`, `locked` and `lockedReason` are untouched, so the console's
       // "configured" state and the env-lock affordances read the same as before.
+      // [#33891] A per-key projection leaves the hidden keys out of all three.
       sendOk(res, {
         ...payload,
-        manifest,
-        values: redactSecretValues(payload.values, service.secretKeysOf(ns)),
-        ...(live ? { live } : {}),
+        manifest: projectManifest(manifest),
+        values: projectKeyed(ns, redactSecretValues(payload.values, service.secretKeysOf(ns))),
+        ...(live ? { live: projectKeyed(ns, live) } : {}),
       });
     },
     refuse(res, err) {
@@ -363,6 +387,10 @@ export function registerSettingsRoutes(
           ),
         );
       }
+      // [#33891] A write that names a key the platform manages is refused
+      // whole, before anything is applied: the same all-or-nothing answer
+      // `setMany` gives a write that names an unknown key.
+      assertWriteServed(ns, Object.keys(body));
       // #7522 — the echoed-mask no-op. GET now answers a secret with the mask;
       // a form that submits back what it read means "unchanged", so the key is
       // dropped rather than persisted as the mask's literal text. Resolved here
@@ -439,6 +467,8 @@ export function registerSettingsRoutes(
   mountFamilyRoute('post', `${base}/:namespace/:actionId`, {
     async serve(req, res, ctx) {
       const { namespace, actionId } = req.params;
+      // [#33891] The actions that exercise or clear what the platform manages.
+      assertActionServed(namespace, actionId);
       const result = await service.runAction(namespace, actionId, req.body, ctx, { locale: requestLocaleOf(req) });
       // The 200/400 split is PRE-EXISTING and preserved verbatim: an action
       // that ran and reported `ok: false` is still answered 400. Whether a

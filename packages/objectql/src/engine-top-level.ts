@@ -4589,20 +4589,57 @@ export function cascadeSetAdd(index: Map<string, Set<string>>, object: string, i
 /**
  * [#23221] The one child delete a cascade walk is issuing, for that delete to
  * recognise itself by — see {@link ObjectQL.cascadeIssuedDeletes}. The walk
- * opens one per `cascade` dependent, around its own `delete()` call, and the
- * `delete()` whose object and id match claims it.
+ * opens one around its own `delete()` call, and the `delete()` whose object
+ * and target match claims it: a by-id delete by `id`, and a batch of children
+ * (ruling 6893661036, option F1) by `ids`, the exact set its `where.id.$in`
+ * names. Exactly one of the two is set.
  */
 interface CascadeIssuedDelete {
   /** The child object the walk is deleting from, as the registry names it. */
   readonly object: string;
-  /** The child row's id, as a string (the walk's `String(depId)`). */
-  readonly id: string;
+  /** The child row's id, as a string (the walk's `String(depId)`): a by-id child delete. */
+  readonly id?: string;
+  /** The chunk's ids, as strings: a cascade batch, one predicate delete over `where.id.$in`. */
+  readonly ids?: ReadonlySet<string>;
   /**
    * Set by the `delete()` that recognised itself. One token, one dispatch: a
    * later delete of the same row inside that call (a hook's own) finds it
    * claimed and is not marked.
    */
   claimed: boolean;
+}
+
+/**
+ * [ruling 6893661036, F1] A cascade batch's caller-scoped read did not return
+ * every child the walk asked it to delete: a row the caller may not delete is
+ * NARROWED out of a predicate delete, where the by-id delete of the same row
+ * REFUSES it. Thrown by `delete()` before any hook dispatches and before any
+ * write, and caught by the walk alone, which then deletes that chunk the by-id
+ * way, so the caller meets today's refusal and the whole cascade rolls back.
+ * Never reaches a caller: it is engine-internal and carries no code.
+ */
+class CascadeBatchNarrowed extends Error {
+  constructor(object: string) {
+    super(`cascade batch on '${object}' was narrowed by the caller's scope; deleting that chunk by id`);
+    this.name = 'CascadeBatchNarrowed';
+  }
+}
+
+/**
+ * [ruling 6893661036, F1] The id set a cascade batch names: `where` is exactly
+ * `{ id: { $in: [...] } }`, the shape the walk issues, and nothing else.
+ * `undefined` for any other predicate.
+ */
+function cascadeBatchIdsOf(where: unknown): string[] | undefined {
+  if (where === null || typeof where !== 'object' || Array.isArray(where)) return undefined;
+  const keys = Object.keys(where);
+  if (keys.length !== 1 || keys[0] !== 'id') return undefined;
+  const idSpec = (where as { id?: unknown }).id;
+  if (idSpec === null || typeof idSpec !== 'object' || Array.isArray(idSpec)) return undefined;
+  const opKeys = Object.keys(idSpec);
+  if (opKeys.length !== 1 || opKeys[0] !== '$in') return undefined;
+  const list = (idSpec as { $in?: unknown }).$in;
+  return Array.isArray(list) ? list.map((v) => String(v)) : undefined;
 }
 
 /**
@@ -5171,8 +5208,8 @@ const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondit
 
 // [#29986 codemod] Declared above without `export`, and read by `engine.ts` or a section module.
 export {
-  AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeIssuedDelete,
-  DISPATCHABLE_HOOK_EVENTS, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
+  AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeBatchNarrowed,
+  CascadeIssuedDelete, DISPATCHABLE_HOOK_EVENTS, cascadeBatchIdsOf, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
   ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WIRE_ONLY_SLOTS, FormulaFaultSink, FormulaRelated,
   IssuedAutonumber, METADATA_ARRAY_KEYS, ReadableIdsSecurityResolution, StoredExpressionServing, TransactionScope,
   WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,

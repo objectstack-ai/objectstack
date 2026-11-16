@@ -229,6 +229,11 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
   `ai.requiresConfirmation: true`, sends `confirm: true` itself on an ask that names the target
   row, and writes exactly the declared write; the scorecard says `confirmed by the agent`
   instead of `asked first`. So write the `ask` naming the row it acts on (its number or name).
+  An agent that asked first is then sent the person's confirmation in a second turn, and
+  that turn must make exactly the declared write (`target` and `values`, or the delete) and
+  nothing else on the object; the scorecard counts it as `confirmed write`, apart from the
+  ask, and the operation passes when both halves do. So declare the `target` and `values`
+  the confirmed write must leave.
 
 `run.agentActions` (optional) lists at least three business actions an agent may call,
 `{ name, object, summary, confirm }`, at least one of them confirm-gated.
