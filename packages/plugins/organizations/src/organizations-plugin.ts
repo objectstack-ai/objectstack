@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext } from '@objectstack/core';
+import { Plugin, PluginContext, DEFAULT_ORGANIZATION_SLUG } from '@objectstack/core';
 import type { OrgScopingEngine } from './org-scoping-engine.js';
 import { createEnsureDefaultOrganizationOnce, isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';
 import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
@@ -416,20 +416,35 @@ export class OrganizationsPlugin implements Plugin {
     // `afterCreateOrganization`, after the member write, so the seed rows are
     // there before it either way.
     //
+    // [#34425] The default-organization bootstrap below is the second writer
+    // with the same two-write shape: it inserts the `default` organization as
+    // SYSTEM, with no person behind it, and THEN binds the platform owner's
+    // `sys_member` row. Replayed on the insert, its seed found no member, so a
+    // `Field.user()` column naming the owner landed NULL (the seed-ownership
+    // handoff after the bind re-owns NULL `owner_id` only). So the `default`
+    // organization that bootstrap inserts waits the same way, and its replay
+    // runs inside the owner's member insert, with the bound owner as the locale
+    // user. When the bootstrap binds nobody (the bind was decided earlier, or
+    // the member write failed), the last bootstrap call to finish replays it
+    // with no person, which is the order it had before.
+    //
     // Every other organization insert replays on the insert, exactly as before:
-    // a SYSTEM insert with no person behind it (the default-organization
-    // bootstrap, whose seed-ownership handoff below reads the rows this replay
-    // landed; imports; migrations) gets no member write it could wait for.
+    // a SYSTEM insert with no person behind it (imports; migrations) gets no
+    // member write it could wait for.
     //
     // ⛔ One replay per organization: the entry is removed before the replay
     // runs, so a second member never replays again.
-    const awaitingFirstMember = new Map<string, { founderId: string; since: number }>();
+    const awaitingFirstMember = new Map<
+      string,
+      { founderId: string | undefined; since: number; fromDefaultOrgBootstrap?: true }
+    >();
+    let defaultOrgBootstrapsInFlight = 0;
     const forgetAbandonedCreates = (now: number) => {
       for (const [organizationId, entry] of awaitingFirstMember) {
         if (now - entry.since < FIRST_MEMBER_WAIT_MS) continue;
         awaitingFirstMember.delete(organizationId);
         ctx.logger.warn(
-          `[org-scoping] organization ${organizationId} was created by ${entry.founderId}, but no member row ` +
+          `[org-scoping] organization ${organizationId} was created by ${entry.founderId ?? 'the default-organization bootstrap'}, but no member row ` +
             `followed within ${FIRST_MEMBER_WAIT_MS / 60_000} minutes, so its seed was not replayed. ` +
             'The create did not finish; an organization with no member has nobody to see the data. ' +
             'Once it has a member, the seed-replayer service called with its id loads the seed.',
@@ -447,7 +462,13 @@ export class OrganizationsPlugin implements Plugin {
         const waiting = typeof organizationId === 'string' ? awaitingFirstMember.get(organizationId) : undefined;
         if (!waiting) return;
         awaitingFirstMember.delete(organizationId);
-        await replayOrganizationSeed(organizationId, waiting.founderId);
+        // A bootstrap entry names nobody until its first member: the owner
+        // that member row binds.
+        const memberUserId = opCtx?.result?.user_id ?? opCtx?.data?.user_id;
+        await replayOrganizationSeed(
+          organizationId,
+          waiting.founderId ?? (typeof memberUserId === 'string' && memberUserId !== '' ? memberUserId : undefined),
+        );
         return;
       }
 
@@ -463,7 +484,15 @@ export class OrganizationsPlugin implements Plugin {
         return;
       }
       const userId = opCtx?.context?.userId;
-      await replayOrganizationSeed(newOrgId, typeof userId === 'string' && userId !== '' ? userId : undefined);
+      const hasUser = typeof userId === 'string' && userId !== '';
+      const slug = opCtx?.result?.slug ?? opCtx?.data?.slug;
+      if (defaultOrgBootstrapsInFlight > 0 && !hasUser && slug === DEFAULT_ORGANIZATION_SLUG) {
+        const now = Date.now();
+        forgetAbandonedCreates(now);
+        awaitingFirstMember.set(String(newOrgId), { founderId: undefined, since: now, fromDefaultOrgBootstrap: true });
+        return;
+      }
+      await replayOrganizationSeed(newOrgId, hasUser ? userId : undefined);
     });
 
     const replayOrganizationSeed = async (newOrgId: string, founderId: string | undefined): Promise<void> => {
@@ -559,8 +588,9 @@ export class OrganizationsPlugin implements Plugin {
       const ensureOnce = createEnsureDefaultOrganizationOnce({
         logger: ctx.logger,
         // [#23354] The claim re-owns only the rows the organization's seed
-        // replay landed on — which ran moments earlier, inside the
-        // `sys_organization` insert that created it (Middleware B above).
+        // replay landed on — which ran moments earlier, inside the owner's
+        // `sys_member` insert that the bind just wrote (Middleware B above,
+        // #34425).
         claimSeedOwnership: (engine, organizationId, ownerUserId, claimOptions) =>
           claimOrgSeedOwnership(engine, organizationId, ownerUserId, {
             ...claimOptions,
@@ -568,6 +598,9 @@ export class OrganizationsPlugin implements Plugin {
           }),
       });
       const runEnsure = async () => {
+        // [#34425] Counted, not flagged: the owner bind re-enters this
+        // bootstrap from inside the deciding call (`default-org-bootstrap-once.ts`).
+        defaultOrgBootstrapsInFlight += 1;
         try {
           const res = await ensureOnce(ql);
           if (res.defaultOrgCreated) {
@@ -579,6 +612,16 @@ export class OrganizationsPlugin implements Plugin {
           ctx.logger.warn?.('[org-scoping] ensureDefaultOrganization failed', {
             error: (e as Error).message,
           });
+        } finally {
+          defaultOrgBootstrapsInFlight -= 1;
+        }
+        if (defaultOrgBootstrapsInFlight > 0) return;
+        // No bootstrap call is left to bind an owner: a `default` organization
+        // still waiting gets no member from it, so it replays now, with no person.
+        for (const [organizationId, entry] of awaitingFirstMember) {
+          if (!entry.fromDefaultOrgBootstrap) continue;
+          awaitingFirstMember.delete(organizationId);
+          await replayOrganizationSeed(organizationId, undefined);
         }
       };
       if (typeof (ctx as any).hook === 'function') {

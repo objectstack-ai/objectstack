@@ -74,6 +74,10 @@ panels are hidden, and the page runs onto as many sheets as it needs.
 | `repeatTableHeaders` | A table's column headings repeated on every sheet it runs onto; on when omitted |
 | `avoidBreakInside` | `break-inside: avoid` on each block of a region |
 
+On a print page whose sections may break between sheets, author one `record:details` block
+per section: `avoidBreakInside` keeps each block whole on one sheet when it fits, so a block
+holding several sections moves to the next sheet as one piece.
+
 Blocks print whole:
 
 - `record:line_items` loads at most its row cap (`limit`, 500 when unset). On a print page,
