@@ -414,6 +414,34 @@ describe('platform_admin approver: one slot the platform administrators decide u
       expect(row.pending_approvers).toEqual(['u_alice']);
     });
 
+    it('a directory row holding the slot opens none', async () => {
+      await engine.insert('sys_user_position', {
+        id: 'pos_slot', user_id: SLOT, position: 'deal_desk', organization_id: ORG,
+      }, { context: SYSTEM } as any);
+      try {
+        const row = await open('via_directory', 'tenant_review',
+          [{ type: 'position', value: 'deal_desk' }, { type: 'user', value: 'u_alice' }]);
+        expect(row.pending_approvers).toEqual(['u_alice']);
+      } finally {
+        await engine.delete('sys_user_position', { where: { id: 'pos_slot' }, context: SYSTEM } as any);
+      }
+    });
+
+    it('an SLA escalation onto a position whose holder row holds the slot does not hand the request to it', async () => {
+      await engine.insert('sys_user_position', {
+        id: 'pos_slot_esc', user_id: SLOT, position: 'escalation_desk', organization_id: ORG,
+      }, { context: SYSTEM } as any);
+      try {
+        await open('via_escalation', 'tenant_review', [{ type: 'user', value: 'u_alice' }],
+          { escalation: { timeoutHours: 1, action: 'reassign', escalateTo: 'escalation_desk', notifySubmitter: false } });
+        now += 2 * 3600_000;
+        await svc.runEscalations();
+        expect((await requestRows('via_escalation'))[0].pending_approvers).not.toContain(SLOT);
+      } finally {
+        await engine.delete('sys_user_position', { where: { id: 'pos_slot_esc' }, context: SYSTEM } as any);
+      }
+    });
+
     it('an out-of-office delegation that ends on the slot leaves the slot with the person', async () => {
       await engine.insert('sys_approval_delegation', {
         id: 'dlg_alice', delegator_id: 'u_alice', delegate_id: SLOT, organization_id: ORG,
