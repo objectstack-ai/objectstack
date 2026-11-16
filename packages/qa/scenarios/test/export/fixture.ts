@@ -238,6 +238,11 @@ class ScriptedDriver implements AgentDriver {
     if (op.outcome.kind === 'refused') {
       return turn('That was refused.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: JSON.stringify({ error: { code: op.outcome.code } }), isError: true }]);
     }
+    if (task.confirmation) {
+      // The person confirmed: delete the target through the door's confirm-gated delete, as the MCP door would.
+      app.rows[op.object] = rows.filter((r) => r.id !== op.target);
+      return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: op.object, recordId: op.target, confirm: true }, output: '{"ok":true}' }]);
+    }
     return turn('This cannot be undone — do you want me to delete it? Please confirm.');
   }
 }
