@@ -259,10 +259,22 @@ describe('#27559 getPackagedObjectBase — the packaged RULE set is the owner pl
         expect((s.registry.getObject(OBJ) as any).label).toBe(EXTENSION_LABEL);
     });
 
-    it('stays the owner declaration BY REFERENCE when no extender ships a rule', () => {
+    it('stays the owner declaration BY REFERENCE when no extender ships a rule or adds a field', () => {
         const s = makeSession();
         registerPackaged(s.registry);
-        registerExtension(s.registry);
+        // An extension that relabels the object and redeclares one of the
+        // owner's own fields adds nothing the packaged base carries.
+        s.registry.registerObject(
+            {
+                name: OBJ,
+                label: EXTENSION_LABEL,
+                fields: { name: { name: 'name', type: 'text', label: 'Full Name' } },
+            } as any,
+            EXT_PKG,
+            undefined,
+            'extend',
+            210,
+        );
         expect(baseOf(s.protocol)).toBe(s.registry.getPackagedObjectOwner(OBJ)?.definition);
     });
 
@@ -280,5 +292,157 @@ describe('#27559 getPackagedObjectBase — the packaged RULE set is the owner pl
             'overlay',
         );
         expect(baseOf(s.protocol).validations.map((r: any) => r.message)).toEqual(['Extension says.']);
+    });
+});
+
+describe('getPackagedObjectBase — a field a code extender ADDS is packaged, as the extender ships it', () => {
+    // A dependent package's `objectExtensions` entry adds fields the owner does
+    // not declare, and ships the translations of their labels and option
+    // labels in its own pack. The catalog translates exactly what the code
+    // layers ship (the #27559 sentence for rules), so the packaged
+    // counterpart of such a field is the extender's declaration; read off the
+    // owner alone, the field counted as authored after the fact and `/meta`
+    // served its source-language strings under every locale.
+    const DEP_PKG = 'com.example.carbon';
+    const MARKET = {
+        name: 'cb_market',
+        type: 'select',
+        label: 'Market',
+        options: [
+            { value: 'domestic', label: 'Domestic' },
+            { value: 'export', label: 'Export' },
+        ],
+    };
+
+    function registerDependentExtension(registry: SchemaRegistry, fields: Record<string, unknown>, packageId = DEP_PKG) {
+        registry.installPackage({ id: packageId, name: packageId, version: '1.0.0' } as any, 'code');
+        registry.registerObject({ name: OBJ, fields } as any, packageId, undefined, 'extend', 200);
+    }
+
+    it('carries a code dependent\'s added field, label and option labels, beside the owner\'s fields', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerDependentExtension(s.registry, { cb_market: MARKET });
+
+        const base = baseOf(s.protocol);
+        expect(base.fields.cb_market.label).toBe('Market');
+        expect(base.fields.cb_market.options.map((o: any) => o.label)).toEqual(['Domestic', 'Export']);
+        expect(base.fields.name.label).toBe('Name');
+        // The owner's own declaration is not mutated on the way.
+        expect((s.registry.getPackagedObjectOwner(OBJ)?.definition as any).fields.cb_market).toBeUndefined();
+    });
+
+    it('keeps the OWNER\'s declaration of a field an extender redeclares, and the owner\'s scalars (#8037)', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        s.registry.installPackage({ id: DEP_PKG, name: DEP_PKG, version: '1.0.0' } as any, 'code');
+        s.registry.registerObject(
+            {
+                name: OBJ,
+                label: EXTENSION_LABEL,
+                fields: { name: { name: 'name', type: 'text', label: 'Full Name' }, cb_market: MARKET },
+            } as any,
+            DEP_PKG,
+            undefined,
+            'extend',
+            200,
+        );
+
+        const base = baseOf(s.protocol);
+        expect(base.fields.name.label).toBe('Name');
+        expect(base.label).toBe(PACKAGED_LABEL);
+        expect(base.fields.cb_market.label).toBe('Market');
+        // The served object is the fold's, which the base must not follow.
+        expect((s.registry.getObject(OBJ) as any).fields.name.label).toBe('Full Name');
+    });
+
+    it('does not carry a field a tenant overlay adds, and does not move under the tenant\'s rename of an extender field', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerDependentExtension(s.registry, { cb_market: MARKET });
+        s.registry.registerObject(
+            {
+                name: OBJ,
+                label: PACKAGED_LABEL,
+                fields: {
+                    name: { name: 'name', type: 'text', label: 'Name' },
+                    cb_market: { ...MARKET, label: 'Sales Market' },
+                    tenant_note: { name: 'tenant_note', type: 'text', label: 'Note' },
+                },
+                _packageId: 'sys_metadata', _provenance: 'org',
+            } as any,
+            'sys_metadata',
+            undefined,
+            'overlay',
+        );
+
+        const base = baseOf(s.protocol);
+        expect(base.fields.tenant_note).toBeUndefined();
+        expect(base.fields.cb_market.label).toBe('Market');
+    });
+
+    it('is no longer the owner BY REFERENCE once a code extender adds a field: the shared fixture\'s `loyalty_tier` is carried', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerExtension(s.registry);
+        const base = baseOf(s.protocol);
+        expect(base).not.toBe(s.registry.getPackagedObjectOwner(OBJ)?.definition);
+        expect(base.fields.loyalty_tier.label).toBe('Loyalty Tier');
+        expect(base.label).toBe(PACKAGED_LABEL);
+    });
+
+    it('carries nothing from a stored (tenant-provenance) extension, a `.custom` pair\'s row included', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        s.registry.registerObject(
+            {
+                name: OBJ,
+                fields: { region__c: { name: 'region__c', type: 'text', label: 'Region' } },
+                _packageId: 'app.showcase.custom', _provenance: 'org',
+            } as any,
+            'app.showcase.custom',
+            undefined,
+            'extend',
+            200,
+        );
+        expect((s.registry.getObject(OBJ) as any).fields.region__c).toBeDefined();
+        const base = baseOf(s.protocol);
+        expect(base.fields.region__c).toBeUndefined();
+        expect(base).toBe(s.registry.getPackagedObjectOwner(OBJ)?.definition);
+    });
+
+    it('does not fold a code extender\'s fieldPatches into the base: the owner\'s field text stays the packaged one', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        s.registry.installPackage({ id: DEP_PKG, name: DEP_PKG, version: '1.0.0' } as any, 'code');
+        s.registry.registerObject(
+            { name: OBJ, fields: { cb_market: MARKET }, fieldPatches: { name: { label: 'Company Name', description: 'Patched.' } } } as any,
+            DEP_PKG,
+            undefined,
+            'extend',
+            200,
+        );
+        expect((s.registry.getObject(OBJ) as any).fields.name.label).toBe('Company Name');
+        const base = baseOf(s.protocol);
+        expect(base.fields.name.label).toBe('Name');
+        expect(base.fields.name.description).toBeUndefined();
+        expect(base.fields.cb_market.label).toBe('Market');
+    });
+
+    it('lets a later code extender\'s declaration of an added field replace an earlier one, as the fold does', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerDependentExtension(s.registry, { cb_market: MARKET });
+        s.registry.installPackage({ id: 'com.example.later', name: 'later', version: '1.0.0' } as any, 'code');
+        s.registry.registerObject(
+            { name: OBJ, fields: { cb_market: { ...MARKET, label: 'Sales Market' } } } as any,
+            'com.example.later',
+            undefined,
+            'extend',
+            300,
+        );
+
+        expect(baseOf(s.protocol).fields.cb_market.label).toBe('Sales Market');
+        expect((s.registry.getObject(OBJ) as any).fields.cb_market.label).toBe('Sales Market');
     });
 });

@@ -5,7 +5,7 @@
 ## 形态
 
 - 席位 `repo:objectstack#N`,可多席、多账号;签名、座位贴、信箱、坐席与收班同他席。
-- 每席照 area-lease.md 分区运作:区线程、复核线程、区内落地;本文只写全仓与多席特有者。
+- 每席照 area-lease.md 分区运作:区线程、L1 线程、区内落地;本文只写全仓与多席特有者。
 - ⛔ 非单车道仓席:cross-repo-coordination.md 单车道仓条、seat-lifecycle.md 单车道仓行不适用。
 - 首触、定级与 `domain:*` 仍归分诊(`triage-duties.md`);本车道 ⛔ 不产、不改 `domain:*`。
 - ⛔ 不给卡挂 `repo:objectstack` 标签:按仓认卡;该标签已退流通,H14 仍作缝卡读。
@@ -15,7 +15,7 @@
 - 本仓全部可认领卡,跨各 `domain:*`;`domain:*` 只定文件归属与串行(SKILL.md 域车道)。
 - 不认领:涉 cloud 整卡归 `repo:cloud` 席;安全公告归 `security` 席;他仓卡归各仓车道。
 - 域车道席照常运作;area-lease.md 认领前重读行的「他区」在本车道读作他席或他区。
-- 跨车道卡的留道、复核与通知照 area-lease.md 区内规则,⛔ 本文不另抄。
+- 跨车道卡的留道、L1/L2 审核与通知照 area-lease.md 区内规则,⛔ 本文不另抄。
 
 ## 多席分工
 
