@@ -19,6 +19,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's reach loads `@objectstack/metadata` lazily; paid here, at
+// collection, never inside a case's clocked window (check:test-source-alias).
+import '@objectstack/metadata';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
