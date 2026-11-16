@@ -505,7 +505,7 @@ describe('celEngine', () => {
         datetime: 'datetime("2026-03-15T08:00:00Z")', isoDate: 'isoDate(today())',
         isoDatetime: 'isoDatetime(now())', abs: 'abs(-3.5)', round: 'round(2.6)',
         floor: 'floor(6.7)', ceil: 'ceil(6.1)',
-        min: 'min(1, 2)', max: 'max(1, 2)', upper: 'upper("hi")', lower: 'lower("HI")',
+        min: 'min(1, 2)', max: 'max(1, 2)', rmbUpper: 'rmbUpper(10500.5)', upper: 'upper("hi")', lower: 'lower("HI")',
         trim: 'trim(" x ")', contains: 'contains("hello", "ell")', startsWith: 'startsWith("hi", "h")',
         endsWith: 'endsWith("hi", "i")', matches: 'matches("a1", "a.")', joinNonEmpty: 'joinNonEmpty(["a", "b"], "-")',
         isBlank: 'isBlank("")', isEmpty: 'isEmpty([])', coalesce: 'coalesce(null, "x")', len: 'len("ab")',
