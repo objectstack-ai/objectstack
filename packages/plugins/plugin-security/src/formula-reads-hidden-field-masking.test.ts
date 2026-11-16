@@ -92,8 +92,13 @@ interface BootOptions {
   secondFields?: FieldEntries;
   /** Capabilities the caller's permission set grants. */
   capabilities?: string[];
-  /** The object grant's View All (reads every field of the object). */
+  /**
+   * The object grant's View All. It reads every field of the object the set's
+   * own rows do not declare `readable: false` (ADR-0066 D2 ⑧).
+   */
   viewAllRecords?: boolean;
+  /** View All on the object in the second set, held only by {@link TWO_SETS}. */
+  secondViewAll?: boolean;
   /**
    * Boot the identity objects and a delegator user holding {@link DELEGATOR_SET}
    * with these field entries, so an on-behalf-of read resolves its delegator
@@ -321,7 +326,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   });
   const second = PermissionSetSchema.parse({
     name: SECOND,
-    objects: { [OBJ]: { allowRead: true }, [REGION]: { allowRead: true } },
+    objects: { [OBJ]: { allowRead: true, ...(opts.secondViewAll ? { viewAllRecords: true } : {}) }, [REGION]: { allowRead: true } },
     ...(opts.secondFields ? { fields: opts.secondFields } : {}),
   });
   const delegatorSet = PermissionSetSchema.parse({
@@ -952,14 +957,21 @@ describe('controls: what the rule leaves unchanged', () => {
     });
   });
 
-  it('a View All holder reads the hidden field and the formulas over it', async () => {
-    const { engine } = await boot({ fields: HIDE_OPEN_CASES, viewAllRecords: true });
-    expect(await findA1(engine)).toMatchObject({ open_cases: 6, load: 0.5, load_pct: 50, open_cases_stored: 6 });
+  it("a holder of another set's View All reads the hidden field and the formulas over it", async () => {
+    const { engine } = await boot({ fields: HIDE_OPEN_CASES, secondViewAll: true });
+    expect(await findA1(engine, TWO_SETS)).toMatchObject({ open_cases: 6, load: 0.5, load_pct: 50, open_cases_stored: 6 });
   });
 
-  it('a View All holder is still withheld a computed field over a capability-gated or masked field (the vote lifts readable: false only)', async () => {
+  it("View All on the set that hides the field does not read it: the field and the computed fields over it stay withheld", async () => {
     const { engine } = await boot({ fields: HIDE_OPEN_CASES, viewAllRecords: true });
     const one = await findA1(engine);
+    expect(one).toMatchObject({ capacity: 12 });
+    for (const f of ['open_cases', 'load', 'load_pct', 'open_cases_stored', 'load_stored']) expect(one, f).not.toHaveProperty(f);
+  });
+
+  it("a holder of another set's View All is still withheld a computed field over a capability-gated or masked field (the vote lifts readable: false only)", async () => {
+    const { engine } = await boot({ fields: HIDE_OPEN_CASES, secondViewAll: true });
+    const one = await findA1(engine, TWO_SETS);
     expect(one).toMatchObject({ open_cases: 6, load: 0.5, phone: '138****5678' });
     for (const f of ['gated', 'gated_double', 'gated_stored', 'phone_copy', 'phone_stored']) expect(one, f).not.toHaveProperty(f);
   });

@@ -187,6 +187,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `round(x)` | int | Round to the nearest integer |
 | `floor(x)` / `ceil(x)` | int | Round toward −∞ / +∞ (`floor(-1.2)` = −2, not −1) |
 | `min(a, b)` / `max(a, b)` | dyn | Smaller / larger operand (numeric comparison) |
+| `rmbUpper(x)` | string | Amount in Chinese capitals, rounded to 分: `rmbUpper(10500.5)` = `壹万零伍佰元伍角`; `''` for null |
 
 **Strings**
 
@@ -216,9 +217,6 @@ tests: every entry resolves at runtime, and this table documents them all.
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
 `double(x)`, `timestamp(s)`, `duration(s)`.
-
-If you need a helper that doesn't exist, prefer adding it to the stdlib
-(small, pure, dependency-free) over inlining a complex CEL expression.
 
 > Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
