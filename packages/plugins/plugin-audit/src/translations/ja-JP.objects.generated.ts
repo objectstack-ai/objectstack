@@ -45,7 +45,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "資格情報の使用",
           scim_refused: "SCIM 要求の拒否",
           audit_signing_key_change: "監査署名キーの変更",
-          dataset_query: "データセットクエリ"
+          dataset_query: "データセットクエリ",
+          scim_manager_unresolved: "SCIM マネージャーの未解決"
         }
       },
       user_id: {
