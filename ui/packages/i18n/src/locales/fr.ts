@@ -1969,6 +1969,7 @@ const fr = {
       },
       passwordsNote: "Mots de passe temporaires — affichés une seule fois, jamais stockés. Enregistrez-les maintenant ; chaque utilisateur doit changer le sien à la première connexion.",
       passwordsMore: "Autres entrées omises — utilisez le téléchargement.",
+      positionsHint: "Postes : associez une colonne de noms machine de postes, plusieurs séparés par « ; ». Chacun est attribué comme dans Setup ; un nom inexistant, ou que vous ne pouvez pas attribuer, est signalé sur sa ligne, et l’utilisateur est tout de même créé.",
       passwordsDownload: "Télécharger le CSV",
     },
     ai: {

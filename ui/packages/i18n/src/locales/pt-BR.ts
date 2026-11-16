@@ -1968,6 +1968,7 @@ const pt = {
       },
       passwordsNote: "Senhas temporárias — exibidas uma única vez, nunca armazenadas. Salve-as agora; cada usuário deve trocar a sua no primeiro acesso.",
       passwordsMore: "Demais entradas omitidas — use o download.",
+      positionsHint: "Cargos: mapeie uma coluna com nomes de máquina de cargos, vários separados por \";\". Cada um é atribuído como no Setup; um nome que não existe, ou que você não pode atribuir, é informado na linha, e o usuário é criado mesmo assim.",
       passwordsDownload: "Baixar CSV",
     },
     ai: {

@@ -39,6 +39,10 @@ const POLICY_FALLBACKS: Record<IdentityPasswordPolicy, { label: string; hint: st
   },
 };
 
+const POSITIONS_HINT_FALLBACK =
+  'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; '
+  + 'a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.';
+
 export function IdentityImportOptions({
   policy,
   onPolicyChange,
@@ -69,6 +73,11 @@ export function IdentityImportOptions({
       </Select>
       <p className="text-xs text-muted-foreground">
         {t(`console.identityImport.policyHint.${policy}`, POLICY_FALLBACKS[policy].hint)}
+      </p>
+      {/* objectstack#33113 — the `positions` column's help: what the cell
+          holds, and that a bad name costs its row the position, not the user. */}
+      <p className="text-xs text-muted-foreground" data-testid="identity-import-positions-hint">
+        {t('console.identityImport.positionsHint', POSITIONS_HINT_FALLBACK)}
       </p>
     </div>
   );
@@ -135,6 +144,11 @@ export function IdentityImportResultExtra({ serverResult }: { serverResult?: Imp
  *  or placeholder address is marked, as the endpoint refuses it with
  *  `INVALID_EMAIL` (objectui#11913).
  *
+ *  `positions` (objectstack#33113) is no `sys_user` field: the endpoint reads
+ *  it — position machine names, `;`-separated — and assigns each one after
+ *  the row lands, as Setup assigns a position. Its help is the options
+ *  panel's `positionsHint`.
+ *
  *  The flag is typed where it is written, against the wizard's own field type,
  *  and the return type does not name it. `ObjectView` passes this list or
  *  `importTargetFields`' list into the wizard's `fields` through one
@@ -152,5 +166,6 @@ export function identityImportFields(
     { name: 'phone_number', label: label('phone_number', 'Phone Number'), type: 'text' },
     { name: 'name', label: label('name', 'Name'), type: 'text' },
     { name: 'role', label: label('role', 'Platform Role'), type: 'text' },
+    { name: 'positions', label: 'Positions', type: 'text' },
   ];
 }

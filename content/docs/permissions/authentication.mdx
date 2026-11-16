@@ -1269,6 +1269,20 @@ every row through better-auth so the accounts are login-capable:
   updates only touch profile fields (`name`, `image`, `phone_number`, `role`)
   — a re-imported file can never modify an existing user's email or reset
   their password.
+- A `positions` column assigns positions: position machine names, several
+  separated by `;` (an array on a JSON row) — the same column
+  `import-sso-users` reads. Each is assigned after every row has landed, as a
+  `sys_user_position` grant written under the importing admin's own access,
+  so it passes the checks Setup applies when you assign a position there (the
+  position must exist, and you must be allowed to assign it). A position that does not exist or is refused is reported on
+  its row and the user is still created: `rows[].positions` lists each named
+  position with its outcome (`assigned`, `already_assigned`, `unresolved`, or
+  `refused` with the refusal's `code`), and `summary.positions` counts them.
+  The import only adds positions; it never removes one a user holds. Permission
+  sets come with the position (a position carries its sets); a direct grant
+  stays a Setup step. A file that names positions on a server that cannot
+  judge the grant is refused with nothing created (`501`), and dry runs do
+  not assign.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
