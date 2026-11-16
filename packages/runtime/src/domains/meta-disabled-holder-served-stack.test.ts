@@ -744,6 +744,17 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
                 .toEqual([leg, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
             const own = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR', package: D });
             expect([leg, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([leg, 200, 'addon fr', D]);
+            // The shared member `en-US`, naming no package, is not moved: the
+            // arm reads only a named non-canonical member. A shipped base serves
+            // its own `en-US`; over a row-held base A's and D's rows of it are
+            // two holders, refused naming both, as without this change.
+            const shared = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'en-US' });
+            if (ships) {
+                expect([leg, shared.status, unwrap(shared.body)?.item?.subject, unwrap(shared.body)?.packageId], JSON.stringify(shared.body)).toEqual([leg, 200, 'base en', A]);
+            } else {
+                expect([leg, shared.status, codeOf(shared.body)], JSON.stringify(shared.body)).toEqual([leg, 409, 'RESOURCE_CONFLICT']);
+                for (const id of [A, D]) expect(JSON.stringify(shared.body), leg).toContain(id);
+            }
         };
         try {
             for (const id of registered) {
