@@ -28,13 +28,14 @@
 - main-red 锚卡由席位先立先派,首触事后补作记录级:可改域,⛔ 不改动作,在飞照补。
 - 锚卡关闭同轮照 project-forms.md 敲门,一 PR 一敲;敲门数进轮次记录。
 - 主干全量红与确定性队列红首触定 p0(锚卡、根因卡、full-run 卡);flake 锚卡判确定性才升。
+- 例外:一签名 2h 内踢 ≥2 独立 head 组的队列 flake 即 p0;修复合入关卡,2h 无新踢按上行定。
+  须失败用例 `main` 已有;一 PR 后叠组算一 head,其新红测试即出队;计数插队见 `lanes/queue.md`。
 - 车道席自分诊:本车道卡挡自有在飞(认领卡/PR/落地/拆分链)且证据清楚,方可首触定 p1/p2。
 - 证据 = 卡上引具名失败 check/run、复现读数或 pin 测试;记录照分诊格式贴卡,请分诊复审。
 - 行首 `Ruling-ref:` 引本例外裁决原话;⛔ 不改 `domain:*`、不定 p0(归 main-red)、不碰人工地板。
 - 分诊每轮读上轮以来新贴的自分诊记录,逐条回复确认或改判;复审前席位定级有效。
 - 分诊定级轮读车道 `Suggested-grade:` 行:是输入不是定级,确认或改判,不采纳给理由。
 - 分类动作每张三选一,外加一个修复通道;裁定写方向、给六态之一。
-- 停 `pm:blocked` 同笔在卡正文写行首 `Blocked-by: #N`(issue/PR 号;full-run 卡写评论),散文不算。
 - 日对账 fire 读 `check-half-states` H14,在飞卡亦然:NOT carrying ⇒ `label-write.mjs --add pm:blocking`;
 - stale/UNJUDGED 行手核跨仓依赖后 `--remove pm:blocking`,留则写明理由;增删卡号进轮次记录。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
@@ -82,10 +83,9 @@
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
 - 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
-- ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下三行、锚卡首触。
+- ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下两行、锚卡首触。
 - 总监席活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲一次,首行键 `Owned-24h re-check:`。
 - 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ `label-write.mjs --release` 一笔中继释放,贴不动。
-- 释放:`Release:` 评论(出处三件)+ `Resume-from:` 行 + `pm:dispatched`→`pm:queue` + 清 assignee。
 - 人工地板(恒呈维护者):功能新增;ADR;协议/公开契约变化;破坏性或难回滚动作。
 - 人工地板同含:安全/权限边界;门禁削弱(降阈/删必查/抬上限/跳测);新增运行时第三方依赖;
 - 花费/配额/舰队形态/默认模型档位;新增必需门禁/hook/棘轮(卡具名所守契约与预期捕获)。
