@@ -60,6 +60,10 @@
 import { describe, it, expect } from 'vitest';
 import { ImportJobProgressSchema, ImportJobSummarySchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
+// The source under test reaches `import('@objectstack/objectql')` inside a
+// handler; paying that load at collection keeps it out of a clocked case
+// (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 /** Canonical ISO-8601 UTC with milliseconds — what the DTO contract promises. */
 const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;

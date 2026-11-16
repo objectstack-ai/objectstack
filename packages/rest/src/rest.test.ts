@@ -3,6 +3,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest';
 import { RouteManager } from './route-manager';
 import { RestServer, mapDataError } from './rest-server';
+// The source under test reaches `import('@objectstack/objectql')` inside a
+// handler; paying that load at collection keeps it out of a clocked case
+// (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { filterAppForUser, filterDashboardForUser, resolveRegisteredServices } from './meta-item-read-gate.js';
 import { createRestApiPlugin } from './rest-api-plugin';
 import type { RestApiPluginConfig } from './rest-api-plugin';
