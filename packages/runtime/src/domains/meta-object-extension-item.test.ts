@@ -707,7 +707,7 @@ describe('[#33216] the publish door judges the one-hop leaf through a lookup the
 });
 
 describe('[#33153] the publish door refuses a formula cycle the extension adds, as `os build` does', () => {
-    const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
+    const formula = (expression: string, label = 'F') => ({ type: 'formula', label, expression, returnType: 'number' });
     const where = (field: string) => `object 'crm_account' · objectExtensions[0] · field '${field}' expression`;
     /** `os build`'s cycle findings at the extension, over the base as authored. */
     const atBuild = (item: unknown) => {
@@ -719,7 +719,7 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
 
     for (const [label, fields, members] of [
         ['a formula reading itself', { a__c: formula('record.a__c') }, ['a__c']],
-        ['two formulas reading each other', { a__c: formula('record.b__c'), b__c: formula('record.a__c') }, ['a__c', 'b__c']],
+        ['two formulas reading each other', { a__c: formula('record.b__c', 'A'), b__c: formula('record.a__c', 'B') }, ['a__c', 'b__c']],
     ] as const) {
         it(`⭐ LIT — ${label} is refused with the build's rule id and location on each member; no field is served`, async () => {
             const item = { extend: TARGET, fields };
@@ -739,7 +739,7 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
     }
 
     it('⭐ CONTROL — a chain of formulas the extension adds publishes and is served', async () => {
-        const item = { extend: TARGET, fields: { b__c: formula('record.a__c * 2'), a__c: formula('1 + 1') } };
+        const item = { extend: TARGET, fields: { b__c: formula('record.a__c * 2', 'B'), a__c: formula('1 + 1', 'A') } };
         expect(atBuild(item)).toEqual([]);
 
         const rig = await boot();
@@ -750,7 +750,7 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
 });
 
 describe('[#33494] the publish door serves the winner `os build` serves when another package extends the same field', () => {
-    const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
+    const formula = (expression: string, label = 'F') => ({ type: 'formula', label, expression, returnType: 'number' });
     const number = { type: 'number', label: 'Sibling' };
     /** A third package, registered as an extender of the account at the priority given. */
     const SIBLING = 'com.acme.sibling';
@@ -785,8 +785,8 @@ describe('[#33494] the publish door serves the winner `os build` serves when ano
     }
 
     it('⭐ LIT — a higher sibling\'s formula closing a cycle through the entry\'s other field is refused on that field, as `os build` refuses it', async () => {
-        const sibling = { s__c: formula('record.a__c + 1') };
-        const item = { extend: TARGET, priority: 200, fields: { s__c: number, a__c: formula('record.s__c * 2') } };
+        const sibling = { s__c: formula('record.a__c + 1', 'S') };
+        const item = { extend: TARGET, priority: 200, fields: { s__c: number, a__c: formula('record.s__c * 2', 'A') } };
         const where = "object 'crm_account' · objectExtensions[0] · field 'a__c' expression";
         expect(atBuild(sibling, 300, item)).toContain(where.replace('objectExtensions[0]', 'packages[1].manifest.objectExtensions[0]'));
 
