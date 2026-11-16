@@ -27,6 +27,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { computedFieldsReadingWithheld, readComputedFieldExpression } from './field-masker.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
 import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
@@ -38,6 +39,9 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 const OBJ = 'qa_fhf_account';
 const REGION = 'qa_fhf_region';
 const NOTE = 'qa_fhf_note';
+const SOURCE = 'qa_fhf_source';
+const RELAY = 'qa_fhf_relay';
+const VAULT = 'qa_fhf_vault';
 const SET = 'qa_fhf_reader';
 const SECOND = 'qa_fhf_second';
 const DELEGATOR_SET = 'qa_fhf_delegator';
@@ -92,6 +96,37 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     objects: [
       ...(opts.delegatorFields ? [SysPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPosition, SysUserPermissionSet, SysOrganization, SysUser, SysMember] : []),
       {
+        name: SOURCE,
+        label: 'Source',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          secret: { name: 'secret', type: 'number' },
+        },
+      },
+      {
+        name: RELAY,
+        label: 'Relay',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          source: { name: 'source', type: 'lookup', reference: SOURCE },
+          // A stored field over a field of the record ITS reference points at.
+          t: { name: 't', type: 'number', expression: cel('record.source.secret * 1.0') },
+        },
+      },
+      {
+        name: VAULT,
+        label: 'Vault',
+        sharingModel: 'public_read_write',
+        nameField: 'title',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          secret: { name: 'secret', type: 'text' },
+          title: { name: 'title', type: 'formula', returnType: 'text', expression: cel("record.secret + ' vault'") },
+        },
+      },
+      {
         name: NOTE,
         label: 'Note',
         sharingModel: 'public_read_write',
@@ -135,6 +170,8 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
             options: [{ label: 'Gold', value: 'gold' }, { label: 'Silver', value: 'silver' }],
           },
           region: { name: 'region', type: 'lookup', reference: REGION },
+          relay: { name: 'relay', type: 'lookup', reference: RELAY },
+          vault_ref: { name: 'vault_ref', type: 'lookup', reference: VAULT, referenceNameVisible: true },
           load: { name: 'load', ...num('record.open_cases / record.capacity') },
           load_pct: { name: 'load_pct', ...num('record.load * 100.0') },
           headroom: { name: 'headroom', ...num('record.capacity - 1.0') },
@@ -150,6 +187,11 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           region_phone_copy: { name: 'region_phone_copy', type: 'formula', returnType: 'text', expression: cel('record.region.region_phone') },
           region_ghost: { name: 'region_ghost', ...num('record.region.no_such_field * 1.0') },
           region_score_stored: { name: 'region_score_stored', type: 'number', expression: cel('record.region.secret_score * 1.0') },
+          // Through a reference to a stored field that reads through a reference of its own.
+          relay_stored: { name: 'relay_stored', type: 'number', expression: cel('record.relay.t * 1.0') },
+          relay_formula: { name: 'relay_formula', ...num('record.relay.t * 1.0') },
+          // A stored copy of a field served masked on the referenced object.
+          region_phone_stored: { name: 'region_phone_stored', type: 'text', expression: cel('record.region.region_phone') },
           // Stored computed fields over each same-record kind.
           gated_stored: { name: 'gated_stored', type: 'number', expression: cel('record.gated * 2.0') },
           phone_stored: { name: 'phone_stored', type: 'text', expression: cel('record.phone') },
@@ -163,6 +205,9 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
   await engine.insert(NOTE, [{ id: 'n1', plain: 'open', code: 'ABCDEFG' }], SYS);
+  await engine.insert(SOURCE, [{ id: 's1', secret: 5 }], SYS);
+  await engine.insert(RELAY, [{ id: 'rl1', source: 's1' }], SYS);
+  await engine.insert(VAULT, [{ id: 'v1', secret: 'S' }], SYS);
   await engine.insert(REGION, [{ id: 'r1', name: 'North', secret_score: 7, gated_score: 3, region_phone: '13900001111' }], SYS);
   if (opts.delegatorFields) {
     await engine.insert('sys_user', { id: DELEGATOR, name: DELEGATOR, email: `${DELEGATOR}@example.test` }, SYS);
@@ -172,7 +217,10 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     }, SYS);
   }
   await engine.insert(OBJ, [
-    { id: 'a1', name: 'Acme', pick: 'capacity', open_cases: 6, capacity: 12, gated: 21, phone: '13812345678', tier: 'gold', region: 'r1' },
+    {
+      id: 'a1', name: 'Acme', pick: 'capacity', open_cases: 6, capacity: 12, gated: 21, phone: '13812345678', tier: 'gold',
+      region: 'r1', relay: 'rl1', vault_ref: 'v1',
+    },
   ], SYS);
 
   const grant = {
@@ -182,7 +230,8 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   const set = PermissionSetSchema.parse({
     name: SET,
     ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
-    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant },
+    // No grant on VAULT: its records are read only by name, through `referenceNameVisible`.
+    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant },
     ...(opts.fields ? { fields: opts.fields } : {}),
   });
   const second = PermissionSetSchema.parse({
@@ -207,13 +256,15 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   };
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-    registerService: vi.fn(),
+    registerService: vi.fn((name: string, svc: unknown) => { if (name === 'security') security = svc; }),
     hook: () => undefined,
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`service not registered: ${name}`);
       return services[name];
     },
   };
+  let security: unknown;
+  wireEngineSecuritySource(engine, () => security);
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
@@ -551,6 +602,69 @@ describe('the projections that answer about a field without reading it leave a w
       expect(writable.has(f), `writable ${f}`).toBe(true);
       expect(access.readable, `record readable ${f}`).toContain(f);
     }
+  });
+});
+
+describe('through a reference to a stored field that reads through a reference of its own (a chain of two)', () => {
+  it('the hidden field two references away withholds the stored and the formula copy; control a caller who reads it', async () => {
+    const { engine, plugin } = await boot({ fields: hide(SOURCE, 'secret') });
+    const one = await findA1(engine);
+    expect(one).not.toHaveProperty('relay_stored');
+    expect(one).not.toHaveProperty('relay_formula');
+    expect(new Set(await plugin.getQueryableFields(OBJ, { ...CALLER })).has('relay_stored')).toBe(false);
+    expect(await outcome(findAll(engine, { where: { relay_stored: { $eq: 5 } }, fields: ['id'] })))
+      .toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    const open = await boot();
+    expect(await findA1(open.engine)).toMatchObject({ relay_stored: 5, relay_formula: 5 });
+  });
+});
+
+describe('a stored copy of a field served masked on the referenced object is withheld', () => {
+  it('absent and not queryable without the unmask capability; control with it, the full value', async () => {
+    const { engine, plugin } = await boot();
+    expect(await findA1(engine)).not.toHaveProperty('region_phone_stored');
+    expect(new Set(await plugin.getQueryableFields(OBJ, { ...CALLER })).has('region_phone_stored')).toBe(false);
+    const open = await boot({ capabilities: ['qa_fhf_unmask'] });
+    expect(await findA1(open.engine)).toMatchObject({ region_phone_stored: '13900001111' });
+  });
+});
+
+describe('the reference name door serves no title computed from a field the reader cannot read', () => {
+  const expandVault = (engine: ObjectQL) =>
+    engine.findOne(OBJ, { where: { id: 'a1' }, expand: { vault_ref: { object: VAULT } }, context: { ...CALLER } } as never) as Promise<any>;
+
+  it('a refused target whose title is a formula over a hidden field is served by id with the floor name', async () => {
+    const { engine } = await boot({ fields: hide(VAULT, 'secret') });
+    const served = (await expandVault(engine)).vault_ref;
+    expect(served).toMatchObject({ id: 'v1', readRefused: true });
+    expect(served.name).not.toBe('S vault');
+  });
+
+  it('control: a reader who may read that field is served the title', async () => {
+    const { engine } = await boot();
+    expect((await expandVault(engine)).vault_ref).toMatchObject({ id: 'v1', name: 'S vault', readRefused: true });
+  });
+});
+
+describe('a payload naming a computed field the caller is not served whole is refused, whatever its value', () => {
+  it('update and insert: 403 naming the field, for a matching and a differing value alike', async () => {
+    const { engine } = await boot({ fields: HIDE_OPEN_CASES });
+    for (const value of [6, 7]) {
+      expect(await outcome(engine.update(OBJ, { open_cases_stored: value }, { where: { id: 'a1' }, context: { ...CALLER } } as never)))
+        .toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: ['open_cases_stored'] });
+    }
+    expect(await outcome(engine.update(OBJ, { load: 0.5 }, { where: { id: 'a1' }, context: { ...CALLER } } as never)))
+      .toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: ['load'] });
+    expect(await outcome(engine.insert(OBJ, { id: 'a4', name: 'D', open_cases_stored: 1 }, { context: { ...CALLER } } as never)))
+      .toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: ['open_cases_stored'] });
+  });
+
+  it('control: a caller served the input whole may name it; the engine recomputes the stored value', async () => {
+    const { engine } = await boot();
+    const landed = await outcome(engine.update(OBJ, { open_cases_stored: 99 }, { where: { id: 'a1' }, context: { ...CALLER } } as never));
+    expect(landed).toHaveProperty('landed');
+    const stored = await engine.findOne(OBJ, { where: { id: 'a1' }, context: { isSystem: true } } as never) as any;
+    expect(stored.open_cases_stored).toBe(6);
   });
 });
 

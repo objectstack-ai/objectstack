@@ -115,9 +115,9 @@ export async function computeReadableFields(
   this: Pick<FieldReadersHost, 'resolveProjectionFieldMask'>,
   object: string,
   context: any,
-  options: { fallbackOnEmptySets: boolean; hops?: boolean },
+  options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string> },
 ): Promise<string[] | undefined> {
-  const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets });
+  const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited });
   if (mask.kind === 'answer') return mask.fields;
 
   // [#8993] A field this caller sees PARTIALLY MASKED is still a served
@@ -164,7 +164,7 @@ export async function resolveProjectionFieldMask(
   this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context: any,
-  options: { fallbackOnEmptySets: boolean },
+  options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string> },
 ): Promise<
   | { kind: 'answer'; fields: string[] | undefined }
   | {
@@ -265,7 +265,10 @@ export async function resolveProjectionFieldMask(
       objectName, secMeta, permissionSets, delegatorSets, hopWithheld,
     ),
     computedFieldInputs: secMeta.computedFieldInputs,
-    readHopWithheld: () => this.resolveHopWithheldFields(secMeta, context, options),
+    readHopWithheld: () => this.resolveHopWithheldFields(secMeta, context, {
+      fallbackOnEmptySets: options.fallbackOnEmptySets,
+      visited: new Set([...(options.visited ?? []), objectName]),
+    }),
     // [#26594 / ruling of record 6457467702] The record-scoped projection's
     // edit half is the step 2.5 gate ITSELF, asked over these sets, this
     // posture and this delegator's sets, as an update by id of `row` (the

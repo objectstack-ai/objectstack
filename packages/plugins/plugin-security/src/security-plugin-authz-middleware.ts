@@ -870,7 +870,7 @@ export function registerAuthzMiddleware(
     // reader that needs them — the query guards (2.5b, 2.9) and step 4.
     let hopWithheldMemo: Promise<Set<string>> | undefined;
     const hopWithheld = (): Promise<Set<string>> =>
-      (hopWithheldMemo ??= this.resolveHopWithheldFields(secMeta, opCtx.context, { fallbackOnEmptySets: false }));
+      (hopWithheldMemo ??= this.resolveHopWithheldFields(secMeta, opCtx.context, { fallbackOnEmptySets: false, visited: new Set([opCtx.object]) }));
 
     // [#3545] Fail CLOSED when the object's own posture could not be resolved.
     // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
@@ -1607,7 +1607,7 @@ export function registerAuthzMiddleware(
       (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
       opCtx.data
     ) {
-      const forbidden = await this.computeForbiddenFieldWrites(
+      const fieldForbidden = await this.computeForbiddenFieldWrites(
         opCtx.object, opCtx.data, secMeta, permissionSets, delegatorSets,
         {
           operation: opCtx.operation,
@@ -1617,6 +1617,24 @@ export function registerAuthzMiddleware(
             : undefined,
         },
       );
+      // Field-level security covers what a value is computed from, on the
+      // write side too: a computed field this caller is not served whole
+      // is not nameable in its payload. A stored one's write never stands
+      // (the engine recomputes it), and whether the engine reported it
+      // replaced would tell the caller whether its guess equalled the value
+      // it is withheld.
+      const computedInputs = secMeta.computedFieldInputs ?? {};
+      const notWhole = Object.keys(computedInputs).length === 0
+        ? {}
+        : this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld());
+      const named = new Set<string>();
+      for (const row of Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) {
+        if (row && typeof row === 'object') for (const key of Object.keys(row)) named.add(key);
+      }
+      const forbidden = [...new Set([
+        ...fieldForbidden,
+        ...[...named].filter((key) => key in computedInputs && (notWhole as Record<string, { readable?: boolean }>)[key]?.readable === false),
+      ])].sort();
       if (forbidden.length > 0) {
         throw withUserMessage(
           new PermissionDeniedError(

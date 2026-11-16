@@ -3233,7 +3233,7 @@ export class SecurityPlugin implements Plugin {
   private computeReadableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; hops?: boolean },
+    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string> },
   ): Promise<string[] | undefined> {
     // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
     const host: Pick<FieldReadersHost, 'resolveProjectionFieldMask'> = {
@@ -3406,9 +3406,9 @@ export class SecurityPlugin implements Plugin {
   private async computeQueryableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; hops?: boolean },
+    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string> },
   ): Promise<string[] | undefined> {
-    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets });
+    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited });
     if (mask.kind === 'answer') return mask.fields;
     const queryGuard = mask.readQueryGuardPerms(options.hops === false ? [] : await mask.readHopWithheld());
     return mask.allFields.filter((f) => queryGuard[f]?.readable !== false);
@@ -3426,7 +3426,7 @@ export class SecurityPlugin implements Plugin {
   private resolveProjectionFieldMask(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean },
+    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string> },
   ): Promise<
     | { kind: 'answer'; fields: string[] | undefined }
     | {
@@ -6291,8 +6291,10 @@ export class SecurityPlugin implements Plugin {
    * or is served it masked — judged by that object's own query
    * projection ({@link computeQueryableFields}: readable minus masked, that
    * object's computed fields folded in turn), or not determinable there (fail
-   * closed). The engine serves one hop, so the target's projection is asked
-   * without hops of its own.
+   * closed). The target's projection folds the target's own reads through
+   * its references in turn — a stored field there holds a value its writer
+   * computed — once per object on the path (`visited`): an object already on
+   * the path is asked without them, so a cycle of references terminates.
    *
    * Every reader of the field map takes this set beside the posture: the
    * result masker (step 4), the query guard (steps 2.5b and 2.9,
@@ -6302,12 +6304,20 @@ export class SecurityPlugin implements Plugin {
   private resolveHopWithheldFields(
     secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
     context: any,
-    options: { fallbackOnEmptySets: boolean },
+    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string> },
   ): Promise<Set<string>> {
     if (!postureHasComputedHops(secMeta)) return Promise.resolve(new Set());
     return resolveHopWithheldFields.call(
       {
-        readServedWholeFields: (object: string, ctx: unknown) => this.computeQueryableFields(object, ctx, { ...options, hops: false }),
+        // A referenced object's own reads through ITS references are judged
+        // too (a stored field there carries a value its writer computed),
+        // once per object on the path: an object already on it is asked
+        // without them, so a cycle of references terminates.
+        readServedWholeFields: (object: string, ctx: unknown) => this.computeQueryableFields(object, ctx, {
+          fallbackOnEmptySets: options.fallbackOnEmptySets,
+          hops: !(options.visited?.has(object) ?? false),
+          visited: options.visited,
+        }),
         readFieldNames: (object: string) => this.getObjectFieldNames(this.metadata, object, this.ql),
         readObjectAdmitted: (object: string, ctx: unknown) => this.canReadObject(object, ctx),
       },

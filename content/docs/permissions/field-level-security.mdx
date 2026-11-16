@@ -133,14 +133,18 @@ whether the expression names it directly, inside a function such as
 `label()`, or through another computed field; or a field the referenced
 object declares, on the record the expression reads through one
 reference, where the caller may not read that object, may not read the
-field, or is served it masked. What is judged is the field, not the row:
+field, or is served it masked — a stored field there withheld for what it
+reads through a reference of its own included, each object along the
+chain judged once. What is judged is the field, not the row:
 a computed field is not withheld because the caller may not read the
 particular record a reference points at (a formula reads `null` there; a
 stored one keeps the value its writer computed). A withheld computed
 field is stripped from records, refused as a filter, sort, group or
 aggregate input (a stored one; a `formula` is refused there for every
-caller), and left out of the fields served to that caller, including the
-object schema and the writable fields. A computed field whose expression
+caller), refused when a write payload names it, served by its floor name
+where it is the name of a record shown through `referenceNameVisible`,
+and left out of the fields served to that caller, including the object
+schema and the writable fields. A computed field whose expression
 reads the record in a way no field name describes (a computed key such as
 `record[record.k]`, a method or macro on `record`, or `record` passed whole
 to a function) is withheld whenever some other field of the object is not
