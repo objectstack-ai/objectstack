@@ -852,7 +852,7 @@ describe('on a cloud-managed environment, membership and roles are managed by th
   it.each(DOORS)('%s refuses ahead of the arms behind it: no permission judge runs and no grant read is taken', async (_door, path, _key, body) => {
     const s = await stage();
     const row = memberRow(s);
-    const permissionJudge = vi.spyOn(s.manager, 'assertRemoveMemberPermitted');
+    const permissionJudge = vi.spyOn(s.manager as any, 'assertRemoveMemberPermitted');
     const grantRead = vi.spyOn(s.manager as any, 'roleChangeGrantDeps');
     setManaged(true);
     const v = await verdict(await s.fire(path, body(String(row.id)), s.bearers.admin));
@@ -864,7 +864,7 @@ describe('on a cloud-managed environment, membership and roles are managed by th
   it.each(DOORS)('CONTROL: self-hosted, %s answers 200 and changes the membership as before', async (_door, path, _key, body) => {
     const s = await stage();
     const row = memberRow(s);
-    const permissionJudge = vi.spyOn(s.manager, 'assertRemoveMemberPermitted');
+    const permissionJudge = vi.spyOn(s.manager as any, 'assertRemoveMemberPermitted');
     const grantRead = vi.spyOn(s.manager as any, 'roleChangeGrantDeps');
     const sent = body(String(row.id));
     const v = await verdict(await s.fire(path, sent, s.bearers.admin));
