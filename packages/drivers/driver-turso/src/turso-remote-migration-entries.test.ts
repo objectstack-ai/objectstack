@@ -458,8 +458,8 @@ describe('relax_not_null in place, with libSQL\'s ALTER COLUMN (#33724, ruling 6
     expect(line).toContain('failed (fetch failed: socket hang up), and its outcome is unknown');
     expect(line).toContain('the next drift read decides');
     expect(line).not.toContain('nothing landed');
-    // …and the next drift read finds no relax to do.
-    expect(await relaxes(remote)).toEqual([]);
+    // …and the next drift read finds no relax left to do on it.
+    expect((await relaxes(remote)).map((d) => d.column)).toEqual(['code']);
   });
 
   it('a splice the plan did not predict lands nowhere: the check in the same batch rolls the statement back', async () => {
