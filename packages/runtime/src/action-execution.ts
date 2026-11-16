@@ -109,6 +109,7 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionByPackage,
     resolveActionHandlerKeys,
+    resolveRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
     type PackageScopedRefusal,
@@ -3259,6 +3260,127 @@ export async function handOffActionConfirmation(
 }
 
 /**
+ * [#33712] What an MCP door asks the person to confirm (step 1 of the amended
+ * contract, `AI_ACTION_CONFIRMATION_CAPABILITY`): the action, the object and
+ * the record it runs on, its id and, when the subject load read one, its
+ * title. Structurally the `McpActionConfirmationSubject` of `@objectstack/mcp`,
+ * which this package does not depend on.
+ */
+export interface ActionConfirmationElicitSubject {
+    actionName: string;
+    actionLabel?: string;
+    objectName?: string;
+    recordId?: string;
+    recordTitle?: string;
+}
+
+/** [#33712] The person's answer, as the door read it (`McpActionConfirmationAnswer`). */
+export type ActionConfirmationElicitAnswer = 'accept' | 'decline' | 'cancel' | 'timed_out';
+
+/**
+ * [#33712] The door's channel to the person's client for ONE call
+ * (`McpActionConfirmationElicitor`). Present only when the client can be
+ * elicited; its absence means "hand off" (step 2), never a refusal.
+ */
+export type ActionConfirmationElicitor = (subject: ActionConfirmationElicitSubject) => Promise<ActionConfirmationElicitAnswer>;
+
+/**
+ * [#33712] The subject an elicitation names, built from what the admitted
+ * sequence already holds: the declaration, the object and the record the
+ * caller-scope subject load read. The title is the object's own
+ * (`resolveRecordTitle`: its `nameField`, formula or column), and is left out
+ * rather than replaced by the id when it does not resolve.
+ */
+export function actionConfirmationElicitSubject(
+    action: any,
+    actionName: string,
+    objectName: string | undefined,
+    recordId: string | undefined,
+    obj: unknown,
+    record: Record<string, unknown> | undefined,
+): ActionConfirmationElicitSubject {
+    const label = typeof action?.label === 'string' && action.label !== '' ? action.label : undefined;
+    let recordTitle: string | undefined;
+    if (recordId !== undefined && record && Object.keys(record).length > 0) {
+        try {
+            recordTitle = resolveRecordTitle(obj, record);
+        } catch {
+            // A title that cannot be composed is left out: the id still names the record.
+            recordTitle = undefined;
+        }
+    }
+    return {
+        actionName,
+        ...(label !== undefined ? { actionLabel: label } : {}),
+        ...(objectName && !isObjectLessActionKey(objectName) ? { objectName } : {}),
+        ...(recordId !== undefined ? { recordId } : {}),
+        ...(recordTitle !== undefined && recordTitle !== '' ? { recordTitle } : {}),
+    };
+}
+
+/**
+ * [#33712] Step 1 of the amended contract: ask the person in their client, and
+ * read the answer as step 4 does. Asked by a door that holds an elicitor, once
+ * every admission gate has passed (the subject load and its caller-scope
+ * verdict included) and never for an AI service account, which the
+ * confirmation step refuses before it gets here.
+ *
+ * - `accept`: `{ accepted: true }`; the caller dispatches the call exactly
+ *   once, as any admitted call. Nothing is stored: the next call is asked again.
+ * - `decline`: refused `428`, `reason: 'declined'`.
+ * - `cancel` (a dismissal, an error answer, a dropped connection): refused,
+ *   `reason: 'cancelled'`.
+ * - `timed_out` (no answer within the door's bound): refused,
+ *   `reason: 'timed_out'`.
+ *
+ * An elicitor that throws, or answers anything else, reads as `cancel`:
+ * nothing runs for want of a readable answer. Nothing is handed off on any of
+ * these answers: the person was asked, and their answer (or their silence)
+ * stands.
+ */
+export async function elicitActionConfirmation(
+    elicit: ActionConfirmationElicitor,
+    subject: ActionConfirmationElicitSubject,
+): Promise<{ accepted: true } | { refused: ActionConfirmationRefusal }> {
+    let answer: unknown;
+    try {
+        answer = await elicit(subject);
+    } catch {
+        answer = 'cancel';
+    }
+    if (answer === 'accept') return { accepted: true };
+    const on = confirmationSubjectOn(subject.objectName);
+    const declared = `Action '${subject.actionName}'${on} declares ai.requiresConfirmation: true, so the person was asked to confirm it in their client`;
+    if (answer === 'decline') {
+        return {
+            refused: confirmationRefusalOf(
+                subject.actionName, subject.objectName,
+                `${declared}, and they declined — nothing was run. Do not retry unless they ask again.`,
+                'declined',
+            ),
+        };
+    }
+    if (answer === 'timed_out') {
+        return {
+            refused: confirmationRefusalOf(
+                subject.actionName, subject.objectName,
+                `${declared}, and no answer arrived in time — nothing was run, and a later answer runs nothing. `
+                    + 'Retry only when they are there to answer.',
+                'timed_out',
+            ),
+        };
+    }
+    return {
+        refused: confirmationRefusalOf(
+            subject.actionName, subject.objectName,
+            `${declared}, and the question was dismissed without an answer — nothing was run. `
+                + 'Retry only if they ask again.',
+            'cancelled',
+        ),
+    };
+}
+
+/**
  * [#33690] The caller-scope subject verdict, as the dispatch arm that would
  * run `action` reads it, asked BEFORE a hand-off (the amended contract, step
  * 2: every admission gate has passed, the subject load and its verdict
@@ -4814,9 +4936,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         // metadata service's `loadMany('action')` is read, as before.
         readActions?: () => Promise<readonly any[] | undefined>;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+        /**
+         * [#33712] The MCP door's channel to the person's client for this call
+         * (step 1 of the amended contract), present only when the client can
+         * be elicited. A declared-gated call is then asked in place instead of
+         * handed off; see {@link elicitActionConfirmation}.
+         */
+        elicitConfirmation?: ActionConfirmationElicitor;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, readActions, callData } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation } = wiring;
     const meta: any = await getMeta();
     const params = input?.params && typeof input.params === 'object' ? input.params : {};
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
@@ -4901,7 +5030,13 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         // [#33690] This door hands a declared-gated call to the person it runs
         // as: the caller's `confirm` is not passed on, because it never counts
         // there (the amended contract, `AI_ACTION_CONFIRMATION_CAPABILITY`).
-        confirmationHandOff: { door: 'mcp', ...(namespace !== undefined ? { namespace } : {}) },
+        // [#33712] With the door's elicitor, the person is asked in their
+        // client first (step 1); the hand-off is then never taken.
+        confirmationHandOff: {
+            door: 'mcp',
+            ...(namespace !== undefined ? { namespace } : {}),
+            ...(elicitConfirmation ? { elicitConfirmation } : {}),
+        },
         ql: engine,
         wiring: {
             ec, envId, driver, callData,

@@ -160,7 +160,18 @@ export interface ResolvedActionCall {
      * hand-off's own members (`ActionConfirmationHandOff`). A door without it
      * (REST, a host's door) keeps the member gate.
      */
-    confirmationHandOff?: { door: string; namespace?: string };
+    confirmationHandOff?: {
+        door: string;
+        namespace?: string;
+        /**
+         * [#33712] The door's channel to the person's client (step 1 of the
+         * amended contract), present only when the client can be elicited. The
+         * person is then asked in place, after the same verdict the hand-off
+         * asks: `accept` dispatches the call as any admitted call, any other
+         * answer refuses it, and nothing is handed off.
+         */
+        elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+    };
     /**
      * [ADR-0106 D1] This door's answer for a name nothing declares, where it
      * is not the sequence's own undeclared `404` ({@link undeclaredActionRefusal}):
@@ -277,7 +288,11 @@ export async function runResolvedAction(
 ): Promise<ResolvedActionRun> {
     const admission = await admitResolvedAction(deps, requestContext, call);
     if ('refused' in admission) return admission;
-    if (admission.handOff) return handOffAdmittedAction(deps, requestContext, call, admission);
+    if (admission.handOff) {
+        const confirmation = await confirmAdmittedAction(deps, requestContext, call, admission);
+        // [#33712] Only an elicited `accept` falls through to the dispatch.
+        if (confirmation !== 'accepted') return confirmation;
+    }
     const outcome = await dispatchAdmittedAction(deps, requestContext, call, admission);
     return {
         admitted: { actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName, recordId: admission.recordId },
@@ -301,13 +316,16 @@ interface Admission {
  * the host's pending-confirmation service (or the `no_confirmation_service`
  * refusal). Nothing dispatches, and no invocation row is written: the call
  * did not run. A verdict refusal is the arm's own, rendered as a refusal.
+ * [#33712] At a door that holds the person's client (`elicitConfirmation`),
+ * the person is asked there instead, after the same verdict: `'accepted'`
+ * sends the caller on to the dispatch, any other answer is the refusal.
  */
-async function handOffAdmittedAction(
+async function confirmAdmittedAction(
     deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     call: ResolvedActionCall,
     admission: Admission,
-): Promise<ResolvedActionRun> {
+): Promise<ResolvedActionRun | 'accepted'> {
     const { objectName, wiring } = call;
     const { actionDef, recordId, params, subject } = admission;
     const subjectRecordId = recordId === undefined || recordId === null || recordId === '' ? undefined : String(recordId);
@@ -321,8 +339,29 @@ async function handOffAdmittedAction(
         return { refused: { message: thrown.message, status: thrown.status, details: { code: thrown.code } } };
     }
     const handOff = call.confirmationHandOff!;
+    const actionName = typeof actionDef?.name === 'string' && actionDef.name ? actionDef.name : call.actionName;
+    // [#33712] Step 1: a client that can be elicited is asked in place, after
+    // the same verdict, and its answer stands: `accept` dispatches, anything
+    // else refuses. The hand-off below is the step-2 path for every other call.
+    if (handOff.elicitConfirmation) {
+        const elicited = await actionExec.elicitActionConfirmation(
+            handOff.elicitConfirmation,
+            actionExec.actionConfirmationElicitSubject(
+                actionDef, actionName, objectName, subjectRecordId, call.declaration?.obj, subject?.record,
+            ),
+        );
+        if ('accepted' in elicited) return 'accepted';
+        const { refused } = elicited;
+        return {
+            refused: {
+                message: refused.message,
+                status: refused.status,
+                details: { code: refused.code, ...(refused.details as unknown as Record<string, unknown>) },
+            },
+        };
+    }
     const answer = await actionExec.handOffActionConfirmation(deps, requestContext, wiring.envId, {
-        actionName: typeof actionDef?.name === 'string' && actionDef.name ? actionDef.name : call.actionName,
+        actionName,
         ...(actionExec.isObjectLessActionKey(objectName) ? {} : { objectName }),
         ...(handOff.namespace !== undefined ? { namespace: handOff.namespace } : {}),
         ...(subjectRecordId !== undefined ? { recordId: subjectRecordId } : {}),
