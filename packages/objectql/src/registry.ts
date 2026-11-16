@@ -3593,12 +3593,28 @@ export class SchemaRegistry {
    * `@objectstack/metadata-protocol`, `packagedRuleLookup` in this package),
    * so they cannot split again.
    *
-   * ⛔ ONLY `validations` widens. The scalars stay the owner's: an extension's
-   * `label` / `description` must keep reading as diverged from the packaged
-   * one, or the catalog takes back the case #8037 filed.
+   * The same sentence holds for a FIELD a code extender adds (a dependent
+   * package's `objectExtensions` field the owner does not declare): its
+   * packaged declaration is the extender's, because the catalog rows for it
+   * can only translate what that extender ships ({@link packagedAddedFields}).
+   * Read off the owner alone, such a field counted as authored after the fact,
+   * and `/meta` served its label and option labels untranslated in every
+   * locale while the extender's own pack carried them.
+   *
+   * ⛔ Exactly those two widen: rules by name, and field NAMES the owner does
+   * not declare. The scalars stay the owner's, and so does every field the
+   * owner declares, even one an extender redeclares; an extender's
+   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * the packaged one, or the catalog — which translates the owner's text under
+   * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
+   * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
+   * their fields stay authored after the fact. Nor does a disabled package's
+   * extension, which the served fold withholds. (The rule half, `packagedRules`,
+   * still reads every code extender, disabled ones included.)
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
-   * rule, and `undefined` exactly where {@link getPackagedObjectOwner} does.
+   * rule or adds a field, and `undefined` exactly where
+   * {@link getPackagedObjectOwner} does.
    */
   getPackagedObjectBase(name: string): ServiceObject | undefined {
     // [#33949 codemod] The body moved to `registry-platform-global.ts` (see `PlatformGlobalHost`).
@@ -6218,6 +6234,7 @@ export class SchemaRegistry {
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
       getPackagedObjectOwner: (...a) => registry.getPackagedObjectOwner(...a),
       invalidateAll: (...a) => registry.invalidateAll(...a),
+      isPackageDisabled: (...a) => registry.isPackageDisabled(...a),
       log: (...a) => registry.log(...a),
       get mergedObjectCache() { return registry.mergedObjectCache; },
       get multiTenant() { return registry.multiTenant; },

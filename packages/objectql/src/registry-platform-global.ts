@@ -43,7 +43,7 @@
 import { isInjectedColumnDefinition, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { TENANT_SCOPE_FIELD_DEF, isCodeArtifactBody } from '@objectstack/metadata-core';
-import { DEFAULT_EXTENDER_PRIORITY, stableStringify, withoutField } from './registry-top-level.js';
+import { DEFAULT_EXTENDER_PRIORITY, packagedAddedFields, stableStringify, withoutField } from './registry-top-level.js';
 import type { ObjectContributor, ObjectExtensionFoldOptions } from './registry-top-level.js';
 import { TENANT_SCOPE_INDEX, extendContributionRefusal, provisionTenantScopeIndex } from './registry.js';
 import type { SchemaRegistry } from './registry.js';
@@ -67,6 +67,7 @@ export interface PlatformGlobalHost {
   getObjectOwner: SchemaRegistry['getObjectOwner'];
   getPackagedObjectOwner: SchemaRegistry['getPackagedObjectOwner'];
   invalidateAll: SchemaRegistry['invalidateAll'];
+  isPackageDisabled: SchemaRegistry['isPackageDisabled'];
   log: SchemaRegistry['log'];
   readonly mergedObjectCache: SchemaRegistry['mergedObjectCache'];
   readonly multiTenant: SchemaRegistry['multiTenant'];
@@ -516,7 +517,7 @@ export class PlatformGlobalFacet {
   }
 
   /** The body of `SchemaRegistry#getPackagedObjectBase`; the method's docblock there is its contract. */
-  static getPackagedObjectBase(this: Pick<PlatformGlobalHost, 'getPackagedObjectOwner' | 'objectContributors' | 'packagedRules' | 'resolveObjectKey'>, name: string): ServiceObject | undefined {
+  static getPackagedObjectBase(this: Pick<PlatformGlobalHost, 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'packagedRules' | 'resolveObjectKey'>, name: string): ServiceObject | undefined {
     const owner = this.getPackagedObjectOwner(name);
     if (!owner) return undefined;
     const fqn = this.resolveObjectKey(name);
@@ -526,9 +527,20 @@ export class PlatformGlobalFacet {
     const extended = contributors.some((c) =>
       c.ownership === 'extend' && isCodeArtifactBody(c.definition)
       && Array.isArray(c.definition.validations) && c.definition.validations.length > 0);
-    if (!extended) return owner.definition;
-    const rules = this.packagedRules(contributors) ?? [];
-    return { ...owner.definition, validations: rules as ServiceObject['validations'] };
+    // A disabled package's extension is withheld from the served fold, so it
+    // adds nothing the served object carries; its field is no packaged one.
+    const addedFields = packagedAddedFields(
+      owner.definition,
+      contributors.filter((c) => !(c.ownership === 'extend' && this.isPackageDisabled(c.packageId))),
+    );
+    if (!extended && addedFields === undefined) return owner.definition;
+    return {
+      ...owner.definition,
+      ...(extended ? { validations: (this.packagedRules(contributors) ?? []) as ServiceObject['validations'] } : {}),
+      ...(addedFields !== undefined
+        ? { fields: { ...owner.definition.fields, ...addedFields } as ServiceObject['fields'] }
+        : {}),
+    };
   }
 
   /** The body of `SchemaRegistry#extendContributionRefusal`; the method's docblock there is its contract. */

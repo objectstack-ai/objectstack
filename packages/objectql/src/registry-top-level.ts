@@ -13,7 +13,7 @@
 
 import { BASE_FIELD_DISPLAY_WHITELIST, LEGACY_API_METHODS, MANAGED_BY_WRITE_LOCKED_BUCKETS, checkManagedApiMethodAffordances, isTenancyDisabled, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ObjectExtensionParsed, ObjectOwnership, ServiceObject } from '@objectstack/spec/data';
-import { readDiscriminatorValue as discriminatorValue, isTenantAuthored } from '@objectstack/metadata-core';
+import { readDiscriminatorValue as discriminatorValue, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import type { SystemFieldName } from '@objectstack/spec/system';
@@ -797,6 +797,45 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
     out.indexes = (indexes as unknown[]).filter((index) => !withheld.withheldIndexes.has(stableStringify(index))) as ServiceObject['indexes'];
   }
   return out;
+}
+
+/**
+ * [ADR-0029 D9.2a, #27559's rule-name principle carried to field names] The
+ * fields the CODE `extend` contributors of an object add — every field name
+ * the owner does not declare — in fold order, so a later extender's
+ * declaration of one name replaces an earlier one's, as
+ * {@link mergeObjectDefinitions} does. The same filter as
+ * `SchemaRegistry.packagedRules` (`ownership === 'extend'` and a code artifact
+ * body), so a tenant overlay and any extension of tenant provenance
+ * (`_provenance: 'org'`) contribute nothing, while a stored extension row
+ * of package provenance is a code layer and does. `contributors` is the
+ * caller's: {@link SchemaRegistry.getPackagedObjectBase} hands in the list
+ * without a disabled package's extensions, as the served fold withholds them
+ * ({@link SchemaRegistry.withholdDisabledExtensions}), so the base and the
+ * served field are the same extender's. `fieldPatches` are not read.
+ * `undefined` when no code extender adds a field, or the owner's `fields` is
+ * not the canonical record.
+ */
+function packagedAddedFields(
+  owner: ServiceObject,
+  contributors: readonly ObjectContributor[],
+): Record<string, unknown> | undefined {
+  const ownFields = owner.fields as unknown;
+  if (ownFields !== undefined && (ownFields === null || typeof ownFields !== 'object' || Array.isArray(ownFields))) {
+    return undefined;
+  }
+  const declared = (ownFields ?? {}) as Record<string, unknown>;
+  let added: Record<string, unknown> | undefined;
+  for (const contrib of contributors) {
+    if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+    const fields = contrib.definition.fields as unknown;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+      if (Object.prototype.hasOwnProperty.call(declared, name)) continue;
+      (added ??= {})[name] = def;
+    }
+  }
+  return added;
 }
 
 /**
@@ -2200,10 +2239,10 @@ export {
   declaresTenantIndex, displayKeyOverridesPackagedBase, entriesOfMember, fieldNamesOf, fieldPatchYieldKey,
   indexKeysOf, isLeftOutExtension, isPackagelessActionSlotKey, isPlainRecord, isStoredActionRow, leavesExtensionsOut,
   mergeValidationsByName, optionByValue, overlaySlotEntriesOf, overlaySlotKey, ownFieldNamesOf, ownFieldsTarget,
-  packageBodySlot, packagelessActionOwnerKey, packagelessActionSlotEntriesOf, packagelessActionSlotKey,
-  parseOverlaySlotKey, parsePackageAction, parsePackageObjectActions, pickBundleMember, picklistReferrerOf,
-  recordFieldOf, ruleNamesOf, sameActionDeclaration, sameHolder, sortActionsByOrder, stableStringify,
-  storedRowPackageOf, storesObjectLessPackagelessRow, tenantRuleSettingsOf, toRecordManifest, validationRuleName,
-  withArrivingMembers, withDeclaredFunctionEntries, withDiscriminator, withTenantRuleSettings, withoutField,
-  withoutWithheldMembers,
+  packageBodySlot, packagedAddedFields, packagelessActionOwnerKey, packagelessActionSlotEntriesOf,
+  packagelessActionSlotKey, parseOverlaySlotKey, parsePackageAction, parsePackageObjectActions, pickBundleMember,
+  picklistReferrerOf, recordFieldOf, ruleNamesOf, sameActionDeclaration, sameHolder, sortActionsByOrder,
+  stableStringify, storedRowPackageOf, storesObjectLessPackagelessRow, tenantRuleSettingsOf, toRecordManifest,
+  validationRuleName, withArrivingMembers, withDeclaredFunctionEntries, withDiscriminator, withTenantRuleSettings,
+  withoutField, withoutWithheldMembers,
 };
