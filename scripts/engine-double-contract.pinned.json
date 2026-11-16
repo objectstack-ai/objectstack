@@ -4459,7 +4459,7 @@
     {
       "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.test.ts",

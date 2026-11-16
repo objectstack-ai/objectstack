@@ -586,7 +586,7 @@ const SITES = [
     // available alternative and is what #5870 did for `capabilities`; it is
     // what left the other four undiffed.)
     //
-    // #29986: the codemod split of `engine.ts` (`scripts/codemod-split-engine.mjs`)
+    // #29986: the codemod split of `engine.ts` (split by #30012)
     // moved its top-level declarations, this list among them, into the leaf
     // `engine-top-level.ts`; both seams still read the one copy there.
     id: 'METADATA_ARRAY_KEYS',

@@ -42,6 +42,15 @@
  *   (drop the raw dimension or its bucket's granularity; ask one granularity).
  *   Before, every face prescribed the engine's "own 'alias'", which no dataset
  *   selection can spell. A direct `engine.aggregate` caller keeps that one.
+ *
+ * [ADR-0149 D1] A selection member is one of the dataset's declared names, so
+ * the second key over one column is spelled here by a declared dimension
+ * (`closed_on` over `closed_at`, as `zone` is over `region`), and the backed
+ * relationship members by declared dimensions over them (`account_id`,
+ * `account_name`, `account_ref`). The undeclared spellings these pins used
+ * before (`OBJECT.closed_at`, `account.id`, `account.name`, the bare
+ * `account`) are refused by the closed-member rule on every face, pinned once
+ * below; `runtimeFilter` keys are fields, not members, and keep their spellings.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -72,13 +81,24 @@ const shape = {
     { name: 'region', field: 'region', type: 'string' },
     { name: 'closed_at', field: 'closed_at', type: 'date' },
     { name: 'zone', field: 'region', type: 'string' },
+    { name: 'closed_on', field: 'closed_at', type: 'date' },
   ],
   measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
 };
 /** Declares no relationship. */
 const UNBACKED = DatasetSchema.parse({ name: 'os28690_deals', ...shape });
 /** Declares `account`. */
-const BACKED = DatasetSchema.parse({ name: 'os28690_deals_by_account', include: ['account'], ...shape });
+const BACKED = DatasetSchema.parse({
+  name: 'os28690_deals_by_account',
+  include: ['account'],
+  ...shape,
+  dimensions: [
+    ...shape.dimensions,
+    { name: 'account_id', field: 'account.id', type: 'string' },
+    { name: 'account_name', field: 'account.name', type: 'string' },
+    { name: 'account_ref', field: 'account', type: 'string' },
+  ],
+});
 
 type Face = 'native' | 'objectql' | 'preview';
 const FACES: readonly Face[] = ['native', 'objectql', 'preview'];
@@ -198,12 +218,23 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       );
     });
 
-    it('keys an OBJECT-qualified time dimension by its spelling, as the live faces do', async () => {
-      const member = `${OBJECT}.closed_at`;
-      await answeredAlike(FACES, UNBACKED, { measures: ['total'], timeDimensions: [{ dimension: member, granularity: 'month' }] }, {
-        rows: [{ [member]: '2026-03', total: 100 }, { [member]: '2026-04', total: 80 }],
-        fields: [`${member}:time`, 'total:number'],
-      });
+    it.each([
+      ['an OBJECT-qualified time dimension', { measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] }, 'timeDimensions', `${OBJECT}.closed_at`],
+      ["a backed 'account.id'", { dimensions: ['account.id'], measures: ['total'] }, 'dimensions', 'account.id'],
+      ["a backed 'account.name'", { dimensions: ['account.name'], measures: ['total'] }, 'dimensions', 'account.name'],
+      ["the bare FK column 'account'", { dimensions: ['account'], measures: ['total'] }, 'dimensions', 'account'],
+    ])('[ADR-0149 D1] refuses %s, which the dataset does not declare, alike on every face', async (_label, selection, param, member) => {
+      const refusals: Array<Record<string, unknown>> = [];
+      for (const face of FACES) {
+        const err = (await ask(face, BACKED, selection as Selection).then(
+          () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
+          (e: unknown) => e,
+        )) as Error & Record<string, unknown>;
+        expect(err, face).toMatchObject({ code: 'INVALID_FIELD', status: 400, param, member, cube: BACKED.name });
+        expect(err.message, face).toContain(`The dataset "${BACKED.name}" does not declare the dimension "${member}".`);
+        refusals.push({ message: err.message });
+      }
+      for (const r of refusals) expect(r).toEqual(refusals[0]);
     });
 
     it('buckets a windowed year, where the preview answered the total with no key', async () => {
@@ -289,41 +320,43 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
   });
 
   describe('#28692 — the ObjectQL strategy groups a backed FK path once', () => {
-    it("serves a backed 'account.id' with the native strategy's groups, where it answered INVALID_QUERY", async () => {
-      await answeredAlike(LIVE, BACKED, { dimensions: ['account.id'], measures: ['total'] }, {
-        rows: [{ 'account.id': 'a1', total: 130 }, { 'account.id': 'a2', total: 50 }],
-        fields: ['account.id:string', 'total:number'],
+    it("serves a backed 'account_id' (over 'account.id') with the native strategy's groups, where it answered INVALID_QUERY", async () => {
+      await answeredAlike(LIVE, BACKED, { dimensions: ['account_id'], measures: ['total'] }, {
+        rows: [{ account_id: 'a1', total: 130 }, { account_id: 'a2', total: 50 }],
+        fields: ['account_id:string', 'total:number'],
       });
     });
 
-    it("serves 'account.id' beside 'account.name', where it answered INVALID_QUERY", async () => {
-      await answeredAlike(LIVE, BACKED, { dimensions: ['account.id', 'account.name'], measures: ['total'] }, {
+    it("serves 'account_id' beside 'account_name', where it answered INVALID_QUERY", async () => {
+      await answeredAlike(LIVE, BACKED, { dimensions: ['account_id', 'account_name'], measures: ['total'] }, {
         rows: [
-          { 'account.id': 'a1', 'account.name': 'Acme', total: 130 },
-          { 'account.id': 'a2', 'account.name': 'Globex', total: 50 },
+          { account_id: 'a1', account_name: 'Acme', total: 130 },
+          { account_id: 'a2', account_name: 'Globex', total: 50 },
         ],
-        fields: ['account.id:string', 'account.name:string', 'total:number'],
+        fields: ['account_id:string', 'account_name:string', 'total:number'],
       });
     });
 
     it.each([
-      ['after', ['account.name', 'account']],
-      ['before', ['account', 'account.name']],
-    ])("serves the FK column 'account' %s 'account.name'", async (_label, dimensions) => {
+      ['after', ['account_name', 'account_ref']],
+      ['before', ['account_ref', 'account_name']],
+    ])("serves the FK column 'account_ref' %s 'account_name'", async (_label, dimensions) => {
       await answeredAlike(LIVE, BACKED, { dimensions, measures: ['total'] }, {
+        // A declared dimension over the lookup column answers the related
+        // record's display name (ADR-0021 server-side display values).
         rows: [
-          { account: 'a1', 'account.name': 'Acme', total: 130 },
-          { account: 'a2', 'account.name': 'Globex', total: 50 },
+          { account_ref: 'Acme', account_name: 'Acme', total: 130 },
+          { account_ref: 'Globex', account_name: 'Globex', total: 50 },
         ],
         fields: [...dimensions.map((d) => `${d}:string`), 'total:number'],
       });
     });
 
     it('leaves the draft preview refusing a backed relationship path (#28555)', async () => {
-      await expect(ask('preview', BACKED, { dimensions: ['account.id'], measures: ['total'] })).rejects.toMatchObject({
+      await expect(ask('preview', BACKED, { dimensions: ['account_id'], measures: ['total'] })).rejects.toMatchObject({
         code: 'INVALID_FIELD',
         status: 400,
-        member: 'account.id',
+        member: 'account_id',
       });
     });
   });
@@ -358,7 +391,7 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
     });
 
     it("still refuses a column raw beside its bucket (two values under one name)", async () => {
-      // `closed_at` raw and `OBJECT.closed_at` bucketed by month are different
+      // `closed_at` raw and `closed_on` bucketed by month are different
       // keys over one column: nothing is merged, and the duplicate-column
       // refusal (the dataset's since #28798) stands on both live faces.
       for (const face of LIVE) {
@@ -366,21 +399,21 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           ask(face, UNBACKED, {
             dimensions: ['closed_at'],
             measures: ['total'],
-            timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }],
+            timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }],
           }),
           face,
         ).rejects.toMatchObject({ code: 'INVALID_QUERY', status: 400 });
       }
     });
 
-    it("serves them beside a cross-object 'account.name' dimension", async () => {
-      await answeredAlike(LIVE, BACKED, { dimensions: ['region', 'zone', 'account.name'], measures: ['total'] }, {
+    it("serves them beside a cross-object 'account_name' dimension", async () => {
+      await answeredAlike(LIVE, BACKED, { dimensions: ['region', 'zone', 'account_name'], measures: ['total'] }, {
         rows: [
-          { region: 'amer', zone: 'amer', 'account.name': 'Acme', total: 100 },
-          { region: 'amer', zone: 'amer', 'account.name': 'Globex', total: 50 },
-          { region: 'emea', zone: 'emea', 'account.name': 'Acme', total: 30 },
+          { region: 'amer', zone: 'amer', account_name: 'Acme', total: 100 },
+          { region: 'amer', zone: 'amer', account_name: 'Globex', total: 50 },
+          { region: 'emea', zone: 'emea', account_name: 'Acme', total: 30 },
         ],
-        fields: ['region:string', 'zone:string', 'account.name:string', 'total:number'],
+        fields: ['region:string', 'zone:string', 'account_name:string', 'total:number'],
       });
     });
   });
@@ -427,12 +460,12 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
 
     it('refuses a column raw beside its own month bucket, where the preview served both', async () => {
       await refusedAsLive(
-        { dimensions: ['closed_at'], measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] },
+        { dimensions: ['closed_at'], measures: ['total'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }] },
         'groupBy.1.field',
         // Spelled out once in full; the cases below build the same sentence.
         "aggregate('os28690_deal'): groupBy.1.field names the column 'closed_at', which groupBy.0 already names — "
         + 'one row cannot carry two values under one column. The query was NOT run. The selection asks for '
-        + "'closed_at' both raw and bucketed (`dimensions` 'closed_at'; `timeDimensions` 'os28690_deal.closed_at' "
+        + "'closed_at' both raw and bucketed (`dimensions` 'closed_at'; `timeDimensions` 'closed_on' "
         + 'by month). Drop the raw dimension from `dimensions`, or drop the granularity from the `timeDimensions` '
         + 'entry. A repeated column name kept only the last value written under it: a count overwritten by a sum, '
         + 'or the group keys replaced by the numbers, while the answer looked served.',
@@ -441,19 +474,19 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
 
     it('refuses it after another dimension, naming the later position', async () => {
       await refusedAsLive(
-        { dimensions: ['region', 'closed_at'], measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] },
+        { dimensions: ['region', 'closed_at'], measures: ['total'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }] },
         'groupBy.2.field',
-        askedTwice('groupBy.2.field', 'groupBy.1', 'closed_at', rawAndBucketed("'closed_at'", `'${OBJECT}.closed_at' by month`)),
+        askedTwice('groupBy.2.field', 'groupBy.1', 'closed_at', rawAndBucketed("'closed_at'", "'closed_on' by month")),
       );
     });
 
     it('[#28798] names only the raw member when the bucketed dimension is listed too', async () => {
       // `closed_at` is bucketed by its own entry, so its key is the bucket;
-      // `OBJECT.closed_at` reads the same column raw.
+      // `closed_on` reads the same column raw.
       await refusedAsLive(
-        { dimensions: ['closed_at', `${OBJECT}.closed_at`], measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }] },
+        { dimensions: ['closed_at', 'closed_on'], measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }] },
         'groupBy.1',
-        askedTwice('groupBy.1', 'groupBy.0.field', 'closed_at', rawAndBucketed(`'${OBJECT}.closed_at'`, "'closed_at' by month")),
+        askedTwice('groupBy.1', 'groupBy.0.field', 'closed_at', rawAndBucketed("'closed_on'", "'closed_at' by month")),
       );
     });
 
@@ -463,11 +496,11 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           measures: ['total'],
           timeDimensions: [
             { dimension: 'closed_at', granularity: 'month' },
-            { dimension: `${OBJECT}.closed_at`, granularity: 'year' },
+            { dimension: 'closed_on', granularity: 'year' },
           ],
         },
         'groupBy.1.field',
-        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities(`'closed_at' by month, '${OBJECT}.closed_at' by year`)),
+        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities("'closed_at' by month, 'closed_on' by year")),
       );
     });
 
@@ -482,17 +515,17 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       );
     });
 
-    it('[#28799] refuses the same pair spelled OBJECT.closed_at', async () => {
+    it('[#28799] refuses the same pair spelled by the second declared dimension over the column', async () => {
       await refusedAsLive(
         {
           measures: ['total'],
           timeDimensions: [
-            { dimension: `${OBJECT}.closed_at`, granularity: 'month' },
-            { dimension: `${OBJECT}.closed_at`, granularity: 'year' },
+            { dimension: 'closed_on', granularity: 'month' },
+            { dimension: 'closed_on', granularity: 'year' },
           ],
         },
         'groupBy.1.field',
-        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities(`'${OBJECT}.closed_at' by month, '${OBJECT}.closed_at' by year`)),
+        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities("'closed_on' by month, 'closed_on' by year")),
       );
     });
 
@@ -522,11 +555,11 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       );
     });
 
-    it("[#28799] refuses the pair beside a cross-object 'account.name' dimension on both live faces", async () => {
+    it("[#28799] refuses the pair beside a cross-object 'account_name' dimension on both live faces", async () => {
       // `executeCrossObject` calls the door on its own keys (the FK column first).
       await refusedAsLive(
         {
-          dimensions: ['account.name'],
+          dimensions: ['account_name'],
           measures: ['total'],
           timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
         },

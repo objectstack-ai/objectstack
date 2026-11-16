@@ -76,10 +76,10 @@ import {
   type QueryDatasetInput,
   type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
-// [#15942 / #16293] The confirmation member the `run_action` door accepts and
-// forwards. Imported, never hand-spelled: the door that refuses (the runtime's
-// `actionConfirmationRefusal`) and the client that retries have to agree on the
-// spelling, and this door is the one that has to advertise it.
+// [#15942 / #16293] The confirmation member the delete tools require. Imported,
+// never hand-spelled: the gate that refuses and the client that retries have to
+// agree on the spelling. [#34209] `run_action` and `resume_run` REFUSE the same
+// spelling at their input, so they key the refusal off this constant too.
 import {
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
@@ -2044,8 +2044,9 @@ function withoutHistorySentence(map: z.core.$ZodErrorMap): z.core.$ZodErrorMap {
  * payload the undeclared keys have already been deleted from. The handler
  * cannot report what it never received — this is not a handler bug, and no
  * amount of care inside one can fix it. `run_action`'s confirmation member
- * carries the same finding from the other side ("Under zod an undeclared key is
- * DROPPED, not rejected"), and had to be *declared* for exactly this reason.
+ * carried the same finding from the other side ("Under zod an undeclared key is
+ * DROPPED, not rejected"), and had to be *declared* for exactly this reason
+ * until its retirement (#34209) made the closed shape refuse it instead.
  *
  * Handing `registerTool` a built `.strict()` object instead moves the decision
  * one frame up, to the only place that can still see the key: the SDK refuses
@@ -2097,7 +2098,17 @@ function withoutHistorySentence(map: z.core.$ZodErrorMap): z.core.$ZodErrorMap {
  * factory rather than a second implementation of it.
  */
 function strictToolInput<T extends z.ZodRawShape>(
-  options: { surface: string; aliases?: Readonly<Record<string, string>> },
+  options: {
+    surface: string;
+    aliases?: Readonly<Record<string, string>>;
+    /**
+     * [#34209] Exact-key prescriptions for a member this tool RETIRED: the
+     * factory's `guidance` channel, so a retired member is refused by the same
+     * unknown-key refusal as any other undeclared key, with the prescription
+     * in place of a rename guess. No code of its own is minted.
+     */
+    retired?: Readonly<Record<string, string>>;
+  },
   shape: T,
 ) {
   return z
@@ -2106,17 +2117,39 @@ function strictToolInput<T extends z.ZodRawShape>(
         surface: options.surface,
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
+        guidance: options.retired,
         history: '',
         // These argument shapes are not protocol metadata and never carried a
-        // retirement kit, so no unknown key here is a retired key: the
-        // upgrade-guide pointer would send an agent to a page unrelated to
-        // its mistake. Only the tools closed HERE opt out; the dataset pair
-        // takes spec `strictObject` schemas and keeps the spec refusal.
+        // retirement kit, so the upgrade-guide pointer would send an agent to
+        // a page unrelated to its mistake. A member a tool retires carries its
+        // prescription inline instead (`retired` above). Only the tools closed
+        // HERE opt out; the dataset pair takes spec `strictObject` schemas and
+        // keeps the spec refusal.
         retiredKeyUpgradeGuide: false,
       })),
     })
     .strict();
 }
+
+/**
+ * [#34209] The prescription `run_action` and `resume_run` refuse the retired
+ * confirmation member with (maintainer ruling 6909355256): the caller's
+ * `confirm` never confirmed a declared-gated action after the hand-off, so a
+ * stale client is refused loudly rather than silently ignored, on EVERY action,
+ * gated or not. The refusal is the closed input's unknown-key refusal, so it
+ * arrives before the bridge is called and nothing runs. The delete tools are
+ * outside the ruling and keep the member.
+ */
+const RETIRED_CONFIRMATION_MEMBER: Readonly<Record<string, string>> = {
+  [AI_ACTION_CONFIRMATION_MEMBER]:
+    `\`${AI_ACTION_CONFIRMATION_MEMBER}\` is not accepted here: you cannot confirm an action for the person. `
+    + 'Confirmation happens in the app, by the person you act for, or in your client when it supports '
+    + 'elicitation and this connection can carry the question: an action its author declared '
+    + 'ai.requiresConfirmation: true is asked of them there, or handed to them and answered status '
+    + '"pending_confirmation" (or, where the server cannot hand it off, refused ACTION_CONFIRMATION_REQUIRED and '
+    + 'performed in the app), and every other '
+    + `action runs without it. Resend this call without \`${AI_ACTION_CONFIRMATION_MEMBER}\`.`,
+};
 
 /**
  * The spellings every object-scoped tool shares, split out because they are the
@@ -3383,8 +3416,9 @@ export function registerActionTools(
         // [#33690] The amended confirmation contract: the caller's `confirm`
         // never counts on an action whose author declared
         // `ai.requiresConfirmation: true`; the person is asked in the app.
-        'An action its author declared ai.requiresConfirmation: true never runs on this call, and confirm: true ' +
-        'does not change that: the call is handed to the person you act for, who approves or rejects it in ' +
+        // [#34209] The member is retired: a call carrying it is refused.
+        'An action its author declared ai.requiresConfirmation: true never runs on this call: the call is ' +
+        'handed to the person you act for, who approves or rejects it in ' +
         'the app, and you are answered status "pending_confirmation" with a pendingId and a message to pass on. ' +
         'Nothing has run then; do not retry, tell the user to approve it. Where the server cannot hand it off, ' +
         'the call is refused ACTION_CONFIRMATION_REQUIRED (details.reason "no_confirmation_service"): the user ' +
@@ -3413,6 +3447,7 @@ export function registerActionTools(
       inputSchema: strictToolInput(
         {
           surface: 'this run_action call',
+          retired: RETIRED_CONFIRMATION_MEMBER,
           aliases: {
             ...OBJECT_NAME_ALIASES,
             ...RECORD_ID_ALIASES,
@@ -3453,30 +3488,12 @@ export function registerActionTools(
           .record(z.string(), z.unknown())
           .optional()
           .describe('Input parameters declared by the action.'),
-        // [#15942 / #16293] The confirmation member — a CLOSED boolean at the
-        // TOP LEVEL of the request, keyed off the contract's own constant so
-        // this door cannot spell it differently from the door that refuses.
-        //
-        // WHY IT IS DECLARED HERE AND NOT ONLY ENFORCED IN THE RUNTIME. Under
-        // zod an undeclared key is DROPPED, not rejected: before this member
-        // existed a client that sent `confirm: true` had it silently stripped
-        // by the SDK's shape wrap and then again by this handler's forward, so
-        // enforcing the gate alone would have made every action declaring
-        // `ai.requiresConfirmation: true` permanently un-invokable over MCP —
-        // refused, retried with the member, stripped, refused again. The door
-        // grows the member in the same change that enforces it.
-        //
-        // It is also how the model DISCOVERS the retry: an agent reads the tool
-        // schema, so a member that lives only in the refusal prose (or in a
-        // transport header) is one it cannot see.
-        [AI_ACTION_CONFIRMATION_MEMBER]: z
-          .boolean()
-          .optional()
-          .describe(
-            'Not read by this tool: an action its author declared ai.requiresConfirmation: true is handed '
-            + 'to the person to approve in the app whatever this member says, and any other action runs '
-            + 'without it. Accepted so that a call carrying it is not refused for it.',
-          ),
+        // [#34209] No confirmation member. It was declared here (#15942) while
+        // the caller's `confirm: true` was the confirmation; since the
+        // hand-off (#33690) it confirmed nothing, and the maintainer retired
+        // it (ruling 6909355256). Undeclared, the closed shape refuses it with
+        // `RETIRED_CONFIRMATION_MEMBER`'s prescription, before the bridge is
+        // called, on every action — `tools/list` shows it absent.
         },
       ),
       // Actions execute app-defined business logic with side effects (writes,
@@ -3488,9 +3505,6 @@ export function registerActionTools(
     async (args, extra) => {
       const { recordId, params } = args;
       let { actionName, objectName, namespace } = args;
-      // Read off the constant, so the member's spelling has exactly one
-      // authority in this package (the schema key above is the same constant).
-      const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
       if (!actionName || typeof actionName !== 'string') {
         return errorResult('actionName is required');
       }
@@ -3531,10 +3545,9 @@ export function registerActionTools(
           ...(namespace !== undefined ? { namespace } : {}),
           recordId,
           params,
-          // [#15942] Forwarded, not rebuilt-without. This line and the schema
-          // key above are the two halves of one change: dropping either one
-          // restores the strip that made the gate unsatisfiable.
-          [AI_ACTION_CONFIRMATION_MEMBER]: confirm,
+          // [#34209] No confirmation member: the closed input refuses it, so
+          // none reaches here to forward. Elicitation asks the person through
+          // the door below and never read the caller's member.
         };
         // [#33712] Step 1 of the amended confirmation contract: a client that
         // advertised `elicitation` on a server that read its `initialize` (the
@@ -3579,8 +3592,8 @@ export function registerActionTools(
           'the user whose call started the run can resume it, and it is gated exactly as run_action is ' +
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
           'the app\'s business logic and can mutate data. When the action that started the run was declared ' +
-          'ai.requiresConfirmation: true, the run does not continue on this call and confirm: true does not ' +
-          'change that: it is handed to the person you act for, who approves or rejects it in the app, and you ' +
+          'ai.requiresConfirmation: true, the run does not continue on this call: ' +
+          'it is handed to the person you act for, who approves or rejects it in the app, and you ' +
           'are answered status "pending_confirmation" with a pendingId; the run stays paused until they ' +
           'approve. Where the server cannot hand it off, the call is refused ACTION_CONFIRMATION_REQUIRED and ' +
           'the run stays paused. When your client supports elicitation and this connection can carry it, the ' +
@@ -3592,6 +3605,7 @@ export function registerActionTools(
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
+            retired: RETIRED_CONFIRMATION_MEMBER,
             // The spellings a caller who knows the REST resume door (`inputs`
             // / `variables`) or the other tools (`params`, `data`) reaches
             // for. Each is named in the refusal so the caller can resend with
@@ -3619,18 +3633,8 @@ export function registerActionTools(
                 'The screen\'s field values, keyed by field name (the names in screen.fields). Omit only when '
                 + 'every field on the screen is optional.',
               ),
-            // The confirmation member, keyed off the contract's constant exactly
-            // as `run_action` declares it, for the same reason: a member this
-            // shape did not declare would be refused, and the gate that asks
-            // for it could never be satisfied.
-            [AI_ACTION_CONFIRMATION_MEMBER]: z
-              .boolean()
-              .optional()
-              .describe(
-                'Not read by this tool: a resume of a run whose action was declared ai.requiresConfirmation: '
-                + 'true is handed to the person to approve in the app whatever this member says. Accepted so '
-                + 'that a call carrying it is not refused for it.',
-              ),
+            // [#34209] No confirmation member, as on `run_action`: a call
+            // carrying it is refused with the same prescription.
           },
         ),
         // The rest of the flow runs here, so this carries the same annotations
@@ -3639,16 +3643,13 @@ export function registerActionTools(
       },
       async (args, extra) => {
         const { runId, values } = args;
-        const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
         if (!runId || typeof runId !== 'string') {
           return errorResult('runId is required');
         }
         try {
-          const request = {
-            values,
-            // Forwarded, never rebuilt without it: see `run_action` above.
-            [AI_ACTION_CONFIRMATION_MEMBER]: confirm,
-          };
+          // [#34209] `values` only: the retired confirmation member is refused
+          // at the closed input, as on `run_action`.
+          const request = { values };
           // [#33712] As `run_action`: asked in place where the client can be.
           const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
           const result = elicitConfirmation

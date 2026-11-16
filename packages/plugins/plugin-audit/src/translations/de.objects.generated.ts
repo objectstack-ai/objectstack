@@ -45,7 +45,8 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Verwendung von Anmeldedaten",
           scim_refused: "SCIM-Anfrage abgelehnt",
           audit_signing_key_change: "Änderung des Audit-Signaturschlüssels",
-          dataset_query: "Dataset-Abfrage"
+          dataset_query: "Dataset-Abfrage",
+          scim_manager_unresolved: "SCIM-Vorgesetzter nicht auflösbar"
         }
       },
       user_id: {

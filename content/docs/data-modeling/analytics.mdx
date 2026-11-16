@@ -269,6 +269,18 @@ with `400 VALIDATION_FAILED` naming it (a `runtimeFilter` beside `selection`
 answers "did you mean `selection.runtimeFilter`?"), and so is a body naming
 both `dataset` and `datasetName`.
 
+A selection names only the members its dataset declares: each `measures` entry
+is one of the dataset's `measures[].name`, and each `dimensions` entry and
+`timeDimensions[].dimension` one of its `dimensions[].name`, spelled exactly so.
+Anything else — the ad-hoc `count`, a raw field such as `amount`, a suffix
+spelling such as `amount_sum`, a `<dataset>.revenue` spelling, a raw field named
+as a dimension — is refused with `400 INVALID_FIELD` before anything is read.
+The refusal's message names every undeclared member, lists the measures and
+dimensions you may use, and the fix is to select one of them or declare the
+member on the dataset. An inline `dataset` is judged against its own
+`measures` and `dimensions`. The cube query (`POST {basePath}/analytics/query`)
+is not a dataset and keeps its ad-hoc members.
+
 A `datasetName` is read the way `GET /meta/dataset/:name` reads it: the
 environment's own dataset, else the one package that holds the name. A name two
 packages hold answers `409 RESOURCE_CONFLICT` naming both, and nothing runs. To

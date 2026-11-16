@@ -21,7 +21,13 @@ import { DatasetSchema, resolveI18nLabel, type Dataset } from '@objectstack/spec
 import { fieldsFromZodIssues } from '@objectstack/types';
 import type { AnalyticsService, DatasetCatalogAdmission } from './analytics-service.js';
 import { dimensionType } from './dataset-compiler.js';
-import { invalidMemberError, type AnalyticsRequestKey } from './dataset-refusal.js';
+import { invalidMemberError } from './dataset-refusal.js';
+import {
+  describeUndeclaredMembers,
+  listMemberNames,
+  undeclaredSelectionMembers,
+  usableDeclaredMembers,
+} from './dataset-declared-members.js';
 import { matchDatasetTerms } from './dataset-term-matcher.js';
 
 /**
@@ -568,13 +574,14 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
  * [ADR-0149] `query_dataset` answers only the members the dataset declares.
  *
  * The dataset is the one declared definition (D1): a selection member it does
- * not declare is outside it. `AnalyticsService.queryDataset` serves the REST
- * door, the dashboard and the report too, and mints a caller-named measure the
- * cube does not declare (`count`, a raw field read as its `sum`, an
- * `<field>_sum` suffix spelling) and groups by a raw field named as a
- * dimension. Through this tool such an answer was cited in `provenance` as a
- * governed metric, which is exactly what D3's fallback rule keeps apart
- * (非指标口径). So the tool refuses it here, before anything is read.
+ * not declare is outside it. Through this tool an answer over one (`count`, a
+ * raw field read as its `sum`, an `<field>_sum` suffix spelling, a raw field
+ * named as a dimension) would be cited in `provenance` as a governed metric,
+ * which is exactly what D3's fallback rule keeps apart (非指标口径). So the
+ * tool refuses it here, before anything is read. `AnalyticsService.queryDataset`
+ * — the REST door, the dashboard and the report — refuses the same members by
+ * the same rule ({@link undeclaredSelectionMembers}); the tool judges first so
+ * its refusal carries the AI caller's fallback, which the service's does not.
  *
  * Declared means one of the dataset's own `measures[].name` /
  * `dimensions[].name`, spelled as `list_datasets` lists it: a
@@ -594,34 +601,16 @@ function assertDeclaredMembers(
   selection: DatasetSelection,
   admission: Extract<DatasetCatalogAdmission, { admitted: true }> | undefined,
 ): void {
-  const measures = new Set((dataset.measures ?? []).map((m) => m.name));
-  const dimensions = new Set((dataset.dimensions ?? []).map((d) => d.name));
-  const undeclared: Array<{ member: string; param: AnalyticsRequestKey }> = [];
-  const judge = (names: readonly unknown[], declared: ReadonlySet<string>, param: AnalyticsRequestKey) => {
-    for (const name of names) {
-      if (typeof name === 'string' && !declared.has(name) && !undeclared.some((u) => u.member === name && u.param === param)) {
-        undeclared.push({ member: name, param });
-      }
-    }
-  };
-  judge(selection.measures ?? [], measures, 'measures');
-  judge(selection.dimensions ?? [], dimensions, 'dimensions');
-  judge(
-    ((selection as { timeDimensions?: Array<{ dimension?: unknown }> }).timeDimensions ?? []).map((td) => td?.dimension),
-    dimensions,
-    'timeDimensions',
-  );
+  // The one rule every face of a dataset query reads (`dataset-declared-members.ts`);
+  // this face words its own refusal, because an AI caller's next step differs.
+  const undeclared = undeclaredSelectionMembers(dataset, selection);
   if (undeclared.length === 0) return;
 
-  const usable = (declared: ReadonlyArray<{ name: string }>, admitted: ReadonlySet<string> | undefined) =>
-    declared.map((m) => m.name).filter((name) => admitted?.has(name) === true);
-  const list = (names: string[]) => (names.length > 0 ? names.join(', ') : '(none)');
-  const named = undeclared.map((u) => `${u.param === 'measures' ? 'measure' : 'dimension'} "${u.member}"`).join(', ');
   const first = undeclared[0];
   throw invalidMemberError(
-    `The dataset "${dataset.name}" does not declare the ${named}. query_dataset answers only the members a dataset `
-      + `declares, by the names list_datasets lists. Measures you may use: ${list(usable(dataset.measures ?? [], admission?.measures))}. `
-      + `Dimensions you may use: ${list(usable(dataset.dimensions ?? [], admission?.dimensions))}. Pick one of these; when none `
+    `The dataset "${dataset.name}" does not declare the ${describeUndeclaredMembers(undeclared)}. query_dataset answers only the members a dataset `
+      + `declares, by the names list_datasets lists. Measures you may use: ${listMemberNames(usableDeclaredMembers(dataset.measures, admission?.measures))}. `
+      + `Dimensions you may use: ${listMemberNames(usableDeclaredMembers(dataset.dimensions, admission?.dimensions))}. Pick one of these; when none `
       + 'fits the question, answer with the object query tools and say that no governed metric was used (非指标口径).',
     { member: first.member, param: first.param, cube: dataset.name },
   );
