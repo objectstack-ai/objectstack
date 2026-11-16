@@ -196,14 +196,19 @@ describe('Seed.dependsOn orders a dataset after the objects its hook reads', () 
 });
 
 describe('Seed.dependsOn refusals: the load writes nothing and names the declaration', () => {
-  const expectRefused = (r: Awaited<ReturnType<typeof run>>, fragment: string) => {
+  /** Refused, nothing written, and the declaration named by its two objects. */
+  const expectRefused = (r: Awaited<ReturnType<typeof run>>, object: string, target: string) => {
     expect(r.result.success).toBe(false);
     expect(r.result.results).toEqual([]);
     expect(r.result.summary.totalInserted).toBe(0);
     expect(r.engine.insert).not.toHaveBeenCalled();
-    const messages = r.result.errors.map((e) => e.message).join('\n');
-    expect(messages).toContain(fragment);
     expect(r.result.errors.every((e) => e.field === 'dependsOn')).toBe(true);
+    expect(r.result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceObject: object, targetObject: target, field: 'dependsOn' }),
+    ]));
+    const error = r.result.errors.find((e) => e.sourceObject === object && e.targetObject === target)!;
+    expect(error.message).toContain(`'${object}'`);
+    return error;
   };
 
   it('a declared edge that closes a cycle with lookup edges refuses the load', async () => {
@@ -213,8 +218,9 @@ describe('Seed.dependsOn refusals: the load writes nothing and names the declara
     seeds[0] = ds('rating_rule', [{ name: 'R1' }], { dependsOn: ['customer_rating'] });
     const r = await run(seeds);
 
-    expectRefused(r, "'rating_rule' declares dependsOn 'customer_rating'");
-    expect(r.result.errors[0]?.message).toContain('rating_rule → customer_rating → rating_rule');
+    const error = expectRefused(r, 'rating_rule', 'customer_rating');
+    // The subject is the cycle itself, named object by object.
+    expect(error.message).toContain('rating_rule → customer_rating → rating_rule');
   });
 
   it('two declared edges that close a cycle between themselves refuse the load', async () => {
@@ -224,19 +230,22 @@ describe('Seed.dependsOn refusals: the load writes nothing and names the declara
     ];
     const r = await run(seeds);
 
-    expectRefused(r, 'closes a cycle');
+    expectRefused(r, 'cyc_reader', 'rating_rule');
+    expectRefused(r, 'rating_rule', 'cyc_reader');
   });
 
   it('a dataset that declares its own object refuses the load', async () => {
     const r = await run(book({ dependsOn: ['customer_rating'] }));
 
-    expectRefused(r, "'customer_rating' declares dependsOn its own object");
+    expectRefused(r, 'customer_rating', 'customer_rating');
   });
 
   it('a name that no dataset of this load seeds refuses the load', async () => {
     const r = await run(book({ dependsOn: ['crm_rating_bnad'] }));
 
-    expectRefused(r, "'customer_rating' declares dependsOn 'crm_rating_bnad', which no dataset of this load seeds");
+    const error = expectRefused(r, 'customer_rating', 'crm_rating_bnad');
+    expect(error.message).toContain("'crm_rating_bnad'");
+    expect(error.message).not.toContain('scoped out');
   });
 
   it('a name whose datasets this load scoped out (env) refuses the load and says why', async () => {
@@ -244,8 +253,8 @@ describe('Seed.dependsOn refusals: the load writes nothing and names the declara
     seeds[2] = ds('rating_band', [{ name: 'B1', item: 'I1' }], { env: ['dev'] });
     const r = await run(seeds, { env: 'prod' });
 
-    expectRefused(r, "'customer_rating' declares dependsOn 'rating_band'");
-    expect(r.result.errors[0]?.message).toContain('scoped out of this load');
+    const error = expectRefused(r, 'customer_rating', 'rating_band');
+    expect(error.message).toContain('scoped out');
   });
 
   it('a dataset this load scoped out is not judged', async () => {
