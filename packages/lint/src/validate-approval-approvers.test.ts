@@ -370,7 +370,10 @@ describe('unset-manager dead-end (#16748)', () => {
     // ⛔ The one that is NOT this repo's to offer must be marked as the
     // deployment's own, and the hint must say WHY rather than merely hedging.
     expect(remedy).toContain('a provisioning path your own deployment supplies');
-    expect(remedy).toContain("declares the SCIM 'manager' attribute without projecting it");
+    // SCIM is no longer among them: its `manager` attribute is projected onto
+    // the column (plugin-auth `scim-manager-projection.ts`).
+    expect(remedy).not.toContain('without projecting it');
+    expect(remedy).toContain("Enterprise User 'manager' attribute, whose value is the manager's SCIM resource id");
 
     // ⛔ And they must not be deleted: a deployment running a real directory
     // sync may well populate the column, and the defect was presenting all
@@ -378,8 +381,8 @@ describe('unset-manager dead-end (#16748)', () => {
     // PRECEDENCE — the endpoint refuses an identity a SCIM directory holds, and
     // so does the import's `manager_id` column, which runs the same derivation —
     // so the hint must not read as "use the endpoint instead of your directory".
-    expect(remedy).toContain('SCIM provisioning and directory sync can populate it');
-    expect(remedy).toContain('where a SCIM directory holds an identity the admin operation refuses');
+    expect(remedy).toContain('SCIM provisioning populates it too');
+    expect(remedy).toContain('Where a SCIM directory holds an identity, the admin operation refuses it');
     expect(remedy).toContain("the import's manager_id column included");
     // ⛔ But only where a directory exists: the `idp_provisioned` mark alone
     // also covers a person who only signs in through SSO, whose manager the

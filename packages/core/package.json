@@ -18,6 +18,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./egress": {
+      "import": {
+        "types": "./dist/egress.d.ts",
+        "default": "./dist/egress.js"
+      },
+      "require": {
+        "types": "./dist/egress.d.cts",
+        "default": "./dist/egress.cjs"
+      }
+    },
     "./logger": {
       "import": {
         "types": "./dist/logger.d.ts",
@@ -49,6 +59,7 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
+    "undici": "^7.30.1",
     "zod": "^4.6.6"
   },
   "keywords": [

@@ -10,8 +10,8 @@
  * `reconcileViewExpansions`, `anotherPackageShips`,
  * `applyRegistryWriteThrough`, `restoreArtifactRegistryView`,
  * `ensureObjectStorage`, `dropObjectStorage`, `unboundOwnerPackageRefusal`,
- * `dropStorageRemainingRowsRefusal` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `dropStorageRemainingRowsRefusal` moved out of `protocol.ts` whole (split
+ * by #29998).
  *
  * A MOVE, not a redesign. `ProtocolRegistryHydrationFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
