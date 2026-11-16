@@ -52,6 +52,7 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport, remoteReadableIdsSemiJoin, type RemoteTenantScope } from './remote-transport.js';
+import { planRelaxedColumnDefinition } from './remote-relax-not-null.js';
 // [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
 // shared with the local face this class inherits, `driver-memory` and `driver-mongodb`.
 import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
@@ -602,14 +603,16 @@ function refuseRemoteDeferredDdl(): never {
  *
  * The entries that are DDL this transport can send as it stands: `drop_index`,
  * `create_index`, `recreate_index` and `replace_unique_index` (portable index
- * DDL on every dialect), and `drop_column` (`ALTER TABLE … DROP COLUMN`, which
- * SQLite and libSQL support since 3.35). A column's indexes go with it, in the
+ * DDL on every dialect), `drop_column` (`ALTER TABLE … DROP COLUMN`, which
+ * SQLite and libSQL support since 3.35), and `relax_not_null` (libSQL's own
+ * `ALTER TABLE … ALTER COLUMN … TO …`, #33724). A column's indexes go with it, in the
  * same transaction, as they do on PostgreSQL and in the local face's SQLite
- * table rebuild. Every other column entry (nullability, width, a dropped
- * DEFAULT) needs that rebuild, which this transport has no copy of, so it is
+ * table rebuild. Every other column entry (a tightened NOT NULL, a width, a
+ * dropped DEFAULT) needs that rebuild, which this transport has no copy of, so it is
  * reported `skipped` and logged, as the in-place arm reports an op its dialect
  * cannot perform. Each entry is reported `applied` only once a read-back shows
- * the physical schema in its target state: the column gone, the index name
+ * the physical schema in its target state: the column gone, the column
+ * nullable with the type and the default it had, the index name
  * gone, or the index present with the uniqueness and the key columns, in
  * order, the entry asked for.
  *
@@ -684,7 +687,12 @@ export const REMOTE_DRIFT_OP_ANSWERS = {
   create_index: 'applied',
   recreate_index: 'applied',
   replace_unique_index: 'applied',
-  relax_not_null: 'needs-table-rebuild',
+  // [#33724] Ruling 6915086281 (letter A): relaxed in place with libSQL's
+  // `ALTER TABLE … ALTER COLUMN … TO …`, never by a table rebuild. Relax ONLY:
+  // that statement does not revalidate existing rows, so a tightening through
+  // it would leave violating rows in place; the tightening, the widths and the
+  // dropped DEFAULT keep the rebuild answer below.
+  relax_not_null: 'applied',
   tighten_not_null: 'needs-table-rebuild',
   widen_varchar: 'needs-table-rebuild',
   narrow_varchar: 'needs-table-rebuild',
@@ -1140,9 +1148,10 @@ export const REMOTE_FACE_ANSWERS = {
   // `false` here (arming is refused), so nothing short-circuits it.
   applyPublishedColumnChanges: 'inherited',
   // [#33724] The install's NOT NULL relax: the same inherited reading of this
-  // face's own `detectManagedDrift` and `applyMigrationEntries`. A relax needs
-  // the SQLite table rebuild, which this transport does not run, so it comes
-  // back `skipped` with this face's reason, which the install logs.
+  // face's own `detectManagedDrift` and `applyMigrationEntries`, which relaxes
+  // the column in place (`ALTER TABLE … ALTER COLUMN … TO …`, ruling
+  // 6915086281) and reports it applied only on a read-back; a refused statement
+  // or a read-back that differs comes back `skipped` with its reason, logged.
   relaxDeclaredNotNull: 'inherited',
   planMediaColumnMove: 'refused',
   // [cloud#3652 D3] Declared renames: this face renames no column (the
@@ -4770,7 +4779,7 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Apply drift entries. [#23816] On the REMOTE face, through the libSQL
-   * client: the index entries and `drop_column`, each in one `write` batch so
+   * client: the index entries, `drop_column` and `relax_not_null` (#33724), each in one `write` batch so
    * it lands whole or not at all, and each reported `applied` only once a
    * read-back shows its target state (see "Remote schema drift" at the top of
    * this file for which entries, and why only those). The contract is the
@@ -4831,8 +4840,10 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
-   * [#23816] One column drift entry on the REMOTE face. `drop_column` only:
-   * `ALTER TABLE … DROP COLUMN`, preceded in the same transaction by a
+   * [#23816] One column drift entry on the REMOTE face: `drop_column`, and
+   * [#33724] `relax_not_null` ({@link applyRemoteRelaxNotNull}).
+   *
+   * `drop_column` is `ALTER TABLE … DROP COLUMN`, preceded in the same transaction by a
    * `DROP INDEX` of every index keyed on the column, since SQLite refuses to
    * drop a column an index still uses. That is the outcome the other dialects
    * reach by themselves (PostgreSQL drops the column's indexes, the local
@@ -4845,6 +4856,7 @@ export class TursoDriver extends SqlDriver {
    * {@link REMOTE_DRIFT_OP_ANSWERS} [#23925]. The guard below narrows the type.
    */
   private async applyRemoteColumnDriftOp(op: ManagedDriftEntry['op']): Promise<boolean> {
+    if (op.type === 'relax_not_null') return this.applyRemoteRelaxNotNull(op.table, op.column);
     const column = (op as { column?: string }).column;
     if (op.type !== 'drop_column' || !column) return false;
     const hasColumn = async () => (await this.remoteLiveColumns(op.table)).some((c) => c.name === column);
@@ -4860,6 +4872,85 @@ export class TursoDriver extends SqlDriver {
       'write',
     );
     return !(await hasColumn());
+  }
+
+  /**
+   * [#33724] Relax one NOT NULL column in place on the REMOTE face, as the
+   * maintainer ruled (record 6915086281, letter A): libSQL's own
+   * `ALTER TABLE t ALTER COLUMN c TO <definition>`, which rewrites the column's
+   * definition in the stored `CREATE TABLE` and neither copies nor revalidates
+   * a row. No table rebuild, and no fall-back to one: a refusal is reported,
+   * never worked around (ruling parameter 4).
+   *
+   * - The definition sent is the column's own, cut out of the table's stored
+   *   `CREATE TABLE` with only its NOT NULL clause removed
+   *   ({@link planRelaxedColumnDefinition}), so the type, the DEFAULT and
+   *   every other clause the database holds are restated byte for byte and
+   *   nothing else is aligned on the way (parameter 5). A stored SQL that does
+   *   not say what that needs is a refusal before any statement.
+   * - The statement goes in one `write` batch with a check that the table's
+   *   stored SQL now reads exactly as planned; a mismatch fails the check's
+   *   statement, so the batch, the statement included, rolls back. libSQL
+   *   locates the old definition by its own reading of the stored text
+   *   (measured: a comma inside the definition, in a DEFAULT, a CHECK, a type's
+   *   width or a comment, makes it splice at that comma, and the result is
+   *   refused as unparseable); the check holds any splice the plan did not
+   *   predict out of the database.
+   * - Applied only on a read-back (parameter 3): the column, read again, is
+   *   nullable, with the type, the DEFAULT and the primary-key position it had
+   *   before. A refused batch or a read-back that differs is `false`, which
+   *   {@link applyMigrationEntries} reports `skipped`; the reason is logged.
+   *
+   * A column that is gone, or already nullable, has nothing to relax here and
+   * is `false`, as `drop_column` answers a column that is already gone.
+   */
+  private async applyRemoteRelaxNotNull(table: string, column: string): Promise<boolean> {
+    const columnState = async () => {
+      const [row] = await this.remoteCatalogRead(
+        'SELECT type, "notnull" AS nn, dflt_value, pk FROM pragma_table_info(?) WHERE name = ?',
+        [table, column],
+      );
+      return row ? { type: row.type, notNull: Number(row.nn) === 1, dflt: row.dflt_value ?? null, pk: Number(row.pk ?? 0) } : null;
+    };
+    const skip = (reason: string): false => {
+      this.logger.warn(`[schema-drift] relax_not_null on ${table}.${column} not applied on the Turso REMOTE transport: ${reason}`);
+      return false;
+    };
+    const before = await columnState();
+    if (!before?.notNull) return false;
+    const [stored] = await this.remoteCatalogRead(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, [table]);
+    if (typeof stored?.sql !== 'string') return skip('the database holds no CREATE TABLE text for the table');
+    const plan = planRelaxedColumnDefinition(stored.sql, column);
+    if ('refusal' in plan) return skip(`${plan.refusal}; nothing was sent`);
+    const statement = `ALTER TABLE ${quoteRemoteIdentifier(table)} ALTER COLUMN ${quoteRemoteIdentifier(column)} TO ${plan.relaxed}`;
+    try {
+      await this.remoteTransport!.batch(
+        [
+          statement,
+          // The check: `json()` over a malformed argument is the error SQLite
+          // raises from a plain SELECT, and CASE evaluates it only on a mismatch.
+          {
+            sql: `SELECT CASE WHEN (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?) = ? THEN 1 ELSE json('relax check: stored table SQL differs') END`,
+            args: [table, plan.expectedTableSql],
+          },
+        ],
+        'write',
+      );
+    } catch (e: any) {
+      return skip(
+        `the database refused \`${statement}\` or its check that the stored table SQL reads as planned, ` +
+          `and the batch rolled back: ${e?.message ?? e}`,
+      );
+    }
+    const after = await columnState();
+    const differs = !after
+      ? 'the column is gone'
+      : after.notNull
+        ? 'the column is still NOT NULL'
+        : after.type !== before.type || after.dflt !== before.dflt || after.pk !== before.pk
+          ? `the column reads back as ${JSON.stringify(after)}, not as ${JSON.stringify({ ...before, notNull: false })}`
+          : null;
+    return differs === null ? true : skip(`the statement ran, and the read-back differs: ${differs}`);
   }
 
   /**
