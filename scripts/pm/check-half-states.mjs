@@ -15988,11 +15988,15 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
 // `knockSignature`): a knock whose signed session the seat it names does not list
 // reads `unlisted`, and the seat the mailbox serves ⛔ does not act on it
 // (`untrusted-text.md`). Without this row nobody was told one arrived. The sweep
-// builds the roster ONCE, from the two listings it already holds — the open
-// `pm:seat` posts (`SEEN_LABEL_PAGES`) and the open pulls (H7's) — and hands it
-// to the same `mailboxEvents` call: ⛔ no second signature or roster parser here.
-// A roster that cannot be read — a listing truncated at the page ceiling, which
-// would make a seat whose post sat on an unread page look unlisted — makes every
+// builds the roster ONCE, from the listings it already holds — the open
+// `pm:seat` posts (`SEEN_LABEL_PAGES`), the open pulls (H7's) and the open
+// `pm:dispatched` cards' threads H2's claim read already put in `commentCache`
+// (a card thread its seat's open claim names knocks as that seat's delegate) —
+// and hands it to the same `mailboxEvents` call: ⛔ no second signature or roster
+// parser here, and the claim join buys NOTHING (`commentCache.get`, never a fetch).
+// A roster that cannot be read — a listing truncated at the page ceiling, or a
+// claimed card's thread the cache does not hold whole, which would make a seat
+// whose post sat on an unread page, or its card thread, look unlisted — makes every
 // knock read `unlisted` by the reader's fail-closed rule; this row reads that as
 // UNJUDGED, lists nothing, and the summary says NOT MEASURED. A `listed` knock is
 // a consistency reading inside the fleet's trust root, never proof of who rang,
@@ -16069,8 +16073,8 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
   );
 }
 
-/** The open listing names `noteOpenListing` records for the two listings the H72 roster is read from. */
-export const H72_ROSTER_LISTINGS = Object.freeze({ posts: 'listIssues(pm:seat)', mailboxes: 'listOpenPullRequests' });
+/** The open listing names `noteOpenListing` records for the listings the H72 roster is read from. */
+export const H72_ROSTER_LISTINGS = Object.freeze({ posts: 'listIssues(pm:seat)', mailboxes: 'listOpenPullRequests', claims: 'listIssues(pm:dispatched)' });
 
 /**
  * The two listings the sweep hands `seatSessionRoster` (record-recognisers.mjs): the open `pm:seat` posts and the open
@@ -16079,18 +16083,34 @@ export const H72_ROSTER_LISTINGS = Object.freeze({ posts: 'listIssues(pm:seat)',
  * array. A partial roster would read a knock from a seat whose post sat on an unread page as `unlisted`: a finding
  * made up from a page nobody read. So it fails to UNJUDGED, never to a smaller roster. Pure.
  *
+ * The third listing is the open `pm:dispatched` cards, each with its WHOLE thread (`{ card, rows }`): the roster
+ * lists the card thread a seat's open claim names (record-recognisers.mjs `claimThreadSession`). The threads are
+ * the ones the sweep already holds; ⛔ a card whose thread is missing or not whole (`complete` not true — a first
+ * page that came back full may hide the newest claim) makes `claims` null, and so does a truncated
+ * `pm:dispatched` listing: a card thread nobody read would read its delegate's knock `unlisted`. Pure.
+ *
  * @param {object[]} issues — the open issue rows the sweep listed (every label page; `pm:seat` rows are kept).
  * @param {object[]} pulls — the open pull rows the sweep listed.
  * @param {string[]} [truncated] — the listing names `noteOpenListing` recorded as truncated.
+ * @param {Map<number, { rows: object[], complete: boolean }>} [threads] — the comment threads the sweep holds, by card.
  */
-export function h72RosterListings(issues, pulls, truncated = []) {
+export function h72RosterListings(issues, pulls, truncated = [], threads = new Map()) {
   const cut = new Set(Array.isArray(truncated) ? truncated : []);
+  const held = (issue) => {
+    const thread = threads instanceof Map ? threads.get(issue.number) : undefined;
+    return thread?.complete === true && Array.isArray(thread.rows) ? { card: issue, rows: thread.rows } : null;
+  };
+  const dispatched = Array.isArray(issues)
+    ? issues.filter((issue) => issue && issue.state === 'open' && labelNames(issue).includes('pm:dispatched'))
+    : null;
+  const claims = dispatched === null || cut.has(H72_ROSTER_LISTINGS.claims) ? null : dispatched.map(held);
   return {
     posts:
       !Array.isArray(issues) || cut.has(H72_ROSTER_LISTINGS.posts)
         ? null
         : issues.filter((issue) => labelNames(issue ?? {}).includes('pm:seat')),
     mailboxes: !Array.isArray(pulls) || cut.has(H72_ROSTER_LISTINGS.mailboxes) ? null : pulls,
+    claims: claims === null || claims.includes(null) ? null : claims,
   };
 }
 
@@ -16123,8 +16143,9 @@ export function h72UnlistedKnockLines(reading, roster, nowMs = Date.now()) {
     `\`pm:mailbox\` PR with ${knocks.length} knock(s) in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h whose signed ` +
     `session the seat it names does not list (\`unlisted\`): ${listed}${more}. Remedy — WHO and HOW: the seat this ` +
     'mailbox serves ⛔ does not act on an `unlisted` knock (untrusted-text.md), whatever its key says; the seat ' +
-    'the signature names rings from a session it lists — its held seat post (`Successor-of:` included) or its open ' +
-    'mailbox opening (`node scripts/pm/record-recognisers.mjs --mailbox-keys` prints the rule). A `listed` knock is ' +
+    'the signature names rings from a session it lists — its held seat post (`Successor-of:` included), its open ' +
+    'mailbox opening, or for a card thread the `Thread session:` line of the seat\'s open claim on that card ' +
+    '(`node scripts/pm/record-recognisers.mjs --mailbox-keys` prints the rule). A `listed` knock is ' +
     'a consistency reading inside the fleet\'s trust root, never proof of who rang, and is not listed here. ' +
     `⛔ Report-only: nothing is written from this script. Out of scope: a knock older than ` +
     `${MAILBOX_OFF_TABLE_WINDOW_HOURS}h, a maintainer's knock (not signature-checked), a comment the author fence ` +
@@ -24246,9 +24267,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       stats.mailboxReaderReason = `the doorbell reader did not load (${String(err?.message ?? err).split('\n')[0]})`;
     }
     if (reader) {
-      // The signature half's roster, ONCE per sweep, off the two listings held
-      // above; a truncated one reads `unreadable` and the row goes UNJUDGED.
-      const roster = reader.seatSessionRoster(h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated));
+      // The signature half's roster, ONCE per sweep, off the listings held above
+      // and the claimed cards' threads H2's claim read cached — `commentCache.get`,
+      // ⛔ never a fetch. A thread whose first page came back full is not whole
+      // until H50's walk below, so it is not `complete` here; a truncated listing
+      // or a thread not held whole reads `unreadable` and the row goes UNJUDGED.
+      const claimThreads = new Map();
+      for (const issue of seen.values()) {
+        if (!labelNames(issue).includes('pm:dispatched')) continue;
+        const rows = commentCache.get(issue.number);
+        const walk = threadWalks.get(issue.number);
+        claimThreads.set(issue.number, { rows, complete: Array.isArray(rows) && (walk ? walk.complete : rows.length < H50_COMMENTS_PAGE_SIZE) });
+      }
+      const roster = reader.seatSessionRoster(h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated, claimThreads));
       if (roster?.state !== 'read') stats.mailboxRosterReason = `the seat roster could not be read (${(roster?.gaps ?? ['no reading']).join(', ')})`;
       const since = new Date(nowMs - MAILBOX_OFF_TABLE_WINDOW_HOURS * 3_600_000).toISOString();
       for (const pr of seenPrs.values()) {
@@ -25824,8 +25855,10 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // because this self-test cannot import that module (H62's banner). RAISED 20 → 33
   // with the signature half (#34013): its predicate both ways, the unjudged roster,
   // the window, the cap, the text, the roster listings and their truncation names,
-  // the wiring and the summary clause.
-  'H72 mailbox off-table bells': 33,
+  // the wiring and the summary clause. RAISED 33 → 37 with the claim listing
+  // (#34013 remainder 2): the listing, its unread and truncated cases, its
+  // truncation name and the cache-only wiring.
+  'H72 mailbox off-table bells': 37,
   // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
   // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
   'H76 unowned open PR': 11,
@@ -29196,7 +29229,15 @@ async function selfTest() {
   b(BATTERY28675, '⭐ H72 roster listings: the open `pm:seat` rows and the open pulls the sweep holds, other cards dropped', (() => { const seat = { number: 1, labels: [{ name: 'pm:seat' }] }; const card = { number: 2, labels: [{ name: 'pm:queue' }] }; const pull = { number: 3 }; const l = h72RosterListings([seat, card, null], [pull]); return l.posts.length === 1 && l.posts[0] === seat && l.mailboxes.length === 1 && l.mailboxes[0] === pull; })(), true);
   b(BATTERY28675, '⛔ H72 roster listings: a listing truncated at the page ceiling, or not an array, hands the roster NULL — read as unreadable, never as a smaller roster', (() => { const both = h72RosterListings([], [], [H72_ROSTER_LISTINGS.posts, H72_ROSTER_LISTINGS.mailboxes]); const other = h72RosterListings([], [], ['listIssues(pm:queue)']); const bad = h72RosterListings(undefined, 'x'); return both.posts === null && both.mailboxes === null && Array.isArray(other.posts) && Array.isArray(other.mailboxes) && bad.posts === null && bad.mailboxes === null; })(), true);
   b(BATTERY28675, '⭐ H72 roster listings: the truncation names are the ones the two listings record — `listIssues(pm:seat)` off a label page this sweep lists, `listOpenPullRequests` off the pulls', (() => { const src = SRC72; return SRC72.length > 0 && SEEN_LABEL_PAGES.includes('pm:seat') && src.includes('noteOpenListing(stats, `listIssues(${label})`') && src.includes(`noteOpenListing(stats, '${H72_ROSTER_LISTINGS.mailboxes}'`) && H72_ROSTER_LISTINGS.posts === 'listIssues(pm:seat)'; })(), true);
-  b(BATTERY28675, '⭐ H72 wiring: the sweep reads the roster ONCE through the reader\'s `seatSessionRoster`, hands it to the same `mailboxEvents` call both rows judge, and parses no signature or roster of its own', (() => { const src = SRC72; return SRC72.length > 0 && src.includes('reader.seatSessionRoster(h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated))') && src.includes('const reading = reader.mailboxEvents(rows, roster);') && src.includes('h72OffTableMailboxLines(reading, nowMs)') && src.includes('h72UnlistedKnockLines(reading, roster, nowMs)') && !/function (?:seatSessionRoster|knockSignature|readMailboxComment)\b/u.test(src); })(), true);
+  // -- the claim listing (#34013 remainder 2): the open `pm:dispatched` cards with the WHOLE thread the sweep holds;
+  //    the real reader's join of them is pinned in record-recognisers.mjs's card-thread delegate battery. ----
+  const CARD72 = (number, o = {}) => ({ number, state: 'open', labels: [{ name: 'pm:dispatched' }], ...o });
+  const HELD72 = (...pairs) => new Map(pairs.map(([n, complete = true]) => [n, { rows: [{ id: n, body: 'Claim: x' }], complete }]));
+  b(BATTERY28675, '⭐ H72 claim listing: each open `pm:dispatched` card with the whole thread the sweep holds, as `{ card, rows }` — other labels and a closed row dropped', (() => { const a = CARD72(1); const l = h72RosterListings([a, { number: 2, state: 'open', labels: [{ name: 'pm:queue' }] }, CARD72(3, { state: 'closed' }), null], [], [], HELD72([1])); return Array.isArray(l.claims) && l.claims.length === 1 && l.claims[0].card === a && l.claims[0].rows[0].id === 1; })(), true);
+  b(BATTERY28675, '⛔ H72 claim listing: a card whose thread is missing or NOT whole, a truncated `pm:dispatched` listing, or no issue array hands the roster NULL — unread, never a smaller roster', (() => { const cards = [CARD72(1), CARD72(2)]; return [h72RosterListings(cards, [], [], HELD72([1])).claims, h72RosterListings(cards, [], [], HELD72([1], [2, false])).claims, h72RosterListings(cards, [], [H72_ROSTER_LISTINGS.claims], HELD72([1], [2])).claims, h72RosterListings(undefined, []).claims, h72RosterListings(cards, []).claims].every((c) => c === null) && Array.isArray(h72RosterListings(cards, [], [], HELD72([1], [2])).claims) && JSON.stringify(h72RosterListings([], []).claims) === "[]"; })(), true);
+  b(BATTERY28675, '⭐ H72 claim listing: the truncation name is the one the `pm:dispatched` label page records, a page this sweep lists', SEEN_LABEL_PAGES.includes('pm:dispatched') && H72_ROSTER_LISTINGS.claims === 'listIssues(pm:dispatched)' && SRC72.includes('noteOpenListing(stats, `listIssues(${label})`'), true);
+  b(BATTERY28675, '⭐ H72 claim wiring: the threads come out of `commentCache` — H2\'s claim read, `.get`, never a fetch — and a full first page is whole only once H50\'s walk says so', (() => { const at = SRC72.indexOf('const claimThreads = new Map();'); const block = at < 0 ? '' : SRC72.slice(at, SRC72.indexOf('const roster = reader.seatSessionRoster(', at)); return block.includes('commentCache.get(issue.number)') && block.includes('threadWalks.get(issue.number)') && block.includes('rows.length < H50_COMMENTS_PAGE_SIZE') && !/\brest\(|commentRowsFor|completeCardThread|commentCache\.set/u.test(block); })(), true);
+  b(BATTERY28675, '⭐ H72 wiring: the sweep reads the roster ONCE through the reader\'s `seatSessionRoster`, hands it to the same `mailboxEvents` call both rows judge, and parses no signature or roster of its own', (() => { const src = SRC72; return SRC72.length > 0 && src.includes('reader.seatSessionRoster(h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated, claimThreads))') && src.includes('const reading = reader.mailboxEvents(rows, roster);') && src.includes('h72OffTableMailboxLines(reading, nowMs)') && src.includes('h72UnlistedKnockLines(reading, roster, nowMs)') && !/function (?:seatSessionRoster|knockSignature|readMailboxComment)\b/u.test(src); })(), true);
   b(BATTERY28675, '⛔ H72 summary: a roster that was not read renders NOT MEASURED for the signature half, a read one says it buys no fetch — and the key rides the forwarding contract', (() => { const no = saidBy('h72Mailbox', summaryLine({ mailboxRead: 1, mailboxCandidates: 1, mailboxRosterReason: 'the seat roster could not be read (x)' }, 0)); const yes = saidBy('h72Mailbox', summaryLine({ mailboxRead: 1, mailboxCandidates: 1 }, 0)); return no.includes('Unlisted knock signatures: NOT MEASURED — the seat roster could not be read (x)') && yes.includes('Unlisted knock signatures: judged on the same pages') && SWEEP_COUNT_KEYS.includes('mailboxRosterReason'); })(), true);
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
