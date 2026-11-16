@@ -94,6 +94,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 
@@ -145,7 +149,13 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : type === 'page' ? server.pages : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -227,8 +237,18 @@ describe('an object route in an app whose package holds none of its objects read
     await settle();
 
     expect(objectCalls()[0]).toBe(`object?package=${CLOUD}`);
+    // objectstack#34244 — the requiresObject entry and the lookup targets are
+    // asked by name once the `?names=` presence read has answered them served.
     expect(sorted(objectCalls())).toEqual(
-      sorted([`object?package=${CLOUD}`, 'object/sys_environment', 'object/sys_organization', 'object/sys_user', 'object/sys_member']),
+      sorted([
+        `object?package=${CLOUD}`,
+        'object?names=sys_member',
+        'object?names=sys_organization,sys_user',
+        'object/sys_environment',
+        'object/sys_organization',
+        'object/sys_user',
+        'object/sys_member',
+      ]),
     );
     // The sidebar's capability gate answers from the same scope.
     expect(screen.getByTestId('members-entry')).toHaveTextContent('true');
@@ -258,6 +278,8 @@ describe('a record route reads the objects its declared record page binds (objec
     expect(sorted(objectCalls())).toEqual(
       sorted([
         `object?package=${CLOUD}`,
+        'object?names=sys_member',
+        'object?names=sys_organization,sys_user',
         'object/sys_environment',
         'object/sys_environment_member',
         'object/sys_organization',
@@ -291,7 +313,8 @@ describe('CONTROLs: the shapes this card does not change ask what they asked bef
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
     await settle();
 
-    expect(objectCalls()).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+    // objectstack#34244 — the target outside the package after one presence read.
+    expect(objectCalls()).toEqual([`object?package=${CRM}`, 'object?names=sys_user', 'object/sys_user']);
   });
 
   it('a record route with no declared record page reads the whole registry, and nothing by name', async () => {

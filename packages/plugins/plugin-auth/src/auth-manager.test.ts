@@ -3241,6 +3241,9 @@ describe('AuthManager', () => {
         developerEditionCreate: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',
+        // The configured base URL as an address, for the console's mobile-app
+        // connect code (which refuses this loopback one).
+        publicBaseUrl: 'http://localhost:3000',
       });
     });
 

@@ -237,8 +237,13 @@ describe('one console open asks for the app\'s objects, not the whole registry (
 
     expect(objectCalls()).not.toContain('object');
     expect(objectCalls()[0]).toBe(`object?package=${CRM}`);
-    // The route's lookup target outside the package, and the object the app's `requiresObject` entry names.
-    expect([...objectCalls()].sort()).toEqual([`object?package=${CRM}`, 'object/cloud_only', 'object/sys_user'].sort());
+    // The route's lookup target outside the package, and the object the app's
+    // `requiresObject` entry names, each in a `?names=` presence read
+    // (objectstack#34244): the unregistered `cloud_only` is never asked by
+    // name, and the gate still hides its entry; the served `sys_user` is.
+    expect([...objectCalls()].sort()).toEqual(
+      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user', 'object/sys_user'].sort(),
+    );
     // The route element and the chrome are handed the scope.
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact,sys_user');
     expect(screen.getByTestId('console-layout').getAttribute('data-chrome-objects')).toBe('crm_account,crm_contact,sys_user');
@@ -250,8 +255,10 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
 
     expect(objectCalls()).not.toContain('object');
-    // objectstack#34188 — the one list-shaped read is the lookup target's presence, by name.
-    expect(objectCalls().filter((c) => c.startsWith('object?'))).toEqual(['object?names=sys_user']);
+    // objectstack#34188 — the list-shaped reads are presence reads: the lookup
+    // target's, and (objectstack#34244) the `requiresObject` entry's.
+    expect([...objectCalls().filter((c) => c.startsWith('object?'))].sort()).toEqual(['object?names=cloud_only', 'object?names=sys_user']);
+    expect(objectCalls()).not.toContain('object/cloud_only');
     expect(objectCalls()).toEqual(expect.arrayContaining(['object/crm_account', 'object/sys_user']));
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account');
   });
