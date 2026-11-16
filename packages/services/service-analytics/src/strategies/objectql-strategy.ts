@@ -1785,7 +1785,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    *
    * `null` — serve by the FK-expand — when the host wired no such hook or the
    * engine declined (a driver that compiles no join: memory, MongoDB, OData;
-   * a read it cannot prove is one statement).
+   * a read it cannot prove is one statement), and when anything on the way
+   * refused with a 4xx: the FK-expand re-derives that refusal, so its order
+   * and its envelope stay today's.
    */
   private async executeCrossObjectJoined(
     baseObject: string,
@@ -1801,9 +1803,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const run = (ctx as DatasetScopedStrategyContext).executeRelationGroupAggregate;
     if (typeof run !== 'function') return null;
 
-    // [#29304] A virtual attribute is refused in the dataset door's words
-    // before the engine is asked, as the FK-expand refuses it.
-    assertCrossObjectAttrsStored(plan, ctx);
+    // [#29304] A virtual attribute is the FK-expand's to refuse, in the
+    // dataset door's words and after its base read's own doors: this path
+    // only declines, before the engine is asked.
+    try {
+      assertCrossObjectAttrsStored(plan, ctx);
+    } catch (error) {
+      if (isClientRefusal(error)) return null;
+      throw error;
+    }
 
     // One relation per FK column, each attribute under its own column.
     const relations: Array<{ field: string; object: string; where?: Record<string, unknown>; attrs: Array<{ attr: string; alias: string }>; resolvedAlias: string }> = [];
@@ -1836,13 +1844,26 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const replaced = new Set(relations.map((r) => r.field).filter((f) => !baseDimFields.includes(f)));
     const joinGroupBy = groupBy.filter((g) => typeof g !== 'string' || !replaced.has(g));
 
-    const answer = await run.call(ctx, baseObject, {
-      groupBy: joinGroupBy.length > 0 ? (joinGroupBy as unknown as string[]) : undefined,
-      aggregations: aggregations.length > 0 ? aggregations : undefined,
-      filter: this.withReadScope(baseObject, filter, ctx),
-      timezone: query.timezone,
-      context: ctx.context,
-    }, relations as readonly RelationGroupAggregateRelation[]);
+    // A 4xx refusal is not this path's to word: the base query here is not
+    // the FK-expand's (its FK columns are gone, so a refusal citing a group
+    // key's position names another one), and the related read is judged even
+    // over an empty base set, which the FK-expand never reads. The FK-expand
+    // re-derives it, so the envelope a client sees, and the dry run it
+    // matches, stays today's field for field. A 5xx is the join's own
+    // fault and surfaces.
+    let answer: Awaited<ReturnType<typeof run>>;
+    try {
+      answer = await run.call(ctx, baseObject, {
+        groupBy: joinGroupBy.length > 0 ? (joinGroupBy as unknown as string[]) : undefined,
+        aggregations: aggregations.length > 0 ? aggregations : undefined,
+        filter: this.withReadScope(baseObject, filter, ctx),
+        timezone: query.timezone,
+        context: ctx.context,
+      }, relations as readonly RelationGroupAggregateRelation[]);
+    } catch (error) {
+      if (isClientRefusal(error)) return null;
+      throw error;
+    }
     if (!answer.joined) return null;
 
     // Each row is one group of the joined statement. Its key for a relation
@@ -2825,4 +2846,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     }
     return fields;
   }
+}
+
+/** [relation group join] A declared 4xx: a verdict the FK-expand re-derives in its own order and words. */
+function isClientRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
 }
