@@ -121,6 +121,85 @@ export const BulkActionExecutionSchema = z.enum(['perRecord', 'aggregate']);
 export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
 
 /**
+ * The per-row outcome an `execution: 'aggregate'` handler MAY resolve with
+ * (#34216, seat ruling 6905490575, option A).
+ *
+ * **[PLANNED — not enforced]** Declared ahead of its reader. The console does
+ * NOT read this value yet: the grid's bulk reader is #34269. Until that lands
+ * the grid counts a resolved aggregate call as covering the whole selection,
+ * so a handler that cannot cover the whole selection must still REJECT. A
+ * handler that resolves with `failed` rows today is reported as full success.
+ *
+ * An aggregate dispatch is ONE call carrying the whole selection in
+ * `params._selectedIds`, so the call's own success or failure is one outcome
+ * for N rows. A handler that writes row by row can move some rows and fail on
+ * others; without a declared answer the console can only say "not all
+ * completed", never which rows changed. This is that answer.
+ *
+ * **Resolve value only — never a rejection.** The object IS the handler's
+ * whole resolve value (no wrapper key). Once the reader (#34269) lands, a run
+ * that moved some rows and refused others resolves with it, a non-empty
+ * `failed` being a legal success answer. A rejection keeps meaning "the
+ * handler could not produce an outcome" and stays the one-outcome report: the
+ * `/actions` door carries no structured body on a script or flow arm's throw
+ * (the shared resolver's `details` is a closed list, and the sandbox passes
+ * only `code`, `fields`, `status` and `userMessage` out of a body), so a
+ * per-row result attached to a throw would be dropped.
+ *
+ * **Not `BatchUpdateResponse`, and not `BulkWriteResult`.** The data plane's
+ * batch answer (`BatchUpdateResponseSchema`, `api/batch.zod.ts`) spells
+ * `succeeded` / `failed` as COUNTS and puts the rows under `results`, and the
+ * console's `BulkWriteResult` names its failures `errors[].error`. Here
+ * `succeeded` and `failed` are the row LISTS themselves and a failure's reason
+ * is `message`. A value shaped like either neighbour does not parse.
+ *
+ * **How the reader (#34269) will read it** — only on an
+ * `execution: 'aggregate'` dispatch:
+ *  - A value with NEITHER a `succeeded` nor a `failed` member (nothing, a
+ *    summary, an artifact link) keeps the one-outcome report: the shape is
+ *    optional.
+ *  - A value that carries `succeeded` or `failed` but does not parse is
+ *    reported as an UNREADABLE result, never as full success.
+ *  - Members beyond the two lists are tolerated (`looseObject`, a wire shape
+ *    written by a handler, not by an author) and carry no meaning, so a
+ *    handler may return a summary beside them.
+ *
+ * **How the reader (#34269) will count ids.** Every id must be one of the
+ * dispatched `params._selectedIds`:
+ *  - an id outside the selection is a handler bug: dropped, counted nowhere;
+ *  - a duplicate id counts once;
+ *  - an id in BOTH lists counts as failed;
+ *  - a selected id in NEITHER list is reported as not confirmed, never as
+ *    succeeded.
+ */
+export const BulkActionResultSchema = lazySchema(() => z.looseObject({
+  succeeded: z.array(z.string()).describe(
+    'Ids of the selected rows the handler wrote. Each must be one of the dispatched `params._selectedIds`. The planned '
+    + 'reader will drop an id outside the selection, count a duplicate once, and count an id that is also in `failed` as failed.',
+  ),
+  failed: z.array(z.looseObject({
+    id: z.string().describe('Id of a selected row the handler did not write: one of the dispatched `params._selectedIds`.'),
+    message: z.string().describe('Why this row was not written, as the person running the action should read it.'),
+  })).describe(
+    'One entry per selected row the handler did not write, each with its own reason (`message`, not `error`). The planned '
+    + 'reader will drop an id outside `params._selectedIds` and count a duplicate once.',
+  ),
+}).describe(
+  '[PLANNED — not enforced] The per-row outcome an `execution: \'aggregate\'` bulk action handler MAY resolve with: '
+  + '`{ succeeded: [ids], failed: [{ id, message }] }` as its whole resolve value, never attached to a rejection (a '
+  + 'rejection stays one outcome for the selection). The console does not read it yet, so until its reader lands a '
+  + 'handler that cannot cover the whole selection must still reject: a resolved aggregate call is counted as covering '
+  + 'every selected row. Not the data plane\'s batch answer: here `succeeded` and `failed` are row lists, not counts. '
+  + 'Once read: a value with neither member keeps the one-outcome report; a value with either member that does not '
+  + 'parse is reported as unreadable, never as full success; members beyond the two lists carry no meaning. Ids must be '
+  + 'dispatched `params._selectedIds`: an id outside the selection is dropped, a duplicate counts once, an id in both '
+  + 'lists counts as failed, and a selected id in neither list is reported as not confirmed, never as succeeded.',
+));
+export type BulkActionResult = z.input<typeof BulkActionResultSchema>;
+/** Post-parse shape of {@link BulkActionResult} — defaults applied, transforms run (ADR-0122). */
+export type BulkActionResultParsed = z.infer<typeof BulkActionResultSchema>;
+
+/**
  * Keys a widget on this path really reads off the field bag — and which this
  * shape nevertheless does NOT declare, so their rejection has to carry the
  * reason rather than a bare "unknown key".
