@@ -180,6 +180,23 @@ export function computedFieldsReadingWithheld(
 }
 
 /**
+ * The computed fields a caller is not served WHOLE, read off the query-guard
+ * map (`computeQueryGuardFieldPerms`: a field the caller may not read, is
+ * served masked, or that is withheld for what it reads, is non-queryable
+ * there). The ONE predicate the write side asks: the step 2.5 gate refuses a
+ * payload naming one, and the write projection and the record field access
+ * leave it out, so the gate and the projections cannot differ.
+ */
+export function computedFieldsNotServedWhole(
+  inputs: ComputedFieldInputs | undefined,
+  queryGuard: Record<string, { readable?: boolean }>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const field of Object.keys(inputs ?? {})) if (queryGuard[field]?.readable === false) out.add(field);
+  return out;
+}
+
+/**
  * `perms` with every computed field the caller may not read marked
  * non-readable — the field map its readers then mask, guard and project by —
  * and those fields: each computed field that reads a field `perms` marks

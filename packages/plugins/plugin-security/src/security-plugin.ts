@@ -182,7 +182,6 @@ import {
   computeReadableFields,
   resolveCallerPosture,
   resolveProjectionFieldMask,
-  withheldComputedFieldsOf,
   type FieldReadersHost,
 } from './security-plugin-field-readers.js';
 // [#25223 cut 9] The object-level admissions: read, read over resolved sets,
@@ -314,7 +313,7 @@ import {
 import {
   type MatchesFilterOptions,
 } from '@objectstack/formula';
-import { FieldMasker, computedHopTargetsOf, readComputedFieldExpression, type ComputedFieldInput, type ComputedFieldInputs } from './field-masker.js';
+import { FieldMasker, computedFieldsNotServedWhole, computedHopTargetsOf, readComputedFieldExpression, type ComputedFieldInput, type ComputedFieldInputs } from './field-masker.js';
 import {
   PermissionDeniedError,
 } from './errors.js';
@@ -3233,7 +3232,7 @@ export class SecurityPlugin implements Plugin {
   private computeReadableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string> },
+    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
   ): Promise<string[] | undefined> {
     // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
     const host: Pick<FieldReadersHost, 'resolveProjectionFieldMask'> = {
@@ -3264,10 +3263,10 @@ export class SecurityPlugin implements Plugin {
     if (mask.kind === 'answer') return mask.fields;
     const nonEditable = new Set(this.fieldMasker.getNonEditableFields(mask.fieldPerms));
     // Field-level security covers what a value is computed from: a computed
-    // field the read mask deletes for what it reads is no field of this
-    // caller's, on the write side either (no write of it ever stands).
-    const withheld = await withheldComputedFieldsOf(mask);
-    return mask.allFields.filter((f) => !nonEditable.has(f) && !withheld.has(f));
+    // field this caller is not served whole is refused by the write gate when a
+    // payload names it (computeForbiddenFieldWrites), by the same predicate.
+    const notWhole = computedFieldsNotServedWhole(mask.computedFieldInputs, mask.readQueryGuardPerms(await mask.readHopWithheld()));
+    return mask.allFields.filter((f) => !nonEditable.has(f) && !notWhole.has(f));
   }
 
   /**
@@ -3324,13 +3323,11 @@ export class SecurityPlugin implements Plugin {
       return { object: objectName, recordId: id, readable: readable ?? [], editable: mask.fields ?? [], writable };
     }
     const forbidden = new Set(await mask.readRowForbiddenWrites(row));
-    // Field-level security covers what a value is computed from (getWritableFields).
-    const withheld = await withheldComputedFieldsOf(mask);
     return {
       object: objectName,
       recordId: id,
       readable: readable ?? [],
-      editable: mask.allFields.filter((f) => !forbidden.has(f) && !withheld.has(f)),
+      editable: mask.allFields.filter((f) => !forbidden.has(f)),
       writable,
     };
   }
@@ -3406,9 +3403,11 @@ export class SecurityPlugin implements Plugin {
   private async computeQueryableFields(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string> },
+    options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
   ): Promise<string[] | undefined> {
-    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited });
+    const mask = await this.resolveProjectionFieldMask(object, context, {
+      fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited, memo: options.memo,
+    });
     if (mask.kind === 'answer') return mask.fields;
     const queryGuard = mask.readQueryGuardPerms(options.hops === false ? [] : await mask.readHopWithheld());
     return mask.allFields.filter((f) => queryGuard[f]?.readable !== false);
@@ -3426,7 +3425,7 @@ export class SecurityPlugin implements Plugin {
   private resolveProjectionFieldMask(
     object: string,
     context: any,
-    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string> },
+    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
   ): Promise<
     | { kind: 'answer'; fields: string[] | undefined }
     | {
@@ -6202,6 +6201,12 @@ export class SecurityPlugin implements Plugin {
    * denies on one. {@link getWritableFields} is their complement over the same
    * posture and the same fold ({@link resolveProjectionFieldMask}).
    *
+   * A computed field the payload names is refused when this caller is not
+   * served it whole (`computedFieldsNotServedWhole` over the query-guard map,
+   * with the reference reads): field-level security covers what a value is
+   * computed from, and the write projection and the record field access ask
+   * the same predicate.
+   *
    * [#25866 / ruling of record 6408558941] `row` is the row the entries that
    * carry a `when` (`FieldPermissionSchema.when`) are judged on: each incoming
    * row of an insert, the caller-read stored row of a by-id update (BEFORE the
@@ -6217,7 +6222,7 @@ export class SecurityPlugin implements Plugin {
   private computeForbiddenFieldWrites(
     objectName: string,
     data: Record<string, any> | Record<string, any>[],
-    secMeta: Pick<ObjectSecurityMeta, 'fieldRequiredPermissions'>,
+    secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
     row: FieldWriteRow,
@@ -6231,7 +6236,9 @@ export class SecurityPlugin implements Plugin {
     const readPermissionEvaluator = () => this.permissionEvaluator;
     const readQl = () => this.ql;
     const readRlsCompiler = () => this.rlsCompiler;
-    const host: Pick<ObjectInputsHost, 'datetimeFieldNamesCache' | 'fieldMasker' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'permissionEvaluator' | 'ql' | 'rlsCompiler' | 'writeCheckFieldOptions'> = {
+    const host: Pick<ObjectInputsHost, 'computeQueryGuardFieldPerms' | 'datetimeFieldNamesCache' | 'fieldMasker' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'permissionEvaluator' | 'ql' | 'resolveHopWithheldFields' | 'rlsCompiler' | 'writeCheckFieldOptions'> = {
+      computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
+      resolveHopWithheldFields: (...a) => this.resolveHopWithheldFields(...a),
       get datetimeFieldNamesCache() { return readDatetimeFieldNamesCache(); },
       get fieldMasker() { return readFieldMasker(); },
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
@@ -6304,20 +6311,30 @@ export class SecurityPlugin implements Plugin {
   private resolveHopWithheldFields(
     secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
     context: any,
-    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string> },
+    options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
   ): Promise<Set<string>> {
     if (!postureHasComputedHops(secMeta)) return Promise.resolve(new Set());
+    // One answer per referenced object (and whether its own references are
+    // followed) for the whole walk, however many paths reach it.
+    const memo = options.memo ?? new Map<string, Promise<string[] | undefined>>();
     return resolveHopWithheldFields.call(
       {
         // A referenced object's own reads through ITS references are judged
         // too (a stored field there carries a value its writer computed),
         // once per object on the path: an object already on it is asked
         // without them, so a cycle of references terminates.
-        readServedWholeFields: (object: string, ctx: unknown) => this.computeQueryableFields(object, ctx, {
-          fallbackOnEmptySets: options.fallbackOnEmptySets,
-          hops: !(options.visited?.has(object) ?? false),
-          visited: options.visited,
-        }),
+        readServedWholeFields: (object: string, ctx: unknown) => {
+          const hops = !(options.visited?.has(object) ?? false);
+          const key = `${object}|${hops}`;
+          let hit = memo.get(key);
+          if (!hit) {
+            hit = this.computeQueryableFields(object, ctx, {
+              fallbackOnEmptySets: options.fallbackOnEmptySets, hops, visited: options.visited, memo,
+            });
+            memo.set(key, hit);
+          }
+          return hit;
+        },
         readFieldNames: (object: string) => this.getObjectFieldNames(this.metadata, object, this.ql),
         readObjectAdmitted: (object: string, ctx: unknown) => this.canReadObject(object, ctx),
       },

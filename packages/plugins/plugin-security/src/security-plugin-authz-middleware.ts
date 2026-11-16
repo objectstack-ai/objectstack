@@ -1594,7 +1594,10 @@ export function registerAuthzMiddleware(
     // per-field capability contract (resolveCallerPosture) refuses every
     // capability-gated field it names — "deny on write" — and its evaluator
     // map is empty, so nothing else is refused. The verdict is
-    // computeForbiddenFieldWrites, which `canWriteObject` asks too.
+    // computeForbiddenFieldWrites, which `canWriteObject` asks too; it also
+    // refuses a computed field the payload names that this caller is not
+    // served whole (field-level security covers what a value is computed
+    // from), by the predicate the write projections ask.
     //
     // [#25866 / ruling of record 6408558941] An entry that carries a `when`
     // is judged on a ROW: the incoming row of an insert, or the stored row of
@@ -1607,7 +1610,7 @@ export function registerAuthzMiddleware(
       (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
       opCtx.data
     ) {
-      const fieldForbidden = await this.computeForbiddenFieldWrites(
+      const forbidden = await this.computeForbiddenFieldWrites(
         opCtx.object, opCtx.data, secMeta, permissionSets, delegatorSets,
         {
           operation: opCtx.operation,
@@ -1617,24 +1620,6 @@ export function registerAuthzMiddleware(
             : undefined,
         },
       );
-      // Field-level security covers what a value is computed from, on the
-      // write side too: a computed field this caller is not served whole
-      // is not nameable in its payload. A stored one's write never stands
-      // (the engine recomputes it), and whether the engine reported it
-      // replaced would tell the caller whether its guess equalled the value
-      // it is withheld.
-      const computedInputs = secMeta.computedFieldInputs ?? {};
-      const notWhole = Object.keys(computedInputs).length === 0
-        ? {}
-        : this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld());
-      const named = new Set<string>();
-      for (const row of Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) {
-        if (row && typeof row === 'object') for (const key of Object.keys(row)) named.add(key);
-      }
-      const forbidden = [...new Set([
-        ...fieldForbidden,
-        ...[...named].filter((key) => key in computedInputs && (notWhole as Record<string, { readable?: boolean }>)[key]?.readable === false),
-      ])].sort();
       if (forbidden.length > 0) {
         throw withUserMessage(
           new PermissionDeniedError(

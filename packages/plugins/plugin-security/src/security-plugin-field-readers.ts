@@ -115,9 +115,11 @@ export async function computeReadableFields(
   this: Pick<FieldReadersHost, 'resolveProjectionFieldMask'>,
   object: string,
   context: any,
-  options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string> },
+  options: { fallbackOnEmptySets: boolean; hops?: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
 ): Promise<string[] | undefined> {
-  const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited });
+  const mask = await this.resolveProjectionFieldMask(object, context, {
+    fallbackOnEmptySets: options.fallbackOnEmptySets, visited: options.visited, memo: options.memo,
+  });
   if (mask.kind === 'answer') return mask.fields;
 
   // [#8993] A field this caller sees PARTIALLY MASKED is still a served
@@ -143,28 +145,12 @@ export async function computeReadableFields(
   return mask.allFields.filter((f) => !withheld.has(f) && (mask.fieldPerms[f]?.readable !== false || partialRules[f] !== undefined));
 }
 
-/**
- * The computed fields the read mask deletes for what they are computed from,
- * for the caller one projection mask was resolved for — the fold
- * {@link computeReadableFields} takes, for the projections that answer about
- * a field without reading it (the write side).
- */
-export async function withheldComputedFieldsOf(mask: {
-  fieldPerms: Record<string, { readable: boolean; editable: boolean }>;
-  computedFieldInputs: ComputedFieldInputs;
-  readPartialMaskRules: () => Record<string, FieldMaskingRule>;
-  readHopWithheld: () => Promise<Set<string>>;
-}): Promise<Set<string>> {
-  const partialRules = mask.readPartialMaskRules();
-  return foldComputedFieldReads(mask.fieldPerms, mask.computedFieldInputs, Object.keys(partialRules), await mask.readHopWithheld()).withheld;
-}
-
 /** The body of `SecurityPlugin#resolveProjectionFieldMask`; the method's docblock there is its contract. */
 export async function resolveProjectionFieldMask(
   this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context: any,
-  options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string> },
+  options: { fallbackOnEmptySets: boolean; visited?: ReadonlySet<string>; memo?: Map<string, Promise<string[] | undefined>> },
 ): Promise<
   | { kind: 'answer'; fields: string[] | undefined }
   | {
@@ -268,6 +254,7 @@ export async function resolveProjectionFieldMask(
     readHopWithheld: () => this.resolveHopWithheldFields(secMeta, context, {
       fallbackOnEmptySets: options.fallbackOnEmptySets,
       visited: new Set([...(options.visited ?? []), objectName]),
+      memo: options.memo,
     }),
     // [#26594 / ruling of record 6457467702] The record-scoped projection's
     // edit half is the step 2.5 gate ITSELF, asked over these sets, this

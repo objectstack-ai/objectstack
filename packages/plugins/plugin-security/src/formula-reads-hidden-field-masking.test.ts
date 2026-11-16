@@ -42,6 +42,7 @@ const NOTE = 'qa_fhf_note';
 const SOURCE = 'qa_fhf_source';
 const RELAY = 'qa_fhf_relay';
 const VAULT = 'qa_fhf_vault';
+const LOOP = 'qa_fhf_loop';
 const SET = 'qa_fhf_reader';
 const SECOND = 'qa_fhf_second';
 const DELEGATOR_SET = 'qa_fhf_delegator';
@@ -116,6 +117,20 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
         },
       },
       {
+        name: LOOP,
+        label: 'Loop',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          // A reference BACK to the account: a chain from the account returns to it.
+          back: { name: 'back', type: 'lookup', reference: OBJ },
+          // Over an account field withheld only for what IT reads through a reference.
+          u: { name: 'u', type: 'number', expression: cel('record.back.region_score_stored * 1.0') },
+          // Over an account field withheld for a reason on its own record.
+          v: { name: 'v', type: 'number', expression: cel('record.back.open_cases * 1.0') },
+        },
+      },
+      {
         name: VAULT,
         label: 'Vault',
         sharingModel: 'public_read_write',
@@ -171,6 +186,11 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           },
           region: { name: 'region', type: 'lookup', reference: REGION },
           relay: { name: 'relay', type: 'lookup', reference: RELAY },
+          loop: { name: 'loop', type: 'lookup', reference: LOOP },
+          loop_u: { name: 'loop_u', type: 'number', expression: cel('record.loop.u * 1.0') },
+          loop_v: { name: 'loop_v', type: 'number', expression: cel('record.loop.v * 1.0') },
+          // A stored field served masked itself, over a field every caller reads.
+          name_masked: { name: 'name_masked', type: 'text', expression: cel('record.name'), maskingRule: { keepHead: 1, keepTail: 1 } },
           vault_ref: { name: 'vault_ref', type: 'lookup', reference: VAULT, referenceNameVisible: true },
           load: { name: 'load', ...num('record.open_cases / record.capacity') },
           load_pct: { name: 'load_pct', ...num('record.load * 100.0') },
@@ -222,6 +242,8 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
       region: 'r1', relay: 'rl1', vault_ref: 'v1',
     },
   ], SYS);
+  await engine.insert(LOOP, [{ id: 'l1', back: 'a1' }], SYS);
+  await engine.update(OBJ, { loop: 'l1' }, { where: { id: 'a1' }, ...SYS } as never);
 
   const grant = {
     allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
@@ -231,7 +253,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     name: SET,
     ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
     // No grant on VAULT: its records are read only by name, through `referenceNameVisible`.
-    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant },
+    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant, [LOOP]: grant },
     ...(opts.fields ? { fields: opts.fields } : {}),
   });
   const second = PermissionSetSchema.parse({
@@ -565,7 +587,8 @@ describe('a computed field reading through a reference to an object the caller m
   it('formula and stored alike: absent from find and the read projection; control a caller who reads the object', async () => {
     const { engine, plugin } = await boot({ regionRead: false });
     const one = await findA1(engine);
-    for (const f of ['region_name', 'region_score', 'region_score_stored']) expect(one, f).not.toHaveProperty(f);
+    // Every computed field reading through the reference, a field the object does not declare included.
+    for (const f of ['region_name', 'region_score', 'region_score_stored', 'region_ghost']) expect(one, f).not.toHaveProperty(f);
     const readable = new Set(await plugin.getReadableFields(OBJ, { ...CALLER }));
     for (const f of ['region_name', 'region_score', 'region_score_stored']) expect(readable.has(f), f).toBe(false);
     const open = await boot();
@@ -636,8 +659,7 @@ describe('the reference name door serves no title computed from a field the read
   it('a refused target whose title is a formula over a hidden field is served by id with the floor name', async () => {
     const { engine } = await boot({ fields: hide(VAULT, 'secret') });
     const served = (await expandVault(engine)).vault_ref;
-    expect(served).toMatchObject({ id: 'v1', readRefused: true });
-    expect(served.name).not.toBe('S vault');
+    expect(served).toEqual({ id: 'v1', name: 'Record #v1', readRefused: true });
   });
 
   it('control: a reader who may read that field is served the title', async () => {
@@ -665,6 +687,46 @@ describe('a payload naming a computed field the caller is not served whole is re
     expect(landed).toHaveProperty('landed');
     const stored = await engine.findOne(OBJ, { where: { id: 'a1' }, context: { isSystem: true } } as never) as any;
     expect(stored.open_cases_stored).toBe(6);
+  });
+});
+
+describe('a chain of references that returns to an object: the walk ends, and judges that object without its own references', () => {
+  it('a field of the returned object withheld for a reason on its own record withholds the chain; one withheld only for what it reads through a reference does not', async () => {
+    const { engine } = await boot({ fields: { ...HIDE_OPEN_CASES, ...hide(REGION, 'secret_score') } });
+    const one = await findA1(engine);
+    // Kept: `open_cases` is withheld on the account itself.
+    expect(one).not.toHaveProperty('loop_v');
+    // The stated limit: `region_score_stored` is withheld on the account only for
+    // what it reads through ITS reference, and the account is judged without those.
+    expect(one).toMatchObject({ loop_u: 7 });
+  });
+
+  it('control: a caller served every input whole reads both', async () => {
+    const { engine } = await boot();
+    expect(await findA1(engine)).toMatchObject({ loop_u: 7, loop_v: 6 });
+  });
+});
+
+describe('one write verdict: the preview, the write and the write projections agree on a computed field the caller is not served whole', () => {
+  it('withheld for its input, or served masked itself: the preview refuses, the write refuses, the projections leave it out', async () => {
+    const { engine, plugin } = await boot({ fields: HIDE_OPEN_CASES });
+    const writable = new Set(await plugin.getWritableFields(OBJ, { ...CALLER }));
+    const access: any = await plugin.getRecordFieldAccess(OBJ, 'a1', { ...CALLER });
+    for (const field of ['open_cases_stored', 'name_masked']) {
+      const payload = { [field]: 'x' };
+      expect(await plugin.canWriteObject(OBJ, 'update', { ...CALLER }, payload), `preview ${field}`).toBe(false);
+      expect(await outcome(engine.update(OBJ, payload, { where: { id: 'a1' }, context: { ...CALLER } } as never)), `write ${field}`)
+        .toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: [field] });
+      expect(writable.has(field), `writable ${field}`).toBe(false);
+      expect(access.editable, `record editable ${field}`).not.toContain(field);
+    }
+  });
+
+  it('control: a payload naming only a field the caller may edit is admitted by the preview and the write alike', async () => {
+    const { engine, plugin } = await boot({ fields: HIDE_OPEN_CASES });
+    expect(await plugin.canWriteObject(OBJ, 'update', { ...CALLER }, { name: 'Acme 5' })).toBe(true);
+    expect(await outcome(engine.update(OBJ, { name: 'Acme 5' }, { where: { id: 'a1' }, context: { ...CALLER } } as never))).toHaveProperty('landed');
+    expect(new Set(await plugin.getWritableFields(OBJ, { ...CALLER })).has('name')).toBe(true);
   });
 });
 

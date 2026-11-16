@@ -135,13 +135,17 @@ object declares, on the record the expression reads through one
 reference, where the caller may not read that object, may not read the
 field, or is served it masked — a stored field there withheld for what it
 reads through a reference of its own included, each object along the
-chain judged once. What is judged is the field, not the row:
+chain judged once. When the chain comes back to an object it has
+already passed through, that object is judged by its own fields and
+the computed fields over them only: a field of it withheld solely for
+what it reads through a reference is not followed again. What is judged is the field, not the row:
 a computed field is not withheld because the caller may not read the
 particular record a reference points at (a formula reads `null` there; a
 stored one keeps the value its writer computed). A withheld computed
 field is stripped from records, refused as a filter, sort, group or
 aggregate input (a stored one; a `formula` is refused there for every
-caller), refused when a write payload names it, served by its floor name
+caller), refused when a write payload names it (as is a computed field
+the caller is served masked), served by its floor name
 where it is the name of a record shown through `referenceNameVisible`,
 and left out of the fields served to that caller, including the object
 schema and the writable fields. A computed field whose expression

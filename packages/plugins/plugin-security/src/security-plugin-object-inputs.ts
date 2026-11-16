@@ -49,7 +49,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MatchesFilterOptions } from '@objectstack/formula';
 import type { FieldConditionVerdict } from '@objectstack/core';
 import { intersectFieldMasks } from './explain-engine.js';
-import { foldComputedFieldReads } from './field-masker.js';
+import { computedFieldsNotServedWhole, foldComputedFieldReads } from './field-masker.js';
 import { storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { FieldConditionJudge } from './permission-evaluator.js';
 import type { RlsFieldGuard } from './rls-compiler.js';
@@ -108,12 +108,14 @@ export interface ObjectInputsHost {
   readonly warnedAuthoredTenantPolicies: SecurityPlugin['warnedAuthoredTenantPolicies'];
   admitCollectedPolicy: SecurityPlugin['admitCollectedPolicy'];
   computePartialMaskRules: SecurityPlugin['computePartialMaskRules'];
+  computeQueryGuardFieldPerms: SecurityPlugin['computeQueryGuardFieldPerms'];
   computeReadPartialMaskRules: SecurityPlugin['computeReadPartialMaskRules'];
   foldFieldRequiredPermissions: SecurityPlugin['foldFieldRequiredPermissions'];
   getObjectFieldNames: SecurityPlugin['getObjectFieldNames'];
   loadObjectFieldNames: SecurityPlugin['loadObjectFieldNames'];
   probeMetadataOutage: SecurityPlugin['probeMetadataOutage'];
   probeUnpublishedDraft: SecurityPlugin['probeUnpublishedDraft'];
+  resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   warnAuthoredTenantPolicyOnce: SecurityPlugin['warnAuthoredTenantPolicyOnce'];
   writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
 }
@@ -321,6 +323,54 @@ function conditionsOn(objectName: string, sets: ReadonlyArray<PermissionSet | nu
 
 /** The body of `SecurityPlugin#computeForbiddenFieldWrites`; the method's docblock there is its contract. */
 export async function computeForbiddenFieldWrites(
+  this: Pick<
+    ObjectInputsHost,
+    | 'computeQueryGuardFieldPerms'
+    | 'datetimeFieldNamesCache'
+    | 'fieldMasker'
+    | 'foldFieldRequiredPermissions'
+    | 'getObjectFieldNames'
+    | 'logger'
+    | 'metadata'
+    | 'numberComparandFieldsCache'
+    | 'permissionEvaluator'
+    | 'ql'
+    | 'resolveHopWithheldFields'
+    | 'rlsCompiler'
+    | 'writeCheckFieldOptions'
+  >,
+  objectName: string,
+  data: Record<string, any> | Record<string, any>[],
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+  permissionSets: PermissionSet[],
+  delegatorSets: PermissionSet[] | null,
+  row: FieldWriteRow,
+): Promise<string[]> {
+  const fields = await fieldEditVerdict.call(this, objectName, data, secMeta, permissionSets, delegatorSets, row);
+  // Field-level security covers what a value is computed from, on the write
+  // side too: a computed field this caller is not served whole is not
+  // nameable in its payload. A stored one's write never stands (the engine
+  // recomputes it), and whether the engine reported it replaced would tell
+  // the caller whether its guess equalled the value it is withheld.
+  const inputs = secMeta.computedFieldInputs ?? {};
+  if (Object.keys(inputs).length === 0) return fields;
+  const named = new Set<string>();
+  for (const payload of Array.isArray(data) ? data : [data]) {
+    if (payload && typeof payload === 'object') for (const key of Object.keys(payload)) if (key in inputs) named.add(key);
+  }
+  if (named.size === 0) return fields;
+  const hopWithheld = await this.resolveHopWithheldFields(
+    secMeta, row.context, { fallbackOnEmptySets: false, visited: new Set([objectName]) },
+  );
+  const notWhole = computedFieldsNotServedWhole(
+    inputs,
+    this.computeQueryGuardFieldPerms(objectName, secMeta, permissionSets, delegatorSets, hopWithheld),
+  );
+  return [...new Set([...fields, ...[...named].filter((key) => notWhole.has(key))])].sort();
+}
+
+/** The field-permission half of {@link computeForbiddenFieldWrites}: the evaluator's map, the capability fold, the delegator. */
+async function fieldEditVerdict(
   this: Pick<
     ObjectInputsHost,
     | 'datetimeFieldNamesCache'
