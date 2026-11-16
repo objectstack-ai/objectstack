@@ -876,7 +876,7 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
     const { a, lines } = await seed();
     const seen: unknown[] = [];
     engine.registerHook('beforeUpdate', async () => {
-      const parent = await engine.findOne('inv', { where: { id: a.id } } as any);
+      const parent = await engine.findOne('inv', { where: { id: a.id } });
       seen.push((parent as any)?.line_total);
     }, { object: 'inv_line' });
     const mine = lines.filter((l: any) => l.inv === a.id);
@@ -954,8 +954,8 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
     driver.commit = async () => { events.push('commit'); };
     await engine.transaction(async (trxCtx: any) => {
       await engine.deferSummaryRecompute(async () => {
-        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id }, context: trxCtx } as any);
-        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[3].id }, context: trxCtx } as any);
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id }, context: trxCtx });
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[3].id }, context: trxCtx });
       });
     });
     expect(events).toEqual(['parent write', 'commit']);
