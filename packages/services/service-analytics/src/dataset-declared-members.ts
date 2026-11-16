@@ -2,6 +2,7 @@
 
 import type { DatasetSelection } from '@objectstack/spec/contracts';
 import type { Dataset } from '@objectstack/spec/ui';
+import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 import { invalidMemberError, type AnalyticsRequestKey } from './dataset-refusal.js';
 
 /**
@@ -89,32 +90,76 @@ export function undeclaredSelectionMembers(
   return undeclared;
 }
 
+/** `"a"`, `"a" and "b"`, `"a", "b" and "c"`. */
+function quotedList(names: readonly string[]): string {
+  const quoted = names.map((k) => `"${k}"`);
+  return quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+}
+
+/**
+ * Whether `key` can be a declared dimension's name at all: the dataset
+ * schema's own dimension-name grammar (`SnakeCaseIdentifierSchema`) decides.
+ * A related record's field (`account.founded_at`) never can — the grammar
+ * has no dot.
+ */
+function canBeDimensionName(key: string): boolean {
+  return SnakeCaseIdentifierSchema.safeParse(key).success;
+}
+
 /**
  * The remedy sentence for an undeclared comparison-window date key, or `''`
  * when no undeclared member is one. A bare "not declared" does not tell a
  * dashboard author what to change: the key is the dashboard date-range field,
  * which the dashboard names against the object, not against the dataset.
  *
- * It names one remedy only, declaring a date dimension named after the key.
- * Pointing the widget's `compareTo.dimension` at a declared dimension is not
- * one: the renderer still lowers the dashboard's window on the undeclared
- * field, so the comparison is either dropped or refused again.
+ * For a key that can be a dimension name it names one remedy only, declaring
+ * a date dimension named after the key. Pointing the widget's
+ * `compareTo.dimension` at a declared dimension is not one: the renderer
+ * still lowers the dashboard's window on the undeclared field, so the
+ * comparison is either dropped or refused again.
+ *
+ * A key that cannot be a dimension name (a dotted `relationship.field`, or any
+ * key the dimension-name grammar refuses) gets no declare-it remedy, because
+ * no declaration can carry that name. Its sentence says what the comparison
+ * needs instead: the dashboard's date field must be a field of the dataset's
+ * own object that a declared date dimension names. When the keys are mixed,
+ * each kind gets its own sentence, scoped to the keys it is true for.
  */
 export function compareWindowRemedy(undeclared: readonly UndeclaredSelectionMember[]): string {
   const keys = undeclared.filter((u) => u.compareWindow).map((u) => u.member);
   if (keys.length === 0) return '';
-  const quoted = keys.map((k) => `"${k}"`);
-  const list = quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
   const one = keys.length === 1;
-  return ` ${one ? `The dimension ${list} is the date key` : `The dimensions ${list} are the date keys`} of `
+  const nameable = keys.filter(canBeDimensionName);
+  const unnameable = keys.filter((k) => !canBeDimensionName(k));
+  const intro = ` ${one ? `The dimension ${quotedList(keys)} is the date key` : `The dimensions ${quotedList(keys)} are the date keys`} of `
     + `this query's comparison window (\`compareTo\`): a dashboard compare widget lowers `
     + (one
       ? 'its date window into `timeDimensions` under the filtered field\'s name, '
       : 'every date window its filter states into `timeDimensions`, each under its filtered field\'s name, ')
-    + 'which is usually the dashboard date-range field. '
-    + (one
-      ? `Declare a date dimension named ${list} on the dataset (over that field).`
-      : `Declare a date dimension for each on the dataset, named ${list}, each over the field of the same name.`);
+    + 'which is usually the dashboard date-range field.';
+  const sentences: string[] = [];
+  if (unnameable.length > 0) {
+    const single = unnameable.length === 1;
+    sentences.push(
+      (single
+        ? `${quotedList(unnameable)} cannot be a dimension name`
+        : `${quotedList(unnameable)} cannot be dimension names`)
+        + ' (a dimension name is a snake_case identifier, with no dot, so a related record\'s field is never one), '
+        + `so no date dimension can be declared under ${single ? 'it' : 'them'}: this comparison cannot run on a dataset query `
+        + `unless ${!single ? 'each of those date fields' : one ? 'the dashboard\'s date field' : 'that date field'} `
+        + 'is a field of the dataset\'s own object that a declared date dimension names.',
+    );
+  }
+  if (nameable.length > 0) {
+    const remedy = nameable.length === 1
+      ? `declare a date dimension named ${quotedList(nameable)} on the dataset (over that field).`
+      : `declare a date dimension for each on the dataset, named ${quotedList(nameable)}, each over the field of the same name.`;
+    // Mixed: scope the declare-it remedy to the keys it is true for.
+    if (unnameable.length === 0) sentences.push(`D${remedy.slice(1)}`);
+    else if (nameable.length === 1) sentences.push(`For the key that can be a dimension name, ${remedy}`);
+    else sentences.push(`For the keys that can be dimension names, ${remedy}`);
+  }
+  return `${intro} ${sentences.join(' ')}`;
 }
 
 /** `measure "x", dimension "y"` — the members a refusal names, in request order. */
@@ -145,7 +190,9 @@ export function listMemberNames(names: readonly string[]): string {
  * undeclared member, the members THIS caller may use, and the remedy — select
  * a declared name, or declare the member on the dataset. When the member is a
  * comparison window's date key ({@link compareWindowRemedy}), the refusal also
- * names the compare widget's remedy.
+ * says what the compare widget needs: a date dimension named after the key,
+ * or, for a key no dimension can be named (a related record's field), a date
+ * field of the dataset's own object.
  */
 export function undeclaredMembersRefusal(
   dataset: Pick<Dataset, 'name' | 'measures' | 'dimensions'>,

@@ -28,6 +28,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import type { AnalyticsService } from '../analytics-service.js';
+import { compareWindowRemedy } from '../dataset-declared-members.js';
 
 const ME = { userId: 'u_me', tenantId: 'org_a' } as ExecutionContext;
 const ADMIN = { userId: 'u_admin', tenantId: 'org_a' } as ExecutionContext;
@@ -290,6 +291,39 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(reads).toEqual([]);
   });
 
+  it('mixed comparison date keys: a related record\'s field gets the own-object requirement, a nameable key keeps its declare-it remedy', async () => {
+    // Seat ruling (option A): a dotted key cannot be a dimension name, so no
+    // sentence tells the author to declare a dimension named after it.
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        {
+          measures: ['revenue'],
+          timeDimensions: [
+            { dimension: 'closed_on', dateRange: ['2026-01-01', '2026-03-31'] },
+            { dimension: 'account.signed_at', dateRange: ['2026-01-01', '2026-03-31'] },
+          ],
+          compareTo: { kind: 'previousPeriod' },
+        } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'closed_on', param: 'timeDimensions', cube: 'pipeline' });
+    expect(messageOf(e)).toContain(
+      'The dimensions "closed_on" and "account.signed_at" are the date keys of this query\'s comparison window (`compareTo`)',
+    );
+    expect(messageOf(e)).toContain('"account.signed_at" cannot be a dimension name');
+    expect(messageOf(e)).toContain(
+      'this comparison cannot run on a dataset query unless that date field is a field of the dataset\'s own object that a declared date dimension names.',
+    );
+    expect(messageOf(e)).toContain(
+      'For the key that can be a dimension name, declare a date dimension named "closed_on" on the dataset (over that field).',
+    );
+    expect(messageOf(e)).not.toMatch(/declare a date dimension[^.]*"account\.signed_at"/i);
+    expect(reads).toEqual([]);
+  });
+
   it('CONTROL: the same undeclared time dimension with no comparison gets no compare-widget remedy', async () => {
     const { service } = await boot();
     const e = await service
@@ -387,5 +421,36 @@ describe('the source-field gates word their remedy for the door that asked', () 
     expect(dimension).toMatchObject({ code: 'INVALID_FIELD', status: 400, field: 'ghost' });
     expect(messageOf(dimension)).toMatch(DIMENSION_HINT);
     expect(messageOf(dimension)).not.toContain('The dataset declares');
+  });
+});
+
+describe('compareWindowRemedy — a true sentence for every key, in every mix', () => {
+  const windows = (...keys: string[]) =>
+    keys.map((member) => ({ member, param: 'timeDimensions' as const, compareWindow: true }));
+  const ownObject = 'is a field of the dataset\'s own object that a declared date dimension names.';
+
+  // [nameable keys, unnameable keys, the sentences after the intro]
+  for (const [nameable, unnameable, tail] of [
+    [['closed_on'], [], 'Declare a date dimension named "closed_on" on the dataset (over that field).'],
+    [['closed_on', 'created_at'], [], 'Declare a date dimension for each on the dataset, named "closed_on" and "created_at", each over the field of the same name.'],
+    [[], ['account.founded_at'], `"account.founded_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under it: this comparison cannot run on a dataset query unless the dashboard's date field ${ownObject}`],
+    [[], ['CloseDate'], `"CloseDate" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under it: this comparison cannot run on a dataset query unless the dashboard's date field ${ownObject}`],
+    [[], ['account.founded_at', 'owner.hired_at'], `"account.founded_at" and "owner.hired_at" cannot be dimension names (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under them: this comparison cannot run on a dataset query unless each of those date fields ${ownObject}`],
+    [['closed_on'], ['account.founded_at', 'owner.hired_at'], `"account.founded_at" and "owner.hired_at" cannot be dimension names (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under them: this comparison cannot run on a dataset query unless each of those date fields ${ownObject} For the key that can be a dimension name, declare a date dimension named "closed_on" on the dataset (over that field).`],
+    [['closed_on', 'created_at'], ['account.founded_at'], `"account.founded_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under it: this comparison cannot run on a dataset query unless that date field ${ownObject} For the keys that can be dimension names, declare a date dimension for each on the dataset, named "closed_on" and "created_at", each over the field of the same name.`],
+  ] as Array<[string[], string[], string]>) {
+    it(`${nameable.length} nameable, ${unnameable.length} unnameable`, () => {
+      const keys = [...nameable, ...unnameable];
+      const text = compareWindowRemedy(windows(...keys));
+      expect(text.endsWith(` ${tail}`), text).toBe(true);
+      expect(text).toContain(keys.length === 1 ? 'is the date key of' : 'are the date keys of');
+      for (const key of unnameable) {
+        expect(text).not.toMatch(new RegExp(`declare a date dimension[^.]*"${key.replace('.', '\\.')}"`, 'i'));
+      }
+    });
+  }
+
+  it('CONTROL: no comparison-window key, no sentence', () => {
+    expect(compareWindowRemedy([{ member: 'account.founded_at', param: 'timeDimensions' }])).toBe('');
   });
 });
