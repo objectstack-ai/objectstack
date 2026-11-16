@@ -915,7 +915,7 @@ describe('the sign-in page reads the client name only for the client its signed 
     expect(JSON.stringify(answer.body)).not.toContain('Other Org');
   });
 
-  it('is rate-limited per client address: the window's reads answer, the next is refused, another address still answers', async () => {
+  it("is rate-limited per client address: the window's reads answer, the next is refused, another address still answers", async () => {
     const rig = await arrange();
     const clientId = await registerNamed(rig, 'Acme Corp');
     const oauthQuery = await signedRequestFor(rig, clientId);
