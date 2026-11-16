@@ -2251,7 +2251,8 @@ export const FieldSchema = lazySchema(() => {
       'The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a '
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
-      + 'only with eq, ne, gt, lt, gte or lte. [PLANNED — not enforced] The picker does not resolve { $record } yet.',
+      + 'only with eq, ne, gt, lt, gte or lte. A { $record } that reaches a server unresolved is refused by name '
+      + '(INVALID_FILTER). [PLANNED — not enforced] The picker does not resolve { $record } yet.',
     ),
     orEmpty: z.boolean().optional().describe(
       '[PLANNED — not enforced] TRUE: the entry also matches a candidate whose column is null — "valid from the '
@@ -2266,9 +2267,9 @@ export const FieldSchema = lazySchema(() => {
     + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
     + 'empty, and on a picker with no single record being edited (a bulk-action bar, a filter panel), the entry is left '
     + 'out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
-    + 'server unresolved is refused, never read as null. The picker narrows the choice only: a rule the save must '
-    + 'enforce belongs on the server too. [PLANNED — not enforced] { $record } and orEmpty are declared ahead of the '
-    + 'picker that resolves them.',
+    + 'server unresolved is refused by name (INVALID_FILTER, naming the field and the path), never read as null. The '
+    + 'picker narrows the choice only: a rule the save must enforce belongs on the server too. [PLANNED — not '
+    + 'enforced] The picker does not resolve { $record } or read orEmpty yet.',
   ),
   dependsOn: z.array(z.union([z.string(), strictObject({
     surface: 'this dependsOn entry',
