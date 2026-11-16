@@ -178,3 +178,27 @@ describe('os diff — what the upgrade plan adds', () => {
     ]);
   });
 });
+
+describe('os diff — objectExtensions fields, as the plan compares them (#34095)', () => {
+  const ACCOUNT = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' } } };
+
+  it('an extension field added to an object the config owns prints under that object', () => {
+    const entries = diffStacks(
+      { objects: [ACCOUNT] },
+      { objects: [ACCOUNT], objectExtensions: [{ extend: 'crm_account', fields: { invoiced_amount: { type: 'number' } } }] },
+    );
+    expect(entries).toEqual([
+      { type: 'added', category: 'objects.crm_account.fields', name: 'invoiced_amount', breaking: false, detail: 'optional field added' },
+    ]);
+  });
+
+  it('an object reached only through an extension prints its field changes, and is never an added or removed object', () => {
+    const entries = diffStacks(
+      { objectExtensions: [{ extend: 'crm_contact', fields: { tier: { type: 'text' } } }] },
+      { objectExtensions: [{ extend: 'crm_contact', fields: { tier: { type: 'number' } } }] },
+    );
+    expect(entries).toEqual([
+      { type: 'modified', category: 'objects.crm_contact.fields', name: 'tier', breaking: true, detail: 'type changed: text → number' },
+    ]);
+  });
+});

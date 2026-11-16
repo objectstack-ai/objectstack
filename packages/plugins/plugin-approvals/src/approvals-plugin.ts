@@ -366,7 +366,9 @@ export class ApprovalsServicePlugin implements Plugin {
         unbindAllHooks(engine);
         // [#23618] The refusal's title is narrowed by the writer's served fields,
         // through the same lazily-resolved authority the snapshot redaction reads.
-        bindApprovalLockHook(engine, ctx.logger, fieldVisibility);
+        // …and it is worded in the writer's locale, with the object's label in
+        // that locale, through the same lazily-read `i18n` service.
+        bindApprovalLockHook(engine, ctx.logger, fieldVisibility, i18nService);
         bindRecordDeleteCancelHook(engine, this.service, ctx.logger);
         bindDelegationWriteGuard(engine, ctx.logger);
         // [#10749] Generic-door snapshot redaction. Registered here so the

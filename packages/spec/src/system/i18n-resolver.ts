@@ -4402,6 +4402,27 @@ export function flowNoticeMessageKey(flowName: string, nodeId: string): string {
 }
 
 /**
+ * Dot-notation i18n key for the text a `create_record` / `update_record` node
+ * writes into a field — `flows.<flow>.records.<node_id>.fields.<field>`
+ * (ruling 6913660232 on objectstack#34062, letter B).
+ *
+ * The sibling of {@link flowNoticeMessageKey}, for the same reason: the
+ * automation engine picks the translated TEMPLATE before it fills the
+ * `{{ }}` holes, because the record keeps the text already rendered. Unlike
+ * every other flow key it is picked in the ORGANIZATION's language (its
+ * Localization setting when somebody set it, else the app's declared
+ * `i18n.defaultLocale`), never the run's: stored text is data the whole
+ * organization reads, not a prompt for the person who started the run.
+ *
+ * `flowName` is `Flow.name`, `nodeId` the record node's `FlowNode.id`, and
+ * `fieldName` the key of its `fields` map whose value is a text envelope
+ * (`{ dialect: 'template', source }`, `FlowRecordFieldValueSchema`).
+ */
+export function flowRecordFieldTextKey(flowName: string, nodeId: string, fieldName: string): string {
+  return `flows.${flowName}.records.${nodeId}.fields.${fieldName}`;
+}
+
+/**
  * Dot-notation i18n key for a hook's declared refusal message —
  * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
  * letter A), or, given a declared reason under the code (#33214, ruling
