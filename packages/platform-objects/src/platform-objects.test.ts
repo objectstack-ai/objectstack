@@ -791,6 +791,10 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysInvitation', SysInvitation, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
     ['SysInvitation', SysInvitation, 'resend_invitation', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
+    // No feature gate to lower: the authored pending-row predicate is served
+    // as written, with the cloud-managed conjunct (accepting creates a
+    // membership, which the hosting organisation manages there).
+    ['SysInvitation', SysInvitation, 'accept_invitation', `has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending' && ${MANAGED}`],
     ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'update_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'remove_team', `${ADMINS} && ${ORG}`],
