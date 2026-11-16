@@ -271,9 +271,13 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // engine refusal leave unchanged ({@link relayedEngineRefusal}). Held, so
     // it is disposed in the finally, before `vm.dispose()`.
     let bodyPromise: QuickJSHandle | undefined;
+    // The encoder a data call's query argument crosses through; disposed with
+    // the other handles below, before the context.
+    let crossing: QueryArgumentCrossing | undefined;
 
     try {
-      this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds);
+      crossing = openQueryArgumentCrossing(vm);
+      this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds, crossing);
       // [#28898] `Intl.DateTimeFormat`, host-backed through plain values only.
       // Every body kind runs through here, so hooks, actions and jobs share one
       // global set (see `sandbox-intl.ts`).
@@ -624,6 +628,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // to `vm.dispose()`, so no late host rejection can register a new one in
       // between.
       releaseEngineRefusalHandles(vm, bodyPromise);
+      crossing?.dispose();
       // Dispose the context — this frees its runtime + all QuickJS allocations
       // (QuickJSWASMModule.newContext: "the runtime will be disposed when the
       // context is disposed"). The sync `QuickJSWASMModule` has no dispose();
@@ -649,6 +654,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     origin: ScriptOrigin,
     txState: TxState,
     deferreds: Set<QuickJSDeferredPromise>,
+    crossing: QueryArgumentCrossing,
   ): void {
     setGlobalJson(vm, '__input', ctx.input);
     setGlobalJson(vm, '__previous', ctx.previous);
@@ -710,8 +716,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
       const wrap = vm.newObject();
       const READ = ['find', 'findOne', 'count', 'aggregate'] as const;
       const WRITE = ['insert', 'update', 'delete', 'updateMany', 'deleteMany', 'upsert'] as const;
-      for (const m of READ) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.read', origin, txState, deferreds);
-      for (const m of WRITE) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.write', origin, txState, deferreds);
+      for (const m of READ) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.read', origin, txState, deferreds, crossing);
+      for (const m of WRITE) installApiMethod(vm, wrap, m, objectName, ctx, caps, 'api.write', origin, txState, deferreds, crossing);
       return wrap;
     });
     vm.setProp(apiObj, 'object', objectFn);
@@ -1411,7 +1417,9 @@ function installApiMethod(
   origin: ScriptOrigin,
   txState: TxState,
   deferreds: Set<QuickJSDeferredPromise>,
+  crossing: QueryArgumentCrossing,
 ): void {
+  const queryAt = QUERY_ARGUMENT_INDEX.get(method);
   const fn = vm.newFunction(method, (...argHandles) => {
     // Capability gate — throw synchronously so the VM sees a normal exception at
     // the call site (mirrors ctx.log / ctx.crypto gating).
@@ -1428,8 +1436,10 @@ function installApiMethod(
       throwSandboxFault(vm, `ctx.api unavailable in ${origin.kind} '${origin.name}'`);
     }
     // Dump args now, while the handles are alive — they are freed when this
-    // function returns, long before the async work below runs.
-    const args = argHandles.map((h) => vm.dump(h));
+    // function returns, long before the async work below runs. The query
+    // argument keeps every filter key the body wrote ({@link dumpQueryArgument}).
+    const call = `ctx.api.object('${objectName}').${method}`;
+    const args = argHandles.map((h, i) => (i === queryAt ? dumpQueryArgument(vm, crossing, h, call) : vm.dump(h)));
 
     const deferred = vm.newPromise();
     deferreds.add(deferred);
@@ -1467,6 +1477,153 @@ function installApiMethod(
   });
   vm.setProp(parent, method, fn);
   fn.dispose();
+}
+
+/**
+ * The argument of each `ctx.api.object(name)` verb that carries its query or
+ * options bag: the one argument a filter can sit in. A verb not listed here
+ * takes no such argument on any repository a body reaches, so every argument
+ * of it crosses by {@link QuickJSContext.dump}, unchanged.
+ */
+const QUERY_ARGUMENT_INDEX: ReadonlyMap<string, number> = new Map([
+  ['find', 0],
+  ['findOne', 0],
+  ['count', 0],
+  ['aggregate', 0],
+  ['delete', 0],
+  ['update', 1],
+]);
+
+/**
+ * The keys whose value is a filter, wherever they sit in a query or options
+ * bag: `where`, the `filter` spelling the engine folds into it, `having`, and
+ * an aggregation's own `filter`. A nested query (an `expand` entry) carries the
+ * same keys, so the rule holds at every depth.
+ */
+const FILTER_KEYS: ReadonlySet<string> = new Set(['where', 'filter', 'having']);
+
+/**
+ * Writes a plain object or array as JSON text with each `undefined` value
+ * written as the call's `mark` string, or answers `undefined` when the value is
+ * not a plain object or array, or cannot be written. Evaluated before the body
+ * runs, so it holds the VM's own `JSON.stringify`.
+ */
+const UNDEFINED_KEEPING_ENCODER = `(function (stringify, isArray, getPrototypeOf, objectPrototype) {
+  return function (value, mark) {
+    if (typeof value !== 'object' || value === null) return undefined;
+    if (!isArray(value)) {
+      var proto = getPrototypeOf(value);
+      if (proto !== objectPrototype && proto !== null) return undefined;
+    }
+    try {
+      return stringify(value, function (key, v) { return v === undefined ? mark : v; });
+    } catch (e) {
+      return undefined;
+    }
+  };
+})(JSON.stringify, Array.isArray, Object.getPrototypeOf, Object.prototype)`;
+
+/**
+ * One invocation's crossing for a data call's query argument: the encoder
+ * above, and the mark it writes for `undefined`, unique per invocation so no
+ * value a body writes can be read as one.
+ */
+interface QueryArgumentCrossing {
+  encode: QuickJSHandle;
+  mark: QuickJSHandle;
+  markText: string;
+  dispose(): void;
+}
+
+function openQueryArgumentCrossing(vm: QuickJSContext): QueryArgumentCrossing {
+  const markText = `objectstack:undefined:${cryptoRandomUUID()}`;
+  const made = vm.evalCode(UNDEFINED_KEEPING_ENCODER);
+  if (made.error) {
+    const msg = vm.dump(made.error);
+    made.error.dispose();
+    throw new SandboxError(`failed to install the query argument encoder: ${formatErr(msg)}`);
+  }
+  const encode = made.value;
+  const mark = vm.newString(markText);
+  return {
+    encode,
+    mark,
+    markText,
+    dispose() {
+      if (encode.alive) encode.dispose();
+      if (mark.alive) mark.dispose();
+    },
+  };
+}
+
+/**
+ * A sandboxed data call reaches the engine with every filter key it was
+ * written with, so the engine's refusal of an absent comparand applies inside
+ * the sandbox too.
+ *
+ * The query argument crosses as JSON, as every other argument does, except
+ * that under a {@link FILTER_KEYS} key, at any depth, an `undefined` value
+ * crosses as `undefined`: the engine judges the filter the body wrote, by its
+ * own door and with its own refusal. Outside a filter an `undefined` crosses
+ * exactly as JSON writes it (an object key omitted, an array slot `null`), so
+ * no other value of the argument crosses differently. A value the encoder does
+ * not take (not a plain object or array, or one JSON cannot write) crosses by
+ * `vm.dump` as before.
+ *
+ * Fails closed: when the encoder itself does not complete, the call is refused
+ * before anything reaches the host, never sent on another crossing.
+ */
+function dumpQueryArgument(
+  vm: QuickJSContext,
+  crossing: QueryArgumentCrossing,
+  h: QuickJSHandle,
+  call: string,
+): unknown {
+  const encoded = vm.callFunction(crossing.encode, vm.undefined, h, crossing.mark);
+  if (encoded.error) {
+    encoded.error.dispose();
+    throwSandboxFault(vm, `${call}: its query argument could not cross into the host`);
+  }
+  const text = vm.typeof(encoded.value) === 'string' ? vm.getString(encoded.value) : undefined;
+  encoded.value.dispose();
+  if (text === undefined) return vm.dump(h);
+  const value: unknown = JSON.parse(text);
+  return text.includes(crossing.markText) ? settleUndefinedMarks(value, crossing.markText) : value;
+}
+
+/**
+ * Turn each `mark` in a parsed query argument back into what the body wrote:
+ * `undefined` under a {@link FILTER_KEYS} key at any depth, and elsewhere what
+ * JSON writes for `undefined`. Iterative, so nesting depth costs no host stack.
+ */
+function settleUndefinedMarks(root: unknown, mark: string): unknown {
+  if (root === null || typeof root !== 'object') return root;
+  const pending: Array<{ node: Record<string, unknown> | unknown[]; keep: boolean }> = [
+    { node: root as Record<string, unknown> | unknown[], keep: false },
+  ];
+  while (pending.length > 0) {
+    const { node, keep } = pending.pop()!;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        const v = node[i];
+        if (v === mark) node[i] = keep ? undefined : null;
+        else if (v !== null && typeof v === 'object') pending.push({ node: v as Record<string, unknown> | unknown[], keep });
+      }
+      continue;
+    }
+    for (const key of Object.keys(node)) {
+      const v = node[key];
+      const keepHere = keep || FILTER_KEYS.has(key);
+      if (v === mark) {
+        // An own key of a `JSON.parse` result, so these touch that key only.
+        if (keepHere) node[key] = undefined;
+        else delete node[key];
+      } else if (v !== null && typeof v === 'object') {
+        pending.push({ node: v as Record<string, unknown> | unknown[], keep: keepHere });
+      }
+    }
+  }
+  return root;
 }
 
 /**
