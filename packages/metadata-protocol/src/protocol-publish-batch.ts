@@ -288,7 +288,7 @@ export async function collectBatchPendingDeclarations(
  * [#30020 codemod] The body of
  * `ObjectStackProtocolImplementation#applySeedBodies`, the host it builds for
  * {@link applySeedBodies} included: moved here whole by `--hand-host` of
- * `scripts/codemod-split-protocol.mjs`. It runs on the class's host
+ * the protocol codemod (split by #32463). It runs on the class's host
  * (`protocol-host.ts`) as `this`, so the class keeps a one-call stub; the
  * method's docblock there is its contract.
  */

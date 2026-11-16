@@ -41,7 +41,7 @@ import {
 } from '@objectstack/core';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
-import { resolveBundleMemberSelector } from './protocol-bundle-members.js';
+import { bundleMemberDiscriminator, resolveBundleMemberSelector } from './protocol-bundle-members.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
@@ -213,8 +213,8 @@ export async function packagelessRowWithheld(
 /**
  * [#32183] The package whose stack a read naming no package takes, for a
  * name a disabled package also holds: the one holder ADR-0150 D3 resolves
- * over the served set. `undefined` leaves the read as it was: a type the
- * registry does not read by package, a name no disabled package holds (the
+ * over the served set. `undefined` leaves the read as it was: a type judged
+ * elsewhere ({@link SERVED_HOLDER_JUDGED_ELSEWHERE}), a name no disabled package holds (the
  * read is `main`'s, untouched), the environment's own item (D3 (a) serves
  * it), no served holder (the withheld arm of the face) or two or more (the
  * read's own refusal).
@@ -225,10 +225,23 @@ export async function packagelessRowWithheld(
  * holder's body while the by-name read served the enabled one. Shared by
  * the face and the layered read, so both read one stack. Optional-called:
  * a registry without these reads leaves every read as it was.
+ *
+ * [#34041, ADR-0150 D3] …and for a type the registry does not read by
+ * package (a `doc`, `view`, `translation`, `hook`, …) too: a disabled package
+ * holds no name of any type. Such a type's layers are the metadata service's
+ * copy, which it keeps by name alone (the body registered last), and the
+ * registry's first composite, so either one could be the disabled holder's.
+ * The face then withheld it, and the bare read answered 404 although an
+ * enabled package ships the name; `/layers` served the disabled body. Read at
+ * the served holder's address, the read is that holder's exact read, which
+ * never answers another package's copy (`serviceCopyOfAnotherPackage`).
+ * Not an `object` (one package owns the name; the face refuses a disabled
+ * package's) and not an `action` (judged over every holder by its own bare
+ * judge, `judgeBareActionRead`, which serves the one enabled holder already).
  */
 export function servedHolderAddressOf(registry: any, type: string, name: string): string | undefined {
-    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
-    if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    if (SERVED_HOLDER_JUDGED_ELSEWHERE.has(type)) return undefined;
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     if (!every.some((id) => registry.isPackageDisabled(id) === true)) return undefined;
     const served: readonly string[] = registry.packageScopedHoldersOf(type, name, null) ?? [];
@@ -238,6 +251,12 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
     }
     return served[0];
 }
+
+/**
+ * [#34041] The types whose bare read {@link servedHolderAddressOf} never
+ * re-addresses: each is judged against a disabled package elsewhere.
+ */
+const SERVED_HOLDER_JUDGED_ELSEWHERE: ReadonlySet<string> = new Set(['object', 'action', 'package']);
 
 /**
  * [#32354, ADR-0150 D3] The served holder of a name for a read naming no
@@ -512,20 +531,30 @@ export function isAnotherHoldersCopy(registry: any, type: string, name: string, 
  * The rows are read through `host.readItemActiveRows`, so the read below takes
  * them instead of reading them again (#24371). The layered read naming no
  * package takes the same address for its layers (`getMetaItemLayered`).
+ *
+ * [#32849] The read that names no member addresses the CANONICAL member
+ * ({@link bundleMemberDiscriminator}), which is the same request as naming it
+ * (`?member=en-US`), so it is judged at that member here and takes the same
+ * address. Before, it was left as it was: with the addition Z shipping the
+ * canonical member and a pair row declaring Z for it, the read naming no
+ * member served Z's shipped member while `?member=en-US` served the override.
+ * A bundle with no shipped canonical member has no one shipper of it here, and
+ * is left as it was. A type with no members is never moved.
  */
 export async function declaredMemberOverrideAddressOf(
     host: ServedRowHost,
     type: string, name: string, member: string | undefined,
 ): Promise<string | undefined> {
-    if (member === undefined) return undefined;
+    const addressed = bundleMemberDiscriminator(type, member);
+    if (addressed === undefined) return undefined;
     const registry: any = host.engine?.registry;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size < 2) return undefined;
-    const memberShippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))];
+    const memberShippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, addressed))];
     if (memberShippers.length !== 1) return undefined;
     const [shipper] = memberShippers;
     if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(shipper) === true) return undefined;
-    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, addressed) !== undefined) {
         return undefined;
     }
     let activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>;
@@ -536,7 +565,7 @@ export async function declaredMemberOverrideAddressOf(
         activeRows = [];
     }
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    const where = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, member) };
+    const where = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, addressed) };
     const installed = installedManifestsOfEngine(host.engine);
     return activeRows.some((row) => rowMatchesOverlayWhere(row, where) && isServedOverrideRowOf(row, shipper, installed))
         ? shipper

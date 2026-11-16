@@ -8,8 +8,8 @@
  * `executeWithMiddleware`, `buildReferentialFieldClear`,
  * `claimReferentialCascadeDelete`, `probeInstallOrganizations`,
  * `invalidateOrganizationProbe`, `resolveSystemInsertOrganization`,
- * `transactionCoversDriverFor` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `transactionCoversDriverFor` moved out of `engine.ts` whole (split
+ * by #30012).
  *
  * A MOVE, not a redesign. {@link MiddlewareAndContextFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -43,6 +43,7 @@ import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
+import { cascadeBatchIdsOf } from './engine-top-level.js';
 import type { EngineMiddleware, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
@@ -210,7 +211,17 @@ export class MiddlewareAndContextFacet {
   static claimReferentialCascadeDelete(this: Pick<MiddlewareAndContextHost, 'cascadeIssuedDeletes'>, object: string, id: unknown): true | undefined {
     const issued = this.cascadeIssuedDeletes.getStore();
     if (!issued || issued.claimed || id == null) return undefined;
-    if (issued.object !== object || issued.id !== String(id)) return undefined;
+    if (issued.object !== object) return undefined;
+    if (issued.ids) {
+      // [ruling 6893661036, F1 · surface amendment 6893212568] A cascade batch:
+      // `delete()` hands its predicate here in place of an id, and the token
+      // matches only the predicate naming EXACTLY its id set, so every per-row
+      // context of that one delete carries the marker and no other delete does.
+      const named = cascadeBatchIdsOf(id);
+      if (!named || named.length !== issued.ids.size || !named.every((v) => issued.ids!.has(v))) return undefined;
+    } else if (typeof id === 'object' || issued.id !== String(id)) {
+      return undefined;
+    }
     issued.claimed = true;
     return true;
   }

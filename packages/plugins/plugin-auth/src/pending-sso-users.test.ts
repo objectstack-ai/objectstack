@@ -1174,6 +1174,317 @@ describe('[#33759] Ban / Unban are offered and work without the admin plugin', (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Removing a pending person, which cancels their invitation at the host
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A recording host with a `userRemoved` member, unless `withRemoved` is false. */
+function removingHost(opts: { withRemoved?: boolean; removed?: () => void; added?: () => void } = {}) {
+  const told: Array<{ kind: string; event: EnvironmentUserEvent }> = [];
+  const host: EnvironmentUserHost = {
+    userAdded: (event) => {
+      told.push({ kind: 'added', event });
+      opts.added?.();
+    },
+    userDeactivated: (event) => void told.push({ kind: 'deactivated', event }),
+    userReactivated: (event) => void told.push({ kind: 'reactivated', event }),
+    ...(opts.withRemoved === false
+      ? {}
+      : {
+          userRemoved: (event: EnvironmentUserEvent) => {
+            told.push({ kind: 'removed', event });
+            opts.removed?.();
+          },
+        }),
+  };
+  return { host, told };
+}
+
+/** Add one pending person with a position, a permission set and a membership; answers their id. */
+async function addPending(s: Awaited<ReturnType<typeof stage>>, email: string): Promise<string> {
+  const res = await s.fire(
+    '/admin/add-sso-user',
+    { email, name: 'Typo', positions: ['sales_rep'], permissionSets: ['crm_user'] },
+    s.bearers.admin,
+  );
+  expect(res.status, await res.clone().text()).toBe(201);
+  return String(s.row(email)!.id);
+}
+
+/** Make the delete of `sys_user` answer a `restrict` refusal, as the engine's delete walk does (`DELETE_RESTRICTED`, 409). */
+const RESTRICTED = 'This User cannot be deleted because an Approval Rule still refers to it.';
+function restrictDelete(s: Awaited<ReturnType<typeof stage>>): void {
+  const realDelete = s.engine.delete.bind(s.engine);
+  s.engine.delete = async (name: string, q: any = {}) => {
+    if (name === 'sys_user') throw Object.assign(new Error(RESTRICTED), { code: 'DELETE_RESTRICTED', status: 409 });
+    return realDelete(name, q);
+  };
+}
+
+describe('[#33228] admin/remove-sso-user removes a pending person and cancels their invitation', () => {
+  it('removes the row, its grants and membership, and tells the host userRemoved first', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'typo@exmaple.com');
+
+    const res = await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toEqual({ userId: id, email: 'typo@exmaple.com', removed: true, host: { notified: true } });
+    expect(s.row('typo@exmaple.com')).toBeUndefined();
+    for (const table of ['sys_user_position', 'sys_user_permission_set', 'sys_member']) {
+      expect(s.rowsOf(table, id), table).toHaveLength(0);
+    }
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+    expect(told[1]!.event).toMatchObject({ userId: id, email: 'typo@exmaple.com', source: PENDING_SSO_SOURCE, actorId: s.ids.admin });
+  });
+
+  it('a host without userRemoved is told userDeactivated for the pending person instead', async () => {
+    const { host, told } = removingHost({ withRemoved: false });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'fallback@example.com');
+
+    expect((await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated']);
+    expect(told[1]!.event).toMatchObject({ userId: id, source: PENDING_SSO_SOURCE });
+    expect(s.row('fallback@example.com')).toBeUndefined();
+  });
+
+  it('refuses a person who is not pending with 409, calls no host and removes no one', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    for (const userId of [s.ids.member, s.ids.idp]) {
+      const v = await verdict(await s.fire('/admin/remove-sso-user', { userId }, s.bearers.admin));
+      expect(v.status, v.text).toBe(409);
+      expect(v.code).toBe('RESOURCE_CONFLICT');
+      expect(v.message?.split('. ')[0]).toBe(PENDING_SSO_MESSAGES.removeNotPending.split('. ')[0]);
+    }
+    expect(s.row(EMAILS.member)).toBeDefined();
+    expect(s.row(EMAILS.idp)).toBeDefined();
+    expect(told).toEqual([]);
+  });
+
+  it('a host\'s typed refusal leaves the person as they are: nothing removed', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new EnvironmentUserHostRefusal(409, OWNER_CONFLICT.code, OWNER_CONFLICT.message);
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'refused.remove@example.com');
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe(OWNER_CONFLICT.code);
+    expect(v.message).toBe(OWNER_CONFLICT.message);
+    expect(s.row('refused.remove@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+  });
+
+  it('a host that cannot be reached refuses the removal: 503, the person is kept and nothing is re-sent', async () => {
+    const { host, told } = removingHost({
+      removed: () => {
+        throw new Error('host down');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'unreached.remove@example.com');
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect([v.status, v.code, v.message]).toEqual([503, 'SERVICE_UNAVAILABLE', PENDING_SSO_MESSAGES.removeHostUnreachable]);
+    expect(s.row('unreached.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+    // Asked once, and no invitation is sent again.
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+  });
+
+  it('with no host wired the person is removed and the answer says no_host', async () => {
+    const s = await managedStage({ host: 'none' });
+    const id = await addPending(s, 'nohost.remove@example.com');
+    const body: any = await (await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).json();
+    expect(body.data).toEqual({ userId: id, email: 'nohost.remove@example.com', removed: true, host: { notified: false, reason: 'no_host' } });
+    expect(s.row('nohost.remove@example.com')).toBeUndefined();
+  });
+
+  it('a record that restricts the delete refuses it with the engine\'s answer; the person stays and is re-invited inline', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held@example.com');
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('DELETE_RESTRICTED');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeRefusedReinvited}`);
+    expect(s.row('held@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed', 'added']);
+    expect(told[2]!.event).toMatchObject({ userId: id, email: 'held@example.com', source: PENDING_SSO_SOURCE });
+  });
+
+  it('a re-invite the host does not take is said truthfully: the person stays pending with no invitation', async () => {
+    let calls = 0;
+    const { host } = removingHost({
+      added: () => {
+        calls += 1;
+        if (calls > 1) throw new Error('host down');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.unsent@example.com');
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeRefusedNotReinvited}`);
+    expect(s.row('held.unsent@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(calls).toBe(2);
+  });
+
+  it('refuses an unknown id 404, a missing id or an unknown key 400, and a non-admin 403', async () => {
+    const s = await managedStage();
+    const unknown = await verdict(await s.fire('/admin/remove-sso-user', { userId: 'usr_nobody' }, s.bearers.admin));
+    expect([unknown.status, unknown.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    const missing = await verdict(await s.fire('/admin/remove-sso-user', {}, s.bearers.admin));
+    expect([missing.status, missing.code]).toEqual([400, 'INVALID_REQUEST']);
+    const extra = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member, email: 'x@example.com' }, s.bearers.admin));
+    expect([extra.status, extra.code]).toEqual([400, 'INVALID_REQUEST']);
+    const id = await addPending(s, 'guarded@example.com');
+    const member = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.member));
+    expect([member.status, member.code]).toEqual([403, 'PERMISSION_DENIED']);
+    expect(s.row('guarded@example.com')).toBeDefined();
+  });
+
+  it('CONTROL: off a managed environment it answers 409 and removes no one', async () => {
+    const s = await stage();
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member }, s.bearers.admin));
+    expect([v.status, v.code, v.message]).toEqual([409, 'RESOURCE_CONFLICT', PENDING_SSO_MESSAGES.notManagedRemove]);
+    expect(s.row(EMAILS.member)).toBeDefined();
+  });
+});
+
+describe('[#33228] a deactivated person is never sent an invitation, and a removal is held to pending people', () => {
+  it('re-adding a deactivated pending person does not invite them: host reads deactivated', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.banned@example.com';
+    const id = await addPending(s, email);
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    const res = await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ userId: id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated']);
+  });
+
+  it('CONTROL: re-adding a pending person who is not deactivated invites them again', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.active@example.com';
+    const id = await addPending(s, email);
+
+    const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin)).json();
+
+    expect(body.data).toMatchObject({ userId: id, alreadyPending: true, host: { notified: true } });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'added']);
+  });
+
+  it('a refused removal of a deactivated pending person sends no new invitation, and says the old one is cancelled', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.banned@example.com');
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated', 'removed']);
+  });
+
+  it('a deactivated pending person whose banned column reads back as a string is not invited on a re-add', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.banned.string@example.com';
+    const id = await addPending(s, email);
+    for (const stored of ['1', 'true']) {
+      s.row(email)!.banned = stored;
+      const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin)).json();
+      expect(body.data, stored).toMatchObject({ userId: id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } });
+    }
+    expect(told.map((t) => t.kind)).toEqual(['added']);
+  });
+
+  it('a person who signs in while the host is asked is not removed: 409, and the answer says the host was told', async () => {
+    const email = 'signs.in@example.com';
+    let s!: Awaited<ReturnType<typeof stage>>;
+    const { host } = removingHost({
+      removed: () => {
+        s.row(email)!.source = 'idp_provisioned';
+      },
+    });
+    s = await managedStage({ host });
+    const id = await addPending(s, email);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('RESOURCE_CONFLICT');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+  });
+
+  it('a person whose first sign-in commits inside the unit of work, after the pending read, is not removed: 409, and the child deletes roll back', async () => {
+    const email = 'signs.in.late@example.com';
+    const { host } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, email);
+    const CHILDREN = ['sys_user_position', 'sys_user_permission_set', 'sys_member'] as const;
+    for (const table of CHILDREN) expect(s.rowsOf(table, id).length, table).toBeGreaterThan(0);
+    // The memory engine has no transaction, so the plugin's `runAtomically`
+    // would run the removal unatomically. Give it one: the seam calls
+    // `engine.transaction`, and a throw out of it restores every table this
+    // unit of work wrote. `sys_user` is left as it is, because its change is
+    // the concurrent sign-in's commit, not this unit of work's write.
+    let units = 0;
+    (s.engine as any).transaction = async (work: (trx: unknown, info: unknown) => Promise<unknown>) => {
+      units += 1;
+      const before = new Map([...s.engine.tables].filter(([name]) => name !== 'sys_user').map(([name, rows]) => [name, structuredClone(rows)]));
+      try {
+        return await work({}, {});
+      } catch (error) {
+        for (const [name, rows] of before) s.engine.tables.set(name, rows);
+        throw error;
+      }
+    };
+    // The first sign-in lands between the in-unit pending read and the row's
+    // delete: the first child delete is the moment after that read.
+    const realDelete = s.engine.delete.bind(s.engine);
+    s.engine.delete = async (name: string, q: any = {}) => {
+      if (name === 'sys_user_position') s.row(email)!.source = 'idp_provisioned';
+      return realDelete(name, q);
+    };
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('RESOURCE_CONFLICT');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
+    expect(units, 'the removal ran inside the transactional seam').toBe(1);
+    for (const table of CHILDREN) expect(s.rowsOf(table, id).length, `${table} rolled back`).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Setup → Users: Unlock is offered and works without the admin plugin
 // ─────────────────────────────────────────────────────────────────────────────
 //

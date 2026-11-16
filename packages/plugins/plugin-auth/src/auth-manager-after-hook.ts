@@ -48,6 +48,7 @@ import { passwordSignInDoorOf } from './auth-manager-sign-in-lockout.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
+import { carryRefusalReasonOnCallback } from './oauth-callback-refusal-reason.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
@@ -229,6 +230,10 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // vendor's writes).
   // See `sso-provider-lifecycle.ts`.
   if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
+
+  // A refused platform sign-in: the environment's callback hands the host's
+  // reason on to the sign-in page (`oauth-callback-refusal-reason.ts`).
+  carryRefusalReasonOnCallback(ctx);
 
   // Ruling record 6866334319: an OIDC provider saved with "sign out of the
   // company sign-in too" on keeps the end_session_endpoint its before-hook

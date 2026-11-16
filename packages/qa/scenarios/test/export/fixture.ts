@@ -66,7 +66,7 @@ export function crmArtifact(iterated: boolean) {
     manifest: { id: `com.example.${NS}`, namespace: NS },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
   };
@@ -166,6 +166,14 @@ export class FakeApp implements AppHarness {
     Object.assign(row, patch);
     return { ok: true, status: 200, body: {} };
   }
+  /** A restore's delete: a row an earlier operation added. */
+  async deleteRow(object: string, id: string): Promise<HttpAnswer> {
+    const rows = this.rows[object] ?? [];
+    const i = rows.findIndex((r) => r.id === id);
+    if (i < 0) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    rows.splice(i, 1);
+    return { ok: true, status: 200, body: {} };
+  }
   async listRows(object: string) {
     return { ok: true, status: 200, body: {}, rows: (this.rows[object] ?? []).map((r) => ({ ...r })) };
   }
@@ -232,11 +240,17 @@ class ScriptedDriver implements AgentDriver {
     if (op.outcome.kind === 'applied') {
       if (op.kind === 'create') rows.push({ id: `new-${op.id}`, ...op.values });
       if (op.kind === 'update') Object.assign(rows.find((r) => r.id === op.target)!, op.values);
+      if (op.kind === 'delete') app.rows[op.object] = rows.filter((r) => r.id !== op.target);
       app.audit[op.target ?? `new-${op.id}`] = `u-${op.actingAs}`;
       return turn('Done.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: '{"ok":true}' }]);
     }
     if (op.outcome.kind === 'refused') {
       return turn('That was refused.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: JSON.stringify({ error: { code: op.outcome.code } }), isError: true }]);
+    }
+    if (task.confirmation) {
+      // The person confirmed: delete the target through the door's confirm-gated delete, as the MCP door would.
+      app.rows[op.object] = rows.filter((r) => r.id !== op.target);
+      return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: op.object, recordId: op.target, confirm: true }, output: '{"ok":true}' }]);
     }
     return turn('This cannot be undone — do you want me to delete it? Please confirm.');
   }
