@@ -97,7 +97,7 @@ import {
 } from '../providers/ExpressionProvider.js';
 import { withoutUnreadableObjectEntries, type ObjectReadCheck } from '../utils/navObjectReadGate.js';
 import { filterActiveApps } from '../utils/appRoute.js';
-import { navigationNames } from '../console/appObjectScope.js';
+import { appRequiredObjectNames, navigationNames, readObjectPresence } from '../console/appObjectScope.js';
 import type { ReadNamesWithoutViews } from './useObjectPresence.js';
 
 const NO_MISSING: readonly string[] = [];
@@ -399,12 +399,18 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   // batched names scope), not one by-name read per name. A name the answer
   // leaves out is missing, as a by-name 404 was; a read that obtained no
   // answer leaves every name unanswered, so each entry shows, as when a
-  // by-name read failed. Inside an app the union is still asked by name: the
-  // route's own objects are among its names, and their by-name read is the
-  // one the record form shares with the adapter (objectui#13044).
+  // by-name read failed.
+  //
+  // objectstack#34244 — inside an app too: an entry's `requiresObject` is by
+  // contract a name the host may not register, and a by-name read answered
+  // such a name 404 on every route. With no package the union is asked in the
+  // same one `?names=` read. In a packaged app the package's own objects are
+  // answered by its list, and the app's other required names are asked in the
+  // presence read the route asks them in (`readObjectPresence`, the same
+  // names, so one request): the gate hides an entry that read left out, and the
+  // route asks by name only the ones it answered served.
   const metadata = useMetadata();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
-  const outsideApp = !(typeof app?.name === 'string' && app.name !== '');
   const readObjectScope = metadata.getTypeStatus?.('object') === 'idle' ? metadata.readObjectScope : undefined;
   const unionNames = readObjectScope && !packageId ? requiredObjectUnion(metadata.apps, app) : NO_MISSING;
   const scope: { objects: readonly unknown[]; missing: readonly string[] } | null = !readObjectScope
@@ -413,16 +419,24 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
       ? (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false })
       : unionNames.length === 0
         ? NO_REQUIRED_OBJECTS
-        : outsideApp
-          ? (readObjectScope as ReadNamesInOneRequest)({ names: unionNames, views: false, batch: true })
-          : (readObjectScope as ReadNamesWithoutViews)({ names: unionNames, views: false });
+        : (readObjectScope as ReadNamesInOneRequest)({ names: unionNames, views: false, batch: true });
+  const presence =
+    readObjectScope && packageId
+      ? readObjectPresence(readObjectScope, packageId, appRequiredObjectNames(app)).presence
+      : NO_REQUIRED_OBJECTS;
   const metadataObjects = scope ? scope.objects : metadata.objects;
   const missingObjects = scope ? scope.missing : NO_MISSING;
   const registeredObjectNames = useMemo(
-    () => new Set<string>((metadataObjects || []).map((o: any) => o?.name).filter(Boolean)),
-    [metadataObjects],
+    () =>
+      new Set<string>(
+        [...(metadataObjects || []), ...presence.objects].map((o: any) => o?.name).filter(Boolean),
+      ),
+    [metadataObjects, presence.objects],
   );
-  const missingObjectNames = useMemo(() => new Set<string>(missingObjects), [missingObjects]);
+  const missingObjectNames = useMemo(
+    () => new Set<string>([...missingObjects, ...presence.missing]),
+    [missingObjects, presence.missing],
+  );
   const checkCap = useCallback(
     (kind: 'object' | 'service', name: string): boolean => {
       if (kind === 'object') {
