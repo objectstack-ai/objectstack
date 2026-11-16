@@ -123,10 +123,16 @@ function isHoldersPairRow(engine: unknown, type: string, name: string, item: unk
 }
 
 /**
+ * [#34041] The types whose bare read {@link servedHolderAddressOf} never
+ * re-addresses: each is judged against a disabled package elsewhere.
+ */
+const SERVED_HOLDER_JUDGED_ELSEWHERE: ReadonlySet<string> = new Set(['object', 'action', 'package']);
+
+/**
  * [#32183] The package whose stack a read naming no package takes, for a
  * name a disabled package also holds: the one holder ADR-0150 D3 resolves
- * over the served set. `undefined` leaves the read as it was: a type the
- * registry does not read by package, a name no disabled package holds (the
+ * over the served set. `undefined` leaves the read as it was: a type judged
+ * elsewhere ({@link SERVED_HOLDER_JUDGED_ELSEWHERE}), a name no disabled package holds (the
  * read is `main`'s, untouched), the environment's own item (D3 (a) serves
  * it), no served holder (the withheld arm of the face) or two or more (the
  * read's own refusal).
@@ -137,10 +143,23 @@ function isHoldersPairRow(engine: unknown, type: string, name: string, item: unk
  * holder's body while the by-name read served the enabled one. Shared by
  * the face and the layered read, so both read one stack. Optional-called:
  * a registry without these reads leaves every read as it was.
+ *
+ * [#34041, ADR-0150 D3] …and for a type the registry does not read by
+ * package (a `doc`, `view`, `translation`, `hook`, …) too: a disabled package
+ * holds no name of any type. Such a type's layers are the metadata service's
+ * copy, which it keeps by name alone (the body registered last), and the
+ * registry's first composite, so either one could be the disabled holder's.
+ * The face then withheld it, and the bare read answered 404 although an
+ * enabled package ships the name; `/layers` served the disabled body. Read at
+ * the served holder's address, the read is that holder's exact read, which
+ * never answers another package's copy (`serviceCopyOfAnotherPackage`).
+ * Not an `object` (one package owns the name; the face refuses a disabled
+ * package's) and not an `action` (judged over every holder by its own bare
+ * judge, `judgeBareActionRead`, which serves the one enabled holder already).
  */
 export function servedHolderAddressOf(registry: any, type: string, name: string): string | undefined {
-    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
-    if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    if (SERVED_HOLDER_JUDGED_ELSEWHERE.has(type)) return undefined;
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     if (!every.some((id) => registry.isPackageDisabled(id) === true)) return undefined;
     const served: readonly string[] = registry.packageScopedHoldersOf(type, name, null) ?? [];
