@@ -97,6 +97,14 @@ export interface RecordActivityTimelineProps {
    * the failure is the host's job.
    */
   onAddComment?: (text: string, attachments?: Attachment[]) => void | Promise<void>;
+  /**
+   * Whether the feed this timeline draws can show a comment at all
+   * (objectstack#34371). `false` — a `types` allow-list that leaves out
+   * `comment` — withdraws the comment composer and the Comments-only filter, so
+   * the timeline never offers a post it would then filter out of view. Absent
+   * means `true`.
+   */
+  commentsShown?: boolean;
   /** Called when a reply is submitted — a rejection keeps the reply draft, as above. */
   onAddReply?: (parentId: string | number, text: string) => void | Promise<void>;
   /** Called when user toggles a reaction */
@@ -225,16 +233,19 @@ const FEED_TYPE_COLORS: Record<FeedItemType, string> = {
  * The dropdown's options, given whether the record's field history is shown
  * (`RecordFieldHistoryContext`): `changes_only` is offered exactly when the
  * stream offers its 变更 chip — the one rule, `timelineStreamFilters`
- * (objectstack#30074, objectstack#30344).
+ * (objectstack#30074, objectstack#30344). `comments_only` is offered exactly
+ * when the feed can show a comment (`commentsShown`, objectstack#34371).
  */
 function getFilterOptions(
   t: (key: string) => string,
   fieldHistory: boolean,
+  commentsShown: boolean,
 ): { value: FeedFilterMode; label: string }[] {
   const changesOffered = timelineStreamFilters(fieldHistory).includes('changes');
   return [
     { value: 'all', label: t('detail.allActivity') },
-    { value: 'comments_only', label: t('detail.commentsOnly') },
+    // A feed that cannot show a comment offers no filter for them (objectstack#34371).
+    ...(commentsShown ? [{ value: 'comments_only' as const, label: t('detail.commentsOnly') }] : []),
     ...(changesOffered ? [{ value: 'changes_only' as const, label: t('detail.fieldChangesFilter') }] : []),
     { value: 'tasks_only', label: t('detail.tasksOnly') },
   ];
@@ -343,6 +354,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onLoadMore,
   loading = false,
   onAddComment,
+  commentsShown = true,
   onAddReply,
   onToggleReaction,
   onEditComment,
@@ -478,11 +490,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
 
   // A filter the dropdown does not offer filters nothing: it reads as `all`,
   // as the stream's chips do.
-  const filterOptions = getFilterOptions(t, React.useContext(RecordFieldHistoryContext));
+  const filterOptions = getFilterOptions(t, React.useContext(RecordFieldHistoryContext), commentsShown);
   const chosenFilter = controlledFilter ?? internalFilter;
   const activeFilter: FeedFilterMode = filterOptions.some((opt) => opt.value === chosenFilter) ? chosenFilter : 'all';
   const showFilter = config?.showFilterToggle !== false;
-  const showCommentInput = config?.showCommentInput !== false && !!onAddComment;
+  const showCommentInput = config?.showCommentInput !== false && !!onAddComment && commentsShown;
   const enableReactions = config?.enableReactions ?? false;
   const enableThreading = config?.enableThreading ?? false;
   const showSubscription = config?.showSubscriptionToggle ?? false;
