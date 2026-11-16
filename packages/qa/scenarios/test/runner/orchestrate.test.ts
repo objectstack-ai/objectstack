@@ -21,13 +21,15 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { validateRollupSourceVisibility } from '@objectstack/lint';
+
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
-import { askModeRefusal, hiddenValues, runCard, runHalf, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { askModeRefusal, buildPassed, hiddenValues, readRollupSourceFinding, rollupSourceCharges, runCard, runHalf, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
@@ -970,6 +972,224 @@ describe('runCard — a build that makes both sides of a reference cycle require
     expect(sc.modes[0]!.findings).toEqual([]);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 637, total: 637, refused: 0 });
     expect(renderScorecard(sc)).toContain('| Seed | 637/637 |');
+  });
+});
+
+// ── A roll-up the build leaves readable over child data the card withholds ──
+
+describe('runCard — a standing security-rollup-source-unreadable on a child the card withholds is a failed Build check (#33818)', () => {
+  const original = load(resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json'));
+  const scenario = namespacedScenario(original);
+  const p = (name: string) => `demoproject_${name}`;
+  const status = select(['todo', 'doing', 'done']);
+
+  /**
+   * project_with_tasks as eval#1's live builds made it: the project carries two
+   * roll-ups over its tasks (`task_count`, `total_estimate`), and the card
+   * withholds `task` from client_viewer and `task.estimate_hours` from the
+   * contractor. `masked` writes the remedy the rule names on client_viewer's
+   * set; `actualHours` adds a third roll-up over a child field the card does
+   * not withhold, which the contractor's set hides.
+   */
+  const projectArtifact = (opts: { masked?: boolean; actualHours?: boolean } = {}) => ({
+    manifest: { id: 'com.example.demoproject', namespace: 'demoproject' },
+    objects: [
+      {
+        name: p('project'),
+        fields: {
+          name: { type: 'text' },
+          status: select(['planned', 'active', 'done']),
+          owner: { type: 'text' },
+          description: { type: 'textarea' },
+          task_count: { type: 'summary', summaryOperations: { object: p('task'), function: 'count' } },
+          total_estimate: { type: 'summary', summaryOperations: { object: p('task'), function: 'sum', field: 'estimate_hours' } },
+          ...(opts.actualHours ? { total_actual: { type: 'summary', summaryOperations: { object: p('task'), function: 'sum', field: 'actual_hours' } } } : {}),
+        },
+      },
+      {
+        name: p('task'),
+        fields: {
+          title: { type: 'text' },
+          status,
+          estimate_hours: { type: 'number' },
+          assignee: { type: 'text' },
+          project: { type: 'lookup', reference: p('project') },
+          ...(opts.actualHours ? { actual_hours: { type: 'number' } } : {}),
+        },
+      },
+    ],
+    permissions: [
+      {
+        name: p('contractor'),
+        objects: { [p('project')]: { allowRead: true }, [p('task')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+        fields: {
+          [`${p('task')}.estimate_hours`]: { readable: false },
+          [`${p('project')}.total_estimate`]: { readable: false },
+          ...(opts.actualHours ? { [`${p('task')}.actual_hours`]: { readable: false } } : {}),
+        },
+        // The contractor reads its own tasks only: the rule's `info` arm on task_count.
+        rowLevelSecurity: [{ name: 'contractor_own_tasks', object: p('task'), operation: 'select', using: "assignee == current_user.id" }],
+      },
+      {
+        name: p('client_viewer'),
+        objects: { [p('project')]: { allowRead: true } },
+        ...(opts.masked
+          ? {
+              fields: {
+                [`${p('project')}.task_count`]: { readable: false },
+                [`${p('project')}.total_estimate`]: { readable: false },
+                ...(opts.actualHours ? { [`${p('project')}.total_actual`]: { readable: false } } : {}),
+              },
+            }
+          : {}),
+      },
+    ],
+  });
+
+  const quiet: AgentDriver = {
+    info: () => ({ driver: 'recorded', version: 'quiet test replay', apiBilled: false }),
+    author: async () => ({ turn: turn('Done.') }),
+    ask: async () => turn('I cannot tell from here.'),
+  };
+  function run(built: unknown) {
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => built,
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => new FakeApp(),
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    return runCard(original, quiet, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+  }
+  const meta = { run: 'r', date: '2026-11-16', packages: PUBLISHED, driver: quiet.info(), runner: 'test', evidenceDir: '/tmp' };
+  const TASK_COUNT = 'build: the roll-up demoproject_project.task_count stays readable to client_viewer (permission set demoproject_client_viewer) over demoproject_task, while the card withholds the object demoproject_task from client_viewer: security-rollup-source-unreadable stands, so client_viewer reads an aggregate of what it may not see';
+
+  it('charged: client_viewer reads both roll-ups over the task it may not read — two failed checks, out of passed, a finding each, and the build is not a pass', async () => {
+    const r = await run(projectArtifact());
+    const build = r.modes[0]!.build!;
+    expect(build.rollupSourceUnreadable?.map((c) => [c.persona, c.rollup, c.withheld, c.finding.rule])).toEqual([
+      ['client_viewer', 'demoproject_project.task_count', { object: 'demoproject_task' }, 'security-rollup-source-unreadable'],
+      ['client_viewer', 'demoproject_project.total_estimate', { object: 'demoproject_task' }, 'security-rollup-source-unreadable'],
+    ]);
+    // The record carries the rule's own report.
+    expect(build.rollupSourceUnreadable![0]!.finding.where).toBe('permission set "demoproject_client_viewer" · summary field "demoproject_project.task_count"');
+    const sc = cardScorecard(r);
+    const tally = sc.modes[0]!.first.build!;
+    expect(tally.total).toBe(build.score!.total + 2);
+    expect(tally.passed).toBe(build.score!.passed);
+    expect(tally.degraded).toBe(true);
+    expect(sc.modes[0]!.findings[0]).toBe(TASK_COUNT);
+    expect(sc.modes[0]!.findings.filter((f) => f.startsWith('build: the roll-up '))).toHaveLength(2);
+    expect(sc.modes[0]!.findings.filter((f) => f.startsWith('iterate build: the roll-up '))).toHaveLength(2);
+    expect(renderScorecard(sc)).toContain(`- scratch finding: ${TASK_COUNT}`);
+    const record = runRecord(meta, r) as { results: Array<{ id: string; verdict: string; clauses: Array<{ evidence: { check?: string; pass?: boolean } }> }> };
+    const half = record.results.find((x) => x.id === 'project_with_tasks.scratch.build')!;
+    expect(half.verdict).not.toBe('pass');
+    expect(half.clauses.map((c) => c.evidence).filter((e) => e.check?.startsWith('rollup-source-unreadable:'))).toEqual([
+      expect.objectContaining({ check: 'rollup-source-unreadable:client_viewer:demoproject_project.task_count', pass: false }),
+      expect.objectContaining({ check: 'rollup-source-unreadable:client_viewer:demoproject_project.total_estimate', pass: false }),
+    ]);
+    expect(record.results.find((x) => x.id === 'project_with_tasks.scratch.iterate-build')!.clauses.filter((c) => c.evidence.check?.startsWith('rollup-source-unreadable:'))).toHaveLength(2);
+    // Never installed as a verified build: template and ask modes run on builds that pass.
+    expect(buildPassed(build)).toBe(false);
+    expect(buildPassed({ ...build, rollupSourceUnreadable: undefined })).toBe(buildPassed({ ...build, rollupSourceUnreadable: [] }));
+  });
+
+  it('uncharged: the roll-ups are masked on client_viewer’s set, so the rule finds nothing and the build scores as it did', async () => {
+    const r = await run(projectArtifact({ masked: true }));
+    const build = r.modes[0]!.build!;
+    expect(rollupSourceCharges(scenario, projectArtifact({ masked: true }))).toEqual([]);
+    expect(build.rollupSourceUnreadable).toBeUndefined();
+    expect(r.modes[0]!.iterate!.build.rollupSourceUnreadable).toBeUndefined();
+    const sc = cardScorecard(r);
+    expect(sc.modes[0]!.first.build).toMatchObject({ passed: build.score!.passed, total: build.score!.total });
+    expect(sc.modes[0]!.findings.filter((f) => f.includes('roll-up'))).toEqual([]);
+    expect(JSON.stringify(runRecord(meta, r))).not.toContain('rollup-source');
+  });
+
+  it('not charged: a standing warning over a child field the card does not withhold, and the info row-scope arm', () => {
+    const built = projectArtifact({ masked: true, actualHours: true });
+    const standing = validateRollupSourceVisibility({ objects: built.objects, permissions: built.permissions });
+    // The rule does stand on the contractor's set: it cannot read task.actual_hours under project.total_actual; and its row policy scopes task_count.
+    expect(standing.map((f) => [f.rule, f.where])).toEqual([
+      ['security-rollup-source-row-scoped', 'permission set "demoproject_contractor" · summary field "demoproject_project.task_count"'],
+      ['security-rollup-source-unreadable', 'permission set "demoproject_contractor" · summary field "demoproject_project.total_actual"'],
+    ]);
+    expect(rollupSourceCharges(scenario, built)).toEqual([]);
+  });
+
+  it('not charged: a set no persona signs in with', () => {
+    const built = projectArtifact({ masked: true });
+    const auditor = { name: p('auditor'), objects: { [p('project')]: { allowRead: true } } };
+    expect(rollupSourceCharges(scenario, { ...built, permissions: [...built.permissions, auditor] })).toEqual([]);
+    // The same set renamed to client_viewer's is charged: the persona, not the set's grants, decides.
+    expect(rollupSourceCharges(scenario, { ...built, permissions: [built.permissions[0]!, { ...auditor, name: p('client_viewer') }] }).map((c) => c.rollup)).toEqual([
+      'demoproject_project.task_count',
+      'demoproject_project.total_estimate',
+    ]);
+  });
+
+  it('charged on a withheld child FIELD: the contractor reads total_estimate over the estimate_hours the card withholds from it', () => {
+    const built = projectArtifact({ masked: true });
+    const contractor = { ...built.permissions[0]!, fields: { [`${p('task')}.estimate_hours`]: { readable: false } } };
+    expect(rollupSourceCharges(scenario, { ...built, permissions: [contractor, built.permissions[1]!] }).map((c) => [c.persona, c.rollup, c.withheld])).toEqual([
+      ['contractor', 'demoproject_project.total_estimate', { field: 'demoproject_task.estimate_hours' }],
+    ]);
+  });
+
+  it('template mode: the iterate build it scores (what the app serves after the change) is charged the same way; ask mode authors nothing and has no Build half to charge', async () => {
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => undefined,
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => new FakeApp(),
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    const r = await runCard(original, quiet, ops, { modes: ['template', 'ask'], admin: ADMIN, templateArtifact: projectArtifact() });
+    const [template, ask] = r.modes;
+    expect(template!.template?.install.ok).toBe(true);
+    expect(template!.iterate!.build.rollupSourceUnreadable?.map((c) => c.rollup)).toEqual(['demoproject_project.task_count', 'demoproject_project.total_estimate']);
+    expect(cardScorecard(r).modes[0]!.findings.filter((f) => f.startsWith('iterate build: the roll-up '))).toHaveLength(2);
+    expect(ask!.build).toBeUndefined();
+    expect(cardScorecard(r).modes[1]!.findings.filter((f) => f.includes('roll-up'))).toEqual([]);
+  });
+
+  it('reads the build’s artifact as the scorer does: collections under packages[] count too', () => {
+    const { manifest, ...body } = projectArtifact();
+    const multi = { manifest, packages: [{ manifest: { ...manifest, name: 'demoproject', version: '1.0.0', type: 'app', ...body } }] };
+    expect(rollupSourceCharges(scenario, multi).map((c) => c.rollup)).toEqual(['demoproject_project.task_count', 'demoproject_project.total_estimate']);
+  });
+
+  it('reads every arm of the rule’s own wording, and refuses one it cannot read', () => {
+    const child = { name: 'c', fields: { amount: { type: 'number' }, band: { type: 'text' } } };
+    const parent = (summary: Record<string, unknown>) => ({ name: 'par', fields: { total: { type: 'summary', summaryOperations: { object: 'c', ...summary } } } });
+    const reads = (summary: Record<string, unknown>, childGrant: Record<string, unknown> | undefined, hidden: string[]) => {
+      const set = { name: 'reader', objects: { par: { allowRead: true }, ...(childGrant ? { c: childGrant } : {}) }, fields: Object.fromEntries(hidden.map((f) => [`c.${f}`, { readable: false }])) };
+      const findings = validateRollupSourceVisibility({ objects: [parent(summary), child], permissions: [set] }).filter((f) => f.rule === 'security-rollup-source-unreadable');
+      expect(findings).toHaveLength(1);
+      return readRollupSourceFinding(findings[0]!);
+    };
+    const base = { permissionSet: 'reader', rollup: 'par.total', child: 'c' };
+    expect(reads({ function: 'count' }, undefined, [])).toEqual({ ...base, childFields: [], unreadable: { object: 'c' } });
+    expect(reads({ function: 'sum', field: 'amount' }, undefined, [])).toEqual({ ...base, childFields: ['amount'], unreadable: { object: 'c' } });
+    expect(reads({ function: 'sum', field: 'amount' }, { allowRead: true }, ['amount'])).toEqual({ ...base, childFields: ['amount'], unreadable: { field: 'amount' } });
+    expect(reads({ function: 'sum', field: 'amount', filter: { band: 'a' } }, { allowRead: true }, ['band'])).toEqual({ ...base, childFields: ['amount', 'band'], unreadable: { field: 'band' } });
+    expect(reads({ function: 'count', filter: { band: 'a' } }, { allowRead: true }, ['band'])).toEqual({ ...base, childFields: ['band'], unreadable: { field: 'band' } });
+    expect(() => readRollupSourceFinding({ where: 'permission set "reader" · summary field "par.total"', message: 'something else entirely' })).toThrow(/cannot read \(the rule's wording moved\?\)/);
   });
 });
 

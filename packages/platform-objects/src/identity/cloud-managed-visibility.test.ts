@@ -15,9 +15,11 @@
  * flag the payload lacks (`default-on` ones too), so that case is the
  * consumer's fault handling, the same for every flag.
  *
- * Each of the six already carries another flag's gate (`organization` or
- * `admin`) through `requiresFeature`, so the `cloudManaged` gate is written in
- * `visible` and the two compose. The predicates are EVALUATED through the
+ * Five of the six also carry another flag's gate (`organization` or `admin`)
+ * through `requiresFeature`, so the `cloudManaged` gate is written in
+ * `visible` and the two compose. `set_user_password` carries none: its door
+ * works without the better-auth admin plugin (the admin block header in
+ * `sys-user.object.ts`), so `cloudManaged` is its only flag. The predicates are EVALUATED through the
  * canonical engine the console delegates to (`@objectstack/formula`), on the
  * parsed object, so the lowered envelope is what is judged; a string match
  * would stay green on a predicate that faults or never answers true.
@@ -33,7 +35,7 @@ import { SysOrganization } from './sys-organization.object.js';
 /** Holds every standing the six doors ask for: the platform-admin rung and the owner grade. */
 const ADMIN = { id: 'u_admin', email: 'admin@example.com', positions: ['org_owner'], isPlatformAdmin: true };
 
-/** The other flags the six inputs are gated on, all on, so `cloudManaged` alone decides. */
+/** The other flags five of the six inputs are gated on, all on, so `cloudManaged` alone decides. */
 const OTHER_FLAGS = { organization: true, admin: true };
 
 const SIX: ReadonlyArray<[string, { actions?: unknown }, string]> = [
@@ -73,8 +75,17 @@ describe('features.cloudManaged hides the six doors that add people', () => {
     expect(offered(visibleOf(def, name), { ...OTHER_FLAGS, cloudManaged: false })).toBe(true);
   });
 
-  it.each(SIX)('%s keeps its other flag: off hides it whatever cloudManaged says', (_site, def, name) => {
+  /** The five that carry another flag; `set_user_password` carries only `cloudManaged`. */
+  const GATED_TWICE = SIX.filter(([site]) => site !== 'sys_user.set_user_password');
+
+  it.each(GATED_TWICE)('%s keeps its other flag: off hides it whatever cloudManaged says', (_site, def, name) => {
     expect(offered(visibleOf(def, name), { organization: false, admin: false, cloudManaged: false })).toBe(false);
+  });
+
+  it('sys_user.set_user_password reads no other flag: offered with the admin plugin off, hidden managed', () => {
+    const source = visibleOf(SysUser, 'set_user_password');
+    expect(offered(source, { organization: false, admin: false, cloudManaged: false })).toBe(true);
+    expect(offered(source, { organization: false, admin: false, cloudManaged: true })).toBe(false);
   });
 });
 

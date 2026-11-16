@@ -5110,6 +5110,12 @@ export interface ReadableIdsChain {
   readonly security: ReadableIdsSecurityResolution;
   readonly context: ExecutionContext | undefined;
   readonly answers: Map<string, { scope: FilterCondition | undefined } | null>;
+  /**
+   * The driver options the read's driver call is handed — what a planned
+   * relation leaf's own options are compared with (`relation-semi-join.ts`);
+   * `undefined` is a bag with no keys. Every executor boundary passes them.
+   */
+  readonly driverOptions?: unknown;
 }
 
 /**
