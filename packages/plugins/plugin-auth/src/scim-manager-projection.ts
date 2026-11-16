@@ -53,7 +53,11 @@
  *   does not author this user's profile, so its manager is not this user's.
  * - Only on an active state: a deprovision is never refused over the org
  *   chart. A manager named while the user is inactive stays in the
- *   directory's resource and lands on the next active write that names it.
+ *   directory's resource and is not applied on re-activation alone; it lands
+ *   on the next replace, or on a patch that changes it. (The vendor calls
+ *   back only when a PATCH changes what it stores, so a patch re-sending the
+ *   same value, or removing an attribute the resource never carried, reaches
+ *   no host code; a replace always calls back.)
  * - Only when the manager CHANGES: a reference that resolves to the manager
  *   the user already has is not judged again, so a write is never refused
  *   over a chain other links have since reshaped.

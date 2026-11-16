@@ -395,7 +395,7 @@ describe('SCIM manager projection: a reference that names no User is served, and
 });
 
 describe('SCIM manager projection: silence is not a clear, and one predicate decides which door owns the column', () => {
-  it('a write that does not name manager keeps a value the admin route set; an explicit remove clears it', async () => {
+  it('a write that does not name manager keeps a value the admin route set; a replace without it clears it', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss');
     const emp = await provision(h, 'emp');
@@ -413,10 +413,11 @@ describe('SCIM manager projection: silence is not a clear, and one predicate dec
     expect(renamed.status, await renamed.clone().text()).toBe(200);
     expect(await managerOf(h, emp.userId)).toBe(boss.userId);
 
-    const removed = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
-      { op: 'remove', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager` },
-    ])));
-    expect(removed.status, await removed.clone().text()).toBe(200);
+    // The explicit PATCH remove is pinned above, on a manager the directory
+    // set: a remove of an attribute the directory's resource never carried
+    // changes nothing the vendor stores, and it answers without calling back.
+    const cleared = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp.scimId}`, userBody('emp')));
+    expect(cleared.status, await cleared.clone().text()).toBe(200);
     expect(await managerOf(h, emp.userId)).toBeNull();
   });
 
@@ -461,7 +462,7 @@ describe('SCIM manager projection: silence is not a clear, and one predicate dec
 });
 
 describe('SCIM manager projection: the cases it does not project', () => {
-  it('an inactive user: a manager named while inactive is not written, re-activation alone does not apply it, the next naming write does', async () => {
+  it('an inactive user: a manager named while inactive is not written, re-activation alone does not apply it, the next replace does', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss');
     const emp = await provision(h, 'emp');
@@ -478,10 +479,10 @@ describe('SCIM manager projection: the cases it does not project', () => {
     expect(reactivated.status, await reactivated.clone().text()).toBe(200);
     expect(await managerOf(h, emp.userId)).toBeNull();
 
-    const named = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
-      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: boss.scimId } },
-    ])));
-    expect(named.status, await named.clone().text()).toBe(200);
+    // A PATCH re-sending the same value changes nothing the vendor stores, so
+    // it answers without calling back; a replace always calls back.
+    const replaced = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp.scimId}`, userBody('emp', { value: boss.scimId })));
+    expect(replaced.status, await replaced.clone().text()).toBe(200);
     expect(await managerOf(h, emp.userId)).toBe(boss.userId);
   });
 

@@ -24,6 +24,6 @@ Metadata-protocol: none
 
 - Outside an authenticated SCIM request: the vendor also runs this step while it decommissions a connection or replays a provisioning domain. Neither is a write the directory made, and a decommission must never be refused over an org-chart reference.
 - When the user's profile source belongs to another connection: that connection authors the user's name and email, so its manager is the one that counts, not this request's.
-- For an inactive user: a deprovision is never refused over the org chart. A manager named while the user is inactive is not applied on re-activation alone; it lands on the next active write that names it.
+- For an inactive user: a deprovision is never refused over the org chart. A manager named while the user is inactive is not applied on re-activation alone; it lands on the next replace, or on a patch that changes it. (`@better-auth/scim` calls the host only when a PATCH changes what it stores, so a patch that re-sends the same value, or removes an attribute the directory never sent, writes nothing; a replace always reaches the projection.)
 
 The `idp_provisioned` stamp (ADR-0135 D4) is unchanged.
