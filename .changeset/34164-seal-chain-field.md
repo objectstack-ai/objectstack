@@ -5,7 +5,7 @@
 
 feat(spec, plugin-audit): a sealed object names its chain column with `lifecycle.seal.chainField`
 
-Clause-②: yes (widening). A sealed object may name its chain column, the default stays `tenant_id`, and an object that seals today is byte-identical.
+Clause-②: yes (widening). A sealed object may name its chain column with `lifecycle.seal.chainField`; the default stays `tenant_id`, and an object that seals today is byte-identical.
 Metadata-protocol: added
 Skills-docs: follow-up #33773
 
