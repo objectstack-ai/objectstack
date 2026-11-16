@@ -129,7 +129,8 @@ describe('[#23072] each by-name /meta door outside the ruling\'s list declares a
         expect([...META_ITEM_REFERENCES_PARAMS]).toEqual([]);
         expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package', 'member']);
         expect([...META_ITEM_AUDIT_PARAMS]).toEqual(['limit']);
-        expect([...META_ITEM_DIFF_PARAMS].sort()).toEqual(['from', 'fromVersion', 'to', 'toVersion']);
+        // [#33308] `package`: the holder whose versions a by-package name's diff compares.
+        expect([...META_ITEM_DIFF_PARAMS].sort()).toEqual(['from', 'fromVersion', 'package', 'to', 'toVersion']);
         expect([...META_ITEM_PUBLISHED_PARAMS]).toEqual([]);
         for (const entry of DOORS) {
             if ('readsMember' in entry) expect(entry.set).toContain('member');

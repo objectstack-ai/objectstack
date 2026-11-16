@@ -3183,3 +3183,26 @@ describe('RollbackMetaItemRequestSchema declares what the rollback door enforces
     expect(RollbackMetaItemRequestSchema.safeParse(base).success).toBe(false);
   });
 });
+
+import { DiffMetaItemRequestSchema } from './protocol.zod';
+
+describe('DiffMetaItemRequestSchema declares what the diff door reads (#33308)', () => {
+  // The REST door reads both bounds through this declaration: a whole number,
+  // as it read them before the request was declared, and `packageId` names
+  // the holder whose versions a by-package name's diff compares.
+  const base = { type: 'flow', name: 'shared_flow' } as const;
+
+  it.each([['fromVersion'], ['toVersion']])('refuses a %s that is not a whole number', (key) => {
+    for (const value of [1.5, '2', true]) {
+      expect(DiffMetaItemRequestSchema.safeParse({ ...base, [key]: value }).success, JSON.stringify(value)).toBe(false);
+    }
+  });
+
+  it('CONTROL: both bounds are optional, and every member is preserved through parse', () => {
+    expect(DiffMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    const full = { ...base, fromVersion: 1, toVersion: 3, packageId: 'com.acme.alpha.custom' };
+    const result = DiffMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(full);
+  });
+});
