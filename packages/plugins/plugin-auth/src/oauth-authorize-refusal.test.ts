@@ -945,12 +945,13 @@ describe('the sign-in page reads the client name only for the client its signed 
     const clientId = await registerNamed(rig, 'Acme Corp');
     const oauthQuery = await signedRequestFor(rig, clientId);
 
-    for (const queries of [
+    const malformed: ReadonlyArray<Record<string, string[]>> = [
       { client_id: [clientId], oauth_query: [oauthQuery], scope: ['openid'] },
       { client_id: [clientId, clientId], oauth_query: [oauthQuery] },
       { oauth_query: [oauthQuery] },
       { client_id: [clientId] },
-    ]) {
+    ];
+    for (const queries of malformed) {
       const answer: any = await read(rig, queries);
       expect(answer.status, JSON.stringify(Object.keys(queries))).toBe(400);
       expect(answer.body.error.code).toBe('VALIDATION_ERROR');
@@ -996,10 +997,10 @@ describe("the environment's callback carries the host's refusal reason on to the
       return { state: new URL(res.headers.get('location')!).searchParams.get('state')!, cookies: cookieList(res) };
     }
     const res = await env.handleRequest(
-      new Request(`${ORIGIN}/api/v1/auth/sign-in/oauth2`, {
+      new Request(`${ORIGIN}/api/v1/auth/sign-in/social`, {
         method: 'POST',
         headers: { origin: ORIGIN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId, callbackURL: KEPT }),
+        body: JSON.stringify({ provider: providerId, callbackURL: KEPT, disableRedirect: true }),
       }),
     );
     const body: any = await res.clone().json();

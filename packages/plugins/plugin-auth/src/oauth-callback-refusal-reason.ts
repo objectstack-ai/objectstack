@@ -53,12 +53,15 @@ function reasonOnRequest(ctx: any): string | undefined {
   return reasons[0];
 }
 
-/** The redirect's location header holder and key, when the callback answered one. */
-function redirectLocation(returned: any): { read(): string | undefined; write(value: string): void } | undefined {
-  const status = returned?.statusCode ?? returned?.status;
-  if (status !== 302 && status !== 'FOUND') return undefined;
-  const headers = returned?.headers;
+interface LocationHolder {
+  read(): string | undefined;
+  write(value: string): void;
+}
+
+/** The location header of one header holder (a `Headers` or a plain record), when it has one. */
+function locationIn(headers: any): LocationHolder | undefined {
   if (headers instanceof Headers) {
+    if (!headers.has('location')) return undefined;
     return { read: () => headers.get('location') ?? undefined, write: (v) => headers.set('location', v) };
   }
   if (headers && typeof headers === 'object') {
@@ -75,6 +78,21 @@ function redirectLocation(returned: any): { read(): string | undefined; write(va
 }
 
 /**
+ * Every holder of the redirect's location, when the callback answered a
+ * redirect: the thrown redirect's own headers and the response headers the
+ * dispatcher answers with (the latter win when the response is written, so
+ * both are kept equal).
+ */
+function redirectLocations(ctx: any): LocationHolder[] {
+  const returned = ctx?.context?.returned;
+  const status = returned?.statusCode ?? returned?.status;
+  if (status !== 302 && status !== 'FOUND') return [];
+  return [locationIn(returned?.headers), locationIn(ctx?.context?.responseHeaders)].filter(
+    (h): h is LocationHolder => h !== undefined,
+  );
+}
+
+/**
  * The after-hook step: on a refused platform sign-in, add the host's reason to
  * the callback's redirect to the sign-in page. Returns whether it did.
  */
@@ -82,9 +100,9 @@ export function carryRefusalReasonOnCallback(ctx: any): boolean {
   if (ctx?.path !== OAUTH_CALLBACK_ENDPOINT_PATH) return false;
   const reason = reasonOnRequest(ctx);
   if (!reason) return false;
-  const location = redirectLocation(ctx?.context?.returned);
-  const target = location?.read();
-  if (!location || !target) return false;
+  const locations = redirectLocations(ctx);
+  const target = locations[0]?.read();
+  if (!target || locations.some((l) => l.read() !== target)) return false;
   let next: URL;
   try {
     next = new URL(target, 'http://relative.invalid');
@@ -97,6 +115,7 @@ export function carryRefusalReasonOnCallback(ctx: any): boolean {
   const hashAt = target.indexOf('#');
   const head = hashAt < 0 ? target : target.slice(0, hashAt);
   const tail = hashAt < 0 ? '' : target.slice(hashAt);
-  location.write(`${head}${head.includes('?') ? '&' : '?'}${OAUTH_REFUSAL_REASON_PARAM}=${reason}${tail}`);
+  const carried = `${head}${head.includes('?') ? '&' : '?'}${OAUTH_REFUSAL_REASON_PARAM}=${reason}${tail}`;
+  for (const location of locations) location.write(carried);
   return true;
 }
