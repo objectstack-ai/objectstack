@@ -11,7 +11,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { createCopyInvitationLinkHandler } from './invitation-link-action';
-import { ACCEPT_INVITATION_WITH_PROOF_PATH } from './invitation-mailbox-proof';
+import { ACCEPT_INVITATION_WITH_PROOF_PATH, invitationProofIdentifier } from './invitation-mailbox-proof';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -289,10 +289,16 @@ describe('#34257 — accepting with the proof', () => {
   });
 
   it('a proof is single-use', async () => {
-    const { manager, invite } = await boot();
+    const { engine, manager, invite } = await boot();
     const { invitation, proof } = await invite('once@example.com');
+    const proofRows = () =>
+      (engine.tables.get('sys_verification') ?? []).filter(
+        (row) => row.identifier === invitationProofIdentifier(String(invitation.id)),
+      );
+    expect(proofRows()).toHaveLength(1);
     const first = await door(manager, { invitationId: invitation.id, proof, name: 'Once', password: PASSWORD });
     expect(first.status, await first.clone().text()).toBe(200);
+    expect(proofRows()).toHaveLength(0);
     await expectRefused(await door(manager, { invitationId: invitation.id, proof, name: 'Once', password: PASSWORD }));
   });
 
