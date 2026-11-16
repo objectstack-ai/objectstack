@@ -216,6 +216,17 @@ describe('objectui#4462 — the shared print stylesheet', () => {
     // so a dark-themed console prints light text onto white paper.
     expect(block).toMatch(/\.dark,\s*\n?\s*\.dark \*\s*\{/);
   });
+
+  it('prints a dark theme with a light colour scheme, so the canvas and the @page margin band are white (objectstack#34446)', () => {
+    // `.dark { color-scheme: dark }` darkens the canvas the browser paints
+    // under a transparent root; with background graphics on, that canvas
+    // printed as a dark frame round every sheet. The rendered half (the PDF's
+    // sheet fill) is pinned in Chromium by
+    // `e2e/print-dark-theme-paper-34446.spec.ts`; this case pins the rule.
+    expect(block).toMatch(/(^|\n)\s*\.dark\s*\{\s*color-scheme:\s*light;\s*\}/);
+    // Print only: outside the print block the theme keeps its dark scheme.
+    expect(css.replace(block, '')).not.toMatch(/color-scheme:\s*light/);
+  });
 });
 
 describe('objectui#4462 — the dashboard print action stops claiming a PDF export', () => {
