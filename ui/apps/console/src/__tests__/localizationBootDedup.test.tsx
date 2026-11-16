@@ -18,15 +18,15 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { useLocalization, readCachedLanguageSeed } from '@object-ui/i18n';
 import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 import { resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
-import { __resetAppDefaultLocaleForTests, seedTenantLanguage } from '../languageSeed';
+import { __resetPreferredLocaleForTests, seedTenantLanguage } from '../languageSeed';
 import { LocalizationFetchProvider } from '../LocalizationFetchProvider';
 
 const ENDPOINT = '/api/v1/auth/me/localization';
 const DISCOVERY = '/api/v1/discovery';
 
 /**
- * The boot's discovery read (objectstack#33231) is the data adapter's request,
- * not this endpoint's: these answer it as a server serving no default, unless a
+ * The boot's discovery read (objectstack#33985) is the data adapter's request,
+ * not this endpoint's: these answer it as a server serving no locale, unless a
  * test says otherwise, and count only the localization requests.
  */
 const isDiscovery = (url: unknown) => String(url).endsWith(DISCOVERY);
@@ -59,12 +59,13 @@ function Consumer() {
 beforeEach(() => {
   resetInflightGetsForTesting();
   localStorage.clear();
-  __resetAppDefaultLocaleForTests();
+  __resetPreferredLocaleForTests();
   clearSharedDiscoveryCache();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   resetInflightGetsForTesting();
   localStorage.clear();
 });
@@ -101,14 +102,15 @@ describe('first-visit localization request budget', () => {
     expect(meCalls(fetchStub)).toBe(1);
   });
 
-  it("still ONE request when both state the app's declared default (objectstack#33231)", async () => {
+  it('still ONE request when both state the supported browser language (objectstack#33985)', async () => {
     const gate = deferred<Response>();
     const fetchStub = vi.fn((url: string, _init?: RequestInit) =>
       isDiscovery(url)
-        ? Promise.resolve(jsonResponse({ locale: { default: 'zh-CN', supported: ['zh-CN'], timezone: 'UTC' } }))
+        ? Promise.resolve(jsonResponse({ locale: { default: 'en', supported: ['en', 'zh-CN'], timezone: 'UTC' } }))
         : gate.promise,
     );
     vi.stubGlobal('fetch', fetchStub);
+    vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('zh-CN');
 
     await seedTenantLanguage('', 1);
     await waitFor(() => expect(meCalls(fetchStub)).toBe(1));

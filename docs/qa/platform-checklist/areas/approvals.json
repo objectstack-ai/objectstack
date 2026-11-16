@@ -1516,7 +1516,7 @@
       "title": "Every approver type resolves the slate it declares — department includes all descendants, deprecated role warns and resolves, and a slate with no concrete person takes the declared onEmptyApprovers fork, never a fake approval",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flows; org owner)", "Ada Auditor / Mei Phone (real logins since #9308 — directory rows the graph legs resolve to)"],
@@ -1533,8 +1533,8 @@
           "sys_team is EMPTY on a stock boot (the seeded 'Team' rows are the demo showcase_team object, not the platform sys_team) — the team leg blocks(fixture) until the run creates a team and its members at runtime, through the organization team doors (fixtures.requires)"
         ]
       },
-      "enumSource": { "file": "packages/spec/src/automation/approval.zod.ts", "export": "ApproverType", "expect": 10 },
-      "variants": ["manager", "position", "department (+ ALL descendant units)", "team", "field (multi-value fan-out)", "expression", "org_membership_level", "role (deprecated → org_membership_level: warn + resolve)", "user", "queue (the queue's members at node entry, ADR-0142 D6)"],
+      "enumSource": { "file": "packages/spec/src/automation/approval.zod.ts", "export": "ApproverType", "expect": 11 },
+      "variants": ["manager", "position", "department (+ ALL descendant units)", "team", "field (multi-value fan-out)", "expression", "org_membership_level", "role (deprecated → org_membership_level: warn + resolve)", "user", "queue (the queue's members at node entry, ADR-0142 D6)", "platform_admin (the deployment's platform administrators, asked per caller and never enumerated; takes no value; accepted only in a flow shipped by a code-registered package; never offered by a designer)"],
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin; provision the directory rows — BU memberships over the data API, a team and its members through the organization team doors, a manager chain through set-user-manager (fixtures.requires names each door) — and record their ids",
         "author + register the scratch flows through POST /api/v1/automation (fixtures.requires: a record trigger on a stock object, no writable package); per leg: trigger the flow by creating one record of its trigger object, GET /api/v1/approvals/requests?status=pending, GET /:id and read pending_approvers (and pending_approver_names); deregister the flow before the next leg",
@@ -1593,7 +1593,7 @@
       ],
       "traps": ["seed-data-thin", "wrong-persona"],
       "source": [
-        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 10 members incl. deprecated role + queue, live since ADR-0142 D6), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve|fallback, default admin_rescue), (fallbackApprovers — same shape as approvers, required iff 'fallback' and refused under any other policy: checkFallbackApproversPairing)",
+        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 11 members incl. deprecated role, queue (live since ADR-0142 D6) and platform_admin), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve|fallback, default admin_rescue), (fallbackApprovers — same shape as approvers, required iff 'fallback' and refused under any other policy: checkFallbackApproversPairing)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#expandApprovers (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue branch over the ownership-queue service and its expanded-to-nobody warn, ADR-0142 D6, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / fallbackApprovers re-expansion / admin_rescue warn)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#organizationAdministrators (#22824 — the slate an empty admin_rescue request opens on: the request organization's members holding its TENANT_ADMIN rung, the authority the override's tenant arm trusts; platform administrators are not added for being one; no administrator ⇒ the nameless request and its loud WARN), (emptySlateReason — the reason kept in __resolvedFrom and the routed-to-administrators timeline comment)",
         "packages/plugins/plugin-approvals/src/admin-rescue-named-slate.integration.test.ts (the #22824 pin: the administrators' slate, each one's queue and bell, an ordinary approval rather than an override, the reason on the request, and the fallback / auto_approve / fail / no-administrator controls)",
@@ -1645,6 +1645,12 @@
           "date": "2026-10-28",
           "change": "steps[6], acceptance[5], variants[9] and the queue notes in source[0] and source[1] follow the queue approver to ADR-0142 D6 (PR #26337). A queue approver now expands to the queue's members at node entry through the ownership-queue service (approval-service.ts resolveApproverSpec, expandQueueUsers), and a queue that expands to nobody warns \"approver 'queue:VALUE' expanded to nobody\" and adds NO slot. The #3508 'not implemented' warn and the queue:VALUE literal slot are gone, so on an empty queue the admin_rescue request's abandoned slate is [] with the reason 'no approver on the node resolved to a person', not ['queue:VALUE']. The leg gains a staffed arm (planted sys_queue and sys_queue_member rows), steps[6] drops the designer note (queue is no longer xEnumDeprecated), and acceptance[5]'s oracle is the api; the clause changed meaning, so a prior verdict on it does not carry. Re-measured at base f2fdac5d: the service code read, and its service-layer pin run — approval-service.test.ts, describe 'a queue approver routes to the queue's members (ADR-0142 D6)', 4 passed; not driven live. Wave anchor #25807, slice C; lead from slice B's report 6457925443",
           "ref": "#25807"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-16",
+          "change": "variants gains platform_admin and enumSource.expect goes from 10 to 11, after PR #34300 added that member to ApproverType: the deployment's platform administrators, asked per caller and never enumerated; it takes no value, is accepted only in a flow shipped by a code-registered package, and is never offered by a designer (NON_AUTHORABLE_APPROVER_TYPES). source[0] now counts 11 members. The matrix is brought level with the enum only: no step or acceptance leg for platform_admin is authored in this revision, so no clause changed. Read at base 2becfd61",
+          "ref": "#34300"
         }
       ]
     },

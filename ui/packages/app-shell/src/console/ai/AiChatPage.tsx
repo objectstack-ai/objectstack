@@ -16,9 +16,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
-import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
@@ -33,6 +32,7 @@ import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { resolveKeyedI18nLabel } from '../../utils/index.js';
 import { resolvePublicShareBase } from '../organizations/resolveHomeUrl.js';
 import { ExcelImportBar } from './ExcelImportBar.js';
+import { useChangeCardLabels } from './changeCardLabels.js';
 import { PendingDraftsBar } from './PendingDraftsBar.js';
 import {
   Select,
@@ -155,6 +155,8 @@ import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundA
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
+import { useUpload } from '@object-ui/fields';
+import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
 
 /**
  * The app segment a record of `objectName` lives under: the object's owning
@@ -2428,21 +2430,28 @@ export function ChatPane({
   // leave the page) and the agent is briefed with a compact structured block —
   // headers + first sample rows + row count — appended to the user's text. The
   // agent's solution-design skill takes it from there (match an object, offer
-  // missing fields, point at the object list's Import action). Non-spreadsheet
-  // attachments stay out of scope and are disclosed rather than dropped.
+  // missing fields, point at the object list's Import action).
+  //
+  // Images and PDFs (objectstack#32749, ruling A) are uploaded to storage as
+  // the signed-in user, bound to no record, and ride the turn as AI SDK file
+  // parts carrying their `sys_file` id (`chatAttachments.ts`). Any other
+  // attachment, and one over the cap or whose upload failed, is named in the
+  // turn's text as not read, never dropped silently.
+  const { upload } = useUpload();
+  const sendNonSheetAttachments = useCallback(
+    async (text: string, nonSheets: File[]): Promise<void> => {
+      const outcome = await uploadChatAttachments(nonSheets, upload, window.location.href);
+      sendMessage(text + chatAttachmentNotes(outcome), undefined, outcome.parts);
+    },
+    [upload, sendMessage],
+  );
   const doSend = useCallback(
     (content: string, files?: File[]) => {
       resetSuppression();
-      const sheets = (files ?? []).filter((f) => /\.(xlsx|xlsm|csv|tsv|txt)$/i.test(f.name));
+      const sheets = (files ?? []).filter(isSpreadsheetAttachment);
       if (!sheets.length) {
         if (files?.length) {
-          // Honest disclosure beats a silent drop — the agent cannot read these.
-          sendMessage(
-            `${content}\n\n(用户上传了 ${files.length} 个附件:${files
-              .map((f) => f.name)
-              .join('、')} — 当前仅支持读取表格类附件(Excel/CSV),这些文件的内容我没有读取。)`,
-          );
-          onSent(content);
+          void sendNonSheetAttachments(content, files).then(() => onSent(content));
           return;
         }
         sendMessage(content);
@@ -2474,13 +2483,13 @@ export function ChatPane({
           }
         }
         if (sheets.length > 2) merged += `\n\n(另有 ${sheets.length - 2} 个表格附件未读取 — 一次最多读取 2 个。)`;
-        const nonSheets = (files ?? []).length - sheets.length;
-        if (nonSheets > 0) merged += `\n\n(另有 ${nonSheets} 个非表格附件,内容未读取。)`;
-        sendMessage(merged);
+        const nonSheets = (files ?? []).filter((f) => !isSpreadsheetAttachment(f));
+        if (nonSheets.length > 0) await sendNonSheetAttachments(merged, nonSheets);
+        else sendMessage(merged);
         onSent(merged);
       })();
     },
-    [resetSuppression, sendMessage, onSent],
+    [resetSuppression, sendMessage, onSent, sendNonSheetAttachments, setPendingSheet],
   );
 
   // Guards the empty-state first send against the conversation-id remount race:
@@ -2576,37 +2585,17 @@ export function ChatPane({
 
   // objectstack#32984 — the change card names objects, fields and field types
   // by their labels (the producer sends machine names only: 「字段
-  // b6bl_quote_item · line_total · currency」). An object or field the change is
-  // about to create is not in metadata yet and answers undefined: the card
-  // then shows the name as given.
-  const { objectLabel: i18nObjectLabel, fieldLabel: i18nFieldLabel } = useObjectLabel();
+  // b6bl_quote_item · line_total · currency」). A name the published registry
+  // does not know is read from the draft overlay (`useChangeCardLabels`); one
+  // the change is about to create answers undefined, and the card then shows
+  // the name as given. The revision moves when a message lands or a turn
+  // starts or ends, which is when a change may have drafted a new name.
+  const { resolveObjectLabel, resolveFieldLabel } = useChangeCardLabels(
+    metadata,
+    metadataClient,
+    `${shownMessages.length}:${isLoading ? 'turn' : 'idle'}`,
+  );
   const metadataLocale = useMetadataLocale();
-  // By name, when a change card asks (objectui#12811): the chat dock mounts
-  // this pane on an app's object-list open, where reading the whole
-  // `objects` registry at render would bring it back onto that open.
-  const findMetadataObject = useCallback(
-    (objectName: string) =>
-      (readObjectsByName(metadata, [objectName]) as Array<{
-        name?: string;
-        label?: string;
-        fields?: Record<string, { label?: string }>;
-      }>).find((o) => o?.name === objectName),
-    [metadata],
-  );
-  const resolveObjectLabel = useCallback(
-    (objectName: string) => {
-      const object = findMetadataObject(objectName);
-      return object ? i18nObjectLabel({ name: objectName, label: object.label ?? objectName }) : undefined;
-    },
-    [findMetadataObject, i18nObjectLabel],
-  );
-  const resolveFieldLabel = useCallback(
-    (objectName: string, fieldName: string) => {
-      const field = findMetadataObject(objectName)?.fields?.[fieldName];
-      return field ? i18nFieldLabel(objectName, fieldName, field.label ?? fieldName) : undefined;
-    },
-    [findMetadataObject, i18nFieldLabel],
-  );
   const resolveFieldTypeLabel = useCallback(
     (type: string) => {
       const name = fieldTypeName(type, metadataLocale);
@@ -3169,6 +3158,10 @@ export function ChatPane({
         allowanceUsedFraction={allowanceUsedFraction}
         suggestions={suggestions}
         onSendMessage={handleSend}
+        // objectstack#32749 — the attach button and the attachment chips: the
+        // send reads spreadsheets, images and PDFs (see `doSend`), and a file
+        // pasted or dropped without them was attached unseen.
+        enableFileUpload
         onClear={clear}
         hideClearBar
         onStop={isLoading ? stop : undefined}

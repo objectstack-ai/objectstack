@@ -929,6 +929,22 @@ export type FlowTenantCurrencyResolver = (
 ) => Promise<string | undefined> | string | undefined;
 
 /**
+ * Resolves the language of a run's ORGANIZATION — the language a sentence the
+ * flow writes into a record is picked in (ruling 6913660232 on
+ * objectstack#34062, letter B): the organization's Localization setting when
+ * somebody set it, else the app's declared `i18n.defaultLocale`. Injected by
+ * the host — the automation plugin bridges it to `@objectstack/core`'s
+ * `resolveOrganizationLocale`, the one reader of that ladder. Returns
+ * `undefined` when neither answers; the text is then written as authored.
+ * Rejects when the read FAILED: it learned nothing, so the record node fails
+ * rather than writing another language over the organization's choice.
+ * When unwired, nothing is picked: marked text is written as authored.
+ */
+export type FlowOrganizationLocaleResolver = (
+  tenantId: string | undefined,
+) => Promise<string | undefined> | string | undefined;
+
+/**
  * Re-reads the specified single-hop lookup relations of a record-change flow's
  * triggering record so `{record.<lookup>.<field>}` templates can traverse them
  * (#3475). Injected by the host — the automation plugin bridges it to a
@@ -3292,6 +3308,8 @@ export class AutomationEngine implements IAutomationService {
     /** Bridge to the host's localization read so a run carries its organization's
      *  default currency, if wired. See {@link FlowTenantCurrencyResolver}. */
     private tenantCurrencyResolver: FlowTenantCurrencyResolver | null = null;
+    /** The run organization's language for text a record write keeps, if wired. See {@link FlowOrganizationLocaleResolver}. */
+    private organizationLocaleResolver: FlowOrganizationLocaleResolver | null = null;
     private executionLogs: ExecutionLogEntry[] = [];
     private readonly maxLogSize: number;
     /** Level for the per-run summary line (#4354). See {@link RunSummaryLogLevel}. */
@@ -4751,6 +4769,34 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Wire the engine to the host's reader of the organization's language, the
+     * language a `create_record` / `update_record` node writes a field value
+     * marked as text in ({@link organizationLocale}). The automation plugin
+     * bridges it to `@objectstack/core`'s `resolveOrganizationLocale`. Passing
+     * `null` detaches it: marked text is then written as authored.
+     */
+    setOrganizationLocaleResolver(resolver: FlowOrganizationLocaleResolver | null): void {
+        this.organizationLocaleResolver = resolver;
+    }
+
+    /**
+     * The language of the run's organization (`context.tenantId`), read when a
+     * record node writes a field value marked as text — ruling 6913660232 on
+     * objectstack#34062: that text is picked in the ORGANIZATION's language,
+     * never the run's (`AutomationContext.locale`, the language of whoever
+     * started it), because the record keeps it for everyone in the
+     * organization. Read where it is used, never at run setup, so a run that
+     * writes no marked text pays no read. `undefined` when unwired or when no
+     * rung answers; rejects when the read failed ({@link FlowOrganizationLocaleResolver}).
+     */
+    async organizationLocale(context: AutomationContext): Promise<string | undefined> {
+        const resolver = this.organizationLocaleResolver;
+        if (!resolver) return undefined;
+        const locale = await resolver(context?.tenantId);
+        return typeof locale === 'string' && locale.trim() !== '' ? locale.trim() : undefined;
+    }
+
+    /**
      * Wire the record lookup-expander (#3475). The automation plugin bridges it
      * to a `findOne(..., { expand, context })` on the same data engine the CRUD
      * nodes use, scoped by the run's identity. Passing `null` detaches it (lookup
@@ -5948,6 +5994,25 @@ export class AutomationEngine implements IAutomationService {
      */
     getFlowSlot(packageId: string | null, name: string): FlowParsed | null {
         const key = this.flowSlots.keyOf(name, packageId);
+        return key === undefined ? null : this.flows.get(key) ?? null;
+    }
+
+    /**
+     * [ADR-0150 D3, #34145; seat ruling 6884403301, amendment 7] {@link getFlow}'s
+     * question judged over every holder ({@link bareFlowKey}): the flow the
+     * engine holds under the bare `name`, a disabled sole holder's included,
+     * `null` for a name it does not hold or a slot-key spelling, and a name two
+     * packages hold refused (409, every holder named), served or not, whether
+     * the engine holds one slot of it or both. For a door that asks a durable
+     * question of a name (is it taken, what did the engine hold before this
+     * write, which credential does it keep), whose answer must not move with a
+     * package's enable state. Engine-local. Not a pure read: like
+     * {@link getFlow}, it first settles the name ({@link settleFlowName}), so a
+     * lone qualified slot of a name one package holds again is re-keyed to the
+     * bare name.
+     */
+    getHeldFlow(name: string): FlowParsed | null {
+        const key = this.bareFlowKey(name);
         return key === undefined ? null : this.flows.get(key) ?? null;
     }
 

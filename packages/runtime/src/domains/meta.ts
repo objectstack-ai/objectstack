@@ -1125,6 +1125,53 @@ function queryRefusalAnswer(
 }
 
 /**
+ * [#33385, #32183 row 17] The `Symbol.for` key of the mark
+ * `admitEnvironmentQualifier` sets on its refusal of a name only disabled
+ * packages hold (`DISABLED_HOLDERS_ONLY_REFUSAL` in
+ * `@objectstack/metadata-protocol`). `RestServer`'s qualified route reads the
+ * same key.
+ */
+const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal');
+
+/**
+ * [#33385] Admit `/meta/:type/_env/:name` for `request`, or throw the
+ * protocol's refusal, as `RestServer`'s qualified route admits it. A refusal
+ * marked {@link DISABLED_HOLDERS_ONLY_REFUSAL} is admitted when the read naming
+ * no package withholds the name: a disabled package holds no name, so `_env`
+ * answers the read's own 404, naming no package. When that read serves an
+ * item or refuses, a package holds the name through a stored row the
+ * registry has not read, and the refusal stands.
+ *
+ * [#33385, review S1] Only the read that judged the name is admitted this way.
+ * `judged` is false when the read the caller is answered is not that plain
+ * read: an ADMITTED draft switch (`?state=draft`, `?preview=draft`, as
+ * `mayReadPendingDrafts` admits it) or the deprecated layered view
+ * (`?layers=`). Then the marked refusal stands, as on `main`. A caller the
+ * draft switches do not admit is answered the plain read, so it is judged.
+ * `RestServer`'s qualified route passes the same judgment.
+ */
+async function admitEnvironmentAddress(
+    protocol: MetaDomainProtocol | undefined,
+    request: { type: string; name: string; member?: string },
+    judged: boolean,
+): Promise<void> {
+    try {
+        protocol?.admitEnvironmentQualifier?.(request);
+    } catch (refusal) {
+        if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
+            || !judged
+            || typeof protocol?.getMetaItem !== 'function') throw refusal;
+        let withheld: boolean;
+        try {
+            withheld = ((await protocol.getMetaItem(request as never)) as { item?: unknown } | undefined)?.item == null;
+        } catch {
+            throw refusal;
+        }
+        if (!withheld) throw refusal;
+    }
+}
+
+/**
  * Handles Metadata requests
  * Standard: /metadata/:type/:name
  * Fallback for backward compat: /metadata (all objects), /metadata/:objectName (get object)
@@ -1589,6 +1636,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // package's address, `servedHolderAddressOf`), and every registry
         // holder of the name, as `RestServer`'s `/published` reads them. Two
         // served holders are refused by the plain read.
+        // [#34041, ADR-0150 D3] …and of every other type that read re-addresses
+        // (a `doc`, `view`, `translation`, …), all but an `action`, which its
+        // own bare judge serves: the metadata service keeps such a type by name
+        // alone, so its snapshot can be the disabled holder's body.
         let mixedOwner: string | undefined;
         let mixedHolders: readonly string[] = [];
         if (publishedType !== 'object' && publishedType !== 'package'
@@ -1605,7 +1656,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error('Not found', 404) };
                 }
                 if (typeof owner === 'string' && typeof registry.packageScopedHoldersOf === 'function'
-                    && typeof registry.readsByPackage === 'function' && registry.readsByPackage(publishedType) === true) {
+                    && publishedType !== 'action') {
                     const holders: readonly string[] = registry.packageScopedHoldersOf(
                         publishedType, name, null, { includeDisabledPackages: true },
                     ) ?? [];
@@ -2143,12 +2194,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         try {
             // [ADR-0150 D5, child G1] `/meta/:type/_env/:name`: the
-            // environment's own item, or `409` naming every holder — judged
-            // here, after the gates above, then read as a caller with no
-            // package (the resolver answers that caller environment-first).
+            // environment's own item, or `409` naming every served holder —
+            // judged here, after the gates above, then read as a caller with
+            // no package (the resolver answers that caller environment-first;
+            // a name only disabled packages hold answers its 404, #33385).
             if (environmentQualified) {
                 const qualifierProtocol = await resolveProtocol(deps, _context);
-                qualifierProtocol?.admitEnvironmentQualifier?.({ type: singularType, name, ...memberSelector });
+                await admitEnvironmentAddress(qualifierProtocol, { type: singularType, name, ...memberSelector },
+                    !isDraftRead && !previewDrafts && !wantsMetaItemLayers(query));
             }
 
             // [#5882 · #20478] The DEPRECATED spelling of the layered view,

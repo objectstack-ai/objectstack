@@ -3,8 +3,8 @@
 /**
  * [#29986 codemod] The "Delete, count, aggregate and execute" section of
  * `ObjectQL`: the bodies of `delete`, `assertNoInternalFieldEvaluated`,
- * `aggregate` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `aggregate` moved out of `engine.ts` whole (split
+ * by #30012 and #31764).
  *
  * A MOVE, not a redesign. {@link DeleteAndAggregateFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -36,7 +36,7 @@
  */
 
 import { normalizeFilterComparandTypes } from '@objectstack/spec/data';
-import type { EngineAggregateOptions, EngineDeleteOptions, HookContext, QueryAST } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineDeleteOptions, FilterCondition, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
 import { assertHavingTemporalComparandsInterpretable, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
@@ -75,10 +75,16 @@ import type { EngineDeleteDispatchInput } from './engine-delete-dispatch.js';
 import {
   ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_WHERE_SLOTS, declaredDatetimeLowering,
   describeNonFilterWhere, foldEngineOptionAliases, isWhereFilterObject, lowerWhereFilterArray, mergeReadContext,
-  organizationPredicateDeleteRefusal, rejectUnknownEngineOptions, resolveThenLowerWhere, whereResolvedTokenJudge,
+  CascadeBatchNarrowed, cascadeBatchIdsOf, organizationPredicateDeleteRefusal, rejectUnknownEngineOptions, resolveThenLowerWhere, whereResolvedTokenJudge,
   writeFailureLogMeta,
 } from './engine-top-level.js';
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
+import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
+import {
+  assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
+  RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
+  relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
+} from './relation-group-join.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
@@ -125,6 +131,7 @@ export interface DeleteAndAggregateHost {
   recomputeSummaries: ObjectQLClass['recomputeSummaries'];
   rejectCredentialAggregation: ObjectQLClass['rejectCredentialAggregation'];
   readonly relatedSchemaOf: ObjectQLClass['relatedSchemaOf'];
+  relationSemiJoinServes: ObjectQLClass['relationSemiJoinServes'];
   releaseSecretHandles: ObjectQLClass['releaseSecretHandles'];
   resolveObjectName: ObjectQLClass['resolveObjectName'];
   resolveWhereTokens: ObjectQLClass['resolveWhereTokens'];
@@ -192,7 +199,9 @@ export class DeleteAndAggregateFacet {
     const permanent = readPermanentDelete(object, options, dispatch.kind);
     // [#23221] Is this the child delete a cascade issued? Decided here, once,
     // before any middleware or hook runs, so the claim is this call's alone.
-    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
+    // [ruling 6893661036, F1] A predicate delete hands its `where` instead: a
+    // cascade batch is claimed by the exact id set it names.
+    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id ?? options?.where);
 
     const opCtx: OperationContext = {
       object,
@@ -532,7 +541,11 @@ export class DeleteAndAggregateFacet {
         // bulk delete with none pays for no read.
         const perRowBeforeHooks = this.hasHooksFor('beforeDelete', object);
         const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
-        if (perRowBeforeHooks || perRowAfterHooks) {
+        // [ruling 6893661036, F1] A cascade batch (the walk's one predicate
+        // delete per chunk of children, claimed above) always reads its doomed
+        // rows: they are its scope check and its per-row realtime events.
+        const cascadeBatch = referentialCascadeDelete === true;
+        if (perRowBeforeHooks || perRowAfterHooks || cascadeBatch) {
           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
           // [#21613] Each doomed row is its per-row `previous`: declared set.
           const doomed = rowsWithDeclaredColumnsOnly(
@@ -540,11 +553,29 @@ export class DeleteAndAggregateFacet {
             declaredDeleteColumns,
           );
           predicateMatchedRows = doomed;
+          // [ruling 6893104201 point (2)] The read ran through the AST the
+          // middleware chain composed for this delete, so it is the caller's
+          // WRITE scope (the delete-class row filters). The READ scope is not
+          // on it: the security plugin composes that onto an addressed
+          // predicate write only, never a nested one, so the walk asked the
+          // read door for the chunk before issuing it (`readDoorReturnsChunk`).
+          // A child the walk asked for and this read did not return is one a
+          // by-id delete would REFUSE (403) where this predicate would skip it:
+          // before any hook and any write, hand the chunk back to the walk,
+          // which deletes it by id, so the refusal and the rollback are today's.
+          if (cascadeBatch) {
+            const found = new Set(doomed.map((row) => String(row?.id)));
+            if (!(cascadeBatchIdsOf(options?.where) ?? []).every((v) => found.has(v))) {
+              throw new CascadeBatchNarrowed(object);
+            }
+          }
           // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
           // and before the driver call.
-          this.assertBulkPerRowHookBudget(
-            object, perRowBeforeHooks ? 'beforeDelete' : 'afterDelete', doomed.length,
-          );
+          if (perRowBeforeHooks || perRowAfterHooks) {
+            this.assertBulkPerRowHookBudget(
+              object, perRowBeforeHooks ? 'beforeDelete' : 'afterDelete', doomed.length,
+            );
+          }
           if (perRowAfterHooks) bulkPerRowRows = doomed;
           // [D1] Zero matched rows is zero dispatches.
           if (perRowBeforeHooks && doomed.length > 0) {
@@ -815,7 +846,18 @@ export class DeleteAndAggregateFacet {
           // or the aggregate `data.records.deleted` when the delete was by
           // predicate (#4639).
           if (this.realtimeService) {
-            if (isPredicateWrite) {
+            if (isPredicateWrite && referentialCascadeDelete && predicateMatchedRows) {
+              // [ruling 6893104201 point (1)] A cascade batch keeps today's
+              // events: one `data.record.deleted` per child, each scoped by its
+              // own pre-image, read before the statement removed it.
+              for (const row of predicateMatchedRows) {
+                await this.publishDataEvent('deleted', object, {
+                  recordId: row.id,
+                  organizationRow: row,
+                  context: opCtx.context,
+                });
+              }
+            } else if (isPredicateWrite) {
               await this.publishBulkDataEvent('deleted', object, {
                 matched: result,
                 context: opCtx.context,
@@ -879,8 +921,30 @@ export class DeleteAndAggregateFacet {
   }
 
   /** The body of `ObjectQL#aggregate`; the method's docblock there is its contract. */
-  static async aggregate(this: Pick<DeleteAndAggregateHost, '_registry' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandSearchOnOptions' | 'getDriver' | 'logger' | 'rejectCredentialAggregation' | 'relatedSchemaOf' | 'resolveObjectName' | 'resolveWhereTokens'>, object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
+  static async aggregate(this: Pick<DeleteAndAggregateHost, '_registry' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandSearchOnOptions' | 'facade' | 'getDriver' | 'logger' | 'rejectCredentialAggregation' | 'relatedSchemaOf' | 'relationSemiJoinServes' | 'resolveObjectName' | 'resolveWhereTokens'>, object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {
       object = this.resolveObjectName(object);
+      // [relation group join] The engine-internal request to group by a
+      // related record's attributes (`relation-group-join.ts`). The registry
+      // half of its decline is judged first: a driver that compiles no join,
+      // a field that is not a single-valued relation to the named object, a
+      // related read the semi-join rule keeps out — declined before anything
+      // is read, so the caller's own path runs the doors below itself.
+      const relationGroup = relationGroupByRequestOf(options);
+      if (relationGroup !== undefined) {
+          const reason = relationGroupRegistryDecline.call({
+              getObjectSchema: (name: string) => this._registry.getObject(name),
+              getDriver: (name: string) => this.getDriver(name) as { readonly name?: unknown; readonly aggregate?: unknown } | undefined,
+              relationSemiJoinServes: (o: string, t: string) => this.relationSemiJoinServes(o, t),
+          }, object, relationGroup);
+          if (reason !== undefined) {
+              declineRelationGroup(relationGroup, reason);
+              return [];
+          }
+      }
+      // [relation group join] A PLANNED read (`relation-semi-join.ts`): the
+      // related read a relation group join is built from is this verb,
+      // stopped at its driver call. Only the engine's own planner sets it.
+      const scopePlan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
       // Fold the `filter` alias into `where` (#4346) — the AST below reads
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
@@ -1215,6 +1279,27 @@ export class DeleteAndAggregateFacet {
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
+      // [relation group join] Every door above has judged the base query;
+      // now the request's shape against the row it adds columns to, then
+      // each related read, planned as the caller.
+      let plannedRelationGroups: PlannedRelationGroup[] | null = null;
+      if (relationGroup !== undefined) {
+          assertRelationGroupRequestShape(object, relationGroup, aggregatedRowColumns(query.groupBy, query.aggregations));
+          plannedRelationGroups = await planRelationGroups.call(
+              { aggregate: (o, q, opts) => this.facade.aggregate(o, q as EngineAggregateOptions, opts as EngineReadOptions) },
+              relationGroup,
+              mergeReadContext(query?.context, options?.context),
+          );
+          if (plannedRelationGroups === null) return [];
+      }
+      // [relation group join] The base read is judged as grouped by each
+      // relation field the join replaces, exactly as the FK-expand's base read
+      // is: those keys ride the AST every middleware sees (the field-level
+      // gate on an aggregate's group keys among them) and leave it only at the
+      // driver call below, where the join takes their place.
+      const judgedRelationFields = relationGroup === undefined
+          ? []
+          : relationFieldsJudgedAsGroupKeys(relationGroup, query.groupBy);
 
       const opCtx: OperationContext = {
         object,
@@ -1225,7 +1310,7 @@ export class DeleteAndAggregateFacet {
         ast: {
             object,
             where: query.where,
-            groupBy: query.groupBy,
+            groupBy: judgedRelationFields.length > 0 ? [...(query.groupBy ?? []), ...judgedRelationFields] : query.groupBy,
             aggregations: query.aggregations,
             // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
             // guard walks its references (predicate-guard.ts) and a future
@@ -1294,6 +1379,12 @@ export class DeleteAndAggregateFacet {
         // are the related read's own (`relation-semi-join.ts`).
         const aggregateOptions = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
         const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context, aggregateOptions);
+        // [relation group join] A planned read hands its final `where` and
+        // driver options to the planner in place of the driver call.
+        if (scopePlan !== undefined) {
+            scopePlan.capture(ast.where as FilterCondition | undefined, aggregateOptions);
+            return scopePlan.rows;
+        }
 
         // Prefer driver.aggregate() when available — driver.find() in many
         // drivers (e.g. driver-sql) does not honor `groupBy` / `aggregations`
@@ -1350,7 +1441,25 @@ export class DeleteAndAggregateFacet {
                 return f != null && typeof f === 'object' && Object.keys(f).length > 0;
             });
         const aggregationFilterNative = drv?.supports?.aggregationFilter === true;
-        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative)) {
+        const nativeAggregate = typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative);
+        // [relation group join] Served only as the driver's own statement:
+        // the rows path below cannot join. Each planned related read is
+        // answered at this boundary, under these driver options, by the rule
+        // the semi-join's leaf is (`plannedRelationLeafVerdict`).
+        if (relationGroup !== undefined && plannedRelationGroups !== null) {
+            if (!nativeAggregate) {
+                declineRelationGroup(relationGroup, `this aggregate of '${object}' is not one its driver answers natively`);
+                return [];
+            }
+            const joins = relationGroupJoinsAtBoundary(relationGroup, plannedRelationGroups, aggregateOptions);
+            if (joins === null) return [];
+            const statement = withoutJudgedRelationFields(ast, judgedRelationFields, query.groupBy);
+            const joined = await drv.aggregate(object, { ...statement, [RELATION_GROUP_JOINS]: joins }, aggregateOptions);
+            assertRelationGroupRowsJoined(object, drv.name, joined, joins);
+            relationGroup.outcome = { kind: 'joined' };
+            return applyHaving(joined, ast.having, havingColumnClasses);
+        }
+        if (nativeAggregate) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over
             // the aggregated row's own columns (aggregation aliases + groupBy
             // projections), identically on both paths. No driver implements it

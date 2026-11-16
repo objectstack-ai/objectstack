@@ -1021,6 +1021,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // A `permission-ref` field also carries the object this form edits
           // (objectstack#32795), so the widget tells the grant's name column
           // from a column of the same name on another object.
+          // (A lookup whose `lookupFilters` read `{ $record }` is stamped as
+          // a field of the record being edited by `gateFormFields`, the one
+          // step every layout draws its fields through.)
           field: withFormObject(
             withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
             schema.objectName,

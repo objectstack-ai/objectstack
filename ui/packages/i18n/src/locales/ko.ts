@@ -2254,6 +2254,9 @@ const ko = {
       fieldErrorsToast_one: "확인이 필요한 설정 {{count}}개: {{settings}}",
       fieldErrorsToast_other: "확인이 필요한 설정 {{count}}개: {{settings}}",
       cryptoRefusalTitle: "이 배포는 시크릿을 암호화할 수 없습니다",
+      platformManagedTitle: "플랫폼에서 관리합니다",
+      platformManagedBody: "호스팅 플랫폼이 이 환경을 위해 제공하고 구성하므로 여기에서 설정하지 않습니다.",
+      aiProviderManaged: "AI 공급자, 모델 및 자격 증명은 플랫폼에서 관리합니다.",
       cryptoRefusalSubjectSuffix: "은(는) 암호화 대상으로 선언되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalNoSubject: "암호화 대상으로 선언된 값이 거부되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalToast: "시크릿을 암호화할 수 없습니다: {{subject}}",
@@ -2707,6 +2710,7 @@ const ko = {
         retry: "싱글 사인온으로 계속",
       },
       ssoHandoff: "{{target}}(으)로 계속",
+      ssoHandoffClient: "{{clientName}}(으)로 계속하려면 로그인하세요",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
         signIn: "개발용 관리자로 로그인",
@@ -2736,6 +2740,8 @@ const ko = {
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
         networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
+        ssoAccessDeniedNotMember: "로그인한 계정은 이 환경 조직의 멤버가 아닙니다. 멤버인 계정으로 로그인하거나, 조직 관리자에게 초대를 요청하세요.",
+        ssoAccessDeniedInvitationPending: "이 환경 조직에 초대되었지만 아직 초대를 수락하지 않았습니다. 이메일에서 초대를 수락한 후 다시 로그인하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
@@ -3048,6 +3054,10 @@ const ko = {
       granted: "액세스가 허용되었습니다",
       denied: "액세스 거부됨",
       noRedirect: "서버가 리디렉션 URL을 반환하지 않았습니다.",
+      returnToApp: "{{appName}}(으)로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      returnToUnnamedApp: "애플리케이션으로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      openApp: "{{appName}} 열기",
+      openUnnamedApp: "애플리케이션 열기",
       failed: "동의 실패",
       footer: "계정 설정에서 언제든지 액세스를 취소할 수 있습니다.",
     },
@@ -3973,13 +3983,11 @@ const ko = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 사용 한도가 {{left}} 남았습니다. ×N으로 표시된 모델은 기본 모델보다 N배 빠르게 한도를 사용합니다.',
@@ -4044,6 +4052,7 @@ const ko = {
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
       get_record_history: "이 레코드의 변경 기록 읽기",
+      list_flow_runs: "플로우 실행 기록 확인하기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",
@@ -4140,6 +4149,21 @@ const ko = {
       needsAttention: "확인 필요 {{count}}건",
       needsAttention_one: "확인 필요 {{count}}건",
       needsAttention_other: "확인 필요 {{count}}건",
+      health: {
+        sampleRowsLive: "샘플 데이터 {{count}}건 게시됨",
+        sampleRowsLive_one: "샘플 데이터 {{count}}건 게시됨",
+        sampleRowsLive_other: "샘플 데이터 {{count}}건 게시됨",
+        views: "뷰 {{count}}개",
+        views_one: "뷰 {{count}}개",
+        views_other: "뷰 {{count}}개",
+        widgets: "위젯 {{count}}개",
+        widgets_one: "위젯 {{count}}개",
+        widgets_other: "위젯 {{count}}개",
+        seeds: "샘플 데이터 세트 {{count}}개",
+        seeds_one: "샘플 데이터 세트 {{count}}개",
+        seeds_other: "샘플 데이터 세트 {{count}}개",
+        verified: "{{checks}} 확인 완료",
+      },
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",

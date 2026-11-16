@@ -16,7 +16,7 @@ import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
-import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
+import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
 import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
@@ -2306,7 +2306,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       )
     ].join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const blob = csvBlob(csvContent);
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

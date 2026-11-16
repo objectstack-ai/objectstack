@@ -27,6 +27,9 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
+ *            So is its `namespace`, through `ManifestSchema.shape.namespace`
+ *            (#33922): absent is admitted, a value the declaration refuses
+ *            answers `PLUGIN_MANIFEST_INVALID` the same way.
  *            A package declaring code this door cannot run answers
  *            `VALIDATION_ERROR` (422) the same way: an enabled job with no
  *            `body`, or one whose `body` the declaration refuses (#21585), and
@@ -204,6 +207,11 @@
  *            automation engine withdraws the package's flows and unbinds their
  *            triggers at once (#27395); it reports each outcome as `cleanups`,
  *            a refused withdrawal or a re-sync that did not run included.
+ *            The entry of a composed artifact (ADR-0130 D4) uninstalls every
+ *            package body its install registered, as one unit: an extension
+ *            one member contributes to another member's object orders the
+ *            withdrawal (the extending module first) rather than refusing it,
+ *            and only an extension or pair from outside the unit refuses it.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -249,6 +257,10 @@ import {
     declaredDependencyIds,
     credentialUseClientFor,
     transportPeerAddressOf,
+    // [#34336, ADR-0130 D4] The one reader of a package-owned collection across
+    // both artifact shapes: every seed door reads `data` through it
+    // ({@link seedDatasetsOf}).
+    resolveStackCollection,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -952,6 +964,40 @@ function judgeWithheldMaps(
 }
 
 /**
+ * [#33922, ADR-0048 §2] The package's `namespace`, parsed through its
+ * declaration (`ManifestSchema.shape.namespace`, `NAMESPACE_PATTERN`), by
+ * reference, ON THE BODY REGISTRATION READS: `manifest` is the body this door
+ * hands `manifest.register` (after `normalizeBundle`), and the registry
+ * installs it under that body's own top-level `namespace` — the key its install-time namespace
+ * gate compares. ⛔ Never a nested read ({@link declaredPackageManifest}): a
+ * judge reading any other key than the one registration reads answers about
+ * a namespace nothing installs under. `null` admits it; otherwise the refusal
+ * sentence.
+ *
+ * Absent is admitted, as the declaration admits it. Without this, `''`,
+ * `'QA_N'` or `'9-Bad Ns!'` registered as written: a namespace no author can
+ * declare, and a case variant of an owned one (`QA_N` beside `qa_n`) that the
+ * gate's uniqueness comparison never reads as the same namespace.
+ *
+ * ⛔ Not the members of a multi-package artifact: each `packages[]` entry is
+ * already parsed WHOLE through `ArtifactPackageSchema` (the core's
+ * `resolveArtifactPackageOrder`, reached here through {@link unrunnableCode}
+ * before any write), whose refusal of the same namespace is
+ * `INVALID_ARTIFACT_PACKAGE_ENTRY` / 422. A second judge here would move that
+ * answer, not close a gap.
+ *
+ * The sentence is the declaration's own inside the frame an invalid
+ * `installModes` is answered with ({@link judgeInstallMode}); no wording is
+ * minted.
+ */
+function namespaceRefusal(manifest: Record<string, any>, manifestId: string): string | null {
+    const declared = ManifestSchema.shape.namespace.safeParse(manifest.namespace);
+    if (declared.success) return null;
+    const [issue] = declared.error.issues;
+    return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}.`;
+}
+
+/**
  * [#28640 ruling ③A] The operator's line for an install that received
  * withheld maps: each one named, once, at `warn` — the connector is installed
  * and runs, without the headers or environment variables the export held back.
@@ -1166,6 +1212,91 @@ function manifestIdOf(p: any): string | undefined {
 }
 
 /**
+ * [ADR-0130 D4] The package ids one install-local ledger entry installed, in
+ * the order its uninstall withdraws them before the registry is asked: the
+ * reverse of the order the install registered them (dependents before the
+ * packages they declare, `orderHydrationBatch`, the rehydrate's own sorter),
+ * read off the entry's stored body the way the rehydrate reads it.
+ *
+ * A single-package entry is its own id alone. The entry's own id is always a
+ * member, last when no body carries it, so the door asks about and withdraws
+ * at least what it did before.
+ */
+function installedUnitPackageIds(manifestId: string, entryManifest: unknown): string[] {
+    const body = flattenPackageBody(entryManifest as Record<string, any>);
+    if (!Array.isArray(body?.packages)) return [manifestId];
+    const nodes = body.packages.flatMap((entry: { manifest?: unknown } | null) => {
+        const id = artifactPackageId(entry?.manifest);
+        return id === undefined ? [] : [{ item: id, label: id, packageIds: [id], declaredIds: declaredDependencyIds(entry?.manifest) }];
+    });
+    const ids = [...new Set(orderHydrationBatch<string>(nodes).ordered.reverse())];
+    return ids.includes(manifestId) ? ids : [...ids, manifestId];
+}
+
+/**
+ * What {@link planUnitWithdrawal} reads off the registry's uninstall refusal
+ * (`PackageUninstallExtendedError`, `RESOURCE_CONFLICT` / 409) of one member:
+ * its sentence, the packages extending the member's objects, and the
+ * member's installed paired customization package. Read by property, as the
+ * door reads `code`: the class is unexported.
+ */
+interface MemberUninstallRefusal {
+    message: string;
+    extenders?: unknown;
+    customizationPackageId?: unknown;
+}
+
+/**
+ * [ADR-0130 D4, ADR-0029] The order an install-local uninstall withdraws its
+ * unit in, or the registry refusal that stops it — decided before anything
+ * moves.
+ *
+ * The registry refuses a package while another package extends an object it
+ * owns, or while its paired customization package is installed
+ * (`assertPackageUninstallable`, the ONE predicate its own `uninstallPackage`
+ * asks). Asked of each member with the whole unit still registered, a refusal
+ * whose every cause is another member of the SAME unit is not a refusal of
+ * the unit: those members are withdrawn first, extending modules before the
+ * package they extend. A cause outside the unit — a package of a different
+ * install, a pair this install did not deliver — refuses the whole uninstall
+ * with the registry's own sentence, as the single-package door always did; so
+ * does a refusal that names no causes to read, and a cycle of members that
+ * each extend the other, which no order can withdraw.
+ *
+ * `base` is {@link installedUnitPackageIds}' order; it decides wherever no
+ * extension does. A single-package unit is refused exactly when its registry
+ * refuses it: no other member can be a cause.
+ */
+function planUnitWithdrawal(
+    base: readonly string[],
+    refusalOf: (packageId: string) => MemberUninstallRefusal | undefined,
+): { order: string[] } | { refusal: string } {
+    const unit = new Set(base);
+    const before = new Map<string, string[]>();
+    const refusals = new Map<string, MemberUninstallRefusal>();
+    for (const id of base) {
+        const refusal = refusalOf(id);
+        if (refusal === undefined) continue;
+        refusals.set(id, refusal);
+        const extenders = Array.isArray(refusal.extenders) ? refusal.extenders : undefined;
+        const pair = typeof refusal.customizationPackageId === 'string' ? refusal.customizationPackageId : undefined;
+        const causes = [...(extenders ?? []), ...(pair !== undefined ? [pair] : [])];
+        if (extenders === undefined || causes.some((cause) => typeof cause !== 'string' || !unit.has(cause))) {
+            return { refusal: refusal.message };
+        }
+        before.set(id, causes as string[]);
+    }
+    const order: string[] = [];
+    const remaining = [...base];
+    while (remaining.length > 0) {
+        const next = remaining.findIndex((id) => (before.get(id) ?? []).every((cause) => order.includes(cause)));
+        if (next === -1) return { refusal: refusals.get(remaining.find((id) => refusals.has(id))!)!.message };
+        order.push(...remaining.splice(next, 1));
+    }
+    return { order };
+}
+
+/**
  * [#28039] The datasources a package body declares, as `AppPlugin` reads a
  * stack's: a list, or a map keyed by name.
  */
@@ -1224,14 +1355,27 @@ function unmanagedCopyBaseManifest(ctx: PluginContext, baseId: string): unknown 
 }
 
 /**
- * The seed datasets a cached manifest bundles: its `data[]` entries that name
- * an object and carry records. One reading for the two doors that match seed
- * rows — the purge, and the listing's `withSampleData` (#21775).
+ * The seed datasets a package body bundles: its `data[]` entries that name an
+ * object and carry records. The ONE reading for every seed door of this
+ * plugin — the install, the reseed and the upgrade (through
+ * `applySideEffects`), the rehydrate's share and its heal, the purge, the
+ * sample-data count and the listing's `withSampleData` (#21775).
+ *
+ * [#34336, ADR-0130 D4] Read through `resolveStackCollection(body, 'data')`:
+ * the top-level `data` when the body carries one (a flat bundle, or a composed
+ * artifact that still carries its flattened union — read once, never again per
+ * package), otherwise every package body's, in the artifact's package order
+ * (the dependency order the packages register in). A composed bundle
+ * (`dist/objectstack.json` with `packages[]`) carries no top-level `data`, and
+ * a top-level-only read answered "no-datasets" for every one of its doors.
+ *
+ * @throws The resolver's ADR-0112 refusal for a malformed `packages`
+ *   (`INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`, …) — the
+ *   refusal the `manifest` service raises on the same bytes.
  */
-function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
-    return Array.isArray(manifest?.data)
-        ? manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-        : [];
+function seedDatasetsOf(body: unknown): PurgeSeedDataset[] {
+    return resolveStackCollection(body, 'data')
+        .filter((d: any) => d && d.object && Array.isArray(d.records)) as PurgeSeedDataset[];
 }
 
 /**
@@ -1840,9 +1984,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Never throws — a failed heal logs and leaves the boot untouched.
      */
     private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry, converted: any): Promise<void> => {
-        const datasets = Array.isArray(converted?.data)
-            ? converted.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-            : [];
+        // [#34336] Every package body's datasets, through the one reader. The
+        // register above already judged these bytes, so a refusal here is not
+        // expected; it is said once and the boot continues unhealed.
+        let datasets: PurgeSeedDataset[];
+        try {
+            datasets = seedDatasetsOf(converted);
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} skipped: its seed datasets could not be read: ${err?.message ?? err}`);
+            return;
+        }
         if (datasets.length === 0) return;
         if (entry.sampleDataPurged === true) return;
         if (organizationWallActive(ctx)) {
@@ -2489,6 +2640,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
+        // 1b″. [#33922, ADR-0048 §2] ⭐ THE DOOR PARSES THE PACKAGE NAMESPACE —
+        //      through its declaration, `ManifestSchema.shape.namespace`, by
+        //      reference ({@link namespaceRefusal}), right after the id and at
+        //      the same converged point, judged on the body registration reads,
+        //      so neither the registry's install-time namespace gate nor the
+        //      ledger write ever sees a namespace no author can declare. Before
+        //      this, `''`, `'QA_N'` and `'9-Bad Ns!'` installed with a 200, and
+        //      `QA_N` beside an owner of `qa_n` passed the gate, whose
+        //      uniqueness comparison never read the two as one namespace. An
+        //      absent namespace is admitted, as the declaration admits it.
+        //      The id gate's status split (400 caller input, 502 upstream
+        //      snapshot) and its rehydrate exemption (an entry an older build
+        //      ledgered under such a namespace still loads and can be removed).
+        {
+            const refusal = namespaceRefusal(manifest, manifestId);
+            if (refusal !== null) {
+                return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: refusal } }, callerManifest ? 400 : 502);
+            }
+        }
+
         // 1b′. [#31963, cloud#3624 ruling A] ⭐ THE GRANT GOVERNS THE COPY. A
         //      grant-path inline manifest is copied only when it declares the
         //      package and version the control plane granted: the cloud
@@ -2912,7 +3083,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     everyone.
         const previousLookup = this.ledger.read(manifestId);
         const previousEntry = previousLookup.entry;
-        const gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
+        //
+        //     [#34407] The gate reads every package body's objects, so a
+        //     `packages` the resolver refuses (ADR-0112 `code` + its declared
+        //     4xx status, the refusal the `manifest` service raises on the same
+        //     bytes) is answered here, before anything is written — never
+        //     thrown out of the door. An undeclared throw stays a throw.
+        let gate: ReturnType<MarketplaceInstallLocalPlugin['evaluateGlobalUniqueGate']>;
+        try {
+            gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
+        } catch (err: any) {
+            const refusal = resolveThrownHttpError(err);
+            if (refusal.declaredStatus === undefined || refusal.status >= 500) throw err;
+            return c.json({
+                success: false,
+                error: {
+                    code: refusal.code,
+                    message: `Package '${manifestId}' cannot be installed: ${String(err?.message ?? err)} Nothing was installed or written.`,
+                },
+            }, refusal.status);
+        }
         if (gate.blocked) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] install of ${manifestId} stopped by the ADR-0120 D5e posture gate ` +
@@ -3535,9 +3725,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private sampleDataInScope = async (c: any, ctx: PluginContext, entries: InstalledEntry[]): Promise<Set<string>> => {
         const present = new Set<string>();
+        // [#34336] A ledger body whose `packages` the resolver refuses answers
+        // `false` with the reason at `warn`, as every other unread entry does —
+        // never a refusal of the whole listing.
+        const unreadBodies: Array<{ manifestId: string; why: string }> = [];
         const seeded = entries
-            .map((entry) => ({ entry, datasets: seedDatasetsOf(entry.manifest) }))
+            .map((entry) => {
+                try {
+                    return { entry, datasets: seedDatasetsOf(entry.manifest) };
+                } catch (err: any) {
+                    unreadBodies.push({ manifestId: entry.manifestId, why: `its seed datasets could not be read: ${err?.message ?? err}` });
+                    return { entry, datasets: [] as PurgeSeedDataset[] };
+                }
+            })
             .filter(({ datasets }) => datasets.length > 0);
+        for (const { manifestId, why } of unreadBodies) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: the installed-apps listing could not read this package's `
+                + `seed rows (${why}), so it answers withSampleData: false for it`,
+            );
+        }
         if (seeded.length === 0) return present;
 
         let organizationId: string | undefined;
@@ -3626,8 +3833,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // this package adds through `objectExtensions`) among them — and holds
         // no copy of any verdict. A refusal is the request's, spelled as the
         // guard spelled it (`code`, `status`, `message`), with nothing moved.
-        {
-            const refused = await this.askUninstallGuards(c, ctx, manifestId, admission.userId);
+        //
+        // [ADR-0130 D4] The install entry of a composed artifact installed
+        // every package body the artifact carries, so its uninstall is that
+        // same unit: each member is asked and, below, withdrawn. A
+        // single-package entry is its own id alone, as before.
+        const unit = installedUnitPackageIds(manifestId, this.ledger.read(manifestId).entry?.manifest);
+        for (const memberId of unit) {
+            const refused = await this.askUninstallGuards(c, ctx, memberId, admission.userId);
             if (refused) return refused;
         }
         // [#28511, ADR-0146 D3] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE
@@ -3654,20 +3867,35 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // meets is reported on `cleanups`. A throw that is not the coded
         // refusal is left to the withdrawal the same way, never answered as a
         // conflict it is not.
+        //
+        // [ADR-0130 D4] Asked of every member of the unit, with the whole unit
+        // still registered: a refusal caused only by other members of the
+        // same install (a module extending the app's objects) orders the
+        // withdrawal — those members go first — instead of refusing it; a
+        // cause outside the unit refuses it as before ({@link planUnitWithdrawal}).
+        let withdrawalOrder = unit;
         {
             let registry: { assertPackageUninstallable?(id: string): void } | undefined;
             try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — nothing registered */ }
             if (typeof registry?.assertPackageUninstallable === 'function') {
-                try {
-                    registry.assertPackageUninstallable(manifestId);
-                } catch (err: any) {
-                    if (err?.code === 'RESOURCE_CONFLICT' && err?.status === 409) {
-                        return c.json({
-                            success: false,
-                            error: { code: 'RESOURCE_CONFLICT', message: String(err.message) },
-                        }, 409);
+                const ask = registry.assertPackageUninstallable.bind(registry);
+                const planned = planUnitWithdrawal(unit, (memberId) => {
+                    try {
+                        ask(memberId);
+                        return undefined;
+                    } catch (err: any) {
+                        return err?.code === 'RESOURCE_CONFLICT' && err?.status === 409
+                            ? { message: String(err.message), extenders: err.extenders, customizationPackageId: err.customizationPackageId }
+                            : undefined;
                     }
+                });
+                if ('refusal' in planned) {
+                    return c.json({
+                        success: false,
+                        error: { code: 'RESOURCE_CONFLICT', message: planned.refusal },
+                    }, 409);
                 }
+                withdrawalOrder = planned.order;
             }
         }
         // [#31283] The version this uninstall removes, for the package's ledger row.
@@ -3705,30 +3933,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // copies go right after the registry half and before the cleanups —
         // only once the registry withdrew, so a refused withdrawal leaves the
         // package whole, as loaded as it was.
+        //
+        // [ADR-0130 D4] Every member of the unit, in the planned order: each
+        // one's names captured, then each withdrawn — all synchronously, still
+        // no `await` between the ledger removal and the last withdrawal. A
+        // member whose withdrawal is refused keeps its own copies and its
+        // overrides; the others' go.
         let registry: unknown;
         try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing registered */ }
-        const declared = captureUninstallDeclared(registry, manifestId);
-        const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
+        const declared = new Map(withdrawalOrder.map((memberId) => [memberId, captureUninstallDeclared(registry, memberId)]));
+        const refusedWithdrawals = new Map<string, UninstallCleanupOutcome>();
+        for (const memberId of withdrawalOrder) {
+            const refused = this.withdrawFromRunningKernel(ctx, memberId);
+            if (refused) refusedWithdrawals.set(memberId, refused);
+        }
+        const withdrawn = withdrawalOrder.filter((memberId) => !refusedWithdrawals.has(memberId));
+        const withdrawal = refusedWithdrawals.size > 0;
         // The registry verb reaches no executable handler: the package's
         // script-action handlers, body hooks and functions this door's install
         // bound on the engine ({@link bindArtifactHandlers}) go right after the
         // registry half withdrew, through the binder's own inverse — never on
         // a refused withdrawal, which leaves the package loaded and running.
+        // They are bound once for the whole install, under its entry's id.
         if (!withdrawal) await this.unbindArtifactHandlers(ctx, manifestId);
-        const copies = withdrawal ? undefined : await this.withdrawObjectCopies(ctx, manifestId);
-        // [#24182] …and the copies of OTHER packages' objects that this one's
-        // extensions rewrote: the bridge that wrote them restores the owner's
-        // definition (`manifest.restoreExtendedObjectCopies`, never rejects).
-        if (!withdrawal) {
+        const copies: UninstallCleanupOutcome[] = [];
+        for (const memberId of withdrawn) {
+            const kept = await this.withdrawObjectCopies(ctx, memberId);
+            if (kept) copies.push(kept);
+            // [#24182] …and the copies of OTHER packages' objects that this one's
+            // extensions rewrote: the bridge that wrote them restores the owner's
+            // definition (`manifest.restoreExtendedObjectCopies`, never rejects).
             let manifestService: { restoreExtendedObjectCopies?(id: string): Promise<void> } | undefined;
             try { manifestService = ctx.getService('manifest') as typeof manifestService; } catch { /* no engine — nothing bridged */ }
-            await manifestService?.restoreExtendedObjectCopies?.(manifestId);
+            await manifestService?.restoreExtendedObjectCopies?.(memberId);
         }
-        const cleanups = [
-            ...(withdrawal ? [withdrawal] : []),
-            ...(copies ? [copies] : []),
-            ...await this.runUninstallCleanups(ctx, manifestId, admission.userId, declared),
-        ];
+        const cleanups = [...refusedWithdrawals.values(), ...copies];
+        for (const memberId of withdrawalOrder) {
+            cleanups.push(...await this.runUninstallCleanups(ctx, memberId, admission.userId, declared.get(memberId)));
+        }
         // [#27395] LAST — after the registry withdrawal and the cleanups, never
         // before, for the window described above — announce the withdrawal as
         // `metadata:reloaded`, the re-sync the install's hot load announces, so
@@ -3737,7 +3979,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // itself: the uninstall drives the one teardown a reload drives. Not
         // when the registry refused: the package is still registered, so a
         // re-sync would only read it back.
-        const resync = withdrawal ? undefined : await this.announceUninstall(ctx, manifestId);
+        // [ADR-0130 D4] Once, for the install, when any member was withdrawn.
+        const resync = withdrawn.length > 0 ? await this.announceUninstall(ctx, manifestId) : undefined;
         if (resync) cleanups.push(resync);
         // [#31283] The package's own `package_uninstall` ledger row (#31186),
         // written once the uninstall is durable — the ledger entry is gone —
@@ -3746,15 +3989,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // stored `sys_metadata` items an uninstall removes: an install-local
         // package is registered from its ledger entry and has none.
         await this.recordUninstall(ctx, manifestId, removedVersion, admission.userId);
-        const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0) + (resync ? 1 : 0);
+        const keptCopies = copies.length > 0;
+        const withdrawals = refusedWithdrawals.size + copies.length + (resync ? 1 : 0);
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
+            + (withdrawalOrder.length > 1 ? `the package bodies it installed: ${withdrawalOrder.join(', ')}; ` : '')
+            + (withdrawal && withdrawn.length > 0 ? `withdrawn: ${withdrawn.join(', ')}; ` : '')
             + (withdrawal
                 ? 'the running kernel did NOT withdraw it, so it stays loaded until the next restart; '
-                : copies || resync
+                : keptCopies || resync
                     ? 'withdrawn from the running kernel\'s registry, but '
                         + [
-                            ...(copies ? ['the metadata service kept copies of its objects'] : []),
+                            ...(keptCopies ? ['the metadata service kept copies of its objects'] : []),
                             ...(resync ? ['the automation engine can still hold its flows'] : []),
                         ].join(' and ')
                         + ' until the next restart; '
@@ -3768,9 +4014,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 cleanups,
                 note: withdrawal
                     ? 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The running kernel did not withdraw the package, so it stays loaded until the next restart; that is the `registry.uninstallPackage` entry in `cleanups`.'
-                    : copies || resync
+                    : keptCopies || resync
                         ? 'Cached manifest removed, the package withdrawn from the running kernel\'s registry, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.'
-                            + (copies
+                            + (keptCopies
                                 ? ' The metadata service kept copies of the package\'s objects, so the object listing and reads keep serving them until the next restart; that is the `metadata.unregister` entry in `cleanups`.'
                                 : '')
                             + (resync
@@ -4567,7 +4813,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return { blocked: false, posture, pending: [], ...(carried ? { attestation: carried } : {}) };
         }
 
-        const findings = collectGlobalUniques(manifest?.objects);
+        // [#34407, ADR-0130 D4] The objects of every package this artifact
+        // delivers, through the one reader of a package-owned collection: the
+        // top-level `objects` when the body carries them (a flat bundle, or a
+        // composed artifact's flattened union — read once), otherwise every
+        // package body's, in package order. A composed bundle carries no
+        // top-level `objects`, so the top-level read listed nothing and its
+        // installation-wide uniques installed unasked. The resolver's refusal
+        // of a malformed `packages` propagates to the caller, which answers it.
+        const findings = collectGlobalUniques(resolveStackCollection(manifest, 'objects'));
         const pending = unconfirmedGlobalUniques(findings, carried, posture);
         if (pending.length === 0) {
             return { blocked: false, posture, pending: [], ...(carried ? { attestation: carried } : {}) };
@@ -6024,7 +6278,33 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
         if (incompatible) return incompatible;
 
-        return this.purgeSeedDatasets(c, ctx, manifestId, seedDatasetsOf(entry.manifest), entry);
+        const read = this.ledgerSeedDatasets(c, ctx, manifestId, entry, 'purge sample data');
+        if ('response' in read) return read.response;
+        return this.purgeSeedDatasets(c, ctx, manifestId, read.datasets, entry);
+    };
+
+    /**
+     * [#34336] The seed datasets of a ledger entry the purge or the count acts
+     * on ({@link seedDatasetsOf}), or — when the resolver refuses the entry's
+     * body (a malformed `packages`, ADR-0112) — the answer the two doors give
+     * an unreadable entry ({@link unreadableLedgerEntry}), naming the ledger
+     * file and quoting the refusal, instead of a throw that reaches the route's
+     * error path with no entry named.
+     */
+    private ledgerSeedDatasets = (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        entry: InstalledEntry,
+        attempted: string,
+    ): { datasets: PurgeSeedDataset[] } | { response: Response } => {
+        try {
+            return { datasets: seedDatasetsOf(entry.manifest) };
+        } catch (cause) {
+            return {
+                response: this.unreadableLedgerEntry(c, ctx, manifestId, { file: this.ledger.fileNameOf(manifestId), cause }, attempted),
+            };
+        }
     };
 
     /**
@@ -6325,7 +6605,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
             if (incompatible) return incompatible;
-            datasets = seedDatasetsOf(entry.manifest);
+            const read = this.ledgerSeedDatasets(c, ctx, manifestId, entry, 'count sample data');
+            if ('response' in read) return read.response;
+            datasets = read.datasets;
         }
         if (datasets.length === 0) return answer(0, 0);
 
@@ -6907,14 +7189,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Replicate the start-time side-effects that AppPlugin runs for
      * statically-declared apps but the `manifest` service does NOT:
      *
-     *   1. Load `manifest.translations` (array of `Record<locale, data>`)
-     *      into the i18n service — auto-creating an in-memory fallback if
-     *      none is registered, matching AppPlugin's behaviour.
+     *   1. Load the package's `translations` (arrays of `Record<locale, data>`:
+     *      the top-level list, or every package body's in package order for a
+     *      composed bundle, #34407) into the i18n service — auto-creating an
+     *      in-memory fallback if none is registered, matching AppPlugin's
+     *      behaviour.
      *
-     *   2. Merge `manifest.data` (an array of seed datasets) into the
-     *      kernel's `seed-datasets` service so SecurityPlugin's per-org
-     *      replay middleware picks them up on every future
-     *      sys_organization insert.
+     *   2. Merge the package's seed datasets ({@link seedDatasetsOf}: the
+     *      top-level `data`, or every package body's in package order for a
+     *      composed bundle, #34336) into the kernel's `seed-datasets` service
+     *      so SecurityPlugin's per-org replay middleware picks them up on
+     *      every future sys_organization insert.
      *
      *   3. When `seedNow=true`, also run the seed immediately so the user
      *      sees demo data without having to create a new org:
@@ -6940,9 +7225,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         let seedSummary: any = { mode: 'skipped', reason: 'no-datasets' };
 
         // ── 1. i18n bundles ─────────────────────────────────────────────
+        // [#34407, ADR-0130 D4] `translations` through the one reader of a
+        // package-owned collection, as the seed datasets below: the top-level
+        // list when the body carries one (a flat bundle, or a composed artifact
+        // that still carries its flattened union — read once), otherwise every
+        // package body's, in package order. A composed bundle carries no
+        // top-level `translations`, and the top-level read loaded none of its
+        // labels. A resolver refusal lands in this step's catch, as any other
+        // failure of it does.
         try {
             const bundles: Array<Record<string, unknown>> = [];
-            if (Array.isArray(manifest?.translations)) bundles.push(...manifest.translations);
+            bundles.push(...(resolveStackCollection(manifest, 'translations') as Array<Record<string, unknown>>));
             if (Array.isArray(manifest?.i18n)) bundles.push(...manifest.i18n);
 
             if (bundles.length > 0) {
@@ -6980,9 +7273,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         // ── 2. Seed datasets — merge into kernel service ─────────────────
-        const datasets = Array.isArray(manifest?.data)
-            ? manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-            : [];
+        // [#34336] Through the one reader, so a composed bundle's package
+        // bodies are seeded too. Every caller hands a body the `manifest`
+        // service already registered, so a refusal here is not expected; it
+        // is reported in the summary rather than thrown, per this method's
+        // contract.
+        let datasets: PurgeSeedDataset[] = [];
+        try {
+            datasets = seedDatasetsOf(manifest);
+        } catch (err: any) {
+            seedSummary = { mode: 'skipped', reason: `seed-datasets-unread: ${err?.message ?? err}` };
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: its seed datasets could not be read, so none were merged or seeded: ${err?.message ?? err}`);
+        }
 
         if (datasets.length > 0) {
             try {

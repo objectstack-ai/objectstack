@@ -797,8 +797,9 @@ const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
       'writer has no way to tell from the refusal which record to ask for access to.',
     'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
       'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
-      'same set holds View All or Modify All on the detail, because that bit makes the entry inert ' +
-      '(`security-superuser-field-mask-inert`).',
+      'same set holds Modify All on the detail, because that bit makes the entry inert ' +
+      '(`security-superuser-field-mask-inert`). Reported beside View All alone, where the set\'s own ' +
+      '`readable: false` binds.',
     'This is a warning, not an error: hiding the reference is legal and no door refuses it. To fix it, make ' +
       'the reference readable (`readable: true`, or delete the entry) when the set\'s holders should see why ' +
       'a write is refused. Keep it hidden when a generic refusal is what is meant.',
@@ -959,25 +960,29 @@ const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
 
 const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
   rule: 'security-superuser-field-mask-inert',
-  covers: 'why a field mask beside View All or Modify All hides nothing',
+  covers: 'why a field mask beside Modify All restricts nothing',
   paragraphs: [
-    '`viewAllRecords` (View All) and `modifyAllRecords` (Modify All) are the super-user bypass on an object. ' +
-      'A set that holds one votes on every field of that object when the field permissions are merged: View ' +
-      'All votes `readable: true`, Modify All votes `readable: true` and `editable: true` (ADR-0066 D2 as ' +
-      'amended). The merge is a union, so a `readable: false` the same set declares on that object hides the ' +
-      'field from none of the set\'s holders, and under Modify All its edit lock (`editable: false`, or ' +
-      '`editable` omitted, which parses to false) holds none of them back either. The stored set still reads ' +
-      'as masked, which is why an author or a reviewer takes the field to be protected.',
+    '`modifyAllRecords` (Modify All) is the super-user write bypass on an object. A set that holds it votes ' +
+      'on every field of that object when the field permissions are merged: `readable: true` and ' +
+      '`editable: true`, on its own field entries too (ADR-0066 D2 as amended). The merge is a union, so a ' +
+      '`readable: false` the same set declares on that object hides the field from none of the set\'s ' +
+      'holders, and its edit lock (`editable: false`, or `editable` omitted, which parses to false) holds ' +
+      'none of them back either. The stored set still reads as masked, which is why an author or a reviewer ' +
+      'takes the field to be protected.',
+    '`viewAllRecords` (View All) alone is not reported. It votes only `readable: true`, and it casts no ' +
+      'vote on a field the same set declares `readable: false`, so a set can grant View All on an object ' +
+      'and still hide a field of it from its holders. View All never widens a write, so an edit lock beside ' +
+      'it binds as well.',
     'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
-      'otherwise its `\'*\'` entry, as a lookup and never a merge. View All beside an edit lock is not ' +
-      'reported, because View All never widens a write, so that lock still binds. Only the set that declares ' +
-      'the entry is judged: a holder of two sets is unmasked by the other set\'s bypass too, but no author ' +
-      'wrote an inert entry there.',
+      'otherwise its `\'*\'` entry, as a lookup and never a merge. Only the set that declares the entry is ' +
+      'judged: a holder of two sets is unmasked by the other set\'s View All or Modify All too, but no ' +
+      'author wrote an inert entry there.',
     'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
-      'is meant. If the field must stay hidden or read-only, remove the bypass bit from the object entry and ' +
-      'reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
-      '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. If the bypass is ' +
-      'meant, delete the field entry, which never took effect.',
+      'is meant. If the field must stay hidden or read-only, remove `modifyAllRecords` from the object entry ' +
+      'and reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
+      '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. `viewAllRecords` ' +
+      'may stay, since the set\'s own `readable: false` binds beside it. If the bypass is meant, delete the ' +
+      'field entry, which never took effect.',
   ],
 };
 
@@ -1019,8 +1024,8 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'minimum, maximum or count of child values it cannot read one by one.',
     '"Can read" is judged as the runtime decides it, through three gates. The object grant: the set\'s own ' +
       'entry for the object, otherwise its `\'*\'` entry, which covers a private object only with View All ' +
-      'or Modify All. The field entry: `readable: false` hides the field, unless the set holds View All or ' +
-      'Modify All on the object; a set with no entry for a field reads it. The capability gate: an object\'s ' +
+      'or Modify All. The field entry: `readable: false` hides the field, unless the set holds Modify All ' +
+      'on the object; a set with no entry for a field reads it. The capability gate: an object\'s ' +
       '`requiredPermissions` (the list, or the `read` bucket of the per-operation map) and a field\'s ' +
       '`requiredPermissions` refuse the read unless the set\'s `systemPermissions` hold every listed ' +
       'capability. View All and Modify All do not lift the capability gate, so a set holding them on the ' +
@@ -1037,8 +1042,8 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'column from every holder of the set, and a co-held set with no entry for the column does not restore ' +
       'it, because only sets that declare an entry vote in the field merge (View All or Modify All on the ' +
       'parent in a co-held set does restore it); to keep the column for some ' +
-      'holders, declare `readable: true` on it in the sets they hold. A set that holds View All or Modify All ' +
-      'on the parent must drop that bit first, because the bypass makes the entry inert. If the set may see ' +
+      'holders, declare `readable: true` on it in the sets they hold. A set that holds Modify All on the ' +
+      'parent must drop that bit first, because Modify All makes the entry inert. If the set may see ' +
       'the child data, grant the read on the child instead.',
   ],
 };
@@ -3333,13 +3338,17 @@ const MANAGER_ONLY_ROUTES =
   'an existing user — and links each row once every row in the file exists, through those same ' +
   'refusals; a link it cannot make is reported on that row\'s manager result and never fails the ' +
   'user it imported. The column is also written by a seed, or by any other system-context ' +
-  'write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ' +
-  'populate it too, but only through a provisioning path your own deployment supplies: this ' +
-  'platform declares the SCIM \'manager\' attribute without projecting it onto the column — and ' +
-  'where a SCIM directory holds an identity the admin operation refuses, the import\'s ' +
-  'manager_id column included, leaving that directory the one surface that authors its ' +
-  'manager. An identity that only signs in through SSO, with no SCIM directory behind it, is set ' +
-  'through the admin operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
+  'write, which bypasses the managed-update whitelist. SCIM provisioning populates it too, for an ' +
+  'active user a SCIM directory holds and only from the connection that provisioned that user\'s ' +
+  'profile: the Enterprise User \'manager\' attribute, whose value is the manager\'s SCIM resource ' +
+  'id, is written onto the column on a SCIM create, replace or patch that names the attribute, ' +
+  'through those same refusals. A write that does not name it leaves the column as it is, and an ' +
+  'id that names no existing user the connection provisioned is served and leaves the column unchanged. ' +
+  'Where a SCIM directory holds an identity, the admin operation refuses it, the import\'s ' +
+  'manager_id column included, leaving that directory the one surface that authors its manager. Any other directory sync ' +
+  'populates it only through a provisioning path your own deployment supplies. An identity that ' +
+  'only signs in through SSO, with no SCIM directory behind it, is set through the admin ' +
+  'operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
   'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
   'of on the organization\'s administrators, which needs no write to the column at all.';
 

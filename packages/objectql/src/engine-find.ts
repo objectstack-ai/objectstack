@@ -5,7 +5,7 @@
  * `ObjectQL`: the bodies of `resolveRelateThenLowerWhere`, `withResolvedWhere`,
  * `expandSearchOnAst`, `expandSearchOnOptions`, `fillQueryAstDefaults`,
  * `requireFindOnePredicate`, `find`, `reportFindFailure`, `findOne` moved out
- * of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * of `engine.ts` whole (split by #30012 and #31116).
  *
  * A MOVE, not a redesign. {@link FindFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
