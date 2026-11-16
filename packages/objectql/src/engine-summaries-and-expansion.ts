@@ -45,6 +45,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withTransientRetry } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { aggregateSummaryValue, aggregateSummaryValues, summaryEmptySetValue } from './summary-aggregate.js';
+import { ruleReadKey, summaryFieldsReadByRules } from './summary-rule-reads.js';
 import type { SummaryDescriptor } from './summary-aggregate.js';
 import { ENGINE_WIRE_ONLY_SLOTS, WIRE_ONLY_CANONICAL_SHAPES } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
@@ -133,6 +134,29 @@ function summaryBatchKey(childObject: string, execCtx: ExecutionContext | undefi
 function writeTransactionOf(host: Pick<SummariesAndExpansionHost, 'isClosedUnitHandle' | 'txStore'>, execCtx: ExecutionContext | undefined): unknown {
   const explicit = execCtx?.transaction;
   return explicit !== undefined && !host.isClosedUnitHandle(explicit) ? explicit : host.txStore.getStore()?.transaction;
+}
+
+/**
+ * [#33795] The summary fields a rule reads, per built summary index: rebuilt
+ * when the index is (a registry change), so it is invalidated with metadata
+ * changes exactly as the index is (`ensureSummaryIndexes`).
+ */
+const ruleReadsByIndex = new WeakMap<object, Set<string>>();
+
+/**
+ * [#33795, ruling 6928862195 B] Does a rule read any of `descriptors`'
+ * summary fields? Then this recompute runs at once inside a batch scope, so a
+ * rule's answer during a bulk update is the one-by-one answer
+ * (`summary-rule-reads.ts`).
+ */
+function rollUpReadByARule(host: Pick<SummariesAndExpansionHost, '_registry' | 'summaryIndex'>, descriptors: readonly SummaryDescriptor[]): boolean {
+  const index = host.summaryIndex;
+  let read = index ? ruleReadsByIndex.get(index) : undefined;
+  if (!read) {
+    read = summaryFieldsReadByRules(host._registry.getAllObjects());
+    if (index) ruleReadsByIndex.set(index, read);
+  }
+  return descriptors.some((d) => read.has(ruleReadKey(d.parentObject, d.summaryField)));
 }
 
 /**
@@ -541,7 +565,7 @@ export class SummariesAndExpansionFacet {
    * Insert, update, delete and a re-parent of a child all reach the master
    * through this one write, so they all stamp the same way.
    */
-  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'isClosedUnitHandle' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'txStore' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
+  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, '_registry' | 'facade' | 'getSummaryDescriptors' | 'isClosedUnitHandle' | 'logger' | 'summaryBatchStore' | 'summaryIndex' | 'summaryRetryOptions' | 'txStore' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
     if (descriptors.length === 0) return [];
 
@@ -552,9 +576,12 @@ export class SummariesAndExpansionFacet {
     // failure can be reported here, so none is: the scope reports them.
     // Only a write under the scope's own transaction is recorded; one under
     // another (a hook's `ctx.api.transaction`, a nested atomic batch) may
-    // commit before the scope ends, so it recomputes now, inside it.
+    // commit before the scope ends, so it recomputes now, inside it. A
+    // roll-up a rule reads is not recorded either (ruling 6928862195 B): it
+    // recomputes after each row, so the next row's rule reads it as
+    // one-by-one updates would.
     const scope = this.summaryBatchStore.getStore();
-    if (scope && !scope.closed && writeTransactionOf(this, execCtx) === scope.transaction) {
+    if (scope && !scope.closed && writeTransactionOf(this, execCtx) === scope.transaction && !rollUpReadByARule(this, descriptors)) {
       const fkFields = [...new Set(descriptors.map((d) => d.fkField))];
       const keysOf = (r: unknown): Record<string, unknown> => {
         const keys: Record<string, unknown> = {};
@@ -722,11 +749,13 @@ export class SummariesAndExpansionFacet {
    * scope, and the outermost call runs the recompute.
    *
    * Only the roll-up recompute moves. Each write's hooks, validation, audit
-   * and realtime run where they run outside a scope. So a rule or hook that
-   * reads a parent's summary during the batch reads the value from before
-   * the batch, as it already does during a predicate update. (A multi-row
-   * insert's validation rules see the batch's earlier rows through an
-   * in-memory overlay, `summary-batch-accumulation.ts`; a scope has none.)
+   * and realtime run where they run outside a scope. A summary field a rule
+   * reads is never deferred (ruling 6928862195 B, `summary-rule-reads.ts`):
+   * its recompute runs after each row, inside the scope, so the next row's
+   * rule reads what one-by-one writes would have it read, for every summary
+   * function. A hook or flow step that reads a parent's summary during the
+   * batch reads the value from before the batch, as it does during a
+   * multi-row insert.
    *
    * Every way out recomputes, over every write recorded:
    *
@@ -750,7 +779,7 @@ export class SummariesAndExpansionFacet {
    * A write recorded after the callback settled (work it started and did not
    * await) recomputes at once.
    */
-  static async deferSummaryRecompute<T>(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'isClosedUnitHandle' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'txStore' | 'update'>, callback: () => Promise<T>): Promise<T> {
+  static async deferSummaryRecompute<T>(this: Pick<SummariesAndExpansionHost, '_registry' | 'facade' | 'getSummaryDescriptors' | 'isClosedUnitHandle' | 'logger' | 'summaryBatchStore' | 'summaryIndex' | 'summaryRetryOptions' | 'txStore' | 'update'>, callback: () => Promise<T>): Promise<T> {
     // A nested call joins the open scope: the outermost one runs the recompute.
     const open = this.summaryBatchStore.getStore();
     if (open && !open.closed) return await callback();

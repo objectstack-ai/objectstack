@@ -406,6 +406,17 @@ writes them in (200 rows each) and refuses the rows the import refuses, with
 the same message. It writes nothing, so a row in a later batch reads the
 summary as stored before the import: two such rows that fall in different
 batches of a dry run both preview valid, while the import refuses the second.
+**A bulk update equals one-by-one updates (批量等于逐条):** a bulk update
+(`updateManyData`, the `update` operation of `batchData`, a grid bulk edit)
+recomputes the parents' summaries once, when the batch ends, except a summary
+that a rule reads: a validation rule of any object reading it one hop through a
+reference, or a detail object's `requiredWhen` / `readonlyWhen` reading it on
+`parent`. That summary recomputes after each row, so each row's rules read it
+as one-by-one updates would, for every summary function, `avg` included. A
+`parent.` predicate that reads a field that is not a summary does not count.
+**Hooks and flow steps read the value from before the batch:** inside one bulk
+create or bulk update, a hook or flow step that reads a parent's summary reads
+it as stored before the batch, on create and update alike.
 **Concurrent writes are not guaranteed (并发不保证):** two writes in flight at
 the same time each read the summary they started from, so a guard like the one
 above can still admit one row from each.

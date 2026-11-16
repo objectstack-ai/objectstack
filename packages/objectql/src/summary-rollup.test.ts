@@ -1059,6 +1059,57 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
     expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50 });
   });
 
+  describe('[ruling 6928862195 B] a roll-up a rule reads is not deferred', () => {
+    const lineWith = (extra: Record<string, unknown>) => engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+        ...(extra.fields as object ?? {}),
+      },
+      ...(extra.validations ? { validations: extra.validations } : {}),
+    } as any);
+    /** Parent writes made DURING the batch, and after it. */
+    async function batchOfSix(): Promise<{ during: number; after: number }> {
+      const { lines } = await seed();
+      let during = 0;
+      await engine.deferSummaryRecompute(async () => {
+        for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+        during = parentWrites.length;
+      });
+      return { during, after: parentWrites.length - during };
+    }
+
+    it('(i) a validation rule on the child reading the parent summary one hop: each row recomputes at once', async () => {
+      lineWith({ validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.inv.line_count > 1000' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(i) a validation rule on ANOTHER object reading the parent summary: judged on the field read, not the object written', async () => {
+      engine.registry.registerObject({
+        name: 'inv_memo',
+        fields: { inv: { type: 'lookup', reference: 'inv' } },
+        validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.inv.line_total > 100000' }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(ii) a field-level parent. predicate reading the parent summary: each row recomputes at once', async () => {
+      lineWith({ fields: { note: { type: 'text', readonlyWhen: 'parent.line_total > 100000' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a parent. predicate reading a field that is no summary (the showcase invoice line, parent.status) keeps the deferral', async () => {
+      lineWith({ fields: { note: { type: 'text', readonlyWhen: "parent.name == 'paid'", requiredWhen: "parent.name == 'x'" } } });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a rule reading another field of the related row keeps the deferral', async () => {
+      lineWith({ validations: [{ name: 'named', type: 'script', severity: 'error', message: 'named', condition: "record.inv.name == 'never'" }] });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+  });
+
   it('a scope with no roll-up write runs nothing', async () => {
     const before = log.length;
     await engine.deferSummaryRecompute(async () => { await engine.insert('region', { name: 'R' }); });

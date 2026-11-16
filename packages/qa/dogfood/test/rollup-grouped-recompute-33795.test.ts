@@ -105,7 +105,56 @@ const KIND_OBJECTS = [
   },
 ];
 
-const OBJECTS = [...rollupPair(0), ...rollupPair(1), ...rollupPair(2), ...KIND_OBJECTS];
+/**
+ * [#33795, ruling 6928862195 B] A supplier whose contacts' rules read its
+ * roll-ups, one child object per summary function so each rule moves alone:
+ * "at most one primary contact" over a filtered `count`, and a bound on a
+ * contact's score against the supplier's current `avg`, `min` and `max`.
+ */
+const RULE_SUPPLIER = 'r33795_rsup';
+const RULE_CHILDREN = {
+  count: { object: 'r33795_rsup_primary', summary: 'primary_count', op: { function: 'count', filter: { is_primary: true } } },
+  avg: { object: 'r33795_rsup_avg', summary: 'score_avg', op: { function: 'avg', field: 'score' } },
+  min: { object: 'r33795_rsup_min', summary: 'score_min', op: { function: 'min', field: 'score' } },
+  max: { object: 'r33795_rsup_max', summary: 'score_max', op: { function: 'max', field: 'score' } },
+} as const;
+const RULE_TEXT = {
+  count: 'A supplier has at most one primary contact.',
+  avg: 'A score may not exceed the supplier average by more than 2.',
+  min: 'A score may not fall more than 1 below the supplier minimum.',
+  max: 'A score may not rise more than 1 above the supplier maximum.',
+} as const;
+const RULE_CONDITION = {
+  count: 'record.is_primary == true && record.supplier.primary_count > 0',
+  avg: 'record.supplier.score_avg != null && record.score > record.supplier.score_avg + 2.0',
+  min: 'record.supplier.score_min != null && record.score < record.supplier.score_min - 1.0',
+  max: 'record.supplier.score_max != null && record.score > record.supplier.score_max + 1.0',
+} as const;
+const RULE_OBJECTS = [
+  {
+    name: RULE_SUPPLIER,
+    label: 'Rule supplier',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      ...Object.fromEntries(Object.values(RULE_CHILDREN).map(({ object, summary, op }) => [
+        summary, { type: 'summary', label: summary, summaryOperations: { object, ...op } },
+      ])),
+    },
+  },
+  ...(Object.keys(RULE_CHILDREN) as Array<keyof typeof RULE_CHILDREN>).map((fn) => ({
+    name: RULE_CHILDREN[fn].object,
+    label: `Rule contact (${fn})`,
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      supplier: { type: 'lookup', label: 'Supplier', reference: RULE_SUPPLIER },
+      is_primary: { type: 'boolean', label: 'Primary' },
+      score: { type: 'number', label: 'Score' },
+    },
+    validations: [{ name: `rule_${fn}`, type: 'script', severity: 'error', message: RULE_TEXT[fn], condition: RULE_CONDITION[fn] }],
+  })),
+];
+
+const OBJECTS = [...rollupPair(0), ...rollupPair(1), ...rollupPair(2), ...KIND_OBJECTS, ...RULE_OBJECTS];
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -344,6 +393,90 @@ describe.each(CELLS)('roll-up batch deferral through the bulk update door (#3379
     expect(answer).toMatchObject({ success: true, succeeded: 30 });
     await check('after updateManyData on an engine without the member');
   });
+});
+
+/**
+ * [#33795, ruling 6928862195 B] A roll-up a rule reads is not deferred: a
+ * bulk update through the real door answers what single updates answer, row
+ * for row, for a filtered `count` and for `avg`, `min` and `max`; atomic and
+ * `continueOnError`. Each case runs twice on twin data — once as one batch,
+ * once as one-record calls of the same door — and the answers, the stored
+ * rows and the supplier's roll-ups must match. A roll-up no rule reads (the
+ * describe above) keeps its deferred statement counts.
+ */
+const RULE_CASES: Record<keyof typeof RULE_CHILDREN, { seed: Array<Record<string, unknown>>; batch: Array<Record<string, unknown>> }> = {
+  // Two contacts set primary in one edit: one-by-one refuses the second;
+  // against the pre-batch count (0) both would pass.
+  count: { seed: [{ is_primary: false }, { is_primary: false }], batch: [{ is_primary: true }, { is_primary: true }] },
+  // Scores 3, 3, 3 (avg 3): 0 is admitted and moves the avg to 2, so 4.5 is
+  // refused (4.5 > 4); against the pre-batch avg it would pass (4.5 > 5 is false).
+  avg: { seed: [{ score: 3 }, { score: 3 }, { score: 3 }], batch: [{ score: 0 }, { score: 4.5 }] },
+  // Scores 1, 5, 5 (min 1): the 1 becomes 5, so the min is 5 and 3 is refused
+  // (3 < 4); against the pre-batch min it would pass (3 < 0 is false).
+  min: { seed: [{ score: 1 }, { score: 5 }, { score: 5 }], batch: [{ score: 5 }, { score: 3 }] },
+  // Scores 9, 5, 5 (max 9): the 9 becomes 5, so the max is 5 and 7 is refused
+  // (7 > 6); against the pre-batch max it would pass (7 > 10 is false).
+  max: { seed: [{ score: 9 }, { score: 5 }, { score: 5 }], batch: [{ score: 5 }, { score: 7 }] },
+};
+
+describe.each(CELLS)('a roll-up a rule reads is not deferred (#33795 B): $name', ({ url, make }) => {
+  const skip = !url;
+
+  async function twin(engine: ObjectQL, fn: keyof typeof RULE_CHILDREN, tag: string) {
+    const [supplier] = await engine.insert(RULE_SUPPLIER, [{ name: `${fn}-${tag}` }], SYSTEM) as Array<{ id: string }>;
+    const contacts = await engine.insert(RULE_CHILDREN[fn].object, RULE_CASES[fn].seed.map((row, k) => ({
+      name: `${tag}${k}`, supplier: supplier.id, ...row,
+    })), SYSTEM) as Array<{ id: string }>;
+    const records = RULE_CASES[fn].batch.map((data, k) => ({ id: contacts[k].id, data }));
+    const state = async () => ({
+      summary: num((await engine.findOne(RULE_SUPPLIER, { where: { id: supplier.id } }, SYSTEM) as any)[RULE_CHILDREN[fn].summary]),
+      contacts: (await engine.find(RULE_CHILDREN[fn].object, { where: { supplier: supplier.id }, orderBy: [{ field: 'name', order: 'asc' }] }, SYSTEM) as any[])
+        .map((c) => ({ is_primary: !!c.is_primary, score: num(c.score) })),
+    });
+    return { records, state };
+  }
+
+  /** The per-row answers a caller reads: success and the first error's code and text. */
+  const rows = (answer: any) => (answer.results as any[]).map((r) => ({ success: r.success, code: r.errors?.[0]?.code, message: r.errors?.[0]?.message }));
+
+  for (const fn of Object.keys(RULE_CHILDREN) as Array<keyof typeof RULE_CHILDREN>) {
+    it.skipIf(skip)(`${fn}: continueOnError answers what single updates answer`, async () => {
+      const { engine } = await boot(make);
+      const protocol = new ObjectStackProtocolImplementation(engine as never);
+      const object = RULE_CHILDREN[fn].object;
+      const one = await twin(engine, fn, 'single');
+      const singles: any[] = [];
+      for (const record of one.records) {
+        singles.push(...rows(await protocol.updateManyData({ object, records: [record], options: { continueOnError: true }, context: SYSTEM.context } as never)));
+      }
+      const batch = await twin(engine, fn, 'batch');
+      const answer = await protocol.updateManyData({ object, records: batch.records, options: { continueOnError: true }, context: SYSTEM.context } as never);
+      // One by one, the first row is admitted and the second refused with the rule's own text.
+      expect(singles[0]).toMatchObject({ success: true });
+      expect(singles[1]).toMatchObject({ success: false, message: expect.stringContaining(RULE_TEXT[fn]) });
+      expect(rows(answer)).toEqual(singles);
+      expect(await batch.state()).toEqual(await one.state());
+    });
+
+    it.skipIf(skip)(`${fn}: an atomic batch refuses the second row with the single update's answer and writes nothing`, async () => {
+      const { engine } = await boot(make);
+      const protocol = new ObjectStackProtocolImplementation(engine as never);
+      const object = RULE_CHILDREN[fn].object;
+      const one = await twin(engine, fn, 'single');
+      const before = await one.state();
+      const second = rows(await protocol.updateManyData({ object, records: [one.records[0]], context: SYSTEM.context } as never)).concat(
+        rows(await protocol.updateManyData({ object, records: [one.records[1]], context: SYSTEM.context } as never)),
+      )[1];
+      expect(second).toMatchObject({ success: false, message: expect.stringContaining(RULE_TEXT[fn]) });
+      const batch = await twin(engine, fn, 'batch');
+      const answer = await protocol.updateManyData({ object, records: batch.records, options: { atomic: true }, context: SYSTEM.context } as never);
+      expect(answer).toMatchObject({ success: false });
+      const got = rows(answer);
+      expect(got[0]).toMatchObject({ success: false, code: 'ROLLED_BACK' });
+      expect(got[1]).toEqual(second);
+      expect(await batch.state()).toEqual(before);
+    });
+  }
 });
 
 /** A stored number as a number: PostgreSQL may answer a numeric aggregate as text. */
