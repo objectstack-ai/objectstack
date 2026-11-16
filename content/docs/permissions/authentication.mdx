@@ -1310,11 +1310,11 @@ before they sign in. Off a managed environment both doors answer `409`.
 
 On a cloud-managed environment the organisation that hosts it decides who is a
 member and at which membership tier, so every organization door that writes or
-deletes a membership row (below: removing a member, changing a member's tier
+deletes a membership row (the six below: removing a member, changing a member's tier
 with Make Owner included, leaving, accepting an invitation, creating an
 organization, which makes the caller its owner, and deleting one, which ends
 every membership in it) answers `409 RESOURCE_CONFLICT` there and changes
-nothing, and their actions are hidden. The one exception is
+nothing, and their seven actions are hidden. The one exception is
 `POST /api/v1/auth/organization/add-member`, which admits exactly a platform
 administrator, adding a membership, so the operator can restore one the
 environment lost; anyone else is refused `403 PERMISSION_DENIED`. The other
