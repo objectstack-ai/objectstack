@@ -196,6 +196,7 @@ describe('[ADR-0130 D4] an install-local uninstall of a composed artifact uninst
 
     it('DELETE of the install entry answers 200 and withdraws every member, the extending module before the app it extends', async () => {
         const booted = await installComposed();
+        const warnedBefore = booted.warnings().length;
 
         const res = await booted.uninstall(APP);
 
@@ -208,7 +209,8 @@ describe('[ADR-0130 D4] an install-local uninstall of a composed artifact uninst
         expect(booted.ql.registry.getObjectContributors(OBJECT)).toEqual([]);
         // Every withdrawal succeeded, so none is reported as a failed outcome.
         expect(res.payload.data.cleanups).toEqual([]);
-        expect(booted.warnings()).toEqual([]);
+        // The uninstall itself warns of nothing (the install's own warnings are not this test's).
+        expect(booted.warnings().slice(warnedBefore)).toEqual([]);
     });
 
     it('the extending module goes first even when the artifact lists it ahead of the app', async () => {
