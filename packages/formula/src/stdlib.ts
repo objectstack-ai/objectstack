@@ -22,6 +22,7 @@
 import type { Environment } from '@marcbachmann/cel-js';
 
 import type { EvalContext, EvalOptionLabels, EvalPermissions, EvalSystemPermissions } from './types';
+import { rmbUpper } from './rmb-upper';
 import { createEvalUser, type EvalUser } from '@objectstack/spec';
 // The verb vocabulary lives on the SECURITY subpath, where the permission
 // contract it is seeded from lives — not on the root barrel, which exports a
@@ -772,6 +773,11 @@ export function registerBoundStdLib(env: Environment, read: () => StdLibBinding)
     // are ints. Comparison is numeric.
     .registerFunction('min(dyn, dyn): dyn', (a: unknown, b: unknown) => (Number(a) <= Number(b) ? a : b))
     .registerFunction('max(dyn, dyn): dyn', (a: unknown, b: unknown) => (Number(a) >= Number(b) ? a : b))
+    // An amount as Chinese capital numerals (人民币大写), the line a Chinese quote
+    // or invoice prints under the total: `rmbUpper(245000)` is `贰拾肆万伍仟元整`.
+    // Rounded to 分 half away from zero on the exact decimal; `''` for null; a
+    // value that spells no number is refused. Rules: `rmb-upper.ts`.
+    .registerFunction('rmbUpper(dyn): string', (x: unknown) => rmbUpper(x))
     // ── Strings ──────────────────────────────────────────────────────────
     // Free-function forms of the common string ops. CEL also exposes some as
     // receiver methods (`s.contains(x)`), but the authoring catalog advertises

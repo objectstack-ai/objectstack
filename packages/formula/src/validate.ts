@@ -1730,18 +1730,18 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  *
  * ## This is a CURATED SUBSET of what the environment resolves — by construction
  *
- * The evaluation `Environment` resolves **77** distinct function names. This list
- * carries 38 of them, and the 39-name gap is NOT staleness. Measured decomposition
+ * The evaluation `Environment` resolves **78** distinct function names. This list
+ * carries 39 of them, and the 39-name gap is NOT staleness. Measured decomposition
  * (`cel-stdlib-drift.test.ts` re-measures all four numbers on every run):
  *
- *   77 registered names
- *    = 42 callable BARE, as `fn(x)`            -> the only shape this list may carry
+ *   78 registered names
+ *    = 43 callable BARE, as `fn(x)`            -> the only shape this list may carry
  *    + 35 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
  *                                                 (cel-js's 33, plus our `can`
  *                                                 and `hasCapability`)
  *
- *   42 bare-callable
- *    = 30 added by `registerStdLib`   -> ALL advertised (one per registration site)
+ *   43 bare-callable
+ *    = 31 added by `registerStdLib`   -> ALL advertised (one per registration site)
  *    +  8 cel-js built-ins            -> advertised: has size int string bool double
  *                                        timestamp duration
  *    +  4 cel-js built-ins WITHHELD   -> bytes dyn type uint
@@ -1773,7 +1773,7 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'now', 'today', 'daysFromNow', 'daysAgo', 'daysBetween', 'addDays', 'addMonths', 'date', 'datetime',
   'isoDate', 'isoDatetime',
   // Numbers (registered stdlib)
-  'abs', 'round', 'floor', 'ceil', 'min', 'max',
+  'abs', 'round', 'floor', 'ceil', 'min', 'max', 'rmbUpper',
   // Strings (registered stdlib)
   'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches', 'joinNonEmpty',
   // Collections / null-ish (registered stdlib)
