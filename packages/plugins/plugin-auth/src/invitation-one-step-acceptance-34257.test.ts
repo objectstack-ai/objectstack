@@ -6,6 +6,7 @@
 // plugin, audience gate, membership reconciler, ObjectQL adapter), over the
 // same minimal engine double the other end-to-end auth-manager suites use.
 
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
@@ -165,7 +166,7 @@ const proofOf = (mail: SentMail): string => {
   return decodeURIComponent(match![1]!);
 };
 
-const boot = async () => {
+const boot = async (options: Record<string, unknown> = {}) => {
   const engine = createMemoryEngine();
   engine.tables.set('sys_organization', [
     { id: DEFAULT_ORG, name: 'Default', slug: 'default' },
@@ -177,6 +178,7 @@ const boot = async () => {
     dataEngine: engine as any,
     membershipPolicy: 'auto',
     getTenancy: () => singleOrgTenancy(),
+    ...options,
   });
   const sent: SentMail[] = [];
   manager.setEmailService({
@@ -283,6 +285,7 @@ describe('#34257 — accepting with the proof', () => {
 
     const anonymous = await door(manager, { invitationId: invitation.id, name: 'X', password: PASSWORD });
     expect(anonymous.status).toBe(401);
+    expect((await anonymous.json()).code).toBe('UNAUTHENTICATED');
 
     expect(userRow(engine, 'unverified@example.com')?.email_verified).toBeFalsy();
     expect(invitationOf(engine, 'unverified@example.com')?.status).toBe('pending');
@@ -433,5 +436,181 @@ describe('#34257 — a signed-in return accepts only a verified address', () => 
     expect((await res.json()).data).toEqual({ outcome: 'verify_email' });
     expect(membersOf(engine, PARTNER_ORG, person.userId)).toHaveLength(0);
     expect(invitationOf(engine, 'unsure@example.com')?.status).toBe('pending');
+  });
+});
+
+// The tables a redemption writes: the account, its credential, its sessions,
+// the membership, the invitation and the proof row.
+const WRITTEN_TABLES = ['sys_user', 'sys_account', 'sys_session', 'sys_member', 'sys_invitation', 'sys_verification'];
+const writtenState = (engine: MemoryEngine) =>
+  JSON.stringify(WRITTEN_TABLES.map((table) => [table, engine.tables.get(table) ?? []]));
+
+const expectAnswer = async (res: Response, status: number, code: string) => {
+  const text = await res.clone().text();
+  expect(res.status, text).toBe(status);
+  expect(JSON.parse(text).code, text).toBe(code);
+};
+
+const expectSignIn = async (res: Response) => {
+  const text = await res.clone().text();
+  expect(res.status, text).toBe(200);
+  expect(JSON.parse(text).data).toEqual({ outcome: 'sign_in' });
+};
+
+const expectAccepted = async (res: Response) => {
+  const text = await res.clone().text();
+  expect(res.status, text).toBe(200);
+  expect(JSON.parse(text).data).toEqual({ outcome: 'accepted', organizationId: PARTNER_ORG });
+};
+
+describe('#34257 — every gate refuses before anything is written, and the proof stays usable', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('a new address is refused where email sign-up is switched off', async () => {
+    const { engine, manager, invite } = await boot({ emailAndPassword: { disableSignUp: true } });
+    const { invitation, proof } = await invite('closed@example.com');
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'C', password: PASSWORD }), 403, 'PERMISSION_DENIED');
+    expect(writtenState(engine)).toBe(before);
+
+    manager.applyConfigPatch({ emailAndPassword: { disableSignUp: false } } as never);
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'C', password: PASSWORD }));
+  });
+
+  it('a new address is refused in SSO-only mode', async () => {
+    const { engine, manager, invite } = await boot({ ssoOnlyMode: true });
+    const { invitation, proof } = await invite('sso-new@example.com');
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: PASSWORD }), 403, 'PERMISSION_DENIED');
+    expect(writtenState(engine)).toBe(before);
+
+    manager.applyConfigPatch({ ssoOnlyMode: false } as never);
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: PASSWORD }));
+  });
+
+  it('an unverified account in SSO-only mode signs in as today, and the proof stays unspent', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('sso-held@example.com');
+    await signUp(manager, engine, 'sso-held@example.com');
+    manager.applyConfigPatch({ ssoOnlyMode: true } as never);
+    const before = writtenState(engine);
+
+    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
+    expect(writtenState(engine)).toBe(before);
+
+    manager.applyConfigPatch({ ssoOnlyMode: false } as never);
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
+  });
+
+  it('an unverified account with a second factor signs in as today, and the proof stays unspent', async () => {
+    const { engine, manager, invite } = await boot({ plugins: { twoFactor: true } });
+    const { invitation, proof } = await invite('two-factor@example.com');
+    await signUp(manager, engine, 'two-factor@example.com');
+    userRow(engine, 'two-factor@example.com')!.two_factor_enabled = true;
+    const before = writtenState(engine);
+
+    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'T', password: NEW_PASSWORD }));
+    expect(writtenState(engine)).toBe(before);
+
+    userRow(engine, 'two-factor@example.com')!.two_factor_enabled = false;
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'T', password: NEW_PASSWORD }));
+  });
+
+  it.each([
+    ['provisioned by an identity provider', 'idp_provisioned'],
+    ['pending its first SSO sign-in', 'idp_pending'],
+  ])('an unverified account %s signs in as today, and the proof stays unspent', async (_label, source) => {
+    const { engine, manager, invite } = await boot();
+    const email = `directory-${source}@example.com`;
+    const { invitation, proof } = await invite(email);
+    await signUp(manager, engine, email);
+    userRow(engine, email)!.source = source;
+    const before = writtenState(engine);
+
+    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'D', password: NEW_PASSWORD }));
+    expect(writtenState(engine)).toBe(before);
+
+    userRow(engine, email)!.source = null;
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'D', password: NEW_PASSWORD }));
+  });
+
+  it('a password under the minimum length is refused', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('short@example.com');
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: 'Ab1!' }), 400, 'PASSWORD_POLICY_VIOLATION');
+    expect(writtenState(engine)).toBe(before);
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: PASSWORD }));
+  });
+
+  it('a password the complexity policy refuses is refused', async () => {
+    const { engine, manager, invite } = await boot({ passwordRequireComplexity: true });
+    const { invitation, proof } = await invite('simple@example.com');
+    const before = writtenState(engine);
+
+    await expectAnswer(
+      await door(manager, { invitationId: invitation.id, proof, name: 'S', password: 'onlylowercaseletters' }),
+      400,
+      'PASSWORD_POLICY_VIOLATION',
+    );
+    expect(writtenState(engine)).toBe(before);
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: PASSWORD }));
+  });
+
+  it('a breached password is refused, and the proof stays usable', async () => {
+    const BREACHED = 'Br3ached!Passw0rd-list';
+    const digest = createHash('sha1').update(BREACHED).digest('hex').toUpperCase();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith('https://api.pwnedpasswords.com/range/')) throw new Error(`unexpected fetch: ${url}`);
+      const listed = url.endsWith(`/${digest.slice(0, 5)}`) ? `${digest.slice(5)}:42` : '0000000000000000000000000000000000A:1';
+      return new Response(listed, { status: 200, headers: { 'content-type': 'text/plain' } });
+    });
+    const { engine, manager, invite } = await boot({ plugins: { passwordRejectBreached: true } });
+    const { invitation, proof } = await invite('breached@example.com');
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'B', password: BREACHED }), 400, 'PASSWORD_COMPROMISED');
+    expect(writtenState(engine)).toBe(before);
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'B', password: PASSWORD }));
+  });
+
+  it('a new address the audience admission refuses is refused', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('refused@example.com');
+    // A posture outside the vocabulary refuses every self-serve creation. The
+    // entry validation refuses one at the door, so it is set behind it.
+    const config = (manager as unknown as { config: Record<string, unknown> }).config;
+    const standing = config.audience;
+    config.audience = { posture: 'not_a_posture' };
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'R', password: PASSWORD }), 403, 'AUTH_CONFIG_ERROR');
+    expect(writtenState(engine)).toBe(before);
+
+    config.audience = standing;
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'R', password: PASSWORD }));
+  });
+
+  it('a new address with no name is refused', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('nameless@example.com');
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: '  ', password: PASSWORD }), 400, 'VALIDATION_ERROR');
+    expect(writtenState(engine)).toBe(before);
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'Named', password: PASSWORD }));
   });
 });
