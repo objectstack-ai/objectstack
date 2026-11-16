@@ -59,10 +59,11 @@
  * object-scoped key to write instead. See {@link actionTranslationNode}.
  *
  * Lookup order: requested locale → each entry of `fallbackChain` → literal
- * `label` from the metadata — except that a request for the deployment's
- * `defaultLocale` never walks the chain: the authored label IS the default
- * locale's text (#15711), so it answers right after the requested locale's
- * own bundle. Helpers never throw — they always return at minimum the
+ * `label` from the metadata — except that a request for the language the
+ * labels are authored in (`ResolveOptions.defaultLocale`: the deployment's
+ * `sourceLocale`, else its `defaultLocale`) never walks the chain: the
+ * authored label IS that locale's text (#15711, #33634), so it answers right
+ * after the requested locale's own bundle. Helpers never throw — they always return at minimum the
  * metadata literal so unconfigured languages gracefully degrade.
  *
  * ## The OTHER half of `I18nLabel`, and where it lives
@@ -337,22 +338,26 @@ export interface ResolveOptions {
    */
   fallbackChain?: string[];
   /**
-   * [#15711] The deployment's DEFAULT locale — the language its metadata
-   * labels are authored in (`i18n.defaultLocale`). When `locale` names it
+   * [#15711 · #33634] The language the deployment's metadata labels are
+   * authored in: its declared `i18n.sourceLocale`, else `i18n.defaultLocale`
+   * (the two coincide unless an app authored in one language defaults its
+   * users to another). Named for the second because that was the only value
+   * before `sourceLocale` existed. When `locale` names it
    * (BCP-47 tags compare case-insensitively, the same rule
    * {@link resolveBundleLocale} applies), the resolvers consult the requested
    * locale's own bundle and then answer with the authored label: the chain
-   * is NOT walked, because the authored label IS the default locale's text.
-   * That is what `os i18n check` already claims when it reports the default
+   * is NOT walked, because the authored label IS that locale's text.
+   * That is what `os i18n check` already claims when it reports the source
    * locale as fully covered by authored text, and what a stack declaring
    * `defaultLocale: 'zh-CN'` with a reflexive `fallbackLocale: 'en'` needs so
    * its courtesy `en` bundle cannot outrank the author for a `zh-CN` request
    * (ruled on #15711 — the contract question #14882 left open).
    *
    * Supplied by the caller that can see the declaration: the serving layer
-   * reads `II18nService.getDefaultLocale()`. Absent, no request is the
-   * default one and every request walks `locale → fallbackChain → authored`.
-   * A bundle entry for the default locale still wins when one is shipped
+   * reads `II18nService.getSourceLocale()`, else `getDefaultLocale()`.
+   * Absent, no request is the authored one and every request walks
+   * `locale → fallbackChain → authored`.
+   * A bundle entry for the authored locale still wins when one is shipped
    * (`os i18n extract --locales=<default>` keeps working; it is optional).
    */
   defaultLocale?: string;
@@ -629,10 +634,10 @@ function isDefaultLocale(locale: string, defaultLocale: string | undefined): boo
 
 /**
  * The locales a lookup consults, in order: the requested locale, then the
- * DECLARED `fallbackChain` — unless the requested locale is the deployment's
- * `defaultLocale`, in which case the chain is skipped and the authored label
- * answers right after the requested locale's own bundle (#15711: the
- * authored label is the default locale's text). A caller that declares no
+ * DECLARED `fallbackChain` — unless the requested locale is the authored
+ * language (`ResolveOptions.defaultLocale`), in which case the chain is
+ * skipped and the authored label answers right after the requested locale's
+ * own bundle (#15711: the authored label is that locale's text). A caller that declares no
  * chain gets the requested locale alone — nothing is invented (#15711's
  * second facet; the default used to be a literal `['en']`).
  */

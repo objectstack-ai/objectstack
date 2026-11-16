@@ -660,6 +660,28 @@ describe('createMemoryI18n declared fallbackLocale (#15694)', () => {
         expect(typeof i18n.setFallbackLocale).toBe('function');
         expect(i18n.getFallbackLocale).toBeUndefined();
     });
+
+    // #33634 — the source-locale pair: unlike the fallback pair, both halves
+    // exist, because the accessor answers only what it was told.
+    it('getSourceLocale answers undefined until setSourceLocale is called, then exactly what it was told', () => {
+        const i18n = createMemoryI18n();
+        i18n.setDefaultLocale('zh-CN');
+        // Never derived from `defaultLocale`: that collapse is the caller's.
+        expect(i18n.getSourceLocale()).toBeUndefined();
+        i18n.setSourceLocale('en');
+        expect(i18n.getSourceLocale()).toBe('en');
+        expect(i18n.getDefaultLocale()).toBe('zh-CN');
+    });
+
+    it('setSourceLocale changes no t() lookup', () => {
+        const i18n = createMemoryI18n();
+        i18n.setDefaultLocale('zh-CN');
+        i18n.loadTranslations('en', { greeting: 'Hello' });
+        i18n.loadTranslations('zh-CN', { other: '其他' });
+        const before = [i18n.t('greeting', 'zh-CN'), i18n.t('greeting', 'en'), i18n.t('other', 'en')];
+        i18n.setSourceLocale('en');
+        expect([i18n.t('greeting', 'zh-CN'), i18n.t('greeting', 'en'), i18n.t('other', 'en')]).toEqual(before);
+    });
 });
 
 // #30456: the one matcher for "is this locale offered here, and as which code",

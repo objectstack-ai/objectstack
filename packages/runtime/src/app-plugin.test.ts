@@ -298,6 +298,39 @@ describe('AppPlugin', () => {
             expect(mockI18n.setDefaultLocale).toHaveBeenCalledWith('zh-CN');
         });
 
+        // ── #33634: `sourceLocale` is threaded like the others ─────────────
+        // The serving layer reads it back (`getSourceLocale()`) as the
+        // authored label's language; this layer is the only one that sees it.
+
+        it('should thread sourceLocale from i18n config to the i18n service', async () => {
+            mockI18n.setSourceLocale = vi.fn();
+            const bundle = {
+                id: 'com.test.source',
+                i18n: { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+            };
+            const plugin = new AppPlugin(bundle);
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.setSourceLocale).toHaveBeenCalledTimes(1);
+            expect(mockI18n.setSourceLocale).toHaveBeenCalledWith('en');
+            expect(mockI18n.setDefaultLocale).toHaveBeenCalledWith('zh-CN');
+        });
+
+        it('should NOT touch sourceLocale when the app declares none', async () => {
+            // A sibling app on the same kernel may have declared one.
+            mockI18n.setSourceLocale = vi.fn();
+            const plugin = new AppPlugin({ id: 'com.test.no-source', i18n: { defaultLocale: 'zh-CN' } });
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.setSourceLocale).not.toHaveBeenCalled();
+        });
+
+        it('should skip a provider that does not implement setSourceLocale', async () => {
+            const plugin = new AppPlugin({ id: 'com.test.source-old', i18n: { defaultLocale: 'zh-CN', sourceLocale: 'en' } });
+            await expect(plugin.start!(mockContext)).resolves.toBeUndefined();
+            expect(mockI18n.setDefaultLocale).toHaveBeenCalledWith('zh-CN');
+        });
+
         it('should treat an empty supportedLocales declaration as no declaration', async () => {
             const bundle = {
                 id: 'com.test.emptylocales',
