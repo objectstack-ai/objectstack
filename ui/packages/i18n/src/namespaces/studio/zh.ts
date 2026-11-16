@@ -618,6 +618,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.kv.asExpression': '写成 CEL 表达式',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL 表达式，例如 joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个表达式。请填写表达式，或把这个值切回文本。',
+  'engine.inspector.flowNode.kv.undeclaredKey': '该动作没有声明这个输入，运行时会拒绝它。请删除它，或选择声明了它的动作。',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
   'engine.inspector.flowNode.triggeringRecord.use': '更新触发记录',
   'engine.inspector.flowNode.triggeringRecord.hint': '目标为启动此流程的那条 {object} 记录。',

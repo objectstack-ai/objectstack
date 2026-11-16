@@ -357,6 +357,15 @@ export interface FlowConfigField {
    * the stored map round-trips whole.
    */
   omitKeys?: string[];
+  /**
+   * For a `keyValue` field whose map the run judges against a CLOSED key set
+   * (objectstack#33838): the keys it accepts. Any other key in the map is
+   * marked, row by row, as one the run refuses — never dropped, so the author
+   * sees it and removes it. The connector Input repeater gets it from the
+   * action's input schema (`connector-input-fields.ts`); absent, every key is
+   * accepted and nothing is marked.
+   */
+  acceptedKeys?: string[];
   /** Reference target for `reference` fields — drives the combobox data source. */
   ref?: FlowReferenceSpec;
   /**

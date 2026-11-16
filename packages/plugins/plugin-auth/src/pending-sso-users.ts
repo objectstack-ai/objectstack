@@ -144,7 +144,8 @@ export interface PendingSsoUserDeps
   /** better-auth's `addMember`, for the multi-organization join; absent when the organization plugin is off. */
   getAddMember?(): Promise<AddMemberCapableApi['addMember'] | undefined>;
   host?: EnvironmentUserHostAccessor;
-  logger?: { warn(msg: string): void };
+  /** `error` receives, once, a membership failure answered with the generic message (`mapAuthApiError`). */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };

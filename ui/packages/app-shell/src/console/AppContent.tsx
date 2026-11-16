@@ -11,7 +11,7 @@
 import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
-import { ModalForm } from '@object-ui/plugin-form';
+import { LazyModalForm } from '../views/lazyFormSurfaces.js';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type AnsweredLoadFailure, type RecordSaveFeedback } from '@object-ui/react';
@@ -37,7 +37,7 @@ import { useHomePath } from '../hooks/useHomePath.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
-import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
+import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view/core';
 import { isPhoneViewportNow } from '../hooks/usePhoneViewport.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
@@ -1698,7 +1698,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             </Suspense>
           </ErrorBoundary>
           {formObjectDef && (
-            <ModalForm
+            <LazyModalForm
               key={`${formObjectDef.name}:${editingRecord?.id || 'new'}`}
               lockedBy={formApprovalLocked ? 'approval' : undefined}
               schema={{

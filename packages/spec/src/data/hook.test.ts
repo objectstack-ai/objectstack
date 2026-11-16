@@ -1478,3 +1478,32 @@ describe('hook.timeout → hook.timeoutMs (ADR-0087 `hook-timeout-to-timeout-ms`
     expect(good.timeoutMs).toBe(5000);
   });
 });
+
+// The mirror of ExecutionContext.performedBy's in-product AI keys, flattened the
+// way `performedByClientId` copies `clientId`.
+describe('HookContextSchema.provenance — the in-product AI performer', () => {
+  const base = { object: 'account', event: 'beforeUpdate', input: { data: {} }, ql: {} };
+
+  it('CONTROL: a provenance carrying only performedByClientId parses unchanged', () => {
+    const ctx = HookContextSchema.parse({ ...base, provenance: { performedByClientId: 'app_1' } });
+    expect(ctx.provenance).toEqual({ performedByClientId: 'app_1' });
+  });
+
+  it('keeps the in-product AI marks through a parse', () => {
+    const provenance = {
+      performedByAgentId: 'data_chat',
+      performedByConversationId: 'conv_1',
+      performedByConfirmationId: 'pa_1',
+    };
+    const ctx = HookContextSchema.parse({ ...base, session: { userId: 'u1' }, provenance });
+    expect(ctx.provenance).toEqual(provenance);
+    expect(ctx.session?.userId).toBe('u1');
+  });
+
+  it('REJECTS a non-string mark', () => {
+    for (const key of ['performedByAgentId', 'performedByConversationId', 'performedByConfirmationId']) {
+      const res = HookContextSchema.safeParse({ ...base, provenance: { [key]: 1 } });
+      expect(res.success, key).toBe(false);
+    }
+  });
+});

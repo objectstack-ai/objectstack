@@ -265,9 +265,13 @@ describe('SeedLoaderService', () => {
 
       // dependsOn should be empty (account not in graph)
       expect(graph.nodes[0].dependsOn).toEqual([]);
-      // But references should still be tracked (for DB resolution)
-      expect(graph.nodes[0].references).toHaveLength(1);
-      expect(graph.nodes[0].references[0].targetObject).toBe('account');
+      // But references should still be tracked (for DB resolution): the
+      // declared lookup, and [#33791] the `owner_id` the platform injects on a
+      // user-owned object (`sys_user` is not in the graph either).
+      expect(graph.nodes[0].references.map((r) => [r.field, r.targetObject])).toEqual([
+        ['account_id', 'account'],
+        ['owner_id', 'sys_user'],
+      ]);
       expect(graph.insertOrder).toEqual(['contact']);
     });
 
