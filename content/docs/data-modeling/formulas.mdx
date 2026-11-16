@@ -304,7 +304,12 @@ page title, related lists and lookups all follow it.
   (`os validate`, `os build`, the object save door), with the field named,
   because it has no label to read and the formula would read null on every row.
   An empty value reads `''`; a stored value no option declares reads as itself.
-  A multi-value select is refused.
+- On a multi-value select (`multiple: true`), `label()` reads the label of each
+  selected value, in the order the record stores them, joined with `, `: a
+  record holding `['no_sales_price', 'no_customer']` reads `无销售价, 无客户` to a
+  `zh-CN` reader and `No sales price, No customer` to an `en-US` one. An empty
+  selection reads `''`. A mail template's `option` hole prints the same list
+  the same way.
 - A read with no locale (a script, a scheduled job) reads the declared labels.
 - A **stored** computed field (a `text` field with an `expression`) is computed
   once, on the write, so it stores the declared label whatever the writer's
