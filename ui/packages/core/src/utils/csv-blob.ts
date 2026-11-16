@@ -13,7 +13,7 @@
  * file holding Chinese (or any non-ASCII) text opens garbled. The CSV import
  * strips one leading mark, so a file that carries it still round-trips.
  */
-export const UTF8_BYTE_ORDER_MARK = '﻿';
+export const UTF8_BYTE_ORDER_MARK = '\uFEFF';
 
 /**
  * A CSV file built in the browser, ready to hand to a download: the text after
