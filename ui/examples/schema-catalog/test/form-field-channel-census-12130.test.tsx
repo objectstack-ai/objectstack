@@ -331,6 +331,13 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
     why: 'RUNTIME-ONLY (objectstack#28245) — object-field metadata (the spec\'s `FieldSchema.lookupAutofill`) read off the '
       + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form.',
   },
+  recordBeingEdited: {
+    readers: ['entry@fields/src/widgets/lookupRecordReference.ts'],
+    why: 'RUNTIME-ONLY (objectstack#34197) — stamped by `ObjectForm` and `buildSectionFields` (`withRecordBeingEdited`) on '
+      + 'a lookup whose `lookupFilters` read `{ $record }`: the record form\'s statement that one record is being edited, '
+      + 'with the object each hop points at. A host that edits no single record must not be able to claim it, so no '
+      + 'document authors it.',
+  },
   homeAmountSource: {
     readers: [CURRENCY],
     why: 'RUNTIME-ONLY (objectstack#27196) — the producers stamp the home-amount source onto the resolved field '
