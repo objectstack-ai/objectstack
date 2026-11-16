@@ -86,7 +86,7 @@ A revocation-shaped pin asserts the end of the chain: the changed metadata is in
 
 ### D8 — What happens to the overlay cache's own text
 
-`meta-overlay-cache.ts` keeps caching only the row set, and its warning against moving its own cache below the merge stands: that cache has one counter and must not serve sources it cannot see. Its section heading and closing sentence are rewritten to say that the row-set-only shape is this module's, and that a cache of a merged answer elsewhere is governed by this record.
+`meta-overlay-cache.ts` keeps caching only the row set, and its warning against moving its own cache below the merge stands: that cache has one counter and must not serve sources it cannot see. Its section heading is rewritten to say that the row-set-only shape is this module's, and a paragraph added after the section's unchanged closing sentence says that a cache of a merged answer elsewhere is governed by this record and never moves this cache below the merge.
 
 ## Consequences
 
