@@ -343,6 +343,22 @@
           "label: '负责人'"
         ]
       }
+    },
+    {
+      "id": 20,
+      "prompt": "Our `expense` rows are entered in many currencies: `amount` is a per-record currency field and the engine already stores its home-currency value in `amount_home`. On `project` I want an `actual_cost` total of all its expenses, shown as money, not as a plain number. We report in dollars, so can I just set the total's currency to USD?",
+      "expected_output": "Roll up the stored home amount, not `amount`: on `project`, `actual_cost` is a `summary` with `function: 'sum'` over `expense`'s `amount_home`, and it declares `currencyConfig: { currencyMode: 'dynamic' }` with no currency code. Every `amount_home` row is already in the organization's home currency, so the total is drawn in `localization.currency` on the record page and in lists; without that declaration it is a bare number. Do not write USD on it: metadata never names the home currency (ADR-0144), so the total follows the organization setting. `dynamic` is admitted only on a roll-up of a home amount (`defineStack` / `os validate` refuses it over any other child field), and a `count` roll-up carries no currency at all.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "summary",
+          "amount_home",
+          "currencyMode: 'dynamic'"
+        ],
+        "must_not_contain": [
+          "defaultCurrency: 'USD'"
+        ]
+      }
     }
   ]
 }
