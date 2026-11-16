@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
-import type { SeedSourceSummary } from '../utils/format.js';
-import type { SeedSettledMessage } from './serve.js';
+import type { SeedSourceSummary } from './format.js';
+import type { SeedSettledMessage } from '../commands/serve.js';
 
 /**
  * Build the `objectstack:seed-settled` message ({@link SeedSettledMessage})

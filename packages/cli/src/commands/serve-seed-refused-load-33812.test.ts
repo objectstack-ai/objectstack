@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from '@objectstack/runtime';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { composeSeedSettledMessage } from './seed-settled-message.js';
+import { composeSeedSettledMessage } from '../utils/seed-settled-message.js';
 import { printSeedResultAfterBanner } from '../utils/format.js';
 
 /**

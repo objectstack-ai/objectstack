@@ -76,7 +76,7 @@ import {
   type SeedSuppressionReason,
 } from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
-import { composeSeedSettledMessage } from './seed-settled-message.js';
+import { composeSeedSettledMessage } from '../utils/seed-settled-message.js';
 // The deployment's product name, for `AuthPlugin` — the same resolver the email
 // capability's template context reads (`resolveEmailCapabilityArg`), so the two
 // cannot disagree. Both moved to `@objectstack/plugin-email` beside the mail
