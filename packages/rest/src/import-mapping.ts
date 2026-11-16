@@ -80,6 +80,15 @@ export interface NamedMappingProtocol {
     admitEnvironmentQualifier?: (req: { type: string; name: string }) => void;
 }
 
+/**
+ * [#33385, review S2] The `Symbol.for` key of the mark
+ * `admitEnvironmentQualifier` sets on its refusal of a name only disabled
+ * packages hold (`DISABLED_HOLDERS_ONLY_REFUSAL` in
+ * `@objectstack/metadata-protocol`), the key the `/meta` door's qualified
+ * route reads (`meta-qualified-item-route.ts`).
+ */
+const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal');
+
 /** The by-name read a `mappingName` asks for. */
 type MappingRead = { type: 'mapping'; name: string; packageId?: string };
 
@@ -98,6 +107,10 @@ type MappingRead = { type: 'mapping'; name: string; packageId?: string };
  *  - `_env`: the environment's own mapping. `admitEnvironmentQualifier`
  *    refuses a name only packages hold, naming every holder; admitted, the
  *    read is a caller with no package, which answers the environment's item.
+ *    [#33385] Its refusal of a name only disabled packages hold is marked,
+ *    and is admitted as the `/meta` door admits it: when the read naming no
+ *    package withholds the name, which then answers not found, naming no
+ *    package. When that read serves an item or refuses, the refusal stands.
  *
  * Anything else is no address, and is read exactly as before this spelling
  * existed: the whole string, by name. A mapping name is snake_case, so such a
@@ -121,8 +134,21 @@ async function namedMappingRead(p: NamedMappingProtocol, mappingName: string): P
     const address = await p.resolveMetaItemAddress({ type: 'mapping', segment: mappingName.slice(0, slash), name });
     if (address?.kind === 'namespace') return { type: 'mapping', name, packageId: address.packageId };
     if (address?.kind === 'environment' && typeof p.admitEnvironmentQualifier === 'function') {
-        await p.admitEnvironmentQualifier({ type: 'mapping', name });
-        return { type: 'mapping', name };
+        const read: MappingRead = { type: 'mapping', name };
+        try {
+            await p.admitEnvironmentQualifier(read);
+        } catch (refusal) {
+            if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
+                || typeof p.getMetaItem !== 'function') throw refusal;
+            let withheld: boolean;
+            try {
+                withheld = ((await p.getMetaItem(read)) as { item?: unknown } | undefined)?.item == null;
+            } catch {
+                throw refusal;
+            }
+            if (!withheld) throw refusal;
+        }
+        return read;
     }
     return bare;
 }
