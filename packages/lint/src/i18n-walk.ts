@@ -133,6 +133,7 @@
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
  *   flows.<flow>.notices.<node_id>.message                     (#28251)
+ *   flows.<flow>.records.<node_id>.fields.<field>              (ruling 6913660232)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
@@ -172,7 +173,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, templateSlotSource } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
@@ -2079,6 +2080,14 @@ const REFUSED_OUTCOME = 'refused';
 const SAVE_NOTICE_NODE_TYPE = 'save_notice';
 
 /**
+ * [ruling 6913660232] The nodes whose `fields` values
+ * `flows.<flow>.records.<node_id>.fields.<field>` addresses: a record write
+ * whose field value is MARKED as text — a `{ dialect: 'template', source }`
+ * envelope (`FlowRecordFieldValueSchema`).
+ */
+const RECORD_WRITE_NODE_TYPES: ReadonlySet<string> = new Set(['create_record', 'update_record']);
+
+/**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
  * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
  * the same reason: a stack handed to `defineStack` is hand-built objects rather
@@ -2360,6 +2369,26 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'notices', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [ruling 6913660232] `flows.<flow>.records.<node_id>.fields.<field>` — a
+    // `create_record` / `update_record` field value MARKED as text (a
+    // `{ dialect: 'template', source }` envelope), at any depth of the same
+    // node universe. The engine reads that key (`flowRecordFieldTextKey`) in
+    // the ORGANIZATION's language before it fills the holes, so the seed is
+    // the authored template, holes and all. A bare string in `fields` is a
+    // literal value, never translated, and has no key.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || !RECORD_WRITE_NODE_TYPES.has(node.type)) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const fields = cfg.fields && typeof cfg.fields === 'object' && !Array.isArray(cfg.fields) ? cfg.fields : {};
+      for (const [fieldName, value] of Object.entries(fields as Record<string, unknown>)) {
+        if (!isFlowTextEnvelopeShaped(value)) continue;
+        const source = inlineText((value as { source?: unknown }).source);
+        pushOptional(out, ['flows', flowName, 'records', nodeId, 'fields', fieldName], source, 'flow', scope);
+      }
     }
 
     // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's

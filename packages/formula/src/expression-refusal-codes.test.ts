@@ -490,6 +490,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'this faults at runtime, so the field silently evaluates to null. ' +
         'Parse the text into a timestamp first: `date(record.start_date).getFullYear()`.',
     },
+    {
+      // [#34363] `timestamp()`'s string overload checks clean on a date-only field's text and faults on it.
+      produce: () =>
+        onlyError('value', "isoDate(timestamp(record.borrow_date) + duration('168h'))", {
+          scope: 'record',
+          fieldTypes: { borrow_date: 'date' },
+        }),
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+      message:
+        '`timestamp(record.borrow_date)` — `record.borrow_date` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, so the field silently evaluates to null. ' +
+        'Parse the text into a timestamp first: `date(record.borrow_date)`. ' +
+        'To shift it by N whole days and keep it a date, write `isoDate(addDays(record.borrow_date, N))`.',
+    },
   ],
   'date-text-call-fail-closed': [
     {
@@ -851,6 +871,8 @@ const SWEEP_SOURCES: readonly string[] = [
   'close_date - close_date > duration("1h")',
   // [#32595] A date field's text handed to a call that refuses text.
   'isoDate(record.close_date)',
+  // [#34363] The string overload over a date-only field: the optional `shift` clause.
+  "timestamp(record.close_date) + duration('24h')",
   'isoDate(close_date) == "2026-01-01"',
   'record.name > 5',
   'record.active + 1 > 5',

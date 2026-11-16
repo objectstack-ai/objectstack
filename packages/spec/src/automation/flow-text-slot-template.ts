@@ -206,6 +206,16 @@ export interface FlowNodeTextSlot {
    * path (`headers.X-Request-Id`); without it the key's value is the slot.
    */
   readonly eachValue?: true;
+  /**
+   * Only a TEXT envelope (`{ dialect: 'template', source }`) is a text slot
+   * here; a bare string is a literal value, written as it is spelled — today a
+   * `create_record` / `update_record` `fields` value, where the author MARKS a
+   * field value as text the record keeps for people to read (ruling
+   * 6913660232 on objectstack#34062, parameter 4: `status: 'escalated'` stays
+   * a literal). The executor picks the marked text's translation in the
+   * organization's language before it fills the holes.
+   */
+  readonly envelopeOnly?: true;
 }
 
 /**
@@ -240,6 +250,10 @@ export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
   { nodeType: 'screen', key: 'description', label: 'screen description' },
   { nodeType: 'end', key: 'message', label: 'end message' },
   { nodeType: 'save_notice', key: 'message', label: 'save_notice message' },
+  // A field value MARKED as text — a text envelope — in the map a record
+  // write carries (`crud-nodes.ts` renders it in the organization's language).
+  { nodeType: 'create_record', key: 'fields', label: 'create_record field text', eachValue: true, envelopeOnly: true },
+  { nodeType: 'update_record', key: 'fields', label: 'update_record field text', eachValue: true, envelopeOnly: true },
 ];
 
 /**
@@ -550,11 +564,13 @@ export function flowNodeTextSlotSources(nodeType: string, config: unknown): Flow
     if (slot.eachValue) {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
       for (const [name, entry] of Object.entries(value as Record<string, unknown>)) {
+        if (slot.envelopeOnly && typeof entry === 'string') continue;
         const source = templateSlotSource(entry);
         if (source !== undefined) out.push({ path: `${slot.key}.${name}`, label: slot.label, source });
       }
       continue;
     }
+    if (slot.envelopeOnly && typeof value === 'string') continue;
     const source = templateSlotSource(value);
     if (source !== undefined) out.push({ path: slot.key, label: slot.label, source });
   }

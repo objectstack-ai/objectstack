@@ -53,6 +53,12 @@ export * from './stack-auth.js';
 // record page, so both roots that construct `AuthPlugin` (`os serve` and
 // `DevPlugin`) leave `plugin-auth`'s out alike (ruling A on objectstack#23015).
 export * from './stack-organization-record-page.js';
+// The organization's language — the one reader of the deployment-default
+// ladder (`localization.locale` when set → `i18n.defaultLocale`) for text the
+// platform writes on the organization's behalf. Here because its readers sit
+// in packages that cannot import each other (`@objectstack/service-automation`
+// and `@objectstack/runtime`'s seed load), and both already depend on this one.
+export * from './organization-locale.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

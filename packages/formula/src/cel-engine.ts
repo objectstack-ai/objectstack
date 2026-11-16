@@ -1522,12 +1522,15 @@ const CEL_NO_MATCHING_OVERLOAD_CODE = 'no_matching_overload';
 /**
  * A verdict of {@link firstDateTextCall}: the call as written, the date field
  * it is handed as written, and the call rewritten with that field parsed by
- * `date(…)` first.
+ * `date(…)` first — for `timestamp(<date-only field>)`, `date(…)` in place of
+ * the call, with `shift`, the whole-day shift that keeps the result a date
+ * (`isoDate(addDays(<field>, N))`).
  */
 export interface DateTextCall {
   readonly call: string;
   readonly reference: string;
   readonly rewrite: string;
+  readonly shift?: string;
 }
 
 /**
@@ -1558,11 +1561,23 @@ export interface DateTextCall {
  * message prescribes is proven, not guessed. Only the date fields are typed;
  * every other field stays `dyn`. Returns `null` when the source does not
  * parse or no call qualifies: anything else is another check's to report.
+ *
+ * [#34363] One call checks clean on the text and still faults on it:
+ * `timestamp(<field>)`, the string overload, handed a `date` field
+ * (`dateOnlyFields`, by name). Its text is `YYYY-MM-DD`, and `timestamp()`
+ * parses only a full RFC 3339 instant: the evaluator answers `timestamp()
+ * requires a string in ISO 8601 format` on every row, and `timestamp(null)`
+ * finds no overload. A `datetime` field's text IS such an instant, so it is
+ * not asked. There is no `timestamp(google.protobuf.Timestamp)` overload to
+ * wrap the field for, so the rewrite is `date(<field>)` in place of the call,
+ * and `shift` carries the whole-day shift the stdlib teaches,
+ * `isoDate(addDays(<field>, N))`, which reads the date text as it is.
  */
 export function firstDateTextCall(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
+  dateOnlyFields: ReadonlySet<string> = new Set(),
 ): DateTextCall | null {
   if (typeof source !== 'string' || !source.trim()) return null;
   const dateFields: Record<string, FieldCelType> = {};
@@ -1572,11 +1587,14 @@ export function firstDateTextCall(
     any ||= t === 'timestamp';
   }
   if (!any) return null;
+  const anyDateOnly = [...dateOnlyFields].some((name) => dateFields[name] === 'timestamp');
   try {
     const env = buildTypedEnv(dateFields, scope, 'text');
     const parsed = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
-    // The whole expression checking clean is the common case: nothing to find.
-    if ((parsed.check?.() as { valid?: boolean } | undefined)?.valid !== false) return null;
+    // The whole expression checking clean is the common case: nothing to find,
+    // unless a date-only field can reach `timestamp()`, which checks clean.
+    const wholeFaulted = (parsed.check?.() as { valid?: boolean } | undefined)?.valid === false;
+    if (!wholeFaulted && !anyDateOnly) return null;
     /** The check of one printed sub-expression: `true` clean, else the fault's code. */
     const checkOf = (node: unknown): true | string | undefined => {
       const r = env.parse(serialize(node as Parameters<typeof serialize>[0])).check?.() as
@@ -1601,8 +1619,24 @@ export function firstDateTextCall(
         : v.op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
           ? [args[1], ...(args[2] as unknown[])]
           : null;
+      // [#34363] `timestamp(<date-only field>)`: clean on the text, faults on it.
+      if (v.op === 'call' && Array.isArray(args) && args[0] === 'timestamp' && operands?.length === 1) {
+        const ref = typedFieldRef(operands[0], scope);
+        if (ref && dateFields[ref.name] === 'timestamp' && dateOnlyFields.has(ref.name)) {
+          const rewrite = wrapInDate(operands[0] as CelNode);
+          if (checkOf(rewrite) === true) {
+            verdict = {
+              call: serialize(v as Parameters<typeof serialize>[0]),
+              reference: ref.written,
+              rewrite: serialize(rewrite as Parameters<typeof serialize>[0]),
+              shift: `isoDate(addDays(${ref.written}, N))`,
+            };
+            return;
+          }
+        }
+      }
       const reference = operands?.map(dateRef).find((r): r is string => r !== null);
-      if (reference && checkOf(v) === CEL_NO_MATCHING_OVERLOAD_CODE) {
+      if (wholeFaulted && reference && checkOf(v) === CEL_NO_MATCHING_OVERLOAD_CODE) {
         // A fresh node around the same operands, each date field wrapped in `date(…)`.
         const wrap = (node: unknown): unknown => (dateRef(node) ? wrapInDate(node as CelNode) : node);
         const list = args as unknown[];

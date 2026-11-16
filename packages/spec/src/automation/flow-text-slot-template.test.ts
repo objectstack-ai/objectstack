@@ -29,7 +29,7 @@ import { tmpl } from '../shared/expression.zod';
 import { FLOW_TERMINAL_MESSAGE_KEYS } from '../system/i18n-resolver';
 
 describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
-  it('names exactly the nine slots whose rendered value is only ever text', () => {
+  it('names exactly the eleven slots whose rendered value is only ever text', () => {
     // [#19939] `notify.actionUrl` joined: the link a person follows, text with
     // holes (`/crm_case/{{ record.id }}`), which the 17.x executor stringified.
     // Then an `http` node's `url` and each `headers` value (stage S5): the
@@ -46,9 +46,16 @@ describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
       'end.message',
       // [#28251] the sentence the writer reads with the save.
       'save_notice.message',
+      // [ruling 6913660232] a record field value MARKED as text.
+      'create_record.fields',
+      'update_record.fields',
     ]);
-    // Only `headers` is a map whose every value is a slot of its own.
-    expect(FLOW_NODE_TEXT_SLOTS.filter((s) => s.eachValue).map((s) => `${s.nodeType}.${s.key}`)).toEqual(['http.headers']);
+    // `headers` is a map whose every value is a slot of its own; a record
+    // write's `fields` is a map whose every TEXT ENVELOPE is one.
+    expect(FLOW_NODE_TEXT_SLOTS.filter((s) => s.eachValue).map((s) => `${s.nodeType}.${s.key}`))
+      .toEqual(['http.headers', 'create_record.fields', 'update_record.fields']);
+    expect(FLOW_NODE_TEXT_SLOTS.filter((s) => s.envelopeOnly).map((s) => `${s.nodeType}.${s.key}`))
+      .toEqual(['create_record.fields', 'update_record.fields']);
   });
 });
 
@@ -400,6 +407,22 @@ describe('flowNodeTextSlotSources — the text slots one node config carries', (
     expect(flowNodeTextSlotSources('end', { outcome: 'refused', message: 'M' }).map((s) => s.label)).toEqual(['end message']);
     expect(flowNodeTextSlotSources('notify', { title: 42, message: { dialect: 'cel', source: 'x' } })).toEqual([]);
     expect(flowNodeTextSlotSources('notify', undefined)).toEqual([]);
+  });
+
+  it('reads a record write\'s field value only where it is MARKED as text — a bare string is a value (ruling 6913660232)', () => {
+    const fields = {
+      escalation_reason: { dialect: 'template', source: 'Auto-escalated: {{ record.priority }} priority' },
+      status: 'escalated',
+      note: 'Hi {record.name}',
+      owner: { dialect: 'cel', source: 'record.owner' },
+    };
+    for (const type of ['create_record', 'update_record'] as const) {
+      expect(flowNodeTextSlotSources(type, { objectName: 'crm_case', fields })).toEqual([
+        { path: 'fields.escalation_reason', label: `${type} field text`, source: 'Auto-escalated: {{ record.priority }} priority' },
+      ]);
+    }
+    // CONTROL: the same map on a node whose `fields` is no text slot yields nothing.
+    expect(flowNodeTextSlotSources('get_record', { objectName: 'crm_case', fields })).toEqual([]);
   });
 });
 
