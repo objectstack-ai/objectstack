@@ -27,6 +27,10 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
+ *            So is a `namespace` — the package's own and each multi-package
+ *            member's — through `ManifestSchema.shape.namespace` (#33922):
+ *            absent is admitted, a value the declaration refuses answers
+ *            `PLUGIN_MANIFEST_INVALID` the same way.
  *            A package declaring code this door cannot run answers
  *            `VALIDATION_ERROR` (422) the same way: an enabled job with no
  *            `body`, or one whose `body` the declaration refuses (#21585), and
@@ -949,6 +953,45 @@ function judgeWithheldMaps(
         };
     }
     return { ok: true, withheldMaps: declared.data ?? [] };
+}
+
+/**
+ * [#33922, ADR-0048 §2] The `namespace` of every package this install
+ * delivers, parsed through its declaration (`ManifestSchema.shape.namespace`,
+ * `NAMESPACE_PATTERN`), by reference: the package's own (where
+ * {@link declaredPackageManifest} reads it — the key the writable-holder check
+ * and the registry's install-time namespace gate compare), and each
+ * `packages[].manifest` of a multi-package artifact, which the registry
+ * installs under its own namespace. `null` admits them all; otherwise the
+ * refusal sentence for the first one refused.
+ *
+ * Absent is admitted, as the declaration admits it. Without this, `''`,
+ * `'QA_N'` or `'9-Bad Ns!'` registered as written: a namespace no author can
+ * declare, and a case variant of an owned one (`QA_N` beside `qa_n`) that the
+ * gate's uniqueness comparison never reads as the same namespace.
+ *
+ * The sentence is the declaration's own inside the frame an invalid
+ * `installModes` is answered with ({@link judgeInstallMode}), the member's
+ * position in the `(at …)` suffix; no wording is minted.
+ */
+function namespaceRefusal(manifest: Record<string, any>, manifestId: string): string | null {
+    const members: Array<{ at: string; body: unknown }> = [{ at: '', body: declaredPackageManifest(manifest) }];
+    if (Array.isArray(manifest.packages)) {
+        manifest.packages.forEach((entry: unknown, index: number) => {
+            if (isPlainObject(entry) && isPlainObject(entry.manifest)) {
+                const nested = isPlainObject(entry.manifest.manifest) ? 'manifest.' : '';
+                members.push({ at: `packages.${index}.manifest.${nested}namespace`, body: declaredPackageManifest(entry.manifest) });
+            }
+        });
+    }
+    for (const { at, body } of members) {
+        const declared = ManifestSchema.shape.namespace.safeParse((body as Record<string, unknown>).namespace);
+        if (declared.success) continue;
+        const [issue] = declared.error.issues;
+        return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}`
+            + `${at !== '' ? ` (at \`${at}\`)` : ''}.`;
+    }
+    return null;
 }
 
 /**
@@ -2488,6 +2531,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
+
+        // 1b″. [#33922, ADR-0048 §2] ⭐ THE DOOR PARSES THE PACKAGE NAMESPACE —
+        //      through its declaration, `ManifestSchema.shape.namespace`, by
+        //      reference ({@link namespaceRefusal}), right after the id and at
+        //      the same converged point, so no later step — the writable-holder
+        //      check, the registry's install-time namespace gate, the ledger
+        //      write — ever sees a namespace no author can declare. Before
+        //      this, `''`, `'QA_N'` and `'9-Bad Ns!'` installed with a 200, and
+        //      `QA_N` beside an owner of `qa_n` passed the gate, whose
+        //      uniqueness comparison never read the two as one namespace. An
+        //      absent namespace is admitted, as the declaration admits it.
+        //      The id gate's status split (400 caller input, 502 upstream
+        //      snapshot) and its rehydrate exemption (an entry an older build
+        //      ledgered under such a namespace still loads and can be removed).
+        {
+            const refusal = namespaceRefusal(manifest, manifestId);
+            if (refusal !== null) {
+                return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: refusal } }, callerManifest ? 400 : 502);
+            }
+        }
 
         // 1b′. [#31963, cloud#3624 ruling A] ⭐ THE GRANT GOVERNS THE COPY. A
         //      grant-path inline manifest is copied only when it declares the
