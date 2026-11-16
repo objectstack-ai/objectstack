@@ -834,7 +834,7 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
         expect(messageOf(answer)).toContain('The platform\'s item binds it to object "contact"');
         const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
         expect([layers.status, codeOf(layers)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
-        // `/layers` and `/published` carry the refusal's text, not its candidates.
+        // `/layers` carries the refusal's candidates too (#32622, pinned below); `/published` carries its text, not its candidates.
         const published = await drive(PUBLISHED, { type: 'action', name: 'approve' });
         expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(messageOf(published)).toContain(`package "${A}"`);
@@ -865,6 +865,40 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
         expect(layers.status, JSON.stringify(layers.body)).toBe(200);
         expect(JSON.stringify(layers.body)).toContain('"label":"alpha"');
         expect(JSON.stringify(layers.body)).not.toContain('"label":"beta"');
+    });
+});
+
+/**
+ * [#32622, ADR-0150 D5] The two `/layers` refusal exits of this route that the
+ * candidates option reaches beyond the two-holder read: the bare action read
+ * weighing the package-less holder, and the exact qualifier of a package that
+ * holds nothing. Each answers the plain read's `details.candidates`.
+ */
+describe('#32622 — the other `/layers` refusal exits carry `details.candidates`', () => {
+    const LAYERS = '/api/v1/meta/:type/:name/layers';
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const conflictOf = (answer: { status: number; body?: any }) =>
+        [answer.status, codeOf(answer), answer.body?.details?.candidates];
+
+    it('the bare action read, the platform\'s item beside A\'s: `/layers` names A and the platform, as the item read does', async () => {
+        const shipAction = (packageId: string | undefined, objectName: string) => registry.registerItem('action', {
+            name: 'approve', label: packageId?.split('.').pop() ?? 'platform', type: 'script', objectName, target: 'approve',
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        }, 'name' as never, packageId);
+        shipAction(A, 'account');
+        shipAction(undefined, 'contact');
+        const plain = await drive(ITEM, { type: 'action', name: 'approve' });
+        const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
+        expect(conflictOf(layers), JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), { kind: 'platform' }]]);
+        expect(layers.body?.details?.candidates).toEqual(plain.body?.details?.candidates);
+    });
+
+    it('`/layers?package=` of a package that holds nothing: the holder, as the item read does', async () => {
+        ship('page', 'home', A);
+        const plain = await drive(ITEM, { type: 'page', name: 'home' }, { package: C });
+        const layers = await drive(LAYERS, { type: 'page', name: 'home' }, { package: C });
+        expect(conflictOf(layers), JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A)]]);
+        expect(layers.body?.details?.candidates).toEqual(plain.body?.details?.candidates);
     });
 });
 
@@ -1049,6 +1083,33 @@ describe('#33456 — the bare action read grafts a holder\'s envelope only at it
             }
         });
     }
+
+    /**
+     * [#33904 item 2, ADR-0150 D4] A DISABLED package holding the name on
+     * another object lends the environment's item no envelope: the face would
+     * withhold an item stamped with a disabled package's `_packageId` (404).
+     * Reported on main `895783a1e` by the #33385 fold's harness probe; closed
+     * by #33898's owner-key lookup (the package bound at the served item's
+     * object, disabled holders included, and none there).
+     */
+    describe('[#33904] a disabled holder on another object', () => {
+        const registryOnlyAction = (objectName: string) =>
+            registry.registerItem('action', body('platform', objectName), 'name' as never);
+        for (const [shape, place] of [
+            ['the environment\'s item (its row stored)', () => environmentAction('contact')],
+            ['a package-less registry item alone', () => registryOnlyAction('contact')],
+        ] as const) {
+            it(`A disabled on \`account\`, ${shape} on \`contact\`: served, with no package's envelope (BASE: A's \`_packageId\`, withheld 404)`, async () => {
+                for (const steps of bothOrders([() => shipAction(A, 'account'), place])) {
+                    compose();
+                    steps.forEach((step) => step());
+                    registry.disablePackage(A);
+                    const [status, , objectName, packageId, packaged] = await envelopeOf();
+                    expect([status, objectName, packageId, packaged]).toEqual([200, 'contact', undefined, false]);
+                }
+            });
+        }
+    });
 
     describe('CONTROLs (unchanged)', () => {
         it('one package on one object with the environment\'s item on that object: its customization, under the package\'s envelope', async () => {

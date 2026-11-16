@@ -46,7 +46,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Plus, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, PanelTop, Settings2 } from 'lucide-react';
 import { cn } from '@object-ui/components';
-import { inferColumns, containerGridColsFor, isWideFieldType } from '@object-ui/plugin-form';
+import { inferColumns, containerGridColsFor, isWideFieldType } from '@object-ui/plugin-form/core';
 import { toFormFieldType } from './formFieldType.js';
 import { resolveBooleanControl } from '@object-ui/fields';
 import {

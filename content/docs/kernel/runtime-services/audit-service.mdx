@@ -47,9 +47,12 @@ services.audit.recordAuthEvent(event: {
   - `login` / `logout` are **session events**: a sign-in that minted a session, and a
     sign-out.
   - `login_failed` / `account_locked` are **account events**: a refused sign-in — a
-    password sign-in that named an existing account, or any `/sign-in/*` request the IP
-    allow-list refused (ADR-0069 D5) — and the refused sign-in that stamped the account
-    lockout (`lockoutThreshold`, ADR-0069 D2). They exist without any session.
+    password sign-in (email or phone number) that named an existing account, a sign-in
+    the account lockout refused at any other door that ends in a session (a one-time
+    code, a sign-in link, the second-factor step, an identity provider's callback, the
+    device grant; `reason: 'ACCOUNT_LOCKED'`), or any `/sign-in/*` request the IP
+    allow-list refused (ADR-0069 D5) — and the refused password sign-in that stamped the
+    account lockout (`lockoutThreshold`, ADR-0069 D2). They exist without any session.
 - **`userId`** must be a real `sys_user` id when given — it lands on the strict `user_id`
   lookup. On an account event it is the account the sign-in named. Every event names one
   except a `login_failed` refused before any account could be resolved: the deployment's

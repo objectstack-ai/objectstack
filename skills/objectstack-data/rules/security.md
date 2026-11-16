@@ -86,13 +86,18 @@ rowLevelSecurity: [
     check: 'owner_id == current_user.id',
   },
   {
-    name: 'org_isolation',
-    object: 'contact',
-    operation: 'select',
-    using: 'organization_id == current_user.organization_id',
+    name: 'own_tasks',   // task.assignee: { type: 'user', defaultValue: 'current_user' }
+    object: 'task',
+    operation: 'insert',
+    check: 'assignee == current_user.id',
   },
 ]
 ```
+
+A `check` over a field the request never names refuses a plain create ("add a
+task" answers 403). Give the tying field a default the check admits:
+`defaultValue: 'current_user'` fills an omitted `user` field before `check` is
+judged, so `own_tasks` admits a create that names no assignee.
 
 Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),

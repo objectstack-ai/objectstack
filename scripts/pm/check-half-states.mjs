@@ -1262,7 +1262,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 //
 //   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
 //            name (`domain:engine-core` carries a hyphen, measured on the label set),
-//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `review`, `qa`, `eval` or `queue`
+//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `l2-review` (old spelling `review`), `qa`, `eval` or `queue`
 //   N        the seat number, from 1
 //   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
 //   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,
@@ -1286,7 +1286,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // ---------------------------------------------------------------------------
 
 /** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
-const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|review|qa|eval|queue)';
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|l2-review|review|qa|eval|queue)';
 const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 /** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
 export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
@@ -12917,11 +12917,20 @@ export function contractReviewVerdictLines(body) {
  *                 in any heading's own tail (the patrol's inline dialect); a
  *                 `verdict` key in any case, under a heading mark, quote, list
  *                 bullet or emphasis, after up to two words (`Overall verdict:`),
- *                 with a parenthetical (`Verdict (delta):`), with `:`, a dash,
- *                 `=` or `is`, reading FAIL, FAILED or FAILS; a table row with a
- *                 verdict cell and a FAIL cell in either order; a line that opens
- *                 with a bare `FAIL` and nothing but a separator, a full stop or
- *                 `!` after it. A record carrying one
+ *                 with a parenthetical (`Verdict (delta):`), with `:`, a dash
+ *                 (spaced on either side), `=`, `is` or `was` (a colon may follow
+ *                 those two), reading FAIL, FAILED or FAILS — first, after a
+ *                 struck word (`~~PASS~~ FAIL`), or after an arrow (`PASS → FAIL`);
+ *                 a table row with a verdict cell and a FAIL cell in either order,
+ *                 a cell holding the key and its value (`| Verdict: FAIL |`), or
+ *                 a FAIL cell under a header row's verdict column, the cell's word
+ *                 after any marks (`| ❌ FAIL |`); a line that opens with a bare
+ *                 `FAIL` and nothing but a separator, a full stop or `!` after it;
+ *                 any case of the word in a heading's tail. The fail-safe idiom
+ *                 is no verdict: `fail-closed`, `fails closed`, `failed closed`
+ *                 anywhere, and `FAIL closed` where it is not the key's value or
+ *                 the cell's word (`PASS, prior FAIL closed`); nor is a bare
+ *                 `FAILED` line (#33770 N4). A record carrying one
  *                 never clears beside its one PASS line: it contradicts itself;
  *   findings      the must-fix and should-fix grades (`contract-review.md`: a
  *                 must-fix is a FAIL, a should-fix earns a delta review of its
@@ -12934,11 +12943,16 @@ export function contractReviewVerdictLines(body) {
  *                   closed      a named finding whose line goes on to say
  *                               `closed` and nothing before it but punctuation, and
  *                               nothing after it but closing emphasis, `.`, `;` or
- *                               `on this head` / `at this head` / `here` (a full stop
- *                               ending the bold title may lead a new sentence):
+ *                               `on this head` / `at this head` / `here`, and whose
+ *                               finding ENDS there — the next line is blank, absent,
+ *                               a new block or a new finding, never its body:
  *                               `- **S1 (should-fix): closed.**` — a delta record
  *                               closing what an earlier one raised. `closed in part`,
- *                               a title opening `Closed …` stay OPEN;
+ *                               a title opening `Closed …`, a closed title with a
+ *                               body after it on its line or under it, and a title
+ *                               wrapped after the word stay OPEN (#33770 N1, N2: a
+ *                               reader cannot weigh a body against its title; a
+ *                               finding closed with a body is closed by id alone);
  *                   none        a named grade whose value is `none`, on the same
  *                               terms (`must-fix: none`; `none of …` stays OPEN);
  *                   cited       a mention inside the citation of an earlier
@@ -12955,23 +12969,58 @@ export function contractReviewVerdictLines(body) {
  *                               so the record fails CLOSED.
  *                 A delta record may also name what it closes by id alone
  *                 (`S1: closed.`), which mentions no grade.
+ *   securityTouching  the record's ONE `Security-touching:` line, three-valued
+ *                 (`contractReviewSecurityTouching` below) — the line the low-risk
+ *                 skills arm stands on, read by nobody else.
  *
  * Grammar measured on the records of PRs #33686, #33687, #33688 (both rounds),
  * #33711 (all three rounds), #33720, #33726 and #33736 (2026-11-15); nits are
  * never read. Pure.
  */
 const CONTRACT_REVIEW_LINE_LEAD = String.raw`^[ \t]*(?:#{1,6}[ \t]+)?(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?[*_]{0,3}[ \t]*`;
-const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:[A-Za-z-]+[ \t]+){0,2}verdict(?:[ \t]*\([^)]*\))?[ \t]*[*_]{0,3}[ \t]*(?:[:：=]|[—–]|-(?=[ \t])|is(?=[ \t]))[ \t]*[*_` + '`' + String.raw`]{0,3}[ \t]*fail(?:ed|s)?\b`, 'i');
-// A table row with a verdict cell and a FAIL cell, in either order (the word may carry emphasis or a code mark).
-const CONTRACT_REVIEW_FAIL_CELL = { test: (line) => /^[ \t]*\|/.test(line) && line.split('|').some((cell) => /\bverdict\b/i.test(cell)) && line.split('|').some((cell) => /^[ \t]*[*_`]{0,3}[ \t]*fail(?:ed|s)?\b/i.test(cell)) };
-const CONTRACT_REVIEW_FAIL_BARE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`FAIL(?:ED)?[*_]{0,3}[ \t]*(?:$|[—–·:：|.。!！]|-[ \t])`);
+// The verdict word where it is a VALUE (the key's, the cell's): FAIL, FAILED or FAILS, ⛔ never the fail-safe idiom
+// spelled as prose spells it — hyphenated (`fail-closed`, `fails-closed`, `failed-closed`) or `fails closed` with one
+// space (#33770 N4). Every other value reads FAIL: `FAIL closed`, `FAILED closed`, `FAILED - closed`.
+const CONTRACT_REVIEW_FAIL_WORD = String.raw`(?:fails\b(?!-closed\b|[ \t]closed\b)|failed\b(?!-closed\b)|fail\b(?!-closed\b))`;
+const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:[A-Za-z-]+[ \t]+){0,2}verdict(?:[ \t]*\([^)]*\))?[ \t]*[*_]{0,3}[ \t]*(?:[:：=]|[—–]|-(?=[ \t])|(?<=[ \t])-|(?:is|was)(?=[ \t:：])[ \t]*[:：]?)[ \t]*(?:[^\n]*?(?:→|->|⇒|⟶)[ \t]*)?(?:~~[^~\n]*~~[ \t]*)?[*_~` + '`' + String.raw`]{0,3}[ \t]*` + CONTRACT_REVIEW_FAIL_WORD, 'i');
+// A table cell whose word reads FAIL: after any marks (emphasis, a code mark, a symbol) and a struck word (#33770 N3).
+const CONTRACT_REVIEW_FAIL_CELL_WORD = new RegExp(String.raw`^[ \t]*(?:~~[^~]*~~[ \t]*)?[^\p{L}\p{N}]*?` + CONTRACT_REVIEW_FAIL_WORD, 'iu');
+// A table row with a verdict cell and a FAIL cell, in either order, or one cell holding the key and its FAIL value.
+const CONTRACT_REVIEW_FAIL_CELL = { test: (line) => /^[ \t]*\|/.test(line) && ((line.split('|').some((cell) => /\bverdict\b/i.test(cell)) && line.split('|').some((cell) => CONTRACT_REVIEW_FAIL_CELL_WORD.test(cell))) || line.split('|').some((cell) => CONTRACT_REVIEW_FAIL_KEYED.test(cell))) };
+// ⛔ A bare FAILED line is not a verdict (#33770 N4); a bare FAIL is.
+const CONTRACT_REVIEW_FAIL_BARE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`FAIL[*_]{0,3}[ \t]*(?:$|[—–·:：|.。!！]|-[ \t])`);
+// The word in a heading's tail, any case (#33770 N3), once the fail-safe idiom is masked out (N4: `PASS, prior FAIL closed`).
+const CONTRACT_REVIEW_FAIL_IDIOM = /\bfail(?:ed|s)?(?:-|[ \t]+)closed\b/gi;
+const CONTRACT_REVIEW_FAIL_ANY = /\bfail(?:ed|s)?\b/i;
 const CONTRACT_REVIEW_GRADE = /\b(must|should)-fix(?:es)?\b/gi;
 const CONTRACT_REVIEW_GRADE_NAMED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:([A-Z]{1,3}\d+)[*_]{0,3}[ \t]*([(\[][ \t]*|[—–:][ \t]*)?)?[*_]{0,3}(must|should)-fix\b`, 'i');
 // ⛔ The state word must END the finding (review 6892305129): nothing but closing emphasis, a full stop or a
-// semicolon may follow it, or the measured tails `on this head` / `at this head` / `here`; a full stop that
-// closes the bold title may then be followed by a new sentence. `closed in part`, `Closed PRs are …` and
-// `none of the three ablations ran` are titles, and the finding they name stays OPEN.
-const CONTRACT_REVIEW_GRADE_NAMED_STATE = /^[^\S\n]*[*_:：—–.,-]*[ \t]*[*_]{0,3}(closed|none)(?:[ \t]+(?:(?:on|at)[ \t]+this[ \t]+head|here))?(?:[*_]{0,3}[.;。]?[*_]{0,3}[ \t]*$|[.。](?:\*\*|__)[ \t]+\S)/i;
+// semicolon may follow it, or the measured tails `on this head` / `at this head` / `here`. `closed in part`,
+// `Closed PRs are …` and `none of the three ablations ran` are titles, and the finding they name stays OPEN.
+// ⛔ Nor may a sentence follow a closed bold title (#33770 N1): `**S1 (…): closed.** Still open for X` takes
+// the title back, and this reader cannot weigh a body against its title — a finding with a body closes by id.
+const CONTRACT_REVIEW_GRADE_NAMED_STATE = /^[^\S\n]*[*_:：—–.,-]*[ \t]*[*_]{0,3}(closed|none)(?:[ \t]+(?:(?:on|at)[ \t]+this[ \t]+head|here))?[*_]{0,3}[.;。]?[*_]{0,3}[ \t]*$/i;
+// …and the finding must end on that line (#33770 N1, N2): a next line that is its body — indented under it, or
+// a lazy continuation that opens no new block and no new finding — is the rest of a wrapped title or a body
+// that may take the state back, so the finding stays OPEN. A blank line, a heading, a list item, a quote, a
+// table row, a fence or a line led by a finding id (`S2: closed.`) ends it. Quote marks are stripped from both
+// lines when the finding is quoted, so a quoted body is read the same way.
+const CONTRACT_REVIEW_BLOCK_START = /^(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t]|>|\||```|~~~)/;
+const CONTRACT_REVIEW_FINDING_ID_LEAD = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`[A-Z]{1,3}\d+\b`);
+function contractReviewFindingContinues(line, next) {
+  if (next === undefined) return false;
+  const quoted = /^[ \t]*>/.test(line);
+  const unquote = (s) => (quoted ? s.replace(/^[ \t]*(?:>[ \t]?)+/, '') : s);
+  const own = unquote(line);
+  const body = unquote(next);
+  // A line that opens a finding of its own — led by an id, or by a grade with no id (`should-fix: none`) — ends this one.
+  const opensFinding = (s) => CONTRACT_REVIEW_FINDING_ID_LEAD.test(s) || CONTRACT_REVIEW_GRADE_NAMED.test(s);
+  if (quoted && !/^[ \t]*>/.test(next)) return /\S/.test(next) && !CONTRACT_REVIEW_BLOCK_START.test(next.trimStart()) && !opensFinding(next);
+  if (!/\S/.test(body)) return false;
+  const indent = (s) => /^[ \t]*/.exec(s)[0].replace(/\t/g, '    ').length;
+  if (indent(body) > indent(own)) return true;
+  return !CONTRACT_REVIEW_BLOCK_START.test(body.trimStart()) && !opensFinding(body);
+}
 const CONTRACT_REVIEW_GRADE_NEGATED = /\b(?:no|nor|neither|zero|0)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?(?:(?:must|should)-fix(?:es)?[ \t]*(?:(?:or|nor|\/)[ \t]*|(?:,|and)[ \t]*(?:no|nor)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?))?$/i;
 const CONTRACT_REVIEW_RECORD_CITATION = /\(record[ \t]+\d{6,}\b[^()]*\)/gi;
 export function contractReviewRecordReading(body) {
@@ -12982,14 +13031,30 @@ export function contractReviewRecordReading(body) {
   const open = [];
   const unreadable = [];
   const headingLine = new RegExp(CONTRACT_REVIEW_HEADING_MARKER.source);
-  for (const line of text.split(/\r?\n/)) {
+  const lines = text.split(/\r?\n/);
+  // The verdict column a table's HEADER row names, while that table lasts (#33770 N3); -1 when none.
+  let tableVerdictColumn = -1;
+  let inTable = false;
+  for (const [at, line] of lines.entries()) {
     // Every heading's own tail is read for an inline FAIL, not only the first one's (nit N3, review 6891926185).
     const heading = headingLine.exec(line);
-    // …and a caps FAIL anywhere in that tail, not only the first verdict word (`— PASS withdrawn, FAIL`, nit N2 of review 6892305129).
-    if (heading && (CONTRACT_REVIEW_VERDICT_INLINE.exec(line.slice(heading.index + heading[0].length))?.[1] === 'FAIL' || /\bFAIL(?:ED)?\b/.test(line.slice(heading.index + heading[0].length)))) failSpellings.push(line.trim());
+    // …and the word in any case anywhere in that tail, not only the first verdict word (`— PASS withdrawn, FAIL`,
+    // nit N2 of review 6892305129; `— Fail`, #33770 N3), the fail-safe idiom aside (`PASS, prior FAIL closed`, N4).
+    const tail = heading ? line.slice(heading.index + heading[0].length) : '';
+    if (heading && (CONTRACT_REVIEW_VERDICT_INLINE.exec(tail)?.[1] === 'FAIL' || CONTRACT_REVIEW_FAIL_ANY.test(tail.replace(CONTRACT_REVIEW_FAIL_IDIOM, '')))) failSpellings.push(line.trim());
+    const row = /^[ \t]*\|/.test(line);
+    const cells = row ? line.split('|') : [];
+    let underVerdictColumn = false;
+    if (!row) [inTable, tableVerdictColumn] = [false, -1];
+    else if (!inTable) [inTable, tableVerdictColumn] = [true, cells.findIndex((cell) => /\bverdict\b/i.test(cell))];
+    else underVerdictColumn = tableVerdictColumn >= 0 && CONTRACT_REVIEW_FAIL_CELL_WORD.test(cells[tableVerdictColumn] ?? '');
     const explicit = CONTRACT_REVIEW_VERDICT_EXPLICIT.exec(line);
-    if (explicit) verdicts.push(explicit[1]);
-    else if (!heading && (CONTRACT_REVIEW_FAIL_KEYED.test(line) || CONTRACT_REVIEW_FAIL_CELL.test(line) || CONTRACT_REVIEW_FAIL_BARE.test(line))) failSpellings.push(line.trim());
+    if (explicit) {
+      verdicts.push(explicit[1]);
+      // The explicit reader stops at the first word, so `**VERDICT: PASS → FAIL**` is ALSO a FAIL spelling (#33770 r2 S1).
+      if (explicit[1] === 'PASS' && CONTRACT_REVIEW_FAIL_KEYED.test(line)) failSpellings.push(line.trim());
+    }
+    else if (!heading && (CONTRACT_REVIEW_FAIL_KEYED.test(line) || CONTRACT_REVIEW_FAIL_CELL.test(line) || underVerdictColumn || CONTRACT_REVIEW_FAIL_BARE.test(line))) failSpellings.push(line.trim());
     const cited = [...line.matchAll(CONTRACT_REVIEW_RECORD_CITATION)].map((c) => [c.index, c.index + c[0].length]);
     const named = CONTRACT_REVIEW_GRADE_NAMED.exec(line);
     // The NAMED mention is the one the lead regex ended on; every other mention on the line is read on its own.
@@ -13000,12 +13065,86 @@ export function contractReviewRecordReading(body) {
         // What follows the grade: past the bracket the finding opened with, then `closed` or `none` and only punctuation before it.
         let rest = line.slice(named[0].length);
         if (named[2] && /[(\[]/.test(named[2])) rest = rest.slice(rest.search(/[)\]]/) + 1 || rest.length);
-        const state = CONTRACT_REVIEW_GRADE_NAMED_STATE.exec(rest)?.[1]?.toLowerCase();
+        const state = contractReviewFindingContinues(line, lines[at + 1]) ? undefined : CONTRACT_REVIEW_GRADE_NAMED_STATE.exec(rest)?.[1]?.toLowerCase();
         if (state === undefined) open.push({ id: named[1] ?? null, grade: `${named[3].toLowerCase()}-fix`, line: line.trim() });
       } else if (!CONTRACT_REVIEW_GRADE_NEGATED.test(line.slice(0, mention.index))) unreadable.push(line.trim());
     }
   }
-  return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] } };
+  return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] }, securityTouching: contractReviewSecurityTouching(text) };
+}
+
+/**
+ * The key and the two values of the record's ONE machine line the LOW-RISK SKILLS ARM reads
+ * (`lowRiskArmVerdict`, `check-governed-merges.mjs`). `Security-touching: no` is the reviewer's
+ * statement that no changed hunk teaches permission, sharing, credential, token, authentication
+ * or other security behaviour — the teaching a path's name and a label cannot show; `yes` says
+ * one does. The arm stands on `no` alone.
+ */
+export const CONTRACT_REVIEW_SECURITY_TOUCHING_KEY = 'Security-touching';
+export const CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES = Object.freeze(['no', 'yes']);
+// A DECLARATION line: the key at the line's lead — behind a heading mark, quote, bullet or emphasis, inside
+// a code span, in any case, its two words joined by a hyphen, an underscore or blanks — then a colon.
+const CONTRACT_REVIEW_SECURITY_TOUCHING_LINE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + '`?[*_]{0,3}security[-_ \\t]*touching[*_`]{0,3}[ \\t]*[:：]', 'i');
+
+/**
+ * The record's `Security-touching:` line, read off the WHOLE comment like its `VERDICT:` lines:
+ *
+ *   missing     no declaration line at all — every record written before the line existed;
+ *   read        the one bare line, with its value (`no` or `yes`);
+ *   unreadable  anything else, with the reason.
+ *
+ * Every declaration line counts, fenced and quoted ones included, and exactly ONE may exist:
+ * outside any code fence (`FENCE_LINE`, `FENCE_CLOSE_LINE`) and any `>` quote, indented at most
+ * three spaces, and with its list bullet, bold and a code span around the VALUE stripped reading
+ * EXACTLY `Security-touching: no` or `Security-touching: yes`. So a second declaration (a quoted
+ * `no` beside the record's own `yes`), trailing words (`no — wording only`), another value, a
+ * near-miss key (`Security touching:`), a fenced, quoted or code-indented line and a code span
+ * holding the KEY (the spelling that mentions the line) are each `unreadable` — the same
+ * strictness `readBareDeclaration` holds a PR body's `Clause-②:` line to.
+ * ⚠️ Not read: whether GitHub RENDERS the line. A bare line inside an HTML comment, a `pre` element
+ * or a code span opened on an earlier line is hidden or shown as code there, and a bare line directly
+ * under a quoted line, with no blank line between, is rendered inside that quote; each still reads
+ * here. Only an author the guard trusts can write a record, so the reader is not widened into a renderer.
+ *
+ * ⛔ Fail closed, in the one direction that matters: `missing`, `unreadable` and `yes` each
+ * keep the pull request at Tier H, and no reading here ever DEFAULTS to `no`. Pure.
+ */
+function contractReviewSecurityTouching(body) {
+  const key = CONTRACT_REVIEW_SECURITY_TOUCHING_KEY;
+  const hits = [];
+  let fence = null; // the OPEN fence — its character and run length — or null outside one
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (fence !== null) {
+      if (CONTRACT_REVIEW_SECURITY_TOUCHING_LINE.test(line)) hits.push({ line, fenced: true });
+      const c = FENCE_CLOSE_LINE.exec(line);
+      if (c !== null && c[1][0] === fence.ch && c[1].length >= fence.len) fence = null;
+      continue;
+    }
+    const f = FENCE_LINE.exec(line);
+    if (f !== null) {
+      fence = { ch: f[1][0], len: f[1].length };
+      continue;
+    }
+    if (CONTRACT_REVIEW_SECURITY_TOUCHING_LINE.test(line)) hits.push({ line, fenced: false });
+  }
+  if (hits.length === 0) return { state: 'missing' };
+  const unreadable = (reason) => ({ state: 'unreadable', reason });
+  // A quoted record line is comment text: flattened (no backtick, pipe or angle bracket survives) and cut.
+  const quote = (line) => `\`${String(line).replace(/[`|<>\r\n]+/g, ' ').trim().slice(0, 80)}\``;
+  if (hits.length > 1) return unreadable(`it carries ${hits.length} \`${key}:\` lines, and a record states exactly one`);
+  const [{ line, fenced }] = hits;
+  if (fenced) return unreadable(`its one \`${key}:\` line sits inside a code fence`);
+  if (/^[ \t]*>/.test(line)) return unreadable(`its one \`${key}:\` line is a quote (${quote(line)})`);
+  if (/^(?: {4,}| *\t)/.test(line)) return unreadable(`its one \`${key}:\` line is indented as code (${quote(line)})`);
+  const stated = line.replace(/^[ \t]*(?:[-*+][ \t]+)?/, '').replace(/\*\*/g, '');
+  // A code span that holds the KEY is how the line is MENTIONED — the template's legend, the review brief and every
+  // reason the arm prints spell it so — and a record that only mentions the line states nothing. The value alone
+  // may sit in a span (`Head-sha:` refuses a span holding its key the same way).
+  if (/^[^:：]*`/.test(stated)) return unreadable(`its one \`${key}:\` line holds the key inside a code span (${quote(line)}), which mentions the line and states nothing`);
+  const bare = stated.replace(/`/g, '').replace(/[ \t]+/g, ' ').trim();
+  const value = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.find((v) => bare === `${key}: ${v}`);
+  if (value === undefined) return unreadable(`its \`${key}:\` line reads ${quote(line)}, not exactly ${CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.map((v) => `\`${key}: ${v}\``).join(' or ')}`);
+  return { state: 'read', value };
 }
 
 // ---------------------------------------------------------------------------
@@ -17684,9 +17823,13 @@ export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
 // and the cap eats the tail a seat reaches LAST.
 //
 // ⛔ It models the full 取卡全序 only in part, and says so rather than implying
-// otherwise: `target:` board membership is a board read this file does not
-// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. The author leg
-// IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
+// otherwise: the 功能点位次 leg (a parent card's place on the North Star's
+// 「Features on the road」) and the two legs above the label order (a
+// maintainer's direct dispatch, a contract-surface card) are reads this file
+// does not make, and the same-priority 「先 `Bug`」 tiebreak is not taken. A
+// release blocker needs no leg of its own: it is `priority:p0` inside the
+// release window and nothing else, which the first rank already reads.
+// The author leg IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
 // it never lifts a card out of its rank. A card is the fleet's when an App
 // opened it (`user.type` `Bot`, every `[bot]` login) OR its body opens with a
 // seat signature (`readSignatureLine`), since seat-operated human accounts file
@@ -17725,9 +17868,10 @@ export const H67_QUOTE_LIMIT = 220;
 
 /**
  * The selection-order legs this row can read for free off the label page, in
- * rank order. ⛔ NOT the whole 取卡全序: `target:` board membership needs a board
- * read this file does not make, and the same-priority 「先 `Bug`」 tiebreak is
- * not taken. Everything not listed shares the last rank and is then ordered by
+ * rank order. ⛔ NOT the whole 取卡全序: the 功能点位次 leg and the two legs above
+ * the label order need reads this file does not make, and the same-priority
+ * 「先 `Bug`」 tiebreak is not taken. A release blocker rides `priority:p0`
+ * inside the release window, so the first rank below already carries it. Everything not listed shares the last rank and is then ordered by
  * age, which is the order in force 「清不空的那一刻起」.
  */
 export const H67_SELECTION_ORDER_LABELS = Object.freeze([
@@ -19216,7 +19360,8 @@ export function summaryLine(counts, findingCount) {
     'file caches a timeline. Candidates are ordered OLDEST-FIRST — the OPPOSITE of H66\'s — ' +
     'because the order in force is 「清不空的那一刻起改最老优先」 and the cards a seat reaches ' +
     'NEXT are the ones that must have been read; the plan models the priority and age legs of ' +
-    '取卡全序 only, ⛔ not `target:` board membership and ⛔ not the 「先 `Bug`」 tiebreak. ' +
+    '取卡全序 only — a release blocker is `priority:p0` inside the release window, so the ' +
+    'priority leg carries it — ⛔ not the 功能点位次 leg and ⛔ not the 「先 `Bug`」 tiebreak. ' +
     '⚠️ Rows are a LOWER BOUND: a delivery that left NO cross-reference is invisible to this ' +
     'instrument (the filer\'s own declared blind spot). A DECORATED `**Release:**` line WAS a ' +
     'second way and is no longer — the ownership marker this row shares with H2/H47/H66 reads it ' +
@@ -25567,7 +25712,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // shadow a trusted FAIL, an approver's read, two lines and an inline word alone
   // no PASS, no binding UNREAD, the binding's four unloaded reasons and its clause
   // (two more, the real guard's predicate and set, run where the register loads).
-  'H43 hand-off timing': 88,
+  // 88 → 93: the record's `Security-touching:` line, the low-risk skills arm's machine line — the bare
+  // readings, the MISSING record, the unreadable shapes, the fence and reason pins, and the constants.
+  // 93 → 94: a code span holding the KEY mentions the line and is unreadable; only the value may sit in one.
+  // 94 → 103: the nine verdict-reader rows that landed with no pin of their own — the closed finding that
+  // must END, the FAIL spellings, the fail-safe idiom. The battery registers 126 cases beside these rows.
+  'H43 hand-off timing': 103,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
   'H70/H71 seat patrol': 30,
@@ -33060,9 +33210,29 @@ async function selfTest() {
   t43('#33604 S1 (review 6891926185): the measured delta preamble cites, a named finding whose line says closed is closed, `No new should-fix` denies', ['DELTA review from `42323f34` (record 6891274033: PASS, should-fix S3, nits N7 and N8) to this head.', '- **S1 (should-fix): closed.**', 'S1 (should-fix) — closed on this head', 'No new should-fix.', 'must-fix: none'].map(grades43).join(), '|0,|0,|0,|0,|0');
   t43('#33604 S2 (review 6891926185): `No must-fix, should-fix S1 and S2 below.` is unreadable (a comma carries no denial); its own `no` after `and` does', [grades43('No must-fix, should-fix S1 and S2 below.'), grades43('No must-fix and no should-fix.')].join(), '|1,|0');
   t43('#33604 S2 (review 6891926185): heading-led key, table cell, words before the key, a dash, a bare `FAIL.` and a second heading read FAIL', ['### VERDICT: FAIL', '## Verdict: FAIL', '| Verdict | FAIL |', 'Overall verdict: FAIL', 'Verdict — FAIL', 'FAIL.', '**FAIL.**', '## Contract review — FAIL', '| Verdict | PASS |'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,1,1,0');
-  t43('#33604 r3 (review 6892305129): the state word must end the finding — `closed in part`, `Closed PRs …`, `none of …` stay open; `closed here.`, a closed bold title then a sentence, `closed;` close', ['S1 (should-fix): closed in part, still open for X', '**S2 (should-fix) — Closed PRs are still read as merged.**', '- should-fix: none of S1, S2 is fixed', 'S1 (should-fix): closed here.', '- **S1 (should-fix): closed.** Every knock names a key.', 'S1 (should-fix): closed;'].map(grades43).join(), 'S1:should-fix|0,S2:should-fix|0,-:should-fix|0,|0,|0,|0');
+  // #33770 N1 forces one cell of this row: a closed bold title with a sentence after it reads OPEN now (it was the r3 allowance).
+  t43('#33604 r3 (review 6892305129): the state word must end the finding — `closed in part`, `Closed PRs …`, `none of …` stay open; `closed here.` and `closed;` close; a closed bold title then a sentence stays open (#33770 N1)', ['S1 (should-fix): closed in part, still open for X', '**S2 (should-fix) — Closed PRs are still read as merged.**', '- should-fix: none of S1, S2 is fixed', 'S1 (should-fix): closed here.', '- **S1 (should-fix): closed.** Every knock names a key.', 'S1 (should-fix): closed;'].map(grades43).join(), 'S1:should-fix|0,S2:should-fix|0,-:should-fix|0,|0,S1:should-fix|0,|0');
   t43('#33604 r3 N2: `Verdict: FAILED`, `Verdict is FAIL`, `Verdict (delta): FAIL`, `| FAIL | Verdict |`, `FAIL!` and a late FAIL in a heading tail read FAIL', ['Verdict: FAILED', 'Verdict is FAIL', 'Verdict (delta): FAIL', '| FAIL | Verdict |', 'FAIL!', '## Contract review — PASS withdrawn, FAIL', 'The verdict is PASS.'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,0');
-  t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]}}');
+  // #33770 (review 6892689104, N1-N4 of PR #33736's last record): the closed allowance, the line-based finding, FAIL spellings, clean text.
+  t43('#33770 N1: a closed bold title taken back by its body stays OPEN — a sentence on its line (bold, `__`, a tab, an unpaired mark) or under it, plain, indented, quoted or a nested bullet', ['**S1 (should-fix) — closed.** Still open for the table cell', '- **S1 (should-fix): closed.** Reopened by this delta.', '__S1 (should-fix): closed.__ Still open', '**S1 (should-fix): closed.**\tStill open', 'S1 (should-fix): closed.** Still open', '- **S1 (should-fix): closed.**\n  Still open for the table cell.', '**S1 (should-fix): closed.**\nStill open for the table cell.', '> **S1 (should-fix): closed.**\n> Still open.', '- **S1 (should-fix): closed.**\n  - still open for X'].map(grades43).join(), Array(9).fill('S1:should-fix|0').join());
+  t43('#33770 N2: a title wrapped right after the state word stays OPEN — bold and plain', ['- **S1 (should-fix) — closed\n  in part, the table cell still clears.**', 'S1 (should-fix): closed\nin part, still open'].map(grades43).join(), 'S1:should-fix|0,S1:should-fix|0');
+  t43('#33770 N1/N2 CONTROL: a closed finding that ENDS reads closed — before a blank line, a new bullet, a quoted bullet or a finding led by its id; `- should-fix: none`; a body under a finding closed by id alone', ['- **S1 (should-fix): closed.**', '- **S1 (should-fix): closed.**\n- **S2 (should-fix): closed.**', 'S1 (should-fix): closed here.\nS2: closed here.', '- **S1 (should-fix): closed.**\n\nNo must-fix.', '> - **S1 (should-fix): closed.**\n> - **S2 (should-fix): closed.**', '- should-fix: none', '- **S1: closed.** Every knock names a key.'].map(grades43).join(), Array(7).fill('|0').join());
+  t43('#33770 N3: FAIL read in a header row\'s verdict column, after an arrow or a struck word, with `was`, `is:` or an unspaced dash, after a mark in a cell, key and value in one cell, title or lower case in a heading tail', ['| Tier | Verdict |\n|---|---|\n| at-tier | FAIL |', 'Verdict: PASS → FAIL', 'Verdict: PASS -> FAIL', 'Verdict: ~~PASS~~ FAIL', 'Verdict was FAIL', 'verdict is: FAIL', 'Verdict -FAIL', '| Verdict | ❌ FAIL |', '| Verdict | ✗ **FAIL** |', '| Verdict: FAIL |', '## Contract review — Fail', '## Contract review — fail'].map((l) => read43(l).failSpellings.length).join(), Array(12).fill('1').join());
+  t43('#33770 N4: the fail-safe idiom and a bare FAILED line are not FAIL — `The verdict is fail-closed.`, a `fails closed` cell beside a verdict cell or under a verdict column, `PASS, prior FAIL closed` in a heading tail, `FAILED`', ['The verdict is fail-closed.', '| Verdict | fails closed |', '| Leg | Verdict |\n|---|---|\n| x | fails closed on error |', '## Contract review — PASS, prior FAIL closed', 'FAILED', '- Leg verdict: fail-closed reading holds.'].map((l) => read43(l).failSpellings.length).join(), '0,0,0,0,0,0');
+  t43('#33770 N4 CONTROL: the idiom never excuses a verdict VALUE — `Verdict: FAIL closed`, a `FAIL closed` cell, a heading tail opening `FAIL closed` read FAIL; a PASS verdict column and `verdict-failure` do not', ['Verdict: FAIL closed', '| Verdict | FAIL closed |', '## Contract review — FAIL closed', '| Tier | Verdict |\n|---|---|\n| at-tier | PASS |', 'verdict-failure noted'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,0,0');
+  // #33770 round 2 (review 6898558527 of PR #34054): the template's own all-caps key, a grade-led next line, a FAILED value.
+  t43('#33770 r2 S1: the explicit all-caps line read past its first word — `**VERDICT: PASS → FAIL**`, the ASCII arrow, bare, quoted — states PASS AND a FAIL spelling; the plain PASS and FAIL lines stay one word each', ['**VERDICT: PASS → FAIL**', '**VERDICT: PASS -> FAIL**', 'VERDICT: PASS → FAIL', '> **VERDICT: PASS ⇒ FAIL**', '**VERDICT: PASS**', '**VERDICT: FAIL**'].map((l) => { const x = contractReviewRecordReading(PASS43.replace('**VERDICT: PASS**', l)); return `${x.verdicts.join('+')}|${x.failSpellings.length}`; }).join(), 'PASS|1,PASS|1,PASS|1,PASS|1,PASS|0,FAIL|0');
+  t43('#33770 r2 S2: a next line led by a grade with no id ends the finding — `must-fix: none` over `should-fix: none`, bulleted or plain, and a closed finding over one; a body under `must-fix: none` keeps it open', ['must-fix: none\nshould-fix: none', '- must-fix: none\nshould-fix: none', 'S1 (should-fix): closed.\nshould-fix: none', 'must-fix: none\nstill open for X'].map(grades43).join(), '|0,|0,|0,-:must-fix|0');
+  t43('#33770 r2 nit: as a VALUE only the prose idiom is excused — `FAILED - closed`, `FAILED closed`, `FAIL - closed` read FAIL; `fails closed`, `failed-closed` do not', ['Verdict: FAILED - closed', 'Verdict: FAILED closed', 'Verdict: FAIL - closed', 'Verdict: fails closed', 'Verdict: failed-closed'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,0,0');
+  t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]},"securityTouching":{"state":"missing"}}');
+  // The record's `Security-touching:` line — the low-risk skills arm's machine line, three-valued and fail closed.
+  const st43 = (prose) => { const r = read43(prose).securityTouching; return r.state === 'read' ? `read:${r.value}` : r.state; };
+  t43('Security-touching: the one bare line reads its value — `no`, `yes`, and behind a bullet, bold, or with the VALUE alone in a code span', ['Security-touching: no', 'Security-touching: yes', '- Security-touching: no', '**Security-touching:** no', '- **Security-touching**: `no`', 'Security-touching: `yes`', '   Security-touching:  no'].map(st43).join(), 'read:no,read:yes,read:no,read:no,read:no,read:yes,read:no');
+  t43('⛔ Security-touching: a code span that holds the KEY mentions the line and states nothing — UNREADABLE, never `no`, and the reason says so', [...['`Security-touching: no`', '- `Security-touching: no`', '`Security-touching:` no', '`Security-touching`: no', '**`Security-touching: no`**', '`Security-touching: yes`'].map(st43), /holds the key inside a code span \(`Security-touching: no`\), which mentions the line and states nothing$/.test(read43('`Security-touching: no`').securityTouching.reason)].join(), `${Array(6).fill('unreadable').join()},true`);
+  t43('⛔ Security-touching: a record with no such line reads MISSING, never `no` — every record written before the line existed, a mention in prose included', [st43('① Derived judgments: none.'), st43('The record carries no line; the seat reads `Security-touching: no` as the arm asks.'), contractReviewRecordReading(PASS43).securityTouching.state].join(), 'missing,missing,missing');
+  t43('⛔ Security-touching: two lines, a quoted, fenced or code-indented line, trailing words, another value and a near-miss key are each UNREADABLE', ['Security-touching: no\nSecurity-touching: no', '> Security-touching: no\n\nSecurity-touching: yes', '> Security-touching: no', '```\nSecurity-touching: no\n```', '~~~text\nSecurity-touching: no', '    Security-touching: no', '\tSecurity-touching: no', 'Security-touching: no — wording only', 'Security-touching: none', 'Security-touching: No', 'Security-touching:', 'security-touching: no', 'Security touching: no', '### Security-touching: no', 'Security-touching：no'].map(st43).join(), Array(15).fill('unreadable').join());
+  t43('⛔ Security-touching: a fenced `no` beside the record\'s own bare `yes` is two declarations (unreadable); a fence closed before the line leaves it read; the reasons name the shape', [st43('```\nSecurity-touching: no\n```\nSecurity-touching: yes'), st43('```\nsome code\n```\nSecurity-touching: no'), /2 `Security-touching:` lines/.test(read43('Security-touching: no\n> Security-touching: no').securityTouching.reason), /inside a code fence/.test(read43('```\nSecurity-touching: no\n```').securityTouching.reason), /is a quote/.test(read43('> Security-touching: no').securityTouching.reason), /not exactly `Security-touching: no` or `Security-touching: yes`/.test(read43('Security-touching: maybe').securityTouching.reason)].join(), 'unreadable,read:no,true,true,true,true');
+  t43('Security-touching: the key and its two values are this file\'s constants, and the line is read above the heading too (the whole comment, like `VERDICT:`)', [CONTRACT_REVIEW_SECURITY_TOUCHING_KEY, CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join('+'), Object.isFrozen(CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES), contractReviewRecordReading(`Security-touching: no\n\n${PASS43}`).securityTouching.value, contractReviewRecordReading('Security-touching: no') === null].join(), 'Security-touching,no+yes,true,no,true');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.
   t43('H43 row: ⛔ BEFORE the hand-off, nobody asked is NOT a half state — quiet', h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], BEFORE43), null);
@@ -36518,7 +36688,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, 'H67 quadruple: …and the cap still renders from the constant on a zero run', q67({}).includes(`cap ${H67_TIMELINE_READ_CAP} page(s)`), true);
   b(BATTERY67, 'H67 quadruple: the clause declares there is NO free half', FULL67.includes('this row has no free half at all'), true);
   b(BATTERY67, 'H67 quadruple: …and the OLDEST-FIRST order with its reason', FULL67.includes('清不空的那一刻起改最老优先'), true);
-  b(BATTERY67, 'H67 quadruple: ⛔ …and what the order does NOT model', FULL67.includes('⛔ not `target:` board membership'), true);
+  b(BATTERY67, 'H67 quadruple: ⛔ …and what the order does NOT model', FULL67.includes('⛔ not the 功能点位次 leg'), true);
   b(BATTERY67, 'H67 quadruple: the anchor is UNIQUE in the rendered line', (summaryLine({}, 0).match(/Queued cards with a merged delivery \(H67\): /g) ?? []).length, 1);
   b(BATTERY67, 'H67 quadruple: every count key rides the enumerated forwarding contract', ['queueDeliveryCandidates', 'queueDeliveryRead', 'queueDeliveryCap', 'queueDeliveryDeferred', 'queueDeliveryUnjudged', 'queueDeliveryRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 

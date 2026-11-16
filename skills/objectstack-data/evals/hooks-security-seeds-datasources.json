@@ -203,6 +203,16 @@
     },
     {
       "id": 21,
+      "prompt": "In our project tracker a contractor may create a `task` only when they are its `assignee` (a person field). A contractor asks the assistant \"Add a 'Launch checklist' task to the Website relaunch\" and the create answers 403, because the request names no assignee. Author the field and the contractor permission set's policy so the plain request succeeds, without widening whom a contractor may assign.",
+      "expected_output": "`assignee: { type: 'user', defaultValue: 'current_user' }` on `task`, and on the contractor permission set a `rowLevelSecurity` policy with `object: 'task'`, `operation: 'insert'` and `check: 'assignee == current_user.id'`. The default fills an omitted `assignee` with the acting user before `check` is judged, so a create that names no assignee is admitted and one naming someone else is still refused. The `check` is kept as it is, not loosened or dropped.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'user'", "defaultValue: 'current_user'", "check: 'assignee == current_user.id'"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 22,
       "prompt": "Our package `com.acme.crm` ships a position `sales_rep`, live at customers, and a sharing rule in the same package whose `sharedWith` is `{ type: 'position', value: 'sales_rep' }`. The next version must call the position `crm_sales_rep`. What changes in the package?",
       "expected_output": "The position becomes `{ name: 'crm_sales_rep', label: 'Sales Rep', renamedFrom: ['sales_rep'], permissionSets: [...] }`: renamed in place with `renamedFrom`, never deleted and re-added, so at boot its holders (`sys_user_position`) move to the new name in every organization. Only holders move: no other reference to the old name is rewritten, so the package's own sharing rule is re-pointed in source to `sharedWith: { type: 'position', value: 'crm_sales_rep' }`, as is any approver, queue member, policy `positions` entry or `current_user.positions` predicate in the package that names `sales_rep`. Stored references in an installed environment (recipients, pending approvers, invitations) are listed by table in the boot log for an administrator to re-point in Setup.",
       "files": [],

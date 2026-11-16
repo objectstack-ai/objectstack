@@ -1502,6 +1502,9 @@ function buildSandboxContext(
     flowRunId: provenanceRaw?.flowRunId,
     attributedUserId: provenanceRaw?.attributedUserId,
     performedByClientId: provenanceRaw?.performedByClientId,
+    performedByAgentId: provenanceRaw?.performedByAgentId,
+    performedByConversationId: provenanceRaw?.performedByConversationId,
+    performedByConfirmationId: provenanceRaw?.performedByConfirmationId,
     impersonatedBy: provenanceRaw?.impersonatedBy,
   });
 
