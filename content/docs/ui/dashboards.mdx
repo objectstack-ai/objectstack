@@ -548,7 +548,7 @@ evaluates it on one of two paths, and the path decides how deep it may reach:
 | Path | When it serves the query | Depth |
 | :--- | :--- | :--- |
 | Native SQL | A SQL datasource (SQLite, PostgreSQL, MySQL, SQL Server, Turso), unless the query buckets a date by granularity, reads a federated object, or reads an object with an engine-enforced read gate (an engine middleware, or a `controlled_by_parent` read scope) | Every hop, as a `LEFT JOIN` per relationship |
-| Engine aggregate | Every query the native SQL path does not serve | One relationship |
+| Engine aggregate | Every query the native SQL path does not serve | Up to three relationships (ADR-0071's hop limit), each read as the caller |
 
 On the engine-aggregate path the filter reads the related object **as the
 caller**, with that object's row-level security and field permissions, and keeps
@@ -562,12 +562,19 @@ the base rows whose relationship points at a record it returned:
   unfiltered set.
 - A related field the caller cannot read is refused (`403 PERMISSION_DENIED`), as
   filtering on it directly would be.
-- More than 1,000 matching related records are refused (`400 INVALID_FILTER`),
-  never truncated. Narrow the related condition.
+- On a SQL datasource the related condition runs inside the same statement, as
+  a subquery, so the number of matching related records is not limited. Where
+  the engine reads the matching related ids first instead (a related object on
+  another datasource, a federated one, or a driver that compiles no subquery,
+  such as MongoDB; the full list is in
+  [Query Syntax](/docs/protocol/objectql/query-syntax)), more than 1,000 of them
+  are refused (`400 INVALID_FILTER`), never truncated. Narrow the related
+  condition.
 - These are refused (`400 INVALID_FIELD`) rather than answered differently: a
-  path of two or more relationships (`line.plan.order.status`), a related-field
-  condition under `$not` (write `$ne` / `$nin` inside the condition instead), and
-  a related field compared with another field (`$field`).
+  path of four or more relationships (`line.plan.order.customer.tier`), a
+  related-field condition under `$not` (write `$ne` / `$nin` inside the
+  condition instead), and a related field compared with another field
+  (`$field`).
 
 On the native SQL path, too, a related-field condition that is not under
 `$not` never selects a row with no related record (an empty relationship, or
@@ -577,16 +584,21 @@ filter, a measure's own `filter` or the dataset's own `filter`: `$ne`, `$nin`,
 included, so the two paths agree on such rows. The same `$or` brings back the
 rows with an empty relationship on both paths; a row naming a record that no
 longer exists is not brought back by it. A related record that exists with no
-value in the field still satisfies `$ne` and `$nin`. Two native-path exceptions
-remain: under `$not`, which the engine path refuses, the native path still
-selects such a row when the negated condition is a comparison with a value
-(`{ $not: { 'order.status': 'open' } }`), so write `$ne` / `$nin` inside the
-condition instead; and `$nin: []` (an empty list) selects every row on the
-native path, such rows included, where the engine path leaves them out.
+value in the field still satisfies `$ne` and `$nin`, and `$nin: []` (an empty
+list, which excludes no value) selects every row whose related record exists.
+One native-path exception remains, under `$not`, which the engine path refuses:
+the native path still selects such a row when the negated condition is one a
+missing value does not satisfy, such as a comparison with a value
+(`{ $not: { 'order.status': 'open' } }`) or a presence test (`$null: false`,
+`$exists: true`, `$ne: null`, `$empty: false`), so write `$ne` / `$nin` inside
+the condition instead. Two `$not`s cancel: `{ $not: { $not: CONDITION } }`
+selects exactly the rows `CONDITION` selects, so it leaves such a row out
+wherever `CONDITION` does.
 
-A related field in a **dataset's own** `filter`, or in a **measure's** own
-`filter`, is still evaluated only on the native SQL path; the engine-aggregate
-path refuses it (`400 INVALID_FIELD`) rather than count rows it cannot join.
+A related field in a **dataset's own** `filter` is evaluated on both paths, as
+in the query's filter. A related field in a **measure's** own `filter` is still
+evaluated only on the native SQL path; the engine-aggregate path refuses it
+(`400 INVALID_FIELD`) rather than count rows it cannot join.
 
 ### Date Filter Defaults
 
