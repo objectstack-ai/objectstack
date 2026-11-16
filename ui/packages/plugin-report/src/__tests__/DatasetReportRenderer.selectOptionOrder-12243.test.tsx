@@ -546,6 +546,13 @@ describe('CONTROLs — what keeps its order (objectui#12243)', () => {
 // answers when the empty-bucket fill does not run: grouped by the STORED
 // priority, so the day columns arrive in first-seen order. The null day is the
 // empty bucket, named by its declared `nullLabel`.
+//
+// DIRECTIONS, written before the ablations were run:
+//  - no date comparator: RED (a), (b) and the CONTROL (their day headers);
+//    GREEN (c), (d), whose server order already reads correctly;
+//  - an order on ANY key re-lays nothing (the old all-or-nothing rule): RED
+//    (b), (c), (d) (their rows) and the CONTROL (its day headers); GREEN (a);
+//  - a named dimension re-laid anyway: RED (d) and the CONTROL; GREEN the rest.
 const DAY_FIELDS = [
   { name: 'priority', type: 'string', label: 'Priority' },
   { name: 'created_at', type: 'time', label: 'Created', nullLabel: 'No date' },
