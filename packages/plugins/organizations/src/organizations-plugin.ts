@@ -405,10 +405,10 @@ export class OrganizationsPlugin implements Plugin {
     // load organization (`Field.user()`, `Field.lookup('sys_user')`, the injected
     // `owner_id`), so a replay run on the organization insert finds no member at
     // all: every person reference the seed declared, the founder's included,
-    // landed NULL with "not a member of organization ORG". better-auth's writes
-    // are the only ones that carry `attributedUserId` (the adapter's
-    // `withSystemContext`), and its create always writes the creator's member
-    // row next. So an organization insert attributed to a person waits for the
+    // landed NULL with "not a member of organization ORG". better-auth's create
+    // is the only `sys_organization` insert that carries `attributedUserId` (the
+    // adapter's `withSystemContext` stamps the signed-in creator), and it always
+    // writes the creator's member row next. So an organization insert attributed to a person waits for the
     // organization's FIRST `sys_member` insert and replays inside it, after that
     // row is stored. better-auth's create runs no database transaction here, so
     // the stored row is what the replay's membership probe reads. Everything a
