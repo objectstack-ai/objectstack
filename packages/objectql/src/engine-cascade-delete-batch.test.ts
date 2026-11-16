@@ -489,3 +489,73 @@ describe('[F1] a cascade into the organization object keeps today\'s by-id delet
     expect(driver.rowsOf('sys_organization')).toEqual([]);
   });
 });
+
+/**
+ * [ruling 6893104201 c1] The deleting walk asks the collection walk's own
+ * dependents probe again: same relation, same ids, same system-identity read.
+ * Nothing writes between the two, so the walk takes the collection's answer
+ * instead of reading again, and only until its own first write: a cascaded
+ * child's delete or a `set_null` clear runs hooks, and a hook may write a row
+ * the next probe must see.
+ *
+ * Read off the driver: every read the delete hands it, in order.
+ */
+describe('[c1] the walk takes the collection\'s probe until its first write', () => {
+  /** Every driver read of the delete, as `object where`, in the order it ran. */
+  function recordReads(driver: any): string[] {
+    const reads: string[] = [];
+    const find = driver.find;
+    driver.find = async function (o: string, ast: any, ...rest: unknown[]) {
+      reads.push(`${o} ${JSON.stringify(ast?.where ?? null)}`);
+      return find.call(this, o, ast, ...rest);
+    };
+    return reads;
+  }
+
+  it('reads the first relation\'s dependents once, every other read unchanged', async () => {
+    const { engine, driver } = await makeEngine();
+    await engine.insert('memo', { id: 'm1', body: 'x', acct: 'a1' });
+    driver.writes.length = 0;
+    const reads = recordReads(driver);
+
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
+
+    // `line` is the first relation into `acct`: probed by the collection
+    // walk, then taken by the deleting walk, which goes straight to the line
+    // batch's reads. `memo` comes after the line batch wrote, so the walk
+    // reads it again, as before. Before c1 a second `line {"acct":"a1"}`
+    // stood between the collection's reads and the batch's.
+    expect(reads).toEqual([
+      'acct {"id":"a1"}',
+      // the collection walk
+      'line {"acct":"a1"}',
+      'memo {"acct":"a1"}',
+      'line_note {"line":{"$in":["l1","l2","l3"]}}',
+      // the deleting walk: the line batch (no probe of its own)
+      'line {"id":{"$in":["l1","l2","l3"]}}',
+      'line {"id":{"$in":["l1","l2","l3"]}}',
+      'line {"id":{"$in":["l1","l2","l3"]}}',
+      'line_note {"line":{"$in":["l1","l2","l3"]}}',
+      // after its first write: the memo relation read again, then its batch
+      'memo {"acct":"a1"}',
+      'memo {"id":{"$in":["m1"]}}',
+      'memo {"id":{"$in":["m1"]}}',
+    ]);
+    expect(reads.filter((r) => r === 'line {"acct":"a1"}')).toHaveLength(1);
+    expect(driver.writes).toEqual(['deleteMany line l1,l2,l3', 'deleteMany memo m1', 'delete acct a1']);
+  });
+
+  it('a row a child\'s hook writes after the collection is still found by the next relation\'s probe', async () => {
+    const { engine, driver } = await makeEngine();
+    // The line batch runs before the memo relation is walked; its hook adds a
+    // memo the collection walk never saw.
+    engine.on('beforeDelete', 'line', async (ctx: any) => {
+      if (ctx.input?.id === 'l1') await driver.create('memo', { id: 'm9', body: 'late', acct: 'a1' });
+    });
+
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
+
+    expect(driver.rowsOf('memo')).toEqual([]);
+    expect(driver.writes).toEqual(['deleteMany line l1,l2,l3', 'delete memo m9', 'delete acct a1']);
+  });
+});
