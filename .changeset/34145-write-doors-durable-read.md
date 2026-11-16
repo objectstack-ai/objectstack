@@ -10,7 +10,7 @@ Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, slot key, run key or binding moves. The narrowed answer is one write door's verdict on a package-less write onto a name two packages hold, in a composition with no metadata store: there is nothing stored for a migration to rewrite and no tombstone. -->
 
-**BREAKING** only for a composition with no metadata store (no metadata protocol): a package-less `PUT /automation/NAME` or `POST /automation` onto a flow name two packages hold, one of them disabled, after the disable's re-sync withdrew the disabled package's slot, was accepted (`200`) and written into the enabled package's flow. It is now refused `409 RESOURCE_CONFLICT`, naming every holder, before anything is registered. Remedy: name the package. The bare write door names none, so save that package's flow through the metadata door with `?package=`, which needs a metadata store.
+**BREAKING** only for a composition with no metadata store (no metadata protocol): a package-less `PUT /automation/NAME` or `POST /automation` onto a flow name two packages hold, one of them disabled, after the disable's re-sync withdrew the disabled package's slot, was accepted (`200`) and written into the enabled package's flow. It is now refused `409 RESOURCE_CONFLICT`, naming every holder, before anything is registered. Remedy: uninstall the disabled co-holder (`DELETE /packages/PACKAGE`; with no metadata store it withdraws the package from the running registry). The name then has one holder and the bare write is admitted. A package that door refuses as read-only (one the deployment ships, or an installed app's module) is removed from the deployment instead. Re-enabling the co-holder does not help, and the addressed doors (`/automation/NAMESPACE/NAME`) write nothing: otherwise the write is refused there exactly as while both holders are enabled.
 
 **Added:** `AutomationEngine.getHeldFlow(name)` on `@objectstack/service-automation`: the flow the engine holds under a bare name, judged over every holder (a disabled package's included; a name two packages hold refused `409`). The write doors below read it.
 
@@ -23,10 +23,10 @@ Four `/automation` write doors ask a lasting question of a flow name: the clone 
 
 These are the answers the last release gave: the served view changed after it.
 
-A name two packages hold, one of them disabled, is now refused at these doors `409` (`RESOURCE_CONFLICT`), naming every holder, before anything is registered. That is the answer the doors give while both packages are enabled. Before:
+A name two packages hold, one of them disabled, is refused at these doors `409` (`RESOURCE_CONFLICT`) before anything is registered, whatever the state of the disabled package's slot, as while both packages are enabled. The definition writes and `DELETE` answer the engine's refusal, naming every holder. The clone's new name gets the door's own name-taken answer, as before. Before:
 
 - `DELETE` answered the same refusal: the engine's removal raises it.
-- The clone's new name got the name-taken answer, also `409`.
+- The clone's new name got the name-taken answer while one holder was disabled. While both were enabled it got the engine's refusal, thrown, naming every holder; it now gets the name-taken answer, same status and code, returned, whose remedy is a new name.
 - The definition writes got the same refusal while the engine still held the disabled package's slot, because the engine's registration raises it. Once the disable's re-sync had withdrawn that slot, the registration filed the body in the enabled package's slot. The store's save, which names no package, then refused it `409` naming the packages, and the engine was put back. A composition with no metadata store kept the write.
 
 A flow of an enabled package, and a name the engine does not hold, answer as before. The read and run doors (`GET`, trigger, toggle, runs, the clone's source) keep the served view.

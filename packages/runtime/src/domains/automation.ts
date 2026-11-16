@@ -12,7 +12,7 @@
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
-    matchInboundHookRoute,
+    matchInboundHookRoute, PackageScopedNameRefusedError,
 } from '@objectstack/core';
 // [#22773] The inbound-hook door, handed the one route the floor admits.
 import { handleInboundHookRequest } from './automation-hooks.js';
@@ -2134,6 +2134,22 @@ function heldFlowReader(
     const getFlow = automationService.getFlow;
     if (typeof getFlow === 'function') return (name) => getFlow.call(automationService, name);
     return undefined;
+}
+
+/**
+ * [#34145] The clone door's taken-name probe over every holder
+ * ({@link heldFlowReader}): the held body, `null` when no holder has the name,
+ * and `true` when two or more packages hold it, whose read is refused
+ * (`PackageScopedNameRefusedError`): such a name is taken. Any other failure
+ * is thrown on.
+ */
+async function cloneTargetHeld(readHeld: (name: string) => Promise<unknown>, name: string): Promise<unknown> {
+    try {
+        return await readHeld(name);
+    } catch (e) {
+        if (e instanceof PackageScopedNameRefusedError) return true;
+        throw e;
+    }
 }
 
 /**
@@ -4505,9 +4521,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // (`heldFlowReader`), not on the served read the source probe
                 // above uses: a name whose one holder's package is disabled is
                 // still taken, and a name two packages hold is refused naming
-                // every holder, whichever of them is served.
+                // every holder, whichever of them is served. That refusal is
+                // caught into this door's own taken-name answer, as the store's
+                // is (`flowWriteRefusal`'s clone arm): a name two packages hold
+                // is taken, and the remedy is a NEW name, not a package.
                 const readHeld = heldFlowReader(automationService);
-                const collision = readHeld === undefined ? null : await readHeld(targetName);
+                const collision = readHeld === undefined ? null : await cloneTargetHeld(readHeld, targetName);
                 if (collision) {
                     return {
                         handled: true,

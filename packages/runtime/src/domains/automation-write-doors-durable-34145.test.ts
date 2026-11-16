@@ -20,6 +20,16 @@
  * answers both reads as the engine does for such a flow; a name two packages
  * hold is refused by the read over every holder, `409` naming every holder.
  *
+ * A name two packages hold is modelled in the engine's measured states
+ * (service-automation's `flow-slots-per-package.test.ts`, `[#33893]`, and the
+ * uninstall stretch): `kept`, the disabled co-holder's slot still held, where a
+ * package-less registration is refused; `withdrawn`, that slot withdrawn by
+ * the disable's re-sync, where the served read and a package-less
+ * registration both reach the served holder's slot while the read over every
+ * holder still refuses the name; `served`, both holders enabled, where every
+ * bare read refuses it; `uninstalled`, the co-holder uninstalled, where the
+ * name has one holder again.
+ *
  * CONTROLs: an enabled holder answers as before at all four doors; a name the
  * engine does not hold is still admitted by the clone door and answered `404`
  * by `DELETE`; the bare served doors of such a flow still answer `404`
@@ -106,9 +116,13 @@ interface Rig {
     readonly saveRefuses?: boolean;
     /** The store holds a row for each of these names. */
     readonly stored?: readonly string[];
+    /** SHARED's state in the engine (see the file header). */
+    readonly shared?: 'kept' | 'withdrawn' | 'served' | 'uninstalled';
+    /** Whether the composition has a metadata store (the `protocol` service). */
+    readonly store?: boolean;
 }
 
-function rig({ holder, heldRead = true, saveRefuses = false, stored = [] }: Rig) {
+function rig({ holder, heldRead = true, saveRefuses = false, stored = [], shared = 'kept', store = true }: Rig) {
     const flows = new Map<string, unknown>([
         [SOLO, withSecret(SOLO, 'stored-secret')],
         [SOURCE, { name: SOURCE, label: 'Source', type: 'autolaunched', nodes: [], edges: [] }],
@@ -119,14 +133,17 @@ function rig({ holder, heldRead = true, saveRefuses = false, stored = [] }: Rig)
         handlerReady: true,
         // The served read: a disabled sole holder's flow is no flow; a name two
         // packages hold, one of them disabled, is its served holder's.
-        getFlow: vi.fn(async (name: string) => (servedBy(name) ? flows.get(name) ?? null : null)),
+        getFlow: vi.fn(async (name: string) => {
+            if (name === SHARED && shared === 'served') throw sharedRefusal(name);
+            return servedBy(name) ? flows.get(name) ?? null : null;
+        }),
         registerFlow: vi.fn((name: string, definition: unknown) => {
-            if (name === SHARED) throw sharedRefusal(name);
+            if (name === SHARED && (shared === 'kept' || shared === 'served')) throw sharedRefusal(name);
             flows.set(name, definition);
             return definition;
         }),
         unregisterFlow: vi.fn((name: string) => {
-            if (name === SHARED) throw sharedRefusal(name);
+            if (name === SHARED && shared !== 'uninstalled') throw sharedRefusal(name);
             flows.delete(name);
         }),
         execute: vi.fn(async () => ({ success: true, output: {} })),
@@ -135,7 +152,7 @@ function rig({ holder, heldRead = true, saveRefuses = false, stored = [] }: Rig)
         // The read over every holder: the slot's body whatever its package's
         // enable state; a name two packages hold refused, naming every holder.
         automation.getHeldFlow = vi.fn((name: string) => {
-            if (name === SHARED) throw sharedRefusal(name);
+            if (name === SHARED && shared !== 'uninstalled') throw sharedRefusal(name);
             return flows.get(name) ?? null;
         });
     }
@@ -161,7 +178,7 @@ function rig({ holder, heldRead = true, saveRefuses = false, stored = [] }: Rig)
         [PAIR_PACKAGE]: { id: PAIR_PACKAGE, dependencies: { [BASE_PACKAGE]: '^3' } },
     };
     const objectql = { registry: { getPackage: (id: string) => (manifests[id] ? { manifest: manifests[id] } : undefined) } };
-    const services: Record<string, unknown> = { automation, protocol, objectql };
+    const services: Record<string, unknown> = store ? { automation, protocol, objectql } : { automation, objectql };
     const resolve = (name: string) => services[name];
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
     const dispatcher = new HttpDispatcher(kernel);
@@ -189,15 +206,13 @@ describe('[#34145] the clone door judges the new name taken over every holder', 
         expect(disabled.automation.getHeldFlow).toHaveBeenCalledWith(SOLO);
     });
 
-    it('a name two packages hold, one of them disabled, is refused 409 naming every holder, as when both are served (FROM: the served holder\'s name-taken answer)', async () => {
-        const { call, automation } = rig({ holder: 'enabled' });
-        // The engine's refusal rides out of the dispatcher as thrown (the
-        // transport serves it), as the bare entries' refusal of a shared name does.
-        await expect(call(...cloneOnto(SHARED))).rejects.toMatchObject({
-            code: 'RESOURCE_CONFLICT',
-            status: 409,
-            refusal: { candidates: [{ kind: 'package', packageId: 'com.a.pkg' }, { kind: 'package', packageId: 'com.b.pkg' }] },
-        });
+    it.each(['kept', 'withdrawn', 'served'] as const)('a name two packages hold (co-holder %s) is taken: the door\'s own 409 name-taken answer, returned, nothing registered (FROM, both served: the engine\'s refusal thrown)', async (shared) => {
+        const { call, automation } = rig({ holder: 'enabled', shared });
+        const taken = await rig({ holder: 'enabled' }).call(...cloneOnto(SOLO));
+        const answer = await call(...cloneOnto(SHARED));
+        expect([answer.status, codeOf(answer)]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(codeOf(answer)).toBe(codeOf(taken));
+        expect(answer.body?.error?.message).toMatch(new RegExp(`^Flow '${SHARED}' already exists`));
         expect(automation.registerFlow).not.toHaveBeenCalled();
     });
 
@@ -278,6 +293,49 @@ describe('[#34145] DELETE /:name finds a flow the engine holds over every holder
         expect([unknown.status, codeOf(unknown)]).toEqual([404, 'RESOURCE_NOT_FOUND']);
         const rowOnly = rig({ holder: 'disabled', stored: ['row_only'] });
         expect((await rowOnly.call('/row_only', 'DELETE')).status).toBe(200);
+    });
+});
+
+/**
+ * The declared narrowing (`Clause-②: yes (narrowing)`): a composition with no
+ * metadata store, a package-less write onto a name two packages hold after the
+ * disabled co-holder's slot was withdrawn. The served read reaches the served
+ * holder and a package-less registration lands in its slot, so the bare write
+ * was admitted; the read over every holder refuses the name, as when both
+ * holders are enabled. Once the co-holder is uninstalled the name has one
+ * holder and the write is admitted again (the remedy; the engine side is
+ * pinned in `flow-slots-per-package.test.ts`'s uninstall stretch).
+ */
+describe('[#34145] no metadata store: a package-less write onto a name two packages hold is refused over every holder', () => {
+    const doors = [['PUT /:name', 'PUT', '/' + SHARED], ['POST /', 'POST', '/']] as const;
+
+    it.each(doors)('%s, the disabled co-holder\'s slot withdrawn: 409 RESOURCE_CONFLICT naming every holder, nothing registered (FROM: 200, registered into the served holder\'s slot)', async (_door, method, path) => {
+        const { call, automation, flows } = rig({ holder: 'enabled', shared: 'withdrawn', store: false });
+        const before = flows.get(SHARED);
+        await expect(call(path, method, withSecret(SHARED, 'new-secret'))).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT',
+            status: 409,
+            refusal: { candidates: [{ kind: 'package', packageId: 'com.a.pkg' }, { kind: 'package', packageId: 'com.b.pkg' }] },
+        });
+        expect(automation.registerFlow).not.toHaveBeenCalled();
+        expect(flows.get(SHARED)).toBe(before);
+    });
+
+    it.each(doors)('CONTROL — %s, both holders enabled: the same 409, as before', async (_door, method, path) => {
+        const { call, automation } = rig({ holder: 'enabled', shared: 'served', store: false });
+        await expect(call(path, method, withSecret(SHARED, 'new-secret'))).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT',
+            status: 409,
+            refusal: { candidates: [{ kind: 'package', packageId: 'com.a.pkg' }, { kind: 'package', packageId: 'com.b.pkg' }] },
+        });
+        expect(automation.registerFlow).not.toHaveBeenCalled();
+    });
+
+    it.each(doors)('the remedy — %s once the co-holder is uninstalled: one holder, the write admitted and registered', async (_door, method, path) => {
+        const { call, automation } = rig({ holder: 'enabled', shared: 'uninstalled', store: false });
+        const answer = await call(path, method, withSecret(SHARED, 'new-secret'));
+        expect(answer.status).toBe(200);
+        expect(automation.registerFlow).toHaveBeenCalledWith(SHARED, expect.objectContaining({ name: SHARED }));
     });
 });
 
