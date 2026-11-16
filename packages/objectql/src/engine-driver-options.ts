@@ -58,7 +58,7 @@
  * move.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30415),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  */
@@ -318,7 +318,7 @@ export function buildDriverOptions(
   // federated object by — one spelling of "this schema is the remote's",
   // not a second reading of it.
   const isFederated = isFederatedObject(objectSchema);
-  const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
+  const tenantObject = isDriverTenantScopedSchema(objectSchema);
   const tenantScope = tenantObject
     ? scope.writeTarget
       ? this.driverWriteTarget(execCtx)
@@ -409,6 +409,17 @@ export function buildDriverOptions(
     opts.preserveAudit = true;
   }
   return opts;
+}
+
+/**
+ * Whether a read of an object with this schema can hand its driver a tenant
+ * scope at all — the object's tenancy class: neither tenancy-disabled
+ * (ADR-0066 platform-global posture) nor federated (ADR-0015 `external`).
+ * The one spelling {@link buildDriverOptions} and the relation semi-join
+ * (`relation-semi-join.ts`) both ask.
+ */
+export function isDriverTenantScopedSchema(objectSchema: unknown): boolean {
+  return !isTenancyDisabled(objectSchema) && !isFederatedObject(objectSchema);
 }
 
 /**

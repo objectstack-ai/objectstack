@@ -92,3 +92,6 @@ export type {
 } from './verifier.js';
 export { AuditProofBundleError, verifyAuditProofBundle } from './bundle.js';
 export type { AuditProofBundleVerifyOptions } from './bundle.js';
+// D3 amended (seat ruling 6885005594): the audit seal lock an `os migrate audit-* --apply` run holds for its whole run.
+export { AUDIT_SEAL_LOCK_NAME, AUDIT_SEAL_LOCK_WAIT_MS, AUDIT_SEAL_PG_LOCK_KEY, holdAuditSealLock } from './seal-lock.js';
+export type { AuditSealLockEngine, AuditSealLockFinish, AuditSealLockHold, AuditSealLockHoldOptions } from './seal-lock.js';

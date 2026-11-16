@@ -1290,7 +1290,7 @@ field declares `storage: { notNull: false }`, since that declaration is the deli
 changes stay with `os migrate apply`. A column change the database could not apply leaves the publish
 a success with an `object-column-changes-not-applied` warning on its answer naming each column.
 
-On a Turso remote primary (`libsql://`), a tightened or relaxed `NOT NULL` and a dropped DEFAULT stay drift, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
+On a Turso remote primary (`libsql://`), a relaxed `NOT NULL` is applied in place, with libSQL's own `ALTER TABLE … ALTER COLUMN … TO …`: only the `NOT NULL` clause leaves the column's stored definition, no row is copied, and the entry counts as applied only once the column reads back nullable with the type and DEFAULT it had. A database that refuses that statement leaves the column as it was, and the entry is listed as not applied. libSQL refuses it for a column whose stored definition holds a comma: a DEFAULT or a CHECK with a comma in it, a type width such as `NUMERIC(10, 2)`, or a comment. Such a column keeps its `NOT NULL` and the table is left as it was; `os migrate apply` lists the entry as not applied, its log says the definition holds a comma, and no table rebuild is attempted. Columns the platform creates on a remote primary are `TEXT`, `INTEGER` or `REAL` with no DEFAULT and no width, so they never hold a comma. A tightened `NOT NULL` and a dropped DEFAULT stay drift there, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
 
 `--allow-destructive` refuses some drops until the data they would lose is
 safe. No flag skips these refusals:
@@ -1678,6 +1678,29 @@ name that is not a roll-up this run walks — a typo, a plain field, or an objec
 `--object` left out — is refused before any row is read. Naming a `count` /
 `sum` is accepted and changes nothing, so a caller can pass every column it
 just declared.
+
+**A package install or upgrade does this for you.** When a running deployment
+installs or upgrades a package through an install door (the marketplace
+install, for example), the door's schema sync computes every roll-up the
+package added, on each stored row still holding `NULL`. It uses the aggregate
+the child-write recompute uses and a system-context write that covers every
+organization's rows, and it writes no child row. Like the door's own seed
+writes, it runs with automations off: no metadata-bound hook or record-change
+flow fires on a backfilled parent. A roll-up over that parent is still
+recomputed. This command, run by hand, keeps running them. `min` / `max` / `avg` are
+included, because the door knows those columns are new. Roll-ups the deployment
+already served when it booted are not walked again, so an upgrade that adds no
+roll-up costs nothing here. Two cases still need this command:
+
+- **The walk did not complete.** A row failed, an object could not be read, or
+  the per-object bound was reached. The server logs it at `error`, naming each
+  roll-up, and gives the exact
+  `os migrate summary-nulls --apply --recompute-undefined-on-empty …` line.
+  The next install in the same process also walks those roll-ups again.
+- **The roll-up arrived with a restart, not through an install door.** This
+  covers a code-defined app's new version and a marketplace install whose hot
+  register failed and loaded at the next restart. A boot records what it serves
+  and computes nothing.
 
 Idempotent — every write turns a `NULL` into a number, so a second run finds
 nothing and writes nothing. Re-running until the report says zero *is* the

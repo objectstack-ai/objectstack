@@ -493,7 +493,11 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  * write happened". They are dispatched before the enclosing transaction (if
  * there is one) commits, so a later refusal can roll the row back after the
  * hook has already run. Ruled on #7477 (2026-08-11) as the declared semantics,
- * not an implementation detail to be re-timed later.
+ * not an implementation detail to be re-timed later. A blocking hook RUNS at
+ * that dispatch; an `async: true` hook is dispatched there too but runs only
+ * once the unit commits, and never when it rolls back (#33760, see `async`
+ * below) — so for an async hook, what this section says about a hook that
+ * "has already run" does not apply.
  *
  * Four ordinary ways a write ends up inside such a unit:
  *   - the write door itself, when the object has a blocking (not `async`)
@@ -510,15 +514,20 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  *     around the write itself.
  *
  * What that means for a handler:
- *   - **Effects through the same engine are safe.** `ctx.api` / `ctx.ql` writes
- *     join the same transaction and roll back with everything else — which is
- *     exactly what makes an in-engine audit hook correct.
+ *   - **Effects through the same engine are safe — in a blocking hook.** A
+ *     blocking (not `async`) hook's `ctx.api` / `ctx.ql` writes join the same
+ *     transaction and roll back with everything else — which is exactly what
+ *     makes an in-engine audit hook correct. An `async: true` hook is the
+ *     exception: it runs after the unit commits and not at all if it rolls
+ *     back (see `async` below), so its writes are never part of the unit.
  *   - **Effects OUTSIDE the engine are the hook's own responsibility to make
  *     rollback-tolerant** — webhooks, notifications, external index updates,
  *     file deletion, email. On a rollback the row survives and the
  *     announcement has already gone out. Make such an effect idempotent and
  *     reconcilable, or enqueue it for a worker that re-reads the row before
- *     acting rather than trusting the event alone.
+ *     acting rather than trusting the event alone. This is a blocking hook's
+ *     burden: an `async: true` hook runs only after the commit, so it never
+ *     announces a write that was rolled back.
  *
  * The `before*` events carry no such caveat: they run before the write is
  * issued, and throwing from one refuses the operation.
@@ -719,6 +728,18 @@ export const HookSchema = lazySchema(() => strictObject(
    * If true, the hook runs in the background and does not block the transaction.
    * Only applicable for 'after*' events.
    * Default: false (Blocking)
+   *
+   * Fired inside a unit of work (see {@link HookEvent}), an async hook starts
+   * once the outermost unit commits, and is dropped without running when that
+   * unit rolls back; its `ctx.api` reads then see the committed write, and its
+   * writes run outside the unit, on their own connection. Outside any unit it
+   * starts at once, after the write. Nothing waits for it, and its errors
+   * never reach the caller.
+   *
+   * That waiting is for a WRITE event's hook (`afterInsert` / `afterUpdate` /
+   * `afterDelete`). A rollback does not undo a read, so an async `afterFind`
+   * hook starts when the read is dispatched, outside the unit, whatever the
+   * unit it was read in does next.
    */
   async: z.boolean().default(false).describe('Run specifically as fire-and-forget'),
 
@@ -1359,7 +1380,16 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    *  - `mode` — `'record'` when this call is the caller's whole write (a
    *    single-id update/delete, a non-batch insert); `'per-row'` when it is
-   *    one of N dispatches for one caller write.
+   *    one of N dispatches for one caller write. A cascade delete removes a
+   *    relation's children as one predicate delete per chunk of 500 (ruling
+   *    6893661036), so a cascaded child is `'per-row'` with
+   *    `input.options.multi` set, and within one chunk of one relation every
+   *    child's `beforeDelete` runs before any of that chunk is gone (not
+   *    across chunks or relations). A chunk is deleted by id instead, each
+   *    child keeping `'record'`, when the caller's scope narrows it (a child
+   *    the caller may not read or delete), when the child's driver has no
+   *    `deleteMany` or is a floored external driver, and when the child
+   *    object is the organization object; so one cascade can show both.
    *  - `index` — 0-based position within that fan-out; always 0 when
    *    `mode` is `'record'`. `index === 0` is how a handler does batch-scoped
    *    work exactly once instead of N times.
@@ -1765,9 +1795,14 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * The engine deletes each child AS THE CALLER: the cascade recurses through
    * the public delete with the caller's own context, so on the path a real
-   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user`,
-   * `ctx.session` and `ctx.input` are identical between a child the cascade
-   * removes and a user's hand delete of that same child. An app guard that
+   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user` and
+   * `ctx.session` are identical between a child the cascade removes and a
+   * user's hand delete of that same child. `ctx.input` and `ctx.dispatch`
+   * tell nothing apart either: a batched child carries the same
+   * `{ where: { id: { $in } }, multi: true }` options and `'per-row'` mode a
+   * user's own predicate delete of those rows carries, and a child deleted by
+   * id the same `{ where: { id } }` and `'record'` a hand delete carries. An
+   * app guard that
    * freezes settled records (a quote's lines once the quote is accepted) had
    * no declared way to refuse the hand delete while yielding to the cascade,
    * and refusing both leaves the parent, and every record whose own cascade
@@ -1778,8 +1813,9 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Unlike `referentialFieldClear`, this fact has no `__`-prefixed twin on the
    * ExecutionContext, and nothing on that envelope is the contract. The engine
    * recognises the delete it issued through an engine-private ambient record
-   * keyed on the exact object and id its cascade is deleting, claimed by that
-   * one delete. Two consequences follow, and both are part of the contract:
+   * keyed on the exact object and id (or, for a batch of children, the exact
+   * id set) its cascade is deleting, claimed by that one delete. Two
+   * consequences follow, and both are part of the contract:
    *
    *  - it does not ride the envelope, so a write a hook issues through
    *    `ctx.api` during a cascade dispatch is NOT marked, a delete included:

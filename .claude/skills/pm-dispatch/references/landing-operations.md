@@ -1,7 +1,5 @@
 # 入队与落地细则
 
-执行席在落地窗口(ACCEPT 之后至 MERGED)读本文;入队与落地条款与 A–D 操作细则都在此。
-
 ## 入队与落地
 
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
@@ -10,7 +8,6 @@
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 子代理起不来 ⇒ L2 缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免 L2 不放行。
-- 落地后见欠 L2 ⇒ 按 `contract-review.md` 补审落地 head、发现照立卡门入卡,⛔ 不修已关 PR。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
 - diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head L2。
 - 其余(含改代码)照全套:同 head 达档 L2 PASS 记录即确认,记录逐句判改写句。
@@ -42,7 +39,9 @@
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
-- K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
+- K ≥ 15 ⇒ 先 merge main 等重跑绿,`behind` 例外;任何 K 同:标签 PR 的 PRBASE 后 main 落新语种包;
+- 或共享预算 PR 遇 `git diff --name-only PRBASE..origin/main` 碰同本输入或账本;封闭两本,输入:账本:
+- `skills/**`:`scripts/check-skills-token-ratchet.mjs`;`ui/**/locales/en.ts`:`ui/scripts/check-eager-closure-budget.mjs`
 - 标签即 `check-generated-translation-bundles`、`check-no-new-untranslated-declared-labels` 所计显示标签。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
@@ -58,6 +57,7 @@
 - 车道 PM 的权责三件:验收(L1 清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即落地评论与 `pr_ready`+`automerge_enable` 一笔中继:`label-write --land`;未绿按阶梯重挂定点。
+  `--land` 拒 `!`/`(narrowing)` PR,除非卡上最新受信 os-dev-report 的 dogfood 钉 head(`os-dev.md`)。
 - 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 429 ⇒ 卡记 `resets at`,到点一次重试裸 op(`rest-channel.md`),⛔ 不重发评论、不报阻塞。

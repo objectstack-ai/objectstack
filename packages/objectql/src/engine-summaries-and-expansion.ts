@@ -7,7 +7,7 @@
  * `buildSummaryIndex`, `ensureSummaryIndexes`, `getSummaryDescriptors`,
  * `summaryForeignKeyColumns`, `getOwnedSummaryDescriptors`,
  * `initializeSummaryFields`, `recomputeSummaries`, `expandRelatedRecords` moved
- * out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * out of `engine.ts` whole (split by #30012 and #30987).
  *
  * A MOVE, not a redesign. {@link SummariesAndExpansionFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -44,11 +44,34 @@ import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withTransientRetry } from '@objectstack/core';
 import type { SummaryRecomputeFailure } from './summary-errors.js';
-import { aggregateSummaryValue, summaryEmptySetValue } from './summary-aggregate.js';
+import { aggregateSummaryValue, aggregateSummaryValues, summaryEmptySetValue } from './summary-aggregate.js';
 import type { SummaryDescriptor } from './summary-aggregate.js';
 import { ENGINE_WIRE_ONLY_SLOTS, WIRE_ONLY_CANONICAL_SHAPES } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
+
+/**
+ * The engine's own mark on the master `update` a roll-up recompute issues
+ * ({@link SummariesAndExpansionFacet.recomputeSummaries}): the write is the
+ * SYSTEM's on the master's audit trail. `ObjectQLPlugin`'s
+ * `sys_stamp_audit_update` hook reads it off the hook's `input.options` and
+ * stamps `updated_by = null` (ADR-0118 D1: a system actor is `null` in a user
+ * lookup column, no system account, no sentinel) and a fresh `updated_at`,
+ * instead of the triggering child writer's `userId`. Ruling recorded on the
+ * card, comment 6902001862: 「确定汇总字段自动重算时主记录的修改人和修改时间怎么记」
+ * → 「记为系统并刷新时间」.
+ *
+ * An OPTION, not a context key, so it reaches exactly the one update it is put
+ * on: the master's hooks keep the caller's context — `userId` included, so a
+ * record-triggered flow or a hook on the master still knows who triggered the
+ * write — and a write one of those hooks issues through `ctx.api` carries the
+ * context, never this bag. A symbol, so no options object a door assembles
+ * from a request can carry it (`rejectUnknownEngineOptions` reads string keys
+ * only, and JSON has no symbols). `Symbol.for`, so every bundle of this
+ * package — both entries, ESM and CJS — names the one key, the shape
+ * `SECURITY_SERVICE_SOURCE_SLOT` takes for the same reason.
+ */
+export const SUMMARY_RECOMPUTE_WRITE: unique symbol = Symbol.for('objectstack.objectql.summaryRecomputeWrite');
 
 /**
  * The `ObjectQL` members the bodies of {@link SummariesAndExpansionFacet} read — every one of
@@ -441,6 +464,17 @@ export class SummariesAndExpansionFacet {
    * `update` of the parent is refused exactly as before), the summary field
    * stays subject to the parent's FLS on read, and the only value this path can
    * move is the one the author DECLARED as a function of the child collection.
+   *
+   * # Who the master's audit trail names
+   *
+   * The SYSTEM, not the child's writer: the parent update carries
+   * {@link SUMMARY_RECOMPUTE_WRITE}, so the audit stamp writes
+   * `updated_by = null` and refreshes `updated_at` (a figure on the master did
+   * change). Elevation alone would not say this — `userId` rides the elevated
+   * context on purpose, and the stamp reads it — which is how a finance user
+   * who only inserted an invoice came to read as the contract's last editor.
+   * Insert, update, delete and a re-parent of a child all reach the master
+   * through this one write, so they all stamp the same way.
    */
   static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryRetryOptions' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
@@ -451,34 +485,134 @@ export class SummariesAndExpansionFacet {
     const recs = Array.isArray(records) ? records : records ? [records] : [];
     const prevs = Array.isArray(previous) ? previous : previous ? [previous] : [];
     const failures: SummaryRecomputeFailure[] = [];
+    const recordFailure = (desc: SummaryDescriptor, parentId: string, err: unknown): void => {
+      // Retries exhausted (or a non-transient failure). Record it so the
+      // caller can surface it — one parent's failure must not abort the
+      // remaining parents' recompute.
+      this.logger.warn('Roll-up summary recompute failed', {
+        childObject, parentObject: desc.parentObject, parentId, field: desc.summaryField,
+        error: (err as any)?.message,
+      });
+      failures.push({ childObject, parentObject: desc.parentObject, parentId, field: desc.summaryField, error: err });
+    };
+
+    // [#33795] Each parent the write touched is written ONCE, carrying all of
+    // its summary fields — not once per field. And a batch costs one
+    // aggregate per descriptor — not one per parent: every descriptor's value
+    // for every touched parent is computed first (one grouped aggregate per
+    // descriptor), then the parents are written. The values are the ones the
+    // per-parent loop computed: the same aggregate function over the same
+    // child rows, the same empty-set fallback. A summary over a summary still
+    // recomputes in dependency order — each parent write is an engine
+    // `update`, whose own recompute visits that parent's parents.
+    type ParentWrite = { parentObject: string; parentId: string; descs: SummaryDescriptor[] };
+    const writes = new Map<string, ParentWrite>();
+    const idsByDesc = new Map<SummaryDescriptor, string[]>();
     for (const desc of descriptors) {
       const ids = new Set<string>();
       for (const r of recs) { const v = r?.[desc.fkField]; if (v != null && v !== '') ids.add(String(v)); }
       for (const p of prevs) { const v = p?.[desc.fkField]; if (v != null && v !== '') ids.add(String(v)); }
+      if (ids.size === 0) continue;
+      idsByDesc.set(desc, [...ids]);
       for (const parentId of ids) {
-        try {
-          // Retry a transient failure (a turso `fetch failed` on the parent
-          // aggregate/update) with backoff — a network blip here used to leave
-          // the parent summary silently stale (framework#3147).
-          await withTransientRetry(async () => {
+        // An object name is snake_case, so its first `|` ends it.
+        const key = `${desc.parentObject}|${parentId}`;
+        let write = writes.get(key);
+        if (!write) { write = { parentObject: desc.parentObject, parentId, descs: [] }; writes.set(key, write); }
+        write.descs.push(desc);
+      }
+    }
+    if (writes.size === 0) return failures;
+
+    // Computing every value before the first write is sound only while no
+    // write can move a row an aggregate read. The aggregates read
+    // `childObject` rows; a parent write moves its own object's rows and,
+    // through its own recompute, its ancestors' along the summary graph. So
+    // a graph that leads from a parent back to `childObject` — a roll-up
+    // over its own object, or a cycle across objects — keeps the per-parent
+    // order, each parent's aggregates read just before its write, as the
+    // per-parent loop read them: there, an earlier parent's write could move
+    // a later parent's child rows.
+    const reachesChild = (): boolean => {
+      const seen = new Set<string>();
+      const queue = [...new Set([...writes.values()].map((w) => w.parentObject))];
+      while (queue.length > 0) {
+        const object = queue.shift()!;
+        if (object === childObject) return true;
+        if (seen.has(object)) continue;
+        seen.add(object);
+        for (const up of this.getSummaryDescriptors(object)) queue.push(up.parentObject);
+      }
+      return false;
+    };
+
+    // Retry a transient failure (a turso `fetch failed` on the parent
+    // aggregate/update) with backoff — a network blip here used to leave
+    // the parent summary silently stale (framework#3147).
+    const writeParent = (parentObject: string, parentId: string, fields: Record<string, unknown>) => withTransientRetry(async () => {
+      await this.update(
+        parentObject,
+        { id: parentId, ...fields },
+        { context: systemCtx, [SUMMARY_RECOMPUTE_WRITE]: true } as any,
+      );
+    }, this.summaryRetryOptions);
+
+    if (reachesChild()) {
+      for (const { parentObject, parentId, descs } of writes.values()) {
+        const fields: Record<string, unknown> = {};
+        const computed: SummaryDescriptor[] = [];
+        for (const desc of descs) {
+          try {
             // The aggregate — parent-FK match ANDed with the optional
             // per-summary filter, empty-set fallback included — is
-            // `aggregateSummaryValue` (#6063). Behaviour unchanged; it simply
-            // lives where the insert-time seed and the one-off NULL backfill
-            // can read the identical computation instead of copying it.
-            const value = await aggregateSummaryValue(this.facade, desc, parentId, systemCtx);
-            await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: systemCtx } as any);
-          }, this.summaryRetryOptions);
-        } catch (err) {
-          // Retries exhausted (or a non-transient failure). Record it so the
-          // caller can surface it — one parent's failure must not abort the
-          // remaining parents' recompute.
-          this.logger.warn('Roll-up summary recompute failed', {
-            childObject, parentObject: desc.parentObject, parentId, field: desc.summaryField,
-            error: (err as any)?.message,
-          });
-          failures.push({ childObject, parentObject: desc.parentObject, parentId, field: desc.summaryField, error: err });
+            // `aggregateSummaryValue` (#6063), where the insert-time seed and
+            // the one-off NULL backfill read the identical computation.
+            fields[desc.summaryField] = await withTransientRetry(
+              () => aggregateSummaryValue(this.facade, desc, parentId, systemCtx), this.summaryRetryOptions,
+            );
+            computed.push(desc);
+          } catch (err) {
+            recordFailure(desc, parentId, err);
+          }
         }
+        if (computed.length === 0) continue;
+        try {
+          await writeParent(parentObject, parentId, fields);
+        } catch (err) {
+          for (const desc of computed) recordFailure(desc, parentId, err);
+        }
+      }
+      return failures;
+    }
+
+    const values = new Map<SummaryDescriptor, Map<string, unknown>>();
+    for (const [desc, parentIds] of idsByDesc) {
+      try {
+        values.set(desc, await withTransientRetry(async () => {
+          // One parent — a single-row write — asks today's one-parent
+          // aggregate, statement for statement. Several ask one grouped
+          // aggregate per chunk of ids. Both read the computation
+          // `summary-aggregate.ts` owns (#6063).
+          if (parentIds.length === 1) {
+            return new Map([[parentIds[0], await aggregateSummaryValue(this.facade, desc, parentIds[0], systemCtx)]]);
+          }
+          return await aggregateSummaryValues(this.facade, desc, parentIds, systemCtx);
+        }, this.summaryRetryOptions));
+      } catch (err) {
+        for (const parentId of parentIds) recordFailure(desc, parentId, err);
+      }
+    }
+    for (const { parentObject, parentId, descs } of writes.values()) {
+      const fields: Record<string, unknown> = {};
+      const computed = descs.filter((desc) => values.has(desc));
+      if (computed.length === 0) continue;
+      for (const desc of computed) fields[desc.summaryField] = values.get(desc)!.get(parentId);
+      try {
+        await writeParent(parentObject, parentId, fields);
+      } catch (err) {
+        // The one write carried every field below, so each is as stale as
+        // the write left it: one failure per field, as before.
+        for (const desc of computed) recordFailure(desc, parentId, err);
       }
     }
     return failures;

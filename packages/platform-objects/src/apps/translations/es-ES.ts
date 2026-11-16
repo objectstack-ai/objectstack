@@ -18,6 +18,7 @@ export const esES: TranslationData = {
         grp_account_developer: { label: 'Desarrollador' },
         grp_account_ai_assistant: { label: 'Asistente de IA' },
         nav_account_profile: { label: 'Perfil' },
+        nav_account_mobile_app: { label: 'Aplicación móvil' },
         nav_account_notifications: { label: 'Notificaciones' },
         nav_account_approvals: { label: 'Aprobaciones pendientes' },
         nav_account_memberships: { label: 'Mis organizaciones' },

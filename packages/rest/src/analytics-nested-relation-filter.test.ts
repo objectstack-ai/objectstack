@@ -93,13 +93,14 @@ const SERVED: ReadonlyArray<readonly [string, FilterCondition]> = [
   ['under $not', { $not: { owner: { region: 'NA' } } }],
   ['multi-valued under $not', { $not: { owners: { region: 'NA' } } }],
   ['inside $or', { $or: [{ owner: { region: 'NA' } }, { title: 'b' }] }],
+  // A single-valued relation is one subquery on a SQL driver: no id list, no cap.
+  ['single-valued, more related matches than the id cap', { owner: { region: 'CAP' } }],
 ];
 
 /** Conditions the engine REFUSES: its envelope is the answer every face must give. */
 const REFUSED: ReadonlyArray<readonly [string, FilterCondition, { code: string; status: number }]> = [
   ['a related field the caller cannot read', { owner: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
   ['a related field the caller cannot read, multi-valued', { owners: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
-  ['past the cap', { owner: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
   ['past the cap, multi-valued', { owners: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
 ];
 
@@ -155,7 +156,7 @@ const titlesOf = (rows: ReadonlyArray<Record<string, unknown>>, key: string) =>
 interface Harness {
   engine: ObjectQL;
   analytics: AnalyticsService;
-  dataset: (selection: Record<string, unknown>) => Promise<{ status: number; body: any }>;
+  dataset: (selection: Record<string, unknown>, def?: Record<string, unknown>) => Promise<{ status: number; body: any }>;
 }
 
 /**
@@ -250,9 +251,9 @@ async function boot(opts: { caps?: 'objectql'; getReadScope?: (object: string) =
   rest.registerRoutes();
   const route = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/analytics/dataset/query');
   expect(route).toBeDefined();
-  const dataset = async (selection: Record<string, unknown>) => {
+  const dataset = async (selection: Record<string, unknown>, def: Record<string, unknown> = DATASET) => {
     const res = makeRes();
-    const body = JSON.parse(JSON.stringify({ dataset: DATASET, selection }));
+    const body = JSON.parse(JSON.stringify({ dataset: def, selection }));
     await route!.handler({ method: 'POST', params: {}, headers: {}, body, query: {} } as any, res);
     return { status: res.statusCode, body: res.body };
   };
@@ -405,7 +406,7 @@ describe('[#20887] a read scope carrying the nested-relation form', () => {
  * engine-aggregate path. `engine.aggregate` cannot join, so `ObjectQLStrategy`
  * refused every such `where` leaf (`400 INVALID_FIELD`, "cannot join in an
  * aggregate"), and a dashboard over detail rows could not leave out the rows of
- * a cancelled parent. It now hands a one-hop leaf to the engine as the
+ * a cancelled parent. It now hands the leaf (up to three hops, #33626) to the engine as the
  * nested-relation condition above (`cross-object-where.ts`), so its answer is
  * the engine's for that condition, computed here as the reference: the related
  * object read as the caller, its row scope and field permissions applied, an
@@ -418,7 +419,7 @@ describe('[#20887] a read scope carrying the nested-relation form', () => {
  * questions: what a child with NO parent gets under a negative operator (it is
  * not selected — a cross-object leaf requires a related record the caller can
  * read; OR in `{ owner: { $null: true } }` to keep such rows), and that the
- * shapes this path cannot serve exactly (under `$not`, two hops) stay refused
+ * shapes this path cannot serve exactly (under `$not`, past three hops) stay refused
  * rather than answered differently.
  */
 describe('[#33335] a dotted cross-object where on the engine-aggregate path answers the engine\'s nested-relation condition', () => {
@@ -484,15 +485,39 @@ describe('[#33335] a dotted cross-object where on the engine-aggregate path answ
     }
   });
 
-  it('a related field the caller cannot read, and a match past the cap, are refused as the engine refuses them', async () => {
+  it('a related field the caller cannot read is refused as the engine refuses it; a single-valued match past the id cap is served', async () => {
     const cases: ReadonlyArray<readonly [FilterCondition, FilterCondition, { code: string; status: number }]> = [
       [{ 'owner.secret': 's1' }, { owner: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
-      [{ 'owner.region': 'CAP' }, { owner: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
     ];
     for (const [dotted, nested, expected] of cases) {
       expect(await reference(nested), JSON.stringify(nested)).toEqual({ refused: expected });
       expect(await cubeRead(dotted), JSON.stringify(dotted)).toEqual({ refused: expected });
     }
+    // One subquery, no id list: the 1001 `CAP` owners select no ledger row, served.
+    const pastCap = await reference({ owner: { region: 'CAP' } });
+    expect(pastCap).not.toHaveProperty('refused');
+    expect(await cubeRead({ 'owner.region': 'CAP' })).toEqual(pastCap);
+  });
+
+  it('[#33626] the dataset\'s OWN filter carrying a dotted leaf is served the same way: the engine\'s rows, the hidden and the orphan parent left out under $ne', async () => {
+    const scoped = (filter: FilterCondition) => ({
+      ...DATASET,
+      name: 'nested_relation_scoped',
+      measures: [{ name: 'row_count', aggregate: 'count' }],
+      filter,
+    });
+    for (const [dotted, nested] of [
+      [{ 'owner.region': { $ne: 'NA' } }, { owner: { region: { $ne: 'NA' } } }],
+      [{ 'owner.region': 'NA' }, { owner: { region: 'NA' } }],
+    ] as Array<[FilterCondition, FilterCondition]>) {
+      const expected = await reference(nested);
+      expect(expected, JSON.stringify(nested)).toHaveProperty('titles');
+      const ds = await h.dataset({ measures: ['row_count'], dimensions: ['title_dim'] }, scoped(dotted));
+      expect(ds.status, `${JSON.stringify(dotted)}: ${JSON.stringify(ds.body)}`).toBe(200);
+      expect({ titles: titlesOf(ds.body.rows, 'title_dim') }, JSON.stringify(dotted)).toEqual(expected);
+    }
+    // The engine's titles for `$ne` exclude d4 (the hidden owner) and d5 (no owner).
+    expect(await reference({ owner: { region: { $ne: 'NA' } } })).toEqual({ titles: ['b'] });
   });
 
   it('a leaf under $not stays refused, never answered from a negated match that admits the hidden owner\'s row', async () => {

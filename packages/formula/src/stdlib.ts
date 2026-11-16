@@ -491,13 +491,31 @@ export function optionlessLabelSentence(field: string): string {
 }
 
 /**
+ * A list of stored option values — a multi-select's value — as the label of
+ * each, in the order the list holds them, joined with `, `.
+ *
+ * The ONE spelling of that rule: `label(record.<field>)` ({@link optionLabelOf})
+ * and the mail template's `option` hole (`template-engine.ts`,
+ * `OPTION_ARGUMENT_RULE`) both print a multi-select through it, each with its
+ * own single-value lookup as `labelOf`, so the two agree on the order and the
+ * separator by construction.
+ *
+ * Package-internal (NOT re-exported from `index.ts`).
+ */
+export function labelEachOption(values: readonly unknown[], labelOf: (value: unknown) => string): string {
+  return values.map((value) => labelOf(value)).join(', ');
+}
+
+/**
  * The label a reader reads for `value` of `field`, from the pinned map.
  *
  * `null` / absent is `''`, so a name composes cleanly over an empty select
  * (`trim()` answers `''` for the same reason). A value no option declares reads
- * as itself — the select control shows such a value the same way. Everything
- * else that cannot be answered THROWS, which the engine reports as
- * `{ ok: false, kind: 'runtime' }`.
+ * as itself — the select control shows such a value the same way. A list — a
+ * `multiple: true` select's value — reads the label of each of its values, in
+ * stored order, joined with `, ` ({@link labelEachOption}); an empty list is
+ * `''`. Everything else that cannot be answered THROWS, which the engine
+ * reports as `{ ok: false, kind: 'runtime' }`.
  */
 function optionLabelOf(field: string, value: unknown, labels: EvalOptionLabels | undefined): string {
   if (labels === undefined) {
@@ -513,11 +531,23 @@ function optionLabelOf(field: string, value: unknown, labels: EvalOptionLabels |
   // row, not only on the rows where it happens to hold a value.
   const options = Object.prototype.hasOwnProperty.call(labels, field) ? labels[field] : undefined;
   if (options === undefined) throw new Error(optionlessLabelSentence(field));
+  if (Array.isArray(value)) return labelEachOption(value, (item) => oneOptionLabel(field, item, options, true));
+  return oneOptionLabel(field, value, options, false);
+}
+
+/** One stored option value of `field` as its label from `options`, or as stored when no option declares it. */
+function oneOptionLabel(
+  field: string,
+  value: unknown,
+  options: Readonly<Record<string, string>>,
+  listed: boolean,
+): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') {
     throw new Error(
-      `label(record.${field}) renders ONE option value, and \`${field}\` holds ` +
-      `${Array.isArray(value) ? 'a list of values' : 'an object'} on this record.`,
+      `label(record.${field}) reads a select field's option values, and \`${field}\` holds ` +
+      `${listed ? 'a list with a non-option entry' : 'an object'} on this record: an option value is ` +
+      'text or a number.',
     );
   }
   const stored = String(value);

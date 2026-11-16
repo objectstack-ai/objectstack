@@ -33,7 +33,7 @@
  *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
- *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints; `readMailboxComment` / `MAILBOX_KNOCK_AUTHORS` its AUTHOR fence — a knock counts only from the relay or a `GOVERNED_APPROVERS` account, any other author ignored and its body never read; `seatSessionRoster` / `knockSignature` its SIGNATURE LISTING — a relay knock whose signed session the seat it names does not list reads `unlisted` (`unverified seat signature`), never acted on; `listed` is a consistency check inside the fleet's trust root, ⛔ never proof of who rang (a copied signature line reads `listed`)
+ *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints; `readMailboxComment` / `MAILBOX_KNOCK_AUTHORS` its AUTHOR fence — a knock counts only from the relay or a `GOVERNED_APPROVERS` account, any other author ignored and its body never read; `seatSessionRoster` / `knockSignature` its SIGNATURE LISTING — a relay knock whose signed session the seat it names does not list reads `unlisted` (`unverified seat signature`), never acted on; `listed` is a consistency check inside the fleet's trust root, ⛔ never proof of who rang (a copied signature line reads `listed`); `claimThreadSession` the claim's `Thread session:` line, ONE spelling — the card thread an open card's newest, unreleased claim names joins the roster of the seat that claim is signed by, as its delegate — a claim row read only from the knock's own authors (`MAILBOX_KNOCK_AUTHORS`)
  *
  * Every definition below was MOVED, names unchanged, out of
  * `check-clause2-carriers.mjs` at the ruling's last step, which deleted the
@@ -74,7 +74,7 @@
 // row is `GOVERNED_READ_FLOOR` in `dispatch-gates.data.mjs`). The derivation
 // grades it against the read the self-test really performs, so it cannot be
 // satisfied by deleting either half.
-// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins the key table both ways against project-forms.md's 〈信箱 PR〉 section (every key named there, no other key named there), the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, and the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, so a change to any of those spellings is judged here
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md .claude/skills/pm-dispatch/SKILL.md -- the mailbox doorbell battery pins the key table both ways against project-forms.md's 〈信箱 PR〉 section (every key named there, no other key named there), the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, and the card-thread delegate battery pins the claim template's one `Thread session:` line in SKILL.md 〈模板与表〉 against `claimThreadSession`, so a change to any of those spellings is judged here
 
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -85,6 +85,7 @@ import { fileURLToPath } from 'node:url';
 import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
+  CLAIM_COMMENT_MARKER,
   CONTRACT_REVIEW_HEADING_MARKER,
   CONTRACT_REVIEW_SECURITY_TOUCHING_KEY,
   CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES,
@@ -102,9 +103,12 @@ import {
   labelNames,
   readSignatureLine,
   refsTargets,
+  RELEASE_COMMENT_MARKER,
+  releaseAnswersClaim,
   SEAT_SIGNATURE_SESSION_SOURCE,
   seatOnDuty,
   stripSignatureLine,
+  yieldedClaimIndexes,
 } from './check-half-states.mjs';
 // The fleet's one verdict reader, in its counting form, re-exported so the queue guard's lazy loader
 // reaches it: every Tier S entry lands on a record with exactly one `VERDICT:` line reading PASS
@@ -1770,11 +1774,81 @@ function mailboxOpeningSession(body) {
   return MAILBOX_OPENING_FOOTER.exec(lines.at(-1) ?? '')?.[1] ?? null;
 }
 
+/** The claim template's `Thread session:` line (pm-dispatch SKILL.md 〈模板与表〉), its ONE spelling: one backticked id, nothing after it. */
+const CLAIM_THREAD_SESSION_LINE = new RegExp(`^Thread session: \`(${SEAT_SIGNATURE_SESSION_SOURCE})\`[ \\t]*$`, 'u');
+/** Any line that reads as that key, however decorated — what makes a second or a misspelt `Thread session:` line count. */
+const CLAIM_THREAD_SESSION_KEY = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?thread[ _-]?session`?(?:\*\*)?[ \t]*[:：]/iu;
+
 /**
- * The sessions each seat LISTS — the roster a knock's signature line is compared with. Read off the two records a
- * seat keeps of who sits it (`seat-post-protocol.md`; `project-forms.md` 〈信箱 PR〉), both bodies only the relay
- * writes — so any fleet session can write them too, and their authors are not read: the roster is the fleet's own
- * word about itself, the trust root a `listed` reading stands inside (`readMailboxComment`, ⛔ never proof):
+ * The card thread a `Claim:` names on its `Thread session:` line — the session that implements the card in
+ * `mode:thread` and knocks the seat's mailbox as the seat's DELEGATE — or null. ONE key, ONE spelling, the
+ * template's: the line starts the line, the value is one backticked session id (`SEAT_SIGNATURE_SESSION_SOURCE`,
+ * the signature's own session shape), and nothing follows it. ⛔ Everything else reads null, never a guess: a
+ * bare or decorated key, a value with prose around it, a session written in prose on the `Session:` line (the
+ * first session there is `claimSessionId`'s, another reader's question), no key at all, and TWO lines that read as
+ * the key — one claim naming two threads cannot say which one knocks. A null adds nothing to the roster and never
+ * fails it. Pure.
+ *
+ * @param {string} body — a claim comment's body
+ * @returns {string | null}
+ */
+export function claimThreadSession(body) {
+  const keyed = String(body ?? '').split(/\r?\n/).filter((line) => CLAIM_THREAD_SESSION_KEY.test(line));
+  if (keyed.length !== 1) return null;
+  return CLAIM_THREAD_SESSION_LINE.exec(keyed[0])?.[1] ?? null;
+}
+
+/**
+ * The card-thread delegate one OPEN card's thread lists, or null: `{ seat, session, where }` when the thread's
+ * NEWEST claim (`latestMarkedComment` over `CLAIM_COMMENT_MARKER`, the recency rule every claim reader shares;
+ * a claim its own session yielded, `yieldedClaimIndexes`, is not a claim) is signed by a seat
+ * (`readSignatureLine`, `seatKey`) and names its card thread (`claimThreadSession`), and no `Release:` answers it
+ * (`releaseAnswersClaim`). So a released claim, a claim a newer one superseded — another seat's included — and a
+ * closed card list nobody.
+ *
+ * ⛔ AUTHOR RULE FIRST: only the rows whose author the knock's own fence trusts (`MAILBOX_KNOCK_AUTHORS`, read
+ * with `recordAuthorTrusted` as `readMailboxComment` reads it — ⛔ no second author list) are read at all. A row
+ * that names no author, or one outside that rule, is not the fleet's word: it lists nobody, and it neither
+ * supersedes, yields nor releases a claim — the claim, yield and release readers run on the fenced rows only.
+ *
+ * What it does NOT do, as intended:
+ *   - the signer's session is not compared: the claim's signature names the seat, and its session is not checked
+ *     against what that seat lists elsewhere;
+ *   - a claim does not lapse by age: it lists until it is released, superseded or its card closes (a stale claim
+ *     is the claim-liveness rows' finding, not this roster's);
+ *   - a card closed and REOPENED with its newest claim never released lists that claim's thread again — the card
+ *     is open and the claim is still its newest, the reading every claim reader shares;
+ *   - the seat's post is not consulted: a seat whose post is no longer held keeps its open claims' threads listed
+ *     until each claim is released or superseded — the claim, not the post, is the record of whom it dispatched.
+ * Pure.
+ */
+function claimDelegate(card, rows) {
+  if (!card || card.state !== 'open' || card.pull_request) return null;
+  rows = rows.filter((row) => recordAuthorTrusted(row, MAILBOX_KNOCK_AUTHORS));
+  const yielded = yieldedClaimIndexes(rows);
+  const live = rows.map((row, index) => ({ row, index })).filter(({ index }) => !yielded.has(index));
+  const newest = latestMarkedComment(live.map(({ row }) => row), CLAIM_COMMENT_MARKER);
+  if (!newest) return null;
+  const { row, index } = live[newest.index];
+  if (releaseAnswersClaim(latestMarkedComment(rows, RELEASE_COMMENT_MARKER), { ...newest, index })) return null;
+  const signed = readSignatureLine(row?.body);
+  const seat = signed ? seatKey(`${signed.lane}#${signed.seat}`) : null;
+  const session = claimThreadSession(row?.body);
+  if (!seat || !session) return null;
+  return { seat: seat.key, session, where: `claim on #${card.number} (comment ${row?.id ?? '?'}) Thread session` };
+}
+
+/**
+ * The sessions each seat LISTS — the roster a knock's signature line is compared with. Read off the records a
+ * seat keeps of who sits it (`seat-post-protocol.md`; `project-forms.md` 〈信箱 PR〉) and of whom it dispatched. The
+ * roster is the fleet's own word about itself, the trust root a `listed` reading stands inside
+ * (`readMailboxComment`, ⛔ never proof), and each source holds to it its own way:
+ *
+ *   - a seat post and a mailbox opening are BODIES only the relay writes, so any fleet session can write them too,
+ *     and their authors are not read;
+ *   - a claim is a COMMENT on a card, which any author can post, so its rows' authors ARE read: only a row whose
+ *     author the knock's own fence trusts (`MAILBOX_KNOCK_AUTHORS`) counts, and any other row — no author, or one
+ *     outside the rule — lists nobody and neither supersedes nor releases a claim (`claimDelegate`).
  *
  *   a seat post   an open `pm:seat` issue whose title is 🟢 (`seatOnDuty` — a vacant or paused post lists nobody)
  *                 lists, for the seat its FIRST-LINE signature names (`readSignatureLine`, the one reader), that
@@ -1785,18 +1859,25 @@ function mailboxOpeningSession(body) {
  *   a mailbox     an open `pm:mailbox` pull whose body names its seat (`mailboxOwner`, the opener's own reading)
  *   opening       lists the session its footer names — the session that opened it at seating. So a successor's
  *                 session the post lists reads `listed` on a mailbox its predecessor opened, and the reverse.
+ *   a claim       `{ card, rows }`, an open card and its WHOLE comment thread: the card thread its newest claim
+ *                 names (`claimDelegate`), for the seat that claim's own signature names — the session that knocks
+ *                 as that seat's delegate, listed only while the claim is open: released, superseded or closed,
+ *                 it drops. `claims` omitted lists no card thread (they read `unlisted`, as before).
  *
- * ⛔ Fail closed: either listing not an array reads `{ state: 'unreadable', gaps }`, never an empty roster, and a
- * row lists only when its `state` reads `open` — a closed row, or one with no `state` at all, lists nobody.
+ * ⛔ Fail closed: any listing that is not an array — `claims` handed in as anything but an array or omitted, or
+ * one of its threads not an array — reads `{ state: 'unreadable', gaps }`, never a smaller roster, and a row
+ * lists only when its `state` reads `open` — a closed row, or one with no `state` at all, lists nobody.
  * Rows in, `{ state: 'read', seats }` out — `seats` a Map from a seat's canonical key (`seatKey`) to a Map of each
  * session it lists to where it is listed. Pure.
  *
- * @param {{ posts?: object[], mailboxes?: object[] }} listings — the open `pm:seat` issues and the open pulls
+ * @param {{ posts?: object[], mailboxes?: object[], claims?: { card: object, rows: object[] }[] }} listings — the
+ *   open `pm:seat` issues, the open pulls, and the open claimed cards with their whole threads
  */
-export function seatSessionRoster({ posts, mailboxes } = {}) {
+export function seatSessionRoster({ posts, mailboxes, claims = [] } = {}) {
   const gaps = [];
   if (!Array.isArray(posts)) gaps.push('the open `pm:seat` posts');
   if (!Array.isArray(mailboxes)) gaps.push('the open `pm:mailbox` pulls');
+  if (!Array.isArray(claims) || claims.some((entry) => !Array.isArray(entry?.rows))) gaps.push('the open `pm:dispatched` claim threads');
   if (gaps.length > 0) return { state: 'unreadable', gaps };
   const seats = new Map();
   const list = (seat, session, where) => {
@@ -1819,6 +1900,10 @@ export function seatSessionRoster({ posts, mailboxes } = {}) {
     const seat = mailboxOwner(pr)?.seat ?? null;
     const session = seat ? mailboxOpeningSession(pr.body) : null;
     if (session) list(seat, session, `mailbox opening #${pr.number}`);
+  }
+  for (const { card, rows } of claims) {
+    const delegate = claimDelegate(card, rows);
+    if (delegate) list(delegate.seat, delegate.session, delegate.where);
   }
   return { state: 'read', seats };
 }
@@ -1843,7 +1928,7 @@ export function knockSignature(body, roster) {
   const seat = seatKey(`${signed.lane}#${signed.seat}`)?.key ?? null;
   if (!seat) return unlisted(`\`${signed.lane}#${signed.seat}\` names no seat a mailbox serves`);
   const listed = roster.seats.get(seat);
-  if (!listed || listed.size === 0) return unlisted(`${seat} lists no session (no held seat post signed by it, no open mailbox opening)`);
+  if (!listed || listed.size === 0) return unlisted(`${seat} lists no session (no held seat post signed by it, no open mailbox opening, no open claim naming its card thread)`);
   if (!listed.has(signed.session)) return unlisted(`${signed.session} is not a session ${seat} lists`);
   const also = [...roster.seats].filter(([other, sessions]) => other !== seat && sessions.has(signed.session)).map(([other]) => other);
   if (also.length > 0) return unlisted(`${signed.session} is listed by ${also.join(', ')} too, so it cannot say which seat rang`);
@@ -1860,7 +1945,7 @@ export function mailboxKeyLines() {
     `Mailbox doorbell — the comment's first line is \`To: <seat>\` (LANE#N), the next is ONE of these ${MAILBOX_KEYS.length} keys:`,
     `one event, one line of at most ${MAILBOX_LINE_MAX_BYTES} bytes, keys and numbers only; anything else is a half-state.`,
     `A knock counts only from ${MAILBOX_KNOCK_AUTHORS.join(', ')}; any other author is ${MAILBOX_IGNORED_AUTHOR.replace(/^ignored: /, 'ignored — ')}, its body never read.`,
-    `A relay knock opens with its seat signature (LANE#N · ACCOUNT · SESSION), from a session that seat lists — its held seat post (Successor-of: included) or its open mailbox opening; any other is ${MAILBOX_UNVERIFIED_SIGNATURE}, not acted on. Listed is consistency, not proof: a copied signature line also reads listed.`,
+    `A relay knock opens with its seat signature (LANE#N · ACCOUNT · SESSION), from a session that seat lists — its held seat post (Successor-of: included), its open mailbox opening, or the Thread session: line of its open claim on a card (a card thread, as the seat's delegate; a claim counts only from an author the knock fence trusts); any other is ${MAILBOX_UNVERIFIED_SIGNATURE}, not acted on. Listed is consistency, not proof: a copied signature line also reads listed.`,
     '',
     ...MAILBOX_KEYS.flatMap((k) => [k.template, `    ${k.from} → ${k.to}; ${k.when}`]),
     '',
@@ -2722,6 +2807,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 51,
   // The knock signature listing (#34013): a relay knock its named seat does not list is never acted on.
   '⭐ the knock signature listing: a relay knock the seat it names does not list reads `unverified seat signature` — and a listed one is consistency, never proof': 18,
+  // The card-thread delegate (#34013 remainder 2): a claim's `Thread session:` line, one spelling, joins its signing seat's roster.
+  '⭐ the card-thread delegate: the session an open claim names on its `Thread session:` line joins the roster of the seat that signed it — one spelling, dropped when released, superseded or closed': 17,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
@@ -2748,7 +2835,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 15 → 16 with the claim-line battery (the maintainer's one-claim-per-head rule): one battery, one row.
 // Raised 16 → 17 with the hold-line battery (the maintainer's lane-hold rule): one battery, one row.
 // Raised 17 → 18 with the knock-signature battery (#33789 item 3, split to #34013): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 18;
+// Raised 18 → 19 with the card-thread delegate battery (#34013 remainder 2): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3485,7 +3573,7 @@ export async function selfTest() {
     t('⛔ ANOTHER seat\'s session signing as this seat is unlisted and NOT consistent — seat 2 ringing as seat 1, though its own post names seat 1\'s session in prose — while its vocabulary reading still reads', (() => { const r = read(KNOCK('domain:skills#1', S2)); return r.state === 'read' && r.consistent === false && r.signature.state === 'unlisted' && r.signature.reason.startsWith(MAILBOX_UNVERIFIED_SIGNATURE) && r.signature.reason.includes(`${S2} is not a session domain:skills#1 lists`) && read(KNOCK('domain:skills#2', S1)).signature.state === 'unlisted'; })());
     t('⛔ a session no seat lists — a card thread ringing under its seat\'s signature — is unlisted', why(KNOCK('domain:skills#1', STRAY)).includes(`${STRAY} is not a session domain:skills#1 lists`));
     t('⛔ a knock with NO signature line is unlisted — `To:` first, or the signature below the key line', [why(DB_ROW(MSG('Notify: landed · #28562'))), why(DB_ROW(`${MSG('Notify: landed · #28562')}\n${SIG('domain:skills#1', S1)}`))].every((w) => w === `${MAILBOX_UNVERIFIED_SIGNATURE} — the knock opens with no seat signature line`));
-    t('⛔ a vacant or paused post lists NOBODY — its last session signing as it reads `lists no session` — and so does a seat with neither a post nor an opening', SAME([why(KNOCK('domain:skills#3', S3)), why(KNOCK('domain:ui#9', S3)), seatSessionRoster({ posts: [POST(29747, '[PM seat] domain:skills · seat 3 — ⏸️ paused', `${SIG('domain:skills#3', S3)}\n`)], mailboxes: [] }).seats.size].join('|'), `${MAILBOX_UNVERIFIED_SIGNATURE} — domain:skills#3 lists no session (no held seat post signed by it, no open mailbox opening)|${MAILBOX_UNVERIFIED_SIGNATURE} — domain:ui#9 lists no session (no held seat post signed by it, no open mailbox opening)|0`));
+    t('⛔ a vacant or paused post lists NOBODY — its last session signing as it reads `lists no session` — and so does a seat with neither a post nor an opening', SAME([why(KNOCK('domain:skills#3', S3)), why(KNOCK('domain:ui#9', S3)), seatSessionRoster({ posts: [POST(29747, '[PM seat] domain:skills · seat 3 — ⏸️ paused', `${SIG('domain:skills#3', S3)}\n`)], mailboxes: [] }).seats.size].join('|'), `${MAILBOX_UNVERIFIED_SIGNATURE} — domain:skills#3 lists no session (no held seat post signed by it, no open mailbox opening, no open claim naming its card thread)|${MAILBOX_UNVERIFIED_SIGNATURE} — domain:ui#9 lists no session (no held seat post signed by it, no open mailbox opening, no open claim naming its card thread)|0`));
     t('⛔ FAIL CLOSED with no roster: none handed in, an unreadable one (either listing not an array) and a malformed one all read unlisted — never an empty roster, never a pass', SAME([readMailboxComment(KNOCK('domain:skills#1', S1)).signature.reason, read(KNOCK('domain:skills#1', S1), seatSessionRoster({ posts: null, mailboxes })).signature.reason, read(KNOCK('domain:skills#1', S1), seatSessionRoster({ posts })).signature.reason, read(KNOCK('domain:skills#1', S1), { state: 'read', seats: {} }).signature.state, seatSessionRoster().state], [`${MAILBOX_UNVERIFIED_SIGNATURE} — no seat roster was read (none was handed in)`, `${MAILBOX_UNVERIFIED_SIGNATURE} — no seat roster was read (the open \`pm:seat\` posts)`, `${MAILBOX_UNVERIFIED_SIGNATURE} — no seat roster was read (the open \`pm:mailbox\` pulls)`, 'unlisted', 'unreadable']));
     t('⛔ a session TWO seats list cannot say which rang — unlisted for each of them', (() => { const r = seatSessionRoster({ posts, mailboxes: [...mailboxes, MAILBOX(33921, 'domain:skills#2', S1)] }); return why(KNOCK('domain:skills#1', S1), r).includes(`${S1} is listed by domain:skills#2 too`) && why(KNOCK('domain:skills#2', S1), r).includes(`${S1} is listed by domain:skills#1 too`) && read(KNOCK('domain:skills#2', S2), r).signature.state === 'listed'; })());
     t('⛔ what lists nothing: a post with no signature line, one not labelled `pm:seat`, a closed post, a pull row, a closed or seat-less mailbox, an opening with the bare footer — and a signature naming no seat a mailbox serves', (() => { const r = seatSessionRoster({ posts: [POST(1, '[PM seat] domain:ui — 🟢 os-pm', `## Current PM\n\n\`${STRAY}\``), POST(2, '[PM seat] domain:ui · seat 2 — 🟢 os-pm', SIG('domain:ui#2', STRAY), { labels: [] }), POST(3, '[PM seat] domain:ui · seat 3 — 🟢 os-pm', SIG('domain:ui#3', STRAY), { state: 'closed' }), POST(4, '[PM seat] domain:ui · seat 4 — 🟢 os-pm', SIG('domain:ui#4', STRAY), { pull_request: {} })], mailboxes: [MAILBOX(5, 'domain:ui#5', STRAY, { state: 'closed' }), MAILBOX(6, 'domain:ui#6', STRAY, { body: 'To: os-pm\n\nlegacy' }), MAILBOX(7, 'domain:ui#7', null)] }); return r.state === 'read' && r.seats.size === 0 && why(KNOCK('coordinator#1', S1)) === `${MAILBOX_UNVERIFIED_SIGNATURE} — \`coordinator#1\` names no seat a mailbox serves`; })());
@@ -3497,6 +3585,60 @@ export async function selfTest() {
     t('⛔ RESIDUAL, pinned: a fleet session that COPIES a seat\'s whole public signature line reads `listed` — byte-identical to that seat\'s own knock — so `listed` is a consistency reading inside the fleet\'s trust root, never proof of who rang', (() => { const line = posts[0].body.split('\n')[0]; const forged = DB_ROW(`${line}\n${MSG('Notify: landed · #28562', 'domain:skills#2')}`, 9001); const own = KNOCK('domain:skills#1', S1); return line === SIG('domain:skills#1', S1) && forged.body === own.body && SAME(read(forged), read(own)) && read(forged).signature.state === 'listed'; })());
     t('⛔ a row lists only when its `state` READS `open` — a seat post or a mailbox with no `state` at all lists nobody, failing closed', (() => { const { state: _p, ...noStatePost } = posts[1]; const { state: _m, ...noStateBox } = mailboxes[1]; const r = seatSessionRoster({ posts: [noStatePost], mailboxes: [noStateBox] }); return r.state === 'read' && r.seats.size === 0 && read(KNOCK('domain:skills#2', S2), r).signature.state === 'unlisted' && read(KNOCK('triage#1', TRI), r).signature.state === 'unlisted'; })());
     t('`--mailbox-keys` tells a sender the signature rule, naming the unlisted reading and that a listed one is no proof', mailboxKeyLines().some((l) => l.includes('Successor-of:') && l.includes(MAILBOX_UNVERIFIED_SIGNATURE) && l.includes('not proof')));
+    // H72's signature row (check-half-states.mjs), driven end-to-end: the REAL roster read off the listings the sweep
+    // hands it (`h72RosterListings`), the REAL reader, and the patrol's predicate over what they made.
+    const NOW_H72 = Date.parse('2026-10-28T08:00:00Z');
+    const ROWS_H72 = [{ ...KNOCK('domain:skills#1', S1), id: 8201 }, { ...KNOCK('domain:skills#1', STRAY), id: 8202 }, DB_ROW(DB.ut, 8203, '2026-10-28T07:00:00Z', GOVERNED_APPROVERS[0]), DB_ROW(DRIVE_BY, 8204, '2026-10-28T07:00:00Z', 'drive-by-commenter')];
+    t('⭐ H72 lists the REAL reader\'s `unlisted` knock for the seat the mailbox serves — by comment id, naming the stray session — and not the listed knock, the maintainer\'s or the drive-by', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, { number: 1, state: 'open', labels: [{ name: 'pm:queue' }] }], [...mailboxes, { number: 2, state: 'open', labels: [] }])); const row = String(hs.h72UnlistedKnockLines(mailboxEvents(ROWS_H72, r), r, NOW_H72) ?? ''); return r.state === 'read' && row.includes('1 knock(s)') && row.includes('comment 8202') && row.includes(`${STRAY} is not a session domain:skills#1 lists`) && !['comment 8201', 'comment 8203', 'comment 8204'].some((c) => row.includes(c)); })());
+    t('⛔ …and a TRUNCATED `pm:seat` listing makes the real roster unreadable, so the reader reads every relay knock `unlisted` (fail closed) while H72 lists NONE of them — unjudged, never a finding against a roster nobody read', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings(posts, mailboxes, [hs.H72_ROSTER_LISTINGS.posts])); const reading = mailboxEvents(ROWS_H72, r); return r.state === 'unreadable' && SAME(reading.unlisted, [8201, 8202]) && hs.h72UnlistedKnockLines(reading, r, NOW_H72) === null; })());
+
+    // -- the card-thread delegate (#34013 remainder 2, seat ruling: option A) ------------------------------------
+    //
+    // A card thread knocks its seat's mailbox as the seat's DELEGATE, so the seat's roster lists the session its
+    // open claim names on the template's ONE `Thread session:` spelling — only while that claim is the card's
+    // newest, unreleased claim on an open card, and only for the seat the claim's own signature names.
+    battery('⭐ the card-thread delegate: the session an open claim names on its `Thread session:` line joins the roster of the seat that signed it — one spelling, dropped when released, superseded or closed');
+    {
+      const T = 'session_01CardThreadDelegateGggg';
+      const T2 = 'session_01CardThreadSecondHhhhhh';
+      const S_UI = 'session_01UiSeatTwoIiiiiiiiiiiii';
+      const CARD = (number, o = {}) => ({ number, state: 'open', labels: [{ name: 'pm:dispatched' }], ...o });
+      const CLAIM = (id, at, seat, seatSession, lines, signed = true) => ({ id, created_at: at, user: { login: RELAY_COMMENT_AUTHOR }, body: `${signed ? `${SIG(seat, seatSession)}\n\n` : ''}Claim: PM loop round 1\n${lines.join('\n')}\nAccount: \`os-pm\`\nBranch: \`claude/project-thread-x\`\nSeat: \`${seat}\`\n` });
+      const OWN = (thread) => [`Session: \`${S2}\``, thread];
+      const TEMPLATE = `Thread session: \`${T}\``;
+      const R = (claims, more = {}) => seatSessionRoster({ posts, mailboxes, claims, ...more });
+      const ONE = (rows, card = CARD(34013)) => R([{ card, rows }]);
+      const DELEGATE = (r, seat = 'domain:skills#2', session = T) => read(KNOCK(seat, session), r).signature;
+      const BASE = [CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, OWN(TEMPLATE))];
+      t('⭐ the template\'s spelling, with a real id, reads its session — the key starting the line, the backticked id, nothing after it but blanks', claimThreadSession(TEMPLATE) === T && claimThreadSession(`${TEMPLATE}  `) === T && claimThreadSession(`Claim: x\r\n${TEMPLATE}\r\nSeat: y`) === T);
+      t('⭐ the GOVERNED template (pm-dispatch SKILL.md 〈模板与表〉) carries exactly ONE line that reads as the key, the backticked placeholder directly after it, its note saying nothing follows the id — and that spelling with a real id is the one the reader reads', (() => { const skill = readFileSync(new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url), 'utf8'); const keyed = skill.split(/\r?\n/).filter((line) => CLAIM_THREAD_SESSION_KEY.test(line)); const head = 'Thread session: `session_<id>`'; return keyed.length === 1 && keyed[0].startsWith(`${head} (`) && keyed[0].includes('nothing after the id') && claimThreadSession(head.replace('session_<id>', T)) === T && claimThreadSession(keyed[0].replace('session_<id>', T)) === null; })());
+      t('⭐ the template spelling JOINS the roster: the card thread ringing under its seat\'s signature reads `listed`, via the claim it was named on', (() => { const s = DELEGATE(ONE(BASE)); return s.state === 'listed' && s.seat === 'domain:skills#2' && s.session === T && s.via === 'claim on #34013 (comment 1) Thread session'; })());
+      const OTHER = {
+        'a bare id': [`Session: \`${S2}\``, `Thread session: ${T}`],
+        'a list bullet': [`Session: \`${S2}\``, `- Thread session: \`${T}\``],
+        'a bold key': [`Session: \`${S2}\``, `**Thread session:** \`${T}\``],
+        'a prose tail': [`Session: \`${S2}\``, `Thread session: \`${T}\` (card thread, dev)`],
+        'a hyphenated key': [`Session: \`${S2}\``, `Thread-session: \`${T}\``],
+        'the session in prose on the `Session:` line': [`Session: \`${T}\` (card thread, dev) · seat \`${S2}\``],
+        'no session at all': [`Session: a card thread opened under seat \`${S2}\``],
+        'two key lines': [`Session: \`${S2}\``, TEMPLATE, `Thread session: \`${T2}\``],
+        'the template placeholder': [`Session: \`${S2}\``, 'Thread session: `session_<id>` (mode:thread only)'],
+      };
+      t('⛔ every OTHER spelling reads null — a bare id, a bullet, a bold key, a prose tail, a hyphenated key, the measured prose on the `Session:` line, no session, two key lines, the template\'s placeholder', Object.values(OTHER).every((lines) => claimThreadSession(CLAIM(1, 'x', 'domain:skills#2', S2, lines).body) === null));
+      t('⛔ …and each joins NOTHING: the thread\'s knock reads unlisted, never a guess at a session in prose', Object.values(OTHER).every((lines) => { const r = ONE([CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, lines)]); return r.state === 'read' && DELEGATE(r).state === 'unlisted' && DELEGATE(r, 'domain:skills#2', T2).state === 'unlisted' && DELEGATE(r, 'domain:skills#2', S2).state === 'listed'; }));
+      t('⛔ a RELEASED claim drops its thread — and a release OLDER than a fresh claim does not', (() => { const rel = { id: 2, created_at: '2026-11-16T04:00:00Z', user: { login: RELAY_COMMENT_AUTHOR }, body: `${SIG('domain:skills#2', S2)}\n\nRelease: \`${S2}\` · premise moved · back to pm:queue` }; return DELEGATE(ONE([...BASE, rel])).state === 'unlisted' && DELEGATE(ONE([{ ...rel, created_at: '2026-11-16T03:00:00Z' }, ...BASE])).state === 'listed'; })());
+      t('⛔ a SUPERSEDED claim drops its thread — a newer claim by another seat lists ITS thread for ITS seat, a newer claim by the same seat lists only the newer thread', (() => { const ui = ONE([...BASE, CLAIM(3, '2026-11-16T05:00:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, `Thread session: \`${T2}\``])]); const same = ONE([...BASE, CLAIM(3, '2026-11-16T05:00:00Z', 'domain:skills#2', S2, OWN(`Thread session: \`${T2}\``))]); return DELEGATE(ui).state === 'unlisted' && DELEGATE(ui, 'domain:ui#2', T2).state === 'listed' && DELEGATE(same).state === 'unlisted' && DELEGATE(same, 'domain:skills#2', T2).state === 'listed'; })());
+      t('⛔ a CLOSED card drops its thread — and so does a pull row', DELEGATE(ONE(BASE, CARD(34013, { state: 'closed' }))).state === 'unlisted' && DELEGATE(ONE(BASE, CARD(34013, { pull_request: {} }))).state === 'unlisted');
+      t('⭐ a claim its OWN session yielded is no claim: the race loser\'s newer claim lists nothing and the winner\'s older claim still lists its thread', (() => { const lose = CLAIM(3, '2026-11-16T05:00:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, `Thread session: \`${T2}\``]); const yieldRow = { id: 4, created_at: '2026-11-16T05:01:00Z', user: { login: RELAY_COMMENT_AUTHOR }, body: `${SIG('domain:ui#2', S_UI)}\n\nalready claimed — yielding \`${S_UI}\`` }; const r = ONE([...BASE, lose, yieldRow]); return DELEGATE(r).state === 'listed' && DELEGATE(r, 'domain:ui#2', T2).state === 'unlisted'; })());
+      t('⛔ a claim signed by ANOTHER seat adds nothing to this one: ui#2\'s thread knocking as skills#2 is unlisted, as ui#2 listed — and a claim with no signature line lists nobody', (() => { const r = ONE([CLAIM(1, '2026-11-16T03:16:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, TEMPLATE])]); const bare = ONE([CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, OWN(TEMPLATE), false)]); return why(KNOCK('domain:skills#2', T), r).includes(`${T} is not a session domain:skills#2 lists`) && DELEGATE(r, 'domain:ui#2', T).state === 'listed' && DELEGATE(bare).state === 'unlisted' && [...bare.seats.values()].every((m) => !m.has(T)); })());
+      t('⭐ AUTHOR RULE: a claim the relay posted lists its thread, and so does one a `GOVERNED_APPROVERS` account posted — the knock fence\'s own authors, ⛔ no second list', DELEGATE(ONE(BASE)).state === 'listed' && DELEGATE(ONE([{ ...BASE[0], user: { login: GOVERNED_APPROVERS[0] } }])).state === 'listed');
+      t('⛔ AUTHOR RULE: a claim posted by any OTHER author, or naming no author at all, lists nobody — whatever its signature and `Thread session:` line say', [{ login: 'drive-by' }, {}, undefined, { login: '' }].every((user) => { const r = ONE([{ ...BASE[0], user }]); return r.state === 'read' && DELEGATE(r).state === 'unlisted' && [...r.seats.values()].every((m) => !m.has(T)); }));
+      t('⛔ AUTHOR RULE: a row outside it neither SUPERSEDES nor RELEASES nor YIELDS — a newer drive-by claim naming another thread lists nothing and the relay claim still lists; a drive-by `Release:` or yield leaves it listed', (() => { const by = { login: 'drive-by' }; const newer = ONE([...BASE, { ...CLAIM(3, '2026-11-16T05:00:00Z', 'domain:skills#2', S2, OWN(`Thread session: \`${T2}\``)), user: by }]); const rel = ONE([...BASE, { id: 2, created_at: '2026-11-16T04:00:00Z', user: by, body: `${SIG('domain:skills#2', S2)}\n\nRelease: \`${S2}\` · premise moved · back to pm:queue` }]); const yieldRow = ONE([...BASE, { id: 4, created_at: '2026-11-16T05:01:00Z', user: by, body: `${SIG('domain:skills#2', S2)}\n\nalready claimed — yielding \`${S2}\`` }]); return DELEGATE(newer).state === 'listed' && DELEGATE(newer, 'domain:skills#2', T2).state === 'unlisted' && DELEGATE(rel).state === 'listed' && DELEGATE(yieldRow).state === 'listed'; })());
+      t('⛔ FAIL CLOSED: claims that are not an array, or a thread that is not one, read the roster UNREADABLE, naming the claim threads — and omitting `claims` lists no card thread, as before', (() => { const gap = 'the open `pm:dispatched` claim threads'; const a = R(null); const b = R([{ card: CARD(1), rows: null }]); const c = seatSessionRoster({ posts, mailboxes }); return a.state === 'unreadable' && a.gaps.includes(gap) && b.state === 'unreadable' && b.gaps.includes(gap) && c.state === 'read' && DELEGATE(c).state === 'unlisted'; })());
+      t('⛔ one thread on TWO seats\' claims cannot say which rang — unlisted for each', (() => { const r = R([{ card: CARD(1), rows: BASE }, { card: CARD(2), rows: [CLAIM(5, '2026-11-16T03:16:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, TEMPLATE])] }]); return why(KNOCK('domain:skills#2', T), r).includes(`${T} is listed by domain:ui#2 too`) && DELEGATE(r, 'domain:ui#2', T).state === 'unlisted'; })());
+      t('⭐ H72 end to end: the claimed card\'s WHOLE thread the sweep holds joins the REAL roster — the delegate\'s knock is not listed, a stray beside it is', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, CARD(34013)], mailboxes, [], new Map([[34013, { rows: BASE, complete: true }]]))); const rows = [{ ...KNOCK('domain:skills#2', T), id: 8301 }, { ...KNOCK('domain:skills#2', STRAY), id: 8302 }]; const row = String(hs.h72UnlistedKnockLines(mailboxEvents(rows, r), r, NOW_H72) ?? ''); return r.state === 'read' && row.includes('1 knock(s)') && row.includes('comment 8302') && !row.includes('comment 8301'); })());
+      t('⛔ …and a claimed card whose thread is NOT held whole makes that roster unreadable, so H72 lists nothing — unjudged, never the delegate accused', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, CARD(34013)], mailboxes, [], new Map([[34013, { rows: BASE, complete: false }]]))); const reading = mailboxEvents([{ ...KNOCK('domain:skills#2', T), id: 8301 }], r); return r.state === 'unreadable' && SAME(reading.unlisted, [8301]) && hs.h72UnlistedKnockLines(reading, r, NOW_H72) === null; })());
+    }
   }
 
   // -- the signature line (#27113) ----------------------------------------------
@@ -3856,7 +3998,7 @@ export async function selfTest() {
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
       + 'doorbell — `To: <seat>` then each of the table\'s keys read, the table named both ways in the protocol text and printed by `--mailbox-keys`, and a key with no `To:`, a `To:` naming a login, free text, an acknowledgement, '
-      + 'a key outside the table, a second line and an over-long line refused; the knock signature listing — `listed` only for a session the seat it names lists on its held post (`Successor-of:` included) or its open mailbox opening, a copied signature line `listed` too (consistency, never proof), a maintainer\'s knock exempt, everything else `unverified seat signature` and failing closed; the review claim line — read signed and unsigned, '
+      + 'a key outside the table, a second line and an over-long line refused; the knock signature listing — `listed` only for a session the seat it names lists on its held post (`Successor-of:` included), its open mailbox opening or its open newest claim\'s `Thread session:` line (one spelling; released, superseded and closed claims drop), a copied signature line `listed` too (consistency, never proof), a maintainer\'s knock exempt, everything else `unverified seat signature` and failing closed; the review claim line — read signed and unsigned, '
       + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the earliest live claim holding; the review hold '
       + 'line — read signed and unsigned, spelled verbatim in the rule text, per head and cleared only by a new head, an unreadable '
       + 'line listed and voiding nothing, its 24-hour age a reading '

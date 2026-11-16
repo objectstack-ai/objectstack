@@ -258,11 +258,13 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     expect(await isBanned(targetUserId), 'an unconfirmed agent call banned the user').toBe(false);
   }, 120_000);
 
-  it('the packaged-action switch holds over MCP: ban_user OFF answers 409 ACTION_DISABLED even confirmed', async () => {
+  it('the packaged-action switch holds over MCP: ban_user OFF answers 409 ACTION_DISABLED', async () => {
     await flip(false);
     try {
+      // [#34209] No `confirm`: the member is retired from run_action, and the
+      // switch answers before the confirmation step anyway.
       const refused = await tool(admin, 'run_action', {
-        actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId, confirm: true,
+        actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId,
       });
       expect(refused.isError).toBe(true);
       expect(refused.payload?.error).toMatchObject({ code: 'ACTION_DISABLED', status: 409 });
@@ -272,21 +274,36 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     }
   }, 120_000);
 
-  it('the target still authorizes: a plain member\'s confirmed call is refused and the user is NOT banned', async () => {
+  it('the target still authorizes: a plain member\'s call is refused and the user is NOT banned', async () => {
     const refused = await tool(member, 'run_action', {
-      actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId, confirm: true,
+      actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId,
     });
     expect(refused.isError).toBe(true);
     expect(await isBanned(targetUserId)).toBe(false);
   }, 120_000);
 
-  it('the confirmed administrator call runs through every gate and bans the user', async () => {
-    const ran = await tool(admin, 'run_action', {
+  it('[#33690] the administrator\'s call clears every gate and still bans nobody: a person confirms, never the caller', async () => {
+    // Before the amended confirmation contract a `confirm: true` call banned
+    // the user. The stack registers no pending-confirmation service, so the
+    // call is refused at confirmation, after every other gate, and nothing is
+    // forwarded.
+    const refused = await tool(admin, 'run_action', {
+      actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId, params: { banReason: 'dogfood' },
+    });
+    expect(refused.isError, refused.text).toBe(true);
+    expect(refused.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+    expect(refused.payload?.error?.details?.reason, refused.text).toBe('no_confirmation_service');
+    expect(await isBanned(targetUserId)).toBe(false);
+
+    // [#34209] The same call carrying the retired `confirm` member is refused
+    // at the tool's closed input, before any gate.
+    const withMember = await tool(admin, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId, params: { banReason: 'dogfood' }, confirm: true,
     });
-    expect(ran.isError, ran.text).toBe(false);
-    expect(ran.payload).toMatchObject({ ok: true, action: 'ban_user', objectName: 'sys_user', recordId: targetUserId });
-    expect(await isBanned(targetUserId)).toBe(true);
+    expect(withMember.isError, withMember.text).toBe(true);
+    expect(withMember.text).toContain('`confirm`');
+    expect(withMember.payload?.error?.code, withMember.text).toBeUndefined();
+    expect(await isBanned(targetUserId)).toBe(false);
   }, 120_000);
 
   // ── The OAuth-connected agent: one case per bucket ───────────────────────
@@ -328,10 +345,10 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     // gate's sentence with the REST door's 403. The scoped call is not told the
     // action is unexposed, because it is exposed; the caller's grant is why.
     const scoped = await tool(memberAgent, 'run_action', {
-      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
+      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'member agent' },
     });
     const byName = await tool(memberAgent, 'run_action', {
-      actionName: 'ban_user', recordId: agentTargetUserId, params: { banReason: 'member agent' }, confirm: true,
+      actionName: 'ban_user', recordId: agentTargetUserId, params: { banReason: 'member agent' },
     });
     for (const refused of [scoped, byName]) {
       expect(refused.isError, refused.text).toBe(true);
@@ -351,20 +368,26 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     expect(messageOf(scoped)).toContain('system object "sys_user" is not exposed via MCP');
   }, 120_000);
 
-  it('C: the agent\'s unconfirmed ban_user is refused 428 before any forward; confirmed, it is served as the agent (#28367) and bans the user', async () => {
-    const unconfirmed = await tool(agent, 'run_action', {
+  it('C: [#33690] the agent\'s ban_user is refused 428 before any forward, and bans nobody; [#34209] with confirm it is refused at the input', async () => {
+    // Before the amended confirmation contract the confirmed call was served as
+    // the agent (#28367) and banned the user. A person confirms now, never the
+    // agent, and the stack registers no pending-confirmation service.
+    const refused = await tool(agent, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' },
     });
-    expect(unconfirmed.isError).toBe(true);
-    expect(unconfirmed.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+    expect(refused.isError, refused.text).toBe(true);
+    expect(refused.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+    expect(refused.payload?.error?.details?.reason, refused.text).toBe('no_confirmation_service');
     expect(await isBanned(agentTargetUserId)).toBe(false);
 
-    const confirmed = await tool(agent, 'run_action', {
+    // [#34209] The agent's `confirm: true` is refused at the tool's closed input.
+    const withMember = await tool(agent, 'run_action', {
       actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' }, confirm: true,
     });
-    expect(confirmed.isError, confirmed.text).toBe(false);
-    expect(confirmed.payload).toMatchObject({ ok: true, action: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId });
-    expect(await isBanned(agentTargetUserId)).toBe(true);
+    expect(withMember.isError, withMember.text).toBe(true);
+    expect(withMember.text).toContain('`confirm`');
+    expect(withMember.payload?.error?.code, withMember.text).toBeUndefined();
+    expect(await isBanned(agentTargetUserId)).toBe(false);
   }, 120_000);
 
   it('H: impersonate_user is absent from the agent\'s listing and refused by name', async () => {

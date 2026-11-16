@@ -5,7 +5,7 @@
  * `ObjectQL`: the bodies of `resolveRelateThenLowerWhere`, `withResolvedWhere`,
  * `expandSearchOnAst`, `expandSearchOnOptions`, `fillQueryAstDefaults`,
  * `requireFindOnePredicate`, `find`, `reportFindFailure`, `findOne` moved out
- * of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * of `engine.ts` whole (split by #30012 and #31116).
  *
  * A MOVE, not a redesign. {@link FindFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -30,8 +30,9 @@
  */
 
 import { SortNodeSchema, lowerFilterCondition, resolveSearchFieldResolution } from '@objectstack/spec/data';
-import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
+import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { collectCredentialFields, collectInternalReadFields } from './secret-fields.js';
@@ -545,7 +546,18 @@ export class FindFacet {
       // [ADR-0139 D2] The executor boundary: the AST is final here — after the
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
-      const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context);
+      const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context, driverOptions);
+      // [relation semi-join] A PLANNED read (`relation-semi-join.ts`): the
+      // final `where` and the driver options are handed to the planner in
+      // place of the driver call, and the read answers the plan's own empty
+      // rows. Only the engine's own nested-relation lowering sets this
+      // symbol-keyed option.
+      const plan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
+      if (plan !== undefined) {
+          plan.capture(driverAst.where as FilterCondition | undefined, driverOptions);
+          opCtx.result = plan.rows;
+          return opCtx.result;
+      }
 
       try {
           let result = await driver.find(object, driverAst, driverOptions);
@@ -837,7 +849,7 @@ export class FindFacet {
       const driverOptions = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
       hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
       // [ADR-0139 D2] The executor boundary, as in `find`.
-      const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context);
+      const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context, driverOptions);
 
       let result = await driver.findOne(objectName, driverAst, driverOptions);
 

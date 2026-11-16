@@ -9,7 +9,7 @@
  * `packagedArtifactBase`, `objectRegistrationRefusal`,
  * `restoreTranslatedObjectEchoes`, `restoreInjectedColumnEchoes`,
  * `registeredTranslationBundle`, `readCodeLayerForCarryForward` moved out of
- * `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
+ * `protocol.ts` whole (split by #29998).
  *
  * [#30062] Written here from the start, beside their siblings: the page,
  * dataset, app and book packaged bases (`getPackagedPageBase`,

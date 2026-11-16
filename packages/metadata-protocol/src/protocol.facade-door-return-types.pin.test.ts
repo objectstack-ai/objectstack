@@ -7,7 +7,7 @@
  *
  * The protocol.ts codemod keeps a non-private method with an inferred return
  * type on the class (`inferred-return-type` in
- * `scripts/codemod-split-protocol.mjs`): the published `.d.ts` prints that
+ * the codemod, split by #29998): the published `.d.ts` prints that
  * type, and once the body moved the compiler would infer it through the moved
  * function instead. Each door below now carries its type on the signature,
  * copied from the `.d.ts` it was inferred into (the PR proves the built
@@ -15,8 +15,8 @@
  * the body lives. An edit that drops one of these annotations turns this red,
  * before a later move could re-infer it.
  *
- * A door's body moves to its facet with `codemod-split-protocol.mjs --members`
- * (#30518); until it does, the door keeps its row in
+ * A door's body moves to its facet as the codemod's `--members` pass did
+ * (split by #30687; #30518); until it does, the door keeps its row in
  * `scripts/facade-delegation-registry.json`.
  */
 import { readFileSync } from 'node:fs';

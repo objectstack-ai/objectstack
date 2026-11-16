@@ -490,6 +490,12 @@ Any other dotted spelling — `revenue.sum`, `owner.amount_sum` — is refused w
 traverse relationships, only dimensions do, so there is no related column for a dotted
 measure to aggregate. To aggregate a related column, declare a Cube whose measure names it
 in its own `sql`.
+
+These inferred spellings belong to the cube query only. The dataset query
+(`POST /analytics/dataset/query`) answers only the measures and dimensions its dataset
+declares, by their declared names, and refuses any other name — `count`, a raw field, a
+suffix spelling — with `400 INVALID_FIELD` before anything is read; see
+[Analytics](/docs/data-modeling/analytics).
 </Callout>
 
 <Callout type="info">

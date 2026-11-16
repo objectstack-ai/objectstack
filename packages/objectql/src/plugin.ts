@@ -9,6 +9,7 @@ import {
   type UnservableControlledByParentMaster,
 } from './engine.js';
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
+import { SUMMARY_RECOMPUTE_WRITE } from './engine-summaries-and-expansion.js';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/metadata-protocol';
 import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
@@ -1381,6 +1382,12 @@ export class ObjectQLPlugin implements Plugin {
         // hooks: there the doors never refuse.
         const registry = this.ql?.registry;
         if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
+        // [#34096] The same moment, for roll-ups: every package of this boot
+        // is registered and schema sync has run, so the roll-ups served now are
+        // the ones the stored rows were computed for. From here on an install
+        // door's `syncSchemas` computes, on the stored rows, the roll-ups an
+        // install or upgrade adds (`summary-install-materialise.ts`).
+        this.ql?.sealSummariesMaterialisedAtBoot();
         // [ADR-0150 D8 row R4] With the holders sealed, bind every activation
         // ledger row that names no package to the one package that holds its
         // item, and report the rows two packages hold (never guessed). Writes
@@ -2099,8 +2106,22 @@ export class ObjectQLPlugin implements Plugin {
       session: any,
       isInsert: boolean,
       seedReplay: boolean,
+      systemActor: boolean,
     ) => {
       const now = stamp();
+      // A roll-up recompute's write onto the master (`SUMMARY_RECOMPUTE_WRITE`,
+      // set only by `recomputeSummaries`) is the SYSTEM's on the audit trail:
+      // `updated_by = null` (ADR-0118 D1) and a fresh `updated_at`, never the
+      // child writer the elevated context still carries as `userId`. Ruling
+      // recorded on the card, comment 6902001862 (「记为系统并刷新时间」). Update-only
+      // and unconditional on the session: a recompute triggered by a user-less
+      // write stamps the same null, and `preserveAudit` on the triggering
+      // import does not make a recompute historical.
+      if (systemActor && !isInsert) {
+        record.updated_at = now;
+        if (hasField(objectName, 'updated_by')) record.updated_by = null;
+        return;
+      }
       // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
       // client-supplied created_at/created_by/updated_at/updated_by is
       // CLIENT-PREFERRED under `preserveAudit` — instead of being overwritten
@@ -2176,15 +2197,16 @@ export class ObjectQLPlugin implements Plugin {
       session: any,
       isInsert: boolean,
       seedReplay: boolean,
+      systemActor = false,
     ) => {
       if (Array.isArray(data)) {
         for (const row of data) {
           if (row && typeof row === 'object') {
-            applyToRecord(row as Record<string, any>, objectName, session, isInsert, seedReplay);
+            applyToRecord(row as Record<string, any>, objectName, session, isInsert, seedReplay, systemActor);
           }
         }
       } else if (data && typeof data === 'object') {
-        applyToRecord(data as Record<string, any>, objectName, session, isInsert, seedReplay);
+        applyToRecord(data as Record<string, any>, objectName, session, isInsert, seedReplay, systemActor);
       }
     };
 
@@ -2201,6 +2223,15 @@ export class ObjectQLPlugin implements Plugin {
      */
     const isSeedReplay = (hookCtx: any): boolean =>
       hookCtx?.input?.options?.context?.seedReplay === true;
+
+    /**
+     * Whether this `beforeUpdate` is the master write of a roll-up recompute.
+     * Read from `input.options` (the caller's own options bag, as above) under
+     * the engine's symbol key, which only `recomputeSummaries` sets — see
+     * `SUMMARY_RECOMPUTE_WRITE` for why it is an option and not a context key.
+     */
+    const isSummaryRecomputeWrite = (hookCtx: any): boolean =>
+      hookCtx?.input?.options?.[SUMMARY_RECOMPUTE_WRITE] === true;
 
     const builtinHooks: any[] = [
       {
@@ -2224,7 +2255,7 @@ export class ObjectQLPlugin implements Plugin {
         handler: async (hookCtx: any) => {
           if (hookCtx.input?.data) {
             // `seedReplay` is moot here: the update stamp never writes `created_at`.
-            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, false, false);
+            stampData(hookCtx.input.data, hookCtx.object, hookCtx.session, false, false, isSummaryRecomputeWrite(hookCtx));
           }
         },
       },

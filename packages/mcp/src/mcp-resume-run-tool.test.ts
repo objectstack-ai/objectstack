@@ -14,7 +14,8 @@
  *    when the bridge implements `resumeRun`, under the `actions:execute` scope;
  *  - `tools/list` declares its closed input schema, and `run_action`'s
  *    description names it only where it is registered;
- *  - the call reaches the bridge with exactly `{ values, confirm }`;
+ *  - the call reaches the bridge with exactly `{ values }` (#34209: the
+ *    `confirm` member is retired and refused at the input);
  *  - a coded refusal keeps its ADR-0112 envelope on the way back.
  *
  * The unknown-key refusal is swept with every other tool in
@@ -93,24 +94,25 @@ describe('MCP resume_run — where it is registered', () => {
     const tools = await listTools(makeBridge(vi.fn()));
     for (const name of ['run_action', 'resume_run']) {
       const tool = tools[name];
-      expect(tool.description, name).toContain('confirm: true');
       expect(tool.description, name).toContain("Under an AI service account's own key");
       expect(tool.description, name).toContain('refused whatever it sends');
-      expect(tool.inputSchema.properties.confirm.description, name).toContain(
-        "Under an AI service account's own key it is not read",
-      );
+      // [#34209] The member is retired from both tools: neither declares it,
+      // and neither description teaches it; a declared-gated call is handed
+      // to the person.
+      expect(tool.inputSchema.properties, name).not.toHaveProperty('confirm');
+      expect(tool.description, name).not.toContain('confirm: true');
+      expect(tool.description, name).toContain('pending_confirmation');
     }
     expect(tools.run_action.description).toContain('ai.requiresConfirmation: false when it is safe unattended');
   });
 });
 
 describe('MCP resume_run — its declared shape', () => {
-  it('declares runId (required), values and confirm, closed against anything else', async () => {
+  it('declares runId (required) and values, closed against anything else (no confirm: #34209)', async () => {
     const tool = (await listTools(makeBridge(vi.fn()))).resume_run;
     expect(tool.inputSchema.required).toEqual(['runId']);
-    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['confirm', 'runId', 'values']);
+    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['runId', 'values']);
     expect(tool.inputSchema.properties.values.type).toBe('object');
-    expect(tool.inputSchema.properties.confirm.type).toBe('boolean');
     expect(tool.inputSchema.additionalProperties).toBe(false);
   });
 
@@ -121,18 +123,28 @@ describe('MCP resume_run — its declared shape', () => {
 });
 
 describe('MCP resume_run — the call', () => {
-  it('reaches the bridge with exactly the runId, the values and the confirmation', async () => {
+  it('reaches the bridge with exactly the runId and the values', async () => {
     const resumeRun = vi.fn(async () => ({ ok: true, result: { status: 'completed' } }));
     const json = await rpc(makeBridge(resumeRun), 'tools/call', {
       name: 'resume_run',
-      arguments: { runId: 'run_1', values: { subject: 'Call back', dueDate: '2026-10-01' }, confirm: true },
+      arguments: { runId: 'run_1', values: { subject: 'Call back', dueDate: '2026-10-01' } },
     });
     expect(json.result.isError).toBeFalsy();
     expect(resumeRun).toHaveBeenCalledTimes(1);
-    expect(resumeRun).toHaveBeenCalledWith('run_1', {
+    expect((resumeRun.mock.calls[0] as unknown[])[1]).toStrictEqual({
       values: { subject: 'Call back', dueDate: '2026-10-01' },
-      confirm: true,
     });
+  });
+
+  it('[#34209] refuses a call carrying the retired confirm member before the bridge is reached', async () => {
+    const resumeRun = vi.fn();
+    const json = await rpc(makeBridge(resumeRun), 'tools/call', {
+      name: 'resume_run',
+      arguments: { runId: 'run_1', values: {}, confirm: true },
+    });
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toContain('`confirm`');
+    expect(resumeRun).not.toHaveBeenCalled();
   });
 
   it('returns the bridge\'s answer unchanged, so a run paused on its next screen reads as paused', async () => {

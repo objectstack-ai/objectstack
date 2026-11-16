@@ -59,11 +59,12 @@ that shared secret (see §6). The `secret` field is optional, not auto-generated
 spoofing without writing custom auth, once they set a secret. The key itself is
 encrypted at rest and never readable back over the data API (§3.1).
 
-**P4 — Safe egress.** Webhooks are a textbook SSRF vector, and the design
-goal is to refuse localhost, private IP ranges, and cloud-provider metadata
-endpoints by default. **This is not shipped yet** — see §7: the dispatcher
-today POSTs to whatever URL is configured, with no blocklisting. Treat
-webhook URL configuration as privileged until this lands.
+**P4 — Safe egress.** A delivery reaches only public addresses. Loopback,
+private and link-local addresses and cloud metadata endpoints are refused by
+default, judged on the address the connection is actually made to and on
+every redirect hop; a deployment that needs an internal target lists it in
+`OS_EGRESS_ALLOWED_TARGETS`, and a link-local or metadata address can never
+be listed. See §7.
 
 **P5 — Observable.** Every delivery attempt is visible to the owner of
 the webhook: status, response code, retry schedule, manual redelivery.
@@ -172,7 +173,7 @@ returned in full by `GET /api/v1/data/sys_webhook`.
 | `object_name`     | text      | Short object name whose record events fire this webhook.                           |
 | `triggers`        | select    | Multi-select of `create` / `update` / `delete` plus the opt-in bulk pair `bulk_update` / `bulk_delete` ([see below](#bulk-writes-bulk_update-and-bulk_delete)), stored as an array (the enqueuer also accepts a legacy comma-separated string). |
 | `url`             | text      | External endpoint that receives the POST.                                          |
-| `method`          | select    | HTTP method — one of `GET` / `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`.   |
+| `method`          | select    | HTTP method — one of `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`. No `GET`: every delivery carries the event as its body ([see below](#stored-get-webhooks-are-parked)). |
 | `description`     | textarea  | Free-text description.                                                              |
 | `active`          | boolean   | Inactive webhooks are skipped by the dispatcher. Default `true`.                    |
 | `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — the per-attempt `timeoutMs` and the rest of the authored envelope. **Not** the signing secret and **not** the custom headers: each has its own encrypted column below. |
@@ -236,6 +237,24 @@ row, or move the values into their encrypted columns yourself. Never type a toke
 `definition_json`: it is returned in full by the generic data API, and nothing
 ages it out.
 </Callout>
+
+### Stored GET webhooks are parked
+
+`GET` was removed from the `method` select and from `WebhookSchema.method`:
+every delivery sends the event envelope as its request body and a GET request
+carries none, so no GET webhook ever delivered an event. Saving a webhook with
+`method: 'get'` — an insert or an update — is now refused
+(`VALIDATION_FAILED` / `400`), and a declared webhook with `method: 'GET'`
+fails `WebhookSchema` parse with the fix in the message.
+
+A `sys_webhook` row already stored with `get` keeps loading, but it is
+**parked**: nothing is sent, and each record change it matches is written to
+`sys_http_delivery` as a `dead` row with 0 attempts whose `error` names the
+method and the fix. Such a row cannot be redelivered. The stored method is
+never rewritten to another one — sending a POST to an endpoint configured for
+GET would be a different request. To bring the webhook back, edit it and set
+the method to `POST`, `PUT`, `PATCH` or `DELETE`, whichever the endpoint
+accepts a body on; it re-arms at the next periodic cache refresh.
 
 ### 3.2 `sys_http_delivery`
 
@@ -635,18 +654,53 @@ idempotency key when deduplicating retries.
 
 ## 7. Egress safety
 
-> **Not yet implemented.** URL blocklisting (localhost / RFC 1918 / link-local /
-> cloud-metadata rejection, `allowPrivate`, https-only enforcement) and
-> DNS-rebinding re-validation are **not** part of the shipped runtime. The
-> sender POSTs to the configured URL with no SSRF filtering. Treat webhook URL
-> configuration as a privileged operation and gate it with RBAC accordingly;
-> network-level egress filtering is future work.
+Every request a webhook delivery makes goes through one outbound-request guard
+(`@objectstack/core/egress`), the same guard the flow `http` node uses, inline
+and `durable: true`.
+
+- **Default refusal.** A delivery reaches only public addresses. Loopback,
+  private (RFC 1918), carrier-grade NAT, link-local, unique-local, multicast,
+  broadcast, unspecified, documentation and benchmarking addresses, every
+  other special-purpose range that is not globally reachable, and any IPv6
+  address outside global unicast are refused, and so are cloud metadata
+  addresses.
+- **What is judged.** The address the connection is actually made to. The
+  guard resolves the host, judges every address, connects to the address it
+  judged without resolving again, and judges the connected socket's remote
+  address once more. A literal IP in the url, and an IPv6 form that carries an
+  IPv4 address, are judged the same way. Every redirect hop is a new
+  connection and is judged again. When a host name has several addresses,
+  every one is judged first and they are then dialled in turn, so a target
+  that answers on only some of them is still reached.
+- **The allowlist.** A deployment that needs internal targets lists them in
+  `OS_EGRESS_ALLOWED_TARGETS`, comma-separated: exact host names, IP
+  addresses, or CIDR blocks with host bits zero and a prefix of at least `/8`
+  — no scheme, port, path or wildcard. A malformed or over-broad list fails
+  the boot, naming every bad entry. Link-local and cloud metadata addresses
+  can never be allowlisted: they are refused even when a listed host name or
+  block covers them, in any IPv6 form that carries them. See
+  [Environment variables](/docs/deployment/environment-variables#outbound-requests).
+- **A refusal.** A refused delivery dead-letters on its first attempt with an
+  error starting `EGRESS_REFUSED`; it does not walk the retry schedule
+  (§4.5), since a retry cannot change the verdict. The error names the
+  requested host and the rule; the server log adds the resolved address and
+  its class for the operator.
+- **At boot.** One line says the guard is active and how many targets are
+  allowlisted; the webhook plugin then logs once how many stored
+  `sys_webhook` rows target an address the guard refuses.
+- **For hosts.** A multi-tenant host binds a stricter policy through the
+  `egressPolicy` option of `WebhookOutboxPlugin`, `MessagingServicePlugin` and
+  `AutomationServicePlugin`; every decision is handed the connected address,
+  the host name, the organization and the source.
+
+The guard does not enforce https: an `http://` url to a public address is
+delivered. It connects directly to the address it judged, so an HTTP proxy
+configured through the environment is not used for these requests.
 
 ### 7.1 Response body capping
 
-The recorded `response_body` is truncated to 16 KB before persistence. This is
-the one egress safeguard that is implemented today: it bounds the worst-case
-exfiltration through a single delivery row even if a hostile URL is configured.
+The recorded `response_body` is truncated to 16 KB before persistence. This
+bounds what a single delivery row can carry back from any target.
 
 ## 8. REST surface
 
@@ -718,8 +772,9 @@ partition is in flight at a time (default 8 partitions per node). Both
 
 > **Not yet implemented.** `sys_webhook` has no `owner_org_id` column, there is
 > no `retry_policy` field, and dispatcher partitioning is on `ref_id` (the
-> webhook id) only — there is no `(org_id, webhook_id)` partitioning or
-> per-tenant egress isolation. The retry budget is a single fixed 7-step
+> webhook id) only — there is no `(org_id, webhook_id)` partitioning. The
+> open-core outbound rule (§7) is one deployment-wide policy; a per-tenant
+> outbound policy is a host's `egressPolicy`. The retry budget is a single fixed 7-step
 > schedule (§4.5), not a per-plan quota. Per-tenant webhook ownership and
 > isolation are future work; until then, isolate access at the RBAC layer on
 > `sys_webhook`.

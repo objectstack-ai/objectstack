@@ -3,8 +3,8 @@
 /**
  * [#29986 codemod] The "Transactions" section of `ObjectQL`: the bodies of
  * `transaction`, `runOpenedUnit`, `isClosedUnitHandle`, `newTransactionScope`,
- * `datasourceNameOf` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `datasourceNameOf` moved out of `engine.ts` whole (split
+ * by #30012).
  *
  * A MOVE, not a redesign. {@link TransactionsSectionFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -34,7 +34,7 @@ import { redactPropagatedDriverFault } from '@objectstack/types';
 import type { EngineTransactionInfo, EngineTransactionOptions, IDataDriver } from '@objectstack/core';
 import { rollbackFailedRefusal, rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
-import { isDetachedUnitHandle } from './unit-detach.js';
+import { isDetachedUnitHandle, newUnitCommitQueue, settleUnitCommitQueue, type UnitCommitQueue } from './unit-detach.js';
 import type { TransactionScope } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
@@ -103,15 +103,18 @@ export class TransactionsSectionFacet {
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
+    // [#33760] The `async` after-hooks dispatched in this unit wait here for its outcome.
+    const commitQueue = newUnitCommitQueue();
+    let result: T;
     try {
       // Run the callback inside the ambient transaction store so internal
       // queries during writes reuse this transaction's connection (ADR-0034),
       // CLOSED once the callback settles, before the commit (#22782, #22855).
-      const result = await this.runOpenedUnit(trx, driver!, () => callback(trxCtx, { owned: true }));
+      result = await this.runOpenedUnit(trx, driver!, () => callback(trxCtx, { owned: true }), commitQueue);
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
-      return result;
     } catch (err) {
+      settleUnitCommitQueue(commitQueue, false);
       let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
@@ -129,6 +132,10 @@ export class TransactionsSectionFacet {
       // `rollbackFailedRefusal`.
       throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
+    // Outside the `try`: the unit has committed, and nothing a waiting run
+    // does may reach the rollback path. Each run is started, never awaited.
+    settleUnitCommitQueue(commitQueue, true);
+    return result;
   }
 
   /**
@@ -155,10 +162,17 @@ export class TransactionsSectionFacet {
    *
    * A primitive handle cannot key {@link openedUnits}, so it keeps only the
    * ambient half.
+   *
+   * [#33760] `commitQueue`, when the caller passes one, rides the entry and
+   * OUTLIVES the close: an `async: true` hook dispatched in the unit waits on
+   * it (`runOutsideOpenUnitsOnCommit`, `unit-detach.ts`) until the caller —
+   * the one that commits or rolls back — settles it. The close above does
+   * not touch it, so work dispatched between the callback's settling and the
+   * commit still waits for the commit.
    */
-  static runOpenedUnit<T>(this: Pick<TransactionsSectionHost, 'newTransactionScope' | 'openedUnits' | 'txStore'>, trx: unknown, owner: IDataDriver, body: () => Promise<T>): Promise<T> {
-    const entry: { transaction: unknown; scope?: TransactionScope } =
-      { transaction: trx, scope: this.newTransactionScope(owner) };
+  static runOpenedUnit<T>(this: Pick<TransactionsSectionHost, 'newTransactionScope' | 'openedUnits' | 'txStore'>, trx: unknown, owner: IDataDriver, body: () => Promise<T>, commitQueue?: UnitCommitQueue): Promise<T> {
+    const entry: { transaction: unknown; scope?: TransactionScope; commitQueue?: UnitCommitQueue } =
+      { transaction: trx, scope: this.newTransactionScope(owner), ...(commitQueue ? { commitQueue } : {}) };
     if (trx !== null && (typeof trx === 'object' || typeof trx === 'function')) this.openedUnits.set(trx, entry);
     return this.txStore.run(entry, body).finally(() => { entry.transaction = undefined; entry.scope = undefined; });
   }

@@ -5,6 +5,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { strictObject } from '../shared/strict-object';
+import { enumWithRetiredValues } from '../shared/retired-key';
 
 /**
  * Webhook Trigger Event
@@ -50,6 +51,19 @@ export const WebhookTriggerType = z.enum([
 ]);
 
 export type WebhookTriggerType = z.input<typeof WebhookTriggerType>;
+
+/**
+ * The parse refusal an author meets for `method: 'GET'` (ADR-0049
+ * enforce-or-remove; `enumWithRetiredValues`, `../shared/retired-key.ts`).
+ * There is no `os migrate meta` sentence: no ADR-0087 D2 conversion exists,
+ * because the replacement method is the receiver's to choose — the D3
+ * semantic entry `webhook-method-get-retired` carries that judgement.
+ */
+const WEBHOOK_METHOD_GET_RETIRED =
+  "`webhook.method: 'GET'` was removed in @objectstack/spec 18.6.0 (ADR-0049 enforce-or-remove) — every "
+  + 'delivery sends the event envelope as the request body, and a GET request carries no body, so a GET '
+  + 'webhook never delivered a single event. Set `method` to the one your endpoint accepts a body on: '
+  + '`POST` (the default), `PUT`, `PATCH` or `DELETE`. A receiver that only answers GET cannot take a webhook.';
 
 /**
  * CANONICAL WEBHOOK DEFINITION
@@ -193,7 +207,20 @@ export const WebhookSchema = lazySchema(() => strictObject({
   
   /** Target */
   url: z.string().url().describe('External webhook endpoint URL'),
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('POST').describe('HTTP method'),
+  /**
+   * The delivery's HTTP method. Every delivery sends the event envelope as
+   * the request body, so the vocabulary is the four methods that carry one.
+   * `GET` was retired (ADR-0049 enforce-or-remove, ADR-0087 D3): no GET
+   * webhook ever delivered — the outbox sent the envelope as its body and the
+   * HTTP client refuses a GET with a body, so the row retried until dead —
+   * and no lossless conversion exists, because sending another method to an
+   * endpoint configured for GET is a different request, not a spelling of
+   * the same one. A stored GET subscription is parked by the dispatcher with
+   * the reason on a dead delivery row; its method is never rewritten.
+   */
+  method: enumWithRetiredValues(['POST', 'PUT', 'PATCH', 'DELETE'], { GET: WEBHOOK_METHOD_GET_RETIRED })
+    .default('POST')
+    .describe('HTTP method'),
   
   /**
    * Headers. A credential MAP as a whole (`.meta({ credential: 'map' })`):

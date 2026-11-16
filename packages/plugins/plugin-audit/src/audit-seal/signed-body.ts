@@ -61,7 +61,12 @@ export function chainKeyOf(tenantId: string | null): string {
 /** What a checkpoint's signature covers (D4). */
 export interface CheckpointSignedBody {
   readonly sealed_object: string;
-  /** The chain's organization; `null` for the deployment chain (D5). */
+  /**
+   * The chain's organization; `null` for the deployment chain (D5). The value
+   * of the sealed object's chain column (`lifecycle.seal.chainField`, default
+   * `tenant_id`; `chainValueOf` reads it), under this member name whatever the
+   * column is called, so a `tenant_id` object's bytes are what they were.
+   */
   readonly tenant_id: string | null;
   readonly sequence: number;
   readonly kind: AuditCheckpointKind;

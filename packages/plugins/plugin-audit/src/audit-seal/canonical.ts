@@ -359,6 +359,32 @@ export function rowIdOf(row: Readonly<Record<string, unknown>>): string {
   throw new CanonicalFormError(`a sealed row carries no usable id (a ${id === null ? 'null' : typeof id})`);
 }
 
+/**
+ * ADR-0154 D5, read with the D10 note on `chainField`: the column whose value
+ * names the organization chain a sealed object's rows join, when the object
+ * names none. `sys_audit_log` and every object sealed before the key existed
+ * chain by it.
+ */
+export const AUDIT_SEAL_DEFAULT_CHAIN_FIELD = 'tenant_id';
+
+/** The chain column a sealed object's `lifecycle` block names (`seal.chainField`), or the default. */
+export function sealChainFieldOf(lifecycle: unknown): string {
+  const named = (lifecycle as { seal?: { chainField?: unknown } } | null | undefined)?.seal?.chainField;
+  return typeof named === 'string' && named !== '' ? named : AUDIT_SEAL_DEFAULT_CHAIN_FIELD;
+}
+
+/**
+ * The organization chain a sealed row joins: the value of its object's chain
+ * column ({@link sealChainFieldOf}), or `null` — the deployment chain (D5) —
+ * when that value is not a non-empty string. The one reader of a row's chain:
+ * the sealer, the live check and the proof bundle it writes all call it, and
+ * the checkpoint's signed `tenant_id` carries what it answers.
+ */
+export function chainValueOf(row: Readonly<Record<string, unknown>>, chainField: string): string | null {
+  const value = row[chainField];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
 /** UTF-16 code-unit order — the order JCS sorts names in, and the leaf order below uses. */
 function compareCodeUnits(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;

@@ -53,8 +53,14 @@ const OCT = new Date(2026, 9, 15, 12, 0, 0);
 const INSTANT = new Date(2024, 0, 5, 8, 30, 0);
 
 describe("formatDate 'short' honors the threaded locale (objectui#4272)", () => {
+  /**
+   * The two non-English faces below were `8月 15, '26` and `Okt 15, '26` until
+   * objectstack#34228: only the month token was localized into the English
+   * compact layout. A locale that does not write month → day → year now gets
+   * its own face with the year; the month is still the threaded locale's.
+   */
   it('zh renders the Chinese month, not the hardcoded English one', () => {
-    expect(formatDate(AUG, 'short', { locale: 'zh' })).toBe("8月 15, '26");
+    expect(formatDate(AUG, 'short', { locale: 'zh' })).toBe('2026年8月15日');
   });
 
   /**
@@ -63,7 +69,7 @@ describe("formatDate 'short' honors the threaded locale (objectui#4272)", () => 
    * abbreviates it `Aug` — so this case is deliberately October.
    */
   it('de renders the German month abbreviation', () => {
-    expect(formatDate(OCT, 'short', { locale: 'de' })).toBe("Okt 15, '26");
+    expect(formatDate(OCT, 'short', { locale: 'de' })).toBe('15. Okt. 2026');
   });
 
   /**

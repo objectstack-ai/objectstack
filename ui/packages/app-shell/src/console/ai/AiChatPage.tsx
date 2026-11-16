@@ -22,6 +22,7 @@ import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
+import { isPlatformBuiltinApp } from '../../utils/platformApp.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
 import { useMetadataClient } from '../../views/metadata-admin/useMetadata.js';
@@ -154,6 +155,8 @@ import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundA
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
+import { useUpload } from '@object-ui/fields';
+import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
 
 /**
  * The app segment a record of `objectName` lives under: the object's owning
@@ -429,27 +432,11 @@ export function isThreadBoundToPackage(
   );
 }
 
-/**
- * #2466 / ADR-0057 Amendment A1.b — is this app a CODE-LOADED platform built-in
- * (`com.objectstack.setup` / `account`, …) rather than a user- or AI-authored
- * package? The A1.b switcher lists only authorable packages, so a built-in —
- * which the build agent can't edit — never appears as a switch target
- * (selecting it would deep-link `/ai/build?package=<builtin>` to a package that
- * can't be authored).
- *
- * Discriminator: the platform reserves the `com.objectstack.*` package
- * namespace for its code-delivered apps; DB-created packages (including every
- * AI-built one — e.g. `app.xadv`) use other ids. This is the only field that
- * reliably distinguishes them on the `/meta/app` LIST response: `_packageId` is
- * grafted onto every list item, whereas `managedBy` / `source` are sys_metadata
- * ROW columns the LIST handler does NOT copy onto the item body, and the
- * resolved `lock` / `editable` envelope exists only on single-GET. Exported for
- * unit testing.
- */
-const PLATFORM_PACKAGE_PREFIX = 'com.objectstack.';
-export function isPlatformBuiltinApp(app: { _packageId?: unknown }): boolean {
-  return typeof app._packageId === 'string' && app._packageId.startsWith(PLATFORM_PACKAGE_PREFIX);
-}
+// #2466 / ADR-0057 Amendment A1.b — the switcher lists only authorable
+// packages. Which apps are code-loaded platform built-ins is one criterion,
+// shared with the first-run checklist (`utils/platformApp.ts`); re-exported
+// here for the importers that already read it from this module.
+export { isPlatformBuiltinApp };
 
 /**
  * The app-metadata fields this surface reads. `useMetadata().apps` is loosely
@@ -2443,21 +2430,28 @@ export function ChatPane({
   // leave the page) and the agent is briefed with a compact structured block —
   // headers + first sample rows + row count — appended to the user's text. The
   // agent's solution-design skill takes it from there (match an object, offer
-  // missing fields, point at the object list's Import action). Non-spreadsheet
-  // attachments stay out of scope and are disclosed rather than dropped.
+  // missing fields, point at the object list's Import action).
+  //
+  // Images and PDFs (objectstack#32749, ruling A) are uploaded to storage as
+  // the signed-in user, bound to no record, and ride the turn as AI SDK file
+  // parts carrying their `sys_file` id (`chatAttachments.ts`). Any other
+  // attachment, and one over the cap or whose upload failed, is named in the
+  // turn's text as not read, never dropped silently.
+  const { upload } = useUpload();
+  const sendNonSheetAttachments = useCallback(
+    async (text: string, nonSheets: File[]): Promise<void> => {
+      const outcome = await uploadChatAttachments(nonSheets, upload, window.location.href);
+      sendMessage(text + chatAttachmentNotes(outcome), undefined, outcome.parts);
+    },
+    [upload, sendMessage],
+  );
   const doSend = useCallback(
     (content: string, files?: File[]) => {
       resetSuppression();
-      const sheets = (files ?? []).filter((f) => /\.(xlsx|xlsm|csv|tsv|txt)$/i.test(f.name));
+      const sheets = (files ?? []).filter(isSpreadsheetAttachment);
       if (!sheets.length) {
         if (files?.length) {
-          // Honest disclosure beats a silent drop — the agent cannot read these.
-          sendMessage(
-            `${content}\n\n(用户上传了 ${files.length} 个附件:${files
-              .map((f) => f.name)
-              .join('、')} — 当前仅支持读取表格类附件(Excel/CSV),这些文件的内容我没有读取。)`,
-          );
-          onSent(content);
+          void sendNonSheetAttachments(content, files).then(() => onSent(content));
           return;
         }
         sendMessage(content);
@@ -2489,13 +2483,13 @@ export function ChatPane({
           }
         }
         if (sheets.length > 2) merged += `\n\n(另有 ${sheets.length - 2} 个表格附件未读取 — 一次最多读取 2 个。)`;
-        const nonSheets = (files ?? []).length - sheets.length;
-        if (nonSheets > 0) merged += `\n\n(另有 ${nonSheets} 个非表格附件,内容未读取。)`;
-        sendMessage(merged);
+        const nonSheets = (files ?? []).filter((f) => !isSpreadsheetAttachment(f));
+        if (nonSheets.length > 0) await sendNonSheetAttachments(merged, nonSheets);
+        else sendMessage(merged);
         onSent(merged);
       })();
     },
-    [resetSuppression, sendMessage, onSent],
+    [resetSuppression, sendMessage, onSent, sendNonSheetAttachments, setPendingSheet],
   );
 
   // Guards the empty-state first send against the conversation-id remount race:
@@ -3184,6 +3178,10 @@ export function ChatPane({
         allowanceUsedFraction={allowanceUsedFraction}
         suggestions={suggestions}
         onSendMessage={handleSend}
+        // objectstack#32749 — the attach button and the attachment chips: the
+        // send reads spreadsheets, images and PDFs (see `doSend`), and a file
+        // pasted or dropped without them was attached unseen.
+        enableFileUpload
         onClear={clear}
         hideClearBar
         onStop={isLoading ? stop : undefined}

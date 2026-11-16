@@ -5952,6 +5952,25 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0150 D3, #34145; seat ruling 6884403301, amendment 7] {@link getFlow}'s
+     * question judged over every holder ({@link bareFlowKey}): the flow the
+     * engine holds under the bare `name`, a disabled sole holder's included,
+     * `null` for a name it does not hold or a slot-key spelling, and a name two
+     * packages hold refused (409, every holder named), served or not, whether
+     * the engine holds one slot of it or both. For a door that asks a durable
+     * question of a name (is it taken, what did the engine hold before this
+     * write, which credential does it keep), whose answer must not move with a
+     * package's enable state. Engine-local. Not a pure read: like
+     * {@link getFlow}, it first settles the name ({@link settleFlowName}), so a
+     * lone qualified slot of a name one package holds again is re-keyed to the
+     * bare name.
+     */
+    getHeldFlow(name: string): FlowParsed | null {
+        const key = this.bareFlowKey(name);
+        return key === undefined ? null : this.flows.get(key) ?? null;
+    }
+
+    /**
      * Attach the durable activation ledger (ADR-0126 §4). Hosts call this at
      * start(), after ObjectQL is available; see the automation plugin.
      */
@@ -6037,6 +6056,19 @@ export class AutomationEngine implements IAutomationService {
      *  - `refused`: the bare hook of a name two packages hold: every holder,
      *    nothing picked. The door logs the holders and answers its one
      *    refusal: D5's `409` does not apply to this anonymous door.
+     *
+     * [#33906; seat ruling 6884403301, amendments 2, 3 and 8] A slot whose
+     * package is disabled now ({@link isDisabledHolderSlot}) answers no
+     * address: the qualified address of a disabled co-holder's slot, and
+     * every address of a disabled sole holder's flow, the bare one included,
+     * are `unadmitted` — the door's one refusal, answered once the body is
+     * read in full, the same bytes the address gets once the disable's
+     * re-sync has withdrawn the slot. Nothing is enqueued, so no post is
+     * accepted whose run {@link triggerRun} would then skip. The slot is
+     * judged after the address has picked it, and no other holder is served
+     * in its place. The cause goes to the server log only, here, once per
+     * refused post. The question is asked at post time, so the address
+     * answers again the moment its package is enabled, with no re-arm.
      */
     inboundHookSlot(
         flowName: string,
@@ -6048,7 +6080,12 @@ export class AutomationEngine implements IAutomationService {
         | { readonly status: 'refused'; readonly candidates: PackageScopedRefusal['candidates'] } {
         if (isSlotKeySpelling(flowName) || flowName.startsWith('\u0000')) return { status: 'unadmitted' };
         this.settleFlowName(flowName);
-        if (!this.flowSlots.isShared(flowName)) return undefined;
+        if (!this.flowSlots.isShared(flowName)) {
+            const packageId = this.flowSlotPackage(flowName);
+            return packageId !== undefined && this.isDisabledHolderSlot(flowName, packageId)
+                ? this.disabledHolderHookRefused(flowName, packageId, flowName)
+                : undefined;
+        }
         if (address === undefined) return { status: 'refused', candidates: this.sharedFlowNameRefusal(flowName, null).candidates };
         const environment = address.qualifier === ENVIRONMENT_ADDRESS_SEGMENT;
         const keys = this.flowSlots.keysOf(flowName).filter((key) => {
@@ -6057,7 +6094,29 @@ export class AutomationEngine implements IAutomationService {
             return slot.packageId !== null && address.namespaceOwners.includes(slot.packageId)
                 && this.packagedFlowOwner(key) === slot.packageId;
         });
-        return keys.length === 1 ? { status: 'served', key: keys[0] } : { status: 'unadmitted' };
+        if (keys.length !== 1) return { status: 'unadmitted' };
+        const packageId = this.flowSlotPackage(keys[0]);
+        if (packageId !== undefined && this.isDisabledHolderSlot(flowName, packageId)) {
+            return this.disabledHolderHookRefused(flowName, packageId, keys[0]);
+        }
+        return { status: 'served', key: keys[0] };
+    }
+
+    /**
+     * [#33906] {@link inboundHookSlot}'s answer for the slot `key` of package
+     * `packageId`'s flow `name` while that package is disabled: `unadmitted`,
+     * its cause logged here at `info` (the sender is told, with the door's one
+     * refusal, so nothing that claims to be persisted is lost).
+     */
+    private disabledHolderHookRefused(name: string, packageId: string, key: string): { readonly status: 'unadmitted' } {
+        this.logger.info(
+            `Inbound hook post for flow '${name}' of package '${packageId}', which is disabled — refused with the `
+                + 'one answer every unverified post gets: nothing was enqueued, and no other package\'s flow of the '
+                + 'name was reached in its place. A sender that retries on a non-2xx keeps the event and can '
+                + 'redeliver it once the package is enabled.',
+            { cause: 'disabled-holder', flow: name, package: packageId, slot: key },
+        );
+        return { status: 'unadmitted' };
     }
 
     /**

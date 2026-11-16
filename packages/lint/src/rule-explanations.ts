@@ -3333,13 +3333,17 @@ const MANAGER_ONLY_ROUTES =
   'an existing user — and links each row once every row in the file exists, through those same ' +
   'refusals; a link it cannot make is reported on that row\'s manager result and never fails the ' +
   'user it imported. The column is also written by a seed, or by any other system-context ' +
-  'write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ' +
-  'populate it too, but only through a provisioning path your own deployment supplies: this ' +
-  'platform declares the SCIM \'manager\' attribute without projecting it onto the column — and ' +
-  'where a SCIM directory holds an identity the admin operation refuses, the import\'s ' +
-  'manager_id column included, leaving that directory the one surface that authors its ' +
-  'manager. An identity that only signs in through SSO, with no SCIM directory behind it, is set ' +
-  'through the admin operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
+  'write, which bypasses the managed-update whitelist. SCIM provisioning populates it too, for an ' +
+  'active user a SCIM directory holds and only from the connection that provisioned that user\'s ' +
+  'profile: the Enterprise User \'manager\' attribute, whose value is the manager\'s SCIM resource ' +
+  'id, is written onto the column on a SCIM create, replace or patch that names the attribute, ' +
+  'through those same refusals. A write that does not name it leaves the column as it is, and an ' +
+  'id that names no existing user the connection provisioned is served and leaves the column unchanged. ' +
+  'Where a SCIM directory holds an identity, the admin operation refuses it, the import\'s ' +
+  'manager_id column included, leaving that directory the one surface that authors its manager. Any other directory sync ' +
+  'populates it only through a provisioning path your own deployment supplies. An identity that ' +
+  'only signs in through SSO, with no SCIM directory behind it, is set through the admin ' +
+  'operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
   'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
   'of on the organization\'s administrators, which needs no write to the column at all.';
 
@@ -4482,6 +4486,15 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
+    'On those picker fields a `lookupFilters[].value.$record` path is judged too, against the record ' +
+      'being edited: a field of the object that owns the picker field, or at most one relationship hop ' +
+      'from it (a ' +
+      'relationship field of that object, then a field of the object it references, as in ' +
+      '`account.cb_market`). The picker is declared to swap that value into its query and to leave ' +
+      'an entry out while the value is empty, so a path the record does not have would drop the filter ' +
+      'without a word. A miss names the segment: an unknown head, ' +
+      'a hop through a field that is not a relationship, a leaf the referenced object lacks, or a ' +
+      'second hop. A `$record` nested inside a literal value is not a reference and is not judged.',
     'A summary field\'s `summaryOperations.filter` is judged against the CHILD object ' +
       '`summaryOperations.object` names: the engine ANDs it with the parent-FK match and runs it as the ' +
       'query on that child, so every key (inside `$and` / `$or` / `$not` groups) is a field of the child. ' +
@@ -6165,9 +6178,13 @@ const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
       'and the finding names that locale.',
     'An error at `os build`, `os validate`, `os lint` and the metadata publish door. At the door a write of ' +
       'another object is never refused for a clash a stored object carries, while saving the object itself is ' +
-      'refused until its clash is fixed; nothing on the boot path runs the rule, so an installed app keeps ' +
+      'refused until its clash is fixed. An `object_extension` publish is refused for a clash the fields it ' +
+      'adds create on the object it extends, two of its own fields included, judged on that object as it will be served, and never for one ' +
+      'the object already carried, nor for what is left of one after the extension took a field out of it. ' +
+      'Nothing on the boot path runs the rule, so an installed app keeps ' +
       'loading. To fix it, give each ' +
-      'visible field its own label (in the translation bundle too, when only a translation clashes), set ' +
+      'visible field its own label (in the translation bundle too, when only a translation clashes; the publish ' +
+      'door reads no bundle, the build does), set ' +
       '`hidden: true` on the field readers should not see, or drop the duplicate and use the platform\'s column.',
   ],
 };
