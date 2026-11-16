@@ -79,11 +79,12 @@ vi.mock('../../../views/metadata-admin/useMetadata', async (importOriginal) => {
     ...actual,
     useMetadataClient: (environmentId?: string) => {
       const real = realHook(environmentId);
-      let wrapped = overlayClients.get(real);
-      if (!wrapped) {
-        wrapped = Object.assign(Object.create(real), { withPreviewDrafts: () => ({ get: overlayGet }) });
-        overlayClients.set(real, wrapped);
-      }
+      const cached = overlayClients.get(real);
+      if (cached) return cached;
+      const wrapped: object = Object.assign(Object.create(real) as object, {
+        withPreviewDrafts: () => ({ get: overlayGet }),
+      });
+      overlayClients.set(real, wrapped);
       return wrapped;
     },
   };
