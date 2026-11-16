@@ -161,9 +161,16 @@ nests user params under `data` while keeping `recordIdParam` flat.
 
 **Human-in-the-loop.** `AIServicePlugin({ enableActionApproval: true })` (default
 `false`) persists an `ai_pending_actions` row instead of running a dangerous
-action and returns `{ status: 'pending_approval', pendingActionId }`; an operator
-approves or rejects in Studio's **AI Pending Actions** inbox (or via
-`GET/POST /api/v1/ai/pending-actions/...`). Whether *your* action is held is
+action and returns `{ status: 'pending_approval', pendingActionId }`. The queue
+is listed in Studio's **AI Pending Actions** inbox (or via
+`GET /api/v1/ai/pending-actions`), but deciding is the person's own act: only the
+person the call ran as approves or rejects the item, in the app on their
+signed-in session. Another user's `ai:approve` does not decide it; an API key
+or token (even the person's own) is refused, and so is an AI identity and any
+call that arrives through an AI door. The model's own confirmation does not
+decide the item, and neither does a `confirm` on the call: the item waits for
+the person. So an operator script lists items and never decides them; a second approver goes through the approvals engine (the `held`
+outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
