@@ -77,6 +77,15 @@ function renderPrintPage(locale: string) {
   );
 }
 
+/** Whether `el` matches `selector`; a selector the DOM cannot parse matches nothing. */
+function matchesSelector(el: Element, selector: string): boolean {
+  try {
+    return el.matches(selector);
+  } catch {
+    return false;
+  }
+}
+
 /** The bodies of the print-stylesheet rules whose selector matches `el`. */
 function printRuleBodiesFor(container: HTMLElement, el: Element): string[] {
   const css = container.querySelector('style[data-print-stylesheet]')?.textContent ?? '';
@@ -84,13 +93,7 @@ function printRuleBodiesFor(container: HTMLElement, el: Element): string[] {
   for (const line of css.split('\n')) {
     const rule = /^\s*(.+?) \{ (.*) \}$/.exec(line);
     if (!rule || rule[1].startsWith('@')) continue;
-    let matches = false;
-    try {
-      matches = el.matches(rule[1]);
-    } catch {
-      matches = false;
-    }
-    if (matches) bodies.push(rule[2]);
+    if (matchesSelector(el, rule[1])) bodies.push(rule[2]);
   }
   return bodies;
 }
