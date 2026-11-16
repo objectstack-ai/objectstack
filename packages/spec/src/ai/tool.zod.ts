@@ -83,6 +83,12 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   // never a confirmation, so the bound names that pair and keeps REST outside
   // this gate for every other caller.
   //
+  // [#33690 / #34209] The member half follows the amended contract: a person
+  // confirms through the hand-off, and `run_action` / `resume_run` refuse the
+  // caller's `confirm` at their input (maintainer ruling 6909355256), so this
+  // prescription teaches no `confirm: true` retry. It names the member only to
+  // say it is refused.
+  //
   // The ids stay in this comment and out of the string: `check:doc-authoring`
   // reds on an internal tracker id inside a customer-facing prescription.
   requiresConfirmation:
@@ -95,31 +101,34 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '(which derives `destructiveHint` from a hardcoded name list). Delete the key. For a ' +
     'REAL gate on a destructive operation, put it behind an action and set ' +
     '`action.ai.requiresConfirmation: true` — the flag the platform\'s confirmation ' +
-    'CONTRACT is written against (`AIActionConfirmation`, `@objectstack/spec/contracts`), ' +
-    'and that contract is ENFORCED. An AI-facing call on an action declaring the flag ' +
-    'must carry the confirmation member `confirm: true` on the request; without it the ' +
-    'call is REFUSED with `ACTION_CONFIRMATION_REQUIRED` (428), the refusal naming the ' +
-    'action and the exact member to set so the caller confirms and retries. A GATE, not ' +
-    'a queue: nothing is parked, nothing is held for an operator to find later, and a ' +
-    'refused call did not run — no record was read and none was written. Two BOUNDS to ' +
-    'read before you rely on it. (1) The enforced set is the doors that ask every action ' +
-    'for the author\'s `ai.exposed` opt-in — today the action door reached from the MCP ' +
-    '`run_action` tool. REST `/actions` reads `ai.exposed` in one case only (an AI ' +
-    'service account starting a `type: \'flow\'` action whose flow declares ' +
-    '`runAs: \'system\'` needs the opt-in there), and that check asks for the opt-in ' +
-    'alone, not a confirmation; for a person\'s call REST `/actions` sits OUTSIDE this ' +
-    'gate, so a human in front of that route is still yours to ' +
-    'arrange. An AI service account (an agent acting for itself, not on a person\'s ' +
-    'behalf) does not confirm an action for itself: it is refused at every action door, ' +
-    'REST `/actions` included, whatever its request carries, and a person runs the ' +
-    'action. (2) Only the ' +
-    'author\'s declared `ai.requiresConfirmation: true` refuses, and only the boolean ' +
-    '`true` confirms: the wider listing heuristic that reports `requiresConfirmation` ' +
-    'for a destructive-looking action ADVISES a client to ask and never refuses, and an ' +
-    'explicit `false` never refuses. `confirm: true` is an unverifiable caller claim — ' +
-    'the gate makes FORGETTING loud, it does not prove a human. For AI metadata ' +
-    'mutations the ADR-0033 draft/publish workspace is the gate: nothing is live until a ' +
-    'human publishes.',
+    'CONTRACT is written against (`AI_ACTION_CONFIRMATION_CAPABILITY`, ' +
+    '`@objectstack/spec/contracts`), and that contract is ENFORCED: a person confirms, ' +
+    'never the agent. On the MCP `run_action` and `resume_run` tools a call on an action ' +
+    'declaring the flag runs only once the person the caller acts for confirms it: in ' +
+    'the client, when the client supports elicitation and the connection can carry the ' +
+    'question (accept runs the call; decline, dismissal or no answer in time refuses it ' +
+    'with `ACTION_CONFIRMATION_REQUIRED`), and in the app otherwise: the call does not ' +
+    'run, it is handed to the person, who approves or rejects it there, and the tool ' +
+    'answers `status: "pending_confirmation"` with a pending id; a server with no ' +
+    'pending-confirmation service refuses it with `ACTION_CONFIRMATION_REQUIRED` (428), ' +
+    'and the person performs the action in the app. The agent cannot confirm for the ' +
+    'person: `confirm: true` is an unverifiable caller claim, and those two tools refuse ' +
+    'any call that carries the member, on every action, so a client resends without it. ' +
+    'Two BOUNDS to read before you rely on it. (1) The enforced set is the doors that ask ' +
+    'every action for the author\'s `ai.exposed` opt-in — today the action door reached ' +
+    'from the MCP `run_action` and `resume_run` tools. REST `/actions` reads `ai.exposed` ' +
+    'in one case only (an AI service account starting a `type: \'flow\'` action whose ' +
+    'flow declares `runAs: \'system\'` needs the opt-in there), and that check asks for ' +
+    'the opt-in alone, not a confirmation; for a person\'s call REST `/actions` sits ' +
+    'OUTSIDE this gate, so a human in front of that route is still yours to arrange. An ' +
+    'AI service account (an agent acting for itself, not on a person\'s behalf) does not ' +
+    'confirm an action for itself: it is refused at every action door, REST `/actions` ' +
+    'included, whatever its request carries, and a person runs the action. (2) Only the ' +
+    'author\'s declared `ai.requiresConfirmation: true` asks the person: the wider listing ' +
+    'heuristic that reports `requiresConfirmation` for a destructive-looking action ' +
+    'ADVISES a client to ask and never gates, and an explicit `false` never gates. For AI ' +
+    'metadata mutations the ADR-0033 draft/publish workspace is the gate: nothing is live ' +
+    'until a human publishes.',
 };
 
 /**
