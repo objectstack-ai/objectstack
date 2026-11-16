@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { DataEngineInsertOptions, EngineDeleteOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 type Recorded = { level: 'debug' | 'info' | 'warn' | 'error'; message: string };
@@ -787,9 +788,9 @@ describe('[#34373] a predicate delete with a cascade locks the rows it walks', (
     driver.reads.length = 0;
     driver.writes.length = 0;
 
-    await expect(engine.find('loner', { where: { name: 'solo' }, lockRows: true } as any))
+    await expect(engine.find('loner', { where: { name: 'solo' }, lockRows: true } as unknown as EngineQueryOptions))
       .rejects.toThrow(/does not recognise option 'lockRows'/);
-    await expect(engine.delete('loner', { where: { name: 'solo' }, multi: true, lockRows: true } as any))
+    await expect(engine.delete('loner', { where: { name: 'solo' }, multi: true, lockRows: true } as unknown as EngineDeleteOptions))
       .rejects.toThrow(/does not recognise option 'lockRows'/);
     expect(driver.reads).toHaveLength(0);
     expect(driver.writes).toHaveLength(0);
@@ -802,7 +803,7 @@ describe('[#34373] a predicate delete with a cascade locks the rows it walks', (
     const { engine, driver } = await makeEngine([loner]);
     driver.writes.length = 0;
 
-    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as any))
+    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as unknown as DataEngineInsertOptions))
       .rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501, object: 'loner' });
     expect(driver.writes).toHaveLength(0);
     expect(driver.rowsOf('loner')).toHaveLength(0);
@@ -812,7 +813,7 @@ describe('[#34373] a predicate delete with a cascade locks the rows it walks', (
     const { engine, driver } = await makeEngine([loner], { lockRows: true });
     driver.writes.length = 0;
 
-    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as any))
+    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as unknown as DataEngineInsertOptions))
       .rejects.toMatchObject({ code: 'PRECONDITION_REQUIRED', status: 428, object: 'loner' });
     expect(driver.writes).toHaveLength(0);
     expect(driver.rowsOf('loner')).toHaveLength(0);
@@ -822,7 +823,7 @@ describe('[#34373] a predicate delete with a cascade locks the rows it walks', (
     const { engine, driver } = await makeEngine([loner], { lockRows: true });
     driver.writes.length = 0;
 
-    await engine.transaction(async () => engine.insert('loner', { name: 'solo' }, { lockRows: true } as any));
+    await engine.transaction(async () => engine.insert('loner', { name: 'solo' }, { lockRows: true } as unknown as DataEngineInsertOptions));
 
     expect(driver.rowsOf('loner')).toHaveLength(1);
     expect(driver.writes.filter((w: any) => w.op === 'create')).toHaveLength(1);
