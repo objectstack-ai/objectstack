@@ -42,7 +42,7 @@
 
 import type { FormField } from '@object-ui/types';
 import { evalFieldPredicate, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
-import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject, withFormObject } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject, withFormObject, withRecordHopObjects } from '@object-ui/fields';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
 import { findCustomFieldMember } from './customFieldsMerge';
@@ -350,8 +350,13 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // ... and a `permission-ref` field carries the object this form edits
     // (objectstack#32795), so the widget recognises the grant's name column by
     // its object and its column.
+    // ... and a lookup whose `lookupFilters` read a `{ $record }` hop carries
+    // the object each hop's lookup points at, so the picker can read the hop.
     field: withFormObject(
-      withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
+      withRecordHopObjects(
+        withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
+        ctx.objectSchema?.fields,
+      ),
       ctx.objectName,
     ),
     options: field.options,

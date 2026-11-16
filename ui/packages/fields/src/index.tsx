@@ -5382,6 +5382,8 @@ export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js'
 // `permission-ref` field's definition, so the widget recognises the grant's
 // name column by its object and its column, not by its column name alone.
 export { FORM_OBJECT_KEY, withFormObject } from './widgets/permissionSetHolders.js';
+// A lookup whose `lookupFilters` read a `{ $record }` hop carries the object each hop points at.
+export { RECORD_HOP_OBJECTS_KEY, withRecordHopObjects } from './widgets/lookupRecordReference.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
 export * from './widgets/SliderField.js';
