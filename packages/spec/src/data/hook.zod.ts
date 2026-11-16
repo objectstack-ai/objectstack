@@ -35,11 +35,16 @@ import {
   HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE,
   HOOK_REFUSAL_PARAM_PATTERN,
   HOOK_REFUSAL_REASON_PATTERN,
+  HOOK_TEXT_KEY_PATTERN,
+  HOOK_TEXT_MESSAGE_HOLE_REFUSED,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
   hookRefusalsWithoutSandboxedBody,
+  hookTextKeysAskedIn,
+  hookTextsWithoutRunnableCode,
   undeclaredHookRefusalCodeAtSave,
   undeclaredHookRefusalReasonAtSave,
+  undeclaredHookTextKeyAtSave,
 } from './hook-refusal-codes';
 // [#33214] The closed-scope `{{ }}` judge a refusal message with declared
 // `params` is read by — the one the action copy slots and a bulk action's
@@ -337,6 +342,37 @@ function refuseUndeclaredLiteralRefusalCode(
 }
 
 /**
+ * [#34374, ruling 6913660232 parameter 7] The object-level check that refuses
+ * `texts` nothing could ask for, and a key a hook's source asks for literally
+ * (`ctx.text('key')`) that `texts` does not declare — the refusal catalogue's
+ * two halves above, for the sentences a hook writes into a record.
+ */
+function refuseUndeclaredLiteralTextKey(
+  hook: {
+    texts?: Record<string, unknown>;
+    body?: { language?: string; source?: unknown };
+    handler?: unknown;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (!hook.texts) return;
+  const hasHandler = typeof hook.handler === 'function' || (typeof hook.handler === 'string' && hook.handler.length > 0);
+  const answered = hook.body === undefined ? hasHandler : hook.body.language === 'js';
+  if (!answered) {
+    ctx.addIssue({ code: 'custom', path: ['texts'], message: hookTextsWithoutRunnableCode(hook.body?.language) });
+    return;
+  }
+  const read = refusalSourceOf(hook);
+  if (!read) return;
+  const path = read.at === 'body.source' ? ['body', 'source'] : ['handler'];
+  const declared = Object.keys(hook.texts);
+  for (const key of hookTextKeysAskedIn(read.source)) {
+    if (Object.prototype.hasOwnProperty.call(hook.texts, key)) continue;
+    ctx.addIssue({ code: 'custom', path, message: undeclaredHookTextKeyAtSave(key, declared, read.at) });
+  }
+}
+
+/**
  * One sentence under a declared refusal code (#33214, ruling 6879477573,
  * S1): the sentence the user reads when the hook throws the code with this
  * reason. Translated through `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`.
@@ -477,6 +513,71 @@ export const HookRefusalSchema = lazySchema(() => strictObject(
 }));
 
 export type HookRefusal = z.input<typeof HookRefusalSchema>;
+
+/** The slot a hook text's `{{ }}` holes are judged in, as a sentence names it. */
+const HOOK_TEXT_MESSAGE_SLOT = 'A hook text `message`';
+
+/**
+ * One declared text of a hook (#34374, ruling 6913660232 parameter 7): a
+ * sentence the hook writes into a record for people to read, picked in the
+ * ORGANIZATION's language when the hook asks for it (`ctx.text(key, params)`).
+ *
+ * The message is the source-locale sentence and the fallback; its translation
+ * is `hooks.<hook>.texts.<key>.message`, picked first, its `{{ NAME }}` holes
+ * filled from the call's `params` after — a declared refusal's posture
+ * ({@link HookRefusalSchema}), with the organization's language in place of
+ * the caller's. An entry that declares no `params` is plain text and a hole in
+ * it is refused.
+ */
+export const HookTextSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this hook text',
+    history: 'Closed from the day it was declared — a key this entry does not declare would be served nowhere.',
+    aliases: {
+      text: 'message', template: 'message', value: 'message', description: 'message',
+      placeholders: 'params', parameters: 'params', variables: 'params',
+    },
+    guidance: {
+      locale:
+        'A hook text has no language of its own — the runtime picks the organization\'s language. Write the sentence '
+        + 'in the source locale in `message` and translate it through `hooks.HOOK.texts.KEY.message`.',
+    },
+  },
+  {
+    message: z.string().trim().min(1).describe(
+      'The sentence the hook writes into a record — in the source locale, translated whole through '
+      + 'hooks.<hook>.texts.<key>.message in the organization\'s language when the hook asks for it (ctx.text). '
+      + 'With no params every {{ }} hole is refused; with params a hole is a path over one of them with an optional '
+      + 'known formatter',
+    ),
+    params: z.array(
+      z.string().regex(HOOK_REFUSAL_PARAM_PATTERN, {
+        message: 'A text param is an identifier (e.g. lead) — the root a {{ }} hole names',
+      }),
+    ).optional().describe(
+      'The names this text may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value the hook passes '
+      + 'in ctx.text(KEY, { NAME: value }). A hole over any other name, logic, an unknown formatter and an empty '
+      + 'hole are refused. Absent: the sentence is plain text and a {{ }} hole is refused',
+    ),
+  },
+).superRefine((entry, ctx) => {
+  const params = entry.params;
+  if (params) {
+    const seen = new Set<string>();
+    params.forEach((name, i) => {
+      if (seen.has(name)) {
+        ctx.addIssue({ code: 'custom', path: ['params', i], message: `\`params\` names '${name}' twice — declare each once.` });
+      }
+      seen.add(name);
+    });
+  }
+  const refusal = !params || params.length === 0
+    ? (HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE.test(entry.message) ? undefined : HOOK_TEXT_MESSAGE_HOLE_REFUSED)
+    : closedScopeTemplateRefusal(entry.message, { slot: HOOK_TEXT_MESSAGE_SLOT, roots: params });
+  if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['message'], message: refusal });
+}));
+
+export type HookText = z.input<typeof HookTextSchema>;
 
 /**
  * Hook Lifecycle Events
@@ -870,6 +971,48 @@ export const HookSchema = lazySchema(() => strictObject(
   ),
 
   /**
+   * The hook's declared texts (#34374, ruling 6913660232 parameter 7): every
+   * sentence it writes into a record for people to read, keyed by a snake_case
+   * key its code asks for.
+   *
+   *   texts: {
+   *     follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] },
+   *   }
+   *
+   *   await ctx.api.object('crm_task').insert({ subject: await ctx.text('follow_up_subject', { lead }) });
+   *
+   * `ctx.text(key, params?)` answers the sentence in the ORGANIZATION's
+   * language, never the caller's (parameter 2): the Localization setting when
+   * somebody set it, else the app's `i18n.defaultLocale` (parameter 3, the one
+   * shared reader `resolveOrganizationLocale` the flow record write reads). It
+   * picks `hooks.<hook>.texts.<key>.message` first and fills the `{{ }}` holes
+   * from `params` after (parameter 1). With no translation, or no language,
+   * the declared sentence is answered and the hook goes on (parameter 5). A
+   * Localization setting that cannot be READ rejects the call: the
+   * organization's language may exist and could not be known. A string the
+   * hook builds itself is written as it is (parameter 4).
+   *
+   * A key the hook's source asks for literally that `texts` does not declare
+   * is refused at save; any other undeclared key is refused when the hook
+   * runs. Served on every path a hook runs on — a sandboxed `js` body and an
+   * in-process `handler` — and refused on a hook whose code cannot ask for one
+   * (an `expression` body, or neither a body nor a handler). Keyed by hook
+   * name, not by object. Absent: `ctx.text` has nothing to answer.
+   */
+  texts: z.record(
+    z.string().regex(HOOK_TEXT_KEY_PATTERN, {
+      message: 'A text key is snake_case (e.g. follow_up_subject) — the key the hook asks for with ctx.text',
+    }),
+    HookTextSchema,
+  ).optional().describe(
+    'Texts the hook writes into records, keyed by the snake_case key its code asks for with ctx.text(KEY, params): '
+    + '{ message, params? }. ctx.text answers the sentence in the organization\'s language (the Localization setting '
+    + 'when somebody set it, else the app\'s i18n.defaultLocale), translated through hooks.<hook>.texts.<key>.message '
+    + 'with the declared message as the fallback, its holes filled from params. A key not declared here is refused — '
+    + 'at save when the hook asks for it literally, otherwise at run time',
+  ),
+
+  /**
    * Execution identity for the hook's `ctx.api` data operations (#14010;
    * ruling 2026-09-01). The value semantics of `'system'` / `'user'` are
    * FlowSchema's, word for word (`automation/flow.zod.ts` `runAs`): `system`
@@ -944,11 +1087,13 @@ export const HookSchema = lazySchema(() => strictObject(
   // [#25653] the second `runAs` with `body`, [#26170] the third `refusals`
   // with `body`, pairs no field-level refine can see together; [#32004] the
   // fourth refuses a body's `email.send` grant, which only the hook can judge,
-  // since an action's body takes it. A schema DERIVED from this one by overriding a key must use `.safeExtend()` (zod
+  // since an action's body takes it; [#34374] the fifth pairs `texts` with
+  // `body` / `handler`, as the third pairs `refusals`. A schema DERIVED from this one by overriding a key must use `.safeExtend()` (zod
   // refuses `.extend()` over a refined object), which is what keeps every
   // check on the derived schema too.
 }).superRefine(refuseBodyOnStoredMetadataTarget).superRefine(refuseElevatedIdentityAssignmentBodyWrite)
-  .superRefine(refuseUndeclaredLiteralRefusalCode).superRefine(refuseHookBodyMailGrant));
+  .superRefine(refuseUndeclaredLiteralRefusalCode).superRefine(refuseHookBodyMailGrant)
+  .superRefine(refuseUndeclaredLiteralTextKey));
 
 /**
  * Hook Runtime Context
