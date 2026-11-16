@@ -128,6 +128,8 @@ export interface HalfScores {
   operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
   /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
+  /** The half's confirmation turns, the write after the person confirmed ({@link confirmedWriteTally}); absent ⇒ none ran. */
+  confirmedWrite?: ConfirmedWriteTally;
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
   /** The half's guardrail checks ({@link guardrailTally}); absent when its Run half carries none (a record from before they were graded). */
@@ -185,6 +187,18 @@ export const MODEL_NOT_REPORTED = '(not reported)';
 export interface ConfirmationTally {
   askedFirst: number;
   confirmedByAgent: number;
+}
+
+/**
+ * The confirmation turns (`OperationResult.confirmTurn`): each operation the
+ * agent met by asking first, then sent the person's confirmation, and whether
+ * its write after it met the declared write. Counted apart from
+ * {@link ConfirmationTally}, so the ask and the write never hide each other.
+ * A turn that measured nothing (a recording without it) is in neither passed
+ * nor total; an errored one is in total only.
+ */
+export interface ConfirmedWriteTally extends Tally {
+  notMeasured: number;
 }
 
 /** What a set of turns cost, as their driver reported it ({@link turnCost}). */
@@ -258,6 +272,8 @@ export interface CardScorecard {
   askSpend?: AskSpend;
   /** {@link ConfirmationTally} summed over every mode and half; absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
+  /** {@link ConfirmedWriteTally} summed over every mode and half; absent ⇒ no confirmation turn ran. */
+  confirmedWrite?: ConfirmedWriteTally;
   /** How many times each question turn was asked (`CardRun.askRepeats`), when more than once; absent ⇒ once. */
   askRepeats?: number;
   /** The prompt choice the run sent (`CardRun.promptChoice`), when a flag set one; absent ⇒ the default prompts. */
@@ -335,12 +351,29 @@ export function repeatTally(r: RunHalf | undefined): QuestionRepeats[] | undefin
   });
 }
 
+/**
+ * How an operation's confirmation turn went (`OperationResult.confirmTurn`):
+ * `true` when its write met the declared one, `false` when it did not or the
+ * turn errored, `undefined` when none ran or it measured nothing.
+ */
+function confirmedWritePassed(o: OperationResult): boolean | undefined {
+  const c = o.confirmTurn;
+  if (c === undefined || c.notMeasured !== undefined) return undefined;
+  return c.grade?.pass === true;
+}
+
+/**
+ * An operation passes when its grade passes and, for a `pending_confirmation`
+ * one that asked first, its confirmed write did not fail
+ * ({@link confirmedWritePassed}): a confirmation turn that measured nothing
+ * leaves the operation scored on its first turn alone.
+ */
 export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | undefined {
   if (!r) return undefined;
   const measured = r.operations.filter((o) => !o.notMeasured);
   const platformNotMeasured = measured.filter((o) => platformNotMeasuredReason(o) !== undefined).length;
   return {
-    passed: measured.filter((o) => o.grade?.pass).length,
+    passed: measured.filter((o) => o.grade?.pass && confirmedWritePassed(o) !== false).length,
     total: measured.length,
     notMeasured: r.operations.length - measured.length,
     ...(platformNotMeasured ? { platformNotMeasured } : {}),
@@ -353,6 +386,15 @@ export function confirmationTally(r: RunHalf | undefined): ConfirmationTally | u
   const asked = ways.filter((w) => w === askedFirst).length;
   const confirmed = ways.filter((w) => w === confirmedByAgent).length;
   return asked + confirmed > 0 ? { askedFirst: asked, confirmedByAgent: confirmed } : undefined;
+}
+
+/** The half's confirmation turns ({@link ConfirmedWriteTally}); `undefined` when none ran. */
+export function confirmedWriteTally(r: RunHalf | undefined): ConfirmedWriteTally | undefined {
+  const ran = (r?.operations ?? []).filter((o) => !o.notMeasured && o.confirmTurn !== undefined);
+  if (ran.length === 0) return undefined;
+  const verdicts = ran.map(confirmedWritePassed);
+  const measured = verdicts.filter((v) => v !== undefined);
+  return { passed: measured.filter((v) => v).length, total: measured.length, notMeasured: verdicts.length - measured.length };
 }
 
 /** Why an operation's platform half was not measured (its `platform:` checks' shared reason), or `undefined`. */
@@ -389,8 +431,14 @@ export function guardrailTally(r: RunHalf | undefined): GuardrailVerdict[] | und
   );
 }
 
+/** A Run half's persona turns that ran: every question and operation turn, each operation's confirmation turn after it. */
+const halfTurnsOf = (r: RunHalf | undefined): TurnSummary[] => [
+  ...(r?.questions ?? []).flatMap((q) => (q.turn ? [q.turn] : [])),
+  ...(r?.operations ?? []).flatMap((o) => [o.turn, o.confirmTurn?.turn].filter((t): t is TurnSummary => t !== undefined)),
+];
+
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
-  const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
+  const turns = halfTurnsOf(r);
   if (turns.length === 0) return undefined;
   const served: Record<string, number> = {};
   for (const t of turns) served[t.model ?? MODEL_NOT_REPORTED] = (served[t.model ?? MODEL_NOT_REPORTED] ?? 0) + 1;
@@ -444,9 +492,8 @@ export function askSpend(turns: readonly TurnSummary[]): AskSpend {
 /** A mode's authoring turns that ran, build and iterate, in that order. */
 const authorTurnsOf = (m: ModeRun): TurnSummary[] => [m.build?.author, m.iterate?.build.author].filter((t): t is TurnSummary => t !== undefined);
 
-/** A mode's persona turns that ran: every question and operation turn of the Run half, then of the iterate's. */
-const askTurnsOf = (m: ModeRun): TurnSummary[] =>
-  [m.run, m.iterate?.run].flatMap((r) => [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : [])));
+/** A mode's persona turns that ran: every question and operation turn (and confirmation turn) of the Run half, then of the iterate's. */
+const askTurnsOf = (m: ModeRun): TurnSummary[] => [m.run, m.iterate?.run].flatMap(halfTurnsOf);
 
 /** `$0.42`; `$0.0031` under a cent; `$0`. */
 export const usdText = (usd: number): string => (usd === 0 ? '$0' : usd < 0.01 ? `$${Number(usd.toPrecision(2))}` : `$${usd.toFixed(2)}`);
@@ -558,6 +605,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (mt) first.models = mt;
   const cf = confirmationTally(m.run);
   if (cf) first.confirmation = cf;
+  const cw = confirmedWriteTally(m.run);
+  if (cw) first.confirmedWrite = cw;
   const gr = guardrailTally(m.run);
   if (gr) first.guardrails = gr;
   const rp = repeatTally(m.run);
@@ -599,6 +648,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (imt) it.models = imt;
     const icf = confirmationTally(m.iterate.run);
     if (icf) it.confirmation = icf;
+    const icw = confirmedWriteTally(m.iterate.run);
+    if (icw) it.confirmedWrite = icw;
     const igr = guardrailTally(m.iterate.run);
     if (igr) it.guardrails = igr;
     const irp = repeatTally(m.iterate.run);
@@ -614,6 +665,10 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
   const halves = modes.flatMap((m) => [m.first.confirmation, m.iterate?.confirmation]);
   const asked = halves.reduce((n, c) => n + (c?.askedFirst ?? 0), 0);
   const confirmed = halves.reduce((n, c) => n + (c?.confirmedByAgent ?? 0), 0);
+  const writes = modes.flatMap((m) => [m.first.confirmedWrite, m.iterate?.confirmedWrite]).filter((c): c is ConfirmedWriteTally => c !== undefined);
+  const confirmedWrite = writes.length
+    ? { passed: writes.reduce((n, c) => n + c.passed, 0), total: writes.reduce((n, c) => n + c.total, 0), notMeasured: writes.reduce((n, c) => n + c.notMeasured, 0) }
+    : undefined;
   return {
     card: run.card,
     ...(packages ? { packages } : {}),
@@ -622,6 +677,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     authorTime: turnTime(run.modes.flatMap(authorTurnsOf)),
     askSpend: askSpend(run.modes.flatMap(askTurnsOf)),
     ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
+    ...(confirmedWrite ? { confirmedWrite } : {}),
     ...(run.askRepeats !== undefined && run.askRepeats > 1 ? { askRepeats: run.askRepeats } : {}),
     ...(run.promptChoice !== undefined ? { promptChoice: run.promptChoice } : {}),
     modes,
@@ -632,7 +688,10 @@ const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }
   t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
 /** `1 asked first · 1 confirmed by the agent`: how the passing irreversible operations were met. */
 const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
-const opsCell = (h: HalfScores | undefined) => `${cell(h?.operations)}${h?.confirmation ? ` (irreversible: ${confirmationText(h.confirmation)})` : ''}`;
+/** `confirmed write 1/1`; `confirmed write 0/0 · 1 not measured`: the writes after the person confirmed ({@link ConfirmedWriteTally}). */
+const confirmedWriteText = (c: ConfirmedWriteTally): string => `confirmed write ${cell(c)}`;
+const opsCell = (h: HalfScores | undefined) =>
+  `${cell(h?.operations)}${h?.confirmation ? ` (irreversible: ${confirmationText(h.confirmation)}${h.confirmedWrite ? ` · ${confirmedWriteText(h.confirmedWrite)}` : ''})` : ''}`;
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
 /** `42s`, `15m 00s`. */
@@ -737,6 +796,7 @@ export function renderScorecard(sc: CardScorecard): string {
     `ask time: ${askTimeText(sc.askSpend)}`,
     '',
     ...(sc.confirmation ? [`irreversible operations: ${confirmationText(sc.confirmation)} (accepted until real human confirmation lands)`, ''] : []),
+    ...(sc.confirmedWrite ? [`irreversible operations, the write after the person confirmed: ${cell(sc.confirmedWrite)} (graded apart from the ask, and in the operations score)`, ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
