@@ -1,0 +1,31 @@
+{
+  "number": 34427,
+  "kind": "issue",
+  "title": "print: with avoidBreakInside on, a record:line_items table that does not fit the rest of sheet 1 moves whole to sheet 2 (measure on the real page first)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T17:02:17Z",
+  "updated_at": "2026-11-16T17:48:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34427",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① a defect, measured so far on a simplified page only. Step 6 of the maintainer's ruling record on #34228 (comment 6922479414) asks for this card and says it is **not** part of that ruling.\n\n`reach:` not yet measured on the real print-page DOM. The first acceptance item measures it before anything is built.\n\n## What was seen\n\nWith `print.avoidBreakInside` on, a `record:line_items` table that does not fit in the rest of sheet 1 moves whole to sheet 2. Sheet 1 then holds only the customer block. This was measured by the #34228 decision thread on a simplified page, plain HTML in Chromium, not the real print-page DOM (probe: `/mnt/project-files/pm-orders/review/34228-pagination-probe.mjs`):\n\n- At 26, 28, 31 and 36 lines, the table starts on sheet 2.\n- At 26, 28 and 31 lines, that is one sheet more than with the key off.\n\nA template cannot fix this, because a table is one block. The print stylesheet applies `break-inside: avoid` to every region child (`ui/packages/components/src/renderers/layout/page-print.ts`).\n\n## Acceptance\n\n1. Measure on the real print page (the quote or invoice print page in the showcase): from how many lines the table moves whole, and how much of sheet 1 is left blank. If it does not reproduce on the real page, close with the reading.\n2. If it reproduces, propose a fix that keeps the published meaning of `avoidBreakInside` (\"keep each block whole on one sheet when it fits\"). An example is letting a block taller than the space left start on the current sheet when it cannot fit any single sheet. If the fix needs the published meaning to change, that is a new maintainer decision, not something built here.\n\nDuplicate check: `is:issue avoidBreakInside` found 4 hits; the only open one is #34228. The closed hits (#22271, #22158, #23392) introduced the key and its docs."
+}

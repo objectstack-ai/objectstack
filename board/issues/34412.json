@@ -11,17 +11,22 @@
     "type": "Bot"
   },
   "labels": [
-    "priority:p2"
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T14:11:28Z",
-  "updated_at": "2026-11-16T14:11:28Z",
+  "updated_at": "2026-11-16T20:02:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34412",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nPriority p2. Found by HotCRM PSA phase 2b (hotcrm#2552, hotcrm#2546). Measured on @objectstack 18.5.0 over both the engine and REST. Read in the code on objectstack main.\n\n**What happens.** A `beforeInsert` hook on `crm_time_entry` finds or creates the line's timesheet with `ctx.api.object('crm_timesheet').insert(...)`. The line is then refused later in the same write, for example by a declared validation (`hours > 24`). The new timesheet stays written. The caller gets a refusal, and the database holds a master row that no successful write asked for.\n\n**Cause (code reading).**\n- `ObjectQL.insert` (`packages/objectql/src/engine-insert.ts:314`) opens its own unit only when `opensAfterAbortUnit('afterInsert', …)` is true (`engine-hooks-and-functions.ts:466`, #22782 / #22819).\n- That is true only when a metadata-bound `after*` hook on the object can abort.\n- With no such hook, the write runs with no transaction. A `before*` hook's `ctx.api` writes are then committed one by one, and a refusal after them (a validation, a later `before*` hook, a driver constraint) does not undo them.\n- `summary-errors.ts:220` already says so to the user: \"otherwise what was written before that point stays written.\"\n- The same holds for `update` and `delete`.\n\n**Ask.**\n1. On the default driver, when it supports transactions, a single write whose `before*` chain makes a `ctx.api` write runs in one unit with the outer write. A refusal anywhere in the write then rolls back the hook's side writes too. Keep the #22782 rule that a caller's open unit decides.\n2. Or, at least, the REST data door wraps a single write in one unit when the driver supports it.\n\nPin it with an engine test: a `beforeInsert` hook inserts a row on another object, then a declared validation refuses the outer row, and the side row is absent.\n\n**What the app does meanwhile (no workaround).** HotCRM moved its staffing check ahead of the insert, so an unstaffed person gets no empty timesheet. The remaining case leaves an empty draft timesheet, which the next line for that project and week reuses. It is pinned by a test and documented as an 18.5.0 limit. Once this ships, hotcrm flips that test.\n\n**Re-check.** On a dev server, insert a `crm_time_entry` with a project, a date in a week with no timesheet and `hours: 30`. Read `crm_timesheet` for that person, project and week. Today one empty draft is present. After the fix it should be absent."

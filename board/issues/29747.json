@@ -1,7 +1,7 @@
 {
   "number": 29747,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:skills · seat 3 — 🟢 os-support-ai",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-bill"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T03:16:22Z",
-  "updated_at": "2026-11-14T15:19:16Z",
+  "updated_at": "2026-11-16T16:46:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29747",
-  "body": "domain:skills#3 · os-bill · session_01Utp6Ca8rgLxchMQbwak9gh\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 3**. Seat 1 is #7623 (🟢 `os-project-manager`), seat 2 is #19287 (⏳ vacant).\n\n<sub>Refreshed 2026-11-14T15:18Z (sign-off completed after the fact: the holder session stood down without flipping this post or closing its mailbox).</sub>\n\n## Current PM\n\n⏳ **vacant.** Previous holder: `os-bill` · `session_01Utp6CaqHXh17Qc3C7MRAQw` (project \"Objectstack server 31527 devx\", thread 「运行 skills 车道座位 3」), seated 2026-11-12T00:16Z, last active 2026-11-12T08:39Z. The sign-off steps it left were completed by `session_01Utp6Ca8rgLxchMQbwak9gh` (same account) on the order of the maintainer (Bill, `os-bill`), 2026-11-14 in the project \"Objectstack server 31527 devx\": 「你还有好几个信箱没关」 then 「说明相关座位下班流程当时没走完」. `check-handover.mjs --session=session_01Utp6CaqHXh17Qc3C7MRAQw --account=os-bill` exit 0. Successor: `/pm-dispatch 接手`, then read this post first.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#3` + `head:claude/` PRs.\n- **Landed this term:** #32519 (PR #32531), #32518 (PR #32541), #32520 (PR #32546), #32549 (PR #32581), #32543 (PR #32593), #32570 (PR #32594), #32424 (PR #32556).\n- **Handed back:** #32542 returned to `pm:queue` by the holder.\n- **In flight:** none. No claim of this seat is open; no card thread is running.\n- **Queue:** read live (`domain:skills` + `pm:queue`); the lane has live sibling seats.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #32482 closed 2026-11-14 (comment 6879210884); the next seat opens its own. **Patrol:** `trig_016gWWQsFkxpgwEbkdtAWjaS` no longer scheduled (the account lists no enabled routine).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6Ca8rgLxchMQbwak9gh -->\n"
+  "body": "domain:skills#3 · os-support-ai · session_01WGufzgtCwPzNYSczvxDEpw\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 3**. Seat 1 is #7623, seat 2 is #19287.\n\n<sub>Refreshed 2026-11-16T16:45Z · round 1 dispatched.</sub>\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzgtCwPzNYSczvxDEpw` · seated 2026-11-16T16:36Z · held by the os-support-ai account's project (\"objectstack spec ui server devx\", thread \"Run PM dispatch skills seat\"). Posture and ledger live in the project; the canonical ledger is below.\n\n- **Mailbox:** PR #34423 (subscribed). **Patrol:** `trig_01W5D6WHD51CTs56bzcbob8b` · `33 * * * *`.\n- **Posture:** p1/p2 only, at most 5 running cards; card threads are opened by this project's coordinator.\n- **Split with seat 2:** a queue card belongs to whichever seat's `Claim:` lands first; no card claimed by another seat is touched.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#3` + `head:claude/` PRs.\n- **In flight (round 1):** #25583 (claim 6922732879), #34191 (6922749450), #34201 (6922776400), #33184 (6922793989) — one card thread each, opened by the coordinator.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#3 · os-support-ai · session_01WGufzgtCwPzNYSczvxDEpw -->\n"
 }

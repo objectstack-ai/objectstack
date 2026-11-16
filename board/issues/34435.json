@@ -1,0 +1,33 @@
+{
+  "number": 34435,
+  "kind": "pull_request",
+  "title": "fix(qa): approver-resolution-matrix gains the platform_admin variant (main red since #34300)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T17:34:53Z",
+  "updated_at": "2026-11-16T18:08:09Z",
+  "closed_at": "2026-11-16T18:08:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T18:08:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34435",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\nNo card: this is a main-red stopgap ordered by the objectstack PM seat (seat post #34366), not a card dispatch, so this PR closes no issue.\n\n## 维护者速读\n\n- 改了什么:平台测试清单 `approvals.approver-resolution-matrix` 补上 `platform_admin` 审批人类型这一行,条目修订号 9→10,枚举计数 10→11,并补一条历史记录。\n- 为什么改:上一个合入的 PR 给 `ApproverType` 新增了 `platform_admin`,清单没跟上,`pnpm check:platform-checklist` 在 main 上报 VARIANTS STALE 退出 1,挡住所有 PR 的 Lint & Repo Gates。\n- 风险与回滚:只改一个 QA 清单 JSON 文件,不发布任何包、不改运行时;回滚即撤这个 PR。\n- 先看:`docs/qa/platform-checklist/areas/approvals.json` 中该条目的 `variants`、`enumSource.expect` 和最后一条 `history`。\n- 两分钟验证:`pnpm check:platform-checklist`,预期退出 0,末行为 `check-platform-checklist: OK`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`ApproverType` (`packages/spec/src/automation/approval.zod.ts`) gained an 11th member, `platform_admin`, in commit 27c0b206. The checklist item `approvals.approver-resolution-matrix` pins that enum with `enumSource`, so the gate went red on `main` with `VARIANTS STALE`. This PR does what the gate prescribes, and nothing else:\n\n- `variants` gains `platform_admin`, described from the merged spec docblock only: the deployment's platform administrators, asked per caller and never enumerated; it takes no value; it is accepted only in a flow shipped by a code-registered package; and designers never offer it.\n- `revision` 9 to 10, with a `history` row saying what changed and that no clause changed.\n- `enumSource.expect` 10 to 11.\n- `source[0]` recounts the enum at 11 members (it said 10).\n\nOne file, +10 / -4. `coverage.json` needs no change: the item is already mapped there and the gate does not ask for a row.\n\n## Tests\n\nNo code or test changed; the evidence is the gate itself. `skip-changeset`: the diff touches only `docs/qa/**`, which no package's `files[]` ships.\n\n## Acceptance notes\n\n- The matrix is brought level with the enum only. No step or acceptance leg for `platform_admin` is authored in this revision, so `acceptance[0]`'s per-variant clause has no driven leg for the new variant yet. Authoring that leg is a `checklist-author` pass, outside a main-red stopgap.\n\n## Verification\n\nRead at head 5c101f9a (base 2becfd61).\n\n<details>\n<summary>check:platform-checklist before (origin/main 2becfd61): exit 1</summary>\n\n```text\ncheck-platform-checklist: 1 problem(s)\n\n  ✗ approvals.json · approvals.approver-resolution-matrix: VARIANTS STALE — ApproverType in packages/spec/src/automation/approval.zod.ts now has 11 members but this item's variants were authored against 10. The platform grew/shrank this surface: revise the variants matrix, bump the item revision, and set enumSource.expect to 11.\n ELIFECYCLE  Command failed with exit code 1.\n```\n</details>\n\n<details>\n<summary>check:platform-checklist after (5c101f9a): exit 0</summary>\n\n```text\n✓ checklist-select self-test: 45 cases pass.\n✓ qa-rollup --self-test: 82 assertions over 5 canonical shapes and 16 retired ones\n✓ retest-owed --self-test: 57 assertions in 9 batteries.\n✓ check-platform-checklist --self-test: 265 assertions — (long line elided)\ncheck-platform-checklist: OK — 16 areas, 433 items (425 active, 3 planned); coverage: 40 kinds mapped, 4 waived; traps: 19 documented, 19 in use; provisioning: 10 area recipes, 18 item references resolved (5 area-qualified), 10/10 recipes referenced\n```\n</details>\n\n<details>\n<summary>Derived gate families (dispatch-gates --commands, 17 families): all exit 0</summary>\n\n```text\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0 (first run exit 3, PREREQUISITE NOT MET; re-run after building formula + lint)\npnpm check:adr-anchors :: exit 0\npnpm check:ci-filter-parity :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:platform-checklist :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n\ndispatch-gates --ran: 17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED (a DERIVED zero — all 17 recorded an exit code and none of them is 3).\n```\n</details>\n\nEvery family CI runs beyond these is read from this PR's check-runs, not re-run locally.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5pmEYLVFDcQ1Z1CS8H)_\n"
+}

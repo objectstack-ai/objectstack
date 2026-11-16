@@ -1,0 +1,31 @@
+{
+  "number": 34445,
+  "kind": "issue",
+  "title": "studio: the flow inspector refuses a valid text envelope in a record node's fields (judges it as an assignment value), after #34062",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T18:20:33Z",
+  "updated_at": "2026-11-16T18:46:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34445",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① a user-visible defect with a named location. A follow-up that PR #34438 (#34062, p1) owes before the release an app installs. It was found by review#1 as should-fix S2 in contract record 6924979595 on #34438. `reach:` read from code on the PR head `b585364d`, not driven in a browser.\n\n## What happens\n\nOnce #34438 lands, a create_record / update_record node's `fields` value can be a text envelope that the platform translates at write time (ruling B, 6913660232). The Studio inspector does not know this:\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowNodeConfigField.tsx`, in the `keyValue` case, passes no `valueRefusal` for a record node's `fields`.\n- So `FlowKeyValueField` judges each cell with `valueEnvelopeRefusal`, which is `AssignmentValueSchema` (`flow-value-envelope.ts:128`).\n\nA valid text envelope is therefore shown with the refusal \"`template` and `cron` envelopes have no meaning here … write one CEL concatenation\", the very spelling the ruling rejects. The row is kept, so nothing is lost on save, but the author is told that a correct value is wrong.\n\n## Expected\n\nThe record node's `fields` cells are judged with `FlowRecordFieldValueSchema`, the schema #34438 publishes, so a text envelope reads as valid and an invalid value still gets the right refusal.\n\n## Acceptance\n\n- The inspector passes the record-field judge for create_record / update_record `fields`.\n- A UI test shows a text envelope with no refusal, and a control shows a malformed value still refused.\n\nPriority p1, as part of delivering #34062. Ships in the same release as #34438, or the release after it at the latest."
+}

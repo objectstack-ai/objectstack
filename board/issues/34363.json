@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "lease:o1-C",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T09:30:24Z",
-  "updated_at": "2026-11-16T14:21:52Z",
+  "updated_at": "2026-11-16T19:50:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34363",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nSeam: spec:formula validateExpression date-text verdicts → runtime:service-automation evaluateValueEnvelope\n\nFiling gate: ① reproduced. Found while fixing objectstack-ai/cloud#4717. The fix is objectstack-ai/cloud#4723, a cloud-side verify_build probe; this card is the shared gate's half.\n\n## Defect\n\nOn the pin `b914e724` (18.5.0), `@objectstack/formula` `validateExpression('value', \"isoDate(timestamp(record.borrow_date) + duration('168h'))\", { fieldTypes: { borrow_date: 'date' } })` returns `errors: []`. `lint` `validateStackExpressions` gives the same verdict. At run time the flow engine's CEL refuses the expression on the field's date-only text (`\"2026-11-16\"`): `timestamp() requires a string in ISO 8601 format`. So every run of the flow fails and the field stays null.\n\nThe existing date-text verdicts miss this shape. `date-text-call` covers timestamp-only calls and `date-text-arithmetic` covers arithmetic, but `timestamp(<date field>)` (the string overload) is neither.\n\nReach: any hand-authored or AI-authored stack. It passes `os validate` and the publish door, then fails on every trigger. Measured live on staging in cloud#4717: the run on record `CexnsMC2iK0oiwRH` failed.\n\nThe supported shape exists and is documented: `isoDate(addDays(record.<date_field>, N))` (`formula/src/stdlib.ts` Dates block; `skills/objectstack-formula/SKILL.md`, the addDays row and \"Shift a date\").\n\n## Done when\n\n- `validateExpression` / `validateStackExpressions` report `timestamp(<date-typed field>)` (and the same field inside `+ duration(...)` arithmetic) as an error, with the fix hint `isoDate(addDays(record.<field>, N))`.\n- A pin test covers the cloud#4717 expression (error) and the taught shape (clean, evaluating to the date + N over a date-only value).\n- Once the framework refuses the shape, cloud's verify_build probe can retire to the shared verdict; that follow-up is the cloud seat's.\n\nDedupe words: timestamp date field date-text-call, validateExpression timestamp ISO 8601 date-only, date-text verdict timestamp string overload."

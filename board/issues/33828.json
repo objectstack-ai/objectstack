@@ -12,22 +12,22 @@
   },
   "labels": [
     "domain:server",
-    "lease:A2",
+    "lease:o1-A",
     "pm:dispatched",
     "priority:p1",
     "security"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:46:34Z",
-  "updated_at": "2026-11-16T09:34:26Z",
+  "updated_at": "2026-11-16T17:38:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 9,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33828",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n**Maintainer ruling (Irene, decision card in the hotcrm project, tapped 2026-11-15 11:44 UTC): A, platform.** An explicit `readable: false` field-permission row on a permission set must win over that **same set's** View All (`viewAllRecords`) field vote. This amends ADR-0066 D2 ⑧ as amended by ruling of record 6573563853.\n\n## What happens today (measured on 18.4.0)\n\n- `superuserFieldVote` (`packages/core/src/security/effective-object-permissions.ts`) has a set that holds `viewAllRecords` on an object vote `readable: true` on every field of that object. `PermissionEvaluator.getFieldPermissions` and `buildEffectiveFieldPermissions` apply it after the declared-entry votes.\n- So a set cannot give View All on an object and still hide some of its fields. Its own `fields` rows are out-voted by its own object row.\n- Measured by the hotcrm PSA thread: `project_member` holds read with View All on `crm_account`, plus `readable: false` rows for the account's Order to Cash totals (`invoiced_amount`, `received_amount`, `receivable_balance`). A consultant still reads all three over REST and in the console.\n\n## Why it matters\n\n- Ruling 6573563853 fixed a real case: a platform admin was hidden from a field by another set's `false`. That case is about **other** sets and stays as it is.\n- The gap is the same-set case. Every View All set that also tries to narrow fields silently loses the narrowing, so a declared field mask is not enforced (declared ≠ enforced).\n- Mainstream reference: Salesforce and Dynamics keep field-level security independent of record-level View All / organization-wide read.\n\n## Asked\n\n- In the field merge, a set's own explicit `readable: false` (or `editable: false`) row on `<object>.<field>` is not overridden by that set's own View All / Modify All vote on `<object>`.\n- Another set's super-user vote still wins over this set's `false`, keeping ruling 6573563853's admin case. Whether Modify All should get the same treatment as View All is part of this card's design; the ruling names View All.\n- ADR-0066 D2 ⑧ is amended in the same PR.\n- **Lint, same PR:** the rule `security-superuser-field-mask-inert` fires today. Under `objectstack lint --strict`, hotcrm's three rows give 3 warnings, `permission set \"project_member\": viewAllRecords on objects.crm_account votes on every field of \"crm_account\", so readable: false on 'crm_account.invoiced_amount' binds none of this set's holders`, at `permissions[6].fields[...]`. After the fix, the rule must stop flagging a row that its own set's View All no longer out-votes. Today the rows cannot even land, because they turn the consumer's strict lint red.\n- Tests: a View All set with a `readable: false` row hides the field from its holder, both in `getFieldPermissions` and in `/auth/me/permissions`. A second set holding Modify All on the object still reveals it.\n\n## Consumer\n\nhotcrm#2481 (`pm:blocked` on this card) adds the three `project_member` rows once a release carries the fix. Until then, consultants see the totals.\n\nGoverning text: ADR-0066 D2 ⑧ (as amended, ruling of record 6573563853); `superuserFieldVote` docblock.\n"

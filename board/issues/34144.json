@@ -2,8 +2,8 @@
   "number": 34144,
   "kind": "issue",
   "title": "metadata-protocol: a bare save of a name only a DISABLED package holds silently edits that package's row (200) while the bare read answers 404 — refuse with the ?package= remedy (ruled A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,21 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:o1-D",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T21:55:24Z",
-  "updated_at": "2026-11-16T13:48:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T18:06:21Z",
+  "closed_at": "2026-11-16T18:00:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34144",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate ③, a recorded maintainer ruling. Filed by area S5 (E1b), lease E1, as the home of the ruling below. Source: dev report 6896224874 on #32605 (open_questions), decision batch 2026-11-15 (b).\n\n## 维护者速读\n\n- 问题：一个名字只被停用的包 D 持有（只有 D 的存储行，没有启用中的持有者）。不带包名读取返回 404，但不带包名保存会悄悄改写 D 的行并返回 200。\n- 裁决：A，拒绝保存并提示指定包。\n- 修法：不带包名保存这种名字时，拒绝并提示用 `?package=` 指定包，不点名任何包，和读取一致。这是声明过的收窄。\n- 优先级 p2，本区（S5）处理。\n\n## Ruling\n\nRuled: option A · the maintainer (Steedos) tapped the decision card at 2026-11-15T21:53Z, relayed by the server#5 seat thread. Question, verbatim: 「决定只被停用包占用的名字在不带包名保存时如何处理」. Chosen option, verbatim: 「拒绝保存并提示指定包」.\n\nAs it binds this card (seat's reading of the card): refuse with the existing 409 refusal shape (no new refusal code) and point the caller to the package parameter (`?package=`). The 200 becomes a refusal, so it is a declared narrowing.\n\n## Measured (dev report 6896224874 on #32605)\n\nA name held only by a disabled package D (D's stored row alone, no enabled holder): the bare read (`GET /meta/TYPE/NAME`, no `?package=`) answers 404 (ADR-0150 D3: a disabled package holds no name), but the bare save resolves to D and, when D is writable, updates D's row (200). PR #33889 pins today's 200 as a CONTROL in `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts`; this card flips that pin.\n\n## Acceptance\n\n1. A bare publish-mode save of a name only disabled packages hold refuses with the existing 409 refusal shape and the `?package=` remedy, naming no package, in both registration orders, with D's row untouched. CONTROLs: one enabled holder (unchanged), the environment's own item (unchanged), `?package=D` (unchanged).\n2. Measure the draft-mode bare save and the bare DELETE for the same state; align them in the same PR or name them in the changeset.\n3. Declaration: `Clause-②: no (narrowing)`, `!` title, BREAKING banner, ADR-0087 marker, dogfood battery; the #33889 CONTROL pin flipped and ablated.\n\n## Reader\n\n`domain:server` area S5 (E1b). Same door (`protocol-save.ts`, `servedPackagelessSaveAddress`) and refusal shape as #33955 (two enabled holders): fold candidate if the five fold gates pass. #32780 (in flight) also edits protocol-save.ts: git merge-tree before claim and push.\n\nPrior rulings read: this ruling; ruling 6781691009 on #31527 (D3/D5 symmetry; did not cover this state); ADR-0150 D3 and red line 2; PR #33889's CONTROL pin (the opposite answer, flipped here).\n\nDedupe: #32605 (closed, the disabled holder beside an enabled one), #33955 (two enabled holders): neither covers the disabled-only state."

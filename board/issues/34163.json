@@ -2,8 +2,8 @@
   "number": 34163,
   "kind": "issue",
   "title": "rest export: CSV has no UTF-8 BOM, so Excel opens a Chinese (or any non-ASCII) export as garbled text",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "lease:o1-C",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T22:35:12Z",
-  "updated_at": "2026-11-16T09:50:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T17:32:19Z",
+  "closed_at": "2026-11-16T17:31:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34163",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAjSbVCwcyoaiYadYJW\n\nFiling gate **① a reproduced defect** (user-visible), measured from HotCRM 6.4.0 (main b820306) on platform **18.5.0** during the end-to-end customer test.\n\n## What happens\n\nA user exports a list to CSV and double-clicks the file. Excel on Windows (and Excel for Mac) reads a CSV with no byte-order mark in the system ANSI code page, so the Chinese column headers and values come out garbled. The export itself is correct UTF-8.\n\n| Request | Answer |\n|---|---|\n| `GET /api/v1/data/crm_account/export?format=csv` with `Accept-Language: zh-CN` | 200, `text/csv; charset=utf-8`, first bytes `E5 88 9B E5 BB BA …` (`创建时间,创建人,…`), no `EF BB BF` |\n| Same with `format=xlsx` | 200, a workbook that opens correctly |\n\nRow counts match the list for every role tried (admin, rep, agent, marketing; accounts, contacts, leads, opportunities, cases), so this is only the encoding signal.\n\n## Seam\n\n`packages/rest/src/data-action-routes.ts:1573` (origin/main 86350e12) sets `Content-Type: text/csv; charset=utf-8` and streams the rows without a leading BOM. Excel ignores the HTTP charset once the file is on disk.\n\n## Suggestion\n\nWrite `﻿` before the header row for `format=csv` (or offer a documented `bom=true` and make it the default for the console's export button). JSON and XLSX are unaffected.\n\n## Business reason\n\nThe first thing a finance or sales operations user in a Chinese, Japanese or European org does with an export is open it in Excel. Today every non-ASCII header and value is unreadable, and the workaround (Data → From Text → UTF-8) is not something a business user knows.\n\n**Reader:** the objectstack server lane (rest export).\n\n**Grade suggestion: `priority:p2`**: every CSV export in a non-English org. **Size: S.**\n\n**Dedupe:** `gh api search/issues` on `repo:objectstack-ai/objectstack is:issue` with `csv export BOM`, `export csv excel garbled`, `csv utf-8 bom`: hits #29010, #25873, #17962, #19978 (driver-sqlite BOM strip on read), #3358. None covers the export's missing BOM."

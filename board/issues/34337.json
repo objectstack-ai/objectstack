@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T07:48:34Z",
-  "updated_at": "2026-11-16T07:48:34Z",
+  "updated_at": "2026-11-16T14:27:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34337",
   "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: out-of-scope finding (class a) of a cloud lane card's report. Reopens the question of #32149, which closed `not_planned` on the premise that `objectstack start` forwards SIGTERM to its serve child and waits for it.\n\n## What happens\n\nTwo multi-replica drill runs on 2026-11-16 sent SIGTERM straight to `node …/@objectstack/cli/bin/run.js start` (no wrapper process in between) to drain a replica. Each time `start` exited with code 0, after 114 ms and after 83 ms, while a process of its process group was still alive: `process.kill(-pid, 0)` succeeded after the exit, and the drill had to reap that leftover process itself. Framework commit `b914e724`, run from source on a local target.\n\nA supervisor that watches the `start` process (a container runtime, systemd, a drill) therefore reads \"stopped\" while the server may still be serving or finishing requests, and what it does next (start a replacement on the same port, reuse the replica's resources) races the old server.\n\n## Expected\n\n1. On SIGTERM, `objectstack start` forwards the signal to its serve child and exits only after that child has exited, with the child's exit code.\n2. A test pins it: send SIGTERM to `start`, then assert no process of its group is alive when `start` exits. With the wait removed, the test goes red.\n3. If today's behaviour is intended, the CLI docs say so and say what a supervisor should signal instead.\n\nDedupe words: start SIGTERM leftover serve child, drain exits before serve."

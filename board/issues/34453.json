@@ -1,0 +1,33 @@
+{
+  "number": 34453,
+  "kind": "pull_request",
+  "title": "fix(mcp): delete_record treats a request naming one matching record as the approval",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T19:48:27Z",
+  "updated_at": "2026-11-16T20:16:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34453",
+  "body": "Fixes #34340\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: follow-up #34456 — skills/objectstack-ai/SKILL.md (the delete_record row of the MCP tools table still says \"ask the human first, then retry\")\n\n## 维护者速读\n\n- 改了什么:MCP `delete_record` 工具说明和它的 `confirm` 参数说明现在明写:用户点名要删的记录且恰好匹配一条,这句请求就是确认,agent 直接带 `confirm: true` 删(进回收站);名字匹配多条或没指明哪一条,先列候选问用户,答复后才带 `confirm: true`。\n- 为什么改:落实裁决「点名单条就算确认」;旧文案\"先问人再重试\"让各模型对点名单删读法不一,评测里 121 次失败写操作有 76 次卡在这条冲突上。\n- 风险与回滚:只改工具说明文字,门禁不动(不带 `confirm: true` 仍被拒,428 `ACTION_CONFIRMATION_REQUIRED`),批量 `delete_records` 不变;回滚即 revert 本 PR。\n- 先看:`packages/mcp/src/mcp-http-tools.ts` 的 `delete_record` 注册段(两句新文案,描述与 `confirm` 共用);`packages/mcp/src/mcp-delete-record-confirmation.test.ts` 末尾新 describe。\n- 两分钟验证:`pnpm --filter @objectstack/mcp exec vitest run src/mcp-delete-record-confirmation.test.ts`,预期 11 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe `delete_record` tool description and its `confirm` member's description now carry two sentences, defined once beside the tool's registration and used on both:\n\n- \"A request in which the human names the record to delete, with exactly one record matching, is the human's approval of that delete: send confirm: true on that call, without asking again.\"\n- \"When the name matches more than one record, or the request does not identify one record, do not delete yet: list the candidates, ask the human which one, and send confirm: true only after the answer.\"\n\nThe description drops \"ask the human first, then retry\" and keeps everything else: the gate sentence (\"A call is REFUSED unless it also sends confirm: true; nothing is deleted on a refused call.\"), the recycle-bin fact and the `recycleBinEntryId` sentence. The `confirm` member keeps its opening and closing sentences around the two new ones.\n\nUnchanged: the gate itself (`recordDeleteConfirmationRefusal`, its code, status, details and message), and `delete_records` (bulk), which stays preview first with `confirm: true` only after the human approves the preview.\n\n## Tests\n\n`packages/mcp/src/mcp-delete-record-confirmation.test.ts` is the existing harness for this tool, so the pin is a new top-level `describe` there, not a new file:\n\n- positive: both sentences, verbatim, on the tool description AND on the `confirm` member as `tools/list` serves them; the description still states the refusal and the recycle bin;\n- control: `delete_records`' description and `confirm` member carry neither sentence, and still say `preview`;\n- gate control (existing, unchanged): \"refuses a call without the member: code, status and the retry details; the record is intact\" and \"refuses %s as the member\" pin `ACTION_CONFIRMATION_REQUIRED` / 428 and that the engine's `delete` is never called.\n\nOne existing assertion comment in the first describe was reworded (it described the old \"ask, then retry\" order); the assertion itself is unchanged.\n\nAblation (one-time, through `scripts/ablation-replace.mjs`, no permanent file): replacing the named-record sentence on the `confirm` member with a marker turned the new pin red (`1 failed | 10 passed`, \"expected 'Set to true only when the human in th…' to contain 'A request in which the human names th…'\"); the tool restored the file to the HEAD blob (`b7318758fc10`, `git diff HEAD` empty), and the full package run after it is green. A first attempt was refused by the tool before running (its replacement text already occurred 13 times in the file, so its count could not rise by one) and restored; it measured nothing.\n\n## Acceptance notes\n\n- `skills/objectstack-ai/SKILL.md` line 202 is not edited here: implementation-card file surfaces exclude `skills/**`, which gets its own `domain:skills` card (and `dispatch-gates --tier` mandates a higher model tier for that path). The follow-up is #34456.\n- Other readers of the old wording, left as they are (no gate demands a change, and each is outside this card's file surface): the MCP-served skill text in `packages/mcp/src/skill-md.ts` (the `delete_record` bullet says \"Ask your human first\", and the gotchas and workflow sections say to confirm destructive actions such as `delete_record` with the user); `content/docs/ai/connect-mcp.mdx` (the `delete_record` bullet: \"The agent asks its human, then retries\"); and the gate's own refusal message (\"confirm with the human in the loop, then retry\"), which a call reaches only without `confirm: true`. Each now reads differently from the tool text; the seat decides where they go.\n- `CHANGELOG.md` entries that quote the old description are release-owned and stay.\n\n## Verification\n\nAll at head `dc4f0a0d0`, worktree off `origin/main` `6aeb665f3`.\n\n<details>\n<summary>Package test and typecheck (under the verify lock)</summary>\n\n- `pnpm --filter @objectstack/mcp test`: VERDICT command-exit 0, Test Files 66 passed (66), Tests 1225 passed (1225)\n- `pnpm --filter @objectstack/mcp typecheck`: VERDICT command-exit 0 (`tsc --noEmit` and `check:test-typecheck` OK)\n- the pin file alone: Tests 11 passed (11)\n- dependency closure built first: `pnpm --filter '@objectstack/mcp^...' build`, VERDICT command-exit 0\n\n</details>\n\n<details>\n<summary>Derived gate families (dispatch-gates --commands, reconciled with --ran)</summary>\n\n- 68 derived, 67 run with exit 0, 1 NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: it reads every package's `dist/`, and only the mcp closure was built); CI runs it.\n- `dispatch-gates --ran`: \"68 derived famil(ies) accounted for — 67 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3).\"\n- `dispatch-gates --tier` on this diff: no path-derived mandate.\n- merge-tree against `origin/main` clean; no open pull request touches a file of this diff.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5nNrLRm8ssuwWcBVcw)_\n\n<!-- signed: repo:objectstack#1 · os-project-manager · session_01FEkQ5nNrLRm8ssuwWcBVcw -->\n"
+}

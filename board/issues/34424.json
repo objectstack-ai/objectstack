@@ -1,0 +1,33 @@
+{
+  "number": 34424,
+  "kind": "issue",
+  "title": "pm-dispatch: large cards leave areas for their own card thread; areas run at most 2 devs per container",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T16:35:34Z",
+  "updated_at": "2026-11-16T17:39:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34424",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ③ maintainer-directed rule change. The maintainer asked 「是否建议立 skills 卡修改规则」 (2026-11-16T16:33:38Z, project chat). He then answered 「ok」 (16:33:48Z) to the coordinator's three-point proposal, written out under **Change**.\n\n## Why\n\nArea-lease mode runs three `os-dev` agents per area inside one container, and they share that container's single verify lock. On 2026-11-16 the seat `repo:objectstack#1` ran five areas at 3/3 each. One area recorded a 63-minute wait on the lock for one probe. Large cards, such as contract changes and narrowing PRs that owe the full dogfood battery, hold the lock longest, so they starve the fix rounds queued behind them. Before area-lease, a large card got its own card thread, which meant its own container (`dispatch-runbook.md`, the 卡线程 section). Without this change, adding devs to an area adds lock waiting, not throughput.\n\n## Change (`.claude/skills/pm-dispatch/references/`)\n\n1. **Large cards go to their own card thread** (`mode:thread`, their own container), not into an area's dev slots. A card is large when any one of these holds:\n   - size L or XL;\n   - a contract change: `Clause-②: yes`, `Metadata-protocol` other than `none`, or a non-test path under `packages/spec/src/**`;\n   - it owes the full-suite validation, such as the narrowing arm's dogfood battery.\n\n   The seat writes the order and hands it to the coordinator, as the 卡线程 section already describes.\n2. **Areas hold only small cards** (S/M without any trigger above) **and fix rounds** of PRs already in the area. A fix round on a large card's PR stays with that card's thread.\n3. **Concurrent validation per container is capped at 2 devs.** `area-lease.md` 「每区恒 3 dev」 becomes 2. The same cap applies to any container that runs devs side by side.\n\nFiles: `area-lease.md` (the dev-count line and an intake line for large cards), `dispatch-runbook.md` (the 卡线程 section names the same three triggers), and `coordinator.md` only if a slot count there cites 3 per area.\n\n## Who acts\n\nSeat `repo:objectstack#1` builds it, through one `os-dev` with a scoped `.claude/**` surface. `.claude/**` is Tier S (`SKILL.md`, the governed-surface line), so it lands after an at-tier contract review PASS (review#1 or review#2). The seat moves its own current large cards under the new rule on the maintainer's same word, without waiting for this PR.\n\n## Duplicate check\n\n`gh api search/issues q='repo:objectstack-ai/objectstack is:issue is:open area-lease'` returned 65 hits, none on per-area concurrency or on large cards leaving areas. #33941, the merge-tree for hot files, is related but separate.\n\n## Acceptance\n\n- `area-lease.md` says 2 devs per area and sends a large card, by the three triggers, to `mode:thread`.\n- `dispatch-runbook.md`'s 卡线程 section names the same three triggers in one place, and `area-lease.md` points to it rather than copying them.\n- The pm-dispatch skill gates are green (skills lint and line-budget ratchet)."
+}

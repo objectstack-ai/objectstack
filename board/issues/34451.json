@@ -1,0 +1,30 @@
+{
+  "number": 34451,
+  "kind": "issue",
+  "title": "flow value envelopes are validated without field types, so the date-text verdicts (timestamp over a date field) never reach update_record / create_record fields",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T19:43:45Z",
+  "updated_at": "2026-11-16T19:47:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34451",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① measured. Found by the #34363 dev round (PR #34447, \"Not reached\" bullet in its body). ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** #34447 让公式校验拒绝对日期字段写 `timestamp()`,但 flow 的值信封(`update_record` / `create_record` 的 `fields.*`、`assignment` 的值)校验时不带字段类型，所以这条新拒绝够不到 cloud#4717 实际出错的位置。cloud 的 verify_build 探针因此还不能撤。\n- **影响：** 写在 flow 值信封里的 `isoDate(timestamp(record.<日期字段>) + duration(...))` 照样通过 `os validate` 和发布，每次运行都失败。\n- **建议(席位路线，非裁决):** A,只为 date-text 这一族把触发对象的字段类型传进值信封校验。这是收窄，要配 changeset、ADR-0087 转换说明和 battery。p2,点名后再做。\n\n## Where (origin/main)\n\n- `packages/lint`: `checkDeclaredValue` judges a flow value envelope with no `fieldTypes`.\n- `packages/services/service-automation`: `valueEnvelopeRefusals` (the engine's registration door) likewise.\n- Measured on the #34447 branch: a record-triggered flow whose `update_record` writes `due_date` from `isoDate(timestamp(record.borrow_date) + duration('168h'))` gets zero findings from `validateStackExpressions`.\n\n## Options\n\n- **A (seat's route):** pass the triggering object's field types into value-envelope validation for the date-text verdict family only. About one dev day. Narrowing: changeset, ADR-0087 conversion note, dogfood battery.\n- **B:** type every value envelope, so every type-mismatch verdict reaches it. Wider narrowing and more fixture churn.\n- **C:** no change; cloud's verify_build probe (cloud#4723) stays as the guard.\n\n## Done when (route A)\n\n- A flow value envelope carrying `timestamp(<date-typed field>)`, alone or inside `+ duration(...)`, is refused by `validateStackExpressions` and at the engine's registration door, with the fix hint `isoDate(addDays(record.<field>, N))`. CONTROL: a `datetime` field in the same envelope stays clean.\n- Cloud's probe can then retire to the shared verdict (the cloud seat's follow-up).\n\nDedupe words: value envelope field types, checkDeclaredValue fieldTypes, valueEnvelopeRefusals date-text, timestamp date field flow fields."
+}

@@ -2,8 +2,8 @@
   "number": 34407,
   "kind": "issue",
   "title": "install-local: composed artifacts read package-owned collections from the top level only (translationsLoaded 0; global-unique gate sees no objects)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T13:29:49Z",
-  "updated_at": "2026-11-16T14:22:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T18:02:59Z",
+  "closed_at": "2026-11-16T18:01:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34407",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pHNFS9mn8hS13iGyL\n\nFamily card for the out-of-scope findings of #34336 (os-dev-report 6917684209), filed by the `repo:objectstack#1` seat's route. Same defect class as #34336: on a composed artifact (ADR-0130 D4) a collection lives in `packages[i]`, and install-local reads only the top level. PR #34403 fixes the seed datasets through `resolveStackCollection`; these two readers are left.\n\n**Business reason.** A composed app installed through install-local shows untranslated labels (zh-CN users see raw keys or the source language), and the global-unique install ceremony checks nothing for it.\n\n**Items**\n\n- [ ] **1. Translations (measured).** `POST /api/v1/marketplace/install-local` answers `translationsLoaded: 0` for a composed bundle whose package body carries translations; the same translations on a flat bundle answer 1. Scratch run in the #34336 worktree, not committed. Cause: `applySideEffects` step 1 reads `manifest.translations` from the top level only (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`). Fix shape: `resolveStackCollection(manifest, 'translations')`. Not measured: whether the hosted UI gets these labels by another path.\n- [ ] **2. Global-unique gate (code-read only, not reproduced).** `evaluateGlobalUniqueGate` (ADR-0120 D5e) runs `collectGlobalUniques(manifest?.objects)`, a top-level read, so on a composed artifact the ceremony would see no objects. Reproduce red-first before fixing.\n\n**Grade.** p2 (seat route).\n\n**Reader.** `domain:server`, packages/cloud-connection. Serial after PR #34403 (same file).\n\n**Dedupe.** Searches: \"composed translations install-local\" (22 hits; #34336, #34396 related, none about translations), \"translationsLoaded composed\" (2: #34336, a seat archive), \"global-unique composed\" (26, none), \"collectGlobalUniques\" (3: #34336, #9022 and #24040 closed, other defects)."

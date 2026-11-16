@@ -2,7 +2,7 @@
   "number": 34284,
   "kind": "pull_request",
   "title": "feat(core, service-messaging, service-automation, plugin-webhooks)!: webhook deliveries and the flow http node reach only public addresses unless the operator allowlists the target",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T03:57:25Z",
-  "updated_at": "2026-11-16T14:20:49Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-16T14:53:45Z",
+  "closed_at": "2026-11-16T14:53:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T14:53:43Z",
   "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34284",

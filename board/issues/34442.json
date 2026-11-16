@@ -1,0 +1,32 @@
+{
+  "number": 34442,
+  "kind": "issue",
+  "title": "spec: the dropped-refinements census stops at MAX_DEPTH 14, so a refinement nested deeper has no ledger row while the census prints 'all declared'",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T18:16:35Z",
+  "updated_at": "2026-11-16T18:49:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34442",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① an instrument defect with a named location. The dropped-refinements census can report \"all declared\" while missing sites.\n\n`reach:` measured through the census on a real schema by the #34062 card thread while answering L1-b on PR #34438 (PR comment 6924993336, head b585364d). It used a one-off tsx probe, not committed.\n\n## What happens\n\n`packages/spec/scripts/lib/dropped-refinements.ts:113` caps the walk at `const MAX_DEPTH = 14`. `api/InstalledPackageAtEitherStage` holds the `flowTextSlotTranslation()` leaf at `flows.records.fields.valueType`. That is one level deeper than `flows.notices.message`, and behind an `options[1]` hop, so it lies past 14 hops:\n- at depth 14 the census shows only the `notices` and `refusals` sites for that schema;\n- at depth 30 the `records` site appears too.\n\nAdding the row by hand turns the build red, because the census cannot see the site. So `dropped-refinements.baseline.json` (\"1090 sites across 266 schemas, all declared\") is complete only up to 14 hops. A refinement nested deeper is dropped from the published JSON Schema without a ledger row and without a red.\n\n## Expected\n\nThe census either walks every reachable schema node, with cycles guarded by identity rather than by a depth cap, or fails loudly when it hits the cap, so that \"all declared\" is never a false complete.\n\n## Acceptance\n\n1. Measure how many sites appear at the current depth versus an unbounded, cycle-guarded walk over every published schema.\n2. Fix the walk so that the ledger is complete, or so that the census refuses to print \"all declared\" when it truncated. Add the newly found rows, including `api/InstalledPackageAtEitherStage` `flows.records.fields.valueType`.\n\nWho acts: the spec-tooling work in seat `repo:objectstack#1`, after triage grades this card. Duplicate check: `is:issue dropped-refinements MAX_DEPTH` returned 0 hits."
+}

@@ -2,9 +2,9 @@
   "number": 34351,
   "kind": "pull_request",
   "title": "feat(spec, plugin-audit): a sealed object names its chain column with lifecycle.seal.chainField",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "protocol:data",
     "size/xl",
     "tests",
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T08:55:36Z",
-  "updated_at": "2026-11-16T14:06:36Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-16T16:19:28Z",
+  "closed_at": "2026-11-16T16:18:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-16T16:18:33Z",
   "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34351",

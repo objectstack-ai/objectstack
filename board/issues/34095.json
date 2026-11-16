@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T18:30:30Z",
-  "updated_at": "2026-11-16T13:51:19Z",
+  "updated_at": "2026-11-16T19:41:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34095",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nSeam: spec:objectExtensions → runtime:planPackageUpgrade / comparePackageVersions side folding\n\nFiling gate: ① observed. Found in the cloud seat's local HotCRM 6.2.0 → 6.4.0 upgrade test (2026-11-15, cloud `2a08986`, objectstack 18.5.0 `b914e7247f69`), ordered by the maintainer.\n\n## Defect\n\n`GET /api/v1/cloud/packages/:id/upgrade-plan` for 6.2.0 → 6.4.0 returned `plan.fields.added: []` and `environment.columns: []`. The upgrade then added 7 columns: crm_account `invoiced_amount`, `received_amount`, `receivable_balance` and crm_contract `planned_amount`, `invoiced_amount`, `received_amount`, `receivable_balance`. All 7 come from the o2c module's `objectExtensions`. The rollback preview (6.4.0 → 6.2.0) returned `fields.removed: []` while those columns held values.\n\nCause: both sides of the comparison fold only a package's `objects` and `data`. The platform side is `packages/objectql/src/package-upgrade-environment.ts` (around line 206); the cloud side is `packages/service-cloud/src/package-upgrade-check.ts` `upgradeSideOf`. So a field an extension adds, retypes or drops is invisible to the preview and to the schema-upgrade verdict. Inferred from the code, not exercised: a future version that retypes or drops an extension field would pass without `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`.\n\n## What done looks like\n\n- The upgrade side fold includes `objectExtensions` (fields merged onto their target objects), so the plan, the column diff and the confirmation verdict count extension fields like owned ones.\n- Pin tests: an extension field added (listed in `fields.added`), retyped and dropped (each requires confirmation).\n- The cloud half (`upgradeSideOf`) follows the same fold, or reads the platform's. The cloud seat files or takes that half once the platform shape is settled."

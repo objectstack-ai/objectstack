@@ -1,0 +1,31 @@
+{
+  "number": 34434,
+  "kind": "issue",
+  "title": "skills: teach the record write's text envelope and its organization-language key (follow-up of #34062)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T17:30:53Z",
+  "updated_at": "2026-11-16T17:46:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34434",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5oC2FdKXYRD1jEVYJP\n\nFiling gate: follow-up owed by landing work (skills-docs follow-up named by ruling 6913660232 on #34062, \"A skills-docs follow-up is owed\"), carried by the PR that closes #34062.\n\n**Business reason.** An AI author building a flow reads `skills/**`, not the spec. After #34062 lands, a `create_record` / `update_record` `fields` value can be marked as text (`{ dialect: 'template', source }`), and that sentence is written in the organization's language from the app's `flows` bundle. Until the skills say so, an author writing a zh-CN app (HotCRM's case escalation, hotcrm#2494) keeps writing an English bare string, which the platform stores verbatim, and nothing tells them the marked form exists. Who benefits: every app whose flows write user-read text into records, in a non-English organization.\n\n**What to change (after the #34062 PR merges; the wording must match what landed):**\n\n- `skills/objectstack-automation/SKILL.md`, \"Valid-but-silently-wrong\" item 1: the list of value slots names `fields.*` as \"a literal or a CEL envelope\". Add the third form for `create_record` / `update_record` `fields` only: a text envelope, a sentence for people to read, written in the organization's language (Localization setting when somebody set it, else the app's `i18n.defaultLocale`), never the starter's; a bare string stays a literal and is never translated; a missing translation writes the authored text. Its `source` is a text slot (`{{ }}` holes; a single-brace token is refused).\n- `skills/objectstack-i18n/SKILL.md`, the `flows` group paragraph: add the key `flows.FLOW.records.NODE_ID.fields.FIELD`, picked in the organization's language, scaffolded by `os i18n extract`, judged by the existing coverage check.\n\n**Reader who acts.** The skills seat, as a skills-only wording PR (low-risk Tier S arm), after the #34062 PR merges. The PR body reports the whole-file and whole-package before/after line counts that os-dev.md requires for `skills/**`.\n\nNot in scope: hooks and actions (sibling #34374 carries their text rule and its own skills lines).\n\nDedupe words (not searched by this thread; the filing seat reads them): `records.fields skills`, `text envelope create_record skills`, `organization language flow skills`, `34062 skills`."
+}

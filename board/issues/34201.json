@@ -13,18 +13,20 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T00:44:09Z",
-  "updated_at": "2026-11-16T12:53:20Z",
+  "updated_at": "2026-11-16T16:43:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34201",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFollow-up from PR #34078 (card #34009, merged as `aab8b318`). That PR declared the `lookupFilters` value shape `{ $record: '<path>' }` (a reference to the record being edited), and the `orEmpty` flag, which pairs only with the six equality and ordering operators. Both are marked `[PLANNED — not enforced]` until their readers land (seat ruling 6900252552 §3).\n\n**Ask (skills lane).** Once the ui picker card lands, so that the docs describe a working reader, update these three:\n- `content/docs/data-modeling/relationships.mdx`\n- `content/docs/data-modeling/fields.mdx`\n- `skills/objectstack-data/rules/field-types.md`\n\nCover four things: the reference shape, the empty-value rule (the entry is dropped), `orEmpty` and the six operators it pairs with, and `dependsOn` vs `$record`. Until then, the PLANNED markers are the truth.\n\nBlocked-by: #34197\n"

@@ -1,0 +1,36 @@
+{
+  "number": 34416,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): cloud lane CI-minute rules in orders and Go text",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T15:11:57Z",
+  "updated_at": "2026-11-16T16:07:48Z",
+  "closed_at": "2026-11-16T16:07:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-16T16:07:46Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34416",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8ChEr57nytUsP92HAidnH8Q)_\n\nPart of objectstack-ai/cloud#4749 (carries cloud#3779's rule too). Governed (Tier H): draft, merged by the maintainer by hand.\n\n## 维护者速读\n\n1. **问题**：cloud 的 CI 分钟里，「已绿又推送」15 天花了约 1,974 分钟，`ci:full` PR 全档平均比受影响档多约 9 分钟。\n2. **改法**：pm-dispatch 的 cloud 车道说明加一条三项（三行）：一个引领句要求派发令与 Go 词带上三项推送纪律。\n3. **三项**：ready 前容器跑类型检查与受影响测试，命令与结果入报告；ready 后修改一次推送，合 main 照 cloud `AGENTS.md` 第 7 条；`ci:full` 只给 pin 轮次与改 workflow 的 PR。\n4. **行数**：把「范围」小节并入「形态」列表，文件仍是 28 行，棘轮天花板不动。\n5. **配套**：cloud 仓 `AGENTS.md` 第 7 条同步收紧（另一个草稿 PR）。\n6. **需要你做的**：审阅后手动合入。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/lanes/cloud.md` only:\n\n- The one-line `## 范围` section folds into the `## 形态` list (same text, prefixed `范围:`), freeing three lines.\n- `## 常设承诺` gains one item over three lines (maintainer's order, 2026-11-16 14:50Z 「同意，全部 p1」): one lead clause tells seats to put all three into every card-thread order and Go text —\n  - ① typecheck and affected tests in the container before `pr_ready`, command and result in the report;\n  - ② after ready, fixes in one push; merging `main` follows cloud `AGENTS.md` rule 7, which takes precedence over the generic merge-main discipline (no reason list restated here);\n  - ③ `ci:full` only on pin rounds (`.objectstack-sha` changes) and PRs that change `.github/workflows/**`; everything else runs the affected tier.\n\nNet line count 28 → 28, so the line ratchet's ceiling (28, headroom 0) is unchanged; no standing rule was cut.\n\n## Why\n\nThe 2026-11-16 cloud CI cost analysis (items 6 and 7) measured the post-green re-push and `ci:full` minutes; the maintainer approved filing them as p1.\n\n## Verification\n\nRun in the container at head 98b349f3:\n- `pnpm check:pm-skill-ratchet` → 0 (28 lines, ceiling 28; every line ≤ 120 bytes, the three new lines 118/119/115)\n- `pnpm check:pm-skill-id-lint` → 0 (no issue IDs in the skill text)\n- `pnpm check:pm-governed-prose` → 0\n- `pnpm check:skill-links` → 0\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (n/a)\n- [x] 2. Every name I added uses the casing for its kind. (n/a)\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset — this publishes nothing (`skip-changeset`).\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to generated docs.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the lane's maintainer summary).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXY2nauW96XKVHkXmW\n\n<!-- signed: repo:cloud#3 · os-warren · session_01JQwxbXY2nauW96XKVHkXmW -->\n"
+}

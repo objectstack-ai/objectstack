@@ -13,18 +13,18 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T07:12:01Z",
-  "updated_at": "2026-11-16T07:12:01Z",
+  "updated_at": "2026-11-16T15:49:36Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34328",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). Finding S2 of the L2 contract review 6909901648 on PR #34198 (card #34005).\n\n## Today\n\n`skills/objectstack-ui/rules/dashboards.md`, section \"Period-over-period — `compareTo`\", teaches `compareTo: { kind, dimension? }` and says nothing about the date key. With PR #34198, a dataset query refuses any member the dataset does not declare. That includes the time dimension a compare widget's date window is lowered into, which is named after the dashboard date-range field (`dateRange.field`, default `created_at`). An agent authoring from this skill can produce a compare widget whose date-range field is not also the name of a declared date dimension. That widget is refused at render, and no save gate stops it first (#34308).\n\n## Ask\n\nIn that section, add the rule and the remedy as #34198 lands them: a compare widget's date window travels as a time dimension named after the date-range field, so the dataset must declare a date dimension with that name. Match the wording of `content/docs/ui/dashboards.mdx` \"The Date Key of a Compare Widget\" after #34198 merges, and run the skills gates.\n\nBlocked-by: #34198 (the rule and its final remedy wording).\n\nReader: domain:skills. Size XS."
