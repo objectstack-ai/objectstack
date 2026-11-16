@@ -234,8 +234,7 @@ describe('a composed bundle: every seed door reads each package body, in package
         expect((await rt.install(composed('6.3.0'))).status).toBe(200);
         const res = await rt.list();
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
-        const entry = (res.payload.data?.installed ?? res.payload.data ?? []).find?.((e: any) => e.manifestId === SUITE)
-            ?? res.payload.data?.apps?.find?.((e: any) => e.manifestId === SUITE);
+        const entry = res.payload.data.items.find((e: any) => e.manifestId === SUITE);
         expect(shape(matchCalls[0]?.datasets)).toEqual([CORE, O2C]);
         expect(entry?.withSampleData).toBe(true);
     });
