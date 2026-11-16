@@ -653,8 +653,8 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * Run `callback` as ONE batch for roll-up summaries: the `summary`
      * recompute every write inside it would run after itself is recorded
      * instead, and runs once, over every recorded row, when the callback
-     * settles — one grouped aggregate per summary field and one write per
-     * parent for the batch, where a per-row loop pays a recompute per row.
+     * settles, where a per-row loop pays a recompute per row. (How few
+     * statements that takes is the implementation's, not this contract's.)
      *
      * Shape, as the ruling settled it: a callback, entered and left by the
      * engine as {@link transaction} is, with no begin and end pair; a nested
@@ -674,9 +674,12 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * engine's stale-roll-up refusal (`ERR_SUMMARY_RECOMPUTE`) whose `written`
      * is that result: the writes are stored, only the named summaries are
      * stale. Rejected: the recompute runs for the writes that landed, and the
-     * callback's own error is rethrown. Inside a {@link transaction} the
-     * recompute runs before the commit, so a caller that lets the refusal
-     * escape rolls the batch back.
+     * callback's own error is rethrown. When the call that opens the scope
+     * runs inside a {@link transaction}, the recompute runs before the
+     * commit, so a caller that lets the refusal escape rolls the batch back.
+     * A call that joins an open scope from inside a transaction opened within
+     * that scope does not get this: its transaction commits first and its
+     * rows recompute when the outer scope ends.
      *
      * OPTIONAL by ruling: a caller probes
      * `typeof engine.deferSummaryRecompute === 'function'`, and without it

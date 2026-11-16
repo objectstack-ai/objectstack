@@ -687,9 +687,11 @@ export class SummariesAndExpansionFacet {
   /**
    * [#33795] The body of `ObjectQL#deferSummaryRecompute`: run `callback` as
    * ONE batch for roll-up summaries. Every `summary` recompute a write inside
-   * it would run is recorded instead, and runs once when the callback settles — one grouped aggregate per summary
-   * field and one write per parent for the whole batch, instead of one
-   * recompute per row. Optional on `IObjectQLEngine` by ruling 6922040858;
+   * it would run is recorded instead, and runs once when the callback
+   * settles: per child object and caller, one grouped aggregate per summary
+   * field per id chunk and one write per parent (a roll-up cycle keeps its
+   * per-parent order), instead of one recompute per row. Optional on
+   * `IObjectQLEngine` by ruling 6922040858;
    * the bulk update doors probe for it.
    *
    * Entered and left by the engine, as `ObjectQL#transaction` is: there is no
@@ -716,6 +718,12 @@ export class SummariesAndExpansionFacet {
    *
    * Called inside a `transaction`, the recompute runs inside it, before
    * the commit, and a caller that lets the refusal escape rolls the batch back.
+   * That holds for the call that OPENS the scope. A call that joins an open
+   * scope from inside a transaction opened within that scope (an atomic batch
+   * reached from inside a non-atomic one) records into the outer scope: its
+   * transaction commits first, its rows recompute when the outer scope ends,
+   * and a failure then no longer rolls its batch back. No caller does this
+   * today.
    * A write recorded after the callback settled (work it started and did not
    * await) recomputes at once.
    */
