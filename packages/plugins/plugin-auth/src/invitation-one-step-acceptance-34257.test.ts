@@ -30,8 +30,8 @@ const createMemoryEngine = () => {
     a instanceof Date || b instanceof Date
       ? new Date(a as any).getTime() === new Date(b as any).getTime()
       : a === b;
-  const matches = (row: any, where: Record<string, any> = {}) =>
-    Object.entries(where).every(([k, v]) => {
+  const matches = (row: any, where: Record<string, any> = {}): boolean =>
+    Object.entries(where).every(([k, v]): boolean => {
       if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
