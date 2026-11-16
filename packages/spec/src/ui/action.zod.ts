@@ -848,7 +848,8 @@ const ActionAnswerFieldFormatSchema = z.enum(ACTION_ANSWER_FIELD_FORMATS);
  * The field set minus `table`: the formats of `resultDialog.format` (a default
  * carries no `columns`) and of a table column's cell (a table does not nest).
  * Derived with `.exclude`, never a second hand-written list, so a format added
- * to the field set reaches both. `subject` names the slot in the refusal.
+ * to the field set reaches both. `tableRefusal` is the message the slot answers
+ * for `table`; every other value keeps the generic enum refusal.
  */
 function actionAnswerScalarFormat(tableRefusal: string) {
   return ActionAnswerFieldFormatSchema.exclude(['table'], {
@@ -870,9 +871,9 @@ const ActionAnswerTableColumnSchema = strictObject({
   label: I18nLabelSchema.optional().describe('Column header. Omitted, the header is the column `path`.'),
   format: actionAnswerScalarFormat(
     '`table` is a field format, not a cell format: a cell draws one value of one row, and a table does not '
-    + 'nest. Drop `format` (a cell whose value is an object or an array is drawn as compact JSON text), or '
+    + 'nest. Drop `format` (a cell value that does not fit its format, an object or an array included, draws as compact JSON text), or '
     + "write `format: 'json'`.",
-  ).optional().describe('Cell format: the field formats minus `table`. Omitted, a scalar draws as `text`; a value that is an object or an array draws as compact JSON text.'),
+  ).optional().describe('Cell format: the field formats minus `table`; omitted, `text`. A value that does not fit the cell\'s format, whatever it is (an object or an array under `text`, a number under `secret`), draws as compact JSON text; a missing value draws an empty cell.'),
 });
 
 /**
@@ -934,7 +935,7 @@ function actionAnswerFieldRow(surface: string, pathDescription: string) {
   }, {
     path: z.string().describe(pathDescription),
     label: I18nLabelSchema.optional(),
-    format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override.'),
+    format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override. `table` [PLANNED — not yet rendered] draws an array as rows and requires `columns`.'),
     columns: z.array(ActionAnswerTableColumnSchema).optional().describe("[PLANNED — not yet rendered] The cells of a `format: 'table'` field, in order: `[{ path, label?, format? }]`, `path` read in ONE element of the array. Required by `table` (never guessed from the element's keys) and refused beside any other format. Until the console's table renderer lands, a `table` field draws its label alone."),
   }).superRefine(refuseTableColumnContradictions);
 }
@@ -1807,12 +1808,19 @@ const actionObject = () => strictObject({
    * - `table` (#34391) — value must be an array; each element is one row and
    *   each entry of the field's `columns` one cell, in `columns` order. The
    *   header of a column is its `label`, falling back to its `path`. A cell
-   *   reads the column's dot `path` in the element and draws in the column's
-   *   `format` (omitted: a scalar as `text`); a cell whose value is an object
-   *   or an array, and every cell of an element that is not an object, draws
-   *   as compact JSON text. `[]` draws the header row over an empty-state
-   *   line. A value that is missing is skipped like any other field's, and a
-   *   value that is not an array draws as `json`, as `code-list` does.
+   *   reads the column's dot `path` in the element; a missing value (the
+   *   path resolves to `undefined`) draws an empty cell. A present value
+   *   draws in the column's `format` (omitted: `text`) when it fits that
+   *   format the way a field's value must: `qrcode`, `secret` and `text` take
+   *   a string, `code-list` an array of strings. Any value that does not fit,
+   *   whatever the column's format (an object or an array under the omitted
+   *   `text`, a number under `secret`), draws as compact JSON text, which is
+   *   also how `json` draws in a cell. An element that is not an object has no
+   *   paths to read: its row draws the element itself as compact JSON text in
+   *   the first cell and leaves the other cells empty. `[]` draws the header
+   *   row over an empty-state line. A field value that is missing is skipped
+   *   like any other field's, and one that is not an array draws as `json`,
+   *   as `code-list` does.
    *   `table` is a field format only: it requires `columns` (never guessed
    *   from the element's keys), `columns` is refused beside any other format,
    *   and neither the dialog-level `format` nor a cell takes `table`.

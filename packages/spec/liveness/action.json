@@ -334,7 +334,7 @@
                 "path": {
                   "status": "planned",
                   "verifiedAt": "2026-11-16",
-                  "note": "Planned with its container `preflight.fields.columns`: the dot path, in ONE element of the array, of the value a cell draws."
+                  "note": "Planned with its container `preflight.fields.columns`: the dot path, in ONE element of the array, of the value a cell draws; a path that resolves to nothing draws an empty cell, and an element that is not an object draws as compact JSON text in its row's first cell."
                 },
                 "label": {
                   "status": "planned",
@@ -344,7 +344,7 @@
                 "format": {
                   "status": "planned",
                   "verifiedAt": "2026-11-16",
-                  "note": "Planned with its container `preflight.fields.columns`: the cell format, the field formats minus `table` (refused at parse: a table does not nest); omitted, a scalar draws as `text` and an object or array as compact JSON text."
+                  "note": "Planned with its container `preflight.fields.columns`: the cell format, the field formats minus `table` (refused at parse: a table does not nest); omitted, `text`. A value that does not fit the cell's format, whatever it is, draws as compact JSON text, and a missing value draws an empty cell (the `table` bullet of the `resultDialog` renderer contract)."
                 }
               }
             }
