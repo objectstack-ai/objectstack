@@ -391,7 +391,10 @@ strict params gate admits either bag without a word.
   answer names, else `successMessage`, else a generic "Action completed
   successfully". A `message` in the server's answer is shown only when the copy
   asks for it (`{{ result.message }}`). Post-success navigation is
-  `onSuccess: { navigate, openIn }`.
+  `onSuccess: { navigate, openIn }`. A failure toast shows `errorMessage` when
+  the action declares one, else the refusal's `userMessage` when the handler
+  threw one (the text it wrote for the user, in the request's locale), else
+  the error's own message.
 - **`undoable`** — on a single-record update, the success toast offers an
   **Undo** that restores the record's prior field values (`Ctrl+Z` works too).
   The runtime only captures the prior values when this flag is set, so an

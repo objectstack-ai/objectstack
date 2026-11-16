@@ -18,6 +18,7 @@ export const ptBR: TranslationData = {
         grp_account_developer: { label: 'Desenvolvedor' },
         grp_account_ai_assistant: { label: 'Assistente de IA' },
         nav_account_profile: { label: 'Perfil' },
+        nav_account_mobile_app: { label: 'Aplicativo móvel' },
         nav_account_notifications: { label: 'Notificações' },
         nav_account_approvals: { label: 'Minhas aprovações pendentes' },
         nav_account_memberships: { label: 'Minhas organizações' },

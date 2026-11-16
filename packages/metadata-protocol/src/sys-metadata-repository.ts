@@ -594,11 +594,42 @@ export interface HistoryVersionOwner {
   sole: boolean;
 }
 
-/** [#32905] Whether history row `row` is a version of `owner`'s slot. */
-function isVersionOf(row: Record<string, unknown>, owner: HistoryVersionOwner): boolean {
+/**
+ * [#32905] Whether history row `row` is a version of `owner`'s slot. [#33308]
+ * The diff door (`diffMetaItem`) filters the rows it compares by this same
+ * predicate, so the three doors of the family read one rule.
+ */
+export function isVersionOf(row: Record<string, unknown>, owner: HistoryVersionOwner): boolean {
   const attributed = historyRowAttribution(row);
   if (attributed === undefined) return owner.sole;
   return attributed === owner.packageId || (attributed === null && owner.sole);
+}
+
+/**
+ * [#32905] The `404 VERSION_NOT_FOUND` for a version that is not `owner`'s
+ * slot's ({@link isVersionOf} answered false for history row `row`), saying
+ * whose it is. [#33308] One sentence for the rollback (`outcome`: nothing was
+ * restored) and the diff door (nothing was compared).
+ */
+export function versionOfAnotherSlotError(
+  ref: { type: string; name: string },
+  version: number,
+  owner: HistoryVersionOwner,
+  row: Record<string, unknown>,
+  outcome: string,
+): Error & { code: 'VERSION_NOT_FOUND'; status: 404 } {
+  const attributed = historyRowAttribution(row);
+  const whose = (id: string | null) => (id === null ? 'the environment\'s own row' : `package '${id}'`);
+  const err = new Error(
+    `No history row at version ${version} for ${ref.type}/${ref.name} of ${whose(owner.packageId)}: `
+      + (attributed === undefined
+        ? 'that version is attributed to no package, and more than one holds the name, so nothing says whose it is.'
+        : `that version belongs to ${whose(attributed)}.`)
+      + ` ${outcome}`,
+  ) as Error & { code: 'VERSION_NOT_FOUND'; status: 404 };
+  err.code = 'VERSION_NOT_FOUND';
+  err.status = 404;
+  return err;
 }
 
 /**
@@ -1791,18 +1822,7 @@ export class SysMetadataRepository implements MetadataRepository {
     });
     if (!row) throw versionNotFoundError(ref, targetVersion);
     if (opts.versionOf !== undefined && !isVersionOf(row as Record<string, unknown>, opts.versionOf)) {
-      const owner = historyRowAttribution(row as Record<string, unknown>);
-      const whose = (id: string | null) => (id === null ? 'the environment\'s own row' : `package '${id}'`);
-      const err: any = new Error(
-        `No history row at version ${targetVersion} for ${ref.type}/${ref.name} of ${whose(opts.versionOf.packageId)}: `
-          + (owner === undefined
-            ? 'that version is attributed to no package, and more than one holds the name, so nothing says whose it is.'
-            : `that version belongs to ${whose(owner)}.`)
-          + ' Nothing was restored.',
-      );
-      err.code = 'VERSION_NOT_FOUND';
-      err.status = 404;
-      throw err;
+      throw versionOfAnotherSlotError(ref, targetVersion, opts.versionOf, row as Record<string, unknown>, 'Nothing was restored.');
     }
     const raw = (row as any).metadata;
     if (raw === null || raw === undefined) {

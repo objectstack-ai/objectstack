@@ -10,11 +10,20 @@ import { useCallback, useRef, useState } from 'react';
 import type { BulkActionDef, BulkWriteResult, DataSource } from '@object-ui/types';
 import { RelatedCountStore } from '@object-ui/components';
 import { executeBulkBatch } from '@object-ui/core';
+import { declaredUserMessage } from '@object-ui/react';
 import { normalizeMultiValuePatch, type MultiValueFieldDef } from './multiValueFields';
 
 export interface BulkRowError {
   id: string;
+  /** The failure's whole text — what the error CSV records for the row. */
   error: string;
+  /**
+   * The rejection's producer-marked `userMessage` (`declaredUserMessage`),
+   * set only when a promoted per-record action's refusal carried one: the
+   * words the handler wrote for the user. The result lists it for the row in
+   * place of `error`, which stays the whole text (objectstack#34215).
+   */
+  userMessage?: string;
 }
 
 export interface BulkProgress {
@@ -29,6 +38,19 @@ export interface BulkResult {
   succeeded: number;
   failed: number;
   errors: BulkRowError[];
+  /**
+   * Set only when an `execution: 'aggregate'` run (objectui#3139) REJECTED.
+   *
+   * An aggregate dispatch is one call for the whole selection, and its
+   * rejection says nothing about which rows the handler had already written
+   * before it stopped: a non-transactional loop over the selection can move
+   * some rows and then reject once. So the run has ONE outcome, not N row
+   * outcomes. `message` is the rejection's producer-marked `userMessage`
+   * (`declaredUserMessage`), falling back to the error's own message; it is
+   * shown once, for the selection. `errors` carries no per-row entry for it,
+   * and `succeeded` / `failed` are not a per-row count the dialog may print.
+   */
+  aggregateRejection?: { message: string };
 }
 
 /**
@@ -115,6 +137,8 @@ export interface BulkExecutorOptions {
    * MUST reject on failure: the executor attributes per-row errors from the
    * rejection reason, so resolving on a failed action would report it as a
    * success (the exact #2960 failure mode this whole path exists to kill).
+   * Reject with an error that carries the producer's `userMessage` when the
+   * failure has one — the row shows it, the error CSV keeps the message.
    *
    * When absent, `operation: 'custom'` keeps its historical meaning: no
    * mutation, the consumer wires `onComplete`.
@@ -133,10 +157,12 @@ export interface BulkExecutorOptions {
    * server can produce one aggregate artifact (zip, merged PDF…) for the
    * whole selection.
    *
-   * MUST reject on failure, like `runAction`: the executor treats the one
-   * call as all-or-nothing and attributes the rejection reason to every
-   * selected id in the result, so resolving on a failed action would report
-   * the entire selection as succeeded.
+   * MUST reject on failure, like `runAction`: resolving on a failed action
+   * would report the entire selection as succeeded. A rejection is ONE
+   * outcome for the whole selection (`BulkResult.aggregateRejection`), never
+   * N row failures: the call cannot say which rows it wrote before it
+   * stopped (objectstack#34173). Reject with an error that carries the
+   * producer's `userMessage` when the failure has one — the result shows it.
    *
    * When absent, an `execution: 'aggregate'` def FAILS LOUDLY rather than
    * quietly degrading to per-record fan-out — N dispatches against an
@@ -180,11 +206,13 @@ export interface BulkExecutorOptions {
  * whole list after every row, and the gaps that left between requests were
  * most of the wall time.
  *
- * A `custom` def with `execution: 'aggregate'` (objectui#3139) rides the same
- * bulk-first decision tree, but its "bulk call" is ONE `runAggregate` dispatch
- * for the entire selection (never chunked, all-or-nothing) and its per-row
- * "fallback" only re-throws the captured error for per-id attribution — it
- * never fans out per-record dispatches against a single-call endpoint.
+ * A `custom` def with `execution: 'aggregate'` (objectui#3139) does not ride
+ * the bulk-first decision tree: it is ONE `runAggregate` dispatch for the
+ * entire selection (never chunked, never fanned out per record against a
+ * single-call endpoint). It settles as a whole — resolved, every row counts as
+ * covered; rejected, the result carries one `aggregateRejection` for the
+ * selection instead of the same error attributed to every row, because the
+ * call cannot say which rows it had already written (objectstack#34173).
  */
 export function useBulkExecutor({ resource, dataSource, objectFields, runAction, runAggregate }: BulkExecutorOptions) {
   const [progress, setProgress] = useState<BulkProgress>({
@@ -243,8 +271,11 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
         ? Math.max(1, rows.length)
         : Math.max(1, def.batchSize ?? 200);
       const errors: BulkRowError[] = [];
+      // Record id → its per-record rejection's `userMessage` (custom runner only).
+      const userMessages = new Map<string, string>();
       let succeeded = 0;
       let failed = 0;
+      let aggregateRejection: BulkResult['aggregateRejection'];
 
       setResult(null);
       setProgress({ total, done: 0, failed: 0, inFlight: true });
@@ -299,33 +330,37 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
             if (id) rowById.set(id, row);
           }
 
+          // Aggregate mode: the ONE call for the whole selection — even a
+          // single selected row goes through it, because the target endpoint
+          // reads `_selectedIds`, which the per-record dispatch shape never
+          // carries. It settles as a whole (objectstack#34173): resolved, it
+          // covered every id; rejected, the run has one outcome for the
+          // selection, not the same error attributed to each row — the call
+          // cannot say which rows it had written before it stopped.
+          if (isAggregate) {
+            try {
+              if (!runAggregate) {
+                throw new Error(`Aggregate action ${def.name} has no dispatcher wired`);
+              }
+              await runAggregate(def, validIds.map((id) => rowById.get(id) ?? { id }), { ...params });
+              succeeded += validIds.length;
+            } catch (e) {
+              failed += validIds.length;
+              aggregateRejection = {
+                message: declaredUserMessage(e)
+                  ?? (e instanceof Error ? e.message : String(e)),
+              };
+            }
+            setProgress({ total, done: succeeded, failed, inFlight: true });
+            continue;
+          }
+
           // Decide whether the adapter can collapse this whole batch into 1
-          // call. Single-row batches skip bulk (no win, just overhead) — EXCEPT
-          // in aggregate mode, where even one selected row must go through the
-          // single aggregate call: the target endpoint reads `_selectedIds`,
-          // which the per-record dispatch shape never carries.
-          const allowBulk = validIds.length >= 2 || isAggregate;
+          // call. Single-row batches skip bulk (no win, just overhead).
+          const allowBulk = validIds.length >= 2;
           let bulkCall: ((ids: string[]) => Promise<number | BulkWriteResult>) | undefined;
           let label = 'bulk';
-          // The one real error from a failed aggregate call. The perRow
-          // "fallback" below re-throws it per id for attribution — it must
-          // never re-dispatch (see the `custom` case).
-          let aggregateError: unknown;
-          if (isAggregate && runAggregate) {
-            bulkCall = async (ids) => {
-              try {
-                await runAggregate(def, ids.map((id) => rowById.get(id) ?? { id }), { ...params });
-                // All-or-nothing: the single call resolving means it covered
-                // every id. Partial success has no envelope on this path — a
-                // server that cannot cover the whole selection must reject.
-                return ids.length;
-              } catch (e) {
-                aggregateError = e;
-                throw e;
-              }
-            };
-            label = 'aggregate action';
-          } else if (def.operation === 'update' && typeof dataSource.bulkUpdate === 'function') {
+          if (def.operation === 'update' && typeof dataSource.bulkUpdate === 'function') {
             bulkCall = (ids) => dataSource.bulkUpdate!(resource, ids, buildPatch());
             label = 'bulk update';
           } else if (def.operation === 'delete' && typeof dataSource.bulkDelete === 'function') {
@@ -340,28 +375,20 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
               case 'update':
                 return dataSource.update(resource, id, buildPatch());
               case 'custom':
-                // Aggregate mode never fans out: the ONE bulkCall above either
-                // covered every id or failed as a whole. Reaching here means it
-                // threw (or `runAggregate` was never wired) — attribute the real
-                // error to each id rather than re-dispatching N per-record calls
-                // against an endpoint written for one `_selectedIds` call.
-                if (isAggregate) {
-                  return Promise.reject(
-                    aggregateError instanceof Error
-                      ? aggregateError
-                      : new Error(
-                          aggregateError !== undefined
-                            ? String(aggregateError)
-                            : `Aggregate action ${def.name} has no dispatcher wired`,
-                        ),
-                  );
-                }
+                // (Aggregate mode never reaches here: it settled above.)
                 // A PROMOTED def (`actionDef` present) runs its object action once
                 // per record through the injected runner. Without one, this is
                 // the historical callout shape — no mutation, caller wires
                 // onComplete.
+                // A rejection's producer-marked `userMessage` is kept per row
+                // and attached to the row's error below; the rejection itself
+                // still settles the row as failed with its whole message.
                 return def.actionDef && runAction
-                  ? runAction(def, rowById.get(id) ?? { id }, { ...params })
+                  ? runAction(def, rowById.get(id) ?? { id }, { ...params }).catch((e: unknown) => {
+                    const userMessage = declaredUserMessage(e);
+                    if (userMessage !== null) userMessages.set(id, userMessage);
+                    throw e;
+                  })
                   : Promise.resolve();
               default:
                 return Promise.reject(new Error(`Unknown operation: ${def.operation}`));
@@ -374,12 +401,21 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
           );
           succeeded += outcome.succeeded;
           failed += outcome.failed;
-          errors.push(...outcome.errors);
+          errors.push(...outcome.errors.map((rowError) => {
+            const userMessage = userMessages.get(rowError.id);
+            return userMessage === undefined ? rowError : { ...rowError, userMessage };
+          }));
           setProgress({ total, done: succeeded, failed, inFlight: true });
         }
       });
 
-      const finalResult: BulkResult = { total, succeeded, failed, errors };
+      const finalResult: BulkResult = {
+        total,
+        succeeded,
+        failed,
+        errors,
+        ...(aggregateRejection ? { aggregateRejection } : {}),
+      };
       // Only retain the snapshot for rows that actually succeeded — there's
       // no point trying to "undo" a row whose mutation never landed.
       const failedIds = new Set(errors.map(e => e.id));
@@ -390,8 +426,9 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       // Mutating any row in `resource` may have changed how many records
       // belong to a parent (e.g. deleting Contacts under an Account). Drop
       // every cached count for this resource so the next page render
-      // re-probes. Cheap — counts are 1-int values.
-      if (succeeded > 0) {
+      // re-probes. Cheap — counts are 1-int values. A rejected aggregate run
+      // may have written rows before it stopped, so it invalidates too.
+      if (succeeded > 0 || aggregateRejection) {
         RelatedCountStore.invalidate(resource);
       }
       return finalResult;

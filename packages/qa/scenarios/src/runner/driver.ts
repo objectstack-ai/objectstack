@@ -69,18 +69,35 @@ export interface StepRef {
    * turn never carries one.
    */
   repeat?: number;
+  /**
+   * The second turn of a `pending_confirmation` operation: the agent asked
+   * first, and this turn carries the person's confirmation. Its key adds one
+   * segment, {@link CONFIRM_KEY_SEGMENT}; the first turn's key is unchanged, so
+   * a recording made without second turns still replays its first turns. Only
+   * an operation turn carries one, and never with {@link repeat}.
+   */
+  confirmation?: true;
 }
 
 /** The key segment an ask after the first adds ({@link stepKey}): `…/account_count/sdr/repeat-2`. */
 const REPEAT_KEY_PREFIX = 'repeat-';
 
+/** The key segment of an operation's confirmation turn ({@link StepRef.confirmation}): `…/remove_ben/sdr/confirm`. */
+export const CONFIRM_KEY_SEGMENT = 'confirm';
+
 /**
  * The replay key of a step: `card/mode/phase/step/persona`, `-` for no
  * persona. A repeated question turn's asks after the first add one segment,
- * `repeat-N` ({@link StepRef.repeat}); the first ask's key is unchanged.
+ * `repeat-N` ({@link StepRef.repeat}); the first ask's key is unchanged. An
+ * operation's confirmation turn adds one segment, `confirm`
+ * ({@link StepRef.confirmation}).
  */
 export const stepKey = (s: StepRef): string => {
   const key = [s.card, s.mode, s.phase, s.step, s.persona ?? '-'].join('/');
+  if (s.confirmation === true) {
+    if (s.repeat !== undefined && s.repeat !== 1) throw new RangeError(`an operation's confirmation turn is never a repeated ask (\`${key}\`)`);
+    return `${key}/${CONFIRM_KEY_SEGMENT}`;
+  }
   if (s.repeat === undefined || s.repeat === 1) return key;
   if (!Number.isInteger(s.repeat) || s.repeat < 1) throw new RangeError(`a step's repeat counts asks from 1, not ${String(s.repeat)} (\`${key}\`)`);
   return `${key}/${REPEAT_KEY_PREFIX}${s.repeat}`;
