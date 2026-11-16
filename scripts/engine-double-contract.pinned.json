@@ -12,6 +12,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/cli/src/commands/serve-seed-refused-load-33812.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cli/src/commands/serve-seed-refused-load-33812.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cli/src/utils/organization-ownership-apply.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2418,6 +2428,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-deferred-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-depends-on-33812.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-depends-on-33812.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-depends-on-33812.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -5718,6 +5743,11 @@
     },
     {
       "file": "packages/services/service-job/src/job-run-context.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-job/src/shutdown-drain-34046.test.ts",
       "verb": "update",
       "pinned": 1
     },

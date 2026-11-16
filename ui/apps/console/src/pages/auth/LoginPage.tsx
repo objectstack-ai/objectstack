@@ -92,11 +92,13 @@ import { followOauthAuthorize } from './followAuthorize';
 import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
 import {
   accessDeniedExits,
+  REFUSAL_REASON_PARAM,
   ssoCallbackRefusalMessage,
   ssoCallbackTechnicalDetail,
   type AccessDeniedExits,
 } from './ssoCallbackRefusal';
 import { decideDirectSignIn, directSignInStartUrl } from './directSignIn';
+import { useHandoffClientName } from './handoffClientName';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
@@ -229,6 +231,9 @@ export function LoginPage() {
       return null;
     }
   }, []);
+  // The application's own name, when the server answers it for this signed
+  // hand-off; any other answer keeps the host line above.
+  const ssoClientName = useHandoffClientName(AUTH_URL, ssoTarget !== null);
 
   // Surface an OAuth/SSO callback failure. better-auth redirects a failed
   // callback (expired hand-off, replayed `state`, IdP error, …) to its
@@ -242,7 +247,8 @@ export function LoginPage() {
     const code = params.get('error');
     if (!code) return null;
     const description = params.get('error_description');
-    return { code, description };
+    const reason = params.get(REFUSAL_REASON_PARAM);
+    return { code, description, reason };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -449,7 +455,7 @@ export function LoginPage() {
           // server's description are written for administrators, so they sit
           // behind a toggle the person can open and pass on.
           <div className="flex flex-col gap-1.5" data-testid="sso-callback-refusal">
-            <AuthErrorBanner message={ssoCallbackRefusalMessage(t, callbackError.code)} />
+            <AuthErrorBanner message={ssoCallbackRefusalMessage(t, callbackError.code, callbackError.reason)} />
             {refusalExits ? <AccessDeniedActions exits={refusalExits} /> : null}
             <details className="px-1 text-xs text-muted-foreground">
               <summary className="cursor-pointer select-none">
@@ -477,11 +483,16 @@ export function LoginPage() {
             className="flex items-start gap-3 rounded-md border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-foreground"
           >
             <span className="mt-0.5 inline-block size-2 shrink-0 rounded-full bg-primary" />
-            <span>
-              {t('auth.login.ssoHandoff', {
-                target: ssoTarget,
-                defaultValue: `Continue to ${ssoTarget}`,
-              })}
+            <span data-testid="sso-handoff-target">
+              {ssoClientName
+                ? t('auth.login.ssoHandoffClient', {
+                    clientName: ssoClientName,
+                    defaultValue: `Sign in to continue to ${ssoClientName}`,
+                  })
+                : t('auth.login.ssoHandoff', {
+                    target: ssoTarget,
+                    defaultValue: `Continue to ${ssoTarget}`,
+                  })}
             </span>
           </div>
         ) : null}

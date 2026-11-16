@@ -1380,7 +1380,16 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    *  - `mode` — `'record'` when this call is the caller's whole write (a
    *    single-id update/delete, a non-batch insert); `'per-row'` when it is
-   *    one of N dispatches for one caller write.
+   *    one of N dispatches for one caller write. A cascade delete removes a
+   *    relation's children as one predicate delete per chunk of 500 (ruling
+   *    6893661036), so a cascaded child is `'per-row'` with
+   *    `input.options.multi` set, and within one chunk of one relation every
+   *    child's `beforeDelete` runs before any of that chunk is gone (not
+   *    across chunks or relations). A chunk is deleted by id instead, each
+   *    child keeping `'record'`, when the caller's scope narrows it (a child
+   *    the caller may not read or delete), when the child's driver has no
+   *    `deleteMany` or is a floored external driver, and when the child
+   *    object is the organization object; so one cascade can show both.
    *  - `index` — 0-based position within that fan-out; always 0 when
    *    `mode` is `'record'`. `index === 0` is how a handler does batch-scoped
    *    work exactly once instead of N times.
@@ -1786,9 +1795,14 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * The engine deletes each child AS THE CALLER: the cascade recurses through
    * the public delete with the caller's own context, so on the path a real
-   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user`,
-   * `ctx.session` and `ctx.input` are identical between a child the cascade
-   * removes and a user's hand delete of that same child. An app guard that
+   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user` and
+   * `ctx.session` are identical between a child the cascade removes and a
+   * user's hand delete of that same child. `ctx.input` and `ctx.dispatch`
+   * tell nothing apart either: a batched child carries the same
+   * `{ where: { id: { $in } }, multi: true }` options and `'per-row'` mode a
+   * user's own predicate delete of those rows carries, and a child deleted by
+   * id the same `{ where: { id } }` and `'record'` a hand delete carries. An
+   * app guard that
    * freezes settled records (a quote's lines once the quote is accepted) had
    * no declared way to refuse the hand delete while yielding to the cascade,
    * and refusing both leaves the parent, and every record whose own cascade
@@ -1799,8 +1813,9 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Unlike `referentialFieldClear`, this fact has no `__`-prefixed twin on the
    * ExecutionContext, and nothing on that envelope is the contract. The engine
    * recognises the delete it issued through an engine-private ambient record
-   * keyed on the exact object and id its cascade is deleting, claimed by that
-   * one delete. Two consequences follow, and both are part of the contract:
+   * keyed on the exact object and id (or, for a batch of children, the exact
+   * id set) its cascade is deleting, claimed by that one delete. Two
+   * consequences follow, and both are part of the contract:
    *
    *  - it does not ride the envelope, so a write a hook issues through
    *    `ctx.api` during a cascade dispatch is NOT marked, a delete included:
