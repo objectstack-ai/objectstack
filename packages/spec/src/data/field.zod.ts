@@ -1315,8 +1315,9 @@ const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/
  * - **Operator.** Only the six scalar comparisons
  *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
  *   value: never a member of an `in` / `notIn` list.
- * - **Where it resolves.** In a record form only: the auto layout and the
- *   modal, drawer, tabbed and wizard forms. Every other picker host leaves
+ * - **Where it resolves.** In a record form only, whatever its layout (the
+ *   auto layout, authored or field-group sections, a modal, drawer, tabbed or
+ *   wizard form, a master-detail header form). Every other picker host leaves
  *   every `{ $record }` entry out — inline edit on a record page, a record
  *   page's header or related list, an action's parameter dialog, and a
  *   picker with no single record being edited (a bulk action over selected
@@ -2257,9 +2258,8 @@ export const FieldSchema = lazySchema(() => {
       'The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a '
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
-      + 'only with eq, ne, gt, lt, gte or lte. In a record form (the auto layout, modal, drawer, tabbed and wizard '
-      + 'forms) the picker sends the referenced value in place of the reference; every other picker host leaves the '
-      + 'entry out.',
+      + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
+      + 'value in place of the reference; every other picker host leaves the entry out.',
     ),
     orEmpty: z.boolean().optional().describe(
       'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
@@ -2269,14 +2269,14 @@ export const FieldSchema = lazySchema(() => {
     'Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. '
     + 'Each entry compares a column of the CANDIDATE record (`field`, on the referenced object) with `value`. A value may '
     + 'read the record being edited as { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup '
-    + 'hop). In a record form (the auto layout, modal, drawer, tabbed and wizard forms) the picker sends that value in '
-    + 'its place and re-queries whenever a referenced field changes. Those fields '
+    + 'hop). In a record form, whatever its layout, the picker sends that value in its place and re-queries whenever a '
+    + 'referenced field changes; every other picker host leaves every { $record } entry out: inline edit on a record '
+    + 'page, a record page\'s header or related list, an action\'s parameter dialog, and a picker with no single record '
+    + 'being edited (a bulk action over selected rows). The referenced fields '
     + 'are implied: do not list them in `dependsOn`, which also scopes the candidate query by equality '
     + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
     + 'empty or cannot be read (the hop\'s row or field does not come back, no object is named for the hop, or the host '
-    + 'has no single-row reader), the entry is left out. Every other picker host leaves every { $record } entry out: '
-    + 'inline edit on a record page, a record page\'s header or related list, an action\'s parameter dialog, and a '
-    + 'picker with no single record being edited (a bulk action over selected rows). A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
+    + 'has no single-row reader), the entry is left out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
     + 'server unresolved is refused, never read as null. The picker narrows the choice only: a rule the save must '
     + 'enforce belongs on the server too.',
   ),
