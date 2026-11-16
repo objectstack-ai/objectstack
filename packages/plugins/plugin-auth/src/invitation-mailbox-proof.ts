@@ -50,7 +50,7 @@
  *   account the one-step path does not set a password on (the closing rule
  *   below). The proof is not spent; the person signs in as today.
  * - `{ outcome: 'verify_email' }` — session mode, and the session's address is
- *   not verified. Nothing is accepted.
+ *   not the invited one, or is not verified. Nothing is accepted.
  * - `400 INVALID_TOKEN` — any proof that does not admit: unknown, used,
  *   expired, for another invitation or address, or an invitation that is no
  *   longer pending. One answer, which does not say which check failed.
@@ -60,11 +60,16 @@
  * The door sets a password on an existing account only when it reads that the
  * mailbox is the account's one claim: the address is not verified, the
  * account's only sign-in account is its email and password one or it has
- * none, it has no second factor, no verified phone number, no API key and no
- * OAuth client consent, its identity source is local, and the server allows a
- * local password here (not SSO-only, email and password on). Every other
- * account, including one in a state no rule names, answers `sign_in`, and the
- * proof stays unspent.
+ * none, it has no second factor, enabled or enrolled, no verified phone
+ * number and no standing grant (an API key, an OAuth client consent, an OAuth
+ * access or refresh token, an OAuth client, a device authorization, an SSO
+ * provider, a SCIM credential or a link to an identity provider's directory,
+ * revoked or expired ones included), its identity source is local, and the
+ * server allows a local password here (not SSO-only, email and password on).
+ * Every other account, including one in a state no rule names, answers
+ * `sign_in`, and the proof stays unspent. Every store the plugin mounts that
+ * is keyed by a user is classified as a claim the judge reads or as no claim,
+ * and a test holds that classification to the mounted list.
  *
  * The judge, {@link oneStepSignInState}, is an allow-list: it lets the
  * password be set only when every value it reads is positively the one that
@@ -72,14 +77,16 @@
  * `unrecognised`. Its reasons are {@link ONE_STEP_SIGN_IN_STATES}; the card's
  * test pins one case per reason.
  *
- * Standing grants count as claims ({@link readStandingGrant}): any
- * `sys_api_key` or `sys_oauth_consent` row of the user, revoked or not,
- * answers `sign_in`. A table that does not exist holds no rows; a read that
- * fails answers `sign_in` as `grant_unreadable`.
+ * Standing grants count as claims ({@link USER_KEYED_STORES},
+ * {@link readStandingGrant}): any row of the user in a standing-grant object,
+ * revoked or not, answers `sign_in`. A table that does not exist holds no
+ * rows; a read that fails answers `sign_in` as `grant_unreadable`. The
+ * plugin's `passkeys` flag is not wired today; if it is ever wired, a passkey
+ * is a claim the judge must read.
  *
  * An account that passes gets the typed password in place of its own, and
  * every one of its sessions is revoked with the reason a password reset
- * records (`session-tombstone.ts`). The password history is consulted before
+ * records (`session-tombstone.ts`); the two writes match the vendor's order. The password history is consulted before
  * the proof is spent and extended after, as the reset door does (ADR-0069
  * D1): a reused password is refused with the proof unspent. A new account is created through the
  * internal adapter, so the sign-up gates that run on every creation (audience
@@ -239,7 +246,7 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'verified',
   /** The account is linked to a sign-in provider. */
   'linked_provider',
-  /** The account has a second factor enrolled. */
+  /** The account has a second factor enabled or enrolled. */
   'second_factor',
   /** The account has a verified phone number. */
   'verified_phone',
@@ -247,6 +254,18 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'api_key',
   /** The account holds an OAuth client consent, revoked or not. */
   'oauth_consent',
+  /** The account holds an OAuth access or refresh token, expired or not. */
+  'oauth_token',
+  /** The account registered an OAuth client. */
+  'oauth_client',
+  /** The account approved a device authorization, expired or not. */
+  'device_code',
+  /** The account registered an SSO provider. */
+  'sso_provider',
+  /** The account minted a SCIM credential, revoked or not. */
+  'scim_credential',
+  /** The account is linked to an identity provider's directory (a SCIM user, subject, projected grant or tombstone). */
+  'idp_linked',
   /** The account's standing grants cannot be read. */
   'grant_unreadable',
   /** The account is provisioned by an identity provider. */
@@ -273,8 +292,69 @@ function isOff(value: unknown): boolean {
   return value === false || value === null || value === undefined;
 }
 
+/**
+ * Every store the plugin mounts that is keyed by a user: each column of an
+ * object in `authIdentityManifest` (`manifest.ts`) that references `sys_user`
+ * or is named `user_id`, classified. A test derives that set from the
+ * manifest and holds it equal to this table's keys, so a store mounted later
+ * fails it until it is classified here.
+ *
+ * - `{ grant }`: a standing grant, a claim. The door reads it by
+ *   {@link readStandingGrant}, and any row answers `sign_in` as `grant`.
+ * - `{ accounts }`: a claim the judge reads from the account rows the vendor
+ *   loads with the user (`accountProviders`).
+ * - `{ notAClaim }`: why a row of it is no claim on the account.
+ *
+ * The plugin's `passkeys` flag is not wired to any plugin today, so no passkey
+ * store is mounted; if it is ever wired, a passkey is a claim the judge must
+ * read, and this table must classify its store.
+ */
+export const USER_KEYED_STORES = {
+  'sys_account.user_id': { accounts: 'linked_provider' },
+  'sys_api_key.user_id': { grant: 'api_key' },
+  'sys_oauth_consent.user_id': { grant: 'oauth_consent' },
+  'sys_oauth_access_token.user_id': { grant: 'oauth_token' },
+  'sys_oauth_refresh_token.user_id': { grant: 'oauth_token' },
+  'sys_oauth_application.user_id': { grant: 'oauth_client' },
+  'sys_device_code.user_id': { grant: 'device_code' },
+  'sys_two_factor.user_id': { grant: 'second_factor' },
+  'sys_sso_provider.user_id': { grant: 'sso_provider' },
+  'sys_scim_connection_credential.user_id': { grant: 'scim_credential' },
+  'sys_scim_user.user_id': { grant: 'idp_linked' },
+  'sys_scim_subject.user_id': { grant: 'idp_linked' },
+  'sys_scim_projection_grant.user_id': { grant: 'idp_linked' },
+  'sys_scim_identity_tombstone.user_id': { grant: 'idp_linked' },
+  'sys_session.user_id': { notAClaim: 'The door revokes every session of the account before it sets the password.' },
+  'sys_session.impersonated_by': { notAClaim: 'A session of another account, acting as that account and never as this one.' },
+  'sys_member.user_id': { notAClaim: 'A membership authorizes a signed-in session and signs no one in.' },
+  'sys_team_member.user_id': { notAClaim: 'A team membership authorizes a signed-in session and signs no one in.' },
+  'sys_invitation.inviter_id': { notAClaim: 'An invitation the account sent grants the account nothing.' },
+  'sys_user.manager_id': { notAClaim: 'Names the account as another user\'s manager and grants the account nothing.' },
+  'sys_user.accountable_user_id': { notAClaim: 'Names the account as accountable for another user and signs no one in as this account.' },
+  'sys_user_preference.user_id': { notAClaim: 'The account\'s own settings, which grant no access.' },
+  'sys_personal_view.user_id': { notAClaim: 'The account\'s own saved list views, which grant no access.' },
+} as const satisfies Record<
+  string,
+  { grant: OneStepSignInState } | { accounts: OneStepSignInState } | { notAClaim: string }
+>;
+
+type UserKeyedStore = keyof typeof USER_KEYED_STORES;
+type GrantStore = {
+  [K in UserKeyedStore]: (typeof USER_KEYED_STORES)[K] extends { grant: OneStepSignInState } ? K : never;
+}[UserKeyedStore];
+type ObjectOf<S> = S extends `${infer O}.user_id` ? O : never;
+/** An object whose rows are a user's standing grants. */
+export type StandingGrantObject = ObjectOf<GrantStore>;
+
+/** The standing grants, in the order the judge reports them: each object, read by `user_id`, and its reason. */
+export const STANDING_GRANTS: ReadonlyArray<{ object: StandingGrantObject; reason: OneStepSignInState }> = Object.entries(
+  USER_KEYED_STORES,
+).flatMap(([store, cls]) =>
+  'grant' in cls ? [{ object: store.slice(0, -'.user_id'.length) as StandingGrantObject, reason: cls.grant }] : [],
+);
+
 /** The objects whose rows are a user's standing grants, each read by `user_id`. */
-export const STANDING_GRANT_OBJECTS = ['sys_api_key', 'sys_oauth_consent'] as const;
+export const STANDING_GRANT_OBJECTS: readonly StandingGrantObject[] = STANDING_GRANTS.map((g) => g.object);
 
 /** Whether a user holds any row of one standing-grant object; `ok: false` when it cannot be read. */
 export type StandingGrantReading = { ok: true; held: boolean } | { ok: false };
@@ -288,7 +368,7 @@ const SYSTEM_READ = { context: { isSystem: true, positions: [], permissions: [] 
  */
 export async function readStandingGrant(
   engine: UserSourceReader | undefined,
-  object: (typeof STANDING_GRANT_OBJECTS)[number],
+  object: StandingGrantObject,
   userId: string,
 ): Promise<StandingGrantReading> {
   if (!engine?.find) return { ok: false };
@@ -312,10 +392,8 @@ export interface OneStepAccountReading {
   twoFactorEnabled: unknown;
   /** `user.phoneNumberVerified`, as stored (absent without the plugin). */
   phoneNumberVerified: unknown;
-  /** Any `sys_api_key` row of the user ({@link readStandingGrant}). */
-  apiKeys: StandingGrantReading;
-  /** Any `sys_oauth_consent` row of the user ({@link readStandingGrant}). */
-  oauthConsents: StandingGrantReading;
+  /** Any row of the user in each standing-grant object ({@link readStandingGrant}). */
+  standingGrants: Readonly<Record<StandingGrantObject, StandingGrantReading>>;
   /** `sys_user.source`, or `ok: false` when it cannot be read. */
   source: { ok: true; value: string | null } | { ok: false };
   /** SSO-only mode. */
@@ -335,9 +413,10 @@ export function oneStepSignInState(account: OneStepAccountReading): OneStepSignI
   if (!account.accountProviders.every((providerId) => providerId === 'credential')) return 'linked_provider';
   if (!isOff(account.twoFactorEnabled)) return account.twoFactorEnabled === true ? 'second_factor' : 'unrecognised';
   if (!isOff(account.phoneNumberVerified)) return account.phoneNumberVerified === true ? 'verified_phone' : 'unrecognised';
-  if (!account.apiKeys.ok || !account.oauthConsents.ok) return 'grant_unreadable';
-  if (account.apiKeys.held !== false) return 'api_key';
-  if (account.oauthConsents.held !== false) return 'oauth_consent';
+  const grants = STANDING_GRANTS.map((grant) => ({ ...grant, reading: account.standingGrants[grant.object] }));
+  if (grants.some(({ reading }) => reading?.ok !== true)) return 'grant_unreadable';
+  const held = grants.find(({ reading }) => reading.ok && reading.held !== false);
+  if (held) return held.reason;
   if (!account.source.ok) return 'source_unreadable';
   const source = account.source.value;
   if (!LOCAL_SOURCES.has(source)) {
@@ -457,18 +536,19 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       if (existing) {
         const engine = host.getDataEngine() as UserSourceReader | undefined;
         const userId = String(existing.id);
-        const [apiKeys, oauthConsents, source] = await Promise.all([
-          readStandingGrant(engine, 'sys_api_key', userId),
-          readStandingGrant(engine, 'sys_oauth_consent', userId),
+        const [source, grantReadings] = await Promise.all([
           readUserSource(engine, userId),
+          Promise.all(STANDING_GRANT_OBJECTS.map((object) => readStandingGrant(engine, object, userId))),
         ]);
+        const standingGrants = Object.fromEntries(
+          STANDING_GRANT_OBJECTS.map((object, i) => [object, grantReadings[i]]),
+        ) as Record<StandingGrantObject, StandingGrantReading>;
         const state = oneStepSignInState({
           emailVerified: existing.emailVerified,
           accountProviders: (found.accounts ?? []).map((a: any) => a?.providerId),
           twoFactorEnabled: existing.twoFactorEnabled,
           phoneNumberVerified: existing.phoneNumberVerified,
-          apiKeys,
-          oauthConsents,
+          standingGrants,
           source,
           ssoOnly: host.isSsoOnlyMode(),
           emailPasswordEnabled: ctx.context.options.emailAndPassword?.enabled,
@@ -525,6 +605,8 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         await internal.linkAccount({ userId: user.id, providerId: 'credential', accountId: user.id, password: passwordHash });
       } else {
         const userId = String(existing.id);
+        // The sessions are revoked before the password is written, which
+        // matches the vendor's order on its own password doors.
         await internal.deleteUserSessions(userId);
         if (await internal.findCredentialAccount(userId)) {
           await internal.updatePassword(userId, passwordHash);

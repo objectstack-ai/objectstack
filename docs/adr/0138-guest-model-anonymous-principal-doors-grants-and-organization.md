@@ -313,9 +313,13 @@ passed every gate, and one server process serializes concurrent redemptions of i
 as strong as the store's consume. Every proof that does not admit gets one refusal that does not say which check
 failed. The door sets a password on an existing account only when it reads that the mailbox is the account's one
 claim: the address is not verified, the account's only sign-in account is its email and password one or it has none,
-it has no second factor, no verified phone number, no API key and no OAuth client consent, its identity source is
+it has no second factor, enabled or enrolled, no verified phone number and no standing grant (an API key, an OAuth
+client consent, an OAuth access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM
+credential or a link to an identity provider's directory, revoked or expired ones included), its identity source is
 local, and the server allows a local password here (not SSO-only, email and password on). Every other account,
-including one in a state no rule names, answers `sign_in`, and the proof stays unspent. A cloud-managed environment
+including one in a state no rule names, answers `sign_in`, and the proof stays unspent. Every store the plugin mounts
+that is keyed by a user is classified as a claim the judge reads or as no claim, and a test holds that classification
+to the mounted list. A cloud-managed environment
 sets no local password, so there the door refuses every request that carries a proof. It carries a rate limit per
 client network address and per invitation, as ADR-0121 D6 requires. Enforced by
 `packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`, ledgered in

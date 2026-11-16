@@ -18,11 +18,17 @@ import { createCopyInvitationLinkHandler } from './invitation-link-action';
 import {
   ACCEPT_INVITATION_ONE_STEP_PATH,
   ONE_STEP_SIGN_IN_STATES,
+  STANDING_GRANTS,
+  STANDING_GRANT_OBJECTS,
+  USER_KEYED_STORES,
   invitationProofIdentifier,
   oneStepSignInState,
   type OneStepAccountReading,
   type OneStepSignInState,
+  type StandingGrantObject,
+  type StandingGrantReading,
 } from './invitation-mailbox-proof';
+import { authIdentityManifest } from './manifest';
 import { BREACH_CHECK_VENDOR_DEFAULT_PATHS } from './auth-manager-plugin-list';
 import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
 
@@ -467,8 +473,7 @@ const WRITTEN_TABLES = [
   'sys_member',
   'sys_invitation',
   'sys_verification',
-  'sys_api_key',
-  'sys_oauth_consent',
+  ...STANDING_GRANT_OBJECTS,
 ];
 const writtenState = (engine: MemoryEngine) =>
   JSON.stringify(WRITTEN_TABLES.map((table) => [table, engine.tables.get(table) ?? []]));
@@ -681,6 +686,14 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
       engine.find = find;
     };
   };
+  // Give the account a row in one standing-grant object; answers how to take it away.
+  const holdGrant = async (engine: MemoryEngine, object: StandingGrantObject, email: string, extra: Record<string, unknown> = {}) => {
+    const id = `${object}_${email}`;
+    await engine.insert(object, { id, user_id: userRow(engine, email)!.id, ...extra });
+    return () => {
+      engine.tables.set(object, (engine.tables.get(object) ?? []).filter((row) => row.id !== id));
+    };
+  };
   const findThrowsForSource = (engine: MemoryEngine) => {
     const find = engine.find.bind(engine);
     engine.find = async (name: string, q: any = {}) => {
@@ -730,23 +743,23 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
         };
       },
     },
-    // A standing grant counts as a claim, a revoked one included.
-    api_key: {
-      enter: async ({ engine }, email) => {
-        await engine.insert('sys_api_key', { id: `key_${email}`, user_id: userRow(engine, email)!.id, revoked: true });
-        return () => {
-          engine.tables.set('sys_api_key', (engine.tables.get('sys_api_key') ?? []).filter((k) => k.id !== `key_${email}`));
-        };
-      },
-    },
+    // A standing grant counts as a claim, a revoked or expired one included.
+    api_key: { enter: async ({ engine }, email) => holdGrant(engine, 'sys_api_key', email, { revoked: true }) },
     oauth_consent: {
-      enter: async ({ engine }, email) => {
-        await engine.insert('sys_oauth_consent', { id: `consent_${email}`, user_id: userRow(engine, email)!.id, client_id: 'client_34257', scopes: '["openid"]' });
-        return () => {
-          engine.tables.set('sys_oauth_consent', (engine.tables.get('sys_oauth_consent') ?? []).filter((c) => c.id !== `consent_${email}`));
-        };
-      },
+      enter: async ({ engine }, email) => holdGrant(engine, 'sys_oauth_consent', email, { client_id: 'client_34257', scopes: '["openid"]' }),
     },
+    oauth_token: {
+      enter: async ({ engine }, email) => holdGrant(engine, 'sys_oauth_refresh_token', email, { client_id: 'client_34257', revoked: new Date() }),
+    },
+    oauth_client: { enter: async ({ engine }, email) => holdGrant(engine, 'sys_oauth_application', email, { client_id: 'client_34257' }) },
+    device_code: {
+      enter: async ({ engine }, email) => holdGrant(engine, 'sys_device_code', email, { status: 'approved', expires_at: new Date(0) }),
+    },
+    sso_provider: { enter: async ({ engine }, email) => holdGrant(engine, 'sys_sso_provider', email, { provider_id: 'sso_34257' }) },
+    scim_credential: {
+      enter: async ({ engine }, email) => holdGrant(engine, 'sys_scim_connection_credential', email, { revoked_at: new Date() }),
+    },
+    idp_linked: { enter: async ({ engine }, email) => holdGrant(engine, 'sys_scim_user', email, { connection_user_key: 'scim-34257' }) },
     grant_unreadable: {
       enter: async ({ engine }) => findThrowsFor(engine, 'sys_oauth_consent', new Error('store unavailable')),
     },
@@ -799,8 +812,10 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     accountProviders: ['credential'],
     twoFactorEnabled: false,
     phoneNumberVerified: undefined,
-    apiKeys: { ok: true, held: false },
-    oauthConsents: { ok: true, held: false },
+    standingGrants: Object.fromEntries(STANDING_GRANT_OBJECTS.map((object) => [object, { ok: true, held: false }])) as Record<
+      StandingGrantObject,
+      StandingGrantReading
+    >,
     source: { ok: true, value: 'env_native' },
     ssoOnly: false,
     emailPasswordEnabled: true,
@@ -820,10 +835,6 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     ['a second-factor flag stored in no form the judge reads', { twoFactorEnabled: 'true' }, 'unrecognised'],
     ['a verified phone number', { phoneNumberVerified: true }, 'verified_phone'],
     ['a phone flag stored in no form the judge reads', { phoneNumberVerified: 1 }, 'unrecognised'],
-    ['an API key', { apiKeys: { ok: true, held: true } }, 'api_key'],
-    ['an OAuth client consent', { oauthConsents: { ok: true, held: true } }, 'oauth_consent'],
-    ['API keys that cannot be read', { apiKeys: { ok: false } }, 'grant_unreadable'],
-    ['OAuth client consents that cannot be read', { oauthConsents: { ok: false } }, 'grant_unreadable'],
     ['an identity-provider source', { source: { ok: true, value: 'idp_provisioned' } }, 'idp_provisioned'],
     ['a pending single sign-on', { source: { ok: true, value: 'idp_pending' } }, 'pending_sso'],
     ['an unreadable source', { source: { ok: false } }, 'source_unreadable'],
@@ -835,18 +846,79 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     expect(oneStepSignInState({ ...ALLOWED, ...change })).toBe(reason);
   });
 
+  const withGrant = (object: StandingGrantObject, reading: StandingGrantReading | undefined): Partial<OneStepAccountReading> => ({
+    standingGrants: { ...ALLOWED.standingGrants, [object]: reading } as Record<StandingGrantObject, StandingGrantReading>,
+  });
+
+  it.each(STANDING_GRANTS.map(({ object, reason }) => [object, reason] as const))(
+    'the judge answers sign_in for a row of %s, as %s, and as grant_unreadable when it cannot be read or was not read',
+    (object, reason) => {
+      expect(oneStepSignInState({ ...ALLOWED, ...withGrant(object, { ok: true, held: true }) })).toBe(reason);
+      expect(oneStepSignInState({ ...ALLOWED, ...withGrant(object, { ok: false }) })).toBe('grant_unreadable');
+      expect(oneStepSignInState({ ...ALLOWED, ...withGrant(object, undefined) })).toBe('grant_unreadable');
+    },
+  );
+
+  it('every user-keyed store the plugin mounts is classified, as a claim the judge reads or as no claim', () => {
+    // Derived from the manifest the plugin registers: every column that
+    // references sys_user or is named user_id, on its objects and on the
+    // fields it adds to them.
+    const manifest = authIdentityManifest();
+    const userKeyed = (fields: Record<string, any>) =>
+      Object.entries(fields ?? {})
+        .filter(([name, field]) => field?.reference === 'sys_user' || name === 'user_id')
+        .map(([name]) => name);
+    const mounted = [
+      ...manifest.objects.flatMap((object: any) => userKeyed(object.fields).map((column) => `${object.name}.${column}`)),
+      ...manifest.objectExtensions.flatMap((extension: any) => userKeyed(extension.fields).map((column) => `${extension.extend}.${column}`)),
+    ];
+    expect([...new Set(mounted)].sort()).toEqual(Object.keys(USER_KEYED_STORES).sort());
+    // Each claim store is read by an indexed lookup on its user column.
+    for (const object of STANDING_GRANT_OBJECTS) {
+      const declared = manifest.objects.find((o: any) => o.name === object);
+      expect(declared?.fields?.user_id, object).toBeDefined();
+      expect((declared?.indexes ?? []).some((index: any) => index.fields?.[0] === 'user_id'), `${object} has no index led by user_id`).toBe(true);
+    }
+  });
+
+  // One boot for every store: each store has its own invitation, account and
+  // client address, so no window counts another's requests.
+  let shared: Promise<Awaited<ReturnType<typeof boot>>> | undefined;
+  it.each(STANDING_GRANT_OBJECTS.map((object, i) => [object, i] as const))(
+    'an unverified account holding a row of %s signs in as today, and is accepted once the row is gone',
+    async (object, i) => {
+      shared ??= boot();
+      const { engine, manager, invite } = await shared;
+      const email = `grant-${object.replace(/_/g, '-')}@example.com`;
+      const address = `198.51.100.${i + 1}`;
+      const { invitation, proof } = await invite(email);
+      await signUp(manager, engine, email);
+      const leave = await holdGrant(engine, object, email);
+      const before = writtenState(engine);
+
+      await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'G', password: NEW_PASSWORD }, undefined, address));
+      expect(writtenState(engine)).toBe(before);
+
+      leave();
+      await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'G', password: NEW_PASSWORD }, undefined, address));
+    },
+  );
+
   it('a grant table that does not exist holds no grant: the account is accepted', async () => {
     const booted = await boot();
     const { engine, manager, invite } = booted;
     const email = 'grants-absent@example.com';
     const { invitation, proof } = await invite(email);
     await signUp(manager, engine, email);
-    const leaveKeys = findThrowsFor(engine, 'sys_api_key', new Error('SQLITE_ERROR: no such table: sys_api_key'));
-    findThrowsFor(engine, 'sys_oauth_consent', new Error('SQLITE_ERROR: no such table: sys_oauth_consent'));
+    const find = engine.find.bind(engine);
+    engine.find = async (name: string, q: any = {}) => {
+      if ((STANDING_GRANT_OBJECTS as readonly string[]).includes(name)) throw new Error(`SQLITE_ERROR: no such table: ${name}`);
+      return find(name, q);
+    };
     try {
       await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'G', password: NEW_PASSWORD }));
     } finally {
-      leaveKeys();
+      engine.find = find;
     }
   });
 
@@ -910,6 +982,26 @@ describe('#34257 — a password the door sets starts the password-age clock and 
 
     await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'H', password: NEW_PASSWORD }));
     expect(JSON.parse(credential()!.previous_password_hashes)).toEqual([replacedHash]);
+  });
+
+  it('the sessions are revoked before the password is written, which matches the vendor\'s order', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('ordered@example.com');
+    await signUp(manager, engine, 'ordered@example.com');
+    const writes: string[] = [];
+    for (const op of ['insert', 'update', 'delete'] as const) {
+      const original = (engine as any)[op].bind(engine);
+      (engine as any)[op] = async (name: string, ...rest: unknown[]) => {
+        writes.push(name);
+        return original(name, ...rest);
+      };
+    }
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'O', password: NEW_PASSWORD }));
+    const sessionsRevoked = writes.indexOf('sys_session');
+    const passwordWritten = writes.indexOf('sys_account');
+    expect(sessionsRevoked, writes.join(' ')).toBeGreaterThanOrEqual(0);
+    expect(passwordWritten, writes.join(' ')).toBeGreaterThan(sessionsRevoked);
   });
 
   it('the sessions the door ends are ledgered with the reason a password reset records', () => {
