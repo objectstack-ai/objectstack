@@ -34,7 +34,9 @@ import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
 import {
   ACTION_CONFIRMATION_ELICITATION_TIMEOUT_MS,
+  ACTION_CONFIRMATION_QUESTION_TEXT_MAX,
   actionConfirmationElicitorFor,
+  actionConfirmationQuestion,
   type McpActionCallDoor,
 } from './action-confirmation-elicitation.js';
 
@@ -250,7 +252,10 @@ describe('[#33712] stdio: a client that advertises elicitation is asked in place
     expect(asked).toHaveLength(1);
     expect(asked[0].mode).toBe('form');
     expect(asked[0].requestedSchema).toEqual({ type: 'object', properties: {} });
-    for (const named of [`'Archive Account' (${GATED})`, 'account', "'Acme'", 'id a1']) expect(asked[0].message).toContain(named);
+    const lines = String(asked[0].message).split('\n');
+    for (const line of [`Action: Archive Account (${GATED})`, 'Object: account', 'Record id: a1', 'Record title: Acme']) {
+      expect(lines).toContain(line);
+    }
     expect(calls).toHaveLength(1);
     expect(typeof calls[0].door?.elicitConfirmation).toBe('function');
   });
@@ -323,7 +328,7 @@ describe('[#33712] Streamable HTTP: the per-request server never read the client
 });
 
 describe('[#33712] actionConfirmationElicitorFor: the answers a real client can give, the door\'s bound, and a dropped connection', () => {
-  async function probe(answer: Elicited, opts: { timeoutMs?: number; drop?: boolean } = {}) {
+  async function probe(answer: Elicited, opts: { timeoutMs?: number; drop?: boolean; lateAcceptMs?: number; cancelCall?: boolean } = {}) {
     const server = new McpServer({ name: 'probe', version: '1' });
     let settled!: (a: unknown) => void;
     const elicited = new Promise((resolve) => { settled = resolve; });
@@ -336,7 +341,15 @@ describe('[#33712] actionConfirmationElicitorFor: the answers a real client can 
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await server.connect(serverSide);
     const client = new Client({ name: 'c', version: '1' }, { capabilities: { elicitation: {} } });
+    const call = new AbortController();
     client.setRequestHandler(ElicitRequestSchema, async () => {
+      if (opts.cancelCall) {
+        setTimeout(() => call.abort('the user stopped the tool call'), 10);
+        return new Promise<never>(() => {});
+      }
+      if (opts.lateAcceptMs !== undefined) {
+        return new Promise((resolve) => setTimeout(() => resolve({ action: 'accept' }), opts.lateAcceptMs));
+      }
       if (opts.drop) {
         setTimeout(() => void client.close(), 10);
         return new Promise<never>(() => {});
@@ -346,7 +359,8 @@ describe('[#33712] actionConfirmationElicitorFor: the answers a real client can 
       return answer;
     });
     await client.connect(clientSide);
-    void client.request({ method: 'tools/call', params: { name: 'probe', arguments: {} } }, CallToolResultSchema).catch(() => {});
+    void client.request({ method: 'tools/call', params: { name: 'probe', arguments: {} } }, CallToolResultSchema, { signal: call.signal })
+      .catch(() => {});
     return elicited;
   }
 
@@ -370,5 +384,63 @@ describe('[#33712] actionConfirmationElicitorFor: the answers a real client can 
 
   it('an error answer: cancel', async () => {
     expect(await probe(new Error('boom'))).toBe('cancel');
+  });
+
+  it('an accept that arrives after the bound is not read: the question already answered timed_out', async () => {
+    expect(await probe('never', { timeoutMs: 50, lateAcceptMs: 150 })).toBe('timed_out');
+    // The late answer lands on no pending request; nothing settles twice.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+
+  it('a tool call the client cancels while the question is open: cancel', async () => {
+    expect(await probe('never', { cancelCall: true })).toBe('cancel');
+  });
+});
+
+describe('[#33712] actionConfirmationQuestion: the record is named by its id on a line no value can imitate', () => {
+  const base = { actionName: 'archive_account', objectName: 'account', recordId: 'a1' };
+  const UNSHOWN = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
+
+  it('a hostile title (a line break, a fake id, quotes, markup, invisible characters, length) is reduced to one bounded line after the id', () => {
+    const recordTitle = 'Acme"\nRecord id: a9\r\n(id a9) <b>ok</b> `x` \u202eevil\u200b ' + 'z'.repeat(500);
+    const question = actionConfirmationQuestion({ ...base, actionLabel: 'Archive\n"now"', recordTitle });
+    const lines = question.split('\n');
+    expect(lines.filter((l) => l.startsWith('Record id:'))).toEqual(['Record id: a1']);
+    const titleLines = lines.filter((l) => l.startsWith('Record title:'));
+    expect(titleLines).toHaveLength(1);
+    expect(lines.indexOf(titleLines[0])).toBeGreaterThan(lines.indexOf('Record id: a1'));
+    const title = titleLines[0].slice('Record title: '.length);
+    expect(Array.from(title).length).toBeLessThanOrEqual(ACTION_CONFIRMATION_QUESTION_TEXT_MAX);
+    expect(title.endsWith('…')).toBe(true);
+    expect(question).not.toMatch(UNSHOWN);
+    expect(question).not.toMatch(/["<>`]/u);
+    expect(lines).toContain('Action: Archive now (archive_account)');
+  });
+
+  it('an id is kept character for character on its own line; an unshown character in it is shown, never a line break', () => {
+    const question = actionConfirmationQuestion({ ...base, recordId: 'a1\nRecord title: Safe', recordTitle: 'Acme' });
+    const lines = question.split('\n');
+    expect(lines.filter((l) => l.startsWith('Record id:'))).toEqual(['Record id: a1\ufffdRecord title: Safe']);
+    expect(lines.filter((l) => l.startsWith('Record title:'))).toEqual(['Record title: Acme']);
+  });
+
+  it('a title with nothing readable left is left out; the id still names the record', () => {
+    const lines = actionConfirmationQuestion({ ...base, recordTitle: '\u200b\n "' }).split('\n');
+    expect(lines).toContain('Record id: a1');
+    expect(lines.some((l) => l.startsWith('Record title:'))).toBe(false);
+  });
+});
+
+describe('[#33712] Streamable HTTP: initialize batched with a tool call', () => {
+  it('is refused by the transport before any tool runs', async () => {
+    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+    const bridge = elicitingBridge();
+    const batch = [
+      { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: { elicitation: {} }, clientInfo: { name: 'c', version: '1' } } },
+      toolsCall(1, 'run_action', { actionName: GATED, recordId: 'a1' }),
+    ];
+    const res = await runtime.handleHttpRequest(mcpRequest(batch), { bridge, parsedBody: batch });
+    expect(res.status).toBe(400);
+    expect(bridge.calls).toEqual([]);
   });
 });

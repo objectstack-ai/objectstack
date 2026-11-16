@@ -29,7 +29,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ACTION_CONFIRMATION_SERVICE, AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 
 import { HttpDispatcher } from './http-dispatcher.js';
-import { actionConfirmationRefusal } from './action-execution.js';
+import { actionConfirmationElicitSubject, actionConfirmationRefusal } from './action-execution.js';
 import { dispatchAction } from './action-dispatch.js';
 
 const OBJECT = 'crm_lead';
@@ -140,7 +140,7 @@ function makeHarness(opts: { service?: unknown } = {}) {
     };
     const viaHost = (ec: unknown, action: string, extra: Record<string, unknown> = {}) =>
         dispatchAction(kernel, { executionContext: ec as any, environmentId: 'platform', objectName: OBJECT, actionName: action, ...extra } as any);
-    return { ql, automation, runs, bridgeAs, viaRest, viaHost };
+    return { ql, automation, runs, leads, bridgeAs, viaRest, viaHost };
 }
 
 async function refusalOf(p: Promise<unknown>): Promise<{ code: unknown; status: unknown; message: string; details?: any }> {
@@ -523,5 +523,52 @@ describe('[#33712] resume_run: a client that can be elicited is asked in place f
         expect(refused.details).toMatchObject({ reason: 'service_account' });
         expect(elicitConfirmation).not.toHaveBeenCalled();
         expect(h.automation.resume).not.toHaveBeenCalled();
+    });
+});
+
+describe('[#33712] run_action: an elicited accept dispatches on a read taken after the answer', () => {
+    it('a record the caller can no longer read when they answer is refused, and nothing runs', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const elicitConfirmation = vi.fn(async () => {
+            h.leads[0] = { ...h.leads[0], owner: 'u2' };
+            return 'accept' as const;
+        });
+        const refused = await refusalOf(h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1' }, { elicitConfirmation }));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(elicitConfirmation).toHaveBeenCalledTimes(1);
+        expect(h.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('a record that changed while the question was open reaches the action as it is now', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const elicitConfirmation = vi.fn(async () => {
+            h.leads[0] = { ...h.leads[0], name: 'Ada Lovelace' };
+            return 'accept' as const;
+        });
+        await h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_1' }, { elicitConfirmation });
+        expect(h.ql.executeAction).toHaveBeenCalledTimes(1);
+        const actionContext: any = (h.ql.executeAction.mock.calls[0] as any[])[2];
+        expect(actionContext.record).toMatchObject({ id: 'lead_1', name: 'Ada Lovelace' });
+    });
+});
+
+describe('[#33712] the question names the record by the title its read served', () => {
+    const SCHEMA = {
+        name: OBJECT, nameField: 'display_title',
+        fields: {
+            name: { name: 'name', type: 'text' },
+            display_title: { name: 'display_title', type: 'formula', expression: { dialect: 'cel', source: 'record.name + " (lead)"' } },
+        },
+    };
+
+    it('the served value under the title pointer, as served', () => {
+        const subject = actionConfirmationElicitSubject(GATED, GATED.name, OBJECT, 'lead_1', SCHEMA, { id: 'lead_1', name: 'Ada', display_title: 'Served Title' });
+        expect(subject.recordTitle).toBe('Served Title');
+    });
+
+    it('a row the read served without its title has none: the title is never re-derived from the row', () => {
+        const subject = actionConfirmationElicitSubject(GATED, GATED.name, OBJECT, 'lead_1', SCHEMA, { id: 'lead_1', name: 'Ada' });
+        expect(subject).not.toHaveProperty('recordTitle');
+        expect(subject.recordId).toBe('lead_1');
     });
 });

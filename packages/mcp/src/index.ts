@@ -58,8 +58,11 @@ export type {
 // [#33712] Step 1 of the amended confirmation contract: the person asked in their client.
 export {
   ACTION_CONFIRMATION_ELICITATION_TIMEOUT_MS,
+  ACTION_CONFIRMATION_QUESTION_ID_MAX,
+  ACTION_CONFIRMATION_QUESTION_TEXT_MAX,
   actionConfirmationElicitorFor,
   actionConfirmationQuestion,
+  confirmationQuestionText,
 } from './action-confirmation-elicitation.js';
 export type {
   McpActionCallDoor,

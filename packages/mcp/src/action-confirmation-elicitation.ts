@@ -106,24 +106,72 @@ const ElicitedActionSchema = z.looseObject({ action: z.enum(['accept', 'decline'
 /** A confirmation asks for nothing but the answer: an empty form. */
 const EMPTY_FORM = { type: 'object', properties: {} } as const;
 
-/** `'X' (x)`, or `x` alone when the label is the name or absent. */
-function named(name: string, label: string | undefined): string {
-  return label && label !== name ? `'${label}' (${name})` : `'${name}'`;
+/** The longest free text (a label, a record title) the question carries, in characters. */
+export const ACTION_CONFIRMATION_QUESTION_TEXT_MAX = 80;
+/** The longest machine name or record id the question carries, in characters. */
+export const ACTION_CONFIRMATION_QUESTION_ID_MAX = 200;
+
+/**
+ * Characters that never reach the person's prompt as themselves: C0 and C1
+ * controls (line breaks and tabs included), the Unicode line and paragraph
+ * separators, and the invisible format characters that reorder or hide text
+ * (bidirectional controls, zero-width characters, the byte-order mark).
+ */
+const UNSHOWN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/gu;
+/** Markup and quoting characters a client might render or a reader might take as structure. */
+const MARKUP = /[<>`*_[\]{}|#"\\]/gu;
+
+/** At most `max` characters (code points), with a visible mark when it was cut. */
+function bounded(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
+}
+
+/**
+ * Free text written by an author or stored on a record (an action label, a
+ * record title), made safe for one labelled line of the question: every
+ * unshown character becomes a space, markup characters and double quotes are
+ * dropped, a single quote becomes a typographic apostrophe, runs of spaces collapse, and the result is bounded. `undefined`
+ * when nothing readable is left.
+ */
+export function confirmationQuestionText(text: string | undefined): string | undefined {
+  if (typeof text !== 'string') return undefined;
+  const plain = text.replace(UNSHOWN, ' ').replace(MARKUP, '').replace(/'/gu, '\u2019').replace(/\s+/gu, ' ').trim();
+  return plain === '' ? undefined : bounded(plain, ACTION_CONFIRMATION_QUESTION_TEXT_MAX);
+}
+
+/**
+ * A machine name or record id for its own labelled line: kept character for
+ * character so it still names exactly one record, except that an unshown
+ * character is shown as U+FFFD, and bounded.
+ */
+function confirmationQuestionId(id: string): string {
+  return bounded(id.replace(UNSHOWN, '\ufffd'), ACTION_CONFIRMATION_QUESTION_ID_MAX);
 }
 
 /**
  * The question the person reads: the action, the object and the record it
  * runs on (its id, and its title when the subject load read one), and what
  * each answer does.
+ *
+ * One fact per labelled line, in a fixed order, the record id BEFORE the
+ * title: every value is reduced to a single line first (no value can start a
+ * line of its own), so the id line is always the one this door wrote, and a
+ * title cannot pose as another record's id or as the end of the question.
  */
 export function actionConfirmationQuestion(subject: McpActionConfirmationSubject): string {
-  const on = subject.objectName ? ` on ${subject.objectName}` : '';
-  const record = subject.recordId
-    ? ` record ${subject.recordTitle !== undefined && subject.recordTitle !== '' ? `'${subject.recordTitle}' (id ${subject.recordId})` : `id ${subject.recordId}`}`
-    : '';
-  return `Your AI assistant asks to run the action ${named(subject.actionName, subject.actionLabel)}${on}${record}. `
-    + 'Its author requires your confirmation before it runs. Accept runs it once, as you; decline refuses it. '
-    + 'Nothing has run yet.';
+  const name = confirmationQuestionId(subject.actionName);
+  const label = confirmationQuestionText(subject.actionLabel);
+  const title = subject.recordId !== undefined ? confirmationQuestionText(subject.recordTitle) : undefined;
+  const lines = [
+    'Your AI assistant asks to run an action whose author requires your confirmation. Nothing has run yet.',
+    `Action: ${label && label !== name ? `${label} (${name})` : name}`,
+    ...(subject.objectName ? [`Object: ${confirmationQuestionId(subject.objectName)}`] : []),
+    ...(subject.recordId !== undefined ? [`Record id: ${confirmationQuestionId(subject.recordId)}`] : []),
+    ...(title !== undefined ? [`Record title: ${title}`] : []),
+    'Accept runs it once, as you. Decline refuses it.',
+  ];
+  return lines.join('\n');
 }
 
 /**
