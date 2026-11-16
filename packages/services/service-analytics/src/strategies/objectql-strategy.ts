@@ -6,7 +6,7 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 // two merge boundaries that stamp it.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
+import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext, RelationGroupAggregateRelation } from './types.js';
 import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
 import { assertDatasetDateBucketsTemporal, assertDatasetGroupTargetsStored } from '../dataset-date-bucket-door.js';
 import {
@@ -1728,37 +1728,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // [#28798] The dataset refusal for a column asked twice, as on the direct path.
     assertDatasetGroupColumnsDistinct(baseObject, groupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
 
-    // Base aggregate, grouped by the FK, scoped to the base object. Threads the
-    // ExecutionContext for the engine-side second belt too (#3602).
-    const baseRows = await ctx.executeAggregate!(baseObject, {
-      groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
-      aggregations: aggregations.length > 0 ? aggregations : undefined,
-      filter: this.withReadScope(baseObject, filter, ctx),
-      timezone: query.timezone,
-      context: ctx.context,
-    });
-
-    // [#29304] A cross-object dimension over a virtual attribute, whether or
-    // not a base row carries a key to resolve. See {@link assertCrossObjectAttrsStored}.
-    assertCrossObjectAttrsStored(plan, ctx);
-
-    // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
-    // object: a related record the caller cannot read never yields its
-    // attribute, so it buckets as RESTRICTED (no leak; ADR-0021 D-C / #3602).
-    const resolvedDims: CrossObjectDim[] = [];
-    for (const cd of plan.crossDims) {
-      const fkValues = [...new Set(baseRows.map((r) => r[cd.fkField]).filter((v) => v != null))];
-      const fkToAttr = await this.resolveFkAttr(cd.refObject, cd.attr, fkValues, ctx);
-      resolvedDims.push({ outputName: cd.outputName, fkField: cd.fkField, fkToAttr });
-    }
-
     const measures: MeasureRecombine[] = (query.measures ?? []).map((m) => ({
       alias: m,
       // planCrossObject already asserted every measure is recombinable.
       method: this.resolveMeasureAggregation(cube, m).method as RecombinableMethod,
     }));
 
-    const merged = rebucketCrossObject(baseRows, baseDimFields, resolvedDims, measures);
+    // [relation group join] On a driver that compiles it, one statement: the
+    // base aggregate LEFT JOINs each related object's readable rows and
+    // groups by the attribute itself — no id list, no bind-parameter ceiling.
+    // `null` when the host cannot run it or the engine declined: the
+    // FK-expand below serves the dimension as it always has.
+    const joined = await this.executeCrossObjectJoined(baseObject, plan, groupBy, baseDimFields, aggregations, filter, query, measures, ctx);
+    const merged = joined ?? await this.executeCrossObjectExpanded(baseObject, plan, groupBy, baseDimFields, aggregations, filter, query, measures, ctx);
 
     // Map resolved group keys back to the caller's dimension names.
     const mappedRows = merged.map((row) => {
@@ -1787,6 +1769,148 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * [relation group join] Serve the cross-object dimensions as ONE aggregate
+   * the engine compiles to `LEFT JOIN … GROUP BY` (objectql
+   * `relation-group-join.ts`), through
+   * {@link DatasetScopedStrategyContext.executeRelationGroupAggregate}.
+   *
+   * The related read is the FK-expand's own, minus its id list: the related
+   * object's read scope ({@link relatedReadScope}, judged and marked exactly
+   * as {@link resolveFkAttr} judges it) is the condition the engine's planned
+   * read of that object applies beside its own pipeline. Each row comes back
+   * with the attribute and a resolved column; a row no readable related
+   * record joined buckets as RESTRICTED, exactly as an id the FK-expand's read
+   * did not return — the rows go through the same {@link rebucketCrossObject},
+   * keyed per row, so the buckets and their measures are the FK-expand's.
+   *
+   * `null` — serve by the FK-expand — when the host wired no such hook or the
+   * engine declined (a driver that compiles no join: memory, MongoDB, OData;
+   * a read it cannot prove is one statement).
+   */
+  private async executeCrossObjectJoined(
+    baseObject: string,
+    plan: CrossObjectPlan,
+    groupBy: AggregateGroupKey[],
+    baseDimFields: string[],
+    aggregations: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>,
+    filter: Record<string, unknown>,
+    query: AnalyticsQuery,
+    measures: MeasureRecombine[],
+    ctx: StrategyContext,
+  ): Promise<Record<string, unknown>[] | null> {
+    const run = (ctx as DatasetScopedStrategyContext).executeRelationGroupAggregate;
+    if (typeof run !== 'function') return null;
+
+    // [#29304] A virtual attribute is refused in the dataset door's words
+    // before the engine is asked, as the FK-expand refuses it.
+    assertCrossObjectAttrsStored(plan, ctx);
+
+    // One relation per FK column, each attribute under its own column.
+    const relations: Array<{ field: string; object: string; where?: Record<string, unknown>; attrs: Array<{ attr: string; alias: string }>; resolvedAlias: string }> = [];
+    const columnOf = new Map<string, { relation: number; alias: string }>();
+    for (const cd of plan.crossDims) {
+      let index = relations.findIndex((r) => r.field === cd.fkField);
+      if (index === -1) {
+        index = relations.length;
+        const where = this.relatedReadScope(cd.refObject, ctx);
+        relations.push({
+          field: cd.fkField,
+          object: cd.refObject,
+          ...(where !== undefined ? { where } : {}),
+          attrs: [],
+          resolvedAlias: `__rg${index}_resolved`,
+        });
+      }
+      const relation = relations[index]!;
+      let attr = relation.attrs.find((a) => a.attr === cd.attr);
+      if (!attr) {
+        attr = { attr: cd.attr, alias: `__rg${index}_a${relation.attrs.length}` };
+        relation.attrs.push(attr);
+      }
+      columnOf.set(cd.outputName, { relation: index, alias: attr.alias });
+    }
+
+    // The base group keys without the FK columns the joins replace — a FK
+    // column a base dimension names itself (`account` beside `account.name`)
+    // stays.
+    const replaced = new Set(relations.map((r) => r.field).filter((f) => !baseDimFields.includes(f)));
+    const joinGroupBy = groupBy.filter((g) => typeof g !== 'string' || !replaced.has(g));
+
+    const answer = await run.call(ctx, baseObject, {
+      groupBy: joinGroupBy.length > 0 ? (joinGroupBy as unknown as string[]) : undefined,
+      aggregations: aggregations.length > 0 ? aggregations : undefined,
+      filter: this.withReadScope(baseObject, filter, ctx),
+      timezone: query.timezone,
+      context: ctx.context,
+    }, relations as readonly RelationGroupAggregateRelation[]);
+    if (!answer.joined) return null;
+
+    // Each row is one group of the joined statement. Its key for a relation
+    // is the row itself when a readable related record joined, and absent
+    // (RESTRICTED) when none did — the FK-expand's map, one entry per row.
+    const keyOf = (relation: number): string => `__rg${relation}_key`;
+    const rows = answer.rows.map((row, i) => {
+      const keyed: Record<string, unknown> = { ...row };
+      relations.forEach((r, index) => {
+        keyed[keyOf(index)] = Number(row[r.resolvedAlias]) === 1 ? i : null;
+      });
+      return keyed;
+    });
+    const resolvedDims: CrossObjectDim[] = plan.crossDims.map((cd) => {
+      const { relation, alias } = columnOf.get(cd.outputName)!;
+      const fkToAttr = new Map<unknown, unknown>();
+      rows.forEach((row, i) => {
+        if (row[keyOf(relation)] === i) fkToAttr.set(i, row[alias]);
+      });
+      return { outputName: cd.outputName, fkField: keyOf(relation), fkToAttr };
+    });
+    return rebucketCrossObject(rows, baseDimFields, resolvedDims, measures);
+  }
+
+  /**
+   * Serve the cross-object dimensions by FK-expand (#3654): the base aggregate
+   * grouped by each FK column, each FK resolved to its attribute by a scoped
+   * read of the referenced object ({@link resolveFkAttr}), re-bucketed here.
+   */
+  private async executeCrossObjectExpanded(
+    baseObject: string,
+    plan: CrossObjectPlan,
+    groupBy: AggregateGroupKey[],
+    baseDimFields: string[],
+    aggregations: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>,
+    filter: Record<string, unknown>,
+    query: AnalyticsQuery,
+    measures: MeasureRecombine[],
+    ctx: StrategyContext,
+  ): Promise<Record<string, unknown>[]> {
+    // Base aggregate, grouped by the FK, scoped to the base object. Threads the
+    // ExecutionContext for the engine-side second belt too (#3602).
+    const baseRows = await ctx.executeAggregate!(baseObject, {
+      groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
+      aggregations: aggregations.length > 0 ? aggregations : undefined,
+      filter: this.withReadScope(baseObject, filter, ctx),
+      timezone: query.timezone,
+      context: ctx.context,
+    });
+
+    // [#29304] A cross-object dimension over a virtual attribute, whether or
+    // not a base row carries a key to resolve. See {@link assertCrossObjectAttrsStored}.
+    assertCrossObjectAttrsStored(plan, ctx);
+
+    // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
+    // object: a related record the caller cannot read never yields its
+    // attribute, so it buckets as RESTRICTED (no leak; ADR-0021 D-C / #3602).
+    const resolvedDims: CrossObjectDim[] = [];
+    for (const cd of plan.crossDims) {
+      const fkValues = [...new Set(baseRows.map((r) => r[cd.fkField]).filter((v) => v != null))];
+      const fkToAttr = await this.resolveFkAttr(cd.refObject, cd.attr, fkValues, ctx);
+      resolvedDims.push({ outputName: cd.outputName, fkField: cd.fkField, fkToAttr });
+    }
+
+    return rebucketCrossObject(baseRows, baseDimFields, resolvedDims, measures);
+  }
+
+  /**
    * Resolve `fkValues` (ids of `refObject`) to their `attr` values, applying the
    * referenced object's OWN read scope (#3654 / #3602). Reuses the aggregate
    * bridge — `group by (id, attr)` is one row per record. Ids the scope hides
@@ -1801,10 +1925,34 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const map = new Map<unknown, unknown>();
     if (fkValues.length === 0 || typeof ctx.executeAggregate !== 'function') return map;
     const idFilter: Record<string, unknown> = { id: { $in: fkValues } };
+    const scope = this.relatedReadScope(refObject, ctx);
+    const filter = scope !== undefined ? { $and: [idFilter, scope] } : idFilter;
+    const rows = await ctx.executeAggregate(refObject, {
+      // [#28692] `<relation>.id` resolves the FK to the related record's own
+      // id: `id` is already the key, and naming it twice is a groupBy the
+      // engine refuses (`INVALID_QUERY`).
+      groupBy: attr === 'id' ? ['id'] : ['id', attr],
+      aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
+      filter,
+      context: ctx.context,
+    });
+    for (const r of rows) {
+      if (r.id != null) map.set(r.id, r[attr]);
+    }
+    return map;
+  }
+
+  /**
+   * The referenced object's OWN read scope, as the related read of a
+   * cross-object dimension applies it — by FK-expand ({@link resolveFkAttr}) or
+   * as the engine's planned read of a join ({@link executeCrossObjectJoined}) —
+   * judged and marked as policy, or `undefined` when there is none.
+   */
+  private relatedReadScope(refObject: string, ctx: StrategyContext): Record<string, unknown> | undefined {
     const scope = typeof ctx.getReadScope === 'function' ? ctx.getReadScope(refObject) : null;
     // [#8220] Same boundary family as `withReadScope`: the scope arm is policy.
-    // `idFilter` is this method's own plumbing, not the caller's text — it
-    // stays unmarked, which withholds, and that is correct for a filter no
+    // `resolveFkAttr`'s id filter is its own plumbing, not the caller's text —
+    // it stays unmarked, which withholds, and that is correct for a filter no
     // author typed.
     // [#13640] The SECOND engine-bound merge on this strategy, and the same
     // door: the referenced object's own scope is `$and`-ed into a filter handed
@@ -1829,20 +1977,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       assertReadScopeAdmittedByEngine(scope, refObject, ctx.context, ctx as DatasetScopedStrategyContext);
     }
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
-    const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
-    const rows = await ctx.executeAggregate(refObject, {
-      // [#28692] `<relation>.id` resolves the FK to the related record's own
-      // id: `id` is already the key, and naming it twice is a groupBy the
-      // engine refuses (`INVALID_QUERY`).
-      groupBy: attr === 'id' ? ['id'] : ['id', attr],
-      aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
-      filter,
-      context: ctx.context,
-    });
-    for (const r of rows) {
-      if (r.id != null) map.set(r.id, r[attr]);
-    }
-    return map;
+    return scope != null ? (scope as Record<string, unknown>) : undefined;
   }
 
   /**

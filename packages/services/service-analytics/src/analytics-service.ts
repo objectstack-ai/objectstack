@@ -1346,6 +1346,15 @@ export interface AnalyticsServiceConfig {
    * told once, at construction, when it also wires `executeRawSql`.
    */
   hasObjectMiddleware?: (objectName: string) => boolean | undefined;
+  /**
+   * The data engine's aggregate grouped also by related records' attributes,
+   * which a SQL driver answers as one `LEFT JOIN … GROUP BY`. See
+   * `DatasetScopedStrategyContext.executeRelationGroupAggregate`
+   * (`strategies/types.ts`). `AnalyticsServicePlugin` wires it only when it
+   * bridges `executeAggregate` itself, to the same engine; a host that wires
+   * nothing serves every cross-object dimension by the FK-expand, as before.
+   */
+  executeRelationGroupAggregate?: DatasetScopedStrategyContext['executeRelationGroupAggregate'];
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -1748,6 +1757,9 @@ export class AnalyticsService implements IAnalyticsService {
       // `NativeSQLStrategy` declines on `true` and on `undefined`, so the
       // engine path serves the object and its middlewares run.
       hasObjectMiddleware: config.hasObjectMiddleware,
+      // The engine's relation group join, passed through untouched; absent,
+      // `ObjectQLStrategy` serves a cross-object dimension by its FK-expand.
+      executeRelationGroupAggregate: config.executeRelationGroupAggregate,
     };
     // [#21080] …and a host that wires raw SQL without that answer is told so,
     // once: the native path then serves every object, gated ones included.
