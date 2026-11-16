@@ -169,6 +169,7 @@ import {
   resolveTwoFactorAccountLockout,
   settleSignInAttempt,
   stampLastLogin,
+  type PasswordSignInDoor,
   type SignInLockoutHost,
   type SignInOutcome,
   type SignInSettlement,
@@ -7176,7 +7177,7 @@ export class AuthManager {
    * resolves the identifier to ({@link findSignInAccount}), so they hold for
    * every spelling of the address that signs in to that account.
    */
-  private admitSignInAttempt(email: string, ctx?: unknown): Promise<void> {
+  private admitSignInAttempt(email: string, ctx?: unknown, door?: PasswordSignInDoor): Promise<void> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
     const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
@@ -7185,7 +7186,7 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return admitSignInAttempt.call(host, email, ctx);
+    return admitSignInAttempt.call(host, email, ctx, door);
   }
 
   /**
@@ -7212,7 +7213,7 @@ export class AuthManager {
    * transition the `account_locked` row records, so a lock that was never
    * written is never reported as one.
    */
-  private settleSignInAttempt(email: string, outcome: SignInOutcome): Promise<SignInSettlement> {
+  private settleSignInAttempt(email: string, outcome: SignInOutcome, door?: PasswordSignInDoor): Promise<SignInSettlement> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
     const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
@@ -7221,7 +7222,7 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return settleSignInAttempt.call(host, email, outcome);
+    return settleSignInAttempt.call(host, email, outcome, door);
   }
 
   /**
@@ -7260,6 +7261,7 @@ export class AuthManager {
     ctx: any,
     email: string,
     settlement: SignInSettlement,
+    door?: PasswordSignInDoor,
   ): Promise<void> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
@@ -7267,7 +7269,7 @@ export class AuthManager {
       get config() { return readConfig(); },
       resolveSignInAccountId: (...a) => this.resolveSignInAccountId(...a),
     };
-    return auditRefusedSignIn.call(host, ctx, email, settlement);
+    return auditRefusedSignIn.call(host, ctx, email, settlement, door);
   }
 
   /**
@@ -7276,14 +7278,14 @@ export class AuthManager {
    * row names the account the credential check actually judged and the lock
    * gate and counter hold.
    */
-  private resolveSignInAccountId(email: string): Promise<string | undefined> {
+  private resolveSignInAccountId(email: string, door?: PasswordSignInDoor): Promise<string | undefined> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const host: Pick<SignInLockoutHost, 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
       findSignInAccount: (...a) => this.findSignInAccount(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return resolveSignInAccountId.call(host, email);
+    return resolveSignInAccountId.call(host, email, door);
   }
 
   /**

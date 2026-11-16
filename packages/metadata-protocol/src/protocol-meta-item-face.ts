@@ -422,9 +422,10 @@ export function isAnotherHoldersCopy(registry: any, type: string, name: string, 
  * another package (the #32606 shape), an undeclared pair row, the
  * environment's own item, a disabled shipper, and the strict draft read.
  * The rows are read through `host.readItemActiveRows`, so the read below takes
- * them instead of reading them again (#24371).
+ * them instead of reading them again (#24371). The layered read naming no
+ * package takes the same address for its layers (`getMetaItemLayered`).
  */
-async function declaredMemberOverrideAddressOf(
+export async function declaredMemberOverrideAddressOf(
     host: ServedRowHost,
     type: string, name: string, member: string | undefined,
 ): Promise<string | undefined> {

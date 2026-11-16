@@ -10810,7 +10810,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
+  t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/l1-review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
   t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
@@ -10955,7 +10955,7 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
-  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/l1-review-checklist.md')));
   // The frame-copy half of the mandate is DEFINED by check:skill-frame-sync's
   // COPIES table (the 2026-08-20 ruling's own wording), so the coupling is
   // pinned mechanically: a copy added to that gate without a matching mandate
