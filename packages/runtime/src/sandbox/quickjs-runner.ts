@@ -1561,14 +1561,12 @@ function openQueryArgumentCrossing(vm: QuickJSContext): QueryArgumentCrossing {
  * written with, so the engine's refusal of an absent comparand applies inside
  * the sandbox too.
  *
- * The query argument crosses as JSON, as every other argument does, except
- * that under a {@link FILTER_KEYS} key, at any depth, an `undefined` value
- * crosses as `undefined`: the engine judges the filter the body wrote, by its
- * own door and with its own refusal. Outside a filter an `undefined` crosses
- * exactly as JSON writes it (an object key omitted, an array slot `null`), so
- * no other value of the argument crosses differently. A value the encoder does
- * not take (not a plain object or array, or one JSON cannot write) crosses by
- * `vm.dump` as before.
+ * Under a {@link FILTER_KEYS} key, at any depth, the query argument crosses
+ * with every key and value the body wrote, `undefined` included: the engine
+ * judges the filter the body wrote, by its own door and with its own refusal.
+ * Every value outside a filter crosses exactly as `vm.dump` crosses it, so
+ * nothing else about the argument changes. A value the encoder does not take
+ * (not a plain object or array, or one it cannot write) crosses by `vm.dump`.
  *
  * Fails closed: when the encoder itself does not complete, the call is refused
  * before anything reaches the host, never sent on another crossing.
@@ -1592,9 +1590,10 @@ function dumpQueryArgument(
 }
 
 /**
- * Turn each `mark` in a parsed query argument back into what the body wrote:
- * `undefined` under a {@link FILTER_KEYS} key at any depth, and elsewhere what
- * JSON writes for `undefined`. Iterative, so nesting depth costs no host stack.
+ * Settle each `mark` in a parsed query argument: under a {@link FILTER_KEYS}
+ * key, at any depth, it becomes the `undefined` the body wrote; elsewhere it
+ * becomes what `vm.dump` would have answered there. Iterative, so nesting depth
+ * costs no host stack.
  */
 function settleUndefinedMarks(root: unknown, mark: string): unknown {
   if (root === null || typeof root !== 'object') return root;

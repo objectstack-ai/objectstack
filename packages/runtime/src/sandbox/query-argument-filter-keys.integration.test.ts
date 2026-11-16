@@ -16,8 +16,8 @@
  * envelope, never a second copy of its wording.
  *
  * The controls pin what does not move: a defined value still filters, a data
- * payload crosses as it did, and outside a filter an `undefined` crosses as
- * JSON writes it.
+ * payload crosses as it did, and every value outside a filter crosses as it
+ * did.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -185,7 +185,7 @@ describe('a sandboxed data call reaches the engine with every filter key it was 
       expect(await rows()).toEqual([{ owner_id: 'u2', stage: 'swept' }]);
     });
 
-    it('a data payload with an undefined value crosses as before: the write lands and the key is left as it was', async () => {
+    it('a data payload crosses as before: the write lands and a field it does not set keeps its value', async () => {
       const [first] = (await engine.find('filter_key_deal', { ...SYSTEM, where: { owner_id: 'u1' } } as any)) as any[];
       const outcome = await run(
         `return await ctx.api.object('filter_key_deal').update({ id: ctx.input.id, stage: ctx.input.missing, amount: 11 });`,
@@ -237,7 +237,7 @@ describe('what the host receives for a data call’s arguments', () => {
     expect(own(options.where, 'owner_id') && options.where.owner_id === undefined).toBe(true);
   });
 
-  it('outside a filter an undefined crosses as JSON writes it', async () => {
+  it('every value outside a filter crosses as before', async () => {
     const [[query], [inserted]] = await received(
       `await ctx.api.object('x').find({ where: { a: 1 }, orderBy: [{ field: 'a', extra: undefined }], fields: ['a', undefined], limit: undefined });
        await ctx.api.object('x').insert({ a: 1, b: undefined, list: [undefined] });`,
