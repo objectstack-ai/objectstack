@@ -155,11 +155,17 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  *     `system-write-guard.ts`, plugin-auth `identity-write-guard.ts`). A
  *     system-context write therefore bypasses the managed-update whitelist by
  *     construction.
- *   - SCIM — NOT here, re-measured and unchanged. The Enterprise `manager`
- *     attribute IS declared (`scim.zod.ts`), but no non-test file under
- *     `packages/plugins` or `packages/runtime` projects it onto the column:
- *     measured 0, against a control (`SysScimGroup`) the same scan does find,
- *     so the scan discriminates.
+ *   - SCIM — AVAILABLE HERE, and the grade this block used to give it ("NOT
+ *     here, 0 projection sites") went stale when the projection landed.
+ *     plugin-auth `scim-manager-projection.ts` carries the Enterprise User
+ *     `manager.value` — the manager's SCIM resource id among the Users the
+ *     same connection provisioned (RFC 7643 §4.3) — onto the column on every
+ *     SCIM create, replace and patch, inside the SCIM transaction, through
+ *     the endpoint's own refusals (`screenUserManagerLink`: self-assignment,
+ *     cycle, depth cap, cross-organization); a reference naming no User is a
+ *     SCIM 400 `invalidValue`, never dropped, and a cleared or absent
+ *     attribute clears the column. Measured by
+ *     `scim-manager-projection.test.ts`, end to end through the vendor.
  *   - Admin bulk import — AVAILABLE HERE, and the grade this block used to
  *     give it ("NOT here") went stale when the import tier admitted the column.
  *     `POST /api/v1/auth/admin/import-users` (`admin-import-users.ts`) reads a
@@ -178,12 +184,12 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  *     It is the route to name for a whole file; a remedy that said otherwise
  *     sent the author away from a supported path.
  *
- * ⇒ SCIM and directory sync stay NAMED, because a deployment running a real
- * one may well populate the column through it — but named as something the
- * operator's own provisioning supplies, ⛔ never as something this repo gives
- * them. They also now have PRECEDENCE over the endpoint rather than merely
- * sitting beside it: on an identity a SCIM directory holds the endpoint refuses, so
- * the directory is the one authoring surface for those rows.
+ * ⇒ SCIM is NAMED as a route this repo gives, with PRECEDENCE over the
+ * endpoint rather than beside it: on an identity a SCIM directory holds the
+ * endpoint refuses, so the directory's `manager` attribute is the one
+ * authoring surface for those rows. Any other directory sync stays named as
+ * something the operator's own provisioning supplies, ⛔ never as something
+ * this repo gives them.
  *
  * ⛔ WHAT DID NOT CHANGE — and why this rule is not deleted. The dead end the
  * finding reports SURVIVES the write surface: a static check still cannot read
