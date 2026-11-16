@@ -33,11 +33,12 @@
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import { RecordContextProvider, DiscussionContextProvider } from '@object-ui/react';
 import type { FeedItem } from '@object-ui/types';
 import { RecordActivityRenderer } from '../record-activity';
+import { resetWithheldCommentComposerWarnings } from '../recordActivityFeed';
 
 const COMPOSER_PLACEHOLDER = 'Leave a comment… (Ctrl+Enter to submit)';
 const EMPTY_FEED = 'No activity recorded';
@@ -327,5 +328,102 @@ describe('record:activity — showSubscriptionToggle is the one documented gap',
     // input declaration must be deleted with it (objectui#3165).
     expect(screen.queryByLabelText('Subscribe to notifications')).toBeNull();
     expect(screen.queryByLabelText('Unsubscribe from notifications')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#34371 — a `types` allow-list that leaves out `comment` filters
+ * every comment out of the block, the ones posted on it included, so the block
+ * offers no composer and no Comments-only filter, and says why once in
+ * development. HotCRM's `lead_detail` page authors exactly that shape
+ * (`types: ['task']`, `showCompleted: true`); the controls are the same block
+ * with `comment` admitted, and with no `types` at all.
+ */
+describe('record:activity — a types list without comment offers no comment composer (objectstack#34371)', () => {
+  const FILTER_TRIGGER = 'Filter activity';
+  const COMMENTS_ONLY = 'Comments Only';
+  const FEED: FeedItem[] = [
+    { id: 'c1', type: 'comment', actor: 'Ada', body: 'a posted comment', createdAt: '2026-11-16T09:47:37.000Z' },
+    { id: 't1', type: 'task', actor: 'Ada', body: 'Meeting held', createdAt: '2026-11-16T09:30:00.000Z' },
+  ];
+  const HOTCRM_LEAD_ACTIVITY = { types: ['task'], limit: 20, showCompleted: true };
+  const withHost = (node: React.ReactNode) => (
+    <DiscussionContextProvider items={FEED as any} onAddComment={vi.fn()}>
+      {node}
+    </DiscussionContextProvider>
+  );
+  const mountBlock = (properties: Record<string, unknown>) =>
+    mountBound({ type: 'record:activity', id: 'lead_activity', properties }, makeDataSource(), withHost);
+
+  /** The dropdown's option labels, read by opening the Radix Select. */
+  async function filterOptionLabels(): Promise<string[]> {
+    fireEvent.keyDown(screen.getByRole('combobox', { name: FILTER_TRIGGER }), { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
+    return screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    resetWithheldCommentComposerWarnings();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  const withheldWarnings = () =>
+    (warn.mock.calls as unknown[][])
+      .map((c: unknown[]) => String(c[0]))
+      .filter((m: string) => m.includes('offers no comment composer'));
+
+  it('the HotCRM shape (types: [task]) draws no composer and no Comments-only option', async () => {
+    mountBlock(HOTCRM_LEAD_ACTIVITY);
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    expect(screen.queryByText('a posted comment')).toBeNull();
+    expect(screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeNull();
+    const options = await filterOptionLabels();
+    expect(options).toContain('All Activity');
+    expect(options).not.toContain(COMMENTS_ONLY);
+  });
+
+  it('CONTROL: types that admits comment keeps the composer and the option, and the comment shows', async () => {
+    mountBlock({ ...HOTCRM_LEAD_ACTIVITY, types: ['task', 'comment'] });
+    expect(await screen.findByText('a posted comment')).toBeTruthy();
+    expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy();
+    expect(await filterOptionLabels()).toContain(COMMENTS_ONLY);
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+
+  it('CONTROL: no types keeps the composer and the option, and the comment shows', async () => {
+    mountBlock({ limit: 20, showCompleted: true });
+    expect(await screen.findByText('a posted comment')).toBeTruthy();
+    expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy();
+    expect(await filterOptionLabels()).toContain(COMMENTS_ONLY);
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+
+  it('warns once, naming the block, its types and both fixes, however often it renders', async () => {
+    const first = mountBlock(HOTCRM_LEAD_ACTIVITY);
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    first.rerender(
+      <RecordContextProvider objectName="crm_account" recordId="rec-alpha" data={{ id: 'rec-alpha', name: 'Alpha' }} dataSource={makeDataSource()}>
+        {withHost(<RecordActivityRenderer schema={{ type: 'record:activity', id: 'lead_activity', properties: { ...HOTCRM_LEAD_ACTIVITY } } as any} />)}
+      </RecordContextProvider>,
+    );
+    first.unmount();
+    mountBlock(HOTCRM_LEAD_ACTIVITY);
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    const said = withheldWarnings();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('record:activity "lead_activity"');
+    expect(said[0]).toContain('["task"]');
+    expect(said[0]).toContain('add "comment" to `types`');
+    expect(said[0]).toContain('`showCommentInput: false`');
+  });
+
+  it('an author who switched the composer off is not told anything', async () => {
+    mountBlock({ ...HOTCRM_LEAD_ACTIVITY, showCommentInput: false });
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    expect(withheldWarnings()).toHaveLength(0);
   });
 });

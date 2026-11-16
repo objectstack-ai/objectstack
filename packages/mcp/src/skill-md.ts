@@ -32,7 +32,12 @@
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
-import { DELETE_RECORDS_MAX_PER_CALL, grantsAuthoringTools } from './mcp-http-tools.js';
+import {
+  DELETE_AMBIGUOUS_ASKS_FIRST,
+  DELETE_NAMED_RECORD_IS_APPROVAL,
+  DELETE_RECORDS_MAX_PER_CALL,
+  grantsAuthoringTools,
+} from './mcp-http-tools.js';
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
 export const OBJECTSTACK_SKILL_NAME = 'objectstack';
@@ -454,9 +459,10 @@ create/update payload.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
 - **delete_record({ objectName, recordId, confirm })** — delete a record.
   The server REFUSES a call without \`confirm: true\`
-  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted. Ask your human
-  first; the flag asserts an approval, it does not obtain one. A deleted
-  business record goes to the recycle bin and can be restored there until the
+  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted.
+  ${DELETE_NAMED_RECORD_IS_APPROVAL}
+  ${DELETE_AMBIGUOUS_ASKS_FIRST}
+  A deleted business record goes to the recycle bin and can be restored there until the
   deployment's retention ends (30 days by default); the answer names the entry
   as \`recycleBinEntryId\`. An answer without one was a permanent delete: a
   platform object's record (\`sys_\`, \`cloud_\`, \`ai_\`), or any record on a
@@ -525,7 +531,9 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 - **Discover, don't assume.** Object and field names vary per app; always
   \`list_objects\` / \`describe_object\` first.
 - **Writes are real and immediate.** There is no implicit dry-run. Confirm
-  destructive actions (\`delete_record\`, bulk updates) with the user.
+  destructive actions (\`delete_record\`, bulk updates) with the user; a
+  \`delete_record\` the user named, with exactly one record matching, is
+  already confirmed.
 - **Page large reads.** Use \`limit\`/\`offset\` rather than asking for everything.
 - **People are \`sys_user\` records.** A person field (owner, approver,
   employee) holds a user id. Find it with \`query_records\` on \`sys_user\`:
@@ -548,6 +556,7 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 3. \`query_records\` to read / verify current state.
 4. \`run_action\` when a matching business action exists; otherwise
    \`create_record\` / \`update_record\` / \`delete_record\` — confirming
-   destructive steps with the user.
+   destructive steps with the user (a delete the user named, with exactly one
+   record matching, is already confirmed).
 `;
 }
