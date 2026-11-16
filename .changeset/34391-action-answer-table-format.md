@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@object-ui/core': patch
 ---
 
 feat(spec): an action's answer fields gain a `table` format, so a per-row answer is drawn as rows, not raw JSON
@@ -18,3 +19,5 @@ Refused at parse, each with a message that names the fix:
 - `table` as a cell `format` (a table does not nest) and as the dialog-level `resultDialog.format` (a default carries no `columns`).
 
 The renderer contract is stated on `resultDialog`. The console's table renderer is still to come: until it lands, a `table` field draws its label alone, and `columns` is marked `[PLANNED — not yet rendered]`.
+
+`@object-ui/core`: the `ResultDialogSpec` / `ResultDialogFieldSpec` `format` members now derive from the contract, as their label members already do, so the console's action renderers keep type-checking against the widened set.
