@@ -357,6 +357,12 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: VALIDATION_RULE,
   },
+  // [#33795] A batch scope keeps a roll-up a rule reads out of the deferral;
+  // the test names the object a rule's one hop reaches, from the declaration.
+  'summary-rule-reads.ts#summaryFieldsReadByRules :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "names the object a validation rule's own one-hop relation path reaches, to judge whether it reads a summary field; it reads no row",
+  },
   'engine-summaries-and-expansion.ts#buildSummaryIndex :: referenceCarrierOf()': {
     disposition: 'author-declared',
     why:
