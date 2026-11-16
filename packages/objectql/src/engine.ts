@@ -339,7 +339,7 @@ import { SecretsAndRoutingFacet } from './engine-secrets-and-routing.js';
 // [#29986 codemod] Migration flags, value-shape deviations, creation attestations, destroy: the methods of the same names below hand the bodies what they read (`MigrationStateHost`).
 import { MigrationStateFacet } from './engine-migration-state.js';
 // [#29986 codemod] Summary indexes, related-record expansion, file and reference hydration: the methods of the same names below hand the bodies what they read (`SummariesAndExpansionHost`).
-import { SummariesAndExpansionFacet } from './engine-summaries-and-expansion.js';
+import { SummariesAndExpansionFacet, type SummaryBatchScope } from './engine-summaries-and-expansion.js';
 // [#29986 codemod] Query lowering, search, find and findOne: the methods of the same names below hand the bodies what they read (`FindHost`).
 import { FindFacet } from './engine-find.js';
 // [#29986 codemod] Write preparation and insert: the methods of the same names below hand the bodies what they read (`InsertHost`).
@@ -446,6 +446,14 @@ export class ObjectQL implements IObjectQLEngine {
    * into a present one on every nested delete.
    */
   private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
+
+  /**
+   * [#33795] The open roll-up deferral scope ({@link deferSummaryRecompute}),
+   * ambient for {@link txStore}'s reason: a row's write reaches
+   * `recomputeSummaries` through hooks and nested engine calls no caller can
+   * thread a marker through.
+   */
+  private readonly summaryBatchStore = new AsyncLocalStorage<SummaryBatchScope>();
 
   /**
    * [#23221] The child delete {@link walkReferencingRelations} is issuing right
@@ -4130,6 +4138,45 @@ export class ObjectQL implements IObjectQLEngine {
     return summaryRefreshesSettled(this);
   }
 
+  /**
+   * [#33795] Run `callback` as ONE batch for roll-up summaries: every
+   * `summary` recompute a write inside it would run is recorded instead, and
+   * runs once when the callback settles — one grouped aggregate per summary
+   * field and one write per parent for the whole batch, instead of one
+   * recompute per row. Optional on `IObjectQLEngine` by ruling 6922040858;
+   * the bulk update doors probe for it.
+   *
+   * Entered and left by the engine, as {@link transaction} is: there is no
+   * begin and end pair to leave unbalanced. A nested call JOINS the open
+   * scope, and the outermost call runs the recompute.
+   *
+   * Only the roll-up recompute moves. Each write's hooks, validation, audit
+   * and realtime run where they run outside a scope. So a rule or hook that
+   * reads a parent's summary during the batch reads the value from before
+   * the batch, as it already does during a multi-row insert or a predicate
+   * update.
+   *
+   * Every way out recomputes, over every write recorded:
+   *
+   * - the callback resolves and every parent recomputes: its result;
+   * - the callback resolves and a parent cannot be recomputed (after the
+   *   transient retries): `SummaryRecomputeError` (`ERR_SUMMARY_RECOMPUTE`),
+   *   `written` the callback's result — the writes are stored, the named
+   *   summaries are stale, as when a single write's recompute fails;
+   * - the callback throws: the recompute still runs, for the writes that
+   *   landed before the throw, and the callback's error is rethrown; a
+   *   recompute failure there is logged, as each one is.
+   *
+   * Called inside a {@link transaction}, the recompute runs inside it, before
+   * the commit, and a caller that lets the refusal escape rolls the batch back.
+   * A write recorded after the callback settled (work it started and did not
+   * await) recomputes at once.
+   */
+  deferSummaryRecompute<T>(callback: () => Promise<T>): Promise<T> {
+    // [#33795] The body is in `engine-summaries-and-expansion.ts` (see `SummariesAndExpansionHost`).
+    return SummariesAndExpansionFacet.deferSummaryRecompute.call(summariesAndExpansionHost.of(this), callback);
+  }
+
   private initializeSummaryFields(object: string, record: any): any {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
     return SummariesAndExpansionFacet.initializeSummaryFields.call(summariesAndExpansionHost.of(this), object, record);
@@ -6140,6 +6187,7 @@ export class ObjectQL implements IObjectQLEngine {
       invalidateSummaryIndex: (...a) => engine.invalidateSummaryIndex(...a),
       get logger() { return engine.logger; },
       serveReferenceNames: (...a) => engine.serveReferenceNames(...a),
+      get summaryBatchStore() { return engine.summaryBatchStore; },
       get summaryIndex() { return engine.summaryIndex; },
       set summaryIndex(v) { engine.summaryIndex = v; },
       get summaryIndexByParent() { return engine.summaryIndexByParent; },

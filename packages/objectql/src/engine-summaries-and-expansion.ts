@@ -43,7 +43,7 @@ import type { QueryAST, ServiceObject } from '@objectstack/spec/data';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withTransientRetry } from '@objectstack/core';
-import type { SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { aggregateSummaryValue, aggregateSummaryValues, summaryEmptySetValue } from './summary-aggregate.js';
 import type { SummaryDescriptor } from './summary-aggregate.js';
 import { ENGINE_WIRE_ONLY_SLOTS, WIRE_ONLY_CANONICAL_SHAPES } from './engine-top-level.js';
@@ -74,6 +74,47 @@ import type { ObjectQL as ObjectQLClass } from './engine.js';
 export const SUMMARY_RECOMPUTE_WRITE: unique symbol = Symbol.for('objectstack.objectql.summaryRecomputeWrite');
 
 /**
+ * [#33795] One open roll-up deferral scope
+ * ({@link SummariesAndExpansionFacet.deferSummaryRecompute}): the recomputes
+ * the writes inside it recorded instead of running, and whether it has ended.
+ *
+ * Ambient (`AsyncLocalStorage`, `ObjectQL.summaryBatchStore`), for the reason
+ * the transaction store is: a row's write reaches `recomputeSummaries`
+ * through hooks, `ctx.api` writes and the engine's own nested calls, none of
+ * which a caller could thread a marker through.
+ */
+export interface SummaryBatchScope {
+  /**
+   * Set once the outermost callback has settled. Work the callback started
+   * and did not await still sees this scope ambiently; a write it makes after
+   * this point recomputes at once, as outside any scope, because the one
+   * recompute has already run.
+   */
+  closed: boolean;
+  /**
+   * The recorded recomputes, merged per child object and caller
+   * ({@link summaryBatchKey}): each entry is one recompute when the scope ends.
+   * A row is recorded as the foreign keys the recompute reads off it, a copy
+   * taken when it was recorded, so a later strip of the row a caller is
+   * answered with (`omitInternalFieldsFromWriteResponse`) cannot move it.
+   */
+  entries: Map<string, { childObject: string; execCtx: ExecutionContext | undefined; records: Record<string, unknown>[]; previous: Record<string, unknown>[] }>;
+}
+
+/**
+ * [#33795] Which recorded recomputes of a scope run as one: the same child
+ * object under the same caller. The recompute elevates the caller's context
+ * (`isSystem`), so what still tells two callers apart is the tenant it is
+ * scoped to and the user the parent's hooks are told triggered it. Identity
+ * of the context object would not do: the security middleware hands every
+ * operation its own copy of the caller's context.
+ */
+function summaryBatchKey(childObject: string, execCtx: ExecutionContext | undefined): string {
+  const ctx = execCtx as { tenantId?: unknown; userId?: unknown } | undefined;
+  return JSON.stringify([childObject, ctx?.tenantId ?? null, ctx?.userId ?? null]);
+}
+
+/**
  * The `ObjectQL` members the bodies of {@link SummariesAndExpansionFacet} read — every one of
  * them, and no other. Each is typed AS the class member (an indexed access on
  * the class), so a change to a member's signature on the class is a change
@@ -93,6 +134,7 @@ export interface SummariesAndExpansionHost {
   invalidateSummaryIndex: ObjectQLClass['invalidateSummaryIndex'];
   readonly logger: ObjectQLClass['logger'];
   serveReferenceNames: ObjectQLClass['serveReferenceNames'];
+  readonly summaryBatchStore: ObjectQLClass['summaryBatchStore'];
   summaryIndex: ObjectQLClass['summaryIndex'];
   summaryIndexByParent: ObjectQLClass['summaryIndexByParent'];
   summaryIndexRevision: ObjectQLClass['summaryIndexRevision'];
@@ -476,9 +518,30 @@ export class SummariesAndExpansionFacet {
    * Insert, update, delete and a re-parent of a child all reach the master
    * through this one write, so they all stamp the same way.
    */
-  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryRetryOptions' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
+  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
     if (descriptors.length === 0) return [];
+
+    // [#33795] Inside an open deferral scope the recompute is RECORDED, not
+    // run: the scope runs it once, over every row recorded, when its callback
+    // settles (`deferSummaryRecompute`). Nothing else of the write moves —
+    // its hooks, validation, audit and realtime ran where they run. No
+    // failure can be reported here, so none is: the scope reports them.
+    const scope = this.summaryBatchStore.getStore();
+    if (scope && !scope.closed) {
+      const fkFields = [...new Set(descriptors.map((d) => d.fkField))];
+      const keysOf = (r: unknown): Record<string, unknown> => {
+        const keys: Record<string, unknown> = {};
+        if (r && typeof r === 'object') for (const f of fkFields) keys[f] = (r as Record<string, unknown>)[f];
+        return keys;
+      };
+      const key = summaryBatchKey(childObject, execCtx);
+      let entry = scope.entries.get(key);
+      if (!entry) { entry = { childObject, execCtx, records: [], previous: [] }; scope.entries.set(key, entry); }
+      for (const r of Array.isArray(records) ? records : records ? [records] : []) entry.records.push(keysOf(r));
+      for (const p of Array.isArray(previous) ? previous : previous ? [previous] : []) entry.previous.push(keysOf(p));
+      return [];
+    }
     // The elevation described above. Built once per call, spread from the
     // caller's context so transaction / tenant / timezone ride along.
     const systemCtx = { ...(execCtx ?? {}), isSystem: true } as ExecutionContext;
@@ -616,6 +679,48 @@ export class SummariesAndExpansionFacet {
       }
     }
     return failures;
+  }
+
+  /** The body of `ObjectQL#deferSummaryRecompute`; the method's docblock there is its contract. */
+  static async deferSummaryRecompute<T>(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'update'>, callback: () => Promise<T>): Promise<T> {
+    // A nested call joins the open scope: the outermost one runs the recompute.
+    const open = this.summaryBatchStore.getStore();
+    if (open && !open.closed) return await callback();
+
+    const scope: SummaryBatchScope = { closed: false, entries: new Map() };
+    // The recorded recomputes, run once the callback has settled — outside
+    // the scope, so each parent write recomputes ITS parents at once, in
+    // dependency order, as a multi-row write's recompute always has. Inside
+    // the caller's transaction when there is one: this runs before the
+    // caller's commit.
+    const recompute = async (): Promise<SummaryRecomputeFailure[]> => {
+      scope.closed = true;
+      const failures: SummaryRecomputeFailure[] = [];
+      for (const { childObject, execCtx, records, previous } of scope.entries.values()) {
+        failures.push(...await SummariesAndExpansionFacet.recomputeSummaries.call(this, childObject, records, previous, execCtx));
+      }
+      return failures;
+    };
+
+    let result: T;
+    try {
+      result = await this.summaryBatchStore.run(scope, callback);
+    } catch (err) {
+      // Every way out recomputes: rows written before the throw keep their
+      // writes, so their parents are recomputed; each failure is already
+      // logged where it happened. The callback's own error is the answer.
+      try {
+        await recompute();
+      } catch (recomputeErr) {
+        this.logger.warn('Roll-up summary recompute at the end of a failed batch failed', { error: (recomputeErr as any)?.message });
+      }
+      throw err;
+    }
+    const failures = await recompute();
+    // The callback's writes are stored; only roll-ups are stale. The same
+    // refusal a single write throws, its `written` the callback's result.
+    if (failures.length > 0) throw new SummaryRecomputeError(failures, result);
+    return result;
   }
 
   /**
