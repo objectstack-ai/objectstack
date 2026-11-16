@@ -449,6 +449,104 @@ async function deepestSubordinateChain(
 }
 
 /**
+ * Refusals 1 to 4 — self-assignment, the proposed manager's existence,
+ * cross-organization, cycle and depth — judged for ONE proposed link
+ * `userId -> managerId`, without writing anything.
+ *
+ * Split out of {@link applyUserManagerLink} for the one caller that must not
+ * run refusal 5: the SCIM manager projection (`scim-manager-projection.ts`).
+ * There the writer IS the directory that holds the identity, so "change it in
+ * your directory" would refuse the directory itself; every other refusal
+ * applies to it unchanged, and this is where it gets them. ⛔ Never a second
+ * copy of these predicates on that path.
+ *
+ * Answers `null` when the link may be written, or the refusal that stops it.
+ * The caller owns authorization AND the write.
+ */
+export async function screenUserManagerLink(
+  deps: SetUserManagerDeps,
+  engine: SetUserManagerEngine,
+  userId: string,
+  managerId: string,
+): Promise<SetUserManagerRefusal | null> {
+  // Refusal 1 — self-assignment.
+  if (managerId === userId) {
+    return deny(
+      400,
+      'INVALID_FIELD',
+      'self_assignment',
+      'A user cannot be their own manager: an approval routed to the manager rung would resolve '
+        + 'to the submitter, which is the approval this tier exists to prevent.',
+    );
+  }
+
+  const manager = await findUser(engine, managerId);
+  if (!manager) {
+    return deny(
+      400,
+      'INVALID_REFERENCE',
+      'manager_not_found',
+      'The proposed manager does not exist',
+    );
+  }
+
+  // Refusal 4 — cross-organization.
+  const screen = await screenCrossOrganization(deps, engine, userId, managerId);
+  if (screen.outside) {
+    return deny(
+      400,
+      'INVALID_REFERENCE',
+      'cross_organization',
+      `The proposed manager holds membership in ${screen.managerOrgs.length} organization(s), `
+        + `none of them an organization this user belongs to. Routing approvals to him would put `
+        + `approval authority over the record outside its tenant. Grant him a membership in one `
+        + `of this user's organizations, or pick a manager inside them.`,
+    );
+  }
+
+  // Refusals 2 and 3 — cycle and depth, in one walk.
+  const walk = await walkChain(engine, managerId, userId);
+  if (walk.kind === 'cycle') {
+    return deny(
+      409,
+      'RESOURCE_CONFLICT',
+      'cycle',
+      'That link would close a loop in the reporting chain: this user already appears above the '
+        + 'proposed manager, so the chain would never reach a top. Clear the intermediate link '
+        + 'first, then set this one.',
+    );
+  }
+  if (walk.kind === 'existing_loop') {
+    return deny(
+      409,
+      'RESOURCE_CONFLICT',
+      'cycle',
+      `The proposed manager's own reporting chain already contains a loop (it revisits user `
+        + `'${walk.repeated}'), so attaching this user beneath it would produce a chain with no `
+        + `top. Repair that loop first.`,
+    );
+  }
+  // The upper half fits; the lower half must fit in what is left of the cap.
+  const below = walk.kind === 'too_deep'
+    ? walk
+    : await deepestSubordinateChain(engine, userId, MAX_MANAGER_CHAIN_DEPTH - walk.links);
+  if (below.kind === 'too_deep') {
+    return deny(
+      400,
+      'VALUE_OUT_OF_RANGE',
+      'max_depth_exceeded',
+      `That link would make this user's reporting chain longer than the maximum of `
+        + `${MAX_MANAGER_CHAIN_DEPTH} links. The hierarchy scopes that walk this chain are `
+        + `bounded, so a longer chain is not resolved in full. The count runs from the deepest `
+        + `existing report below this user, through this user, to the top above the proposed `
+        + `manager. Shorten the chain above the proposed manager, or the chain of reports below `
+        + `this user, first.`,
+    );
+  }
+  return null;
+}
+
+/**
  * `POST /api/v1/auth/admin/set-user-manager` — the caller is ALREADY gated by
  * the mount's ADR-0068 platform-admin check, and `actor` is that judged admin.
  *
@@ -552,80 +650,8 @@ export async function applyUserManagerLink(
   }
 
   if (managerId !== null) {
-    // Refusal 1 — self-assignment.
-    if (managerId === userId) {
-      return deny(
-        400,
-        'INVALID_FIELD',
-        'self_assignment',
-        'A user cannot be their own manager: an approval routed to the manager rung would resolve '
-          + 'to the submitter, which is the approval this tier exists to prevent.',
-      );
-    }
-
-    const manager = await findUser(engine, managerId);
-    if (!manager) {
-      return deny(
-        400,
-        'INVALID_REFERENCE',
-        'manager_not_found',
-        'The proposed manager does not exist',
-      );
-    }
-
-    // Refusal 4 — cross-organization.
-    const screen = await screenCrossOrganization(deps, engine, userId, managerId);
-    if (screen.outside) {
-      return deny(
-        400,
-        'INVALID_REFERENCE',
-        'cross_organization',
-        `The proposed manager holds membership in ${screen.managerOrgs.length} organization(s), `
-          + `none of them an organization this user belongs to. Routing approvals to him would put `
-          + `approval authority over the record outside its tenant. Grant him a membership in one `
-          + `of this user's organizations, or pick a manager inside them.`,
-      );
-    }
-
-    // Refusals 2 and 3 — cycle and depth, in one walk.
-    const walk = await walkChain(engine, managerId, userId);
-    if (walk.kind === 'cycle') {
-      return deny(
-        409,
-        'RESOURCE_CONFLICT',
-        'cycle',
-        'That link would close a loop in the reporting chain: this user already appears above the '
-          + 'proposed manager, so the chain would never reach a top. Clear the intermediate link '
-          + 'first, then set this one.',
-      );
-    }
-    if (walk.kind === 'existing_loop') {
-      return deny(
-        409,
-        'RESOURCE_CONFLICT',
-        'cycle',
-        `The proposed manager's own reporting chain already contains a loop (it revisits user `
-          + `'${walk.repeated}'), so attaching this user beneath it would produce a chain with no `
-          + `top. Repair that loop first.`,
-      );
-    }
-    // The upper half fits; the lower half must fit in what is left of the cap.
-    const below = walk.kind === 'too_deep'
-      ? walk
-      : await deepestSubordinateChain(engine, userId, MAX_MANAGER_CHAIN_DEPTH - walk.links);
-    if (below.kind === 'too_deep') {
-      return deny(
-        400,
-        'VALUE_OUT_OF_RANGE',
-        'max_depth_exceeded',
-        `That link would make this user's reporting chain longer than the maximum of `
-          + `${MAX_MANAGER_CHAIN_DEPTH} links. The hierarchy scopes that walk this chain are `
-          + `bounded, so a longer chain is not resolved in full. The count runs from the deepest `
-          + `existing report below this user, through this user, to the top above the proposed `
-          + `manager. Shorten the chain above the proposed manager, or the chain of reports below `
-          + `this user, first.`,
-      );
-    }
+    const screened = await screenUserManagerLink(deps, engine, userId, managerId);
+    if (screened) return screened;
   }
 
   // The write. `authSystemWriteContext()` builds both halves together:
