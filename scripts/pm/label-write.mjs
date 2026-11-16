@@ -3056,8 +3056,8 @@ export async function selfTest() {
     t('…a report written by a governed approver is trusted, as the record leg trusts it', approver.exit, EXIT_OK);
 
     // Ordering and shape.
-    const dry = await land(pull({ cards: { 8: [report(NA)] } }), { send: async () => { throw new Error('a refused land must not dispatch'); } });
-    t('the gate refuses BEFORE the comment is judged and before any send — the comment file is never even read', [dry.exit, dry.text.includes('② comment —')], [EXIT_USAGE, false]);
+    const early = await land(pull({ cards: { 8: [report(NA)] } }));
+    t('the gate refuses BEFORE the comment is judged and before any send — the comment file is never even read', [early.exit, early.sent.length, early.text.includes('② comment —')], [EXIT_USAGE, 0, false]);
     const own = readFileSync(SELF_PATH, 'utf8');
     const foldSource = own.slice(own.indexOf('async function foldStroke('), own.indexOf('export async function runRelease('));
     const gateSource = own.slice(own.indexOf('export async function landDogfoodGate('), own.indexOf('export function landDogfoodRefusal('));
