@@ -289,7 +289,12 @@ export function readPageObjectScope(
   const ready = routeReadDone(boundRead);
   const names = [...new Set([...bound, ...extraNames])];
   const first = read(names);
-  const lookups = bound.flatMap((name) => lookupTargetNames(first.objects.find((o: any) => o?.name === name)));
+  const lookups = servedLookupTargets(
+    readObjectScope,
+    packageId,
+    names,
+    bound.flatMap((name) => lookupTargetNames(first.objects.find((o: any) => o?.name === name))),
+  );
   return {
     scope: lookups.length > 0 ? read([...new Set([...names, ...lookups])]) : first,
     ready,
@@ -453,6 +458,35 @@ function lookupTargetNames(def: any): string[] {
     }
   }
   return [...out];
+}
+
+/**
+ * objectstack#34188 — the lookup targets a route asks by name: in an app with
+ * no package (the names-only scope), only those this runtime registers. A
+ * lookup may point at an object the host does not register at all (the control
+ * plane registers no `sys_business_unit`, a Free environment no
+ * `sys_approval_request`), and a by-name read answers such a name 404 on every
+ * open of the route. So the targets not already among the route's `asked`
+ * names are asked first in ONE `?names=` read, which leaves an absent name
+ * out ({@link readDashboardWidgetObjects}'s read, objectstack#29444); a target
+ * joins the by-name scope only once that read has answered it served.
+ *
+ * The package arm is left as it is: a target its package list does not hold is
+ * still asked by name there.
+ */
+function servedLookupTargets(
+  readObjectScope: ReadObjectScope,
+  packageId: string | undefined,
+  asked: readonly string[],
+  lookups: readonly string[],
+): string[] {
+  if (packageId || lookups.length === 0) return [...lookups];
+  const known = new Set(asked);
+  const unasked = lookups.filter((name) => !known.has(name));
+  if (unasked.length === 0) return [...lookups];
+  const presence = (readObjectScope as unknown as ReadNamesInOneRequest)({ names: unasked, views: false, batch: true });
+  const served = new Set(presence.objects.map((o: any) => o?.name).filter((n: unknown): n is string => typeof n === 'string'));
+  return lookups.filter((name) => known.has(name) || served.has(name));
 }
 
 /** The names a navigation tree carries under `key` on its entries, at every group depth. */
@@ -679,7 +713,7 @@ function readObjectRouteNames(
   const asked = read(names);
   const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
-  const lookups = routeDef ? lookupTargetNames(routeDef) : [];
+  const lookups = routeDef ? servedLookupTargets(readObjectScope, packageId, names, lookupTargetNames(routeDef)) : [];
   const streamNames = synthesizedRecordPage && routeDef ? recordStreamObjectNames(routeDef) : [];
   if (lookups.length === 0 && streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
   // The lookup targets are asked without views, through the same scope as the

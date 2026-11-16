@@ -16,7 +16,7 @@
  *     mapStyleUrl?: string,        // the deployment's default map style (OS_CONSOLE_MAP_STYLE_URL) — absent unless set (#26001)
  *     singleEnvironment: boolean,
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
- *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
+ *     features: { installLocal, marketplace, deploymentNotice, aiStudio, autoPublishAiBuilds, ... },
  *     branding: { productName, productShortName, stage?, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor },
  *     telemetry: { errorReporting?: { dsn, sendDefaultPii, environment?, tracesSampleRate, replaysOnErrorSampleRate } }
  *   }
@@ -550,6 +550,34 @@ function someRoutePattern(rawApp: unknown, matches: (pattern: string) => boolean
         const pattern = (route as { path?: unknown } | null | undefined)?.path;
         return typeof pattern === 'string' && matches(pattern);
     });
+}
+
+/**
+ * The kernel service the settings plugin registers its deployment-notice door
+ * under when it mounts the settings routes with one (`@objectstack/service-settings`
+ * `DEPLOYMENT_NOTICE_SERVICE`). Spelled here rather than imported, as the
+ * marketplace prefixes above are: this package does not depend on the settings
+ * one. The coupling is pinned by test, which mounts the REAL settings plugin.
+ */
+const DEPLOYMENT_NOTICE_SERVICE = 'settings.deployment-notice';
+
+/**
+ * Does this host serve the deployment notice (`GET /api/settings/deployment/notice`)?
+ *
+ * Observed, never declared, and read per request: the settings plugin
+ * registers its door when it mounts the routes at `kernel:ready`. A host that
+ * mounts the settings routes itself, with no door, answers that route `503`,
+ * and its route table is the same as a host that serves it, so the route
+ * table cannot answer this; the door's registration can. The Console asks the
+ * notice only where this is true (an older runtime that serves no key keeps
+ * asking, as it always has).
+ */
+function hasDeploymentNoticeDoor(ctx: PluginContext): boolean {
+    try {
+        return ctx.getService<unknown>(DEPLOYMENT_NOTICE_SERVICE) != null;
+    } catch {
+        return false;
+    }
 }
 
 
@@ -1196,6 +1224,10 @@ export class RuntimeConfigPlugin implements Plugin {
                         marketplace: hasMarketplaceBrowseMount(rawApp),
                         // aiStudio + autoPublishAiBuilds + any distribution keys.
                         ...features,
+                        // Observed from the composition, and after the host's
+                        // keys so no policy hook can claim a notice the host
+                        // does not serve, nor withhold one it does.
+                        deploymentNotice: hasDeploymentNoticeDoor(ctx),
                     },
                     // Read per request (#24766): a Branding save shows on the
                     // next load, with no restart.

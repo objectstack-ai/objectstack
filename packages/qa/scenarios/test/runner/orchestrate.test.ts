@@ -19,17 +19,20 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { validateRollupSourceVisibility } from '@objectstack/lint';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { buildDeniesWrite, truthFigures } from '../../src/score/index.js';
+import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
-import { main as runScenarios, makeDriver, parseArgs } from '../../src/runner/cli.js';
+import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
-import { askModeRefusal, runCard, runHalf, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { askModeRefusal, buildPassed, hiddenValues, readRollupSourceFinding, rollupSourceCharges, runCard, runHalf, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
+import { buildPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -269,9 +272,11 @@ function setup<A extends FakeApp = FakeApp>(
     app?: () => A;
     preValidates?: boolean;
     authorAs?: Record<string, ParsedTurn | Error>;
+    /** The card to run, in place of the crm card as it loads (a variant of it: the fakes speak its names). */
+    scenario?: LoadedScenario;
   } = {},
 ) {
-  const scenario = load();
+  const scenario = opts.scenario ?? load();
   const fresh = opts.app ?? (() => new FakeApp() as A);
   let current = fresh();
   const apps: A[] = [];
@@ -967,6 +972,224 @@ describe('runCard — a build that makes both sides of a reference cycle require
     expect(sc.modes[0]!.findings).toEqual([]);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 637, total: 637, refused: 0 });
     expect(renderScorecard(sc)).toContain('| Seed | 637/637 |');
+  });
+});
+
+// ── A roll-up the build leaves readable over child data the card withholds ──
+
+describe('runCard — a standing security-rollup-source-unreadable on a child the card withholds is a failed Build check (#33818)', () => {
+  const original = load(resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json'));
+  const scenario = namespacedScenario(original);
+  const p = (name: string) => `demoproject_${name}`;
+  const status = select(['todo', 'doing', 'done']);
+
+  /**
+   * project_with_tasks as eval#1's live builds made it: the project carries two
+   * roll-ups over its tasks (`task_count`, `total_estimate`), and the card
+   * withholds `task` from client_viewer and `task.estimate_hours` from the
+   * contractor. `masked` writes the remedy the rule names on client_viewer's
+   * set; `actualHours` adds a third roll-up over a child field the card does
+   * not withhold, which the contractor's set hides.
+   */
+  const projectArtifact = (opts: { masked?: boolean; actualHours?: boolean } = {}) => ({
+    manifest: { id: 'com.example.demoproject', namespace: 'demoproject' },
+    objects: [
+      {
+        name: p('project'),
+        fields: {
+          name: { type: 'text' },
+          status: select(['planned', 'active', 'done']),
+          owner: { type: 'text' },
+          description: { type: 'textarea' },
+          task_count: { type: 'summary', summaryOperations: { object: p('task'), function: 'count' } },
+          total_estimate: { type: 'summary', summaryOperations: { object: p('task'), function: 'sum', field: 'estimate_hours' } },
+          ...(opts.actualHours ? { total_actual: { type: 'summary', summaryOperations: { object: p('task'), function: 'sum', field: 'actual_hours' } } } : {}),
+        },
+      },
+      {
+        name: p('task'),
+        fields: {
+          title: { type: 'text' },
+          status,
+          estimate_hours: { type: 'number' },
+          assignee: { type: 'text' },
+          project: { type: 'lookup', reference: p('project') },
+          ...(opts.actualHours ? { actual_hours: { type: 'number' } } : {}),
+        },
+      },
+    ],
+    permissions: [
+      {
+        name: p('contractor'),
+        objects: { [p('project')]: { allowRead: true }, [p('task')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+        fields: {
+          [`${p('task')}.estimate_hours`]: { readable: false },
+          [`${p('project')}.total_estimate`]: { readable: false },
+          ...(opts.actualHours ? { [`${p('task')}.actual_hours`]: { readable: false } } : {}),
+        },
+        // The contractor reads its own tasks only: the rule's `info` arm on task_count.
+        rowLevelSecurity: [{ name: 'contractor_own_tasks', object: p('task'), operation: 'select', using: "assignee == current_user.id" }],
+      },
+      {
+        name: p('client_viewer'),
+        objects: { [p('project')]: { allowRead: true } },
+        ...(opts.masked
+          ? {
+              fields: {
+                [`${p('project')}.task_count`]: { readable: false },
+                [`${p('project')}.total_estimate`]: { readable: false },
+                ...(opts.actualHours ? { [`${p('project')}.total_actual`]: { readable: false } } : {}),
+              },
+            }
+          : {}),
+      },
+    ],
+  });
+
+  const quiet: AgentDriver = {
+    info: () => ({ driver: 'recorded', version: 'quiet test replay', apiBilled: false }),
+    author: async () => ({ turn: turn('Done.') }),
+    ask: async () => turn('I cannot tell from here.'),
+  };
+  function run(built: unknown) {
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => built,
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => new FakeApp(),
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    return runCard(original, quiet, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+  }
+  const meta = { run: 'r', date: '2026-11-16', packages: PUBLISHED, driver: quiet.info(), runner: 'test', evidenceDir: '/tmp' };
+  const TASK_COUNT = 'build: the roll-up demoproject_project.task_count stays readable to client_viewer (permission set demoproject_client_viewer) over demoproject_task, while the card withholds the object demoproject_task from client_viewer: security-rollup-source-unreadable stands, so client_viewer reads an aggregate of what it may not see';
+
+  it('charged: client_viewer reads both roll-ups over the task it may not read — two failed checks, out of passed, a finding each, and the build is not a pass', async () => {
+    const r = await run(projectArtifact());
+    const build = r.modes[0]!.build!;
+    expect(build.rollupSourceUnreadable?.map((c) => [c.persona, c.rollup, c.withheld, c.finding.rule])).toEqual([
+      ['client_viewer', 'demoproject_project.task_count', { object: 'demoproject_task' }, 'security-rollup-source-unreadable'],
+      ['client_viewer', 'demoproject_project.total_estimate', { object: 'demoproject_task' }, 'security-rollup-source-unreadable'],
+    ]);
+    // The record carries the rule's own report.
+    expect(build.rollupSourceUnreadable![0]!.finding.where).toBe('permission set "demoproject_client_viewer" · summary field "demoproject_project.task_count"');
+    const sc = cardScorecard(r);
+    const tally = sc.modes[0]!.first.build!;
+    expect(tally.total).toBe(build.score!.total + 2);
+    expect(tally.passed).toBe(build.score!.passed);
+    expect(tally.degraded).toBe(true);
+    expect(sc.modes[0]!.findings[0]).toBe(TASK_COUNT);
+    expect(sc.modes[0]!.findings.filter((f) => f.startsWith('build: the roll-up '))).toHaveLength(2);
+    expect(sc.modes[0]!.findings.filter((f) => f.startsWith('iterate build: the roll-up '))).toHaveLength(2);
+    expect(renderScorecard(sc)).toContain(`- scratch finding: ${TASK_COUNT}`);
+    const record = runRecord(meta, r) as { results: Array<{ id: string; verdict: string; clauses: Array<{ evidence: { check?: string; pass?: boolean } }> }> };
+    const half = record.results.find((x) => x.id === 'project_with_tasks.scratch.build')!;
+    expect(half.verdict).not.toBe('pass');
+    expect(half.clauses.map((c) => c.evidence).filter((e) => e.check?.startsWith('rollup-source-unreadable:'))).toEqual([
+      expect.objectContaining({ check: 'rollup-source-unreadable:client_viewer:demoproject_project.task_count', pass: false }),
+      expect.objectContaining({ check: 'rollup-source-unreadable:client_viewer:demoproject_project.total_estimate', pass: false }),
+    ]);
+    expect(record.results.find((x) => x.id === 'project_with_tasks.scratch.iterate-build')!.clauses.filter((c) => c.evidence.check?.startsWith('rollup-source-unreadable:'))).toHaveLength(2);
+    // Never installed as a verified build: template and ask modes run on builds that pass.
+    expect(buildPassed(build)).toBe(false);
+    expect(buildPassed({ ...build, rollupSourceUnreadable: undefined })).toBe(buildPassed({ ...build, rollupSourceUnreadable: [] }));
+  });
+
+  it('uncharged: the roll-ups are masked on client_viewer’s set, so the rule finds nothing and the build scores as it did', async () => {
+    const r = await run(projectArtifact({ masked: true }));
+    const build = r.modes[0]!.build!;
+    expect(rollupSourceCharges(scenario, projectArtifact({ masked: true }))).toEqual([]);
+    expect(build.rollupSourceUnreadable).toBeUndefined();
+    expect(r.modes[0]!.iterate!.build.rollupSourceUnreadable).toBeUndefined();
+    const sc = cardScorecard(r);
+    expect(sc.modes[0]!.first.build).toMatchObject({ passed: build.score!.passed, total: build.score!.total });
+    expect(sc.modes[0]!.findings.filter((f) => f.includes('roll-up'))).toEqual([]);
+    expect(JSON.stringify(runRecord(meta, r))).not.toContain('rollup-source');
+  });
+
+  it('not charged: a standing warning over a child field the card does not withhold, and the info row-scope arm', () => {
+    const built = projectArtifact({ masked: true, actualHours: true });
+    const standing = validateRollupSourceVisibility({ objects: built.objects, permissions: built.permissions });
+    // The rule does stand on the contractor's set: it cannot read task.actual_hours under project.total_actual; and its row policy scopes task_count.
+    expect(standing.map((f) => [f.rule, f.where])).toEqual([
+      ['security-rollup-source-row-scoped', 'permission set "demoproject_contractor" · summary field "demoproject_project.task_count"'],
+      ['security-rollup-source-unreadable', 'permission set "demoproject_contractor" · summary field "demoproject_project.total_actual"'],
+    ]);
+    expect(rollupSourceCharges(scenario, built)).toEqual([]);
+  });
+
+  it('not charged: a set no persona signs in with', () => {
+    const built = projectArtifact({ masked: true });
+    const auditor = { name: p('auditor'), objects: { [p('project')]: { allowRead: true } } };
+    expect(rollupSourceCharges(scenario, { ...built, permissions: [...built.permissions, auditor] })).toEqual([]);
+    // The same set renamed to client_viewer's is charged: the persona, not the set's grants, decides.
+    expect(rollupSourceCharges(scenario, { ...built, permissions: [built.permissions[0]!, { ...auditor, name: p('client_viewer') }] }).map((c) => c.rollup)).toEqual([
+      'demoproject_project.task_count',
+      'demoproject_project.total_estimate',
+    ]);
+  });
+
+  it('charged on a withheld child FIELD: the contractor reads total_estimate over the estimate_hours the card withholds from it', () => {
+    const built = projectArtifact({ masked: true });
+    const contractor = { ...built.permissions[0]!, fields: { [`${p('task')}.estimate_hours`]: { readable: false } } };
+    expect(rollupSourceCharges(scenario, { ...built, permissions: [contractor, built.permissions[1]!] }).map((c) => [c.persona, c.rollup, c.withheld])).toEqual([
+      ['contractor', 'demoproject_project.total_estimate', { field: 'demoproject_task.estimate_hours' }],
+    ]);
+  });
+
+  it('template mode: the iterate build it scores (what the app serves after the change) is charged the same way; ask mode authors nothing and has no Build half to charge', async () => {
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => undefined,
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => new FakeApp(),
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    const r = await runCard(original, quiet, ops, { modes: ['template', 'ask'], admin: ADMIN, templateArtifact: projectArtifact() });
+    const [template, ask] = r.modes;
+    expect(template!.template?.install.ok).toBe(true);
+    expect(template!.iterate!.build.rollupSourceUnreadable?.map((c) => c.rollup)).toEqual(['demoproject_project.task_count', 'demoproject_project.total_estimate']);
+    expect(cardScorecard(r).modes[0]!.findings.filter((f) => f.startsWith('iterate build: the roll-up '))).toHaveLength(2);
+    expect(ask!.build).toBeUndefined();
+    expect(cardScorecard(r).modes[1]!.findings.filter((f) => f.includes('roll-up'))).toEqual([]);
+  });
+
+  it('reads the build’s artifact as the scorer does: collections under packages[] count too', () => {
+    const { manifest, ...body } = projectArtifact();
+    const multi = { manifest, packages: [{ manifest: { ...manifest, name: 'demoproject', version: '1.0.0', type: 'app', ...body } }] };
+    expect(rollupSourceCharges(scenario, multi).map((c) => c.rollup)).toEqual(['demoproject_project.task_count', 'demoproject_project.total_estimate']);
+  });
+
+  it('reads every arm of the rule’s own wording, and refuses one it cannot read', () => {
+    const child = { name: 'c', fields: { amount: { type: 'number' }, band: { type: 'text' } } };
+    const parent = (summary: Record<string, unknown>) => ({ name: 'par', fields: { total: { type: 'summary', summaryOperations: { object: 'c', ...summary } } } });
+    const reads = (summary: Record<string, unknown>, childGrant: Record<string, unknown> | undefined, hidden: string[]) => {
+      const set = { name: 'reader', objects: { par: { allowRead: true }, ...(childGrant ? { c: childGrant } : {}) }, fields: Object.fromEntries(hidden.map((f) => [`c.${f}`, { readable: false }])) };
+      const findings = validateRollupSourceVisibility({ objects: [parent(summary), child], permissions: [set] }).filter((f) => f.rule === 'security-rollup-source-unreadable');
+      expect(findings).toHaveLength(1);
+      return readRollupSourceFinding(findings[0]!);
+    };
+    const base = { permissionSet: 'reader', rollup: 'par.total', child: 'c' };
+    expect(reads({ function: 'count' }, undefined, [])).toEqual({ ...base, childFields: [], unreadable: { object: 'c' } });
+    expect(reads({ function: 'sum', field: 'amount' }, undefined, [])).toEqual({ ...base, childFields: ['amount'], unreadable: { object: 'c' } });
+    expect(reads({ function: 'sum', field: 'amount' }, { allowRead: true }, ['amount'])).toEqual({ ...base, childFields: ['amount'], unreadable: { field: 'amount' } });
+    expect(reads({ function: 'sum', field: 'amount', filter: { band: 'a' } }, { allowRead: true }, ['band'])).toEqual({ ...base, childFields: ['amount', 'band'], unreadable: { field: 'band' } });
+    expect(reads({ function: 'count', filter: { band: 'a' } }, { allowRead: true }, ['band'])).toEqual({ ...base, childFields: ['band'], unreadable: { field: 'band' } });
+    expect(() => readRollupSourceFinding({ where: 'permission set "reader" · summary field "par.total"', message: 'something else entirely' })).toThrow(/cannot read \(the rule's wording moved\?\)/);
   });
 });
 
@@ -2334,5 +2557,239 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const rows = (run: CardRun, driver: AgentDriver) => (runRecord(meta(driver), run).results as Array<{ id: string }>).filter((r) => !r.id.includes('.ask.'));
     expect(JSON.stringify(rows(withAsk, b.driver))).toBe(JSON.stringify(rows(without, a.driver)));
     expect(JSON.stringify(cardScorecard(withAsk).modes.slice(0, 2))).toBe(JSON.stringify(cardScorecard(without).modes));
+  });
+});
+
+// ── The prompt choice: --lang and --prompt ──────────────────────────────────
+
+describe('runCard — `--lang zh|en` and `--prompt short|detailed` choose the prompts every mode sends (#33743)', () => {
+  const CARD = 'crm_account_with_contacts';
+  const meta = (driver: AgentDriver) => ({ run: 'r', date: '2026-11-15', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' });
+
+  /** The crm card (English only) with a Chinese twin of every text a prompt renders, each marked so a test can tell the two apart. */
+  function bilingual(s: LoadedScenario = load()): LoadedScenario {
+    const out = structuredClone(s);
+    const c = out.card;
+    c.prompt.short.zh = `【简述】${c.prompt.short.en!}`;
+    c.prompt.detailed.zh = `【详述】${c.prompt.detailed.en!}`;
+    c.iterate.change.zh = `【变更】${c.iterate.change.en!}`;
+    for (const q of c.run.questions) q.ask.zh = `【问】${q.ask.en!}`;
+    for (const op of c.run.operations) op.ask.zh = `【办】${op.ask.en!}`;
+    return out;
+  }
+
+  /** Every prompt the driver was sent, by step key. */
+  class Prompts implements AgentDriver {
+    readonly sent = new Map<string, string>();
+    constructor(private readonly inner: AgentDriver) {}
+    info(): DriverInfo {
+      return this.inner.info();
+    }
+    author(task: AuthorTask) {
+      this.sent.set(stepKey(task), task.prompt);
+      return this.inner.author(task);
+    }
+    ask(task: AskTask) {
+      this.sent.set(stepKey(task), task.prompt);
+      return this.inner.ask(task);
+    }
+  }
+
+  /** setup(), on `scenario`, with its driver wrapped to keep every prompt. */
+  function prompted(scenario: LoadedScenario) {
+    const s = setup({ scenario });
+    return { ...s, driver: new Prompts(s.driver) };
+  }
+
+  const ALL_MODES = ['scratch', 'template', 'ask'] as const;
+
+  it('the flags: --lang zh|en and --prompt short|detailed, each refused on any other value, neither set when absent', () => {
+    expect(parseArgs([])).not.toHaveProperty('lang');
+    expect(parseArgs([])).not.toHaveProperty('prompt');
+    expect(parseArgs(['--lang', 'zh', '--prompt', 'short'])).toMatchObject({ lang: 'zh', prompt: 'short' });
+    expect(parseArgs(['--lang', 'en', '--prompt', 'detailed'])).toMatchObject({ lang: 'en', prompt: 'detailed' });
+    expect(() => parseArgs(['--lang', 'fr'])).toThrow('unknown --lang `fr` (zh, en)');
+    expect(() => parseArgs(['--lang', 'zh-CN'])).toThrow('unknown --lang `zh-CN` (zh, en)');
+    expect(() => parseArgs(['--prompt', 'long'])).toThrow('unknown --prompt `long` (short, detailed)');
+    expect(() => parseArgs(['--lang'])).toThrow('--lang needs a value');
+    expect(promptChoiceOf(parseArgs([]))).toBeUndefined();
+    expect(promptChoiceOf(parseArgs(['--prompt', 'short']))).toEqual({ prompt: 'short' });
+  });
+
+  it('⛔ neither flag is the run as it was, byte for byte: the same prompts (en ?? zh, prompt.detailed), the same record, scorecard and recording, and no choice stated anywhere', async () => {
+    const a = prompted(load());
+    const b = prompted(load());
+    const before = await runCard(a.scenario, a.driver, a.ops, { modes: ALL_MODES, admin: ADMIN });
+    const none = await runCard(b.scenario, b.driver, b.ops, { modes: ALL_MODES, admin: ADMIN, promptChoice: {} });
+    expect([...b.driver.sent]).toEqual([...a.driver.sent]);
+    const card = namespacedScenario(load()).card;
+    const build = a.driver.sent.get(`${CARD}/scratch/build/author/-`)!;
+    expect(build.split('\n## The app\n\n')[1]!.startsWith(`${card.prompt.detailed.en!}\n\n## What the app will be loaded with`)).toBe(true);
+    expect(a.driver.sent.get(`${CARD}/scratch/run/account_count/sdr`)!.startsWith(`${card.run.questions.find((q) => q.id === 'account_count')!.ask.en!}\n\nAnswer from the app’s data`)).toBe(true);
+    const written = JSON.stringify(runRecord(meta(b.driver), none));
+    expect(written).toBe(JSON.stringify(runRecord(meta(a.driver), before)));
+    expect(written).not.toContain('promptChoice');
+    expect(renderScorecard(cardScorecard(none))).toBe(renderScorecard(cardScorecard(before)));
+    expect(renderScorecard(cardScorecard(none))).not.toContain('prompts:');
+    expect(new RecordingDriver(a.driver, {}).recording).not.toHaveProperty('promptChoice');
+    expect(new RecordingDriver(a.driver).recording).not.toHaveProperty('promptChoice');
+  });
+
+  it('the default renders a text the card has only in Chinese in Chinese (en ?? zh), as before', () => {
+    const zhOnly = bilingual();
+    for (const q of zhOnly.card.run.questions) delete q.ask.en;
+    expect(questionPrompt(zhOnly, 'account_count').startsWith('【问】')).toBe(true);
+    expect(buildPrompt(zhOnly.card)).toContain(zhOnly.card.prompt.detailed.en!);
+    expect(buildPrompt(zhOnly.card)).not.toContain('【详述】');
+  });
+
+  it('--lang zh in every mode, with --ask-repeats 2: the build, both iterates, every question ask (each repeat) and every operation are sent their Chinese text, and no English card text', async () => {
+    const zh = bilingual();
+    const { scenario, ops, driver } = prompted(zh);
+    const run = await runCard(scenario, driver, ops, { modes: ALL_MODES, admin: ADMIN, askRepeats: 2, promptChoice: { lang: 'zh' } });
+    expect(run.modes.map((m) => [m.mode, m.skipped])).toEqual([['scratch', undefined], ['template', undefined], ['ask', undefined]]);
+    const card = namespacedScenario(zh).card;
+    const sent = [...driver.sent];
+    const authored = sent.filter(([k]) => k.endsWith('/author/-'));
+    expect(authored.map(([k]) => k)).toEqual([`${CARD}/scratch/build/author/-`, `${CARD}/scratch/iterate/author/-`, `${CARD}/template/iterate/author/-`]);
+    expect(authored[0]![1]).toContain(`## The app\n\n${card.prompt.detailed.zh!}\n\n`);
+    for (const [, p] of authored.slice(1)) expect(p).toContain(`Change: ${card.iterate.change.zh!}\n`);
+    const asks = sent.filter(([k]) => !k.endsWith('/author/-'));
+    // Every Run half: scratch run + iterate-run, template iterate-run, ask run; each question turn twice, each operation once.
+    for (const half of [`${CARD}/scratch/run/`, `${CARD}/scratch/iterate-run/`, `${CARD}/template/iterate-run/`, `${CARD}/ask/run/`]) {
+      expect(asks.filter(([k]) => k.startsWith(half))).toHaveLength(9 * 2 + 5);
+    }
+    for (const [k, p] of asks) {
+      const step = k.split('/')[3]!;
+      const q = card.run.questions.find((x) => x.id === step);
+      const text = q ? q.ask.zh! : card.run.operations.find((o) => o.id === step)!.ask.zh!;
+      expect(p.startsWith(text), k).toBe(true);
+    }
+    // No English card text reached the driver: the wrapper is the runner's own, and stays English.
+    const english = [card.prompt.detailed.en!, card.prompt.short.en!, card.iterate.change.en!, ...card.run.questions.map((q) => q.ask.en!), ...card.run.operations.map((o) => o.ask.en!)];
+    for (const [k, p] of sent) for (const t of english) expect(p.includes(`\n${t}`) || p.startsWith(t) || p.includes(`: ${t}`), `${k} carries "${t.slice(0, 40)}"`).toBe(false);
+    // The record and the scorecard state the choice.
+    expect(run.promptChoice).toEqual({ lang: 'zh' });
+    const record = runRecord(meta(driver), run) as { cardRun: CardRun; scorecard: { promptChoice?: unknown } };
+    expect(record.cardRun.promptChoice).toEqual({ lang: 'zh' });
+    expect(record.scorecard.promptChoice).toEqual({ lang: 'zh' });
+    expect(renderScorecard(cardScorecard(run))).toContain('\nprompts: language zh · build prompt detailed\n');
+  });
+
+  it('--prompt short changes the build turn only: prompt.short in place of prompt.detailed; the iterate, question and operation prompts are the default ones', async () => {
+    const a = prompted(load());
+    const b = prompted(load());
+    await runCard(a.scenario, a.driver, a.ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    const run = await runCard(b.scenario, b.driver, b.ops, { modes: ['scratch', 'template'], admin: ADMIN, promptChoice: { prompt: 'short' } });
+    const card = namespacedScenario(load()).card;
+    const buildKey = `${CARD}/scratch/build/author/-`;
+    expect(b.driver.sent.get(buildKey)).toBe(a.driver.sent.get(buildKey)!.replace(card.prompt.detailed.en!, card.prompt.short.en!));
+    expect(b.driver.sent.get(buildKey)).not.toContain(card.prompt.detailed.en!);
+    for (const [k, p] of a.driver.sent) if (k !== buildKey) expect(b.driver.sent.get(k), k).toBe(p);
+    expect(run.promptChoice).toEqual({ prompt: 'short' });
+    expect(renderScorecard(cardScorecard(run))).toContain('\nprompts: language default (en, else zh) · build prompt short\n');
+  });
+
+  it('--lang zh --prompt short: the build turn is sent prompt.short in Chinese; the four combinations each render their own build prompt', () => {
+    const card = namespacedScenario(bilingual()).card;
+    const app = (choice: Parameters<typeof buildPrompt>[1]) => buildPrompt(card, choice).split('\n## The app\n\n')[1]!.split('\n\n## What the app')[0];
+    expect(app({ lang: 'zh', prompt: 'short' })).toBe(card.prompt.short.zh);
+    expect(app({ lang: 'zh', prompt: 'detailed' })).toBe(card.prompt.detailed.zh);
+    expect(app({ lang: 'en', prompt: 'short' })).toBe(card.prompt.short.en);
+    expect(app({ lang: 'en', prompt: 'detailed' })).toBe(card.prompt.detailed.en);
+    // --lang en renders what the default renders on a card that has English.
+    expect(buildPrompt(card, { lang: 'en' })).toBe(buildPrompt(card));
+    expect(iteratePrompt(card, { lang: 'zh', prompt: 'short' })).toContain(`Change: ${card.iterate.change.zh!}\n`);
+  });
+
+  it('⛔ no silent fallback: a card lacking a text the run would render in the chosen language is refused before any scaffold, naming each missing text; the gaps follow the modes', async () => {
+    const { scenario, ops, driver } = prompted(load());
+    const qs = scenario.card.run.questions.map((q) => `run.questions[${q.id}].ask`);
+    const os = scenario.card.run.operations.map((o) => `run.operations[${o.id}].ask`);
+    expect(promptLanguageGaps(scenario.card, { lang: 'zh' }, ['scratch', 'template'])).toEqual(['prompt.detailed', 'iterate.change', ...qs, ...os]);
+    expect(promptLanguageGaps(scenario.card, { lang: 'zh', prompt: 'short' }, ['scratch'])).toEqual(['prompt.short', 'iterate.change', ...qs, ...os]);
+    expect(promptLanguageGaps(scenario.card, { lang: 'zh' }, ['template'])).toEqual(['iterate.change', ...qs, ...os]);
+    expect(promptLanguageGaps(scenario.card, { lang: 'zh' }, ['ask'])).toEqual([...qs, ...os]);
+    expect(promptLanguageGaps(scenario.card, { lang: 'en' }, ALL_MODES)).toEqual([]);
+    expect(promptLanguageGaps(scenario.card, { prompt: 'short' }, ALL_MODES)).toEqual([]);
+    // One missing text is enough, and only the build prompt the choice sends counts.
+    const shortOnly = bilingual();
+    delete shortOnly.card.prompt.detailed.zh;
+    expect(promptLanguageGaps(shortOnly.card, { lang: 'zh', prompt: 'short' }, ALL_MODES)).toEqual([]);
+    expect(promptLanguageRefusal(shortOnly.card, { lang: 'zh' }, ALL_MODES)).toBe('--lang zh sends every card text in zh and no other language, and this card has no zh text for `prompt.detailed`');
+    await expect(runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, promptChoice: { lang: 'zh' } })).rejects.toThrow(
+      `crm_account_with_contacts: --lang zh sends every card text in zh and no other language, and this card has no zh text for ${['prompt.detailed', 'iterate.change', ...qs, ...os].map((f) => `\`${f}\``).join(', ')}`,
+    );
+    expect(ops.scaffolded).toEqual([]);
+    expect(driver.sent.size).toBe(0);
+    // And a prompt asked to render a missing text throws by name, never sends the other language.
+    expect(() => questionPrompt(scenario, 'account_count', { lang: 'zh' })).toThrow(MissingLanguageError);
+  });
+
+  it('⛔ the CLI skips such a card before any card runs, naming each missing text, and runs the others; with none left it runs nothing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-lang-skip-'));
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void errors.push(a.join(' ')));
+    try {
+      const out = join(dir, 'out');
+      const work = join(dir, 'work');
+      const code = await runScenarios(['--driver', 'recorded:/nonexistent.json', '--only', CARD, '--lang', 'zh', '--out', out, '--work', work]);
+      expect(code).toBe(2);
+      expect(errors[0]).toMatch(/^skipped crm_account_with_contacts: --lang zh sends every card text in zh and no other language, and this card has no zh text for `prompt\.detailed`, `iterate\.change`, /);
+      expect(errors[1]).toBe('no card to run: every card chosen lacks a text the run would send in zh');
+      // Nothing scaffolded, nothing recorded: the replay file was never even opened.
+      expect([readdirSync(out), readdirSync(work)]).toEqual([[], []]);
+    } finally {
+      spy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('⛔ replay: a recording carries the choice it was sent, and `recorded:` refuses another choice before any card runs; the same choice replays', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-lang-replay-'));
+    try {
+      const zh = new RecordingDriver(new ScriptedDriver(load(), fakeOps(() => new FakeApp()), () => new FakeApp(), undefined), { lang: 'zh', prompt: 'short' });
+      expect(zh.recording.promptChoice).toEqual({ lang: 'zh', prompt: 'short' });
+      zh.save(join(dir, 'zh.json'));
+      expect(JSON.parse(readFileSync(join(dir, 'zh.json'), 'utf8')).promptChoice).toEqual({ lang: 'zh', prompt: 'short' });
+      const replay = RecordedDriver.fromFile(join(dir, 'zh.json'));
+      expect(() => replay.assertPromptChoice({ lang: 'zh', prompt: 'short' })).not.toThrow();
+      expect(() => replay.assertPromptChoice(undefined)).toThrow(
+        /^the recording .*zh\.json was sent language zh · build prompt short, and this run asks for language default \(en, else zh\) · build prompt detailed: a replay re-reads the answers to the prompts that were recorded, so replay it with --lang zh --prompt short$/,
+      );
+      expect(() => replay.assertPromptChoice({ lang: 'zh' })).toThrow(/so replay it with --lang zh --prompt short$/);
+      // A default recording replays under neither flag, and under `--prompt detailed`, which sends the same prompts; `--lang en` is another choice.
+      const plain = new RecordedDriver({ driver: { driver: 'claude', apiBilled: false }, turns: {}, files: {} }, 'plain.json');
+      expect(() => plain.assertPromptChoice(undefined)).not.toThrow();
+      expect(() => plain.assertPromptChoice({ prompt: 'detailed' })).not.toThrow();
+      expect(() => plain.assertPromptChoice({ lang: 'en' })).toThrow(/so replay it with neither flag$/);
+      // Through the CLI: refused before any card runs.
+      const out = join(dir, 'out');
+      const work = join(dir, 'work');
+      await expect(runScenarios(['--driver', `recorded:${join(dir, 'zh.json')}`, '--only', CARD, '--modes', 'scratch', '--out', out, '--work', work])).rejects.toThrow(/^the recording .*zh\.json was sent language zh/);
+      expect([readdirSync(out), readdirSync(work)]).toEqual([[], []]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a Chinese reply with the right figures grades correct and cited, and a Chinese decline passes an unanswerable question: the grader reads the reply in either language (leave_balances)', () => {
+    const leave = load(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'));
+    // `pending_by_approver` as the employee: 1 pending step, with e05; 6 approved, 2 rejected, 1 cancelled of their own.
+    const reply = '你有 1 个待审批的步骤，在 e05（你的部门经理）手上。你其余的步骤中，6 个已批准，2 个被驳回，1 个已取消。\n来源：approval_step';
+    const graded = gradeCardAnswer(leave, { question: 'pending_by_approver', persona: 'employee', hidden: { values: hiddenValues(leave, 'employee') }, turn: turn(reply) });
+    expect(graded).toMatchObject({ correct: true, cited: true, leaks: [] });
+    // Written without spaces, as Chinese is, and cited in the English line the answer instructions ask for.
+    const tight = gradeCardAnswer(leave, { question: 'pending_by_approver', persona: 'employee', hidden: { values: hiddenValues(leave, 'employee') }, turn: turn('你有1个待审批步骤，在e05手上。\nSource: approval_step') });
+    expect(tight).toMatchObject({ correct: true, cited: true, leaks: [] });
+    // A wrong figure is still wrong in Chinese.
+    expect(gradeCardAnswer(leave, { question: 'pending_by_approver', persona: 'employee', hidden: { values: hiddenValues(leave, 'employee') }, turn: turn('你有 3 个待审批步骤。\n来源：approval_step') }).correct).toBe(false);
+    // An all-rows question, its figures stated in Chinese.
+    const q = leave.card.run.questions.find((x) => x.id === 'annual_days_by_department')!;
+    const figures = truthFigures(leave.truths[q.id]!, q.object, 'x').map((f) => `${f.label.replace(/^x\[?|\]$/g, '') || '合计'}：${f.value} 天`);
+    expect(gradeCardAnswer(leave, { question: q.id, turn: turn(`各部门已批准的年假天数：${figures.join('；')}。\n来源：${q.object}`) })).toMatchObject({ correct: true, cited: true });
+    // `unpaid_leave_deduction` is unanswerable: a Chinese decline passes, a Chinese invented figure does not.
+    expect(gradeCardAnswer(leave, { question: 'unpaid_leave_deduction', turn: turn('无法回答：应用的数据里没有记录工资，算不出事假要扣多少。') }).correct).toBe(true);
+    expect(gradeCardAnswer(leave, { question: 'unpaid_leave_deduction', turn: turn('事假一共要扣 1200 元。\n来源：leave_request') }).correct).toBe(false);
   });
 });
