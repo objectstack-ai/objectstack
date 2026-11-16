@@ -663,7 +663,7 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * It defers the roll-up recompute ONLY. Each write's hooks, validation,
      * audit and realtime run where they run outside a scope, so a rule or hook
      * that reads a parent's summary during the batch reads the value from
-     * before the batch (as during a multi-row insert or a predicate update).
+     * before the batch, as during a predicate update.
      * A summary over a summary still recomputes in dependency order.
      *
      * Every way out of the callback recomputes. Resolved: the callback's

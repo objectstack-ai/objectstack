@@ -681,7 +681,41 @@ export class SummariesAndExpansionFacet {
     return failures;
   }
 
-  /** The body of `ObjectQL#deferSummaryRecompute`; the method's docblock there is its contract. */
+  /**
+   * [#33795] The body of `ObjectQL#deferSummaryRecompute`: run `callback` as
+   * ONE batch for roll-up summaries. Every `summary` recompute a write inside
+   * it would run is recorded instead, and runs once when the callback settles — one grouped aggregate per summary
+   * field and one write per parent for the whole batch, instead of one
+   * recompute per row. Optional on `IObjectQLEngine` by ruling 6922040858;
+   * the bulk update doors probe for it.
+   *
+   * Entered and left by the engine, as `ObjectQL#transaction` is: there is no
+   * begin and end pair to leave unbalanced. A nested call JOINS the open
+   * scope, and the outermost call runs the recompute.
+   *
+   * Only the roll-up recompute moves. Each write's hooks, validation, audit
+   * and realtime run where they run outside a scope. So a rule or hook that
+   * reads a parent's summary during the batch reads the value from before
+   * the batch, as it already does during a predicate update. (A multi-row
+   * insert's validation rules see the batch's earlier rows through an
+   * in-memory overlay, `summary-batch-accumulation.ts`; a scope has none.)
+   *
+   * Every way out recomputes, over every write recorded:
+   *
+   * - the callback resolves and every parent recomputes: its result;
+   * - the callback resolves and a parent cannot be recomputed (after the
+   *   transient retries): `SummaryRecomputeError` (`ERR_SUMMARY_RECOMPUTE`),
+   *   `written` the callback's result — the writes are stored, the named
+   *   summaries are stale, as when a single write's recompute fails;
+   * - the callback throws: the recompute still runs, for the writes that
+   *   landed before the throw, and the callback's error is rethrown; a
+   *   recompute failure there is logged, as each one is.
+   *
+   * Called inside a `transaction`, the recompute runs inside it, before
+   * the commit, and a caller that lets the refusal escape rolls the batch back.
+   * A write recorded after the callback settled (work it started and did not
+   * await) recomputes at once.
+   */
   static async deferSummaryRecompute<T>(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'update'>, callback: () => Promise<T>): Promise<T> {
     // A nested call joins the open scope: the outermost one runs the recompute.
     const open = this.summaryBatchStore.getStore();
