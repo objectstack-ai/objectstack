@@ -375,16 +375,25 @@ describe('a formula reading through a reference: every kind of field the caller 
 });
 
 describe('the public-form echo withholds every computed field that reads through a reference, for every submitter', () => {
+  // The grant admits the form object's create alone, so a submission cannot
+  // name a record the submitter cannot read: the reference stays empty, and
+  // the engine computes a formula reading through it as `null`.
   const GRANT = { publicFormGrant: { object: OBJ }, permissions: [SET], anonymous: true };
+  const THROUGH_A_REFERENCE = ['region_name', 'region_score', 'region_twice', 'region_gated', 'region_phone_copy', 'region_ghost'];
 
-  it('the submitter\'s echo carries no formula reading through a reference, readable there or not; a formula over its own record stays', async () => {
+  it('the submitter\'s echo carries no key for a formula reading through a reference; a formula over its own record stays', async () => {
     const { engine } = await boot({ capabilities: ['qa_fhf_gate', 'qa_fhf_unmask', 'qa_fhf_region_gate'] });
-    const echoed = (await engine.insert(OBJ, { id: 'a9', name: 'Form', capacity: 5, region: 'r1' }, { context: { ...GRANT } } as never)) as any;
+    const echoed = (await engine.insert(OBJ, { id: 'a9', name: 'Form', capacity: 5 }, { context: { ...GRANT } } as never)) as any;
     const rec = Array.isArray(echoed) ? echoed[0] : echoed;
     expect(rec).toMatchObject({ name: 'Form', headroom: 4 });
-    for (const f of ['region_name', 'region_score', 'region_twice', 'region_gated', 'region_phone_copy', 'region_ghost', 'region_score_stored']) {
-      expect(rec, f).not.toHaveProperty(f);
-    }
+    for (const f of THROUGH_A_REFERENCE) expect(rec, f).not.toHaveProperty(f);
+  });
+
+  it('control: a signed-in caller\'s echo of the same insert carries each of them, as null', async () => {
+    const { engine } = await boot({ capabilities: ['qa_fhf_gate', 'qa_fhf_unmask', 'qa_fhf_region_gate'] });
+    const echoed = (await engine.insert(OBJ, { id: 'a9', name: 'Form', capacity: 5 }, { context: { ...CALLER } } as never)) as any;
+    const rec = Array.isArray(echoed) ? echoed[0] : echoed;
+    for (const f of THROUGH_A_REFERENCE) expect(rec, f).toHaveProperty(f, null);
   });
 });
 

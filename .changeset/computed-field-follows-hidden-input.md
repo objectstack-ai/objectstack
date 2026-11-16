@@ -19,7 +19,7 @@ Who moves:
 
 - a holder of a permission set that withholds such a field, who read a computed field over it;
 - a delegate acting on behalf of a delegator whose permission sets withhold such a field;
-- every public-form submitter: the record echoed back to the submitter carries no computed field that reads through a reference, whatever the submitter could read there;
+- every public-form submitter: the record the engine echoes for a public-form grant carries no computed field that reads through a reference, whatever the submitter could read there (the form submit route itself answers the created id only);
 - a caller who reads a computed field whose expression reads the record in a way no field name describes (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL), while some other field of the object is not served whole to that caller.
 
 For that caller, after this release, the computed field is withheld exactly as the field it reads is:
