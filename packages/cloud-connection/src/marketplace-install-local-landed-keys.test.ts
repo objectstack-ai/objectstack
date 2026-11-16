@@ -254,6 +254,23 @@ const removeRow = (object: string, name: string, org: string = ORG) => {
     store[object] = (store[object] ?? []).filter((r) => !(r.name === name && r.organization_id === org));
 };
 
+/**
+ * What a boot's restart heal recorded for `manifestId` on the kernel's
+ * `seed-summary`: the outcome the boot banner, `objectstack:seed-settled`,
+ * `GET /ready` and `os verify` judge, an `emptyInstall` or a `rejected` row
+ * reading as a failed seed in each.
+ */
+const healOutcome = (rt: { ctx: any }, manifestId: string) =>
+    (rt.ctx.getService('seed-summary') as Array<Record<string, unknown>>).find((s) => s.source === manifestId && s.marketplace === true);
+/** The heal's own log lines for `manifestId` at `level`. */
+const healLines = (rt: { logger: Record<string, any> }, level: 'info' | 'warn', manifestId: string) =>
+    (rt.logger[level].mock.calls as unknown[][])
+        .map((c) => String(c[0]))
+        .filter((line) => line.includes('[MarketplaceInstallLocal]') && line.includes(manifestId) && /heal/.test(line));
+/** The outcome a heal that withheld every row records: the real `skipped`, nothing flagged. */
+const withheldOutcome = (manifestId: string) =>
+    ({ source: manifestId, marketplace: true, inserted: 0, updated: 0, skipped: 4, rejected: 0, droppedRefs: 0 });
+
 const BUNDLES = [
     { kind: 'flat', id: 'com.example.lkflat', body: flat },
     { kind: 'composed', id: 'com.example.lksuite', body: composed },
@@ -330,15 +347,22 @@ describe.each(BUNDLES)('$kind bundle: install-local keeps and honours the record
         for (const r of ['SO-1', 'SO-2']) removeRow('lk_order', r);
 
         // Every seeded object empty, the purge never run: the heal's own trigger.
-        await boot();
+        const restart = await boot();
         expect(names('lk_account')).toEqual([]);
         expect(names('lk_order')).toEqual([]);
+        // The withheld rows are the declared outcome, so the restart reports a
+        // settled seed: the real `skipped`, no `emptyInstall`, said at `info`.
+        expect(healOutcome(restart, id)).toEqual(withheldOutcome(id));
+        expect(healLines(restart, 'warn', id)).toEqual([]);
+        expect(healLines(restart, 'info', id)).toHaveLength(1);
 
         // Control: a new database (no row, no record) is healed from the ledger body.
         for (const object of Object.keys(store)) if (object !== 'sys_organization') delete store[object];
-        await boot();
+        const fresh = await boot();
         expect(names('lk_account')).toEqual(['Acme', 'Globex']);
         expect(names('lk_order')).toEqual(['SO-1', 'SO-2']);
+        expect(healOutcome(fresh, id)).toEqual(expect.objectContaining({ inserted: 4, rejected: 0, healed: true }));
+        expect(healOutcome(fresh, id)).not.toHaveProperty('emptyInstall');
     });
 
     it('a purge stays purged across a reinstall and a restart', async () => {
@@ -354,10 +378,13 @@ describe.each(BUNDLES)('$kind bundle: install-local keeps and honours the record
         expect(names('lk_account')).toEqual([]);
         expect(names('lk_order')).toEqual([]);
 
-        // Every seeded object empty again: the restart's heal runs, and leaves it.
-        await boot();
+        // Every seeded object empty again: the restart's heal runs, and leaves it,
+        // reporting a settled seed rather than an empty install.
+        const restart = await boot();
         expect(names('lk_account')).toEqual([]);
         expect(names('lk_order')).toEqual([]);
+        expect(healOutcome(restart, id)).toEqual(withheldOutcome(id));
+        expect(healLines(restart, 'warn', id)).toEqual([]);
     });
 
     it('the per-organization replayer honours it per organization, and `{ reseed: true }` brings a removed row back', async () => {
