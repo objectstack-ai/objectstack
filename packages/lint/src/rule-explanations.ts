@@ -4482,6 +4482,13 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
+    'On those picker fields a `lookupFilters[].value.$record` path is judged too, against the record ' +
+      'being edited: a field of the object that owns the picker field, or at most one hop from it (a ' +
+      'relationship field of that object, then a field of the object it references, as in ' +
+      '`account.cb_market`). The picker swaps that value into its query, so a path the record does ' +
+      'not have leaves the filter with nothing to compare. A miss names the segment: an unknown head, ' +
+      'a hop through a field that is not a relationship, a leaf the referenced object lacks, or a ' +
+      'second hop. A `$record` nested inside a literal value is not a reference and is not judged.',
     'A summary field\'s `summaryOperations.filter` is judged against the CHILD object ' +
       '`summaryOperations.object` names: the engine ANDs it with the parent-FK match and runs it as the ' +
       'query on that child, so every key (inside `$and` / `$or` / `$not` groups) is a field of the child. ' +
