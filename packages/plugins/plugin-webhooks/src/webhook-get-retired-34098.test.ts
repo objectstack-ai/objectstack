@@ -181,7 +181,7 @@ describe('webhook method GET retired — the save door (sys_webhook select)', ()
                 (err: any) => err,
             );
             expect(refused).toMatchObject({ code: 'VALIDATION_FAILED' });
-            const stored: any = await driver.findOne('sys_webhook', { where: { id: row.id } } as any);
+            const stored: any = await driver.findOne('sys_webhook', { where: { id: row.id } });
             expect(stored.method).toBe('post');
         } finally {
             await driver.disconnect();
@@ -232,9 +232,9 @@ describe('webhook method GET retired — a stored GET row is parked, never conve
             expect(parkedReports[0].meta).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, method: 'GET' });
 
             // No conversion: the method reads exactly as stored.
-            const raw: any = await driver.findOne('sys_webhook', { where: { id } } as any);
+            const raw: any = await driver.findOne('sys_webhook', { where: { id } });
             expect(raw.method).toBe('get');
-            const served: any = await engine.findOne('sys_webhook', { where: { id }, ...SYSTEM } as any);
+            const served: any = await engine.findOne('sys_webhook', { where: { id }, ...SYSTEM });
             expect(served.method).toBe('get');
         } finally {
             await enqueuer.stop();
