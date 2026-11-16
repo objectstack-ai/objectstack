@@ -34,6 +34,17 @@
  * The projection is **narrow on purpose**: a skill with no `instructions` has
  * nothing to serve, so it is not listed at all rather than listed empty.
  *
+ * ## The owner decides whether a skill is written for MCP at all (#34167)
+ *
+ * The binding test below answers whether a connection CAN run a playbook. It
+ * cannot answer whether the playbook is written for MCP: a skill may bind
+ * tools MCP serves under the same names (`create_record`, `action_*` through
+ * `run_action`) and still tell the model to call in-product tools and wait for
+ * the in-product approval card. Its owner says so with `mcpPrompt: false`, and
+ * {@link projectSkillPrompt} — the one place both the per-request HTTP surface
+ * and the long-lived stdio server read — projects no such skill, on any
+ * connection, whatever its binding.
+ *
  * ## The binding still decides WHETHER a skill is offered (#32767)
  *
  * The binding is not projected, but it is read: a skill's instructions teach
@@ -126,6 +137,8 @@ function readString(source: Record<string, unknown>, key: string): string | unde
  * - anything that is not an object with a non-empty string `name`;
  * - `active: false` — a disabled skill is not offered (the same rule the cloud
  *   skill registry applies);
+ * - `mcpPrompt: false` — the owner declared the skill written for the
+ *   in-product agents only (#34167); no tool binding brings it back;
  * - no `instructions` (or blank) — the half that projects is missing, so there
  *   is no prompt to serve. The skill is still perfectly valid metadata; it just
  *   has nothing for an MCP client to fetch.
@@ -140,6 +153,8 @@ export function projectSkillPrompt(
   const name = readString(record, 'name');
   if (!name) return null;
   if (record.active === false) return null;
+  // [#34167] The owner's opt-out of MCP projection: in-product only.
+  if (record.mcpPrompt === false) return null;
 
   const instructions = readString(record, 'instructions');
   if (!instructions) return null;
