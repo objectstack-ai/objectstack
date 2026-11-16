@@ -288,20 +288,48 @@ describe('platform_admin approver: one slot the platform administrators decide u
     expect((await requestRows('member'))[0].status).toBe('pending');
   });
 
-  it('an organization administrator takes no slot: only the #3424 override, recorded as one; another organization\'s cannot decide', async () => {
+  it('an organization administrator takes no slot and no override: decide, reassign and recall are refused; another organization\'s cannot decide', async () => {
     const row = await open('org_admin', 'host_review', PLATFORM);
     const orgAdmin = () => as('u_org_admin', ORG, ['organization_admin']);
-    expect((await svc.getRequest(row.id, orgAdmin()) as any)?.viewer).toMatchObject({ can_act: false, can_override: true });
+    expect((await svc.getRequest(row.id, orgAdmin()) as any)?.viewer).toMatchObject({ can_act: false, can_override: false });
     await expect(svc.decide(row.id, { decision: 'approve', actorId: SLOT } as any, orgAdmin()))
       .rejects.toThrow(/^FORBIDDEN: cannot act as 'platform_admin:\*'/);
+    await expect(svc.decide(row.id, { decision: 'approve' } as any, orgAdmin()))
+      .rejects.toThrow(/^FORBIDDEN: actor 'u_org_admin' is not a pending approver/);
+    await expect(svc.reassign(row.id, { actorId: 'u_org_admin', to: 'u_alice' }, orgAdmin()))
+      .rejects.toThrow(/^FORBIDDEN: /);
+    await expect(svc.recall(row.id, {} as any, orgAdmin()))
+      .rejects.toThrow(/^FORBIDDEN: /);
     await expect(svc.decide(row.id, { decision: 'approve' } as any, as('u_other_admin', OTHER_ORG, ['organization_admin'])))
       .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
-    expect((await requestRows('org_admin'))[0].status).toBe('pending');
-    await svc.decide(row.id, { decision: 'approve' } as any, orgAdmin());
-    const decision = (await actionsOf(row.id)).find((a) => a.action === 'approve');
-    expect(decision).toMatchObject({ actor_id: 'u_org_admin' });
-    expect(decision?.acted_as ?? null).not.toBe(SLOT);
-    expect(Boolean(decision?.via_override)).toBe(true);
+    expect(await requestRows('org_admin')).toMatchObject([{ status: 'pending', pending_approvers: SLOT }]);
+    expect(await actionsOf(row.id)).not.toContainEqual(expect.objectContaining({ actor_id: 'u_org_admin' }));
+  });
+
+  it('an override finalizes the whole request, so a mixed slate is withheld from the organization administrator whole; its ordinary slot holder decides as before', async () => {
+    const orgAdmin = () => as('u_org_admin', ORG, ['organization_admin']);
+    const mixed = await open('mixed', 'host_review', [...PLATFORM, { type: 'user', value: 'u_alice' }]);
+    expect(mixed.pending_approvers).toEqual([SLOT, 'u_alice']);
+    expect((await svc.getRequest(mixed.id, orgAdmin()) as any)?.viewer).toMatchObject({ can_act: false, can_override: false });
+    await expect(svc.decide(mixed.id, { decision: 'approve' } as any, orgAdmin()))
+      .rejects.toThrow(/^FORBIDDEN: actor 'u_org_admin' is not a pending approver/);
+    await svc.decide(mixed.id, { decision: 'approve' } as any, as('u_alice'));
+    expect((await actionsOf(mixed.id)).find((a) => a.action === 'approve'))
+      .toMatchObject({ actor_id: 'u_alice', acted_as: 'u_alice' });
+    expect(Boolean((await actionsOf(mixed.id)).find((a) => a.action === 'approve')?.via_override)).toBe(false);
+    // CONTROL: on a slate without the platform slot the tenant arm is unchanged.
+    const ordinary = await open('ordinary', 'tenant_review', [{ type: 'user', value: 'u_alice' }]);
+    expect((await svc.getRequest(ordinary.id, orgAdmin()) as any)?.viewer).toMatchObject({ can_act: false, can_override: true });
+  });
+
+  it('CONTROL: the platform administrator\'s override arm is unchanged on the platform slot', async () => {
+    const row = await open('platform_override', 'host_review', PLATFORM);
+    const root = () => as('u_root', ORG, ['admin_full_access']);
+    expect((await svc.getRequest(row.id, root()) as any)?.viewer).toMatchObject({ can_act: true, can_override: true });
+    // Recall holds no slot: the override arm alone admits a caller who is not
+    // the submitter.
+    await svc.recall(row.id, {} as any, root());
+    expect((await requestRows('platform_override'))[0].status).not.toBe('pending');
   });
 
   it('a revoked administrator cannot decide a request opened before the revocation', async () => {

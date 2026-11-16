@@ -2429,8 +2429,22 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * resolver lights this up without extra wiring. ⛔ NOT `positions` — on BOTH
    * rungs now: that array carries names, and a name is not an authority (see the
    * two blocks inside).
+   *
+   * [#34218] `pendingSlate` is passed by the override ADMISSIONS only (decide,
+   * reassign, recall and the `viewer.can_override` flag they agree with), never
+   * by a read grant. A slate holding the platform administrators' slot
+   * (`platform_admin:*`) closes the TENANT arm: such a step exists so that
+   * someone outside the request's organization decides it, and an override
+   * finalizes the whole request (it is not one vote among the slate), so an
+   * organization administrator overriding it would decide the platform's step
+   * for their own organization, on a mixed slate as on a pure one. The platform
+   * arm and the system context are unchanged.
    */
-  private isOverrideActor(context: ExecutionContext, requestOrg?: string | null): boolean {
+  private isOverrideActor(
+    context: ExecutionContext,
+    requestOrg?: string | null,
+    pendingSlate?: readonly string[],
+  ): boolean {
     if (!context) return false;
     if (context.isSystem) return true;
     const perms = Array.isArray(context.permissions) ? context.permissions : [];
@@ -2488,6 +2502,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const isTenantAdmin = posture === 'TENANT_ADMIN'
       || holdsTenantAdminRung(this.engine, held);
     if (!isTenantAdmin) return false;
+    if (pendingSlate !== undefined && pendingSlate.some(isPlatformAdminAddress)) return false;
     // A tenant admin's authority stops at their own org. [ADR-0131 D1] NULL is
     // not a state and names no owner, so a request with no organization is no
     // organization administrator's to act on: under a walled posture it is the
@@ -5471,7 +5486,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // A privileged admin may override a stuck request (#3424) even when they
     // hold no slot — the escape hatch for an approval routed to an unstaffed
     // position or to approvers who have all left.
-    const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
+    const isOverride = this.isOverrideActor(context, raw.organization_id ?? null, pendingApprovers);
     const slot = await this.takenSlot(pendingApprovers, actorId, context);
     const isSlotHolder = slot !== undefined;
     if (!isSlotHolder && !isOverride) {
@@ -6338,7 +6353,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // one hardcoded English sentence that Console rendered verbatim in a
     // toast. See {@link ApprovalService.userFacingRefusal}.
     const overrideAdmits = raw.status === 'pending'
-      && this.isOverrideActor(context, raw.organization_id ?? null);
+      && this.isOverrideActor(context, raw.organization_id ?? null, csvSplit(raw.pending_approvers));
     // A request with no submitter is recalled only through the arm above (a
     // system context or the override actor, on `pending`): `actsAsSubmitter`
     // answers no for every actor there.
@@ -7086,7 +7101,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (pending.includes(to)) {
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
-    const isOverride = this.isOverrideActor(context, raw.organization_id ?? null);
+    const isOverride = this.isOverrideActor(context, raw.organization_id ?? null, pending);
     // The slot the actor takes (`takenSlot`) — and, when `from` is not named,
     // the slot being handed over.
     const slot = await this.takenSlot(pending, actorId, context);
@@ -10514,7 +10529,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         can_act: row.status === 'pending' && !!caller && heldSlot(pending, caller.userId, caller) !== undefined,
         is_submitter: !!uid && row.submitter_id != null && String(row.submitter_id) === uid,
         can_override: row.status === 'pending'
-          && this.isOverrideActor(context, (row as any).organization_id ?? null),
+          && this.isOverrideActor(context, (row as any).organization_id ?? null, pending),
       };
     }
   }
