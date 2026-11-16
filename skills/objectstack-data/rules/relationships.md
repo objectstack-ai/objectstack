@@ -82,13 +82,13 @@ sharingModel: 'controlled_by_parent',
 sharing: { controlledByParent: { writeRequiresMasterRead: true } },  // or ownerMayEdit
 ```
 
-- `ownerMayEdit: true` widens only the row owner's (`owner_id`) by-id update; insert,
-  delete, predicate (`multi: true`) updates and on-behalf-of writes still need master edit.
+- `ownerMayEdit: true` widens only the row owner's (`owner_id`) by-id update; every
+  other write, on-behalf-of included, still needs master edit.
 - `writeRequiresMasterRead: true`: whoever reads the master inserts, updates and
   deletes the detail under its own object permissions, RLS and FLS (re-points and
   each opted-in chain hop too; on-behalf-of, both users must read the master). The
-  ownership floor (rows you created) still binds predicate and on-behalf-of updates
-  and deletes. Refused beside `ownerMayEdit: true`, which it covers. Lint
+  ownership floor (rows you created) still binds predicate and, for both users, on-behalf-of
+  updates and deletes. Refused beside `ownerMayEdit: true`, which it covers. Lint
   `security-controlled-by-parent-owner-policy-without-opt-in` is silent here.
 
 The detail's own row policies AND in under both. Each is refused at parse under any
@@ -107,8 +107,8 @@ account: { type: 'master_detail', reference: 'account', required: false },
 A row with no master is its owner's (`owner_id`): the owner or View All on the
 detail reads it, the owner or Modify All writes it (no owner: View All / Modify
 All only). An insert naming no master is admitted. Setting a master asks edit
-on it, emptying one edit on the stored master (even under `ownerMayEdit`; read
-under `writeRequiresMasterRead`). A
+on it, emptying one edit on the stored master (both even under `ownerMayEdit`;
+read for both under `writeRequiresMasterRead`). A
 chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
