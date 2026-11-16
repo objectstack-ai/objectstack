@@ -5,6 +5,7 @@ import { MessagingService, MemoryHttpOutbox, HttpDispatcher } from '@objectstack
 import type { FetchImpl } from '@objectstack/service-messaging';
 import { AutomationEngine } from '../engine.js';
 import { registerHttpNodes } from './http-nodes.js';
+import { stubbedFetchEgress } from './stubbed-fetch-egress.testkit.js';
 
 /**
  * #7882 — the run summary an operator reads must not claim an HTTP callout that
@@ -44,7 +45,7 @@ function engineWith(messaging?: MessagingService): AutomationEngine {
     registerHttpNodes(engine, {
         logger: silentLogger(),
         getService: (name: string) => (name === 'messaging' ? messaging : undefined),
-    } as any);
+    } as any, { egress: stubbedFetchEgress() });
     return engine;
 }
 
