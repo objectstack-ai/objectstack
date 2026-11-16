@@ -257,6 +257,8 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
       );
       expect(err.message).toContain('the date key of this query\'s comparison window');
       expect(err.message).not.toMatch(/declare a date dimension named/i);
+      // Nor the generic select-or-declare sentence: the key is the only member.
+      expect(err.message).not.toContain('declare the member on the dataset');
       expect(err.message).toContain('"account.founded_at" cannot be a dimension name');
       expect(err.message).toContain(
         'this comparison cannot run on a dataset query unless the dashboard\'s date field is a field of the dataset\'s own object that a declared date dimension names.',

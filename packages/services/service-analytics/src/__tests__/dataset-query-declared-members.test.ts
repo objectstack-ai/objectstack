@@ -321,6 +321,63 @@ describe('queryDataset refuses a selection member the dataset does not declare',
       'For the key that can be a dimension name, declare a date dimension named "closed_on" on the dataset (over that field).',
     );
     expect(messageOf(e)).not.toMatch(/declare a date dimension[^.]*"account\.signed_at"/i);
+    // The select-or-declare sentence names the member it is for, never the dotted key.
+    expect(messageOf(e)).toContain(
+      'For the dimension "closed_on", use one of these, or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.',
+    );
+    expect(reads).toEqual([]);
+  });
+
+  it('a related record\'s field as the only undeclared member: the refusal tells the author to declare nothing', async () => {
+    // Seat ruling (option A): the message must be true for that class. The
+    // select-or-declare sentence would name the dotted key, which no
+    // declaration can carry, so it is left out; the compare-window sentence is
+    // the whole remedy.
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        {
+          measures: ['revenue'],
+          timeDimensions: [{ dimension: 'account.signed_at', dateRange: ['2026-01-01', '2026-03-31'] }],
+          compareTo: { kind: 'previousPeriod' },
+        } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'account.signed_at', param: 'timeDimensions', cube: 'pipeline' });
+    expect(messageOf(e)).toContain('Dimensions you may use: stage, region, close_month. The dimension "account.signed_at" is the date key');
+    expect(messageOf(e)).not.toMatch(/\bdeclare (the member|a date dimension named)/i);
+    expect(messageOf(e)).not.toContain('Use one of these');
+    expect(messageOf(e)).toContain(
+      '"account.signed_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record\'s field is never one), '
+        + 'so no date dimension can be declared under it: this comparison cannot run on a dataset query unless the dashboard\'s date field '
+        + 'is a field of the dataset\'s own object that a declared date dimension names.',
+    );
+    expect(reads).toEqual([]);
+  });
+
+  it('a related record\'s date key beside an undeclared measure: the select-or-declare sentence names the measure only', async () => {
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        {
+          measures: ['amount_sum'],
+          timeDimensions: [{ dimension: 'account.signed_at', dateRange: ['2026-01-01', '2026-03-31'] }],
+          compareTo: { kind: 'previousPeriod' },
+        } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'amount_sum', param: 'measures', cube: 'pipeline' });
+    expect(messageOf(e)).toContain('does not declare the measure "amount_sum", dimension "account.signed_at".');
+    expect(messageOf(e)).toContain(
+      'For the measure "amount_sum", use one of these, or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.',
+    );
+    expect(messageOf(e)).not.toContain('Use one of these');
+    expect(messageOf(e)).toContain('"account.signed_at" cannot be a dimension name');
+    expect(messageOf(e)).not.toMatch(/declare a date dimension[^.]*"account\.signed_at"/i);
     expect(reads).toEqual([]);
   });
 

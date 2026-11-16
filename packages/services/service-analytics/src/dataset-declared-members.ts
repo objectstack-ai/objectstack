@@ -193,6 +193,13 @@ export function listMemberNames(names: readonly string[]): string {
  * says what the compare widget needs: a date dimension named after the key,
  * or, for a key no dimension can be named (a related record's field), a date
  * field of the dataset's own object.
+ *
+ * The select-or-declare sentence covers only the members it can fix. A
+ * comparison window's date key that cannot be a dimension name is never
+ * covered by it: the widget sends the window under that very name, which no
+ * declaration can carry. When every undeclared member is such a key, the
+ * sentence is left out and the compare-window sentence is the whole remedy;
+ * when some are, it names the members it is for.
  */
 export function undeclaredMembersRefusal(
   dataset: Pick<Dataset, 'name' | 'measures' | 'dimensions'>,
@@ -200,12 +207,19 @@ export function undeclaredMembersRefusal(
   admitted: { measures: ReadonlySet<string>; dimensions: ReadonlySet<string> } | undefined,
 ): Error {
   const first = undeclared[0];
+  // A comparison window's date key no dimension can be named is not fixed by
+  // selecting or declaring it: compareWindowRemedy says what it needs instead.
+  const fixable = undeclared.filter((u) => !(u.compareWindow && !canBeDimensionName(u.member)));
+  const selectOrDeclare = fixable.length === 0
+    ? ''
+    : ` ${fixable.length === undeclared.length ? 'Use' : `For the ${describeUndeclaredMembers(fixable)}, use`} one of these, `
+      + 'or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.';
   return invalidMemberError(
     `The dataset "${dataset.name}" does not declare the ${describeUndeclaredMembers(undeclared)}. A dataset query `
       + 'answers only the members its dataset declares, by their declared names. '
       + `Measures you may use: ${listMemberNames(usableDeclaredMembers(dataset.measures, admitted?.measures))}. `
-      + `Dimensions you may use: ${listMemberNames(usableDeclaredMembers(dataset.dimensions, admitted?.dimensions))}. `
-      + 'Use one of these, or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.'
+      + `Dimensions you may use: ${listMemberNames(usableDeclaredMembers(dataset.dimensions, admitted?.dimensions))}.`
+      + selectOrDeclare
       + compareWindowRemedy(undeclared),
     { member: first.member, param: first.param, cube: dataset.name },
   );

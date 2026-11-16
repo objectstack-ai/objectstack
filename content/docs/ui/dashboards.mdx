@@ -528,8 +528,9 @@ A date field of a related record — a dotted `relationship.field` such as
 [Filtering on a Related Record's Field](#filtering-on-a-related-records-field)) —
 has no such remedy. A dimension name is a snake_case identifier with no dot, so
 no dimension can carry that key, and the dataset query refuses the comparison
-with `400 INVALID_FIELD`; the message says the comparison needs a date field of
-the dataset's own object that a declared date dimension names. Declaring a
+with `400 INVALID_FIELD`; the message offers no declaration for that key and
+says the comparison needs a date field of the dataset's own object that a
+declared date dimension names. Declaring a
 dimension over the path under another name does not help, because the widget
 still sends the window under the dotted field's name. A compare widget's date
 window must therefore be a field of the dataset's own object.
