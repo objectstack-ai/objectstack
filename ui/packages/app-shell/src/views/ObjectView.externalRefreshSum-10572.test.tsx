@@ -88,6 +88,9 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { notifyDataChanged } from '@object-ui/react';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
