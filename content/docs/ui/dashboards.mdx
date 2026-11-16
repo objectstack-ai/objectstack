@@ -103,7 +103,7 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `layout` | `object` | optional | Grid position and size (auto-flowed into the grid when omitted) |
 | `chartConfig` | `object` | optional | Chart **appearance**: `title`, `subtitle`, `description`, `colors`, `height`, `showLegend`, `showDataLabels`, `annotations`, `interaction`. The bound dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — see below |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
-| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. The window's date key must be a dimension the dataset declares — see [The Date Key of a Compare Widget](#the-date-key-of-a-compare-widget). The delta is coloured by the measure's `polarity`: `'lower'` draws a rise red and a fall green, `'neutral'` draws neither; undeclared, a rise is green. |
+| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. The window's date key must be a dimension the dataset declares, so the date field it comes from must be a field of the dataset's own object — see [The Date Key of a Compare Widget](#the-date-key-of-a-compare-widget). The delta is coloured by the measure's `polarity`: `'lower'` draws a rise red and a fall green, `'neutral'` draws neither; undeclared, a rise is green. |
 | `options` | `object` | optional | The query keys below. Presentation does not go here — see below |
 
 ### What `chartConfig` does **not** carry
@@ -508,8 +508,9 @@ A widget with `compareTo` compares over a date window, and the runtime takes tha
 window from the widget's filter, the dashboard's `dateRange` filter included. The
 window is sent to the dataset query as a time dimension named after the filtered
 **field** (`dateRange.field`, `created_at` by default). A dataset query answers
-only declared dimensions, so that field name must also be the **name** of a date
-dimension the dataset declares:
+only declared dimensions, so when that field is a field of the dataset's own
+object, its name must also be the **name** of a date dimension the dataset
+declares:
 
 ```typescript
 dimensions: [
@@ -521,6 +522,18 @@ dimensions: [
 
 Otherwise the widget's query is refused with `400 INVALID_FIELD`, and the message
 names the remedy: declare a date dimension named after the date-range field.
+
+A date field of a related record — a dotted `relationship.field` such as
+`account.signed_at`, which a dashboard filter may otherwise name (see
+[Filtering on a Related Record's Field](#filtering-on-a-related-records-field)) —
+has no such remedy. A dimension name is a snake_case identifier with no dot, so
+no dimension can carry that key, and the dataset query refuses the comparison
+with `400 INVALID_FIELD`; the message says the comparison needs a date field of
+the dataset's own object that a declared date dimension names. Declaring a
+dimension over the path under another name does not help, because the widget
+still sends the window under the dotted field's name. A compare widget's date
+window must therefore be a field of the dataset's own object.
+
 No author-time rule checks a compare widget's date key yet.
 
 ### Filtering on a Related Record's Field
