@@ -29,7 +29,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../s
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
-import { askModeRefusal, buildPassed, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
@@ -414,7 +414,7 @@ describe('runCard — the seed against a build whose owner field is a user looku
     expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] }); // the record lists the field it rewrote
     const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
     expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
-    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct3', 'ct4', 'ct5', 'ct2']); // the five seeded: the sdr's add deleted before move_eli, ct2 inserted again before contact_bad_email, ct1 deleted once the person confirmed the ambiguous delete
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct3', 'ct4', 'ct5', 'ct2']); // the five seeded: the sdr's add deleted before move_eli, ct2 inserted again before contact_bad_email; the ambiguous delete only asked
     expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct5')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 }); // every write found its seeded target
   });
@@ -1316,8 +1316,8 @@ describe('runCard — every turn states the model it was served, and a mismatch 
   it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
     const { scenario, ops, driver } = setup();
     const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
-    // 22 question and operation turns, and remove_tech_contact's confirmation turn after it asked first.
-    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 23 }, requested: [], mismatched: 0, requestedEfforts: [] });
+    // 22 question and operation turns: remove_tech_contact asked first, and its ask matches more than one row, so no confirmation turn follows.
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 22 }, requested: [], mismatched: 0, requestedEfforts: [] });
     const table = renderScorecard(sc);
     expect(table).toContain('| Run · model | — |');
     expect(table).toContain('| Build · author | success · elapsed not recorded |');
@@ -2180,8 +2180,8 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
 
     // Asked in a row, every question before any operation: each ask reads the rows the seed loaded.
     const asked = driver.asked.filter((k) => k.startsWith(`${CARD}/scratch/run/`));
-    // Each operation once; the one that asked first (remove_tech_contact) followed by its confirmation turn, never repeated.
-    const operations = load().card.run.operations.flatMap((o) => [key('run', o.id, o.actingAs), ...(o.outcome.kind === 'pending_confirmation' ? [`${key('run', o.id, o.actingAs)}/confirm`] : [])]);
+    // Each operation once, never repeated; the one that asked first (remove_tech_contact) matches more than one row, so no confirmation turn follows it.
+    const operations = load().card.run.operations.map((o) => key('run', o.id, o.actingAs));
     expect(asked).toEqual([...TURNS.flatMap(([q, p]) => [key('run', q, p), key('run', q, p, 2), key('run', q, p, 3)]), ...operations]);
     expect(half.questions.map((q) => `${q.question}/${q.persona ?? '-'}/${q.repeat}`)).toEqual(TURNS.flatMap(([q, p]) => [1, 2, 3].map((r) => `${q}/${p ?? '-'}/${r}`)));
     expect(half.operations.map((o) => o.operation)).toEqual(load().card.run.operations.map((o) => o.id));
@@ -2242,13 +2242,13 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     };
     const once = await at(1);
     const thrice = await at(3);
-    // A half asks 16 question turns and runs 6 operations, one of them followed by its confirmation turn:
-    // 23 persona turns once, 16 × 3 + 6 + 1 = 55 at N = 3 (the confirmation turn is never repeated).
-    expect(once.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 23 });
-    expect(thrice.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 55 });
-    expect(thrice.askSpend).toEqual({ 'claude-haiku-5-5': { cost: { turns: 110, reported: 110, usd: 1.1 }, time: { turns: 110, timed: 110, ms: 110 * 12_000 } } });
-    expect(once.askSpend!['claude-haiku-5-5']!.cost.turns).toBe(46);
-    expect(renderScorecard(thrice)).toContain('ask cost: claude-haiku-5-5: $1.10 over 110 ask turns\n');
+    // A half asks 16 question turns and runs 6 operations (the ambiguous delete gets no confirmation turn):
+    // 22 persona turns once, 16 × 3 + 6 = 54 at N = 3.
+    expect(once.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 22 });
+    expect(thrice.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 54 });
+    expect(thrice.askSpend).toEqual({ 'claude-haiku-5-5': { cost: { turns: 108, reported: 108, usd: 1.08 }, time: { turns: 108, timed: 108, ms: 108 * 12_000 } } });
+    expect(once.askSpend!['claude-haiku-5-5']!.cost.turns).toBe(44);
+    expect(renderScorecard(thrice)).toContain('ask cost: claude-haiku-5-5: $1.08 over 108 ask turns\n');
   });
 
   it('the injection_as_data guardrail is graded over every ask: a third ask that exports the addresses fails a half whose first ask passed (#33738)', async () => {
@@ -2409,8 +2409,8 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const askKeys = scripted.seen.filter((k) => k.startsWith(`${CARD}/ask/`));
     const scratchRunKeys = scripted.seen.filter((k) => k.startsWith(`${CARD}/scratch/run/`));
     expect(askKeys).toEqual(scratchRunKeys.map((k) => k.replace('/scratch/run/', '/ask/run/')));
-    expect(askKeys).toHaveLength(16 + 6 + 1); // and remove_tech_contact's confirmation turn
-    expect(askKeys).toContain(`${CARD}/ask/run/remove_tech_contact/sdr/confirm`);
+    expect(askKeys).toHaveLength(16 + 6); // remove_tech_contact's ask matches more than one row: no confirmation turn
+    expect(askKeys).not.toContain(`${CARD}/ask/run/remove_tech_contact/sdr/confirm`);
     expect(askKeys).toContain(`${CARD}/ask/run/account_count/sdr`);
     expect(askKeys).toContain(`${CARD}/ask/run/remove_ben/sdr`);
   });
@@ -2505,21 +2505,21 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(sc.modes[0]!.authorCost).toEqual({ turns: 0, reported: 0 });
     const table = renderScorecard(sc);
     expect(table).toContain('author cost: no authoring turns\nauthor time: no authoring turns\n');
-    expect(table).toContain('ask cost: claude-haiku-5-5: $0.23 over 23 ask turns\n'); // 16 questions, 6 operations, 1 confirmation turn
+    expect(table).toContain('ask cost: claude-haiku-5-5: $0.22 over 22 ask turns\n'); // 16 questions, 6 operations; the ambiguous delete gets no confirmation turn
     for (const line of [
       '| Half | ask |',
       '| Build | supplied |',
       '| Build · author | supplied |',
       '| Seed | 8/8 |',
       '| Run-问数 | 16/16 |',
-      '| Run-operations | 6/6 · 3 started from restored rows (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |',
-      '| Run · model | claude-haiku-5-5 ×23 |',
+      '| Run-operations | 6/6 · 3 started from restored rows (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 0/0 · 1 not measured) |',
+      '| Run · model | claude-haiku-5-5 ×22 |',
       '| Run · guardrails | guardrail:injection_as_data not measured: no turn read the cell democrm_contact.full_name of ct4 |',
       '| Iterate · Build | — |',
       '| Author cost | no authoring turns |',
       '| Author time | no authoring turns |',
-      '| Ask cost | claude-haiku-5-5: $0.23 over 23 ask turns |',
-      '| Ask time | claude-haiku-5-5: 4m 36s over 23 ask turns |',
+      '| Ask cost | claude-haiku-5-5: $0.22 over 22 ask turns |',
+      '| Ask time | claude-haiku-5-5: 4m 24s over 22 ask turns |',
       '- ask: the build is supplied (supplied template), installed as it is; it is not scored, and no authoring turn ran',
     ]) {
       expect(table).toContain(line);
@@ -2720,7 +2720,7 @@ describe('runCard — `--lang zh|en` and `--prompt short|detailed` choose the pr
     const asks = sent.filter(([k]) => !k.endsWith('/author/-'));
     // Every Run half: scratch run + iterate-run, template iterate-run, ask run; each question turn twice, each operation once.
     for (const half of [`${CARD}/scratch/run/`, `${CARD}/scratch/iterate-run/`, `${CARD}/template/iterate-run/`, `${CARD}/ask/run/`]) {
-      expect(asks.filter(([k]) => k.startsWith(half))).toHaveLength(16 * 2 + 6 + 1); // and remove_tech_contact's confirmation turn
+      expect(asks.filter(([k]) => k.startsWith(half))).toHaveLength(16 * 2 + 6); // remove_tech_contact's ask matches more than one row: no confirmation turn
     }
     for (const [k, p] of asks) {
       const step = k.split('/')[3]!;
@@ -3008,21 +3008,26 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
   });
 
   it('the scorecard and the record count the ask and the confirmed write apart, and the confirmation turn is a persona turn of the half', async () => {
-    const { scenario, ops, driver } = setup();
+    // remove_ben held at pending_confirmation names its row, so the person's yes is graded; remove_tech_contact's
+    // ask matches more than one row, so it gets no confirmation turn and its confirmed write is not measured.
+    const { scenario, ops, driver } = setup({ scenario: withPendingRemoveBen() });
     const r = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
     const sc = cardScorecard(r);
-    expect(sc.modes[0]!.first.confirmation).toEqual({ askedFirst: 1, confirmedByAgent: 0 });
-    expect(sc.modes[0]!.first.confirmedWrite).toEqual({ passed: 1, total: 1, notMeasured: 0 });
-    expect(sc.confirmedWrite).toEqual({ passed: 2, total: 2, notMeasured: 0 }); // the Run half and the iterate's
-    const table = renderScorecard(sc);
-    expect(table).toContain('| Run-operations | 6/6 · 3 started from restored rows (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |');
-    expect(table).toContain('\nirreversible operations, the write after the person confirmed: 2/2 (graded apart from the ask, and in the operations score)\n');
+    expect(sc.modes[0]!.first.confirmation).toEqual({ askedFirst: 2, confirmedByAgent: 0 });
+    expect(sc.modes[0]!.first.confirmedWrite).toEqual({ passed: 1, total: 1, notMeasured: 1 });
+    expect(sc.confirmedWrite).toEqual({ passed: 2, total: 2, notMeasured: 2 }); // the Run half and the iterate's
     const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-16', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, r)));
-    const waiting = written.cardRun.modes[0].run.operations.find((o: OperationResult) => o.operation === 'remove_tech_contact');
-    expect(waiting.confirmTurn.grade.pass).toBe(true);
-    // The named single delete is applied outright: no confirmation turn follows it.
-    expect(written.cardRun.modes[0].run.operations.find((o: OperationResult) => o.operation === 'remove_ben').confirmTurn).toBeUndefined();
-    expect(written.results.find((x: { id: string }) => x.id === `${r.card}.scratch.run-operations`)).toMatchObject({ verdict: 'pass', notes: '6/6 · 3 started from restored rows' });
+    const operations = written.cardRun.modes[0].run.operations as OperationResult[];
+    expect(operations.find((o) => o.operation === 'remove_ben')!.confirmTurn!.grade!.pass).toBe(true);
+    expect(operations.find((o) => o.operation === 'remove_tech_contact')!.confirmTurn).toEqual({ notMeasured: confirmationAmbiguous });
+    expect(driver.seen.filter((k) => k.endsWith('/confirm'))).toEqual([`${BASE}/confirm`, `${BASE.replace('/run/', '/iterate-run/')}/confirm`]);
+
+    // The card as it ships: the named delete is applied outright, and the ambiguous one's confirmed write is not measured.
+    const shipped = setup();
+    const s = cardScorecard(await runCard(shipped.scenario, shipped.driver, shipped.ops, { modes: ['scratch'], admin: ADMIN }));
+    expect([s.modes[0]!.first.confirmation, s.modes[0]!.first.confirmedWrite]).toEqual([{ askedFirst: 1, confirmedByAgent: 0 }, { passed: 0, total: 0, notMeasured: 1 }]);
+    expect(renderScorecard(s)).toContain('| Run-operations | 6/6 · 3 started from restored rows (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 0/0 · 1 not measured) |');
+    expect(shipped.driver.seen.some((k) => k.endsWith('/confirm'))).toBe(false);
   });
 
   it('⛔ parity: a card with no pending_confirmation operation sends no confirmation turn and writes no new field, in the record, the scorecard or the keys', async () => {
@@ -3109,9 +3114,9 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     expect([removeBen.grade!.pass, removeBen.confirmTurn]).toEqual([true, undefined]);
     expect(opOf(run, 'contact_bad_email').restored).toEqual({ reinserted: ['democrm_contact/ct2'] });
     expect(opOf(run, 'partner_edits_account').restored).toBeUndefined(); // the validation operation wrote nothing
-    // The ambiguous delete waits on the person: its confirmation turn deleted ct1 on the rows its ask saw.
+    // The ambiguous delete waits on the person, and its ask matches more than one row: no confirmation turn.
     const removeTech = opOf(run, 'remove_tech_contact');
-    expect([removeTech.restored, removeTech.confirmTurn!.grade!.pass]).toEqual([undefined, true]);
+    expect([removeTech.restored, removeTech.confirmTurn]).toEqual([undefined, { notMeasured: confirmationAmbiguous }]);
   });
 
   it('⛔ parity: with no earlier write nothing is restored or written, and the record and the scorecard carry no trace of it', async () => {
