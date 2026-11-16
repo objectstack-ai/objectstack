@@ -88,6 +88,7 @@ import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
 import { getSharedDiscovery } from '@object-ui/data-objectstack';
 import { sharedGetJson } from '@object-ui/types';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
 
 /**
  * How long a true first visit will wait for the resolved locale before booting
@@ -140,28 +141,23 @@ async function fetchDiscovery(serverBase: string): Promise<unknown> {
  * `supported`, else the app's declared `appDefault`, else `undefined`.
  *
  * The browser's language is its top tag (`navigator.language`), the one tag
- * the server's own `Accept-Language` rung reads off a header. It matches an
- * entry of `supported` case-insensitively, or, failing that, an entry that is
- * its bare language (`en-US` matches `en`, the way an app spells a language it
- * ships for every region). Never the other way round: `zh` does not pick
- * `zh-CN` or `zh-TW`, because a bare language cannot tell which one the person
- * reads. The answer is the app's own spelling of the entry, so the server is
- * asked for exactly a language the app ships.
+ * the server's own `Accept-Language` rung reads off a header. "Lists it" is
+ * answered by the platform's one locale ladder, `resolveLocaleAmong`, the
+ * matcher that same server rung resolves a requested tag through: exact, then
+ * case-insensitive, then the platform table language through its read aliases
+ * (`ja` → `ja-JP`, `zh-TW` → `zh-Hant`), then base language (`en-US` → `en`),
+ * then variant (`es-MX` → `es-ES`, `zh` → `zh-CN`). The answer is the app's
+ * own spelling of the entry, so the server is asked for exactly a language the
+ * app ships, and the console agrees with what the server answered the raw
+ * browser header before the app default was stated.
  */
 export function pickPreferredLocale(
   browserTag: string | null | undefined,
   supported: readonly string[],
   appDefault: string | undefined,
 ): string | undefined {
-  const tag = typeof browserTag === 'string' ? browserTag.trim().toLowerCase() : '';
-  if (tag) {
-    const exact = supported.find((entry) => entry.toLowerCase() === tag);
-    if (exact) return exact;
-    const language = tag.split('-')[0];
-    const bare = supported.find((entry) => entry.toLowerCase() === language);
-    if (bare) return bare;
-  }
-  return appDefault;
+  const tag = typeof browserTag === 'string' ? browserTag.trim() : '';
+  return (tag ? resolveLocaleAmong(tag, supported) : undefined) ?? appDefault;
 }
 
 /** Discovery `locale`, read as the default and the supported list. */

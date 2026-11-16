@@ -309,11 +309,20 @@ describe('pickPreferredLocale', () => {
     expect(pickPreferredLocale('en-US', ['zh-CN', 'en'], 'zh-CN')).toBe('en');
   });
 
-  it('never widens a bare browser language to one of its regions', () => {
-    expect(pickPreferredLocale('zh', ['en', 'zh-CN', 'zh-TW'], 'en')).toBe('en');
+  it("reads the browser tag through the platform table's aliases, as the server's rung does", () => {
+    expect(pickPreferredLocale('ja', ['en', 'ja-JP'], 'en')).toBe('ja-JP');
+    expect(pickPreferredLocale('zh-TW', ['en', 'zh-Hant'], 'en')).toBe('zh-Hant');
+    expect(pickPreferredLocale('zh-HK', ['en', 'zh-Hant'], 'en')).toBe('zh-Hant');
   });
 
-  it('falls to the app default for an unsupported or absent browser language', () => {
+  it('expands a browser language to a variant the app ships', () => {
+    expect(pickPreferredLocale('es-MX', ['en', 'es-ES'], 'en')).toBe('es-ES');
+    expect(pickPreferredLocale('pt', ['en', 'pt-BR'], 'en')).toBe('pt-BR');
+    // The platform table reads a bare `zh` as Simplified, as the server answers that header.
+    expect(pickPreferredLocale('zh', ['en', 'zh-CN', 'zh-TW'], 'en')).toBe('zh-CN');
+  });
+
+  it('CONTROL: falls to the app default for an unsupported or absent browser language', () => {
     expect(pickPreferredLocale('fr', ['en', 'zh-CN'], 'en')).toBe('en');
     expect(pickPreferredLocale(undefined, ['en', 'zh-CN'], 'en')).toBe('en');
     expect(pickPreferredLocale('zh-CN', [], 'en')).toBe('en');
