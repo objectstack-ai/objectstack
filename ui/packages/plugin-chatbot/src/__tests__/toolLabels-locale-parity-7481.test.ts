@@ -21,16 +21,15 @@
  * be REMOVED from that list, which the last case here enforces, so the hand-held
  * half shrinks rather than growing into a second, permanent registry.
  *
- * ⭐ IT HAS SHRUNK TO NOTHING, AND THAT IS THE MECHANISM WORKING. The five names
- * this file was written around — `get_authoring_rules` (cloud#1837),
- * `load_tools`, `open_record`, `test_flow`, `toggle_flow` — are all in
- * `PLATFORM_TOOLS_BY_PACKAGE` as of `@objectstack/spec` 17.4.0, so
- * {@link AHEAD_OF_PIN} is empty and coverage is the registry alone
- * (objectui#8772 took the pin there). ⛔ The list is kept, not deleted: the next
- * tool the cloud registers ahead of a snapshot needs the same hatch, and
- * rebuilding it under pressure is how a permanent second registry starts.
- * {@link GRADUATED} keeps this file's guards honest while the list is empty —
- * see its note.
+ * ⭐ IT SHRINKS, AND THAT IS THE MECHANISM WORKING. The five names this file
+ * was written around — `get_authoring_rules` (cloud#1837), `load_tools`,
+ * `open_record`, `test_flow`, `toggle_flow` — are all in
+ * `PLATFORM_TOOLS_BY_PACKAGE` as of `@objectstack/spec` 17.4.0, so they left
+ * {@link AHEAD_OF_PIN} (objectui#8772 took the pin there). ⛔ The list is kept,
+ * not deleted: the next tool the cloud registers ahead of a snapshot needs the
+ * same hatch, and rebuilding it under pressure is how a permanent second
+ * registry starts. {@link GRADUATED} keeps this file's guards honest whenever
+ * the list is empty — see its note.
  *
  * The English pin that used to stand here — every `en` value byte-equal to the
  * title-caser's output — is retired with the rule it held (objectui#12724,
@@ -57,9 +56,11 @@ const REGISTRY = (
  * list yet — sourced from cloud `service-ai-studio`'s `plugin.ts` tool
  * definitions. Shrink this list on a pin bump — never grow it as a habit.
  *
- * EMPTY at this pin: every name it carried has graduated (see {@link GRADUATED}).
+ * `list_flow_runs` (the build agent's read-only reader of a flow's recent
+ * runs) waits on the registry entry that objectstack#34372 adds; that change
+ * moves it from here to {@link GRADUATED}.
  */
-const AHEAD_OF_PIN: readonly string[] = [];
+const AHEAD_OF_PIN: readonly string[] = ['list_flow_runs'];
 
 /**
  * The names that HAVE graduated from {@link AHEAD_OF_PIN} into the registry.

@@ -3984,8 +3984,8 @@ const ja = {
   //
   // objectui#7481 — the `tool.*` set covers every name in the registry above,
   // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
-  // before the pinned `@objectstack/spec` lists it (empty while the registry is
-  // current): a step label the user reads must not wait on a pin bump.
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
   // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
