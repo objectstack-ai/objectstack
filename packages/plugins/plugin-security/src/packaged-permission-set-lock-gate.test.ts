@@ -119,9 +119,13 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
           ? { name, _packageId: PKG }
           : undefined,
     },
-    async find(table: string, _opts: { where: Record<string, unknown> }) {
+    async find(table: string, opts2?: { where?: Record<string, unknown> }) {
       if (table === 'sys_metadata_history') return historyRows;
-      return Array.from(rows.values());
+      // The table's own rows, narrowed by the where's scalar equalities (a batch
+      // publish lists a package's drafts with one); operator clauses are not read.
+      const scalar = Object.entries(opts2?.where ?? {}).filter(([, v]) => v === null || typeof v !== 'object');
+      return Array.from(rows.values()).filter((r) => (r.__table ?? 'sys_metadata') === table
+        && scalar.every(([k, v]) => (r[k] ?? null) === v));
     },
     async findOne(table: string, opts2: { where: Record<string, unknown> }) {
       assertEngineFindOnePredicate(table, opts2);
@@ -490,7 +494,7 @@ describe('[#34226] a permission set is (package, name): the seal and the lock ju
       expect(promoted, 'hr\'s N is promoted before the refused write').toEqual([N]);
       expect(res.outcome).toBe('refused');
       expect(res.failed.find((f) => f.name === N)?.code, 'undone, not reported live').toBe('BATCH_ABORTED');
-      expect(metaRowsOf(engine).map((r) => `${String(r.name)}:${String(r.state)}`).sort()).toEqual([`${LATER}:draft`, `${N}:draft`]);
+      expect(metaRowsOf(engine).map((r) => `${String(r.name)}:${String(r.state)}`).sort()).toEqual([`${N}:draft`, `${LATER}:draft`]);
       expect({ metadata: draftOf(N)?.metadata, checksum: draftOf(N)?.checksum }).toEqual(draftBefore);
     }, 30_000);
 
