@@ -1860,8 +1860,8 @@ export interface IAutomationService {
      *
      * **Admission: the by-name start rule.** The rules that admit a start by
      * name (`flowStartRefusal`, `@objectstack/runtime`'s
-     * `flow-start-admission.ts`), judged on the supplied definition's `type`,
-     * `runAs` and `requiredPermissions` against the named user. There is no
+     * `flow-start-admission.ts`), judged on the supplied definition's `runAs`
+     * and `requiredPermissions` against the named user. There is no
      * system-principal bypass, since the run always names a user.
      *  - A definition declaring `runAs: 'system'` whose `type` starts on its own
      *    trigger (`autolaunched`, `record_change`, `schedule`) is admitted to a
