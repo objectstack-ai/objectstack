@@ -583,9 +583,13 @@ const byCount = (dir: 1 | -1) => [...DAY_ROWS_BY_PRIORITY].sort((a, b) => dir * 
 // empty day sorts last ascending and first descending, as Postgres does.
 const byDay = (dir: 1 | -1) =>
   [...DAY_ROWS_BY_PRIORITY].sort((a, b) => {
-    const ka = a.created_at ?? '￿';
-    const kb = b.created_at ?? '￿';
-    if (ka !== kb) return dir * (ka < kb ? -1 : 1);
+    const ka = a.created_at;
+    const kb = b.created_at;
+    if (ka !== kb) {
+      if (ka === null) return dir;
+      if (kb === null) return -dir;
+      return dir * (ka < kb ? -1 : 1);
+    }
     return STORED_PRIORITY[a.priority] < STORED_PRIORITY[b.priority] ? -1 : 1;
   });
 
