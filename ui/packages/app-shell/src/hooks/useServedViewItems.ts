@@ -177,9 +177,10 @@ export function useServedViewItems(read = true): ServedViewReads {
 /**
  * The objects a package-less app's entries open or require, in its
  * `navigation` and every `areas[].navigation`, once each (objectstack#29416).
- * objectstack#34244 — a required object only once the presence read has
- * answered it registered (`servedRequiredObjectNames`, the route's own ask):
- * one the host does not register is never asked by name.
+ * objectstack#34244 — a required object (an entry that opens the object it
+ * requires among them) only once the presence read has answered it registered
+ * (`servedRequiredObjectNames`, the route's own ask): one the host does not
+ * register is never asked by name.
  */
 function packagelessAppObjectNames(
   app: Record<string, unknown>,
@@ -187,8 +188,9 @@ function packagelessAppObjectNames(
 ): string[] {
   const pick = (item: Record<string, unknown>) => (item.type === 'object' ? item.objectName : undefined);
   const trees = [app.navigation, ...(Array.isArray(app.areas) ? app.areas : []).map((area) => (isRecord(area) ? area.navigation : undefined))];
-  const names = [...trees.flatMap((tree) => navigationNames(tree, pick)), ...servedRequiredObjectNames(readObjectScope, app)];
-  return [...new Set(names)];
+  const required = new Set(trees.flatMap((tree) => navigationNames(tree, (item) => item.requiresObject)));
+  const opened = trees.flatMap((tree) => navigationNames(tree, pick)).filter((name) => !required.has(name));
+  return [...new Set([...opened, ...servedRequiredObjectNames(readObjectScope, app)])];
 }
 
 /**

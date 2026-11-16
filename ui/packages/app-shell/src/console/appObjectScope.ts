@@ -580,6 +580,20 @@ export function appRequiredObjectNames(app: Record<string, unknown> | undefined)
   ];
 }
 
+/**
+ * The objects the app's navigation opens, which the command palette reads
+ * while it is open. objectstack#34244 — an entry that requires the object it
+ * opens is gated on it, so that object is asked by name only once the presence
+ * read has answered it served ({@link servedRequiredObjectNames}).
+ */
+function paletteObjectNames(readObjectScope: ReadObjectScope, app: Record<string, unknown> | undefined): string[] {
+  const opened = navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined));
+  const required = new Set(appRequiredObjectNames(app));
+  if (!opened.some((name) => required.has(name))) return opened;
+  const served = new Set(servedRequiredObjectNames(readObjectScope, app));
+  return opened.filter((name) => !required.has(name) || served.has(name));
+}
+
 export interface AppObjectScopeRead {
   /** The route reads a scope when its app names a package: an app route on the scope list, no record form overlay. */
   candidate: boolean;
@@ -649,7 +663,7 @@ export function readAppObjectScope(
     }
     const extra = servedRequiredObjectNames(readObjectScope, app);
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readDashboardObjectScope(readObjectScope, app, dashboardRead.dashboard, extra), routeObjectRefusal: null };
   }
@@ -682,7 +696,7 @@ export function readAppObjectScope(
     }
     const extra = [route.objectName, ...servedRequiredObjectNames(readObjectScope, app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, page, extra), routeObjectRefusal: null };
   }
@@ -699,7 +713,7 @@ export function readAppObjectScope(
     }
     const extra = servedRequiredObjectNames(readObjectScope, app);
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, pageRead.page, extra), routeObjectRefusal: null };
   }
@@ -769,7 +783,7 @@ function readObjectRouteNames(
   if (objectName) names.push(objectName);
   names.push(...relatedNames);
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-    names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+    names.push(...paletteObjectNames(readObjectScope, app));
   }
   const asked = read(names);
   const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;

@@ -48,7 +48,13 @@ function makeAdapter(calls: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : [];
           const items = options?.packageId ? all.filter((o) => o._packageId === options.packageId) : all;
@@ -106,7 +112,9 @@ describe('package-less app: the chrome readers read the names-only scope (object
 
     expect(read().presence.presence).toBe('present');
     expect(objectCalls(calls)).not.toContain('object');
-    expect([...objectCalls(calls)].sort()).toEqual(['object/note', 'object/sys_activity']);
+    // objectstack#34244 — `note` is the entry's `requiresObject`: asked by name
+    // once the `?names=` presence read has answered it served.
+    expect([...objectCalls(calls)].sort()).toEqual(['object/note', 'object/sys_activity', 'object?names=note'].sort());
   });
 
   it('(a) an object the deployment does not have reads absent, by name, with no whole-registry read', async () => {

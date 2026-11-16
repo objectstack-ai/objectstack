@@ -438,24 +438,24 @@ describe('objectstack#34244 — a packaged app asks an off-package lookup target
   const PKG_APPS = [{ name: 'crm', _packageId: CRM, navigation: [entry('crm_account'), entry('sys_user'), entry('cloud_billing')] }];
   const ACCOUNTS_PAGE = { name: 'accounts_home', object: 'crm_account' };
 
-  function RouteProbe({ subPath }: { subPath: string }) {
+  function RouteProbe({ subPath, search = '' }: { subPath: string; search?: string }) {
     const { apps, readObjectScope } = useMetadata();
     const app = apps.find((a: any) => a?.name === 'crm');
     const read =
       app && readObjectScope
-        ? readAppObjectScope(readObjectScope, app, subPath, '', [], () => ({ page: ACCOUNTS_PAGE, settled: true }))
+        ? readAppObjectScope(readObjectScope, app, subPath, search, [], () => ({ page: ACCOUNTS_PAGE, settled: true }))
         : undefined;
     const names = ((read?.scope?.objects ?? []) as any[]).map((o) => o?.name).sort().join(',');
     return <div data-testid="scope">{names}</div>;
   }
 
-  function mountRoute(subPath: string) {
+  function mountRoute(subPath: string, search = '') {
     sessionStorage.clear();
     const calls: string[] = [];
     const view = render(
       <MetadataProvider adapter={makeAdapter(calls, PKG_APPS, PKG_OBJECTS)}>
         <MemoryRouter initialEntries={['/']}>
-          <RouteProbe subPath={subPath} />
+          <RouteProbe subPath={subPath} search={search} />
         </MemoryRouter>
       </MetadataProvider>,
     );
@@ -480,6 +480,14 @@ describe('objectstack#34244 — a packaged app asks an off-package lookup target
       'object?names=sys_user,cloud_billing',
       'object?names=sys_approval_request',
     ]);
+  });
+
+  it.each(ARMS)('with the command palette open, %s asks no entry object it requires and the host lacks by name', async (_arm, subPath) => {
+    const { calls, scope } = mountRoute(subPath, '?palette=1');
+    await waitFor(() => expect(scope()).toBe('crm_account,sys_user'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).not.toContain('object/cloud_billing');
+    expect(calls).toContain('object/sys_user');
   });
 
   it.each(ARMS)('CONTROL: on %s a registered off-package target and requiresObject still resolve by name', async (_arm, subPath) => {
