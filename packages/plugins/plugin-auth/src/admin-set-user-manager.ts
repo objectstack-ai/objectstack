@@ -304,10 +304,22 @@ async function directoryOwnsManagerOf(engine: SetUserManagerEngine, user: UserRo
   return String(user.source ?? '') === 'idp_provisioned' && await heldByScimDirectory(engine, String(user.id));
 }
 
+/**
+ * {@link directoryOwnsManagerOf}, by id, answering with the user's row (its
+ * `manager_id` included) when the directory owns it and `null` otherwise, a
+ * user that does not exist among them: the predicate and the column in one read.
+ */
+export async function directoryOwnedUser(
+  engine: SetUserManagerEngine,
+  userId: string,
+): Promise<{ readonly manager_id?: unknown } | null> {
+  const user = await findUser(engine, userId);
+  return user && await directoryOwnsManagerOf(engine, user) ? user : null;
+}
+
 /** {@link directoryOwnsManagerOf}, by id: `false` for a user that does not exist. */
 export async function directoryOwnsUserManager(engine: SetUserManagerEngine, userId: string): Promise<boolean> {
-  const user = await findUser(engine, userId);
-  return user ? directoryOwnsManagerOf(engine, user) : false;
+  return (await directoryOwnedUser(engine, userId)) !== null;
 }
 
 /**

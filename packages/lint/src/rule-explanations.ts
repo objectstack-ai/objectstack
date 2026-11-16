@@ -3338,7 +3338,7 @@ const MANAGER_ONLY_ROUTES =
   'profile: the Enterprise User \'manager\' attribute, whose value is the manager\'s SCIM resource ' +
   'id, is written onto the column on a SCIM create, replace or patch that names the attribute, ' +
   'through those same refusals. A write that does not name it leaves the column as it is, and an ' +
-  'id that names no user the connection provisioned is served and leaves the column unchanged. ' +
+  'id that names no existing user the connection provisioned is served and leaves the column unchanged. ' +
   'Where a SCIM directory holds an identity, the admin operation refuses it, the import\'s ' +
   'manager_id column included, leaving that directory the one surface that authors its manager. Any other directory sync ' +
   'populates it only through a provisioning path your own deployment supplies. An identity that ' +

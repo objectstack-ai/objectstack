@@ -104,7 +104,7 @@ create, replace or patch that names the attribute, through the same refusals (ea
 SCIM `400 invalidValue`). It is written only for an active user the directory holds, and only from
 the connection that provisioned that user's profile. A write that does not name the attribute
 leaves the column as it is; removing the attribute, or a replace without it, clears the column. An
-id that names no user the connection provisioned does not fail the write: the user is saved, the
+id that names no existing user the connection provisioned does not fail the write: the user is saved, the
 column stays as it was, and the server logs a warning for the operator and records a
 `scim_manager_unresolved` row in the audit log, naming the connection, the user and the reference, once per
 connection per ten minutes. Where a SCIM directory holds an identity (it carries `source: 'idp_provisioned'` and

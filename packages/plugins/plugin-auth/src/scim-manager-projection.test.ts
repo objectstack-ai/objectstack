@@ -477,6 +477,41 @@ describe('[#33918] SCIM manager projection: an unresolvable reference leaves one
     expect(h.unresolvedWarns()).toHaveLength(2);
   });
 
+  it('a connection\'s own User whose platform user is gone names no User: a create and a replace are served, one warn and one row each', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const ex = await provision(h, 'ex');
+    const emp2 = await provision(h, 'emp2', { value: ex.scimId });
+    expect(await managerOf(h, emp2.userId)).toBe(ex.userId);
+    // The vendor's scimUser row stays and its sys_user goes: removed at the
+    // driver, past the engine's restrict, the way an out-of-band delete lands.
+    const driver = (h.engine as unknown as { getDriver: (object: string) => { delete: (object: string, id: string) => Promise<unknown> } })
+      .getDriver('sys_user');
+    await driver.delete('sys_user', boss.userId);
+    expect(await h.engine.find('sys_user', { where: { id: boss.userId }, fields: ['id'] }, SYSTEM), 'the boss row is gone').toEqual([]);
+
+    const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp1', { value: boss.scimId })));
+    expect(res.status, await res.clone().text()).toBe(201);
+    const emp1 = await userIdOf(h, 'emp1@acme.com');
+    expect(await managerOf(h, emp1)).toBeNull();
+    expect(h.unresolvedWarns()).toHaveLength(1);
+    expect(await h.unresolvedEvents()).toEqual([
+      { connectionId: CONNECTION, organizationId: ORG, userId: emp1, referenceKind: 'id', reference: boss.scimId },
+    ]);
+
+    // A fresh window, so the replace's warn and row are its own.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
+    const replaced = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp2.scimId}`, userBody('emp2', { value: boss.scimId })));
+    expect(replaced.status, await replaced.clone().text()).toBe(200);
+    expect(await managerOf(h, emp2.userId)).toBe(ex.userId);
+    expect(h.unresolvedWarns()).toHaveLength(2);
+    const events = await h.unresolvedEvents();
+    expect(events).toHaveLength(2);
+    expect(events[1]).toEqual({
+      connectionId: CONNECTION, organizationId: ORG, userId: emp2.userId, referenceKind: 'id', reference: boss.scimId,
+    });
+  });
+
   it('no row on the served-unchanged paths: a resolved manager re-sent, a write that names none, a dangling one left alone', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss');

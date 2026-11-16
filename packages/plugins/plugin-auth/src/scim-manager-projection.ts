@@ -75,7 +75,8 @@
  *
  * Maintainer ruling record 6909383114: a reference that cannot be resolved —
  * an unknown id, an `externalId`-style value, another connection's id, a
- * `$ref` with no readable `/Users/{id}` segment — does not refuse the user
+ * `$ref` with no readable `/Users/{id}` segment, this connection's own User
+ * whose platform user no longer exists — does not refuse the user
  * write. The write lands, `manager_id` stays as it was, and an operator warn
  * names the connection, bounded per connection
  * ({@link SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW} per window, with the count
@@ -101,7 +102,7 @@
 
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 import {
-  directoryOwnsUserManager,
+  directoryOwnedUser,
   screenUserManagerLink,
   writeUserManagerLink,
   type SetUserManagerDeps,
@@ -116,8 +117,6 @@ import { ScimRefusalAuditBound } from './scim-refusal-audit.js';
 export const SCIM_ENTERPRISE_USER_SCHEMA = 'urn:ietf:params:scim:schemas:extension:enterprise:2.0:User';
 
 const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error';
-
-const SYSTEM_READ_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /** Operator warns one connection gets per 10-minute window for unresolvable references. */
 export const SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW = 1;
@@ -366,8 +365,10 @@ export function createScimManagerProjection(deps: ScimManagerProjectionDeps): Sc
         `[auth] SCIM manager projection: no data engine to write sys_user.manager_id for user '${state.userId}'`,
       );
     }
-    // The one ownership predicate the admin endpoint's refusal 5 reads.
-    if (!(await directoryOwnsUserManager(engine, state.userId))) return;
+    // The one ownership predicate the admin endpoint's refusal 5 reads; the
+    // row it answers with carries the column's current value.
+    const owned = await directoryOwnedUser(engine, state.userId);
+    if (!owned) return;
 
     const reference = readScimManagerReference(source.serializedAttributes);
     let managerId: string | null | undefined = null; // `undefined` = unresolvable
@@ -384,21 +385,23 @@ export function createScimManagerProjection(deps: ScimManagerProjectionDeps): Sc
       managerId = managerSource && text(managerSource.userId) ? text(managerSource.userId) : undefined;
     }
 
-    const rows = await engine.find('sys_user', {
-      where: { id: state.userId },
-      fields: ['id', 'manager_id'],
-      limit: 1,
-      context: SYSTEM_READ_CTX,
-    });
-    const current = text((Array.isArray(rows) ? (rows[0] as { manager_id?: unknown } | undefined) : undefined)?.manager_id);
+    const current = text(owned.manager_id);
     if (managerId !== undefined && current === (managerId ?? '')) return;
+    const named = reference as Exclude<ScimManagerReference, { kind: 'none' }>;
     if (managerId === undefined) {
-      warnUnresolved(scope, connectionId, state.userId, reference as Exclude<ScimManagerReference, { kind: 'none' }>);
+      warnUnresolved(scope, connectionId, state.userId, named);
       return;
     }
 
     if (managerId !== null) {
       const refusal = await screenUserManagerLink(deps, engine, state.userId, managerId);
+      // A connection's own SCIM row whose user no longer exists names no User
+      // either: served, like any unresolvable reference (ruling 6909383114).
+      // Only the four structural refusals answer 400.
+      if (refusal?.reason === 'manager_not_found') {
+        warnUnresolved(scope, connectionId, state.userId, named);
+        return;
+      }
       if (refusal) throw await scimRefusalError(refusal);
     }
 
