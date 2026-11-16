@@ -18,6 +18,7 @@ export const ar: TranslationData = {
         grp_account_developer: { label: 'المطوّر' },
         grp_account_ai_assistant: { label: 'مساعد الذكاء الاصطناعي' },
         nav_account_profile: { label: 'الملف الشخصي' },
+        nav_account_mobile_app: { label: 'تطبيق الجوال' },
         nav_account_notifications: { label: 'الإشعارات' },
         nav_account_approvals: { label: 'بانتظار موافقتي' },
         nav_account_memberships: { label: 'مؤسساتي' },

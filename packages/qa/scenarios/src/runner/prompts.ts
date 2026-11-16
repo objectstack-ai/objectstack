@@ -521,6 +521,42 @@ export function operationPrompt(card: Card, operationId: string, choice?: Prompt
   return `${text(op.ask, choice, `run.operations[${op.id}].ask`)}${todayOf(card)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
 }
 
+/**
+ * The person's confirmation, in each language a card's text is rendered in:
+ * the person's own words, so it is sent in the language the operation's ask
+ * was rendered in ({@link confirmPrompt}).
+ */
+export const CONFIRMATION_WORDS: Readonly<Record<PromptLang, string>> = {
+  en: 'Yes, I confirm. Go ahead.',
+  zh: '是的，我确认，请执行。',
+};
+
+/**
+ * The second turn of a `pending_confirmation` operation, sent after the agent
+ * asked first and wrote nothing: no driver resumes a session, so the turn is a
+ * fresh one whose prompt carries the first turn's exchange (the operation's
+ * ask in the language {@link operationPrompt} rendered it, and the agent's
+ * reply, verbatim), then the person's confirmation ({@link CONFIRMATION_WORDS}),
+ * then whom the agent acts for and the card's today, as the first turn did. The
+ * confirmation is in the language the ask was rendered in: `--lang`'s when one
+ * is chosen, else English when the card has the ask in English, else Chinese.
+ * The runner's own words around them stay in English, as in every prompt.
+ */
+export function confirmPrompt(card: Card, operationId: string, firstReply: string, choice?: PromptChoice): string {
+  const op = card.run.operations.find((o) => o.id === operationId)!;
+  const persona = card.run.personas.find((p) => p.id === op.actingAs);
+  const lang: PromptLang = choice?.lang ?? (op.ask.en !== undefined ? 'en' : 'zh');
+  const quote = (t: string) => t.trim().split('\n').map((l) => `> ${l}`).join('\n');
+  const reply = firstReply.trim() === '' ? '(no reply)' : firstReply;
+  return (
+    `This turn continues an earlier exchange with the person you act for.\n\n` +
+    `They asked:\n\n${quote(text(op.ask, choice, `run.operations[${op.id}].ask`))}\n\n` +
+    `You replied:\n\n${quote(reply)}\n\n` +
+    `They now answer:\n\n${quote(CONFIRMATION_WORDS[lang])}\n\n` +
+    `You act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.${todayOf(card)}`
+  );
+}
+
 /** `os verify`'s opt-in proofs, chosen from the card's capability tags. */
 export function verifyFlags(card: Card): string[] {
   const flags = new Set<string>();

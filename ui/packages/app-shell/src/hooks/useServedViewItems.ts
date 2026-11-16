@@ -61,7 +61,7 @@
 
 import { useMetadata } from '@object-ui/react';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
-import { navigationNames } from '../console/appObjectScope.js';
+import { navigationNames, servedRequiredObjectNames } from '../console/appObjectScope.js';
 
 /** One identity for "nothing was served", so a dependency list on it holds. */
 const NONE_SERVED: readonly unknown[] = Object.freeze([]);
@@ -158,7 +158,7 @@ export function useServedViewItems(read = true): ServedViewReads {
     objects = scope.served;
     views = scope.views;
   } else if (scoped && isPackagelessApp(app)) {
-    const names = packagelessAppObjectNames(app);
+    const names = packagelessAppObjectNames(app, metadata.readObjectScope!);
     if (names.length > 0) {
       const scope = metadata.readObjectScope!({ names }) as { served: unknown; views?: unknown };
       objects = scope.served;
@@ -177,15 +177,20 @@ export function useServedViewItems(read = true): ServedViewReads {
 /**
  * The objects a package-less app's entries open or require, in its
  * `navigation` and every `areas[].navigation`, once each (objectstack#29416).
+ * objectstack#34244 — a required object (an entry that opens the object it
+ * requires among them) only once the presence read has answered it registered
+ * (`servedRequiredObjectNames`, the route's own ask): one the host does not
+ * register is never asked by name.
  */
-function packagelessAppObjectNames(app: Record<string, unknown>): string[] {
+function packagelessAppObjectNames(
+  app: Record<string, unknown>,
+  readObjectScope: Parameters<typeof servedRequiredObjectNames>[0],
+): string[] {
   const pick = (item: Record<string, unknown>) => (item.type === 'object' ? item.objectName : undefined);
   const trees = [app.navigation, ...(Array.isArray(app.areas) ? app.areas : []).map((area) => (isRecord(area) ? area.navigation : undefined))];
-  const names = trees.flatMap((tree) => [
-    ...navigationNames(tree, pick),
-    ...navigationNames(tree, (item) => item.requiresObject),
-  ]);
-  return [...new Set(names)];
+  const required = new Set(trees.flatMap((tree) => navigationNames(tree, (item) => item.requiresObject)));
+  const opened = trees.flatMap((tree) => navigationNames(tree, pick)).filter((name) => !required.has(name));
+  return [...new Set([...opened, ...servedRequiredObjectNames(readObjectScope, app)])];
 }
 
 /**
