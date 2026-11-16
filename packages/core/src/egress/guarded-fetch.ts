@@ -2,7 +2,7 @@
 
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP, type Socket } from 'node:net';
-import { Agent, buildConnector } from 'undici';
+import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 import { createEnvEgressPolicy, EGRESS_ALLOWED_TARGETS_ENV, type EgressContext, type EgressDecision, type EgressPolicy } from './policy.js';
 
 /**
@@ -15,31 +15,63 @@ import { createEnvEgressPolicy, EGRESS_ALLOWED_TARGETS_ENV, type EgressContext, 
  * the next on a connect error, so a target that answers on only some of its
  * addresses is still reached, as the bare fetch reached it.
  *
- * The request itself is `globalThis.fetch` with this connector's dispatcher:
- * never a bare fetch. A refused connect rejects with a `fetch failed` whose
- * `cause` is an {@link EgressRefusedError}; {@link findEgressRefusal} reads it.
+ * The request itself is undici's own `fetch` with this connector's
+ * dispatcher — never the process's global fetch, whose honouring of a
+ * dispatcher is a property of the host runtime. Enforcement is proven, not
+ * assumed: every guard probes, before its first send, that a request made
+ * this way is routed through its connector, and where that cannot be proven
+ * the install refuses and so does every send ({@link EgressGuard.ready}).
+ * Every send also checks that the connection it answered over was judged.
+ * This needs a Node.js runtime (`undici`, `node:dns`, `node:net`).
+ *
+ * A refused connect rejects with a `fetch failed` whose `cause` is an
+ * {@link EgressRefusedError}; {@link findEgressRefusal} reads it.
  */
 
 /** The error code a refused connect carries. */
 export const EGRESS_REFUSED = 'EGRESS_REFUSED';
 
 /**
- * A connect the policy refused. `message` is tenant-safe: it names the
- * requested host and the rule, never the resolved address or its class — those
- * are in {@link EgressRefusedError.decision}'s privileged `reason`.
+ * The text a refused request reads, the same whatever the cause — a target
+ * that is not public, one that does not resolve, or a guard that cannot prove
+ * it is enforced — so it never tells one apart from another.
+ */
+export function egressRefusalText(hostname: string): string {
+    return (
+        `${EGRESS_REFUSED}: the request to ${hostname} was not sent — outbound requests reach only a host whose ` +
+        `every address is public, or a target the operator's egress allowlist names ` +
+        `(${EGRESS_ALLOWED_TARGETS_ENV}; link-local and cloud metadata addresses cannot be listed)`
+    );
+}
+
+/**
+ * A request the guard did not send. `message` is tenant-safe and the same
+ * for every cause ({@link egressRefusalText}); the resolved address, its
+ * class and the cause are in {@link EgressRefusedError.decision}'s privileged
+ * `reason`. `unresolved` marks a host name that did not resolve, which a
+ * caller may retry: only the verdict on a resolved address is final.
  */
 export class EgressRefusedError extends Error {
     readonly code = EGRESS_REFUSED;
     constructor(
         readonly hostname: string,
         readonly decision: EgressDecision,
+        readonly unresolved: boolean = false,
     ) {
-        super(
-            `${EGRESS_REFUSED}: the request to ${hostname} was not sent — outbound requests reach only public ` +
-                `addresses, and this target is not public and not on the operator's egress allowlist ` +
-                `(${EGRESS_ALLOWED_TARGETS_ENV}; link-local and cloud metadata addresses cannot be listed)`,
-        );
+        super(egressRefusalText(hostname));
         this.name = 'EgressRefusedError';
+    }
+}
+
+/** The guard could not prove that a request it sends is routed through its connector: it refuses to install. */
+export class EgressGuardUnprovenError extends Error {
+    constructor(detail: string) {
+        super(
+            `the outbound-request guard cannot install: this runtime did not route a probe request through the ` +
+                `guard's connector (${detail}), so webhook deliveries and flow http requests could leave unjudged. ` +
+                `They need a Node.js runtime in which undici's fetch honours its dispatcher.`,
+        );
+        this.name = 'EgressGuardUnprovenError';
     }
 }
 
@@ -96,6 +128,13 @@ export interface EgressGuard {
     judgeUrl(url: string, ctx: EgressContext): Promise<{ allow: boolean; unresolved?: boolean; decision?: EgressDecision }>;
     /** The boot line's text. */
     describe(): string;
+    /**
+     * Settles once the guard has proven that a request it sends is routed
+     * through its connector; rejects with {@link EgressGuardUnprovenError}
+     * when it cannot. Every send awaits the same proof and is refused while
+     * it is not proven.
+     */
+    ready(): Promise<void>;
 }
 
 function stripBrackets(host: string): string {
@@ -116,7 +155,11 @@ async function judge(
     ctx: EgressContext,
 ): Promise<EgressDecision> {
     try {
-        return await policy.canConnect({ address, hostname, port }, ctx);
+        const verdict = await policy.canConnect({ address, hostname, port }, ctx);
+        if (!verdict || typeof verdict.allow !== 'boolean') {
+            return { allow: false, reason: 'the egress policy returned no verdict — refused' };
+        }
+        return verdict;
     } catch (err) {
         return { allow: false, reason: `the egress policy threw (${(err as Error)?.message ?? String(err)}) — refused` };
     }
@@ -124,6 +167,57 @@ async function judge(
 
 type ConnectOptions = Parameters<ReturnType<typeof buildConnector>>[0];
 type ConnectCallback = Parameters<ReturnType<typeof buildConnector>>[1];
+
+/** The probe's target: `.invalid` never resolves (RFC 6761), so even a runtime that ignores the dispatcher sends it nowhere. */
+const PROBE_URL = 'http://egress-guard-probe.invalid/';
+/** Longest wait for the probe to settle. */
+const PROBE_TIMEOUT_MS = 5_000;
+
+function causeChainHas(err: unknown, target: unknown): boolean {
+    let current: unknown = err;
+    for (let depth = 0; depth < 6 && current; depth++) {
+        if (current === target) return true;
+        current = (current as { cause?: unknown }).cause;
+    }
+    return false;
+}
+
+/**
+ * Prove that a request made the way the guard makes it is routed through the
+ * guard's connector: send one to {@link PROBE_URL} through a connector that
+ * records the call and fails it with a sentinel. Proven only when the
+ * connector was called and the sentinel is what the fetch failed with.
+ */
+async function proveConnectorRouting(): Promise<void> {
+    let consulted = false;
+    const sentinel = new Error('egress probe: connector consulted');
+    const agent = new Agent({
+        connect: (_opts: ConnectOptions, callback: ConnectCallback) => {
+            consulted = true;
+            callback(sentinel, null);
+        },
+    });
+    let outcome: unknown;
+    try {
+        outcome = await undiciFetch(PROBE_URL, { dispatcher: agent, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    } catch (err) {
+        outcome = err;
+    } finally {
+        void agent.destroy().catch(() => undefined);
+    }
+    if (consulted && causeChainHas(outcome, sentinel)) return;
+    throw new EgressGuardUnprovenError(
+        consulted ? 'the connector was called but the request did not fail with its answer' : 'the connector was never called',
+    );
+}
+
+function hostnameOf(url: string): string {
+    try {
+        return stripBrackets(new URL(url).hostname);
+    } catch {
+        return url;
+    }
+}
 
 /**
  * Build the guard. Throws when the policy cannot be built (a malformed
@@ -137,18 +231,22 @@ export function createEgressGuard(options: EgressGuardOptions = {}): EgressGuard
     const base = buildConnector({});
     // Prove the dispatcher constructs here, at install, rather than on the first send.
     void new Agent({ connect: base }).close();
+    // Prove the requests this guard sends are routed through its connector.
+    // Observed by ready() and by every send; never left unhandled.
+    const proof = proveConnectorRouting();
+    proof.catch(() => undefined);
 
-    const refuse = (hostname: string, decision: EgressDecision, ctx: EgressContext): EgressRefusedError => {
+    const refuse = (hostname: string, decision: EgressDecision, ctx: EgressContext, unresolved = false): EgressRefusedError => {
         logger?.warn(`[egress] refused an outbound connect to ${hostname}: ${decision.reason ?? 'denied by the egress policy'}`, {
             source: ctx.source,
             organizationId: ctx.organizationId,
             hostname,
             denyClass: decision.denyClass,
         });
-        return new EgressRefusedError(hostname, decision);
+        return new EgressRefusedError(hostname, decision, unresolved);
     };
 
-    const connectorFor = (ctx: EgressContext) => (opts: ConnectOptions, callback: ConnectCallback): void => {
+    const connectorFor = (ctx: EgressContext, onJudged: () => void) => (opts: ConnectOptions, callback: ConnectCallback): void => {
         const hostname = stripBrackets(opts.hostname);
         const port = opts.port ? Number(opts.port) : undefined;
         const servername = opts.servername || (isIP(hostname) ? undefined : hostname);
@@ -172,15 +270,25 @@ export function createEgressGuard(options: EgressGuardOptions = {}): EgressGuard
                     return;
                 }
                 void judge(policy, remote, hostname, port, ctx).then((decision) => {
-                    if (decision.allow) return callback(null, socket);
+                    if (decision.allow) {
+                        onJudged();
+                        return callback(null, socket);
+                    }
                     socket.destroy();
                     callback(refuse(hostname, decision, ctx), null);
                 });
             });
         };
         void (async () => {
-            const addresses = await resolveAll(hostname, resolve);
-            if (addresses.length === 0) throw new Error(`egress: ${hostname} resolved to no address`);
+            // A host name that does not resolve reads the same refusal text as
+            // one that is refused, marked retriable: the author cannot tell them apart.
+            let addresses: string[];
+            try {
+                addresses = await resolveAll(hostname, resolve);
+            } catch (err) {
+                throw refuse(hostname, { allow: false, reason: `${hostname} did not resolve (${(err as Error)?.message ?? String(err)})` }, ctx, true);
+            }
+            if (addresses.length === 0) throw refuse(hostname, { allow: false, reason: `${hostname} resolved to no address` }, ctx, true);
             for (const address of addresses) {
                 const decision = await judge(policy, address, hostname, port, ctx);
                 if (!decision.allow) throw refuse(hostname, decision, ctx);
@@ -194,16 +302,28 @@ export function createEgressGuard(options: EgressGuardOptions = {}): EgressGuard
 
     return {
         policy,
+        ready: () => proof,
         describe: () =>
             `[egress] outbound guard active: webhook and flow http requests reach only public addresses` +
             ` (${policy.describe?.() ?? 'host-provided egress policy'}; link-local and cloud metadata addresses are never reachable)`,
         async fetch(url, init, ctx) {
-            const agent = new Agent({ connect: connectorFor(ctx) });
             try {
-                const response = await globalThis.fetch(url, { ...init, dispatcher: agent } as RequestInit);
+                await proof;
+            } catch (err) {
+                throw refuse(hostnameOf(url), { allow: false, reason: (err as Error).message }, ctx);
+            }
+            let judged = false;
+            const agent = new Agent({ connect: connectorFor(ctx, () => { judged = true; }) });
+            try {
+                const response = await undiciFetch(url, { ...init, dispatcher: agent });
+                if (!judged) {
+                    // Never hand back an answer from a connection the policy did not judge.
+                    void agent.destroy().catch(() => undefined);
+                    throw refuse(hostnameOf(url), { allow: false, reason: 'the response arrived over a connection the guard never judged' }, ctx);
+                }
                 // Graceful: the pool closes once the body the caller reads has drained.
                 void agent.close().catch(() => undefined);
-                return response;
+                return response as unknown as Response;
             } catch (err) {
                 void agent.destroy().catch(() => undefined);
                 throw err;
@@ -255,13 +375,16 @@ const announced = new WeakSet<EgressPolicy>();
 
 /**
  * Resolve the guard a plugin boots with — the host's policy when it passed
- * one, else the default — and print the boot line once per policy. Throws (and
- * so fails the boot) when the guard cannot install.
+ * one, else the default — prove it is enforced in this runtime, and print the
+ * boot line once per policy. Rejects (and so fails the boot) when the guard
+ * cannot install: a malformed allowlist, or a runtime in which its requests
+ * are not proven to route through its connector.
  */
-export function installEgressGuard(options: { policy?: EgressPolicy; logger: EgressLogger }): EgressGuard {
+export async function installEgressGuard(options: { policy?: EgressPolicy; logger: EgressLogger }): Promise<EgressGuard> {
     const guard = options.policy
         ? createEgressGuard({ policy: options.policy, logger: options.logger })
         : withLogger(defaultEgressGuard(), options.logger);
+    await guard.ready();
     if (!announced.has(guard.policy)) {
         announced.add(guard.policy);
         if (options.logger.info) options.logger.info(guard.describe());

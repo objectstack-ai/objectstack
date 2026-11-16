@@ -260,9 +260,10 @@ export class MessagingServicePlugin implements Plugin {
 
     async init(ctx: PluginContext): Promise<void> {
         // The outbound-request guard, installed before anything can send: a
-        // malformed `OS_EGRESS_ALLOWED_TARGETS` throws here and fails the boot,
+        // malformed `OS_EGRESS_ALLOWED_TARGETS`, or a runtime in which the
+        // guard cannot prove it judges every connection, fails the boot here,
         // and there is no unguarded fallback for the HTTP outbox to take.
-        this.egress = installEgressGuard({ policy: this.egressPolicy, logger: ctx.logger });
+        this.egress = await installEgressGuard({ policy: this.egressPolicy, logger: ctx.logger });
 
         // Shared lazy data-engine resolver — used to persist the L2
         // `sys_notification` event in `emit()`, by the inbox channel to

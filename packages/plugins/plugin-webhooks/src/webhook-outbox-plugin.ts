@@ -256,7 +256,7 @@ export class WebhookOutboxPlugin implements Plugin {
     egressCensus?: Promise<WebhookEgressCensus | undefined>;
 
     async init(ctx: PluginContext): Promise<void> {
-        this.egress = installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger as any });
+        this.egress = await installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger as any });
         // Register the webhook config object (ADR-0029 K2.a). The delivery
         // telemetry now lives in messaging's `sys_http_delivery`, so the nav's
         // "Deliveries" entry points there (filtered to source=webhook in views).

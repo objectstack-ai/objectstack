@@ -2292,10 +2292,10 @@ export class AutomationServicePlugin implements Plugin {
         // `new AutomationServicePlugin()` is thus a self-contained automation
         // capability — no companion node-pack plugins required (ADR-0018).
         // The outbound-request guard the `http` node sends through, installed
-        // here so a malformed `OS_EGRESS_ALLOWED_TARGETS` fails the boot.
-        installBuiltinNodes(this.engine, ctx, {
-            egress: installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger }),
-        });
+        // here so a malformed `OS_EGRESS_ALLOWED_TARGETS`, or a runtime in which
+        // the guard cannot prove it judges every connection, fails the boot.
+        const egress = await installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger });
+        installBuiltinNodes(this.engine, ctx, { egress });
 
         if (this.options.debug) {
             ctx.hook('automation:beforeExecute', async (flowName: string) => {

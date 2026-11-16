@@ -107,7 +107,11 @@ export interface HttpDispatcherOptions {
      * dispatcher with a malformed allowlist throws.
      */
     egress?: EgressGuard;
-    /** Replace the guarded fetch outright (tests). */
+    /**
+     * Replace the guarded fetch outright — tests only. A dispatcher given
+     * this sends without the outbound-request guard, so it is outside the
+     * rule; nothing in the platform passes it.
+     */
     fetchImpl?: FetchImpl;
     /** RNG override for the retry-jitter schedule (tests). */
     rng?: () => number;

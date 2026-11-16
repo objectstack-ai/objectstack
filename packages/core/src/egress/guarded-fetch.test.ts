@@ -1,9 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createEgressGuard, EGRESS_REFUSED, findEgressRefusal, installEgressGuard, type EgressResolver } from './guarded-fetch.js';
+import {
+    createEgressGuard,
+    EGRESS_REFUSED,
+    EgressGuardUnprovenError,
+    egressRefusalText,
+    findEgressRefusal,
+    installEgressGuard,
+    type EgressResolver,
+} from './guarded-fetch.js';
 import { createEnvEgressPolicy, EgressAllowlistError } from './policy.js';
 
 /**
@@ -12,6 +20,30 @@ import { createEnvEgressPolicy, EgressAllowlistError } from './policy.js';
  * hop — and a refused connect never reaches the receiver. Every assertion is
  * made by a REAL loopback receiver counting what arrived.
  */
+
+/**
+ * The runtime the guard runs in, switchable per test: `real` is undici's own
+ * fetch; `ignore-dispatcher` is a runtime whose fetch drops the dispatcher and
+ * sends on a plain connection (the probe's `.invalid` host fails as a lookup
+ * would); `ignore-after-probe` honours it for the probe only.
+ */
+const transport = vi.hoisted(() => ({ mode: 'real' as 'real' | 'ignore-dispatcher' | 'ignore-after-probe', leaked: [] as string[] }));
+vi.mock('undici', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('undici')>();
+    return {
+        ...actual,
+        fetch: async (input: string, init: Record<string, unknown> = {}) => {
+            const url = String(input);
+            const probe = url.includes('.invalid');
+            const bypass = transport.mode === 'ignore-dispatcher' || (transport.mode === 'ignore-after-probe' && !probe);
+            if (!bypass) return actual.fetch(input, init as never);
+            transport.leaked.push(url);
+            if (probe) throw new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND') });
+            const { dispatcher: _dropped, ...rest } = init;
+            return actual.fetch(input, rest as never);
+        },
+    };
+});
 
 let server: Server;
 let port: number;
@@ -39,6 +71,11 @@ afterAll(async () => {
 
 beforeEach(() => {
     hits.length = 0;
+});
+
+afterEach(() => {
+    transport.mode = 'real';
+    transport.leaked.length = 0;
 });
 
 /** Every test host name resolves to the loopback receiver unless named otherwise. */
@@ -166,19 +203,19 @@ describe('judgeUrl answers without sending', () => {
 });
 
 describe('the boot', () => {
-    it('prints one boot line naming the guard and the allowlist size', () => {
+    it('prints one boot line naming the guard and the allowlist size', async () => {
         const info = vi.fn();
         const policy = createEnvEgressPolicy({ allowedTargets: '127.0.0.1,hooks.internal' });
-        installEgressGuard({ policy, logger: { info, warn: vi.fn() } });
-        installEgressGuard({ policy, logger: { info, warn: vi.fn() } });
+        await installEgressGuard({ policy, logger: { info, warn: vi.fn() } });
+        await installEgressGuard({ policy, logger: { info, warn: vi.fn() } });
         expect(info).toHaveBeenCalledTimes(1);
         expect(String(info.mock.calls[0]![0])).toMatch(/^\[egress\] outbound guard active: .*2 allowlisted targets from OS_EGRESS_ALLOWED_TARGETS/);
     });
 
-    it('a malformed allowlist refuses the boot', () => {
+    it('a malformed allowlist refuses the boot', async () => {
         vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '0.0.0.0/0');
         try {
-            expect(() => installEgressGuard({ logger: { info: vi.fn(), warn: vi.fn() } })).toThrow(EgressAllowlistError);
+            await expect(installEgressGuard({ logger: { info: vi.fn(), warn: vi.fn() } })).rejects.toThrow(EgressAllowlistError);
         } finally {
             vi.unstubAllEnvs();
         }
@@ -250,8 +287,8 @@ describe('the shared default guard logs to the plugin that installed it', () => 
         try {
             const first = { info: vi.fn(), warn: vi.fn() };
             const second = { info: vi.fn(), warn: vi.fn() };
-            installEgressGuard({ logger: first });
-            const g = installEgressGuard({ logger: second });
+            await installEgressGuard({ logger: first });
+            const g = await installEgressGuard({ logger: second });
             await refusal(g.fetch(`http://127.0.0.1:${port}/x`, {}, ctx));
             expect(second.warn).toHaveBeenCalledTimes(1);
             expect(String(second.warn.mock.calls[0]![0])).toMatch(/^\[egress\] refused an outbound connect to 127\.0\.0\.1/);
@@ -259,5 +296,87 @@ describe('the shared default guard logs to the plugin that installed it', () => 
         } finally {
             vi.unstubAllEnvs();
         }
+    });
+});
+
+describe('enforcement is proven in the runtime, never assumed', () => {
+    const asking = () => {
+        const asked: string[] = [];
+        const policy = { canConnect: (t: { address: string }) => { asked.push(t.address); return { allow: true }; } };
+        return { asked, policy };
+    };
+
+    it("where the runtime's fetch does not route through the guard's connector, the install refuses and every send is refused before anything leaves", async () => {
+        transport.mode = 'ignore-dispatcher';
+        const { asked, policy } = asking();
+        const g = createEgressGuard({ policy, resolve: resolver() });
+        await expect(g.ready()).rejects.toBeInstanceOf(EgressGuardUnprovenError);
+        const refused = await refusal(g.fetch(`http://hooks.example:${port}/x`, {}, ctx));
+        expect(refused.message).toBe(egressRefusalText('hooks.example'));
+        expect(hits).toEqual([]);
+        // Only the probe reached the runtime's fetch, and its host never resolves.
+        expect(transport.leaked).toEqual(['http://egress-guard-probe.invalid/']);
+        expect(asked).toEqual([]);
+        await expect(installEgressGuard({ policy, logger: { info: vi.fn(), warn: vi.fn() } })).rejects.toBeInstanceOf(EgressGuardUnprovenError);
+    });
+
+    it('a response that arrives over a connection the policy never judged is refused, never handed back', async () => {
+        transport.mode = 'ignore-after-probe';
+        const { asked, policy } = asking();
+        const g = createEgressGuard({ policy, resolve: resolver() });
+        await g.ready();
+        // A literal address, so the runtime's own plain connection reaches the receiver.
+        const refused = await refusal(g.fetch(`http://127.0.0.1:${port}/x`, {}, ctx));
+        expect(refused.decision.reason).toMatch(/never judged/);
+        expect(asked).toEqual([]);
+        expect(hits).toEqual([`127.0.0.1:${port} /x`]);
+    });
+
+    it('CONTROL: in this runtime the proof holds, and a send is judged before it leaves', async () => {
+        const { asked, policy } = asking();
+        const g = createEgressGuard({ policy, resolve: resolver() });
+        await expect(g.ready()).resolves.toBeUndefined();
+        const res = await g.fetch(`http://hooks.example:${port}/ok`, {}, ctx);
+        expect(await res.text()).toBe('body of /ok');
+        expect(asked).toEqual(['127.0.0.1', '127.0.0.1']);
+        expect(transport.leaked).toEqual([]);
+    });
+});
+
+describe('a policy that gives no verdict refuses', () => {
+    it('no verdict at the second judgement ends the request as a named refusal, not a pending one', async () => {
+        let calls = 0;
+        const g = createEgressGuard({
+            policy: { canConnect: () => (++calls === 1 ? { allow: true } : (undefined as never)) },
+            resolve: resolver(),
+        });
+        const refused = await refusal(g.fetch(`http://hooks.example:${port}/x`, {}, ctx));
+        expect(refused.decision.reason).toMatch(/no verdict/);
+        expect(calls).toBe(2);
+        expect(hits).toEqual([]);
+    });
+});
+
+describe('a host name that does not resolve reads the same refusal as a non-public one', () => {
+    const g = () =>
+        createEgressGuard({
+            policy: createEnvEgressPolicy({ allowedTargets: '' }),
+            resolve: async (hostname) => {
+                if (hostname === 'nowhere.example') throw Object.assign(new Error('getaddrinfo ENOTFOUND nowhere.example'), { code: 'ENOTFOUND' });
+                if (hostname === 'empty.example') return [];
+                return [{ address: '10.1.2.3' }];
+            },
+        });
+
+    it('the text is the same; only the privileged reason and the retry mark differ', async () => {
+        const unresolved = await refusal(g().fetch(`http://nowhere.example:${port}/x`, {}, ctx));
+        const empty = await refusal(g().fetch(`http://empty.example:${port}/x`, {}, ctx));
+        const refused = await refusal(g().fetch(`http://inside.example:${port}/x`, {}, ctx));
+        expect(unresolved.message).toBe(egressRefusalText('nowhere.example'));
+        expect(empty.message).toBe(egressRefusalText('empty.example'));
+        expect(refused.message).toBe(egressRefusalText('inside.example'));
+        expect([unresolved.unresolved, empty.unresolved, refused.unresolved]).toEqual([true, true, false]);
+        expect(unresolved.decision.reason).toContain('did not resolve');
+        expect(hits).toEqual([]);
     });
 });

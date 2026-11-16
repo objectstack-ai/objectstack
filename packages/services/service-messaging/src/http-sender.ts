@@ -137,7 +137,8 @@ export type HttpAttemptOutcome =
  *   - 408, 429, 5xx, transport  → retriable
  *   - a connect the egress guard refused → permanent failure, named
  *     `EGRESS_REFUSED`: retrying cannot change the verdict, so it dead-letters
- *     at once instead of walking the retry schedule
+ *     at once instead of walking the retry schedule; a host name that did
+ *     not resolve reads the same refusal text and stays retriable
  */
 export async function sendOnce(
     delivery: HttpDelivery,
@@ -199,7 +200,8 @@ export async function sendOnce(
         clearTimeout(timer);
         const durationMs = Date.now() - start;
         const refused = findEgressRefusal(err);
-        if (refused) return { success: false, retriable: false, error: refused.message, durationMs };
+        // Final unless the host name did not resolve; the text is the same either way.
+        if (refused) return { success: false, retriable: refused.unresolved === true, error: refused.message, durationMs };
         const e = err as { name?: string; message?: string };
         const error = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : e?.message ?? String(err);
         return { success: false, retriable: true, error, durationMs };

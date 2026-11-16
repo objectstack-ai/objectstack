@@ -127,6 +127,25 @@ describe('CONTROL: an allowed target delivers', () => {
     });
 });
 
+describe('a host name that does not resolve reads as a refusal does, and stays retriable', () => {
+    it('the recorded error is the refusal text a refused target records, and the delivery is retried', async () => {
+        const egress = createEgressGuard({
+            policy: createEnvEgressPolicy({ allowedTargets: '' }),
+            resolve: async (hostname) => {
+                if (hostname === 'nowhere.example') throw Object.assign(new Error('getaddrinfo ENOTFOUND nowhere.example'), { code: 'ENOTFOUND' });
+                return [{ address: '10.1.2.3' }];
+            },
+        });
+        const unresolved = await deliverOnce('http://nowhere.example/hook', { egress });
+        const refused = await deliverOnce('http://inside.example/hook', { egress });
+        expect(unresolved.error).toBe(refused.error!.replace('inside.example', 'nowhere.example'));
+        expect(unresolved.status).toBe('pending');
+        expect(unresolved.nextRetryAt).toBeTypeOf('number');
+        expect(refused.status).toBe('dead');
+        expect(hits).toBe(0);
+    });
+});
+
 describe('the boot', () => {
     function ctx(info: (msg: string) => void) {
         const services = new Map<string, unknown>([['manifest', { register() {} }]]);

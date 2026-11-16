@@ -4,6 +4,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { AutomationEngine } from '../engine.js';
 import { registerHttpNodes } from './http-nodes.js';
 import { registerTryCatchNode } from './index.js';
+import { stubbedFetchEgress } from './stubbed-fetch-egress.testkit.js';
+import { egressRefusalText } from '@objectstack/core/egress';
 
 function createTestLogger() {
     return {
@@ -133,7 +135,7 @@ describe('http (canonical node)', () => {
             vi.stubGlobal('fetch', fetchMock);
             const messaging: HttpSurface = { isHttpDeliveryReady: () => false };
             const engine = new AutomationEngine(createTestLogger());
-            registerHttpNodes(engine, createCtx(messaging));
+            registerHttpNodes(engine, createCtx(messaging), { egress: stubbedFetchEgress() });
             engine.registerFlow('http_flow', httpFlow('http', { url: 'https://x/y', durable: true }));
 
             const result = await engine.execute('http_flow');
@@ -229,7 +231,7 @@ describe('http (canonical node)', () => {
 
         it('runs an inline fetch and returns response + status', async () => {
             const engine = new AutomationEngine(createTestLogger());
-            registerHttpNodes(engine, createCtx());
+            registerHttpNodes(engine, createCtx(), { egress: stubbedFetchEgress() });
             engine.registerFlow('http_flow', httpFlow('http', { url: 'https://api.test/items', method: 'POST', body: { n: 1 } }));
 
             const result = await engine.execute('http_flow');
@@ -259,19 +261,19 @@ describe('http (canonical node)', () => {
 
 describe('http (canonical node) — a failed call names its host and cause', () => {
     // Real fetches against real failures: the cause shape is undici's, not a mock's.
-    async function run(config: Record<string, unknown>) {
+    async function run(config: Record<string, unknown>, egress?: ReturnType<typeof stubbedFetchEgress>) {
         const engine = new AutomationEngine(createTestLogger());
-        registerHttpNodes(engine, createCtx());
+        registerHttpNodes(engine, createCtx(), egress ? { egress } : {});
         engine.registerFlow('http_flow', httpFlow('http', config));
         return engine.execute('http_flow');
     }
 
-    it('an unknown host reports the host and the DNS cause, not a bare "fetch failed"', async () => {
+    it('an unknown host reads the refusal a non-public target reads, naming the host and nothing of the lookup', async () => {
         const result = await run({ url: 'http://no-such-host.invalid/path' });
         expect(result.success).toBe(false);
-        expect(result.error).toContain('http: fetch failed');
-        expect(result.error).toContain('no-such-host.invalid');
-        expect(result.error).toContain('ENOTFOUND');
+        expect(result.error).toMatch(/http: EGRESS_REFUSED: /);
+        expect(result.error!.endsWith(`http: ${egressRefusalText('no-such-host.invalid')}`)).toBe(true);
+        expect(result.error).not.toContain('ENOTFOUND');
     });
 
     it('a refused port reports the host:port and ECONNREFUSED', async () => {
@@ -318,7 +320,7 @@ describe('http (canonical node) — a failed call names its host and cause', () 
     it('a failure with no cause keeps its own message and the host', async () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
         try {
-            const result = await run({ url: 'https://api.test/items' });
+            const result = await run({ url: 'https://api.test/items' }, stubbedFetchEgress());
             expect(result.error).toMatch(/http: boom \u2014 api\.test$/);
         } finally {
             vi.unstubAllGlobals();
@@ -362,7 +364,7 @@ describe('durable http with no outbox on the save path', () => {
         const logger = { ...createTestLogger(), warn: vi.fn(), error: vi.fn() };
         const ctx = { ...createCtx({ isHttpDeliveryReady: () => false }), logger };
         const engine = new AutomationEngine(createTestLogger());
-        registerHttpNodes(engine, ctx);
+        registerHttpNodes(engine, ctx, { egress: stubbedFetchEgress() });
         registerTryCatchNode(engine, ctx);
         engine.registerFlow('http_flow', retriedDurableFlow());
         return { engine, logger };
