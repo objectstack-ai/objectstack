@@ -25,13 +25,16 @@
  * | `where` on `order.status`        | native, before | engine and `/data` (and native, now) |
  * |:--|:--|:--|
  * | `$ne 'open'`, `$nin ['open']`, `$notContains 'pe'` | 6 / 6600 | 4 / 600 |
- * | `$null: true`, `$eq: null`, `$empty: true`         | 3 / 6300 | 1 / 300 |
+ * | `$null: true`, `$eq: null`, `$empty: true`, `$exists: false` | 3 / 6300 | 1 / 300 |
  * | `$ne 'cancelled'`                                   | 5 / 6302 | 3 / 302 |
  * | two hops, `order.customer.tier $ne 'gold'`          | 6 / 6600 | 3 / 300 |
  * | two hops, `order.customer.tier $null: true`         | 3 / 6300 | 0 / 0   |
  *
  * `$eq 'cancelled'` agreed before and after (3 / 300): a positive comparison is
  * UNKNOWN on a NULL, so it never selected an orphan.
+ * A measure's own `filter` (`$ne 'open'`: 6 / 6600 before, 4 / 600 now) and the
+ * dataset's own `filter` (`$null: true`: 3 / 6300 before, 1 / 300 now) go
+ * through the same compile and moved the same way.
  *
  * ## What holds now
  *
@@ -170,6 +173,7 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
     ['$null true', { 'order.status': { $null: true } }, { order: { status: { $null: true } } }, ['l6']],
     ['$eq null', { 'order.status': { $eq: null } }, { order: { status: { $eq: null } } }, ['l6']],
     ['$empty true', { 'order.status': { $empty: true } }, { order: { status: { $empty: true } } }, ['l6']],
+    ['$exists false', { 'order.status': { $exists: false } }, { order: { status: { $exists: false } } }, ['l6']],
     ["$ne 'cancelled'", { 'order.status': { $ne: 'cancelled' } }, { order: { status: { $ne: 'cancelled' } } }, ['l1', 'l2', 'l6']],
     // A positive operator never selected an orphan: the comparison is UNKNOWN on a NULL. Unchanged.
     ["$eq 'cancelled'", { 'order.status': { $eq: 'cancelled' } }, { order: { status: { $eq: 'cancelled' } } }, ['l3', 'l4', 'l5']],
@@ -259,6 +263,36 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
       expect(await totals('native', where)).toEqual({ n: expected.length, total: sumOf(expected) });
     });
   }
+
+  // The same compile serves the two other filter positions of a dataset: a
+  // measure's own `filter` (the conditional aggregate) and the dataset's own
+  // `filter`. Both moved with `where` (native, before: 6 / 6600 and 3 / 6300).
+  // The engine path refuses a related field in a measure's `filter`, so that
+  // position is the native face alone.
+  it("a measure's own filter leaves the orphan out of its conditional aggregate (native)", async () => {
+    const notOpen = { 'order.status': { $ne: 'open' } };
+    const scoped = DatasetSchema.parse({
+      ...DATASET,
+      name: 'os33792_lines_measure_filter',
+      measures: [
+        { name: 'line_count', aggregate: 'count', filter: notOpen },
+        { name: 'total', aggregate: 'sum', field: 'amount', filter: notOpen },
+      ],
+    });
+    const res = await services.native!.queryDataset(scoped, { measures: ['line_count', 'total'] } as never);
+    const [row] = res.rows as Array<Record<string, unknown>>;
+    const expected = ['l3', 'l4', 'l5', 'l6'];
+    expect({ n: Number(row?.line_count), total: Number(row?.total) }).toEqual({ n: expected.length, total: sumOf(expected) });
+  });
+
+  it("the dataset's own filter leaves the orphan out, native and engine alike", async () => {
+    const scoped = DatasetSchema.parse({ ...DATASET, name: 'os33792_lines_dataset_filter', filter: { 'order.status': { $null: true } } });
+    for (const face of ['native', 'objectql'] as const) {
+      const res = await services[face]!.queryDataset(scoped, { measures: ['line_count', 'total'] } as never);
+      const [row] = res.rows as Array<Record<string, unknown>>;
+      expect.soft({ n: Number(row?.line_count ?? 0), total: Number(row?.total ?? 0) }, face).toEqual({ n: 1, total: sumOf(['l6']) });
+    }
+  });
 
   it('native: `$not` over `$null: true` answers what `$null: false` answers', async () => {
     expect(await totals('native', { $not: { 'order.status': { $null: true } } }))
