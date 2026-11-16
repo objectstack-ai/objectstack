@@ -221,7 +221,8 @@ describe('graftAuthoredCode — onEnable and every handler run from one module e
   let dir = '';
   let config: Record<string, any>;
   let artifact: Record<string, any>;
-  let wrap: InstanceType<typeof AppPlugin>;
+  /** The wrap's bundle — the object `AppPlugin` executes (`onEnable` at start, `functions` for handlers). */
+  let served: Record<string, any>;
   let artifactFns: Record<string, (ctx: any) => any>;
   let graft: Awaited<ReturnType<typeof graftAuthoredCode>>;
 
@@ -277,8 +278,9 @@ export default defineStack({
     config = mod.default;
     artifact = await loadArtifactBundle(artifactPath, { tag: '[serve]', unwrapEnvelope: true });
     artifactFns = collectBundleFunctions(artifact);
-    wrap = new AppPlugin(artifact, undefined, { securityMetadataRegistrar: 'artifact-door' });
+    const wrap = new AppPlugin(artifact, undefined, { securityMetadataRegistrar: 'artifact-door' });
     graft = await graftAuthoredCode([wrap], config);
+    served = (wrap as unknown as { bundle: Record<string, any> }).bundle;
   }, 120_000);
 
   afterAll(async () => {
@@ -296,12 +298,12 @@ export default defineStack({
     expect(graft.grafted).toEqual(['onEnable']);
     expect(graft.rebound?.slice().sort()).toEqual(['one_dispatch', 'one_mark']);
     expect(graft.unbound).toEqual([]);
-    expect((wrap.bundle as any).onEnable).toBe(config.onEnable);
+    expect(served.onEnable).toBe(config.onEnable);
   });
 
   it('a job handler and a hook see the state onEnable bound', async () => {
-    await (wrap.bundle as any).onEnable({ ql: ENGINE });
-    const fns = collectBundleFunctions(wrap.bundle);
+    await served.onEnable({ ql: ENGINE });
+    const fns = collectBundleFunctions(served);
     await expect(fns.one_dispatch({})).resolves.toBe(ENGINE.tag);
     const ctx = { input: {} as Record<string, unknown> };
     await fns.one_mark(ctx);
