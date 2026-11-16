@@ -7,7 +7,7 @@ feat(spec, plugin-audit): a sealed object names its chain column with `lifecycle
 
 Clause-②: yes (widening). A sealed object may name its chain column, the default stays `tenant_id`, and an object that seals today is byte-identical.
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-data/rules/lifecycle.md, skills/objectstack-data/evals/objects-fields-relationships.json
+Skills-docs: follow-up #33773
 
 An audit-class object that declares `lifecycle.seal` was sealed only when it had a `tenant_id` column, because the sealer read each row's organization from that column alone. An object whose organization lives in the tenant column the platform injects, `organization_id`, was reported at `error` every hour and never sealed.
 
