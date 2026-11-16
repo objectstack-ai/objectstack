@@ -309,7 +309,10 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.admin) {
     await this.addOptionalPlugin(plugins, 'admin', async () => {
       const { admin } = await import('better-auth/plugins/admin');
-      // Platform admin: ban/unban, set-password, impersonate, set-role.
+      // The vendor admin plugin: what create-user and import-users drive,
+      // impersonation, and better-auth's own /admin/* routes (set-role,
+      // list-users, …). Ban/unban, unlock and set-password are ObjectStack
+      // mounts served with or without it (`plugins.admin` in auth-config.zod.ts).
       // Schema mapping ensures the plugin's added user/session columns
       // match ObjectStack's snake_case conventions (ban_reason,
       // ban_expires, impersonated_by). `role` and `banned` are already

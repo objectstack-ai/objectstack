@@ -1366,6 +1366,8 @@ export function buildMcpBridge(
         // the MCP door grew the member in the same change that enforces it, and
         // a bridge that quietly rebuilt `{ objectName, recordId, params }` was
         // the second of the two strip layers that made the member unreachable.
+        // [#33690] The door no longer reads it: a declared-gated call is handed
+        // to the person it runs as (`invokeBusinessAction`), whatever it carries.
         runAction: async (
             name: string,
             // [ADR-0150 D5] `namespace` rides through like `confirm`: the whole
@@ -1874,11 +1876,11 @@ function notResumableRunMessage(runId: string): string {
  *     candidate that passes admits the call. If none passes, the first
  *     candidate's refusal is served. If there is no candidate at all, the run
  *     was not started by a flow action, and the call is refused 403.
- *     The confirmation gate applies here too because the flow's writes happen
- *     after the screen, so on resume. A run started with `confirm: true` still
- *     needs `confirm: true` to resume. An AI service account never confirms
- *     an action for itself (ADR-0151 D3 rule 3), so its resume of a gated
- *     action is refused whatever it sends.
+ *     The confirmation step applies here too because the flow's writes happen
+ *     after the screen, so on resume. [#33690] Under the amended contract the
+ *     caller's `confirm` never counts: a resume of a gated action is handed to
+ *     the person (after steps 4 and 5, below), carrying its run, and an AI
+ *     service account is refused whatever it sends (ADR-0151 D3 rule 3).
  *  4. **The subject record, read again as the caller.** This is #16370's rule,
  *     with the same two shared functions: `loadActionSubjectRecord` and
  *     `refuseDeniedSubjectLoad`. A record the caller could read when the run
@@ -1898,6 +1900,10 @@ function notResumableRunMessage(runId: string): string {
  * recordId?, result }`. `result` is the engine's own answer, so a run that
  * pauses on its NEXT screen comes back as `status: 'paused'` with a `runId`
  * and a `screen`, and a multi-screen wizard is walked by calling this again.
+ * [#33690] A resume of a gated action answers `ActionConfirmationPending`
+ * instead (or the `no_confirmation_service` refusal): the run stays parked,
+ * and approving the hand-off resumes THAT run with these values, as the
+ * approver, who must be its owner. No invocation row is written for it.
  */
 export async function resumeActionRun(
     deps: DomainHandlerDeps,
@@ -1980,6 +1986,7 @@ export async function resumeActionRun(
             || flowHolderForCaller(activationEngine?.registry, action.target, packageId) === runPackage)
         && (runObject === undefined ? actionExec.isObjectLessActionKey(objectName) : objectName === runObject));
     let admitted: { action: any; objectName: string } | undefined;
+    let handOff = false;
     let firstRefusal: Error | undefined;
     // [ADR-0106 D1] A candidate this caller is not shown does not exist for
     // them, as `run_action` answers it: it admits nothing and is no refusal.
@@ -1994,12 +2001,13 @@ export async function resumeActionRun(
         });
         if (projected.kind === 'fault') throw actionRunFieldVisibilityRefusal(projected.object);
         if (projected.kind === 'withhold') continue;
-        const refusal = resumeAdmissionRefusal(deps, candidate, ec, input, activationEngine);
-        if (!refusal) {
+        const admission = resumeAdmissionRefusal(deps, candidate, ec, activationEngine);
+        if (!(admission instanceof Error)) {
             admitted = candidate;
+            handOff = admission.handOff;
             break;
         }
-        firstRefusal ??= refusal;
+        firstRefusal ??= admission;
     }
     if (!admitted) {
         throw firstRefusal ?? resumeDoorError(
@@ -2012,6 +2020,28 @@ export async function resumeActionRun(
     }
     const { action, objectName } = admitted;
     const recordId = typeof trigger?.recordId === 'string' && trigger.recordId !== '' ? trigger.recordId : undefined;
+
+    // [#33690] A gated action's resume is handed to the person, after steps 4
+    // and 5 so nobody is asked to confirm a resume refused anyway: nothing
+    // resumes, the run stays parked, and no invocation row is written.
+    if (handOff) {
+        await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        const answer = await actionExec.handOffActionConfirmation(deps, context, envId, {
+            actionName: typeof action?.name === 'string' && action.name ? action.name : String(flowName),
+            ...(actionExec.isObjectLessActionKey(objectName) ? {} : { objectName }),
+            ...(recordId !== undefined ? { recordId } : {}),
+            params: {},
+            door: 'mcp',
+            run: { runId, values: values ?? {} },
+        }, ec);
+        if ('refused' in answer) {
+            throw resumeDoorError(deps, answer.refused.message, answer.refused.status, {
+                code: answer.refused.code,
+                ...answer.refused.details,
+            });
+        }
+        return answer.pending;
+    }
 
     // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW,
     // as `run_action` writes it: the call cleared steps 1–3, so from here on
@@ -2063,7 +2093,37 @@ async function continueAdmittedRun(
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
     },
 ): Promise<any> {
-    const { action, objectName, recordId, driver, envId, ec, callData } = admitted;
+    const { action, objectName, recordId } = admitted;
+    await refuseUnresumableAdmittedRun(deps, automation, runId, admitted);
+
+    // ── 6. resume, answered through the table the REST door uses ─────────────
+    const signal: { variables?: Record<string, unknown> } = {};
+    if (values !== undefined) signal.variables = values;
+    const result = await automation.resume(runId, signal);
+    const refusal = await classifyResumeResult(deps, automation, runId, result);
+    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details, refusal.extra);
+    return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
+}
+
+/**
+ * `resume_run` steps 4–5 for an admitted run: the subject record read again
+ * as the caller, and the screen-pause check. Throws the refusal; reads
+ * nothing else. Asked before a resume and before a hand-off (#33690) alike.
+ */
+async function refuseUnresumableAdmittedRun(
+    deps: DomainHandlerDeps,
+    automation: any,
+    runId: string,
+    admitted: {
+        objectName: string;
+        recordId: string | undefined;
+        driver: any;
+        envId?: string;
+        ec: any;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+    },
+): Promise<void> {
+    const { objectName, recordId, driver, envId, ec, callData } = admitted;
 
     // ── 4. the subject record, read again in the caller's own scope ──────────
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
@@ -2080,22 +2140,14 @@ async function continueAdmittedRun(
             409,
         );
     }
-
-    // ── 6. resume, answered through the table the REST door uses ─────────────
-    const signal: { variables?: Record<string, unknown> } = {};
-    if (values !== undefined) signal.variables = values;
-    const result = await automation.resume(runId, signal);
-    const refusal = await classifyResumeResult(deps, automation, runId, result);
-    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details, refusal.extra);
-    return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
 }
 
 /**
  * [#15705] `run_action`'s admission gates, in `run_action`'s order, for ONE
- * candidate action. Answers the refusal, or `undefined` when the candidate
- * admits the call. Each gate uses the shared helper `invokeBusinessAction`
- * uses, so the reasons cannot drift apart. The system-object, exposure and
- * permission refusals are thrown as plain errors there. Here they carry
+ * candidate action. Answers the refusal, or the admission (whether the call
+ * is handed to the person, #33690) when the candidate admits the call. Each
+ * gate uses the shared helper `invokeBusinessAction` uses, so the reasons
+ * cannot drift apart. The system-object, exposure and permission refusals are thrown as plain errors there. Here they carry
  * `PERMISSION_DENIED` / 403 (the code and status REST `/actions` answers for
  * the permission gate), because a refusal on a new door should be
  * machine-readable.
@@ -2104,9 +2156,8 @@ function resumeAdmissionRefusal(
     deps: DomainHandlerDeps,
     candidate: { action: any; objectName: string },
     ec: any,
-    request: AIActionConfirmation,
     activationEngine: any,
-): Error | undefined {
+): Error | { handOff: boolean } {
     const { action, objectName } = candidate;
     const systemObject = actionExec.systemObjectActionExposureError(deps, action, objectName);
     if (systemObject) return resumeDoorError(deps, systemObject, 403);
@@ -2118,12 +2169,14 @@ function resumeAdmissionRefusal(
     if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
     // [ADR-0151 D3 rule 3] The caller's envelope rides along: an AI service
     // account never confirms for itself, so it is refused whatever it sends.
-    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName, ec);
-    if (confirmation) {
-        return resumeDoorError(deps, confirmation.message, confirmation.status, {
-            code: confirmation.code,
-            ...confirmation.details,
+    // [#33690] The request is not read: a gated resume by anyone else is
+    // handed to the person, never admitted on the caller's `confirm`.
+    const confirmation = actionExec.aiDoorConfirmation(deps, action, objectName, ec);
+    if (confirmation.kind === 'refuse') {
+        return resumeDoorError(deps, confirmation.refusal.message, confirmation.refusal.status, {
+            code: confirmation.refusal.code,
+            ...confirmation.refusal.details,
         });
     }
-    return undefined;
+    return { handOff: confirmation.kind === 'hand-off' };
 }

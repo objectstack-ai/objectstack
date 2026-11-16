@@ -123,6 +123,94 @@ function isHoldersPairRow(engine: unknown, type: string, name: string, item: unk
 }
 
 /**
+ * [#33401, ADR-0150 D4] The package a package-less row (stamped with no
+ * package, `''` or the `sys_metadata` sentinel) that the read naming no
+ * package reached is withheld with: the holder whose key the row customizes,
+ * when every holder of that key is disabled. Seat ruling 6882483833 on
+ * #32814: a package-less row whose key (`(type, name)`; `(object, name)` for
+ * an `action`) an installed package holds is that holder's overlay, owned
+ * over every holder, disabled included (epic ruling 6816940784 on #31699), so
+ * with every holder disabled the read answers as if no row were stored. The
+ * member is not part of the key: a locale the holder never shipped is still
+ * its customization.
+ *
+ * The key's holders are the registry's one owner rule
+ * (`overlayRowBinding`, every holder counted): `null` is the environment's
+ * own item (D3 (a), no holder at its key, a same-name action on another
+ * object included), served; one holder is withheld when it is disabled; two
+ * or more are judged as the name's holders are ({@link disabledOnlyHolderOf}).
+ * The row itself is untouched, so it is served again on re-enable.
+ * `undefined` when the item is not such a row, or the registry cannot bind
+ * one (optional-called: such a registry hides nothing more).
+ */
+function packagelessRowWithheldHolder(registry: any, type: string, name: string, item: unknown): string | undefined {
+    const stamp = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (stamp !== undefined && stamp !== null && stamp !== '' && stamp !== 'sys_metadata') return undefined;
+    if (typeof registry?.overlayRowBinding !== 'function' || typeof registry?.isPackageDisabled !== 'function') return undefined;
+    const holder: unknown = registry.overlayRowBinding(type, name, item, { includeDisabledPackages: true });
+    if (holder === null) return undefined;
+    if (typeof holder === 'string') return registry.isPackageDisabled(holder) === true ? holder : undefined;
+    return disabledOnlyHolderOf(registry, type, name);
+}
+
+/**
+ * [#33401, review#2 S5] Whether an enabled package holds `(type, name)`
+ * through a stored active row the reads serve: a row bound to an enabled
+ * package that the reads do not decline (`declinesStoredRow`) and that is no
+ * holder's customization pair row (a pair row is that holder's item, never a
+ * holder of its own). The registry's owner rule does not see such a row
+ * until it is hydrated, so {@link packagelessRowWithheldHolder} alone would
+ * withhold a package-less row while an enabled package holds the name, and
+ * the answer would follow hydration order.
+ */
+function enabledRowHolds(
+    host: Pick<ServedRowHost, 'engine' | 'declinesStoredRow'>,
+    type: string, name: string,
+    rows: ReadonlyArray<Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>[number]>,
+): boolean {
+    const registry: any = host.engine?.registry;
+    const every: readonly string[] = registry?.packageScopedHoldersOf?.(type, name, null, { includeDisabledPackages: true }) ?? [];
+    const installed = installedManifestsOfEngine(host.engine);
+    return rows.some((row) => {
+        const bound = typeof row.package_id === 'string' && row.package_id !== '' && row.package_id !== 'sys_metadata'
+            ? row.package_id : undefined;
+        return bound !== undefined && registry?.isPackageDisabled?.(bound) !== true
+            && !host.declinesStoredRow(type, name, row)
+            && !every.some((holder) => pairsOf(holder, installed).includes(bound));
+    });
+}
+
+/**
+ * [#33401] The holder a package-less `item` of `(type, name)` is withheld
+ * with ({@link packagelessRowWithheldHolder}), unless an enabled package
+ * holds the name through a stored active row ({@link enabledRowHolds},
+ * review#2 S5): then the answer is `main`'s, whichever order the rows were
+ * hydrated in. `rows` are the item's active rows when the caller already
+ * read them; otherwise they are read here, only once the registry would
+ * withhold the item. The read naming no package and the list naming no
+ * package (`protocol-meta-list-reads.ts`) both ask this, so the list carries
+ * no row the by-name read withholds.
+ */
+export async function packagelessRowWithheld(
+    host: Pick<ServedRowHost, 'engine' | 'declinesStoredRow' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    type: string, name: string, item: unknown,
+    rows?: ReadonlyArray<Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>[number]>,
+): Promise<string | undefined> {
+    const holder = packagelessRowWithheldHolder(host.engine?.registry, type, name, item);
+    if (holder === undefined) return undefined;
+    let active: ReadonlyArray<Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>[number]> | undefined = rows;
+    if (active === undefined) {
+        try {
+            active = await host.readItemActiveRows(type, name);
+        } catch (error) {
+            host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            active = [];
+        }
+    }
+    return enabledRowHolds(host, type, name, active) ? undefined : holder;
+}
+
+/**
  * [#32183] The package whose stack a read naming no package takes, for a
  * name a disabled package also holds: the one holder ADR-0150 D3 resolves
  * over the served set. `undefined` leaves the read as it was: a type the
@@ -422,9 +510,10 @@ export function isAnotherHoldersCopy(registry: any, type: string, name: string, 
  * another package (the #32606 shape), an undeclared pair row, the
  * environment's own item, a disabled shipper, and the strict draft read.
  * The rows are read through `host.readItemActiveRows`, so the read below takes
- * them instead of reading them again (#24371).
+ * them instead of reading them again (#24371). The layered read naming no
+ * package takes the same address for its layers (`getMetaItemLayered`).
  */
-async function declaredMemberOverrideAddressOf(
+export async function declaredMemberOverrideAddressOf(
     host: ServedRowHost,
     type: string, name: string, member: string | undefined,
 ): Promise<string | undefined> {
@@ -522,6 +611,11 @@ export async function readMetaItemFace(
     // name's holders too, as it does when it reached nothing: a pair row of a
     // name only disabled packages hold is their withheld item, the answer the
     // same read gives with no row stored.
+    // [#33401] …and so does a package-less row of a key whose every holder is
+    // disabled ({@link packagelessRowWithheld}): that holder's customization,
+    // withheld with it; the environment's own item is served, and so is the
+    // row while an enabled package holds the name through a stored row
+    // (review#2 S5), judged over the active rows read above.
     const withheldHolder = request.type === 'object' || request.type === 'package'
         ? undefined
         : (request.packageId ? disabledExactAddressHolder(this, { type: request.type, name: request.name, packageId: request.packageId }) : undefined)
@@ -530,7 +624,12 @@ export async function readMetaItemFace(
                     ? !isStoredUnder(answer.item, request.packageId)
                     : isHoldersPairRow(this.engine, request.type, request.name, answer.item))
                 ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
-                : undefined);
+                : undefined)
+            ?? (request.packageId || answer?.item == null
+                ? undefined
+                : await packagelessRowWithheld(this, request.type, request.name, answer.item,
+                    activeRows !== undefined && activeRows.type === request.type && activeRows.name === request.name
+                        ? activeRows.rows : undefined));
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         return answer;

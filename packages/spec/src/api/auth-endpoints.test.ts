@@ -244,6 +244,7 @@ describe('AuthFeaturesConfig declares every classified served key', () => {
     termsUrl: 'https://objectstack.ai/terms',
     privacyUrl: 'https://objectstack.ai/privacy',
     turnstileSiteKey: '0x4AAAAAAA',
+    publicBaseUrl: 'https://os.acme.example/platform',
   } as const;
 
   it('the served fixture names every classified key, so the parse below covers them all', () => {
