@@ -4900,9 +4900,13 @@ export class TursoDriver extends SqlDriver {
    *   nullable, with the type, the DEFAULT and the primary-key position it had
    *   before. A refused batch or a read-back that differs is `false`, which
    *   {@link applyMigrationEntries} reports `skipped`; the reason is logged.
+   *   A failed batch is called refused only when the stored table SQL, read
+   *   again, is still what it was: a transport error can arrive after the
+   *   server committed, and then the log says the outcome is unknown.
    *
    * A column that is gone, or already nullable, has nothing to relax here and
-   * is `false`, as `drop_column` answers a column that is already gone.
+   * is `false`, as `drop_column` answers a column that is already gone; the
+   * log says which, since the apply tells the operator its log says why.
    */
   private async applyRemoteRelaxNotNull(table: string, column: string): Promise<boolean> {
     const columnState = async () => {
@@ -4917,10 +4921,13 @@ export class TursoDriver extends SqlDriver {
       return false;
     };
     const before = await columnState();
-    if (!before?.notNull) return false;
-    const [stored] = await this.remoteCatalogRead(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, [table]);
-    if (typeof stored?.sql !== 'string') return skip('the database holds no CREATE TABLE text for the table');
-    const plan = planRelaxedColumnDefinition(stored.sql, column);
+    if (!before) return skip('the table has no such column; nothing was sent');
+    if (!before.notNull) return skip('the column is already nullable; nothing was sent');
+    const storedSql = async () =>
+      (await this.remoteCatalogRead(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, [table]))[0]?.sql;
+    const stored = await storedSql();
+    if (typeof stored !== 'string') return skip('the database holds no CREATE TABLE text for the table');
+    const plan = planRelaxedColumnDefinition(stored, column);
     if ('refusal' in plan) return skip(`${plan.refusal}; nothing was sent`);
     const statement = `ALTER TABLE ${quoteRemoteIdentifier(table)} ALTER COLUMN ${quoteRemoteIdentifier(column)} TO ${plan.relaxed}`;
     try {
@@ -4937,9 +4944,25 @@ export class TursoDriver extends SqlDriver {
         'write',
       );
     } catch (e: any) {
+      // A refusal rolls the batch back; a transport error may arrive after the
+      // server committed it. Only a fresh read tells the two apart, and when
+      // it cannot, the outcome is unknown and the next drift read decides.
+      const failure = e?.message ?? String(e);
+      let now: unknown;
+      try {
+        now = await storedSql();
+      } catch (readError: any) {
+        return skip(
+          `the batch carrying \`${statement}\` failed (${failure}), and its outcome is unknown: the stored table SQL ` +
+            `could not be read back (${readError?.message ?? readError}); the next drift read decides`,
+        );
+      }
       return skip(
-        `the database refused \`${statement}\` or its check that the stored table SQL reads as planned, ` +
-          `and the batch rolled back: ${e?.message ?? e}`,
+        now === stored
+          ? `the batch carrying \`${statement}\` and its check that the stored table SQL reads as planned failed, ` +
+              `and the stored table SQL reads as before, so nothing landed: ${failure}`
+          : `the batch carrying \`${statement}\` failed (${failure}), and its outcome is unknown: the stored table SQL ` +
+              'no longer reads as before; the next drift read decides',
       );
     }
     const after = await columnState();

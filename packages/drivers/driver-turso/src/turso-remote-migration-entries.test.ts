@@ -48,7 +48,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
 import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
@@ -364,6 +364,13 @@ async function withNotNullColumns(ddl = P_DDL): Promise<{ file: string; remote: 
   return { file, remote };
 }
 
+/** The driver's `logger.warn` lines, captured (the diagnostic channel the apply door logs a skipped entry's reason on). */
+function warnLines(driver: TursoDriver): () => string[] {
+  const logger = (driver as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger;
+  const spy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+  return () => spy.mock.calls.map((c) => c.map(String).join(' '));
+}
+
 const relaxes = async (remote: TursoDriver) =>
   (await remote.detectManagedDrift([P] as Objects)).filter((d) => d.op.type === 'relax_not_null');
 
@@ -399,9 +406,15 @@ describe('relax_not_null in place, with libSQL\'s ALTER COLUMN (#33724, ruling 6
     expect(await tryOnDisk(file, `INSERT INTO "p" ("id", "code") VALUES ('f', 'a')`)).toMatch(/UNIQUE constraint failed/);
     expect((await secondConnection(file, 'PRAGMA integrity_check'))[0]).toEqual({ integrity_check: 'ok' });
 
-    // Converged: the remote face reports no relax, and a re-run has nothing to do.
+    // Converged: the remote face reports no relax, and a re-run has nothing to
+    // do, and says so: the apply tells the operator its log says why.
     expect(await relaxes(remote)).toEqual([]);
+    const warned = warnLines(remote);
     expect(await remote.applyMigrationEntries(entries)).toEqual({ applied: [], skipped: entries });
+    expect(warned().filter((l) => l.includes('relax_not_null on p.')).map((l) => l.replace(/^.*relax_not_null on (p\.\w+).*: /, '$1: ')).sort()).toEqual([
+      'p.code: the column is already nullable; nothing was sent',
+      'p.price: the column is already nullable; nothing was sent',
+    ]);
   });
 
   it('a DEFAULT libSQL cannot splice (a comma inside it) is refused whole: skipped, and the table byte-identical', async () => {
@@ -414,11 +427,39 @@ describe('relax_not_null in place, with libSQL\'s ALTER COLUMN (#33724, ruling 6
     const entries = await relaxes(remote);
     expect(entries.map((d) => d.column)).toEqual(['code']);
     const before = await tableSqlOf(file, 'p');
+    const warned = warnLines(remote);
 
     expect(await remote.applyMigrationEntries(entries)).toEqual({ applied: [], skipped: entries });
 
     expect(await tableSqlOf(file, 'p')).toBe(before);
     expect((await columnFactsOf(file, 'p')).code?.notNull).toBe(true);
+    // Called refused only because the stored SQL, read again, is what it was.
+    const [line] = warned().filter((l) => l.includes('relax_not_null on p.code'));
+    expect(line).toContain('and the stored table SQL reads as before, so nothing landed');
+  });
+
+  it('a transport error after the server committed is logged as an unknown outcome, never as a rollback', async () => {
+    const { file, remote } = await withNotNullColumns();
+    const [entry] = (await relaxes(remote)).filter((d) => d.column === 'price');
+    const transport = (remote as unknown as { remoteTransport: { batch: (s: unknown[], m: string) => Promise<unknown> } }).remoteTransport;
+    const send = transport.batch.bind(transport);
+    transport.batch = async (statements, mode) => {
+      const answer = await send(statements, mode);
+      if (typeof statements[0] === 'string' && statements[0].includes('ALTER COLUMN')) throw new Error('fetch failed: socket hang up');
+      return answer;
+    };
+    const warned = warnLines(remote);
+
+    expect(await remote.applyMigrationEntries([entry!])).toEqual({ applied: [], skipped: [entry] });
+
+    // The batch did land: the column is nullable, and the log does not say otherwise.
+    expect((await columnFactsOf(file, 'p')).price?.notNull).toBe(false);
+    const [line] = warned().filter((l) => l.includes('relax_not_null on p.price'));
+    expect(line).toContain('failed (fetch failed: socket hang up), and its outcome is unknown');
+    expect(line).toContain('the next drift read decides');
+    expect(line).not.toContain('nothing landed');
+    // …and the next drift read finds no relax to do.
+    expect(await relaxes(remote)).toEqual([]);
   });
 
   it('a splice the plan did not predict lands nowhere: the check in the same batch rolls the statement back', async () => {
