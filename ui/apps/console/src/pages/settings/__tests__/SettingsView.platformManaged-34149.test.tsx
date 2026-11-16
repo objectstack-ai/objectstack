@@ -235,18 +235,21 @@ describe('the hosted AI page (objectstack#34149)', () => {
   });
 
   it('a save refused as platform-managed toasts the managed text', async () => {
-    getSettingsNamespace.mockResolvedValue(AI_FULL);
+    getSettingsNamespace.mockResolvedValue({
+      manifest: { namespace: 'ai', label: 'AI', specifiers: [{ type: 'text', key: 'openai_model', label: 'Model' }] },
+      values: { openai_model: { value: 'gpt-4o', source: 'default' } },
+    });
     saveSettingsNamespace.mockRejectedValue(
       rejection(409, {
         code: 'RESOURCE_CONFLICT',
-        message: "This environment is cloud-managed: … so 'provider' cannot be changed here. Nothing was written.",
-        details: { namespace: 'ai', managedBy: 'platform', keys: ['provider'] },
+        message: "This environment is cloud-managed: … so 'openai_model' cannot be changed here. Nothing was written.",
+        details: { namespace: 'ai', managedBy: 'platform', keys: ['openai_model'] },
       }),
     );
-    renderView('ai');
+    const { container } = renderView('ai');
 
-    const toggle = await screen.findByRole('switch');
-    fireEvent.click(toggle);
+    await screen.findByText('Model');
+    fireEvent.change(container.querySelector('input') as HTMLInputElement, { target: { value: 'gpt-5' } });
     fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(MANAGED_TITLE));
   });
