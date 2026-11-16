@@ -64,6 +64,7 @@ import { readRequestClientAddress } from './request-client-address.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { readSessionUserRow, refuseAgentAccountCredential } from './service-account-identity.js';
 import { refuseInactiveUserSession, SESSION_ADMISSION_ROW_FIELDS } from './user-session-admission.js';
+import { LOCKED_ACCOUNT_ROW_FIELDS, refuseLockedAccountSession } from './auth-manager-sign-in-lockout.js';
 import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
 import { PENDING_SSO_SOURCE } from './pending-sso-marker.js';
 
@@ -362,17 +363,22 @@ export function composeDatabaseHooks(
   // before the host's hook and every step below, so no sign-in method,
   // impersonation or minted session gets a session for one, whatever runs
   // after it. See service-account-identity.ts.
+  const SESSION_USER_ROW_FIELDS = [...SESSION_ADMISSION_ROW_FIELDS, ...LOCKED_ACCOUNT_ROW_FIELDS];
   const sessionBefore = async (session: any, ctx: any) => {
     // [#33181] The same one read of the row carries the columns the next
     // refusal judges: a pending person holds no session but the platform
     // sign-in's, and a ban holds on a kernel without the vendor admin plugin
     // (whose own hook enforces it where it is mounted). See
     // user-session-admission.ts.
-    const userRow = await readSessionUserRow(this.config.dataEngine, session, SESSION_ADMISSION_ROW_FIELDS);
+    const userRow = await readSessionUserRow(this.config.dataEngine, session, SESSION_USER_ROW_FIELDS);
     await refuseInactiveUserSession(this.config.dataEngine, session, {
       row: userRow,
       enforceBan: async () => !(await this.isAdminPluginMounted()),
     });
+    // ADR-0069 D2: a locked account is refused on every door that ends in a
+    // session for that account, with the answer password sign-in gives. See
+    // auth-manager-sign-in-lockout.ts.
+    await refuseLockedAccountSession.call(this, session, ctx, userRow);
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;

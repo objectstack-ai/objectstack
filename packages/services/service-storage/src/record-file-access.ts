@@ -36,10 +36,12 @@ import {
 // The upload doors' own size verdict and refusal, asked here rather than
 // restated.
 import {
+  parseHostMaxUploadMb,
   resolveStorageLimits,
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
   UPLOAD_TOO_LARGE_STATUS,
+  type HostMaxUploadMb,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
 // The upload doors' own storage-key layout, and the download doors' link.
@@ -459,6 +461,12 @@ export interface RecordFileAccessDeps {
   getEngine(): RecordFileEngine | null;
   getStorage(): IStorageService | null;
   getLimitsSnapshot(): StorageLimitsSnapshot | undefined;
+  /**
+   * The host's upload bound (the plugin's `maxUploadMb`, already validated) —
+   * the host layer of the doors' own precedence; absent ⇒ the namespace
+   * default, else the built-in 100 MB.
+   */
+  hostMaxUploadMb?: HostMaxUploadMb;
   /** The caller-scoped attach verbs (`FileAttachmentService`). */
   attachments: {
     attachFileAs(input: AttachFileInput, context: ExecutionContext): Promise<AttachedFile>;
@@ -503,7 +511,7 @@ export interface RecordFileAccessDeps {
 
 /** [#32712] The i18n surface the page's labels are translated through (`II18nService`'s reads). */
 export type UploadLinkLabelI18n = Pick<II18nService, 'getLocales' | 'getTranslations'> &
-  Partial<Pick<II18nService, 'getFallbackLocale' | 'getDefaultLocale'>>;
+  Partial<Pick<II18nService, 'getFallbackLocale' | 'getDefaultLocale' | 'getSourceLocale'>>;
 
 /** [#32747] One upload of a submit, its media type settled. */
 type TypedUpload = UploadLinkUpload & { mimeType: string };
@@ -757,7 +765,10 @@ function describe(file: FileRecord): Pick<RecordFileEntry, 'fileId' | 'name' | '
 }
 
 export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoor {
-  constructor(private readonly deps: RecordFileAccessDeps) {}
+  constructor(private readonly deps: RecordFileAccessDeps) {
+    // The host bound is judged where the verb is built, as at every host door.
+    parseHostMaxUploadMb(deps.hostMaxUploadMb, 'RecordFileAccess');
+  }
 
   private now(): number {
     return this.deps.now ? this.deps.now() : Date.now();
@@ -1333,7 +1344,10 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const bundle = i18n ? translationBundleOf(i18n) : undefined;
     if (!i18n || !bundle) return { objectLabel, fieldLabel };
     const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-    const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+    // [#33634] The authored language: the declared `sourceLocale`, else the
+    // users' `defaultLocale` — the metadata route's rule.
+    const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+    const defaultLocale = source || (typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined);
     const translated = translateObject(doc, bundle, {
       locale: lang,
       ...(fallback ? { fallbackChain: [fallback] } : {}),
@@ -1393,7 +1407,9 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     // [#32747] As many files as the link takes, before anything else is judged.
     const range = this.fileRangeOf(engine, state);
     if (uploads.length < range.min || uploads.length > range.max) refuseFileCount(range, uploads.length);
-    const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes;
+    const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot(), {
+      maxUploadMb: this.deps.hostMaxUploadMb,
+    }).maxUploadBytes;
     for (const upload of uploads) {
       if (!nonEmptyString(upload?.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
       if (!Buffer.isBuffer(upload.data)) refuse('VALIDATION_ERROR', 400, 'The upload carries no bytes.');

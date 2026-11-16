@@ -56,7 +56,10 @@
  * `error` — and an object registered without the parse keeps failing closed
  * on it. A raw parse cannot see the omission (the field default has already
  * written `false` when the object refinement runs), so there an omitted
- * `required` reads as the optional master.
+ * `required` reads as the optional master. `defineStack` keeps that reading
+ * and records the omission beside it, on the parsed field
+ * (`master-detail-required-omission.ts`), so the linter can still report the
+ * omitted spelling; nothing here reads that record.
  * `readonly` (`z.boolean().default(false)`) and `system` (optional) are read
  * the same way: only `=== true` marks the one master unwritable.
  */

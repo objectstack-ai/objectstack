@@ -128,6 +128,10 @@ import {
   readStorageLimits,
   sameStorageLimits,
   describeStorageLimits,
+  parseHostMaxUploadMb,
+  resolveStorageLimits,
+  uploadBoundBootLine,
+  type HostMaxUploadMb,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
 
@@ -179,6 +183,20 @@ export interface StorageServicePluginOptions {
    * @default 86400
    */
   sessionTtl?: number;
+  /**
+   * Upload size bound in MB (counted as MiB), or `'unlimited'` to accept
+   * uploads of any size.
+   *
+   * Same precedence as the TTLs: a value SAVED in the `storage` settings
+   * (`max_upload_mb`) wins over this one, and this one wins over the
+   * namespace's manifest default. Left out, the namespace default applies, or
+   * — with no settings bound (`bindToSettings: false`, no settings service, a
+   * settings read that failed) — the built-in 100 MB. The bound is never unset
+   * by omission: no limit takes `'unlimited'`, and boot says so at `warn`.
+   * Anything but a positive number or `'unlimited'` refuses construction.
+   * @default 100 (via the storage settings, else built in)
+   */
+  maxUploadMb?: HostMaxUploadMb;
   /**
    * Bind to the `storage` settings namespace and rebuild the inner
    * adapter on every `settings:changed` event. Disable to keep the
@@ -307,7 +325,9 @@ export class StorageServicePlugin implements Plugin {
   private pendingSwapMovesStore?: boolean;
 
   constructor(options: StorageServicePluginOptions = {}) {
-    this.options = { adapter: 'local', ...options };
+    // Judged here, before any door exists: a malformed bound refuses the boot.
+    const maxUploadMb = parseHostMaxUploadMb(options.maxUploadMb, 'StorageServicePlugin');
+    this.options = { adapter: 'local', ...options, maxUploadMb };
   }
 
   /** Build a concrete adapter from a values map (settings-derived). */
@@ -418,6 +438,7 @@ export class StorageServicePlugin implements Plugin {
         getEngine: () => this.attachmentEngine,
         getStorage: () => storage,
         getLimitsSnapshot: () => storage.getLimitsSnapshot(),
+        hostMaxUploadMb: this.options.maxUploadMb,
         logger: ctx.logger,
         // The attach rule's verdict for the caller-scoped verbs, resolved per
         // call, the same two services the `sys_attachment` insert gate asks.
@@ -472,6 +493,7 @@ export class StorageServicePlugin implements Plugin {
         },
         getStorage: () => storage,
         getLimitsSnapshot: () => storage.getLimitsSnapshot(),
+        hostMaxUploadMb: this.options.maxUploadMb,
         logger: ctx.logger,
       }),
     );
@@ -767,6 +789,7 @@ export class StorageServicePlugin implements Plugin {
             basePath: this.options.basePath ?? '/api/v1/storage',
             presignedTtl: this.options.presignedTtl,
             sessionTtl: this.options.sessionTtl,
+            maxUploadMb: this.options.maxUploadMb,
             logger: ctx.logger,
           });
 
@@ -1065,6 +1088,21 @@ export class StorageServicePlugin implements Plugin {
       }
     });
 
+    // ── The upload bound in force, named once at boot ─────────────────
+    // Registered after the settings hook above, so it runs after
+    // `applySettings` has settled (or never ran): the bound it names is the
+    // one the next upload meets, with the layer it came from. `warn` when there
+    // is no bound — only an explicit host `maxUploadMb: 'unlimited'` gets there.
+    ctx.hook('kernel:ready', async () => {
+      if (!this.storage) return;
+      const line = uploadBoundBootLine(
+        'StorageServicePlugin',
+        resolveStorageLimits(this.storage.getLimitsSnapshot(), { maxUploadMb: this.options.maxUploadMb }),
+      );
+      if (line.level === 'warn') ctx.logger.warn(line.message);
+      else ctx.logger.info(line.message);
+    });
+
     // ── cloud#3814: no unshared local root under declared replicas ─────
     // Registered after the hook above, so it runs after `applySettings` has
     // settled: the adapter in use is decided there, not in `init()` — a
@@ -1255,6 +1293,8 @@ export interface StorageRoutesComposition {
   basePath?: string;
   presignedTtl?: number;
   sessionTtl?: number;
+  /** The host's upload bound — validated by the routes' registration. */
+  maxUploadMb?: HostMaxUploadMb;
   downloadTtl?: number;
   logger?: { info(msg: string): void; warn(msg: string): void };
 }
@@ -1333,7 +1373,8 @@ export function composeStorageRoutes(
   // the same object an adapter save swaps — so both mounts read it from the
   // one place it is written. Duck-typed like the routes' `verifyToken`: a host
   // whose `storage` is a bare adapter (no plugin, no settings) has no Limits
-  // group, and its doors keep their options and no size limit.
+  // group, and its doors keep their options, else the built-in defaults — the
+  // upload bound included.
   const limitsCarrier = composition.storage as { getLimitsSnapshot?: () => StorageLimitsSnapshot | undefined };
   const limitsSnapshot = typeof limitsCarrier.getLimitsSnapshot === 'function'
     ? () => limitsCarrier.getLimitsSnapshot!()
@@ -1347,6 +1388,7 @@ export function composeStorageRoutes(
       basePath,
       presignedTtl: composition.presignedTtl,
       sessionTtl: composition.sessionTtl,
+      maxUploadMb: composition.maxUploadMb,
       limitsSnapshot,
       downloadTtl: composition.downloadTtl,
       resolveSession,

@@ -21,6 +21,11 @@ import { VirtualGrid } from './VirtualGrid';
 import { ImportWizard } from './ImportWizard';
 
 export { ObjectGrid, VirtualGrid, ImportWizard };
+// The list face for a `referenceVia` pointer pair (objectui#12608): a page that
+// lists (object, record id) pairs outside a grid names the record through the
+// same batched resolver the grid's pointer columns use.
+export { RecordPointerCell } from './RecordPointerCell';
+export type { RecordPointerCellProps, RecordPointerSource } from './RecordPointerCell';
 // Spreadsheet parsers (pure functions; ExcelJS lazy-loads inside) — exported
 // for the chat-native attachment flow (cloud#797 WS3): the AI build panel
 // parses an attached Excel/CSV client-side and briefs the agent with the

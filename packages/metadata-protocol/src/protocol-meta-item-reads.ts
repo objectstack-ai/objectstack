@@ -120,6 +120,16 @@ function actionObjectOf(item: unknown): string | undefined {
 }
 
 /**
+ * [ADR-0150 D4, #33456] The owner key a served `action` item's artifact
+ * envelope is looked up at (`lookupArtifactItem`'s `owner`): the object the
+ * item binds its name to, `undefined` for an object-less one. `undefined`
+ * (look up by name) for every other type, and for no item.
+ */
+function artifactOwnerKeyOf(type: string, item: unknown): { object: string | undefined } | undefined {
+    return type === 'action' && item !== null && typeof item === 'object' ? { object: boundObjectOf(item) } : undefined;
+}
+
+/**
  * Is `packageId` a package the registry has switched off? A disabled package
  * holds nothing to a by-name action read (#25308), as
  * `refuseAmbiguousObjectLessAction` counts it.
@@ -301,6 +311,30 @@ export async function judgeBareActionRead(
         if (item !== undefined) return { item };
     }
     return undefined;
+}
+
+/**
+ * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The bare by-name read of
+ * a `doc` (`GET /meta/doc/NAME`, both faces, and the doors that read through
+ * it), judged before any layer is read by the registry's own read of it
+ * (`resolveItem` naming no package, which `MetadataFacade.get` asks too): a
+ * name two or more enabled packages hold is refused naming every holder
+ * (`409 RESOURCE_CONFLICT`). It served one holder by registration order: the
+ * MetadataService's copy (kept by name alone, the holder registered last) or
+ * the registry's first composite.
+ *
+ * Judge only: any answer the registry gives leaves the read to its layers,
+ * exactly as before. The environment's own item answers first where the
+ * registry holds it (its package-less bare slot: a hydrated or saved row);
+ * a package-less row only the store holds is no exemption, because the
+ * layers below do not serve it for a `doc` and would answer a holder by
+ * registration order again.
+ *
+ * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
+ */
+export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): void {
+    const registry = host.engine?.registry as { resolveItem?(type: string, name: string, caller: null, member?: string): unknown } | undefined;
+    if (typeof registry?.resolveItem === 'function') registry.resolveItem('doc', name, null, member);
 }
 
 /**
@@ -591,6 +625,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         }
         bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused, opts.face);
     }
+    // [ADR-0150 D1 bucket 1, ruling 6893582352 option A] A `doc` name two or
+    // more enabled packages hold is refused here when the read names no
+    // package, naming each, before any layer is read; the environment's own
+    // item still answers first ({@link refuseAmbiguousBareDocRead}).
+    if (!request.packageId && request.type === 'doc') refuseAmbiguousBareDocRead(host, request.name, member);
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }
@@ -1236,12 +1275,17 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#32501] …and, at an admitted exact address, at the package that
     // address reads, strictly ({@link exactAddressArtifact}): never the
     // first registered holder the pair id's lookup fell back to.
+    // [ADR-0150 D4, #33456] …and, for an action, at the served item's own
+    // owner key: an artifact another object binds the name to is another
+    // item, and lends this one no envelope ({@link artifactOwnerKeyOf}).
+    const artifactOwner = artifactOwnerKeyOf(request.type, item);
     const artifactItem = exactAddress
         ? exactAddressArtifact(exactAddress, (packageId) => host.lookupArtifactItem(
-            request.type, request.name, packageId, bundleMemberOf(request.type, item),
+            request.type, request.name, packageId, bundleMemberOf(request.type, item), artifactOwner,
         ))
         : host.lookupArtifactItem(
             request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
+            artifactOwner,
         );
     // [#21738] The lock is the one item-lock resolution's, over the layers
     // this read resolved from its address: [#21803] every installed

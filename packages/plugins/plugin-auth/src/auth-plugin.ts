@@ -128,7 +128,11 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
-import type { DirectSignInOptions } from './direct-sign-in.js';
+import {
+  directSignInNetworkRefusal,
+  isDirectSignInDoorNavigation,
+  type DirectSignInOptions,
+} from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -3880,6 +3884,9 @@ export class AuthPlugin implements Plugin {
     // of the routes below. The public render helpers (/config,
     // /bootstrap-status) are exempt so a blocked client still gets a clean
     // login page + error. Nothing is judged when no ranges are configured.
+    // Direct sign-in's start door is NOT exempt: a blocked browser that
+    // navigated to it is refused with a landing on the sign-in page that names
+    // the refusal (`directSignInNetworkRefusal`), never by reaching the door.
     //
     // The address judged is the one the server ESTABLISHED, by the platform's
     // client-address trust rule (`AuthManager.resolveClientAddress`, shared
@@ -3905,6 +3912,13 @@ export class AuthPlugin implements Plugin {
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
         this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
+        if (
+          this.directSignInDoorMounted &&
+          typeof mgr.getConsoleUrl === 'function' &&
+          isDirectSignInDoorNavigation(c.req.method, path, basePath)
+        ) {
+          return directSignInNetworkRefusal(c.req.url, (page) => mgr.getConsoleUrl(page));
+        }
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,
@@ -4075,16 +4089,17 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/set-initial-password`, async (c: any) => {
       try {
         const authApi = await this.authManager!.getApi();
-        // [#25083] On a cloud-managed environment the door narrows to a caller
-        // with platform-admin standing: everyone else signs in through the
-        // hosting organisation's identity provider, while an administrator can
-        // still give themselves the local password break-glass needs (ADR-0135
-        // D5.2 splits by population, never wholesale). A caller with no
-        // session falls through to the body, which answers it as before.
+        // [#25083] [#33203] On a cloud-managed environment the door refuses
+        // every signed-in caller, a platform administrator included: everyone
+        // signs in through the hosting organisation's identity provider, and a
+        // hosted environment keeps no local break-glass password (ruling 10 of
+        // objectstack-ai/cloud#4465; `cloud-managed.ts` states the rule). A
+        // caller with no session falls through to the body, which answers it
+        // as before.
         if (isCloudManaged()) {
           // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
           const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
-          if (session?.user?.id && !isPlatformAdminUser(session.user)) {
+          if (session?.user?.id) {
             const refusal = cloudManagedRefusal('setInitialPassword');
             return c.json(refusal.body, refusal.status);
           }
@@ -4129,6 +4144,7 @@ export class AuthPlugin implements Plugin {
             const source = await readUserSource(this.authManager!.getDataEngine(), String(callerId));
             return source.ok && isPendingSsoSource(source.value) ? pendingSsoPasswordRefusal('setInitialPassword') : undefined;
           },
+          logger: ctx.logger,
         });
         return c.json(body, status);
       } catch (error) {
@@ -4482,6 +4498,7 @@ export class AuthPlugin implements Plugin {
         return engine.transaction(async () => work());
       },
       resolveApiKeyLifecyclePolicy: () => this.authManager!.resolveApiKeyLifecyclePolicy(),
+      logger: ctx.logger,
     });
     const serviceAccountRoute = (
       path: string,
@@ -5250,7 +5267,7 @@ export class AuthPlugin implements Plugin {
         // attribution seam here — the `sys_member` row this creates is
         // credited to the admin instead of recorded as the system.
         const { status, body } = await runAttributedToUser(actor, () =>
-          runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any }, c.req.raw),
+          runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any, logger: ctx.logger }, c.req.raw),
         );
         return c.json(body, status as any);
       } catch (error) {
@@ -5661,6 +5678,20 @@ export class AuthPlugin implements Plugin {
           // `status` is the number 400, answered 400 from the same door. A
           // throw that declares no status is a server fault and stays 500.
           const { status } = resolveThrownHttpError(err, 500);
+          // A refusal the vendor classifies carries a body and keeps its own
+          // description and status; a body-less throw with a 4xx status is a
+          // refusal addressed to the caller and keeps its answer too. Anything
+          // else is an unclassified internal failure: it is answered in the
+          // generic words this file's other catches use, and logged once. The
+          // thrown error's own text never reaches the caller.
+          const vendorClassified = err?.body !== null && typeof err?.body === 'object';
+          if (!vendorClassified && !(status >= 400 && status <= 499)) {
+            ctx.logger.error(
+              '[AuthPlugin] sys-oauth-application/register failed',
+              err instanceof Error ? err : new Error(String(err)),
+            );
+            return c.json({ success: false, error: { code: 'OAUTH_REGISTER_FAILED', message: INTERNAL_ERROR_MESSAGE } }, status);
+          }
           // better-auth's `body.error` is an arbitrary upstream string, so it
           // cannot be `error.code` — that field is a closed set (ADR-0112) and
           // an unbounded source defeats it. Keep the code ours and carry the

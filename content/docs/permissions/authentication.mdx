@@ -370,6 +370,17 @@ nothing; the user signs in through the identity provider.
   a local password a user already holds — it still signs in, and
   `POST /api/v1/auth/change-password` still changes it. On a cloud-managed
   environment the cloud-managed rules answer first.
+- **A cloud-managed environment sets no local password for anyone.** There
+  (`OS_CLOUD_MANAGED=1`), `POST /api/v1/auth/set-initial-password` refuses every
+  signed-in caller, `POST /api/v1/auth/admin/set-user-password` refuses every
+  target, and the self-service reset doors (`POST /api/v1/auth/reset-password`,
+  `POST /api/v1/auth/phone-number/reset-password`, and the
+  `request-password-reset` doors that send their link or code) refuse every
+  request, with `409 RESOURCE_CONFLICT`, whatever the user's identity source
+  and a platform administrator included. Everyone signs in through the hosting
+  organisation's identity provider, so a hosted environment has no local
+  break-glass administrator. A password set before is not removed here.
+  Self-hosted deployments keep the rules above.
 
 ### Email Verification
 
@@ -622,6 +633,13 @@ credential check resolves the address to. So every refused sign-in on that accou
 counts toward its one lock, whichever spelling of the address it used. A lock refuses
 every sign-in that resolves to the account, the correct password included, and a
 successful sign-in under any spelling clears the counter.
+Every password sign-in door (email and password, phone number and password) counts
+toward that one lock and checks it before the password, and a locked account is
+refused, with the answer password sign-in gives, on every door that ends in a session
+for it: one-time codes, sign-in links, an address-change confirmation opened without a
+session, the second-factor step, sign-in through an identity provider (social, generic
+OAuth, enterprise SSO) and the device grant, so the lock also reaches an account that
+has no password.
 
 Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
 Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,
@@ -1289,6 +1307,11 @@ becomes `idp_provisioned`; only that provider clears the pending state, and a
 sign-in through any other one leaves the person pending. Their positions, permission sets and manager apply
 from the moment they are added, so seed data and approval flows can name them
 before they sign in. Off a managed environment both doors answer `409`.
+
+Signing in does not lock the manager: a platform administrator still changes
+it with **Set Manager** (`POST /api/v1/auth/admin/set-user-manager`). That
+endpoint refuses only a person a SCIM directory holds, whose manager is changed
+in the directory.
 
 A host can be told about people as they come and go: the `environmentUserHost`
 option of the auth plugin is called after a person is added, and before a

@@ -26,11 +26,8 @@ Every block below is a `where` fragment, so `check:skill-examples` skips it.
 | Null | `$exists` | `IS NOT NULL` / `IS NULL` | `{ metadata: { $exists: true } }` |
 | Null | `$empty` | `IS NULL`, `''` or `[]` by type | `{ notes: { $empty: true } }` |
 
-**Case sensitivity is part of the contract** (`filter.zod.ts`): "`$contains` /
-`$notContains` / `$startsWith` / `$endsWith` compare CASE-SENSITIVELY.
-`$icontains` is the case-INSENSITIVE twin" — ASCII folding only, so `café` does
-not match `CAFÉ`. Use `$icontains` for anything a human typed. `$like`/`$ilike`
-match the WHOLE value, so a pattern with no wildcard is an exact comparison, not
+Case sensitivity: SKILL.md, **String Operators**. `$like`/`$ilike` match the
+WHOLE value, so a pattern with no wildcard is an exact comparison, not
 a substring search. Their reach is narrower than the rest of the table: the SQL
 family, `driver-memory` and `@objectstack/formula` answer them, while
 `driver-mongodb`, objectql `having` and service-analytics each keep an operator
@@ -124,11 +121,19 @@ are. For OR, wrap them in a `$or` array (SKILL.md, **Logical Operators**).
 `{ age: { $contains: '25' } }` — the string operators are declared on strings
 only; use the comparison operators for numbers and dates.
 
-### ⚠️ Prefer `$null` to a bare `null` comparand
+### ⚠️ A column with no value fails every ordering test
 
-`where: { deleted_at: null }` works — a bare null lowers to `IS NULL` on both
-paths — but it reads as "equals null" and has no `IS NOT NULL` spelling. Write
-`{ deleted_at: { $null: true } }` instead.
+`$gt` / `$gte` / `$lt` / `$lte` / `$between` never match a row whose column is
+null or absent — in `where`, an aggregation's `filter` and `having` alike. So
+`{ amount: { $lte: 0 } }` skips the rows with no amount; to keep them, say so:
+
+```typescript
+where: { $or: [{ amount: { $lte: 0 } }, { amount: { $null: true } }] }
+```
+
+State absence with `$null`: `null` is not an ordering comparand
+(`{ $gte: null }` is refused, `INVALID_FILTER` / 400), and a bare
+`{ deleted_at: null }` lowers to `IS NULL` but has no `IS NOT NULL` spelling.
 
 ## Date Filtering Patterns
 
@@ -137,13 +142,6 @@ For **ad-hoc queries in application code**, compute the date yourself:
 ```typescript
 where: {
   created_at: { $gte: new Date('2025-01-01') }
-}
-
-// Records within a date range
-where: {
-  created_at: {
-    $between: [new Date('2025-01-01'), new Date('2025-03-31')]
-  }
 }
 ```
 
@@ -165,8 +163,7 @@ where: {
   period boundaries like `{current_month_start}`, `{last_quarter_end}`,
   `{next_year_start}` (and bare aliases like `{month_start}`).
 - **Parameterised tokens:** `{N_<unit>_ago}` / `{N_<unit>_from_now}` with
-  units `minute|hour|day|week|month|year` — e.g. `{30_days_ago}`,
-  `{2_weeks_from_now}`.
+  units `minute|hour|day|week|month|year` — e.g. `{2_weeks_from_now}`.
 - **Both spellings parse:** `{today}` and `${today}` are the same token
   (`DATE_MACRO_WRAPPED_RE` is `/^\$?\{([a-zA-Z0-9_]+)\}$/`, and the context
   tokens share it).
@@ -176,7 +173,7 @@ where: {
 user's id and the active organization id.
 
 ```typescript
-where: { owner: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
+where: { owner_id: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
 ```
 
 **Scope:** tokens expand on **both** sides of the wire — client-side by

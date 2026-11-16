@@ -3391,6 +3391,7 @@ const en = {
         directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
         directSignInUnavailable: "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
         directSignInRateLimited: "Too many sign-ins were started from this network just now. Wait a few seconds, then try again.",
+        networkNotAllowed: "This system does not allow sign-in from your network. Connect from an allowed network (for example your organization's office network or VPN), or ask your administrator.",
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
@@ -3793,6 +3794,9 @@ const en = {
     keyboardShortcuts: 'Keyboard shortcuts',
     onlineDocs: 'Online documentation',
     loadingDocumentation: 'Loading documentation',
+    docConflictTitle: 'Choose a package',
+    docConflictDescription: 'More than one installed package provides a document named {{name}}. Open the one you want to read.',
+    docConflictCandidates: 'Packages that provide this document',
     documentation: 'Documentation',
     uncategorized: 'Uncategorized',
     about: 'About',
@@ -4932,6 +4936,9 @@ const en = {
       aggregations: 'Aggregations',
       records: 'Records',
       visibleToYou: 'Only records visible to you',
+      dataset: 'Dataset',
+      metrics: 'Metrics',
+      noAddedFilter: 'No filter added to the dataset definition',
     },
     tool: {
       aggregate_data: 'Aggregate the data',

@@ -967,15 +967,27 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "Ablehnungen",
-        helpText: "Katalog der Ablehnungen, nach dem SCREAMING_SNAKE-Code, den der Rumpf wirft (z. B. CLEAN_VERSION_REQUIRED). Der Aufrufer liest die deklarierte Meldung, übersetzt in seine Sprache, mit dem deklarierten Status. Nur JavaScript-Rümpfe (L2)"
+        helpText: "Katalog der Ablehnungen, nach dem SCREAMING_SNAKE-Code, den der Hook wirft (z. B. CLEAN_VERSION_REQUIRED). Der Aufrufer liest die deklarierte Meldung, übersetzt in seine Sprache, mit dem deklarierten Status. Für einen JavaScript-Rumpf (L2) oder einen Handler; bei einem Ausdrucksrumpf abgelehnt"
       },
       "refusals.message": {
         label: "Meldung",
-        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Code wirft – einfacher Text ohne Platzhalter"
+        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Code wirft. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
       },
       "refusals.status": {
         label: "Status",
         helpText: "HTTP-Status der Ablehnung (400–499). Fehlt er: 400"
+      },
+      "refusals.reasons": {
+        label: "Gründe",
+        helpText: "Weitere Sätze unter demselben Code, nach dem snake_case-Grund, den der Rumpf neben dem Code wirft ({ code, reason }). Gesendeter Code und Status bleiben die dieses Eintrags; ein hier nicht deklarierter Grund wird abgelehnt. Fehlt er: Ein geworfener Grund wird nicht gelesen"
+      },
+      "refusals.reasons.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Grund unter dem Code wirft. Seine {{ }}-Platzhalter folgen den params des Eintrags"
+      },
+      "refusals.params": {
+        label: "Parameter",
+        helpText: "Namen, die die Sätze füllen dürfen (z. B. state): Der Rumpf wirft { code, params: { state } }, und ein Platzhalter {{ state }} zeigt den Wert. Fehlt er: Die Sätze sind einfacher Text"
       },
       handler: {
         label: "Handler",

@@ -257,8 +257,9 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'opt-in',
     gatedInputs: [
       'sys_user.actions.create_user',
-      'sys_user.actions.ban_user',
-      'sys_user.actions.unban_user',
+      // `ban_user` / `unban_user` are not booked: their doors are ObjectStack
+      // mounts that work without the admin plugin, so neither is gated on this
+      // flag (see the admin block header in sys-user.object.ts).
       'sys_user.actions.unlock_user',
       'sys_user.actions.set_user_password',
       // 'sys_user.actions.set_user_role' retired (#9968) — see the removal
@@ -294,6 +295,8 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_member.actions.invite_user',
       'sys_invitation.actions.invite_user',
       'sys_organization.actions.invite_user',
+      // A resend is a call to invite-member, which refuses it here.
+      'sys_invitation.actions.resend_invitation',
       // [#27843] The invitation's accept link: no invitation is handed out here.
       'sys_invitation.actions.copy_invitation_link',
       'sys_user.actions.create_user',

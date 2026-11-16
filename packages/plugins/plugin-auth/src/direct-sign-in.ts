@@ -108,6 +108,14 @@ export const DIRECT_SIGN_IN_UNAVAILABLE = 'direct_sign_in_unavailable';
  */
 export const DIRECT_SIGN_IN_RATE_LIMITED = 'direct_sign_in_rate_limited';
 
+/**
+ * The `error` code the sign-in page is sent to when the deployment's IP
+ * allow-list (ADR-0069 D5) refused the client at the start door: the
+ * refusal's own code, so the page names it as the network refusal it is and
+ * does not navigate again ({@link directSignInNetworkRefusal}).
+ */
+export const DIRECT_SIGN_IN_NETWORK_REFUSED = 'IP_NOT_ALLOWED';
+
 /** The longest return path kept; a longer one is dropped. */
 export const RETURN_PATH_MAX = 2048;
 
@@ -230,7 +238,11 @@ export function carriedRedirect(kept: string | undefined): string | undefined {
 }
 
 /** The Console's `/login`, with the carried `redirect` and the `error` code, when there are any. */
-function signInPageUrl(host: DirectSignInHost, redirect: string | undefined, error?: string): string {
+function signInPageUrl(
+  host: Pick<DirectSignInHost, 'consolePageUrl'>,
+  redirect: string | undefined,
+  error?: string,
+): string {
   const params = new URLSearchParams();
   if (error !== undefined) params.set('error', error);
   if (redirect !== undefined) params.set('redirect', redirect);
@@ -452,4 +464,37 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
   const location = started.status === 200 ? await authorizationUrlOf(started) : undefined;
   if (!location) return unavailable('start_refused', chosen.providerId);
   return redirect(location, started.headers.getSetCookie?.() ?? []);
+}
+
+/**
+ * Whether a request is a browser's navigation to the start door
+ * (`GET {basePath}/sign-in/direct`), the one auth request the IP allow-list
+ * answers with a landing instead of a JSON body ({@link directSignInNetworkRefusal}).
+ */
+export function isDirectSignInDoorNavigation(method: string, path: string, basePath: string): boolean {
+  return method.toUpperCase() === 'GET' && path === `${basePath}${DIRECT_SIGN_IN_PATH}`;
+}
+
+/**
+ * The answer the IP allow-list gives a client it refused at the start door:
+ * `302` to the Console's `/login?error=IP_NOT_ALLOWED`, carrying the page's
+ * `?redirect=` like every other landing ({@link carriedRedirect}), instead of
+ * the raw `403 IP_NOT_ALLOWED` body a top-level navigation would show.
+ *
+ * The refusal stands: nothing is started, no provider is read and nothing
+ * reaches the door. The page reads the code, holds (an `error` on the URL),
+ * and says the network is not allowed; every sign-in door it offers is judged
+ * by the allow-list as before. Only the query's `callbackURL` is read, and a
+ * query the door would refuse `400` still lands here: the client is refused
+ * either way, and the network refusal is the one that tells it why.
+ */
+export function directSignInNetworkRefusal(requestUrl: string, consolePageUrl: (path: string) => string): Response {
+  let redirectTo: string | undefined;
+  try {
+    const values = new URL(requestUrl).searchParams.getAll('callbackURL');
+    redirectTo = values.length === 1 ? carriedRedirect(keptReturnPath(values[0])) : undefined;
+  } catch {
+    redirectTo = undefined;
+  }
+  return redirect(signInPageUrl({ consolePageUrl }, redirectTo, DIRECT_SIGN_IN_NETWORK_REFUSED));
 }

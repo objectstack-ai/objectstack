@@ -186,3 +186,72 @@ describe('useLauncherApps narrows by /me/apps (objectstack#26838)', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * objectstack#28085 — a surface that waits on `pending` (Home) must not draw
+ * its page for one frame before the first read starts: that frame mounts the
+ * page's children, `pending` then takes them away, and the answer mounts them
+ * again, so every read a child makes on mount goes out twice per load.
+ */
+describe('the first /me/apps read is pending from the first render (objectstack#28085)', () => {
+  /** Home's gate, reduced: the page, and a child that reads once on mount. */
+  function GatedPage({ childRead }: { childRead: () => void }) {
+    const { pending } = useLauncherApps(state.apps);
+    if (pending) return <div data-testid="gate">loading</div>;
+    return <PageChild childRead={childRead} />;
+  }
+  function PageChild({ childRead }: { childRead: () => void }) {
+    React.useEffect(() => childRead(), [childRead]);
+    return <div data-testid="page">page</div>;
+  }
+
+  it('a page behind the gate mounts once, so its child reads once per load', async () => {
+    const childRead = vi.fn();
+    let answer!: (res: Response) => void;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => (answer = resolve)));
+    renderWith(fetcher as unknown as typeof fetch, <GatedPage childRead={childRead} />);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      answer(new Response(JSON.stringify({ apps: [{ name: 'crm' }] }), { status: 200 }));
+    });
+    // The page in the DOM is not its effect having run: a commit outside `act`
+    // flushes passive effects on a later task, so wait for the read itself,
+    // then let the load run out before counting.
+    await waitFor(() => expect(screen.getByTestId('page')).toBeInTheDocument());
+    await waitFor(() => expect(childRead).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(childRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('is pending in the very first render when a read is due', () => {
+    const fetcher = vi.fn(() => new Promise<Response>(() => {}));
+    const firstRender: boolean[] = [];
+    function First() {
+      const { pending } = useLauncherApps(state.apps);
+      if (firstRender.length === 0) firstRender.push(pending);
+      return null;
+    }
+    renderWith(fetcher as unknown as typeof fetch, <First />);
+    expect(firstRender).toEqual([true]);
+  });
+
+  it('is not pending in the first render when no read is due', () => {
+    for (const setup of [
+      () => (state.userId = null),
+      () => (state.loading = true),
+      () => (state.apps = []),
+    ]) {
+      setup();
+      const fetcher = meApps(['crm']);
+      const { unmount } = renderWith(fetcher as unknown as typeof fetch);
+      expect(screen.getByTestId('probe')).toHaveAttribute('data-pending', 'false');
+      expect(fetcher).not.toHaveBeenCalled();
+      unmount();
+      state.userId = 'u1';
+      state.loading = false;
+      state.apps = [SETUP, ACCOUNT, CRM, SHOWCASE];
+    }
+  });
+});

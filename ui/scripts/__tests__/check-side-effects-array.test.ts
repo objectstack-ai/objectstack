@@ -795,10 +795,20 @@ describe('the real workspace — the population this widening was measured again
     const kinds = results.flatMap((r) => r.entryForms.map((e) => e.kind));
     expect(kinds).toContain('asset'); // @object-ui/app-shell's `./styles.css`
     expect(results.flatMap((r) => r.entryForms.flatMap((e) => e.alternateFormats)).length).toBeGreaterThan(0);
-    // ...and every package still walks from exactly one root, which is the
-    // sentence this change has to carry: the fix is right, and the genuine
-    // multi-entry population is ZERO today, so it is future packages the
-    // priority rests on rather than present ones.
-    for (const r of results) expect(r.entryPoints, r.name).toHaveLength(1);
+    // ...and the genuine multi-entry population is exactly the two `/core`
+    // subpaths objectstack#33581 published: side-effect-free secondary entry
+    // points, walked as roots of their own (and finding no registrar, which is
+    // their point). Every other package still walks from one root. A package
+    // joining or leaving this list is the moment to re-read the argument above.
+    const multi = Object.fromEntries(
+      results.filter((r) => r.entryPoints.length > 1).map((r) => [r.name, r.entryPoints]),
+    );
+    expect(multi).toEqual({
+      '@object-ui/plugin-form': ['src/core.ts', 'src/index.tsx'],
+      '@object-ui/plugin-view': ['src/core.ts', 'src/index.tsx'],
+    });
+    for (const r of results) {
+      if (!(r.name in multi)) expect(r.entryPoints, r.name).toHaveLength(1);
+    }
   });
 });

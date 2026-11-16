@@ -75,6 +75,7 @@ import {
   type ComboboxOption,
 } from '@object-ui/components';
 import { LookupField, getLazyFieldWidget, objectRefOptionLabel } from '@object-ui/fields';
+import { RecordPointerCell } from '@object-ui/plugin-grid';
 import { ConsolePageHeader, useAdapter, useMetadata } from '@object-ui/app-shell';
 import { Search, X, AlertCircle, ScrollText, ExternalLink } from 'lucide-react';
 import { actionBadgeVariant, actionFilterOptionsOf, actionLabelOf } from './auditLogActions';
@@ -719,7 +720,20 @@ export function AuditLogPage() {
                       <TableCell className="font-mono text-xs">{formatDate(r.created_at, displayLocale)}</TableCell>
                       <TableCell><Badge variant={variant}>{actionLabelOf(actionOptions, r.action) ?? '—'}</Badge></TableCell>
                       <TableCell>{objectLabelOf(objects, r.object_name) ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{truncate(r.record_id, 18)}</TableCell>
+                      <TableCell className="max-w-[16rem] text-xs">
+                        {/* The record by its display name, through the batched
+                            pointer resolver the grid's `referenceVia` columns
+                            use (`sys_audit_log.record_id` is the id half of the
+                            pair `object_name` types). */}
+                        {r.object_name && r.record_id ? (
+                          <RecordPointerCell
+                            pointer={{ objectName: r.object_name, recordId: r.record_id }}
+                            dataSource={adapter}
+                          />
+                        ) : (
+                          <span className="font-mono">{truncate(r.record_id, 18)}</span>
+                        )}
+                      </TableCell>
                       <TableCell><ActorCell face={actorOf(r)} /></TableCell>
                       <TableCell className="font-mono text-xs">{r.ip_address || '—'}</TableCell>
                     </TableRow>

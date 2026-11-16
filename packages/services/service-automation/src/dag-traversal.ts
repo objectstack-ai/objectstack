@@ -111,8 +111,10 @@ export function runUserOf(context: AutomationContext | undefined): EvalUserParse
  * `droppedFields` keeps each element that is a well-typed
  * `DroppedFieldsEventSchema` event and skips the rest: the same per-element
  * filter the run's terminal answer applies when it folds the step log
- * (`foldDropEvents`), so the step and the answer can never disagree about
- * which events were real. `warnings` keeps its string entries. A member with
+ * (`foldDropEvents`), so the step and the answer agree on which events were
+ * well-typed. They part on one shape only: a well-typed event with
+ * `fields: []` stays on the step, while the fold drops it from the answer
+ * (no in-tree producer emits one). `warnings` keeps its string entries. A member with
  * nothing well-typed left is omitted, never `[]`. Total, never throwing: it
  * runs inside the step's `try`, where a throw would read as a node failure.
  */
@@ -1228,9 +1230,49 @@ export function seedRunVariables(
     return variables;
 }
 
+/**
+ * The start node's trigger-condition gate — the ONE evaluator both attempt
+ * paths call: `execute()` (attempt 1) and {@link executeWithoutRetry} (every
+ * retry attempt).
+ *
+ * The start node's `condition` is the predicate that decides whether the
+ * trigger event should launch the flow at all (e.g.
+ * `status == "done" && previous.status != "done"`). The engine, not the
+ * trigger, owns evaluating it, so every trigger type and a manual `execute()`
+ * share one gate. Plain-string conditions are routed through CEL so bare field
+ * references resolve.
+ *
+ * Three answers, the same on every attempt:
+ * - no condition authored (absent, `null` or `''`) → `true`, the run proceeds;
+ * - the condition does not hold → `false`, the caller answers the
+ *   `condition_not_met` skip and runs no node;
+ * - the condition cannot be evaluated → it THROWS (ADR-0032 §1c, via
+ *   `evaluateCondition`): a fault, which `execute()`'s catch hands to the
+ *   flow's error strategy. Under `strategy: 'retry'` the fault is retried,
+ *   and each retry attempt re-runs this gate — a fault stays a fault and
+ *   never becomes a pass. Before this was shared, the retry path never
+ *   evaluated the condition, so a condition that faulted on attempt 1 let
+ *   attempts 2..N run the nodes ungated.
+ */
+export function startConditionHolds(
+    this: Pick<DagTraversalHost, 'evaluateCondition'>,
+    startNode: FlowNodeParsed,
+    variables: Map<string, unknown>,
+    context: AutomationContext,
+): boolean {
+    const startCondition = (startNode.config as Record<string, unknown> | undefined)?.condition as
+        | string
+        | { dialect?: string; source?: string; ast?: unknown }
+        | undefined;
+    if (startCondition === undefined || startCondition === null || startCondition === '') return true;
+    const condExpr =
+        typeof startCondition === 'string' ? { dialect: 'cel', source: startCondition } : startCondition;
+    return this.evaluateCondition(condExpr, variables, context);
+}
+
 /** The body of {@link AutomationEngine.executeWithoutRetry}, moved unedited; that method's docblock is its contract. */
 export async function executeWithoutRetry(
-    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun' | 'flowChecksumOf' | 'renderFlowTerminalMessage' | 'flowSlotPackage'>,
+    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'evaluateCondition' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun' | 'flowChecksumOf' | 'renderFlowTerminalMessage' | 'flowSlotPackage'>,
     flowName: string,
     context?: AutomationContext,
     dispatched?: { errorMessage: string | undefined },
@@ -1292,6 +1334,19 @@ export async function executeWithoutRetry(
             // [#9415] Same classification as `execute()`'s start-node exit,
             // for the reason the disabled exit above states.
             return { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' };
+        }
+
+        // The SAME trigger-condition gate attempt 1 runs under, through the
+        // same evaluator (`startConditionHolds`), and in the same place: after
+        // the start-node lookup, before the input-schema guard and any node.
+        // A condition that does not hold on this attempt skips the run with
+        // the envelope `execute()` answers; one that throws lands in this
+        // method's failure arm below and consumes one retry attempt, so a
+        // condition that faults on every attempt ends the run `failed` with no
+        // node executed. `start-condition-retry-33935.test.ts` pins all three.
+        if (!startConditionHolds.call(this, startNode, variables, runContext)) {
+            this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
+            return { success: true, output: { skipped: true, reason: 'condition_not_met' }, flowLabel: flow.label };
         }
 
         // [#9889] The SAME definition-level guard attempt 1 runs under —
