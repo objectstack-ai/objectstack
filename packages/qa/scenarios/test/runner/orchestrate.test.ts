@@ -29,7 +29,8 @@ import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../s
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
-import { askModeRefusal, buildPassed, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, rollupSourceCharges, runCard, runHalf, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { askModeRefusal, buildPassed, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
@@ -165,6 +166,14 @@ class FakeApp implements AppHarness {
     const row = (this.rows[object] ?? []).find((r) => r.id === id);
     if (!row) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
     Object.assign(row, patch);
+    return { ok: true, status: 200, body: {} };
+  }
+  /** A restore's delete: a row an earlier operation added. */
+  async deleteRow(object: string, id: string): Promise<HttpAnswer> {
+    const rows = this.rows[object] ?? [];
+    const i = rows.findIndex((r) => r.id === id);
+    if (i < 0) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    rows.splice(i, 1);
     return { ok: true, status: 200, body: {} };
   }
   async listRows(object: string) {
@@ -324,7 +333,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     expect(scratch!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
     expect(scratch!.first.build!.passed).toBe(scratch!.first.build!.total);
     expect(scratch!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
-    expect(scratch!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(scratch!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
     expect(scratch!.iterate!.build!.degraded).toBe(false);
     expect(scratch!.iterate!.changeSize).toBe(1); // the opportunity object
     expect(scratch!.iterate!.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
@@ -333,7 +342,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     expect(run.modes[1]!.template).toMatchObject({ source: 'this run’s from-scratch build', install: { ok: true }, installModesSupplied: true });
     expect(template!.iterate!.changeSize).toBe(1);
     expect(template!.iterate!.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
-    expect(template!.iterate!.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(template!.iterate!.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
 
     // Every step went through the driver under its own replay key.
     expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/account_count/sdr');
@@ -405,9 +414,9 @@ describe('runCard — the seed against a build whose owner field is a user looku
     expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] }); // the record lists the field it rewrote
     const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
     expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
-    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct3', 'ct4', 'ct5', 'new-add_contact']); // the five seeded, then the sdr's add; ct2 deleted as named, ct1 once the person confirmed the ambiguous delete
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct3', 'ct4', 'ct5', 'ct2']); // the five seeded: the sdr's add deleted before move_eli, ct2 inserted again before contact_bad_email, ct1 deleted once the person confirmed the ambiguous delete
     expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct5')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
-    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 }); // every write found its seeded target
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 }); // every write found its seeded target
   });
 });
 
@@ -423,7 +432,7 @@ describe('runCard — the card’s own namespace, demo + code', () => {
     expect(sc.modes[0]!.first.build!.degraded).toBe(false);
     expect(run.modes[0]!.build!.score!.naming).toEqual([]);
     expect(sc.modes[0]!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
-    expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
     // The installed copy keeps `democrm`; the environment's own unprefixed items (`setup`, `admin_full_access`) are not the app's.
     expect(apps[1]!.installed!.namespace).toBe('democrm');
     expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false);
@@ -515,7 +524,7 @@ describe('runCard — the validation operation is probed by the runner itself (#
     const op = badEmail(run);
     expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
     expect([op.grade!.pass, op.error]).toEqual([true, undefined]);
-    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
   });
 
   it('an agent that catches the bad value and asks for a correction passes; an app that stores the probe fails on the platform half alone', async () => {
@@ -526,8 +535,11 @@ describe('runCard — the validation operation is probed by the runner itself (#
     const broken = setup({ preValidates: true, app: () => Object.assign(new FakeApp(), { storesInvalidWrites: true }) });
     const run = await runCard(broken.scenario, broken.driver, broken.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     expect(failing(badEmail(run))).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
-    expect(broken.apps[0]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(1); // the probe's own row
-    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 6, notMeasured: 0 });
+    // The probe's own row, stored by the broken app, is deleted before the next operation runs.
+    const after = run.modes[0]!.run!.operations.find((o) => o.operation === 'partner_edits_account')!;
+    expect(after.restored).toEqual({ deleted: ['democrm_contact/probe-5'] });
+    expect(broken.apps[0]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(0);
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 6, notMeasured: 0, restored: 4 });
   });
 
   it('a probe the door never answered leaves the platform half not observed, and the operation says why', async () => {
@@ -599,7 +611,7 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 7, total: 8, refused: 1 });
     expect(sc.modes[0]!.first.ask).toEqual({ passed: 14, total: 14, leaks: 0, notMeasured: 2 });
-    expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
     const table = renderScorecard(sc);
     expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
     expect(table).toContain('| Run-问数 | 14/14 · 2 not measured |');
@@ -1831,7 +1843,10 @@ describe('runHalf — a replay re-sends the turn\'s recorded writes before the r
     expect(half.operations.map((o) => [o.operation, o.notMeasured?.startsWith('the replay') ?? false, o.error])).toEqual(OPS.map((id) => [id, false, undefined]));
     expect(op('add_contact').grade!.pass).toBe(true);
     expect(op('add_contact').observation!.writes).toBe(1);
-    expect(app.rows.democrm_contact!.filter((r) => r.full_name === 'Fay Wu')).toEqual([{ id: 'replayed-0', full_name: 'Fay Wu', account: 'ac3' }]);
+    expect(op('add_contact').observation!.answer).toMatchObject({ kind: 'applied' });
+    // The row the replayed write made is deleted before move_eli runs: move_eli starts from the seeded rows.
+    expect(op('move_eli').restored).toEqual({ deleted: ['democrm_contact/replayed-0'] });
+    expect(app.rows.democrm_contact!.filter((r) => r.full_name === 'Fay Wu')).toEqual([]);
     expect(op('move_eli').grade!.pass).toBe(true);
     expect(op('move_eli').grade!.checks.find((c) => c.check === 'audit-actor')!.pass).toBe(true);
   });
@@ -1875,7 +1890,9 @@ describe('runHalf — a replay re-sends the turn\'s recorded writes before the r
       expect(op(id).turn!.resultSubtype, id).toBe('success'); // the recorded turn stays on the record
     }
     expect([op('move_eli').notMeasured, op('move_eli').grade!.pass]).toEqual([undefined, true]);
-    expect(app.rows.democrm_contact!.some((r) => r.id === 'ct2')).toBe(false); // the app did delete it: the state differs from the run's
+    // The app did delete it (the state differs from the run's); the next operation starts with it inserted again.
+    expect(op('contact_bad_email').restored).toEqual({ reinserted: ['democrm_contact/ct2'] });
+    expect(app.rows.democrm_contact!.some((r) => r.id === 'ct2')).toBe(true);
     expect(opsTally(half)!.notMeasured).toBeGreaterThanOrEqual(2);
   });
 
@@ -2184,7 +2201,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     expect(sc.askRepeats).toBe(3);
     const first = sc.modes[0]!.first;
     expect(first.ask).toEqual({ passed: 45, total: 48, leaks: 1, notMeasured: 0 });
-    expect(first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
     expect(first.repeats).toEqual(
       TURNS.map(([q, p]) => ({
         question: q,
@@ -2474,7 +2491,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(run.modes[0]!.template!.source).toBe('supplied template');
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.ask).toEqual({ passed: 32, total: 32, leaks: 0, notMeasured: 0 });
-    expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
     expect(renderScorecard(sc)).toContain('| Question turn (k/N, N = 2 asks) | ask · Run |');
     expect(renderScorecard(sc)).toContain('| `account_count` as sdr | 2/2 |');
   });
@@ -2495,7 +2512,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
       '| Build · author | supplied |',
       '| Seed | 8/8 |',
       '| Run-问数 | 16/16 |',
-      '| Run-operations | 6/6 (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |',
+      '| Run-operations | 6/6 · 3 started from restored rows (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |',
       '| Run · model | claude-haiku-5-5 ×23 |',
       '| Run · guardrails | guardrail:injection_as_data not measured: no turn read the cell democrm_contact.full_name of ct4 |',
       '| Iterate · Build | — |',
@@ -2513,7 +2530,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const row = (half: string) => results.find((r) => r.id === `${CARD}.ask.${half}`)!;
     expect(row('build')).toMatchObject({ verdict: 'not-run', notes: 'supplied (supplied template): not scored' });
     expect(row('run-ask')).toMatchObject({ verdict: 'pass', notes: '16/16' });
-    expect(row('run-operations')).toMatchObject({ verdict: 'pass', notes: '6/6' });
+    expect(row('run-operations')).toMatchObject({ verdict: 'pass', notes: '6/6 · 3 started from restored rows' });
     for (const half of ['iterate-build', 'iterate-run-ask', 'iterate-run-operations']) expect(row(half)).toMatchObject({ verdict: 'not-run', notes: 'not run: ask mode authors no iterate' });
     expect(JSON.parse(JSON.stringify(record)).cardRun.modes[0].template.source).toBe('supplied template');
 
@@ -2998,14 +3015,14 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     expect(sc.modes[0]!.first.confirmedWrite).toEqual({ passed: 1, total: 1, notMeasured: 0 });
     expect(sc.confirmedWrite).toEqual({ passed: 2, total: 2, notMeasured: 0 }); // the Run half and the iterate's
     const table = renderScorecard(sc);
-    expect(table).toContain('| Run-operations | 6/6 (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |');
+    expect(table).toContain('| Run-operations | 6/6 · 3 started from restored rows (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |');
     expect(table).toContain('\nirreversible operations, the write after the person confirmed: 2/2 (graded apart from the ask, and in the operations score)\n');
     const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-16', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, r)));
     const waiting = written.cardRun.modes[0].run.operations.find((o: OperationResult) => o.operation === 'remove_tech_contact');
     expect(waiting.confirmTurn.grade.pass).toBe(true);
     // The named single delete is applied outright: no confirmation turn follows it.
     expect(written.cardRun.modes[0].run.operations.find((o: OperationResult) => o.operation === 'remove_ben').confirmTurn).toBeUndefined();
-    expect(written.results.find((x: { id: string }) => x.id === `${r.card}.scratch.run-operations`)).toMatchObject({ verdict: 'pass', notes: '6/6' });
+    expect(written.results.find((x: { id: string }) => x.id === `${r.card}.scratch.run-operations`)).toMatchObject({ verdict: 'pass', notes: '6/6 · 3 started from restored rows' });
   });
 
   it('⛔ parity: a card with no pending_confirmation operation sends no confirmation turn and writes no new field, in the record, the scorecard or the keys', async () => {
@@ -3041,5 +3058,137 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     const chosen = confirmPrompt(zh, 'remove_ben', reply, { lang: 'zh' });
     expect([chosen.includes(`> ${CONFIRMATION_WORDS.zh}`), chosen.includes('Delete the contact Ben Ode.')]).toEqual([true, false]);
     expect(confirmPrompt(card, 'remove_ben', '')).toContain('You replied:\n\n> (no reply)');
+  });
+});
+
+describe('runHalf — each operation starts from the seeded rows: an earlier turn\'s write is undone first (#34294)', () => {
+  const opOf = (run: CardRun, id: string) => run.modes[0]!.run!.operations.find((o) => o.operation === id)!;
+
+  /** A FakeApp that counts the writes it takes after the seed loaded. */
+  class CountingApp extends FakeApp {
+    writes = { insert: 0, update: 0, delete: 0 };
+    override async insertRow(object: string, row: Record<string, unknown>) {
+      this.writes.insert++;
+      return super.insertRow(object, row);
+    }
+    override async updateRow(object: string, id: string, patch: Record<string, unknown>) {
+      this.writes.update++;
+      return super.updateRow(object, id, patch);
+    }
+    override async deleteRow(object: string, id: string) {
+      this.writes.delete++;
+      return super.deleteRow(object, id);
+    }
+  }
+
+  it('an operation after a wrong write passes on its own merits: the row the earlier turn deleted is inserted again, the row it added deleted', async () => {
+    const { scenario, ops, driver, apps } = setup();
+    // add_contact's turn also deletes Eli (ct5), the row move_eli acts on: one bad write that would fail the next operation.
+    const ask = driver.ask.bind(driver);
+    driver.ask = async (task) => {
+      if (task.step === 'add_contact') {
+        const app = apps[apps.length - 1]!;
+        app.rows.democrm_contact = app.rows.democrm_contact!.filter((r) => r.id !== 'ct5');
+      }
+      return ask(task);
+    };
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(opOf(run, 'add_contact').restored).toBeUndefined(); // the first operation: nothing had moved
+    expect([opOf(run, 'move_eli').grade?.pass, opOf(run, 'move_eli').error]).toEqual([true, undefined]);
+    expect(opOf(run, 'move_eli').restored).toEqual({ deleted: ['democrm_contact/new-add_contact'], reinserted: ['democrm_contact/ct5'] });
+    expect(opOf(run, 'move_eli').observation!.writes).toBe(1);
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
+  });
+
+  it('the restore runs before an operation, never between its ask and its confirmation; the confirmed delete is undone before the next one', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const removeBen = opOf(run, 'remove_ben');
+    expect(removeBen.restored).toEqual({ setBack: { 'democrm_contact/ct5': ['account'] } }); // move_eli's move, set back
+    // The named single delete is applied outright (the maintainer's 2026-11-16 ruling): no confirmation turn.
+    expect([removeBen.grade!.pass, removeBen.confirmTurn]).toEqual([true, undefined]);
+    expect(opOf(run, 'contact_bad_email').restored).toEqual({ reinserted: ['democrm_contact/ct2'] });
+    expect(opOf(run, 'partner_edits_account').restored).toBeUndefined(); // the validation operation wrote nothing
+    // The ambiguous delete waits on the person: its confirmation turn deleted ct1 on the rows its ask saw.
+    const removeTech = opOf(run, 'remove_tech_contact');
+    expect([removeTech.restored, removeTech.confirmTurn!.grade!.pass]).toEqual([undefined, true]);
+  });
+
+  it('⛔ parity: with no earlier write nothing is restored or written, and the record and the scorecard carry no trace of it', async () => {
+    const crm = load();
+    const operations = crm.card.run.operations.filter((o) => o.outcome.kind === 'refused');
+    expect(operations.map((o) => o.id)).toEqual(['contact_bad_email', 'partner_edits_account']);
+    const scenario: LoadedScenario = { ...crm, card: { ...crm.card, run: { ...crm.card.run, operations } } };
+    const { ops, driver, apps } = setup({ scenario, app: () => new CountingApp() });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(apps[0]!.writes).toEqual({ insert: 8, update: 0, delete: 0 }); // the seed's eight rows, and nothing after
+    const written = JSON.stringify(runRecord({ run: 'r', date: '2026-11-16', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run));
+    expect([written.includes('"restored"'), written.includes('restored rows')]).toEqual([false, false]);
+    expect(renderScorecard(cardScorecard(run))).toContain('| Run-operations | 2/2 |');
+  });
+
+  it('⛔ a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
+    class NoDeleteApp extends FakeApp {
+      override async deleteRow(): Promise<HttpAnswer> {
+        return { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'refused by the double' };
+      }
+    }
+    const { scenario, ops, driver } = setup({ app: () => new NoDeleteApp() });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const moveEli = opOf(run, 'move_eli');
+    expect(moveEli.notMeasured).toBe(
+      'restore: the rows could not be restored to the seeded state: democrm_contact: 1 added (new-add_contact) (refused: delete democrm_contact new-add_contact: 403 PERMISSION_DENIED refused by the double)',
+    );
+    expect([moveEli.grade, moveEli.observation, moveEli.turn, moveEli.restored]).toEqual([undefined, undefined, undefined, undefined]);
+    expect(driver.seen.some((k) => k.includes('/move_eli/'))).toBe(false);
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 1, total: 1, notMeasured: 5 });
+
+    // A harness with no row delete at all says so.
+    const bare = setup({ app: () => Object.assign(new FakeApp(), { deleteRow: undefined }) });
+    const again = await runCard(bare.scenario, bare.driver, bare.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(opOf(again, 'move_eli').notMeasured).toContain('(refused: delete democrm_contact new-add_contact: this app harness has no row delete)');
+  });
+
+  it('restoreSeededRows: sets back only what moved, through the seed path; derived fields and the clock are neither compared nor written', async () => {
+    const scenario = namespacedScenario(load());
+    const app = new CountingApp();
+    const accounts = await Promise.all(scenario.card.run.personas.map((p) => app.createPersona(p.id, p.id)));
+    await seedApp(scenario, app, accounts);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    expect([...seeded.keys()]).toEqual(['democrm_account', 'democrm_contact']);
+    const built = { objects: [{ name: 'democrm_account', fields: { name: { type: 'text' }, contacts: { type: 'summary' } } }] };
+    // Only the clock and a computed field moved: nothing to restore.
+    for (const r of app.rows.democrm_account!) Object.assign(r, { updated_at: 'later', contacts: 99 });
+    expect(await restoreSeededRows(scenario, app, accounts, seeded, built)).toEqual({});
+    expect(app.writes).toEqual({ insert: 8, update: 0, delete: 0 });
+    // A changed name is set back to the seeded value; the computed field is not written.
+    app.rows.democrm_account!.find((r) => r.id === 'ac1')!.name = 'Wrong';
+    app.rows.democrm_account!.find((r) => r.id === 'ac2')!.contacts = 1;
+    expect(await restoreSeededRows(scenario, app, accounts, seeded, built)).toEqual({ restored: { setBack: { 'democrm_account/ac1': ['name'] } } });
+    expect(app.rows.democrm_account!.find((r) => r.id === 'ac1')!.name).toBe('Acme');
+    // A removed seeded row goes back in with the very body the seed sent (its owner the persona's user).
+    app.rows.democrm_account = app.rows.democrm_account!.filter((r) => r.id !== 'ac1');
+    expect(await restoreSeededRows(scenario, app, accounts, seeded, built)).toEqual({ restored: { reinserted: ['democrm_account/ac1'] } });
+    expect(app.rows.democrm_account!.find((r) => r.id === 'ac1')).toEqual(seeded.get('democrm_account')!.find((r) => r.id === 'ac1'));
+  });
+});
+
+describe('rowDrift / derivedFields — how far rows have moved from the seeded state (#34294)', () => {
+  it('compares every column but the clock and the last writer; an absent column and null are the same nothing', () => {
+    const was = [{ id: 'a', name: 'A', note: null, updated_at: 't0', updated_by: 'u-admin' }, { id: 'b', name: 'B' }];
+    expect(rowDrift('o', was, [{ id: 'a', name: 'A', updated_at: 't1', updated_by: 'u-sdr' }, { id: 'b', name: 'B' }], RESTORE_UNCOMPARED)).toBeUndefined();
+    expect(rowDrift('o', was, [{ id: 'a', name: 'X', note: 'n' }, { id: 'c', name: 'C' }], RESTORE_UNCOMPARED)).toEqual({
+      object: 'o',
+      added: ['c'],
+      missing: ['b'],
+      changed: [{ id: 'a', fields: ['name', 'note'] }],
+    });
+  });
+
+  it('reads the fields a build computes (formula, summary, autonumber) per object; nothing from an unreadable artifact', () => {
+    const built = { objects: [{ name: 'o', fields: { total: { type: 'summary' }, label: { type: 'formula' }, no: { type: 'autonumber' }, name: { type: 'text' } } }] };
+    expect(derivedFields(built)).toEqual(new Map([['o', new Set(['total', 'label', 'no'])]]));
+    expect(derivedFields(undefined)).toEqual(new Map());
+    expect(derivedFields({ objects: 'not a list' })).toEqual(new Map());
   });
 });

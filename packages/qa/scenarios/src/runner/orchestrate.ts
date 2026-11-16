@@ -92,7 +92,7 @@ import {
   verifyArgs,
   type PromptChoice,
 } from './prompts.js';
-import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
+import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedLookups, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -270,9 +270,19 @@ export interface OperationResult {
    * grade measured nothing (`OperationGrade.notMeasured`: the build denies the
    * persona the write the card gives it, `buildDeniesWrite`); or it was
    * replayed and the app did not answer its re-sent writes as it answered the
-   * recorded run (`ReplayNotFaithfulError`). Never a fail.
+   * recorded run (`ReplayNotFaithfulError`); or it was not run, because the
+   * rows an earlier turn moved could not be restored to the seeded state
+   * (`restore: …`, {@link restoreSeededRows}). Never a fail.
    */
   notMeasured?: string;
+  /**
+   * The rows the runner set back to the seeded state before this operation
+   * ran, because an earlier turn had moved them ({@link restoreSeededRows}):
+   * the operation started from the card's own rows, as if it ran first.
+   * Absent when nothing had moved, so a run with no earlier write records
+   * exactly what it recorded before restores.
+   */
+  restored?: RowRestore;
   /**
    * The write the build denies the acting persona, when the grade charged a
    * check to it (`buildDeniesWrite`): the persona, the operation's object as
@@ -313,6 +323,19 @@ export interface ConfirmTurnResult {
   grade?: ConfirmedWriteGrade;
   turn?: TurnSummary;
   error?: string;
+}
+
+/**
+ * What one restore did ({@link OperationResult.restored}), each row as
+ * `object/id`. A list is absent when the restore did none of that.
+ */
+export interface RowRestore {
+  /** Rows an earlier turn added, deleted. */
+  deleted?: string[];
+  /** Rows of the seeded state an earlier turn removed, inserted again. */
+  reinserted?: string[];
+  /** Rows of the seeded state an earlier turn changed: `object/id` → the columns set back. */
+  setBack?: Record<string, string[]>;
 }
 
 /** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
@@ -938,6 +961,44 @@ async function buildHalf(
 }
 
 /**
+ * One seed row as the seed path sends it ({@link seedApp}): the card's row,
+ * with each user-handle field rewritten to a user id (and the row owned by
+ * that user), a persona's own record bound to that persona's user, and the row
+ * owned by the persona the card makes its owner. `rewritten` names the
+ * user-handle fields it rewrote (`object.field`), `asAdmin` the handles no
+ * persona holds, each loaded as the admin user. A restore sends the same body
+ * for a seeded row it inserts again ({@link restoreSeededRows}).
+ */
+function seedRowBody(
+  card: Card,
+  object: string,
+  row: Card['run']['seed'][string][number],
+  accounts: readonly PersonaAccount[],
+  adminId: string,
+): { body: Record<string, unknown>; rewritten: string[]; asAdmin: string[] } {
+  const handles = personaHandles(card);
+  const userFields = userHandleFields(card);
+  const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
+  const body: Record<string, unknown> = { ...row };
+  const rewritten: string[] = [];
+  const asAdmin: string[] = [];
+  for (const [k, v] of Object.entries(row)) {
+    if (typeof v !== 'string' || !userFields.has(`${object}.${k}`)) continue;
+    const acct = accountOf(handles.get(v));
+    const userId = acct?.userId ?? adminId;
+    body[k] = userId;
+    body.owner_id = userId;
+    rewritten.push(`${object}.${k}`);
+    if (!acct) asAdmin.push(v);
+  }
+  const self = accountOf(personaRecords(card).get(`${object}/${row.id}`));
+  if (self) body[PERSON_USER_FIELD] = self.userId;
+  const owner = accountOf(rowOwner(card, object, row));
+  if (owner) body.owner_id = owner.userId;
+  return { body, rewritten, asAdmin };
+}
+
+/**
  * Load the card's seed into a booted app, as the admin, by its load plan
  * ({@link seedPlan}): in lookup order, and in two passes where the card's
  * lookups close a reference cycle — every row first, with each lookup value
@@ -978,10 +1039,6 @@ export async function seedApp(
   required?: ReadonlySet<string>,
 ): Promise<RunHalf['seed']> {
   const { card } = scenario;
-  const handles = personaHandles(card);
-  const records = personaRecords(card);
-  const userFields = userHandleFields(card);
-  const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
   const plan = seedPlan(card, required);
   /** `object/id` → the lookup values its second-pass update sets. */
   const later = new Map<string, { object: string; id: string; patch: Record<string, string> }>();
@@ -993,20 +1050,9 @@ export async function seedApp(
   if (later.size) seed.secondPass = Object.fromEntries([...new Set(plan.deferred.map((d) => lookupKey(d)))].map((k) => [k, 0]));
   for (const object of plan.order) {
     for (const row of card.run.seed[object] ?? []) {
-      const body: Record<string, unknown> = { ...row };
-      for (const [k, v] of Object.entries(row)) {
-        if (typeof v !== 'string' || !userFields.has(`${object}.${k}`)) continue;
-        const acct = accountOf(handles.get(v));
-        const userId = acct?.userId ?? app.adminUserId();
-        body[k] = userId;
-        body.owner_id = userId;
-        seed.rewritten = [...new Set([...(seed.rewritten ?? []), `${object}.${k}`])].sort();
-        if (!acct) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), v])].sort();
-      }
-      const self = accountOf(records.get(`${object}/${row.id}`));
-      if (self) body[PERSON_USER_FIELD] = self.userId;
-      const owner = accountOf(rowOwner(card, object, row));
-      if (owner) body.owner_id = owner.userId;
+      const { body, rewritten, asAdmin } = seedRowBody(card, object, row, accounts, app.adminUserId());
+      if (rewritten.length) seed.rewritten = [...new Set([...(seed.rewritten ?? []), ...rewritten])].sort();
+      if (asAdmin.length) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), ...asAdmin])].sort();
       const waits = later.get(`${object}/${row.id}`);
       for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
       const r = await app.insertRow(object, body);
@@ -1031,6 +1077,167 @@ export async function seedApp(
 }
 
 /**
+ * The objects whose rows a restore keeps at the seeded state: every seeded
+ * object, then every object an operation writes or its outcome reads that the
+ * seed does not name (a row an earlier turn added there is deleted again), in
+ * that order.
+ */
+export function restoreObjects(card: Card): string[] {
+  const out = new Set(Object.keys(card.run.seed));
+  for (const op of card.run.operations) {
+    out.add(op.object);
+    if (op.outcome.kind === 'applied') for (const st of op.outcome.state) out.add(st.object);
+  }
+  return [...out];
+}
+
+/** The seeded state a restore returns to: each object's rows as the app held them right after the seed loaded. */
+export type SeededRows = Map<string, HeldRow[]>;
+
+/**
+ * Read the seeded state ({@link SeededRows}) of every object in `objects`, as
+ * the admin, right after the seed loaded. An object the app does not answer
+ * for (no such object in the build, a refused read) is left out: there is no
+ * state to return it to, and the operation reads it as it always did.
+ */
+export async function seededRows(app: AppHarness, objects: readonly string[]): Promise<SeededRows> {
+  const out: SeededRows = new Map();
+  for (const object of objects) {
+    const r = await app.listRows(object);
+    if (r.ok) out.set(object, r.rows);
+  }
+  return out;
+}
+
+/** How many rounds of writes a restore takes before it gives up: a cascade (a delete that takes a child, a reference set back) can need a second. */
+const RESTORE_ROUNDS = 3;
+
+/**
+ * Put the rows an earlier turn moved back to the seeded state `seeded`
+ * ({@link seededRows}), as the admin, before an operation runs, so every
+ * operation starts from the card's own rows and is graded on its own turn,
+ * never on the turn before it.
+ *
+ * Each object in `seeded` is read and compared with its seeded rows
+ * ({@link rowDrift}: every column but the clock, the last writer and the
+ * fields the build computes, {@link derivedFields}). Nothing moved ⇒ nothing
+ * is written and `{}` is returned: a run with no earlier write is unchanged.
+ * Otherwise, in rounds until nothing has moved:
+ *
+ *   1. a row a turn added is deleted;
+ *   2. a seeded row a turn removed is inserted again through the seed path —
+ *      the very body the seed sent ({@link seedRowBody}), or, for a row the
+ *      app made itself while seeding, the row as it was read, less the
+ *      columns the platform stamps ({@link RESTORE_UNWRITTEN}) — with each
+ *      lookup to a row still missing left out until a later round sets it;
+ *   3. a seeded row a turn changed has those columns set back to the values
+ *      the seeded state read.
+ *
+ * After {@link RESTORE_ROUNDS} rounds, rows that still differ make the restore
+ * fail: `failed` names what still differs and the first refusals met, and the
+ * operation is not measured — never graded on rows the card did not declare.
+ */
+export async function restoreSeededRows(
+  scenario: LoadedScenario,
+  app: AppHarness,
+  accounts: readonly PersonaAccount[],
+  seeded: SeededRows,
+  built?: unknown,
+): Promise<{ restored?: RowRestore; failed?: string }> {
+  const { card } = scenario;
+  const derived = derivedFields(built);
+  const uncompared = (object: string) => new Set([...RESTORE_UNCOMPARED, ...(derived.get(object) ?? [])]);
+  const unwritten = (object: string) => new Set([...RESTORE_UNWRITTEN, ...(derived.get(object) ?? [])]);
+  const lookups = seedLookups(card);
+  const order = [...seedPlan(card).order, ...[...seeded.keys()].filter((o) => !(o in card.run.seed))];
+  const deleted = new Set<string>();
+  const reinserted = new Set<string>();
+  const setBack = new Map<string, Set<string>>();
+  /** The refusals met, each named once however many rounds met it. */
+  const refusals = new Set<string>();
+  const refused = (what: string, r: { status: number; code?: string; message?: string }) =>
+    refusals.add(`${what}: ${r.status}${r.code ? ` ${r.code}` : ''}${r.message ? ` ${r.message.slice(0, 120)}` : ''}`);
+  const record = (): RowRestore | undefined =>
+    deleted.size || reinserted.size || setBack.size
+      ? {
+          ...(deleted.size ? { deleted: [...deleted] } : {}),
+          ...(reinserted.size ? { reinserted: [...reinserted] } : {}),
+          ...(setBack.size ? { setBack: Object.fromEntries([...setBack].map(([k, v]) => [k, [...v]])) } : {}),
+        }
+      : undefined;
+
+  for (let round = 0; ; round++) {
+    const drifts: RowDrift[] = [];
+    for (const object of order) {
+      const was = seeded.get(object);
+      if (!was) continue;
+      const now = await app.listRows(object);
+      if (!now.ok) {
+        const restored = record();
+        return { ...(restored ? { restored } : {}), failed: `the rows of ${object} could not be read to restore them: ${now.status}${now.code ? ` ${now.code}` : ''}` };
+      }
+      const d = rowDrift(object, was, now.rows, uncompared(object));
+      if (d) drifts.push(d);
+    }
+    if (!drifts.length) {
+      const restored = record();
+      return restored ? { restored } : {};
+    }
+    if (round === RESTORE_ROUNDS) {
+      const restored = record();
+      const still = drifts.map(driftText).join('; ');
+      return { ...(restored ? { restored } : {}), failed: `the rows could not be restored to the seeded state: ${still}${refusals.size ? ` (refused: ${[...refusals].slice(0, 3).join('; ')})` : ''}` };
+    }
+    // 1. The rows a turn added.
+    for (const d of drifts) {
+      for (const id of d.added) {
+        if (!app.deleteRow) {
+          refusals.add(`delete ${d.object} ${id}: this app harness has no row delete`);
+          continue;
+        }
+        const r = await app.deleteRow(d.object, id);
+        if (r.ok) deleted.add(`${d.object}/${id}`);
+        else refused(`delete ${d.object} ${id}`, r);
+      }
+    }
+    // 2. The seeded rows a turn removed, through the seed path, in its load order.
+    const missing = new Set(drifts.flatMap((d) => d.missing.map((id) => `${d.object}/${id}`)));
+    for (const d of [...drifts].sort((a, b) => order.indexOf(a.object) - order.indexOf(b.object))) {
+      for (const id of d.missing) {
+        const seedRow = card.run.seed[d.object]?.find((r) => r.id === id);
+        const was = seeded.get(d.object)!.find((r) => String(r.id) === id)!;
+        const skip = unwritten(d.object);
+        skip.delete('id');
+        const body = seedRow
+          ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId()).body
+          : Object.fromEntries(Object.entries(was).filter(([k]) => !skip.has(k)));
+        for (const l of lookups) if (l.object === d.object && missing.has(`${l.to}/${String(body[l.field])}`)) delete body[l.field];
+        const r = await app.insertRow(d.object, body);
+        if (r.ok) {
+          reinserted.add(`${d.object}/${id}`);
+          missing.delete(`${d.object}/${id}`);
+        } else refused(`insert ${d.object} ${id}`, r);
+      }
+    }
+    // 3. The seeded rows a turn changed, set back to the values the seeded state read.
+    for (const d of drifts) {
+      const skip = unwritten(d.object);
+      for (const { id, fields } of d.changed) {
+        const was = seeded.get(d.object)!.find((r) => String(r.id) === id)!;
+        const writable = fields.filter((f) => !skip.has(f));
+        if (!writable.length) continue;
+        const r = await app.updateRow(d.object, id, Object.fromEntries(writable.map((f) => [f, was[f] ?? null])));
+        if (r.ok) {
+          const key = `${d.object}/${id}`;
+          if (!setBack.has(key)) setBack.set(key, new Set());
+          for (const f of writable) setBack.get(key)!.add(f);
+        } else refused(`update ${d.object} ${id}`, r);
+      }
+    }
+  }
+}
+
+/**
  * Seed, personas, every question and every operation, against one booted app.
  * `built` is the artifact the app serves, whose required lookups decide which
  * side of a reference cycle the seed's second pass sets ({@link seedApp}).
@@ -1042,9 +1249,12 @@ export async function seedApp(
  * operation writes, so each ask reads the same rows. A turn the seed takes out
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
  * once; a `pending_confirmation` one the agent met by asking first is followed
- * by its confirmation turn ({@link OperationResult.confirmTurn}). The
- * guardrails are graded over every turn that ran, each ask and each
- * confirmation turn included.
+ * by its confirmation turn ({@link OperationResult.confirmTurn}). Before
+ * each operation, the rows an earlier turn moved are restored to the state
+ * the seed left ({@link restoreSeededRows}), read once right after the seed
+ * loaded; the restore runs before an operation's first turn, never between
+ * its ask and its confirmation. The guardrails are graded over every turn
+ * that ran, each ask and each confirmation turn included.
  * Every question and operation turn is sent in the prompt choice `choice`
  * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
@@ -1075,6 +1285,8 @@ export async function runHalf(
     const adminKey = await app.adminApiKey();
 
     await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
+    // The state every operation starts from: the rows as the seed left them.
+    const seeded = await seededRows(app, restoreObjects(card));
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // The door a turn is given: the app's MCP endpoint as the persona, and the
@@ -1125,6 +1337,14 @@ export async function runHalf(
         continue;
       }
       try {
+        // An earlier turn's write (the agent's, a probe's, a confirmed one) is
+        // undone first, so this operation is graded on its own turn alone.
+        const { restored, failed } = await restoreSeededRows(scenario, app, accounts, seeded, built);
+        if (restored) res.restored = restored;
+        if (failed !== undefined) {
+          half.operations.push({ ...res, notMeasured: `restore: ${failed}` });
+          continue;
+        }
         const before = (await app.listRows(op.object)).rows as Row[];
         const started = new Date();
         let turn: ParsedTurn;
