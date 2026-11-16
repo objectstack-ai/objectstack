@@ -76,6 +76,13 @@ import MigratePlan from './plan.js';
 // Paid at module load, not inside a clocked case (`check:test-source-alias`).
 import '@objectstack/runtime';
 import '@objectstack/objectql';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-sql';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/platform-objects/system';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
 
 const SQLD = process.env.OS_TEST_SQLD_BIN;
 const HERE = dirname(fileURLToPath(import.meta.url));
