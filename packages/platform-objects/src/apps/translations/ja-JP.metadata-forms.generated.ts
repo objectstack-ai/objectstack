@@ -2829,6 +2829,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ツール",
         helpText: "ツール名（ワイルドカード対応: action_*）"
       },
+      mcpPrompt: {
+        label: "MCP プロンプトとして提供",
+        helpText: "このスキルを MCP プロンプトとして提供します。製品内エージェント専用に書かれたプレイブック（そのツールと承認カードを前提とするもの）ではオフにしてください。オフにすると、ツールに関係なく MCP クライアントには一覧表示されません。未設定 = 提供。"
+      },
       triggerConditions: {
         label: "トリガー条件",
         helpText: "プログラム条件（例: objectName == \"case\"）"

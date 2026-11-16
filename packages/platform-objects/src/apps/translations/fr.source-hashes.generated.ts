@@ -98,6 +98,8 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.skill.fields.active.label": "eee107cf4e466779",
   "metadataForms.skill.fields.description.label": "779a4342c8eb6707",
   "metadataForms.skill.fields.instructions.label": "ed1cc73e669573d0",
+  "metadataForms.skill.fields.mcpPrompt.helpText": "23d70850b9794ec7",
+  "metadataForms.skill.fields.mcpPrompt.label": "52a386069c5cc374",
   "metadataForms.skill.fields.surface.label": "5f41277948ff2598",
   "metadataForms.tool.fields.description.label": "779a4342c8eb6707",
   "metadataForms.view.fields.addRecord.position.label": "9a24c02e441eb0b4",

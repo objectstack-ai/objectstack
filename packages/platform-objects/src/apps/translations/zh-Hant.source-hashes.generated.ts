@@ -18,6 +18,8 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "metadataForms.skill.fields.mcpPrompt.helpText": "23d70850b9794ec7",
+  "metadataForms.skill.fields.mcpPrompt.label": "52a386069c5cc374",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",

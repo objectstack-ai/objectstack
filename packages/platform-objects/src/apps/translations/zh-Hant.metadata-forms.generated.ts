@@ -2829,6 +2829,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "工具",
         helpText: "工具名（支援萬用字元：action_*）"
       },
+      mcpPrompt: {
+        label: "Offer as MCP prompt",
+        helpText: "Offer this skill as an MCP prompt. Turn off for a playbook written only for the in-product agents (their tools, their approval card): it is then never listed to MCP clients, whatever its tools. Unset = offered."
+      },
       triggerConditions: {
         label: "觸發條件",
         helpText: "程式化條件（如 objectName == \"case\"）"

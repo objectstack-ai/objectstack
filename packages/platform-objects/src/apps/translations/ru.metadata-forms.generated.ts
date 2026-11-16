@@ -2829,6 +2829,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Инструменты",
         helpText: "Имена инструментов (поддерживается подстановка: action_*)"
       },
+      mcpPrompt: {
+        label: "Offer as MCP prompt",
+        helpText: "Offer this skill as an MCP prompt. Turn off for a playbook written only for the in-product agents (their tools, their approval card): it is then never listed to MCP clients, whatever its tools. Unset = offered."
+      },
       triggerConditions: {
         label: "Условия активации",
         helpText: "Программные условия (например, objectName == \"case\")"

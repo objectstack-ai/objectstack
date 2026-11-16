@@ -2829,6 +2829,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ferramentas",
         helpText: "Nomes das ferramentas (aceita curinga: action_*)"
       },
+      mcpPrompt: {
+        label: "Offer as MCP prompt",
+        helpText: "Offer this skill as an MCP prompt. Turn off for a playbook written only for the in-product agents (their tools, their approval card): it is then never listed to MCP clients, whatever its tools. Unset = offered."
+      },
       triggerConditions: {
         label: "Condições de ativação",
         helpText: "Condições programáticas (por exemplo, objectName == \"case\")"

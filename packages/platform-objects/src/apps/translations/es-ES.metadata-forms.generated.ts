@@ -2829,6 +2829,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Herramientas",
         helpText: "Nombres de herramienta (admite comodín: action_*)"
       },
+      mcpPrompt: {
+        label: "Ofrecer como prompt MCP",
+        helpText: "Ofrece esta habilidad como prompt MCP. Desactívalo para un manual escrito solo para los agentes del producto (sus herramientas, su tarjeta de aprobación): ya no se lista a los clientes MCP, sean cuales sean sus herramientas. Sin definir = se ofrece."
+      },
       triggerConditions: {
         label: "Condiciones disparadoras",
         helpText: "Condiciones programáticas (p. ej., objectName == \"case\")"

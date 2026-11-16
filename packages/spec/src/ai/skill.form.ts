@@ -37,7 +37,7 @@ export const skillForm = defineForm({
       fields: [
         { field: 'instructions', widget: 'textarea', helpText: 'Instructions for AI — tell it how to use these tools together' },
         { field: 'tools', widget: 'string-tags', required: true, helpText: 'Tool names (supports wildcard: action_*)' },
-        { field: 'mcpPrompt', colSpan: 1, helpText: 'Offer this skill as an MCP prompt. Turn off for a playbook written only for the in-product agents (their tools, their approval card): it is then never listed to MCP clients, whatever its tools. Unset = offered.' },
+        { field: 'mcpPrompt', label: 'Offer as MCP prompt', colSpan: 1, helpText: 'Offer this skill as an MCP prompt. Turn off for a playbook written only for the in-product agents (their tools, their approval card): it is then never listed to MCP clients, whatever its tools. Unset = offered.' },
       ],
     },
     {
