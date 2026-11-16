@@ -25,8 +25,8 @@ action's own label, params and `visible`.
 ## TypeScript Usage
 
 ```typescript
-import { BulkActionDefSchema, BulkActionExecutionSchema, BulkActionOperationSchema, BulkActionParamSchema } from '@objectstack/spec/ui';
-import type { BulkActionDef, BulkActionExecution, BulkActionOperation, BulkActionParam } from '@objectstack/spec/ui';
+import { BulkActionDefSchema, BulkActionExecutionSchema, BulkActionOperationSchema, BulkActionParamSchema, BulkActionResultSchema } from '@objectstack/spec/ui';
+import type { BulkActionDef, BulkActionExecution, BulkActionOperation, BulkActionParam, BulkActionResult } from '@objectstack/spec/ui';
 
 // Validate data
 const result = BulkActionDefSchema.parse(data);
@@ -173,6 +173,27 @@ const result = BulkActionDefSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Option label (plain string — not i18n-resolved on this path). |
 | **value** | `string \| number \| boolean` | ✅ | Stored value. |
+
+
+---
+
+## BulkActionResult
+
+The per-row outcome an `execution: 'aggregate'` bulk action handler MAY resolve with: `{ succeeded: [ids], failed: [{ id, message }] }` as its whole resolve value, never attached to a rejection (a rejection stays one outcome for the selection). A run that wrote some rows and refused others still resolves, with a non-empty `failed`. Optional: a value that does not parse keeps the one-outcome report, and members beyond the two lists are tolerated and carry no meaning. Every id must be one of the dispatched `params._selectedIds`; an id outside the selection is a handler bug, and the reader drops it.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **succeeded** | `string[]` | ✅ | Ids of the selected rows the handler wrote. Each must be one of the dispatched `params._selectedIds`; an id outside the selection is a handler bug, and the reader drops it and counts it nowhere. |
+| **failed** | `({ id: string; message: string } & Record<string, any>)[]` | ✅ | One entry per selected row the handler did not write, each with its own reason. Ids outside `params._selectedIds` are a handler bug, and the reader drops them and counts them nowhere. |
+
+### Nested Shape: `BulkActionResult.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Id of a selected row the handler did not write: one of the dispatched `params._selectedIds`. |
+| **message** | `string` | ✅ | Why this row was not written, as the person running the action should read it. |
 
 
 ---
