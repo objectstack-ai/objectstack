@@ -91,6 +91,15 @@ export function slateHoldsPlatformAdminAddress(slate: readonly string[]): boolea
 }
 
 /**
+ * `ids` without the platform administrators' slot. Read where a slate is
+ * resolved from anything but the approver type that names them, which alone
+ * opens it.
+ */
+export function withoutPlatformAdminAddress(ids: readonly string[]): string[] {
+  return ids.filter((id) => !isPlatformAdminAddress(id));
+}
+
+/**
  * The prefixes under which a slot address names a position: `position:` alone
  * (ADR-0090 D3 — the retired `role:` is no alias of it). Kept a list so every
  * reader below reads the one set the acting path admits.

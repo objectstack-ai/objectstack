@@ -43,6 +43,7 @@ import { normalizeStackInput } from '@objectstack/spec';
 import { runAuthoringRules, runRuntimeAuthoringRules, APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED } from '@objectstack/lint';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { registerApprovalNode } from './approval-node.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
@@ -106,6 +107,12 @@ const ARMED: Record<string, string | undefined> = {
   host_review_overridden: undefined,
 };
 /** Who ships each flow's NAME (`packagedFlowOwner`): the override's name is the host's. */
+/**
+ * The body the engine holds armed under every flow name here: one approval
+ * node, the object the executor hands when the run executes that body.
+ */
+const ARMED_NODE = { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'platform_admin' }] } };
+const ARMED_BODY = { nodes: [{ id: 'start', type: 'start' }, ARMED_NODE] };
 const NAME_OWNER: Record<string, string | undefined> = {
   host_review: 'com.host.review',
   host_review_overridden: 'com.host.review',
@@ -158,12 +165,17 @@ describe('platform_admin approver: one slot the platform administrators decide u
   const told: string[][] = [];
   const prevOwnerEnv = process.env.OS_PLATFORM_OWNER_EMAIL;
 
-  const open = async (key: string, flowName: string, approvers: any[], extra: Record<string, unknown> = {}) => {
-    await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: ORG }, { context: SYSTEM } as any);
+  const open = async (
+    key: string, flowName: string, approvers: any[], extra: Record<string, unknown> = {},
+    scene: { fields?: Record<string, unknown>; node?: unknown } = {},
+  ) => {
+    const fields = { title: key, ...scene.fields };
+    await engine.insert('crm_deal', { id: `D_${key}`, ...fields, organization_id: ORG }, { context: SYSTEM } as any);
     const opened = await svc.openNodeRequest({
       object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName,
       config: { approvers, behavior: 'first_response', ...extra } as any,
-      submitterId: 'u_sub', record: { id: `D_${key}`, title: key }, organizationId: ORG,
+      submitterId: 'u_sub', record: { id: `D_${key}`, ...fields }, organizationId: ORG,
+      node: 'node' in scene ? scene.node : ARMED_NODE,
     }, as('u_sub'));
     // A slate that reads as empty auto-approves instead of opening; no pin here
     // expects that, so it is a failure of the scene, not a branch to handle.
@@ -199,7 +211,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
       objectDef('sys_member', ['user_id', 'organization_id', 'role']),
       objectDef('sys_user_position', ['user_id', 'position', 'organization_id']),
       objectDef('sys_user_permission_set', ['user_id', 'permission_set', 'organization_id']),
-      objectDef('crm_deal', ['title', 'organization_id']),
+      objectDef('crm_deal', ['title', 'reviewer', 'organization_id']),
       ...(await packageObjects()),
     ];
     for (const def of defs) engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
@@ -238,6 +250,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
     svc.attachAutomation({
       armedFlowPackage: (name: string) => ARMED[name],
       packagedFlowOwner: (name: string) => NAME_OWNER[name],
+      getFlow: async () => ARMED_BODY,
     } as any);
   });
 
@@ -379,6 +392,89 @@ describe('platform_admin approver: one slot the platform administrators decide u
     it('a residual owner a code door recorded is admitted', async () => {
       const row = await open('residual', 'residual_review', PLATFORM);
       expect(row.pending_approvers).toEqual([SLOT]);
+    });
+  });
+
+  describe('the slot is opened only by the approver type that names it: every other way a slate is resolved opens no slot', () => {
+    it('a user approver whose value is the slot opens none; the slate keeps its people', async () => {
+      const row = await open('via_user', 'tenant_review', [{ type: 'user', value: SLOT }, { type: 'user', value: 'u_alice' }]);
+      expect(row.pending_approvers).toEqual(['u_alice']);
+    });
+
+    it('a record field holding the slot opens none', async () => {
+      const row = await open('via_field', 'tenant_review', [{ type: 'field', value: 'reviewer' }], {},
+        { fields: { reviewer: `${SLOT},u_alice` } });
+      expect(row.pending_approvers).toEqual(['u_alice']);
+    });
+
+    it('an expression resolved as users that yields the slot opens none', async () => {
+      const row = await open('via_expression', 'tenant_review',
+        [{ type: 'expression', value: 'trigger.reviewer', resolveAs: 'user' }, { type: 'user', value: 'u_alice' }], {},
+        { fields: { reviewer: SLOT } });
+      expect(row.pending_approvers).toEqual(['u_alice']);
+    });
+
+    it('an out-of-office delegation that ends on the slot leaves the slot with the person', async () => {
+      await engine.insert('sys_approval_delegation', {
+        id: 'dlg_alice', delegator_id: 'u_alice', delegate_id: SLOT, organization_id: ORG,
+      }, { context: SYSTEM } as any);
+      try {
+        const row = await open('via_delegation', 'tenant_review', [{ type: 'user', value: 'u_alice' }]);
+        expect(row.pending_approvers).toEqual(['u_alice']);
+      } finally {
+        await engine.delete('sys_approval_delegation', { where: { id: 'dlg_alice' }, context: SYSTEM } as any);
+      }
+    });
+  });
+
+  describe('the platform\'s place on a mixed slate moves only for the platform or the system', () => {
+    const mixed = (key: string) => open(key, 'host_review', [...PLATFORM, { type: 'user', value: 'u_alice' }]);
+
+    it('the ordinary slot holder cannot move it', async () => {
+      const row = await mixed('move_by_holder');
+      await expect(svc.reassign(row.id, { actorId: 'u_alice', from: SLOT, to: 'u_member' }, as('u_alice')))
+        .rejects.toThrow(/^FORBIDDEN: actor 'u_alice' may not move the platform administrators' slot/);
+      expect((await requestRows('move_by_holder'))[0].pending_approvers).toBe(`${SLOT},u_alice`);
+    });
+
+    it('a platform administrator can', async () => {
+      const row = await mixed('move_by_platform');
+      await svc.reassign(row.id, { actorId: SLOT, from: SLOT, to: 'u_member' }, as('u_root'));
+      expect((await requestRows('move_by_platform'))[0].pending_approvers).toBe('u_member,u_alice');
+    });
+
+    it('the system can', async () => {
+      const row = await mixed('move_by_system');
+      await svc.reassign(row.id, { actorId: 'system', from: SLOT, to: 'u_member' }, SYSTEM);
+      expect((await requestRows('move_by_system'))[0].pending_approvers).toBe('u_member,u_alice');
+    });
+  });
+
+  describe('the origin is answered for the body whose step is being opened', () => {
+    it('a node that is not the armed body\'s is refused, though the armed body is a code package\'s', async () => {
+      await expect(open('other_body', 'host_review', PLATFORM, {}, { node: { ...ARMED_NODE } }))
+        .rejects.toThrow(/^FORBIDDEN: approval node 'review' of flow 'host_review' names the platform administrators/);
+      await expect(open('no_body', 'host_review', PLATFORM, {}, { node: undefined }))
+        .rejects.toThrow(/^FORBIDDEN: /);
+      expect(await requestRows('other_body')).toEqual([]);
+    });
+
+    it('the approval executor hands the node it runs: the armed body\'s opens, another body\'s does not', async () => {
+      const executors: any[] = [];
+      registerApprovalNode({ registerNodeExecutor: (e: any) => { executors.push(e); } } as any, svc);
+      const executor = executors.find((e) => e.type === 'approval');
+      const run = async (key: string, node: unknown) => {
+        await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: ORG }, { context: SYSTEM } as any);
+        const variables = new Map<string, unknown>([
+          ['$runId', `run_${key}`], ['$record', { id: `D_${key}`, title: key }], ['$flowName', 'host_review'],
+        ]);
+        return executor.execute(node, variables, { object: 'crm_deal', userId: 'u_sub', organizationId: ORG, tenantId: ORG });
+      };
+      expect(await run('exec_armed', ARMED_NODE)).toMatchObject({ success: true, suspend: true });
+      const other = await run('exec_other', { ...ARMED_NODE });
+      expect(other.success).toBe(false);
+      expect(other.error).toMatch(/FORBIDDEN: approval node 'review'/);
+      expect(await requestRows('exec_other')).toEqual([]);
     });
   });
 

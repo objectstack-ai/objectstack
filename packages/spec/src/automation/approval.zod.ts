@@ -148,8 +148,16 @@ export function canonicalApproverType(type: string): string {
  * Approver types that still PARSE but must not be offered for new authoring.
  * Published to designers as `xEnumDeprecated` on the approver `type` (see
  * {@link ApprovalNodeApproverSchema}): a stored value keeps rendering, the
- * dropdown just stops handing authors the entry. One source: the deprecated
- * spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3).
+ * dropdown just stops handing authors the entry. Two sources: the deprecated
+ * spellings in {@link DEPRECATED_APPROVER_TYPES} (ADR-0090 D3), and
+ * `platform_admin`, which is NOT deprecated: it is accepted only in a code
+ * package's flow body, which no designer saves.
+ *
+ * The published label is `xEnumDeprecated` because that is the one key every
+ * designer reads to keep an entry out of its picker. For `platform_admin` it
+ * means "not offered for authoring", never "deprecated": no replacement exists
+ * and no removal is planned. A `value` on a `platform_admin` approver is
+ * ignored, not refused.
  *
  * `queue` was the second source while the runtime had no queue branch
  * (offering it would have advertised a capability the engine did not deliver,
@@ -539,6 +547,8 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
   // approver-type dropdown straight from this enum and keeps offering `role`
   // — the exact trap ADR-0090 D3 is retiring — one click away from `position`.
   // (`queue` was listed too until the runtime resolved it, ADR-0142 D6.)
+  // `platform_admin` is listed without being deprecated: it is not offered
+  // for authoring (see NON_AUTHORABLE_APPROVER_TYPES).
   // Renderers omit these from pickers while still rendering a stored value.
   type: ApproverType.meta({
     xEnumDeprecated: [...NON_AUTHORABLE_APPROVER_TYPES],
