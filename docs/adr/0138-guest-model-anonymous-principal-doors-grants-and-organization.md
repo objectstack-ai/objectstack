@@ -315,7 +315,7 @@ is never at rest in clear, the stored mail row never holds it, and it is single-
 invitation, its address and its expiry; a resend retires the old one. Every proof that does not admit
 gets one refusal that does not say which check failed. An address whose account is verified, is
 linked to a provider, or otherwise takes no password from this door is answered "sign in", with the
-proof unspent. It carries a per-address and per-invitation rate limit, as ADR-0121 D6 requires.
+proof unspent. It carries a rate limit per client address and per invitation, as ADR-0121 D6 requires.
 Enforced by `packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`,
 ledgered in `packages/plugins/plugin-auth/src/auth-route-ledger.ts`; it sits in the `/auth`
 namespace and is classified under class 2 the way the preview above is.
