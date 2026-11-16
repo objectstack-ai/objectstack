@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-15T20:18:06.243Z",
+  "generated_at": "2026-11-16T02:25:17.978Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-15T20:02:23.713Z",
-      "since": "2026-11-15T14:01:35.730Z",
+      "cursor": "2026-11-16T02:09:58.337Z",
+      "since": "2026-11-15T20:02:23.713Z",
       "slice": 300
     },
     "history": {
@@ -20,42 +20,42 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-15T14:01:35.730Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-15T14:01:35.730Z)",
-  "next_since": "2026-11-15T20:02:23.713Z",
+  "since": "2026-11-15T20:02:23.713Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-15T20:02:23.713Z)",
+  "next_since": "2026-11-16T02:09:58.337Z",
   "resume": null,
   "counts": {
-    "issues_open": 386,
-    "issues_closed": 14975,
-    "issues_transferred": 7,
-    "pulls_open": 91,
-    "pulls_closed": 16551,
-    "records": 32010
+    "issues_open": 395,
+    "issues_closed": 15043,
+    "issues_transferred": 8,
+    "pulls_open": 74,
+    "pulls_closed": 16618,
+    "records": 32138
   },
   "board": {
-    "open_issues_count": 410,
-    "open_pull_requests": 87,
-    "read_at": "2026-11-15T20:17:59.291Z"
+    "open_issues_count": 402,
+    "open_pull_requests": 69,
+    "read_at": "2026-11-16T02:25:17.075Z"
   },
   "count_check": {
-    "verdict": "surplus",
-    "reason": "the reconcile was cut short (the reconcile's share of the 800-request budget is spent (5 held back for the board read) — the rest is left for the next run), so this is the census before it against the board read before it",
-    "expected": 323,
-    "archived": 386,
+    "verdict": "ok",
+    "reason": null,
+    "expected": 333,
+    "archived": 395,
     "shortfall": 0,
-    "surplus": 1,
+    "surplus": 0,
     "gone_ledger": 62,
-    "ok": false
+    "ok": true
   },
   "freshness": {
     "verdict": "fresh",
     "pending_since": null,
     "reason": null
   },
-  "requests": 795,
+  "requests": 573,
   "run": {
-    "numbers_read": 468,
-    "files_written": 873,
+    "numbers_read": 325,
+    "files_written": 576,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -65,16 +65,21 @@
     "reconcile": {
       "first": {
         "verdict": "surplus",
-        "expected": 323,
-        "archived": 386,
+        "expected": 333,
+        "archived": 396,
         "shortfall": 0,
         "surplus": 1
       },
-      "listed": 410,
-      "candidates": 7,
+      "listed": 402,
+      "candidates": 6,
       "left": 0,
       "reread": [],
-      "transferred": [],
+      "transferred": [
+        {
+          "number": 33924,
+          "to": "a repository this token cannot read"
+        }
+      ],
       "destroyed": [
         {
           "number": 19374,
@@ -83,13 +88,25 @@
         {
           "number": 19471,
           "kind": "pull_request"
+        },
+        {
+          "number": 19478,
+          "kind": "pull_request"
+        },
+        {
+          "number": 19538,
+          "kind": "pull_request"
+        },
+        {
+          "number": 19540,
+          "kind": "pull_request"
         }
       ],
       "unreadable": [],
       "blank_pages_reasked": 0,
-      "reason": "the reconcile's share of the 800-request budget is spent (5 held back for the board read) — the rest is left for the next run",
-      "wrote": 0,
-      "cut_short": true
+      "reason": null,
+      "wrote": 1,
+      "cut_short": false
     }
   }
 }

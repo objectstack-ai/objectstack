@@ -2,8 +2,8 @@
   "number": 34107,
   "kind": "issue",
   "title": "pm(check-governed-merges): carry #33975's round-5 review fixes (AGENTS.md PD14 wording, patch-read favourable answer)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,22 +13,23 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T19:15:08Z",
-  "updated_at": "2026-11-15T19:37:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T02:13:49Z",
+  "closed_at": "2026-11-16T01:41:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34107",
-  "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: the at-tier contract review round 5 on PR #33975 (card #33539, head `eefe17f1`) failed with M4, S7 and S8. The fixes were committed after the head entered the merge queue; the push was refused (GH006) and the seat chose not to dequeue a governed PR. #33975 merged at 2026-11-15T19:11Z without them. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** #33975 已合入,但第 5 轮合同复核的三条修补没赶上:AGENTS.md 第 14 条首要准则那句仍说 CODEOWNERS 把「除低风险目录外」的每个 Tier H 面都派给批准人,而 #33975 已把根 ADR 树移出 CODEOWNERS;合入后巡查里,`-p` 补丁读失败时会被当成「没有改动块」,本该「未测量」的 ADR 落地读成 `tier-h`。\n- **要做的:** 改 AGENTS.md 那一句;`favourableArmGitRead` 只给带 `--raw` 的读有利答案,补丁读返回 null,加一条自测行钉住;PR 正文写明根 ADR 的 PR 不再由 CODEOWNERS 自动请审。\n- **受管文件:** 是(AGENTS.md;Tier H,须 GOVERNED_APPROVERS 批准后才可 ready)。\n\n## What is wrong\n\n1. **M4 (must-fix).** `AGENTS.md` Prime Directive 14 (about line 306) says \"CODEOWNERS routes every Tier H surface but the low-risk catalogs to the approvers\". PR #33975 removed the root `/docs/adr/` line from `.github/CODEOWNERS`, and an ADR tree is not a catalog, so the sentence now tells a reader that `docs/adr/**` still summons both approvers through CODEOWNERS.\n2. **S7 (should-fix).** In `scripts/pm/check-governed-merges.mjs`, `favourableArmGitRead` (from #33765 N-a) answers any failed `git diff-tree` read with a raw status listing. #33975 added a second `diff-tree` read, the `-p` patch read in `catalogFilesOf`. When only the patch read fails in the post-merge sweep, `armSettledWithoutUnread` hands back the raw listing as the patch, `addOnlyNoteReasons` reads it as \"shows no hunk\", and `readArmLanding` returns `tier-h` (sweep complete) where it should return `not-measured` (sweep incomplete). The primary gate (queue, relay, `--pr`) is not affected.\n3. **S8 (PR body).** Nothing in the rules face says that a root ADR pull opened ready is no longer auto-requested by CODEOWNERS; the queue guard and the relay's per-pull request now hold the ruling for every change that is not an add-only note.\n\n## What lands\n\n1. AGENTS.md PD14: reword the clause so it matches the post-#33975 CODEOWNERS (for example \"but the low-risk arm's rows\"), inside the line budget.\n2. `favourableArmGitRead` gives the favourable answer only to the raw read (argv carrying `--raw`) and returns null for the `-p` patch read. One self-test row: an ADR landing whose patch read throws stays NOT MEASURED; an ablation (answer the patch read too) turns it red.\n3. The PR body's 维护者速读 carries the S8 sentence.\n\nSurface: `AGENTS.md` (PD14 line only), `scripts/pm/check-governed-merges.mjs` (the favourable-read helper and its self-test region). `skip-changeset`; `Clause-②: no`. Tier H: open as draft, never ready before a GOVERNED_APPROVERS approval. The fixes already exist as commit `3bc27d49` on the #33975 thread's branch and are rebased onto main. Dedupe: `is:issue favourableArmGitRead` → none. **New.**\n"
+  "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: the at-tier contract review round 5 on PR #33975 (card #33539, head `eefe17f1`) failed with M4, S7 and S8. The fixes were committed after the head entered the merge queue; the push was refused (GH006) and the seat chose not to dequeue a governed PR. #33975 merged at 2026-11-15T19:11Z without them. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** #33975 已合入,但第 5 轮合同复核的三条修补没赶上:AGENTS.md 第 14 条首要准则那句仍说 CODEOWNERS 把「除低风险目录外」的每个 Tier H 面都派给批准人,而 #33975 已把根 ADR 树移出 CODEOWNERS;合入后巡查里,`-p` 补丁读失败时会被当成「没有改动块」,本该「未测量」的 ADR 落地读成 `tier-h`。\n- **要做的:** 改 AGENTS.md 那一句;`favourableArmGitRead` 只给带 `--raw` 的读有利答案,补丁读返回 null,加一条自测行钉住;PR 正文写明根 ADR 的 PR 不再由 CODEOWNERS 自动请审。\n- **受管文件:** 是(AGENTS.md;Tier H,须 GOVERNED_APPROVERS 批准后才可 ready)。\n\n## What is wrong\n\n1. **M4 (must-fix).** `AGENTS.md` Prime Directive 14 (about line 306) says \"CODEOWNERS routes every Tier H surface but the low-risk catalogs to the approvers\". PR #33975 removed the root `/docs/adr/` line from `.github/CODEOWNERS`, and an ADR tree is not a catalog, so the sentence now tells a reader that `docs/adr/**` still summons both approvers through CODEOWNERS.\n2. **S7 (should-fix).** In `scripts/pm/check-governed-merges.mjs`, `favourableArmGitRead` (from #33765 N-a) answers any failed `git diff-tree` read with a raw status listing. #33975 added a second `diff-tree` read, the `-p` patch read in `catalogFilesOf`. When only the patch read fails in the post-merge sweep, `armSettledWithoutUnread` hands back the raw listing as the patch, `addOnlyNoteReasons` reads it as \"shows no hunk\", and `readArmLanding` returns `tier-h` (sweep complete) where it should return `not-measured` (sweep incomplete). The primary gate (queue, relay, `--pr`) is not affected.\n3. **S8 (PR body).** Nothing in the rules face says that a root ADR pull opened ready is no longer auto-requested by CODEOWNERS; the queue guard and the relay's per-pull request now hold the ruling for every change that is not an add-only note.\n\n## What lands\n\n1. AGENTS.md PD14: reword the clause so it matches the post-#33975 CODEOWNERS (for example \"but the low-risk arm's rows\"), inside the line budget.\n2. `favourableArmGitRead` gives the favourable answer only to the raw read (argv carrying `--raw`) and returns null for the `-p` patch read. One self-test row: an ADR landing whose patch read throws stays NOT MEASURED; an ablation (answer the patch read too) turns it red.\n3. The PR body's 维护者速读 carries the S8 sentence.\n\nSurface: `AGENTS.md` (PD14 line only), `scripts/pm/check-governed-merges.mjs` (the favourable-read helper and its self-test region). `skip-changeset`; `Clause-②: no`. Tier H: open as draft, never ready before a GOVERNED_APPROVERS approval. The fixes already exist as commit `3bc27d49` on the #33975 thread's branch and are rebased onto main. Dedupe: `is:issue favourableArmGitRead` → none. **New.**\n\nBlocked-by: #34115\n\n<!-- signed: domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19 -->\n"
 }

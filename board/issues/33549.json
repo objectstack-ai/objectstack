@@ -2,8 +2,8 @@
   "number": 33549,
   "kind": "issue",
   "title": "console: a drawer list view with navigation.preventNavigation still opens the record drawer on row click",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:16:07Z",
-  "updated_at": "2026-11-15T00:16:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T23:32:48Z",
+  "closed_at": "2026-11-15T23:31:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33549",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① an authored key the console ignores, with a named producer. It was found by the #33317 contract review on PR #33544 (record 6886428303, ③), read on the code, not driven live.\nReader: `domain:ui` (`ui/packages/app-shell` `ObjectView` row click). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: an authored setting has no effect, and no data is wrong.\nDedupe: `is:issue is:open preventNavigation` finds only #33317.\n\n## 维护者速读\n\n视图的 `navigation.preventNavigation` 在 spec 里的说明是「完全禁用标准导航」，但 Console 中 `drawer` 模式的列表在点击行时并不读取它，仍然写入 `?recordId=` 打开记录抽屉。\n\n## Producer\n\n- `packages/spec/src/ui/view.zod.ts`: `preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely')`.\n- The console's `ObjectView` `handleRowClick` writes `?recordId=` for a `drawer` view without reading `navigation.preventNavigation`.\n- After PR #33544, `rowOpensRecord` is keyed to the resolved mode, so such a row still looks openable. That is honest today, because it does open.\n\n## Acceptance\n\n- A view with `navigation.preventNavigation: true` opens no record on row click, whatever its mode. The host also folds it into `rowOpensRecord` (PR #33544), so the row stops looking clickable.\n- Measure first whether any other host (`ObjectDataPage`, `InterfaceListPage`, the phone face) reads `preventNavigation`, and make them agree. Say in the PR which ones changed.\n- Pins: `preventNavigation: true` on a drawer view opens nothing and draws no link face. CONTROL: `false`/absent opens the drawer as today.\n- ⛔ No spec change. ⛔ Lands after PR #33544 (same files)."

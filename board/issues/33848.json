@@ -2,8 +2,8 @@
   "number": 33848,
   "kind": "issue",
   "title": "pm(dispatch-gates): --commands does not derive the self-test of a script that imports a changed scripts/pm module",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:08:42Z",
-  "updated_at": "2026-11-15T18:48:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T22:34:21Z",
+  "closed_at": "2026-11-15T22:33:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33848",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a gate-derivation defect measured on PR #33804, record 6893545108).\n\nOn PR #33804's first head (two files: `scripts/pm/check-governed-queue-guard.mjs`, `scripts/pm/check-governed-merges.mjs`), `node scripts/pm/dispatch-gates.mjs --commands` derived 35 gates and did NOT derive `check:pm-fleet-write-execute`, although `scripts/pm/fleet-write/execute.mjs` imports `readWorkflowDiff` from a changed file and its self-test fakes that function's git calls. The developer's \"35 of 35 exit 0\" coexisted with a red `Lint · repo & tooling gates` on the head (2 of 415 executor cases). Once the PR also touched `execute.mjs`, 42 gates were derived, that one among them.\n\n## What lands\n- `--commands` derives the self-test of every script that imports a changed `scripts/pm/**` module (the reverse import edge), at least for the fleet-write executor, validator and dispatcher; a self-test row replays PR #33804's first file list and expects `check:pm-fleet-write-execute` in the output.\n\n`scripts/pm/dispatch-gates.mjs` and its self-test; `skip-changeset`; `Clause-②: no`. Ungoverned. Grading is triage's.\n"

@@ -1,0 +1,32 @@
+{
+  "number": 34251,
+  "kind": "issue",
+  "title": "Console first-run checklist: host-provided profile so a cloud-managed environment shows first-app and first-record rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:blocking",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:17:33Z",
+  "updated_at": "2026-11-16T02:20:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34251",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① the framework half of objectstack-ai/cloud#4304 item 1 (a task on the maintainer's 「立卡处理」: one checklist on hosted). Seat repo:cloud#1 picked the environment's checklist as the single hosted path, following the maintainer's rulings on objectstack-ai/cloud#4465 (people, apps and records live in the environment). Measured at cloud's pin `b914e724`. Dedupe: `FirstRunChecklist first app host profile` finds no card.\nConsumer: objectstack-ai/cloud#4304 (the cloud home checklist retires on hosted once this ships).\n\n## 维护者速读\n\n- 要做的：环境首页「准备好你的系统」清单支持由宿主提供的清单配置：云端托管的环境多出「放进第一个应用」「添加第一条记录」两行，并能隐藏不适用的行。\n- 为什么：现在托管客户同时看到云端首页「Getting set up」和环境首页清单两套；按 #4465 的裁决，人员、应用和记录都在环境里，所以环境清单是唯一的入门路径。\n- 需要你做的：无。\n\n## Change\n\n1. Two rows, shown where the host turns them on: \"Put your first app in\", done when the launcher lists an app (`GET /api/v1/me/apps` non-empty), and \"Add your first record\", done when a person created a record.\n2. The host can hide rows that do not apply, for example Email delivery until the platform channel reads configured (objectstack#32799).\n3. Seam: a host-provided checklist profile keyed off the existing cloud-managed flag (plugin-auth `cloud-managed.ts`). No hosted-only branch in console code.\n4. Done when tests pin: on a managed environment the two rows draw and tick from real reads; on self-hosted the checklist is unchanged.\n\nReader: framework console lane (`FirstRunChecklist.tsx`)."
+}

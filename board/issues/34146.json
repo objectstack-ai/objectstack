@@ -1,0 +1,38 @@
+{
+  "number": 34146,
+  "kind": "pull_request",
+  "title": "fix(spec): hook form refusals help names the handler beside the JavaScript body",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T21:56:15Z",
+  "updated_at": "2026-11-15T23:51:50Z",
+  "closed_at": "2026-11-15T23:51:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T23:51:48Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34146",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9FD3xDgRM1o696UD7FEBAjA)_\n\nFixes #33803\n\nClause-②: no — help text only\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：钩子表单「拒绝目录」一行的说明文字，从「仅限 JavaScript (L2) 正文」改为「适用于 JavaScript (L2) 正文或处理器；表达式正文会被拒绝」，并同步 11 个语言包里的同一句（14 个文件，+49/-13）。\n- 为什么改：handler 类钩子早已可以声明拒绝目录，表单本身也提供 handler 一行，旧说明会让作者以为 handler 钩子不能用。\n- 风险与回滚：纯文字，不改任何行为；回滚即 revert 本 PR。\n- 先看：`packages/spec/src/data/hook.form.ts`（新说明）、`packages/spec/src/data/hook-refusals.test.ts`（末尾新钉子）、`packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts` 第 970 行。\n- 两分钟验证：`git grep -c \"bodies only\" -- packages/spec/src/data/hook.form.ts` 预期 0；`git grep -l \"For a JavaScript (L2) body or a handler\" -- packages` 预期 2 个文件（源与 en 包）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/spec/src/data/hook.form.ts`: the `refusals` row help now says the code is the one the **hook** throws, and ends \"For a JavaScript (L2) body or a handler; refused on an expression body\". That is what `HookSchema.refusals` says (`hook.zod.ts`, \"a js body or a handler\") and what `hookRefusalsWithoutSandboxedBody` refuses (an `expression` body, or neither a body nor a handler). The file docblock says the same.\n- `packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts`: `en` carries the new source string (byte-equal to what `check:i18n` extracts); the ten translated locales (`ar de es-ES fr ja-JP ko pt-BR ru zh-CN zh-Hant`) are re-translated by hand in place, leaf value only, no key added or dropped. No locale has a source-hash entry for this path, so no digest file moves.\n- `.changeset/33803-hook-refusals-help-handler.md`: patch for `@objectstack/spec` and `@objectstack/platform-objects`.\n\n## Tests\n\n- New top-level `describe` at the end of `packages/spec/src/data/hook-refusals.test.ts` (the refusals harness file): the `refusals` row help names `handler` and no longer says \"bodies only\"; the `handler` row it names is a row the same form offers. No forced edit to an existing test. The second commit reads `hookForm.sections` through its optional type (`?? []`), which `check:test-typecheck` asked for; an empty list would still red the `toHaveLength(1)` assertion.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/data/hook-refusals.test.ts src/kernel/repeater-item-titles.test.ts src/system/metadata-form-declared-rows.pin.test.ts`: Test Files 3 passed, Tests 140 passed (head a711ec17; again on final head d4af1df0).\n- Ablation (one leg, via `scripts/ablation-replace.mjs` on the committed head): restoring the old ending \"JavaScript (L2) bodies only\" in `hook.form.ts` landed (anchor 1 → 0, blob 6d2932ce → 8f783593) and turned the new pin red (1 failed / 98 passed); restore proved blob == HEAD and `git diff HEAD` empty.\n\n## Acceptance notes\n\n- The nested rows under `refusals` (`message`, `reasons`, `reasons.message`) still say \"when the body throws this code\". With a handler hook the thrower is the handler, so those three help strings read narrower than the schema. Same wording class, three more strings × 11 locales; left out of this card's scope. carrier: none.\n\n## Verification\n\nAll on final head d4af1df0, local subset only; every family CI runs is read from this PR's check-runs.\n\n<details><summary>Derived gates: 84 derived, 84 run, 0 NOT-MEASURED, all exit 0</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 84 families from 14 paths vs merge base 385ea1cce; each ran after the last commit and `--ran` reconciled: \"84 derived famil(ies) accounted for — 84 run, 0 NOT-MEASURED\".\n- Includes `pnpm check:i18n` (the `en` bundle equals a fresh extract of the new source string), `check:i18n-stale-fill`, `check:doc-authoring`, `check:nul-bytes`, `check:issue-citations`, `check:test-source-alias`, and the spec dist family (`check:api-surface`, `check:docs`, `check:authorable-surface`, `check:exported-any`) after `pnpm --filter @objectstack/spec build`.\n- Environment notes, not findings: `check-plugin-teardown-shape --self-test` first exited 3 on the shallow clone (pinned fixture commit missing), green after fetching that commit; `check:dual-build-cjs-loads` first exited 3 (PREREQUISITE NOT MET, packages without dist), green after building `./packages/**`; the four spec dist gates exited 3 after the second commit moved the src hash, green after rebuilding spec.\n\n</details>\n\n<details><summary>Package checks</summary>\n\n- `pnpm --filter @objectstack/spec typecheck` (incl. `check:test-typecheck`): exit 0.\n- `pnpm --filter @objectstack/platform-objects typecheck`: exit 0.\n- `pnpm --filter @objectstack/platform-objects test`: Test Files 122 passed, Tests 2007 passed.\n- `test:repo` (Test Core) not run locally: the diff edits no repo-project test; CI runs it.\n- Dogfood battery: n/a, no `!` in the title and no `(narrowing)` arm.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSYipyhBpSxJqatyap)_\n"
+}

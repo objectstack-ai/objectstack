@@ -1,0 +1,33 @@
+{
+  "number": 34130,
+  "kind": "issue",
+  "title": "sys_user unlock_user and set_user_password stay hidden without the admin plugin, though both doors answer 200 with it off",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T20:34:53Z",
+  "updated_at": "2026-11-16T01:31:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34130",
+  "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFiling gate: ① a follow-up owed by work in flight: the dev measurement on PR #34119 (card #34008), round-1 contract review record 6900367724, S1. Class b: the console hides a door the server serves.\nReader: the console admin for a deployment without the better-auth admin plugin.\nDedupe: `is:issue is:open unlock_user requiresFeature`, `set_user_password requiresFeature admin`. No open card covers it.\n\n## 维护者速读\n\nThe same bug #33759 fixed for ban / unban, on two more buttons. Without the admin plugin, a user's **Unlock** and **Set password** buttons are hidden in the console. The server serves both doors with the plugin off, so an admin on such a deployment cannot reach a working action from the UI.\n\n## Facts (dev probe on the PR #34119 branch, `plugins.admin` off / on, platform admin, throwaway and not committed)\n\n- `POST {routes.auth}/admin/unlock-user`: 200 / 200. `POST {routes.auth}/admin/set-user-password`: 200 / 200. These are ObjectStack's own raw mounts, like `ban-user` / `unban-user` since #33227.\n- `sys_user.unlock_user` and `sys_user.set_user_password` still declare `requiresFeature: 'admin'` (`packages/platform-objects/src/identity/sys-user.object.ts`). `PUBLIC_AUTH_FEATURES.admin.gatedInputs` (`packages/spec/src/kernel`) books both.\n- After PR #34119, the spec describes (`features.admin`, `plugins.admin`) say unlock and set-password are served without the plugin. They also say the console buttons still show only when the value is true, which is this gap.\n\n## Ask\n\nDo as #33759 / PR #33989 did for ban / unban:\n- Drop `requiresFeature: 'admin'` from both actions. Keep every other visibility rule: `set_user_password` stays hidden on a cloud-managed environment and for non-local accounts, as today.\n- Take both out of `PUBLIC_AUTH_FEATURES.admin.gatedInputs`.\n- Pin both buttons visible with the plugin off.\n- Once that lands, the sentence in the #34119 describes about the buttons becomes false and moves in the same PR.\n\nMeasure first that both doors still answer with the plugin off on `main` when this is picked up.\n\nSuggested-grade: p3 · an affordance hidden over a door that works; there is no data or security effect."
+}

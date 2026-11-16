@@ -2,8 +2,8 @@
   "number": 33969,
   "kind": "issue",
   "title": "checklist coverage: v18.5.0 sweep surfaces with no checklist item (writeRequiresMasterRead, renamedFrom holder carry, cross-object where, and others)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T15:06:34Z",
-  "updated_at": "2026-11-15T18:09:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T21:45:32Z",
+  "closed_at": "2026-11-15T21:44:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33969",
   "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\nCarries the new-coverage rows of #33761 (the v18.5.0 release test sweep anchor): surfaces the sweep drove that no checklist item covers. This is `checklist-author` work (new items), not accuracy. Filing gate ①: the follow-up owed by in-flight work. Ledger: anchor comment 6896511848 (read at `origin/main` `895783a1`). ⛔ Not a claim.\n\n## Scope\n\n- Rows of ledger 6896511848: 11, 12, 15, 16, 101, 196, 209. Examples: row 11, the `writeRequiresMasterRead` opt-in of #33250 (403/404 split); row 12, the `renamedFrom` holder carry of #33238 (no item exists); row 15, the #33181 files and #33512's one-hop cross-object `where`.\n- New items in `docs/qa/platform-checklist/areas/*.json` by the `checklist-author` skill's rules, one per uncovered surface, each with its source citations and an automated ref where a pin exists.\n- Serial: after the batch cards that touch the same area files merge.\n\n## Acceptance\n\n- Each row has a new item, or a reading that an existing item already covers it.\n- `check:platform-checklist` passes.\n\nPriority p2 (coverage growth, not release evidence)."

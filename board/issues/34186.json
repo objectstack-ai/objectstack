@@ -1,0 +1,34 @@
+{
+  "number": 34186,
+  "kind": "issue",
+  "title": "Console: the home page asks the deployment notice on a host that does not compose it, and is answered 503",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:11:45Z",
+  "updated_at": "2026-11-16T02:08:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34186",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① found while measuring objectstack-ai/cloud#4300 (hosted console calls to routes the host does not serve). Dedupe: `deployment notice 503 hosted`, `not composed on this host`, `deployment/notice runtime config` return no open card (closed #32643, #32798 are about the notice's content, not where it is asked).\nConsumer: objectstack-ai/cloud#4300 (Blocked-by this card; closes on a pin bump and a re-measure).\n\n## 维护者速读\n\n- 要做的：控制台只在宿主确实组装了「部署提示」时才去请求它。\n- 为什么：托管环境不组装这个提示（它讲的是自托管部署者自己磁盘上的数据库、密钥和环境变量），控制台首页每次加载对管理员请求两次，得到 503。\n- 需要你做的：无。\n\n## What happens\n\nOn a hosted ObjectOS environment the console home asks `GET /api/settings/deployment/notice` twice per load for an administrator and is answered `503 SERVICE_UNAVAILABLE` (\"not composed on this host\"). Measured on cloud main 7317e42 with the framework at b914e7247f (18.5.0), `run-stack --with-ui --prod-like --seed`, headless Chromium.\n\n- Caller: `ui/packages/app-shell/src/console/deployment-notice/deploymentNotice.ts:92`, from `DeploymentNotice.tsx:96`; the only gate is `isAdmin`.\n- Server: `packages/services/service-settings/src/settings-routes.ts:483` answers 503 when `opts.deploymentNotice` is absent. `SettingsServicePlugin` wires it; a host that mounts the settings family itself (cloud's `EnvSettingsRoutesPlugin`) does not, by design.\n\n## Change\n\n1. `GET /api/v1/runtime/config` (or discovery) states whether the deployment notice is served, derived from the composition the way `features.installLocal` is derived from what is mounted.\n2. The console reads the notice only when it says so.\n3. Done when a test pins both arms: composed (the notice is read) and not composed (no request is made).\n\nSeam: `runtime:service-settings registerSettingsRoutes(deploymentNotice)` → `renderer:DeploymentNotice`."
+}

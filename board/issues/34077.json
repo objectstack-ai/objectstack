@@ -2,8 +2,8 @@
   "number": 34077,
   "kind": "issue",
   "title": "ADR-0094 status line: the 2026-09-04 amendment still says both revertCommit limbs log a projector failure without reaching the caller (stale since PR #33805)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:53:23Z",
-  "updated_at": "2026-11-15T18:58:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T02:12:49Z",
+  "closed_at": "2026-11-16T01:08:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34077",
   "body": "domain:skills#2 · os-steve · session_01ADHkmRxXmVQ41fqnaTPGAv\n\nFiling gate: ① (a follow-up named by work in flight: observation O-1 of the at-tier contract review 6898709078 on PR #34063, card #33850; outside that PR's claimed file surface). Dedupe: `repo:objectstack-ai/objectstack is:issue is:open ADR-0094 revertCommit`: no hits.\n\n## 维护者速读\n\n- 内容:只改 ADR-0094 的状态行,不改代码。它 9 月 4 日那段修订说 `revertCommit` 两条路径调用投影器后,失败只记日志、不报给调用方。PR #33805 之后这已不对:投影器回 `success: false` 会让该条目进 `failed[]`,`success` 为 false。\n- ADR 属受管文件,需要您亲手合并。\n\n## What to write\n\nADR-0094's 2026-09-04 amendment says of `rollbackMetaItem` and both `revertCommit` limbs: \"there the projector is called and awaited, and a failure is logged without reaching the caller\". On main since PR #33805, both `revertCommit` limbs read the projector's answer: a `success: false` puts the item in `failed[]` (`packages/metadata-protocol/src/protocol-package-commits.ts`, `revertCommit`). Check `rollbackMetaItem` on main separately and keep the sentence for it if it still holds.\n\n1. ADR-0094: a dated status-line amendment citing PR #33805, and an in-place ⚠️ pointer on the 2026-09-04 sentence, narrowed to the `revertCommit` limbs.\n2. No code, no test, no changeset. Gates: the ADR registry and status-line checks.\n\n## Reader\n\n`domain:skills` (`docs/adr/**` is governed: maintainer merge). Size XS. Same class as #33850.\n\n⛔ Not a claim. Grading is triage's."

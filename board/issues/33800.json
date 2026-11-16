@@ -2,8 +2,8 @@
   "number": 33800,
   "kind": "issue",
   "title": "i18n regression (18.4.0): fields added by a dependent package's objectExtensions are served untranslated by /api/v1/meta/object, and its fieldPatches label/description never translate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -14,7 +14,6 @@
     "bug",
     "domain:server",
     "lease:A2",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:04:33Z",
-  "updated_at": "2026-11-15T15:38:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T02:07:51Z",
+  "closed_at": "2026-11-16T01:46:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33800",
   "body": "## Summary\n\nOn 18.4.0, `GET /api/v1/meta/object/<obj>` with `Accept-Language: zh-CN` serves **every field that a dependent (non-`.custom`) package adds via `objectExtensions`** with its source-language label and option labels. The same package's translation pack does carry these strings: `/i18n/translations/zh-CN` serves them, and the record detail page renders them in Chinese. The base package's own fields on the same object come back translated.\n\nThe console's **New record form** reads the meta object, so it shows the extension's options in English inside a Chinese UI.\n\n## Repro (consumer: steedos-labs/os-project-blackcat-crm, 18.4.0)\n\n- `crm_account` is from the base package. The carbon package extends it with `cb_market` (options domestic/export), `cb_default_packaging`, `cb_default_transport`, and so on, and ships zh-CN pack rows for them.\n- `GET /api/v1/meta/object/crm_account` (zh-CN):\n  - `cb_market` label `Market`, options `['Domestic','Export']`;\n  - `cb_default_packaging` options `['25 kg Bag','Bulk Bag','Bulk']`;\n  - the base field `payment_cycle` options do come back translated: `['预付','30 天',…]`.\n- New Customer form in zh-CN: option labels Domestic / Bulk Bag / Road / Truck & Bus Radial.\n- Detail page of an existing record: the same options in Chinese.\n\n**Same root, second symptom:** a `fieldPatches` description or label on an extension from a dependent package is never translated. A carbon `fieldPatches` description on `crm_account.registration_number` was served in English under zh-CN, even though the zh pack row carrying the text was served by `/i18n/translations/zh-CN`. It stages clean and passes validate.\n\n## Suspected cause\n\n`@objectstack/spec` `translateObject`:\n- a field that the packaged base does not declare counts as *diverged* on every slot;\n- a diverged slot reads only the `.custom` pair's catalog (ADR-0146 D2);\n- a dependent package has no `.custom` pair, so its own pack rows are never consulted.\n\nThe consumer recorded the same options in Chinese on 18.3.0, so this looks like a regression.\n\n## Expected\n\nFields and patches contributed by a dependent package's `objectExtensions` translate from that package's own pack rows on the meta-object door, as they already do on the detail page."

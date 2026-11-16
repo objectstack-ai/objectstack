@@ -1,0 +1,33 @@
+{
+  "number": 34171,
+  "kind": "issue",
+  "title": "Login page draws the server's English 409 sentence when a managed runtime refuses password sign-in; map RESOURCE_CONFLICT to a localized sentence that points at the identity-provider button",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T23:18:53Z",
+  "updated_at": "2026-11-15T23:18:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34171",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ① a product defect. This is item 3 of cloud#4535 (the UI half). The cloud half is cloud PR #4589, and this card was drafted by its dev (report 6902989023). Reader: the `domain:ui` lane (`ui/packages/auth`).\n\n## 维护者速读\n\n托管环境（cloud-managed）拒绝本地密码登录时，服务端回 409 `RESOURCE_CONFLICT`，登录页直接把服务端那段英文原文画出来。cloud#4535 已让托管环境的 `/auth/config` 不再宣称邮箱密码（`emailPassword.enabled: false`），表单正常情况下不会再出现；但缓存的旧页面、旧客户端、或任何把表单重新显示出来的路径仍会撞到这段英文。登录页应把这个拒绝映射成本地化的一句话，引导用户点「使用 ObjectOS Cloud 继续」（或该部署的身份提供方按钮）。\n\n## Facts (objectstack at cloud's pin b914e7247f)\n\n- `ui/packages/auth/src/LoginForm.tsx` submits `sign-in/email` and draws the error body's message\n  as given. A managed runtime's refusal is 409 `RESOURCE_CONFLICT` (plugin-auth\n  `cloud-managed.ts`, `CLOUD_MANAGED_REFUSAL_CODE`/`_STATUS`; cloud's relay answers the same\n  envelope with its own English sentence, `HOSTED_NO_LOCAL_PASSWORD_MESSAGE`).\n- Observed before cloud#4535 on `os-2yfwh7.objectos.ai/_console/login`: the zh-CN page showed the\n  English sentence \"This environment is hosted: everyone signs in through the cloud, ...\".\n- objectstack#29159 (closed) wrote the login card's copy for \"email sign-in off\"; this is the\n  same copy family for the case where the form was drawn anyway.\n\n## Expected\n\nOn a 409 `RESOURCE_CONFLICT` from the password sign-in (and the reset / set-password doors the\npage drives), the page shows a localized sentence (en / zh-CN / ja-JP / es-ES at least) saying\nthis deployment signs people in through its identity provider, and points at that button. It\ndoes not draw the server text. Self-hosted deployments, which never answer this refusal, are\nunchanged.\n\nSeam: spec:none (error envelope, ADR-0112 `RESOURCE_CONFLICT`) → renderer:`ui/packages/auth` `LoginForm` error mapping\nDedupe words: LoginForm RESOURCE_CONFLICT localized, managed sign-in refusal copy, hosted password 409 English"
+}

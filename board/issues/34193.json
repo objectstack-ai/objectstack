@@ -1,0 +1,31 @@
+{
+  "number": 34193,
+  "kind": "issue",
+  "title": "Tool preview: \"Open in API Console\" presets the direct tool-run route for tools that need the server model, which the hosted cloud refuses there",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:34:05Z",
+  "updated_at": "2026-11-16T00:34:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34193",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling category: ③ follow-up from a cloud card (framework UI).\nreach: console › metadata admin › Tool preview (`ui/packages/app-shell/src/views/metadata-admin/previews/ToolPreview.tsx`), the \"Open in API Console\" link.\n\n## Business reason\n\nThe link sends a builder to the API console with `POST /api/v1/ai/tools/:toolName/execute` preset for any tool. On the hosted cloud, that route follows the rule the MCP build door already follows (cloud#3605): **a tool run directly, outside a chat turn, runs no server-side model.** A builder who opens a model-backed tool (for example `propose_blueprint` or `create_seed` without `records`) from the preview gets a refusal sentence. The page offers nothing that explains why.\n\n## Expected\n\nThe preview knows whether a tool needs the server model. For such a tool it either hides the link or says next to it that the tool runs in a chat turn, and it offers the link unchanged for tools that call no model. A tool that calls no model (for example `query_records`) keeps the link as today.\n\nReader who acts: the framework UI lane (`app-shell` metadata-admin previews). The cloud side needs nothing more.\nDedupe: `repo:objectstack-ai/objectstack ToolPreview \"Open in API Console\"` → 0 open issues."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 34152,
+  "kind": "issue",
+  "title": "pm-dispatch triage: a flake that ejects merge groups on two or more heads is p0, and its accepted fix is jumped the same round (queue#1 vacant → triage covers)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T22:10:57Z",
+  "updated_at": "2026-11-16T01:43:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34152",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. On the triage thread, 2026-11-15, after the `run-date.test.ts` timeout ejected merge groups for about three hours: 「34104 已经提前了，这个问题严重，提前你为什么不处理」 and 「队列恢复后，你应该用邮箱通知各席位吧？」, then 「看看你的哪些skills和项目中不一致的，需要立卡更新」. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** 一个超时型 flake(#34081)从 17:47 到 21:45 连续踢掉多个排头组,main 两小时只合进约一组/小时。修复 PR #34104 19:12 已过席位核对,却一直排在后面,最后是您手动提前的。\n- **规则缺口:**\n  - 分诊规则写「flake 锚卡判确定性才升 p0」,所以分诊迟迟没升级。\n  - 插队工具(中继 `pr_enqueue_front`)写在队列席章程里,而队列席 `queue#1` 没人坐,分诊的规则里没写由它兜底。\n- **要改的:**\n  - 同一签名踢掉 ≥2 个排头组的 flake 当轮定 p0。\n  - 队列席空缺时,分诊照插队规则把已过核对的修复 PR 插到队首,事后报您。\n  - 恢复后照 L40 逐席敲门通知重投。\n- **受管文件:** `.claude/**` 文本,需您合并。\n\n## Where (origin/main)\n\n- `.claude/skills/pm-dispatch/references/triage-duties.md`, the line 「主干全量红与确定性队列红首触定 p0(…);flake 锚卡判确定性才升。」\n- `.claude/skills/pm-dispatch/references/landing-operations.md` L33-37: jump reasons; reason (a) covers exactly this case.\n- `.claude/skills/pm-dispatch/references/lanes/queue.md` L20-22: the jump belongs to the queue seat, which is unseated; no fallback is named.\n- `.claude/skills/pm-dispatch/references/project-forms.md` L40: when an anchor closes, triage sends `Notify: main-green` to every open PR whose body carries `Waits-on: main-red #n`. A queue flake's ejected PRs carry no such line, so nothing tells their seats to re-enqueue.\n\n## Change\n\n1. triage-duties: a flake anchor whose one signature ejects merge groups on **two or more heads** within a rolling 2 h is graded p0 the round it is seen. It is a queue blocker whatever its root cause, and it drops when the fix lands.\n2. triage-duties or queue.md: while `queue#1` is vacant, triage holds the queue seat's jump duty. When that p0's fix PR has a seat ACCEPT, triage sends `pr_enqueue_front` the same round under reason (a): audit comment first, one jumper per repository, and reports to the maintainer after the fact. Triage never asks the maintainer to jump a PR the relay can jump.\n3. project-forms L40: extend the `Notify: main-green` knock to queue-flake anchors. When the anchor closes, triage knocks the seat of each PR the signature ejected that is still open and not back in the queue, one knock per PR.\n\n## Evidence\n\n- #34081 and its ejection table.\n- R1153 to R1156 on #6015, which record the head ejections and the 18:39 20-entry rebuild.\n- PR #34104: ACCEPT 19:12, queued 19:13, still unmerged at 22:05."
+}

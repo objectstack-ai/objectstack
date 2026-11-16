@@ -2,8 +2,8 @@
   "number": 33880,
   "kind": "issue",
   "title": "MCP instructions: when the data cannot answer a question, say what is missing and offer the computation; never fill the gap with an assumed value",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:14:05Z",
-  "updated_at": "2026-11-15T19:31:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T23:06:25Z",
+  "closed_at": "2026-11-15T23:05:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33880",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① shipped AI guidance gap, measured. `reach:` the fifth gallery debut refresh, 2026-11-15T12:4xZ (card `asset_lifecycle`, published 18.4.0, runner at objectstack main `b0056382`, model claude-opus-5-5). Every other check passed: Build 144/144, 问数 14/15, operations 6/6, Iterate 155/155 · 15/15 · 6/6. The gallery export was refused on this one answer. Epic objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nQuestion `laptop_warranty_expiring`, \"Which laptops' warranties run out before the end of this year?\", has truth `unanswerable`: no object records a warranty. The agent, an MCP client reading this server's instructions, correctly said it cannot answer from the data. It then added:\n\n> \"**An assumption, not data:** if laptops come with a typical warranty of 1 year or longer, none would run out before 2026-12-31…\"\n\nIt also volunteered derived counts (\"30 laptops … 23 in use, 6 in stock and 1 in repair\"). The grader failed the turn with \"stated a figure the data cannot support\". **The grade is right:** an assumed warranty term and a conclusion drawn from it (\"none\") are an answer the data cannot support. That is the risk a customer's MCP client carries the same way. Runs 1–3 that day declined cleanly, so the behaviour varies.\n\n## Carrier\n\nThe MCP door's instructions (`packages/mcp/src/skill-md.ts`, the client-facing SKILL.md) tell the client how to choose between a governed metric and an object query, and to say so when measures are withheld. They say nothing about a question the data **cannot** answer.\n\n## Ask\n\n1. Add one rule to the MCP instructions for that case:\n   - say the data does not record it, and name what is missing (here, a warranty end date);\n   - offer the computation if the user supplies the missing parameter;\n   - **never** fill the gap with an assumed value or a conclusion drawn from one;\n   - figures you volunteer must come from a tool answer, as a cited source.\n2. Keep it to one bullet beside the dataset rule, in the house register. If an eval set exists for the MCP door, add this case to it.\n3. Proof: the rendered instructions carry the rule (the renderer's test). A live re-run is the daily gallery task's job.\n\nReader: the `domain:skills` lane seat, which owns the client-facing instruction text; if `packages/mcp` is another lane's surface, triage reroutes. Dedupe: `skill-md cannot answer assumption`, no hit. Priority p3: guidance coverage."

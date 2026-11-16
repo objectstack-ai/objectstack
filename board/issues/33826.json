@@ -2,8 +2,8 @@
   "number": 33826,
   "kind": "issue",
   "title": "删除记录后，命令面板「最近访问」仍列出该记录",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:45:21Z",
-  "updated_at": "2026-11-15T19:39:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T23:11:03Z",
+  "closed_at": "2026-11-15T22:37:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33826",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，reach: 界面实测一次。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq`（Jack，免费版，HotCRM 6.1.2）。报告：https://claude.ai/artifact/XaMk7Uo36seWMKsPy5ETPM\n\n## 复现\n\n1. HotCRM → 客户 → 新建「浏览器测试公司-1115」→ 打开记录 → 更多 → 删除 → 确认（提示「已删除」并可撤销）。\n2. 立即按顶部搜索（⌘K）打开命令面板。\n3. 「最近访问」第一条仍是「浏览器测试公司-1115 · 客户」。\n\n## 业务理由\n\n用户点进去会落到一条不存在的记录；最近访问越用越不可信。\n\n## 修复方向\n\n删除成功后把该记录从最近访问（`objectui-recent-items:*` 本地存储与服务端的同类列表）移除；打开最近访问项时若记录已不存在，静默剔除。Studio 首页同类问题已在 objectstack#32615 / #32724 修过，可复用思路。\n\n## 验收\n\n1. 删除记录后，命令面板与环境首页「最近访问」都不再出现它。\n2. 撤销删除后可重新出现。\n\n## Reader\n\nobjectstack console 车道（`domain:ui`）。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack 最近访问 已删除` → 2 条：objectstack#32615 / #32724，都是 Studio 首页的「最近访问」保留已删软件包，已关；不覆盖应用内命令面板的记录。\n- `repo:objectstack-ai/objectstack recent items deleted record palette` → 17 条，均为 QA 汇总或审计卡。"

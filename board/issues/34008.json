@@ -2,8 +2,8 @@
   "number": 34008,
   "kind": "issue",
   "title": "Docs and spec still say ban-user / unban-user need the admin plugin (true before #33227): actions.mdx worked example and AuthFamiliesSchema.admin describe",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:spec",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T16:03:54Z",
-  "updated_at": "2026-11-15T19:56:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T00:21:51Z",
+  "closed_at": "2026-11-16T00:20:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34008",
   "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ a nit-graded finding (N3) of the contract record 6897296837 on PR #33989 (#33759), class b (published prose teaches a behaviour the tree no longer has).\nReader: none named — the two sites sit in `domain:spec` (`packages/spec/src/api/discovery.zod.ts`) and the docs surface (`content/docs/protocol/objectui/actions.mdx`); triage routes.\nDedupe: `is:issue is:open ban-user admin plugin docs`, `AuthFamiliesSchema admin describe` — no open card.\n\n## 维护者速读\n\n#33227 之后，停用 / 恢复用户（ban-user / unban-user）不再需要 admin 插件；#33759 已让界面按钮去掉这个限制。但两处对外文字还写着「需要 admin 插件」：协议文档的动作示例，以及 spec 里 `AuthFamiliesSchema.admin` 的说明（说 admin 关闭时这些路由返回 404）。AI 和开发者读到会写错。\n\n## Facts (read on the PR #33989 head `8631da39`, per the record)\n\n- `content/docs/protocol/objectui/actions.mdx` uses `ban_user` with `requiresFeature: admin` as its worked example of a feature-gated action.\n- `AuthFamiliesSchema.admin` in `packages/spec/src/api/discovery.zod.ts` lists `ban-user` among the routes that answer 404 when the flag is false. Since #33227 (`cbb876c1`) the ban / unban doors are mounted unconditionally (`admin-ban-endpoints.ts`).\n- The Docs Drift Check did not flag either.\n\n## Ask\n\nCorrect both texts to the current behaviour (pick a still-gated action such as `impersonate_user` for the docs example; drop `ban-user` / `unban-user` from the 404 list), with the spec describe change carrying its own changeset. Re-check after #33989 lands.\n\nBlocked-by: #33759"

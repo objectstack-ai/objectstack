@@ -1,0 +1,31 @@
+{
+  "number": 34228,
+  "kind": "issue",
+  "title": "print (service-print, zh-CN): a printed record page shows dates as \"11月 15, '26\", lets a wide record:line_items table overflow its card, leaves half of page 1 blank, and prints screen styling (grey page, link colour, badges)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:42:49Z",
+  "updated_at": "2026-11-16T01:49:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34228",
+  "body": "## What happens\n\nOn @objectstack 18.5.0, `service-print` with a local Chromium (`OS_PRINT_CHROMIUM_PATH` + `OS_PRINT_CONSOLE_URL`) printed a downstream quote document: steedos-labs/os-project-blackcat-crm `quote_print_page`, an A4 portrait record page with `print: { repeatHeader, pageNumbers, avoidBreakInside: true }` and a `record:details`, a `record:line_items` and a second `record:details`. The organization is zh-CN. In the PDF:\n\n1. **Date format.** The date fields `date` and `expiration_date` print as `11月 15, '26` / `12月 15, '26`, an English-order pattern with Chinese month words. #27498 fixed the console list grid to `2026年10月11日`, but the print render does not use that path.\n2. **Table overflow.** The 5-column `record:line_items` table (Product, Quantity, Sales Price, Discount %, Total) runs past the right edge of its card on A4 with 15 mm margins. The last column's border sits outside the card, and a stray vertical rule is drawn.\n3. **Blank half page.** Page 1 ends after the line items, with about 50% of the sheet empty. The next `record:details` (two sections, about 10 short fields) moves whole to page 2. That looks like `avoidBreakInside` applied to the whole block rather than to each section or row group.\n4. **Screen styling printed.**\n   - The grey app background prints as a grey page.\n   - Lookup values print in the orange link colour.\n   - Select values print as coloured badges (the 已批准 pill, the 付款条款 pill).\n   - A printed document would normally use black text on white, with plain values.\n\n## Ask\n\n- (1) In print, format dates by the request locale, as the console's record page does.\n- (2) Fit `record:line_items` to the printable width: wrap or shrink columns, never overflow.\n- (3) Apply `avoidBreakInside` per section or row group, so one block of short fields does not leave half a page blank.\n- (4) A print stylesheet: white page, plain-text lookups, and badges rendered as text. Optionally a page-level switch.\n\nEach item can be its own PR. Screenshots of the PDF are available from the downstream PM if needed.\n\nDedupe words: print date format zh-CN, line_items overflow print, avoidBreakInside blank page, print stylesheet badge link colour."
+}

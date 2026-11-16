@@ -2,8 +2,8 @@
   "number": 33857,
   "kind": "issue",
   "title": "console Settings pages fetch /api/settings with no session locale, so server-composed copy (the Localization page's currency-lock banner, write refusals, action copy) comes back in the browser's language on a zh-CN session",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T12:25:29Z",
-  "updated_at": "2026-11-15T18:03:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T21:00:44Z",
+  "closed_at": "2026-11-15T20:59:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33857",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nKind: product defect (off-clause probe, rule 8) — severity guess P2 (mixed-language page on a switched session; no data effect)\n\n## Repro (main a557fa386bc3, stock showcase)\n1. Boot: `pnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin --no-compile --no-watch -p PORT -d file:/tmp/x.db`.\n2. In a browser whose own language is English (Accept-Language en-US), sign in at http://localhost:PORT/_console/ as admin@objectos.ai / admin123.\n3. Avatar menu → Language → 中文 (writes sys_user.locale; the shell turns Chinese).\n4. Open Setup → 设置 → 本地化 (`/_console/apps/setup/system/settings/localization`).\n- Expected: the info banner at the top reads `默认币种已锁定：USD` with its zh-CN text (the zh-CN entry of CURRENCY_LOCK_COPY, lockedLabel / lockedText).\n- Actual: the banner reads `Default currency locked: USD` / `In use by 1 object (Invoice) and 4 exchange rates. Converted amounts are stored in this currency, so it can no longer be changed.`, while every other string on the page (title 本地化, groups 区域 / 财务, key labels 默认时区, source badges) is Chinese.\n- Network: the page's `GET /api/settings/localization` carries `accept-language: en-US` (the browser default), while the same page's `GET /api/v1/meta/object` carries `accept-language: zh-Hans`.\n- Server control: `curl -H 'Accept-Language: zh-CN' /api/settings/localization` and `-H 'Accept-Language: zh-Hans'` both answer `默认币种已锁定：USD` — the server copy and its locale pick are correct.\n\n## Mechanism\n- `ui/apps/console/src/pages/settings/api.ts:102` `jsonHeaders()` sends only `Content-Type` and `Accept`; `getSettingsNamespace` / `listSettingsManifests` / the PUT and action POSTs (lines 137-184) use it with raw `fetch`, so no session locale reaches the server and the browser's own Accept-Language is what arrives.\n- `packages/services/service-settings/src/settings-routes.ts:216-222` `requestLocaleOf` reads the top Accept-Language tag, else `?locale` — so it picks the browser's language, and `liveStatementOf` (line 316), `getNamespace` (304) and the action route (385) hand that to `currencyLockCopy()` (`packages/services/service-settings/src/localization-currency-lock.ts:330`) and the other per-request copy tables (`settings-action-copy.ts`, `localization-locale-options.ts` NOT_OFFERED_COPY).\n- The console's own metadata client sends the session language (zh-Hans), which is why the rest of the page is Chinese.\n- Not new in 18.5: neither file changed since 18.4.0 (`git log 181ad7d4..HEAD` empty for both).\n\n## Fix direction\nSend the session language from the settings API client (the same header the metadata client sends), or pass `?locale=`.\n\n## Duplicates searched (open issues, objectstack-ai/objectstack)\n- `settings Accept-Language` → 3 hits, all PM seat cards (#12708, #6023, #6015)\n- `currency lock locale` → 7 hits, none about this (#32984 AI build chat, #31908 audit ADR, PM seats)\n- `settings page locale english banner` → 4 hits, PM seats only\n- `live status locale settings` → 11 hits, none about this (#33358, #25921, #31908, PM seats)\n\nQA-source: #33853 · i18n.surface-matrix · observed beside the clauses"

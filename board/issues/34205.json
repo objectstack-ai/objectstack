@@ -1,0 +1,30 @@
+{
+  "number": 34205,
+  "kind": "pull_request",
+  "title": "test(driver-sql): count the default-order index in the live MySQL activation-ledger index lists",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:52:00Z",
+  "updated_at": "2026-11-16T02:10:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34205",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbKnsd8ZLsq9hBbRRm5JvJb2)_\n\nPart of #34126\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\n\n## 维护者速读\n\n- **改了什么**：只改测试。`sql-driver-widened-declared-unique.test.ts` 的 MySQL 8 和 MariaDB 两个 live 单元，在断言激活账本的索引名列表时，补上 `idx_sys_metadata_activation_created_at_id`。\n- **为什么改**：PR #34044（#33695）让每张受管表都带上隐式的 `(created_at, id)` 索引，表上实际多了这一个索引。这两个单元只在 `Temporal Conformance (live PG + MySQL)` 里跑，而该 job 只在 push 和定时全量里跑，PR CI 和合并队列都不跑，所以 #34044 没测到。00:10Z 的 4 小时全量（run 43778747333）因此变红。\n- **风险与回滚**：断言仍是精确相等，只多了一个确定存在的名字，没有放宽，也没有跳过。回滚即 revert 本 PR。\n- **先看**：测试文件里新加的 `DEFAULT_ORDER` 常量，以及两处 `toEqual`。\n- **两分钟验证**：等下一次 4 小时全量（或 main 上的 push 运行），看 `Temporal Conformance (live PG + MySQL)` 是否转绿。\n- **需要你做的**：无。区内自审（≤50 行、仅测试、`Clause-②: no`）。\n\n## What changes\n\nThe live MySQL 8 cell, `an upgraded MySQL 8 database: the old key retires safely beside the functional guard`, lists every index on `sys_metadata_activation` after the safe replace and compares the list exactly. The 4-hourly full run on main at 00:10Z (run 43778747333, job 133010997457) failed there:\n\n```\n- Expected\n+ Received\n  [\n    \"PRIMARY\",\n+   \"idx_sys_metadata_activation_created_at_id\",\n    \"uniq_sys_metadata_activation_metadata_type_package_id_name\",\n    \"uniq_sys_metadata_activation_packageless\",\n  ]\n```\n\nThe extra name is the `(created_at, id)` index that `IMPLICIT_SYSTEM_COLUMN_KEYS` gives every managed table since PR #34044. It is not a timing budget. The MariaDB cell reads the same list through the same sync, so it gets the same name. It skips on the MySQL 8 server CI provisions, which is why only one case went red.\n\nBoth lists now name `DEFAULT_ORDER`. The assertion stays exact: nothing is loosened, filtered or skipped.\n\n## Tests\n\n- Local: `vitest run src/sql-driver-widened-declared-unique.test.ts`: 31 passed, 2 skipped (the two live MySQL cells, because no MySQL server is available here). ESLint `--no-inline-config` on the file exits 0, and `check-nul-bytes` exits 0.\n- The live cells run only in `Temporal Conformance (live PG + MySQL)`, which does not run on `pull_request` or `merge_group`. The proof is the full-run diff above, and the next push run on main or the next 4-hourly run will confirm it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n<!-- signed: domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh -->\n"
+}

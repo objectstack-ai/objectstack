@@ -2,8 +2,8 @@
   "number": 33507,
   "kind": "issue",
   "title": "objectql: the bare-name refusal still explains itself with the old one-name-per-deployment rule for the four types that now hold one name per namespace",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:54:53Z",
-  "updated_at": "2026-11-15T15:26:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T00:38:28Z",
+  "closed_at": "2026-11-16T00:38:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

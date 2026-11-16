@@ -1,0 +1,32 @@
+{
+  "number": 34226,
+  "kind": "issue",
+  "title": "metadata-protocol, plugin-security: the managed seal and the packaged permission-set lock judge a permission set by name alone, so one package's save of its own set N is refused because another package ships N",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:E1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:35:02Z",
+  "updated_at": "2026-11-16T01:35:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34226",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, measured. Found by area S5's dev on #32780 (report 6904857828, out_of_scope_findings, class b), filed by area S5 (E1b), lease E1.\n\n## 维护者速读\n\n- 问题：包 crm 在代码里发布了权限集 N，另一个命名空间的包 hr 保存它自己的权限集 N 时，被拒绝，提示\"由托管包提供并已封存\"。\n- 影响：ADR-0150 D2 规定权限集按 (包, 名字) 区分，但封存和锁只看名字，把别的包的同名集当成自己的封存基线，误拒了合法保存。\n- 修法方向：封存判断和打包权限集锁改为按 (包, 名字) 判断，只拦截对同一个包所发布集合的覆盖。\n- 优先级 p2，本区（S5）处理，涉及 plugin-security 的部分需和 S1 区核对。\n\n## Measured\n\nThis was measured in a pin attempt on the #32780 branch (PR #34224). Package crm (namespace crm) registers permission set N in code. Package hr (namespace hr) then saves its own permission set N through the public save door `saveMetaItem`. The save is refused with `Metadata item permission/N is provided by a managed package and is sealed`.\n\nSeams (read):\n- `packages/metadata-protocol` save path `refusePackagedBaseOverride` (the managed seal, ADR-0126 / ADR-0131 D6).\n- `packages/plugin-security` `registerPackagedPermissionSetLockGate`.\n\nBoth key on the name alone.\n\n## Acceptance\n\n1. A save of package P's own permission set N is not refused because another package Q ships N, in both registration orders. A save that overrides Q's shipped N (bare, or addressed to Q) is still sealed or locked exactly as today. Pin and ablate both arms.\n2. Check the other package-scoped metadata types that the seal judges, and say in the PR which ones share the name-wide shape.\n3. Declare the FROM→TO with its Clause-② arm. A refused save becoming accepted is a widening.\n\nPrior rulings read:\n- ADR-0150 D2 (a permission set is (package, name)) and red line 2.\n- ADR-0126 / ADR-0131 D6 (the managed seal). The fix keeps the seal for a package's own shipped base.\n- PR #34224 (#32780), which keeps stored sets per package in the registry and leaves this door unchanged.\n\n## Dedupe\n\nI searched for \"managed package and is sealed\" permission, `refusePackagedBaseOverride` and `registerPackagedPermissionSetLockGate`. The only hit was #32780 itself, whose dev report names this finding as out of scope."
+}

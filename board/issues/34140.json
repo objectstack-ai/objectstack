@@ -1,0 +1,37 @@
+{
+  "number": 34140,
+  "kind": "pull_request",
+  "title": "fix(mcp): say what the data lacks instead of answering from an assumed value",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T21:31:56Z",
+  "updated_at": "2026-11-15T23:05:37Z",
+  "closed_at": "2026-11-15T23:05:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T23:05:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34140",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WAN8ZYZ3d7CaQtjqgcurPJ)_\n\nFixes #33880\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：MCP 服务给客户端的说明书（带数据集工具时渲染的那一段）在\"指标还是对象查询\"规则旁多了一条：数据答不了的问题，要说明缺什么、可以让用户补参数再算、绝不拿假设值或由假设推出的结论充数、主动给的数字必须来自工具回答。\n- 为什么改：画廊跑分里\"哪些笔记本保修年底前到期\"本应答\"数据里没有保修信息\"，客户端却补了一句\"按典型一年保修，没有会到期\"，被判失分；同样的风险会落在客户自己的 MCP 客户端上。\n- 风险与回滚：只改说明文字，不改工具、协议或元数据；回滚即还原这 6 行。\n- 先看：`packages/mcp/src/skill-md.ts`（DATASET_TOOL_LINES 末条）、`packages/mcp/src/mcp-dataset-tools.test.ts`（新钉子）。\n- 两分钟验证：`pnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2 src/mcp-dataset-tools.test.ts`，预期全绿，含 \"renders the rule for a question the data cannot answer\"。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`DATASET_TOOL_LINES` in `packages/mcp/src/skill-md.ts` (the dataset pair's entries in the served SKILL.md, rendered when the host's bridge carries the pair under a `data:read` grant) gains one bullet after \"Choosing between a metric and an object query\":\n\n> **When the data cannot answer.** No metric, object or field records what the question needs: say the data you can read does not record it and name what is missing (such as a shipment's weight), and offer the computation if the user supplies it. Never fill the gap with an assumed value, nor draw a conclusion from one (\"under a typical term, none would…\"). Any figure you add comes from a tool answer; cite it.\n\nThe constant's docblock gains one sentence naming the new entry. No restatement was cut: no byte or line budget guards this text (the surface guard checks tool names only).\n\nSize: +6 lines in the dataset-host render (+425 bytes); the render without the pair (and so the Console \"Download skill\" mirror, which renders with no options) is byte-identical.\n\n## Tests\n\n- `packages/mcp/src/mcp-dataset-tools.test.ts`, in the describe that already pins the selection rule: a new case asserts the rule renders after the selection rule, carries its parts (the data you can read does not record it, offer the computation, never an assumed value, nor a conclusion drawn from one, any figure from a tool answer and cited), and is absent from a render without the pair. No existing test was edited.\n- `pnpm --filter @objectstack/mcp test` at `d61d6fb7`: Test Files 65 passed (65), Tests 1186 passed (1186); `pnpm --filter @objectstack/mcp typecheck` exit 0 (under os-verify-lock, VERDICT command-exit 0).\n\n## Acceptance notes\n\n- Eval set: the MCP door has no eval set of its own. The question that measured this gap (`laptop_warranty_expiring`, truth `unanswerable`) is already a case in the scenario card `docs/qa/scenarios/asset_lifecycle.json`, which the gallery run grades; no case was added.\n- Reach: the rule sits beside the dataset rule as the card asks, so it renders only for hosts that carry the dataset pair (service-analytics loaded). A client of a host without the pair does not see it. Moving it into the always-rendered \"Conventions & gotchas\" section would reach every client but changes the no-options render, which the Console mirror under `ui/apps/console/src/pages/developer/` must match byte for byte; that is outside this card's file surface and is left to the seat.\n- A live re-run is the daily gallery task's job (card body, Ask 3).\n- Review round 1 (contract review 6901764807, PASS; open question ruled A, the rule stays beside the dataset rule): the reply names \"the data you can read\" (right under a narrowed grant), a figure added is cited as `query_dataset` already asks, the example names a field no scenario card carries (checked against all nine `docs/qa/scenarios/*.json`), the test pins the no-conclusion clause and the whole citation sentence, and the changeset quotes the measured sentence verbatim.\n\n## Verification\n\nAll at head `d61d6fb7` (round 1; first round at `56c0751f`, same 62-command list and result) (base main `385ea1cc`; main since moved to `b29f2dd1`, none of its 18 files under `packages/mcp` or the Console mirror).\n\n<details><summary>Build, package tests, derived gates (62/62 exit 0)</summary>\n\n- `pnpm --filter '@objectstack/mcp^...' build` then `pnpm build --concurrency=2` under os-verify-lock: VERDICT command-exit 0 (10m41s).\n- `pnpm --filter @objectstack/mcp test` at `d61d6fb7`: Test Files 65 passed (65), Tests 1186 passed (1186); `pnpm --filter @objectstack/mcp typecheck` exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` (no paths): 62 commands, every one exit 0 at `d61d6fb7`. In the first round `node scripts/check-plugin-teardown-shape.mjs --self-test` first exited 3 (PREREQUISITE: its pinned positive-control commit was outside the shallow clone); after `git fetch --depth=1 origin` of that commit it exited 0 (48 cases pass).\n- `dispatch-gates --ran`: 62 derived, 62 run, 0 NOT-MEASURED, 0 UNRUN.\n- Every family CI runs (Lint & Repo Gates, Test Core, the UI lanes, the queue guard) is read from this PR's check-runs, not re-run here.\n\n</details>\n\n<!-- signed: domain:skills#2 · os-steve · session_01ADHkmRWzsJDFRdgC6Nys2K -->\n"
+}

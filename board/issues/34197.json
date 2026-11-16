@@ -1,0 +1,33 @@
+{
+  "number": 34197,
+  "kind": "issue",
+  "title": "ui: the lookup picker resolves { $record } from the form record, sends orEmpty, and re-queries on the referenced fields",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:42:11Z",
+  "updated_at": "2026-11-16T01:15:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34197",
+  "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFollow-up from PR #34078 (card #34009, merged as `aab8b318`). That PR declared the `lookupFilters` value shape `{ $record: '<path>' }` (a reference to the record being edited), and the `orEmpty` flag, which pairs only with the six equality and ordering operators. Both are marked `[PLANNED — not enforced]` until their readers land (seat ruling 6900252552 §3).\n\n**Ask (ui lane).**\n- In `ui/packages/fields/src/widgets/LookupField.tsx` and `RecordPickerDialog.tsx` (`lookupFiltersToRecord`), resolve `{ $record: path }` from the form record, hop included.\n- While the referenced value is empty, drop the entry (ruling §1, the same rule as an unset `dependsOn`).\n- Send `orEmpty: true` as `$or` with a null match.\n- Re-query when a referenced field changes.\n- Then drop the PLANNED marker in `field.zod.ts` for the picker half.\n\n**Carried notes from review records 6901257122 / 6903625797:**\n- N6: the `dependsOn` describe's \"filter panel\" example names a surface with no measured `lookupFilters` reader. Correct it, or make the surface real.\n- N8: `orEmpty: false` under `in`, `notIn` or `contains` is refused with the same sentence as `true` (by design: pairs only with the six).\n\nThe Skills-docs follow-up moves with this change; it is filed separately on the skills lane.\n"
+}

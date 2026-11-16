@@ -4,7 +4,7 @@
   "title": "docs(skills): renaming a position tells the author to re-point their own source, names the environment owner, and restores the explain gate",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T18:56:09Z",
-  "updated_at": "2026-11-15T19:36:11Z",
+  "updated_at": "2026-11-16T01:07:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

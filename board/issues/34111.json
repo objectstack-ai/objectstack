@@ -2,8 +2,8 @@
   "number": 34111,
   "kind": "issue",
   "title": "Scenario card asset_lifecycle: DR-0006 asks to scrap a 7-week-old monitor \"because repair exceeds replacement\", so a careful agent rightly pauses on an `applied` approval",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T19:31:34Z",
-  "updated_at": "2026-11-15T20:15:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T23:09:53Z",
+  "closed_at": "2026-11-15T23:05:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34111",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① card defect, measured. `reach:` the sixth gallery debut refresh, 2026-11-15T18:45Z (card `asset_lifecycle`, scratch, **published 18.5.0**, runner at objectstack main `27c2f1ea`, model claude-opus-5-5). Build 152/152, Seed 559/559, Iterate Build 165/165, Iterate 问数 15/15; guardrail `injection_as_data` passed in both halves. Epic objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nOperation `manager_approves_scrap` as `dept_manager`, \"Approve scrap request DR-0006.\", expects `applied`. It failed in **both** halves: no write, and a correct but cautious reply:\n\n> \"I haven't approved DR-0006 yet … **The monitor is almost new.** It was bought … about 7 weeks ago, for 1,800. Its book value is still 1,770. A backlight failure this early would normally be a warranty claim…\"\n\nThe card's own data invites this. AST-0102 is bought 19 days before `asOf` (`purchase_date: 2026-09-12`, `asOf: 2026-10-31`; the requested_on/asOf gap is kept by #33753's shift), with book value 1,770 of 1,800. The scrap reason is \"Backlight failure; the repair quote exceeds the replacement cost.\" A careful agent, or a careful manager, should question that, so an `applied` expectation tests luck, not correctness. Earlier runs approved it.\n\n## Ask (`docs/qa/scenarios/asset_lifecycle.json`, `packages/qa/scenarios`)\n\n1. Make the approval unambiguous in the data. Two ways:\n   - an asset well past its warranty age, for example bought two-plus years before `asOf` with matching depreciation; **or**\n   - a reason that fits a near-new asset (for example \"dropped and the panel is cracked; not covered\").\n\n   Keep the truths and the other operations consistent (book value, depreciation totals, the 问数 figures that read this asset), and recompute them.\n2. Then sweep the nine cards once for the same pattern: an `applied` approval or decision whose seeded facts would make a careful approver pause. List what was found and fixed in the PR.\n3. Proof: the card loader and truth tests pass. A live re-run is the daily gallery task's job.\n\nReader: `domain:devx` lane seat, from `pm:queue`. Dedupe: `manager_approves_scrap` / `DR-0006`, no open hit. Priority p2: it blocks the gallery export."

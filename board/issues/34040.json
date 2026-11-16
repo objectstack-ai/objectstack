@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:06:45Z",
-  "updated_at": "2026-11-15T18:31:20Z",
+  "updated_at": "2026-11-16T02:12:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34040",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, measured. Found by area S5's dev on #33264 (report 6898101382, out_of_scope_findings, class a), filed by area S5 (E1b), lease E1.\n\n## 维护者速读\n\n- 问题：两个包都发布了同名文档（doc）时，带 `?package=A` 的精确读取可能返回 B 包的文档，两种注册顺序都会出现。\n- 影响：精确地址返回了错误持有者的内容，违反 ADR-0150 D3（按 (包, 名) 寻址）。\n- 修法方向：对 registry 不按包读取的类型，运行时读取不能用只按名字保存的元数据服务副本来回答精确地址。\n- 优先级 p2，本区（S5）处理。\n\n## Measured\n\nOn a composed artifact server (MetadataPlugin artifact door + AppPlugin, two package bodies shipping one `doc` name `shared_doc`), on origin/main 1e65a389 and unchanged at PR #34036's head:\n- `GET /api/v1/meta/doc/shared_doc?package=com.qa.alpha` answers 200 with `com.qa.beta`'s doc, in both registration orders.\n\nSeam (read): `readMetaItem` step 2 (`packages/metadata-protocol/src/protocol-meta-item-reads.ts`) serves the MetadataService copy, which is kept by name alone, for an exact address of a type the registry does not read by package.\n\n## Acceptance\n\n1. An exact `?package=X` doc read answers X's doc or 404, never another holder's. Pin both orders, ablated. CONTROL: one holder (unchanged).\n2. Measure the other types the registry does not read by package for the same step-2 shape; fix the family in one PR, with an enumeration pin.\n3. Declared FROM→TO with its Clause-② arm.\n\nPrior rulings read: ADR-0150 D3 (package-addressed reads) and red line 2; ruling 6893582352 on #33264 (bare doc read), which does not cover the exact read; no test found pinning the current answer.\n\n## Dedupe\n\nSearched \"doc package= wrong holder\", \"metadata service doc by name\": only #33264 (bare read, not exact). #33385 / #33401 (fold PR #33995) cover `_env` and the exact qualifier for registry-read types, not this step-2 path."

@@ -2,8 +2,8 @@
   "number": 34009,
   "kind": "issue",
   "title": "lookup picker: a lookupFilters value cannot read the form record or today, so a picker cannot offer only the price books valid on the quote date or matching the customer's market",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T16:04:20Z",
-  "updated_at": "2026-11-15T19:47:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T00:45:53Z",
+  "closed_at": "2026-11-16T00:39:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34009",
   "body": "## Pull\n\nThis comes from the downstream carbon-black CRM, steedos-labs/os-project-blackcat-crm#143. The maintainer ruled on 2026-11-15 that on a quote, the Price Book picker must offer only:\n\n- active books whose validity window (`valid_from` to `valid_to`, where an empty bound means no limit) contains the quote's date, and\n- books whose market (`cb_market`: domestic or export) equals the customer's market, or books with no market set, which count as generic.\n\nThe acceptance text says a 2027-01-05 quote must neither see nor save the 2026 Q4 book (「看不到也存不了」). The downstream PR enforces both rules server-side in a beforeInsert/beforeUpdate hook. It cannot meet the \"not shown in the picker\" half, and it adds no client-side workaround.\n\n## What the spec offers today (read on `main`, `packages/spec/src/data/field.zod.ts`)\n\n- `lookupFilters: [{ field, operator, value }]`: `value` is a literal. Nothing lets it refer to:\n  - a field of the record being edited (`quote.date`),\n  - a field reached through that record's lookup (`quote.account.cb_market`), or\n  - the current date.\n- `dependsOn: [string | { field, param }]`:\n  - scopes the candidate query by **equality** with a same-record field, so it cannot express a range (`valid_from <= quote.date <= valid_to`);\n  - cannot express \"equal **or empty**\" (generic books);\n  - cannot follow a lookup hop (the market lives on the account, not on the quote).\n\n## Ask\n\nGive `lookupFilters` a declarative way to compare against the edited record's values, and against now/today, evaluated in the picker. One possible shape:\n\n```ts\nlookupFilters: [\n  { field: 'is_active', operator: 'eq', value: true },\n  { field: 'valid_from', operator: 'lte', value: { $record: 'date' }, orEmpty: true },\n  { field: 'valid_to',   operator: 'gte', value: { $record: 'date' }, orEmpty: true },\n  { field: 'cb_market',  operator: 'eq',  value: { $record: 'account.cb_market' }, orEmpty: true },\n]\n```\n\n`$record` would allow at most one lookup hop, `orEmpty` would match a null column, and `{ $now: true }` / `{ $today: true }` would read the current date. The picker re-queries when a referenced field changes, as `dependsOn` already does. This is a picker convenience; the server-side rule stays the authority.\n\n## Related gap, same card\n\nField-level `readonlyWhen` cannot read a related record. The downstream wanted the quote line's Sales Price to be read-only when the picked product is a carbon grade, meaning a product referenced by `crm_carbon_grade.crm_product`. Today it is enforced server-side only, so the field looks editable and the save is refused. Dedupe words: readonlyWhen related record, lookup filter $record, picker filter by date, lookupFilters dynamic value."

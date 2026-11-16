@@ -1,0 +1,32 @@
+{
+  "number": 34247,
+  "kind": "issue",
+  "title": "metadata-protocol: an exact ?package=X read of a doc (and the other types the registry does not read by package) that X does not ship answers another package's item instead of 404",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:E1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:14:05Z",
+  "updated_at": "2026-11-16T02:14:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34247",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, measured. Found by area S5's dev on #34040 (open question, cell C, in the report on #34040; PR #34241), filed by area S5 (E1b), lease E1.\n\n## 维护者速读\n\n- 问题：带 `?package=X` 精确读取文档时，如果 X 没有发布这个名字但别的包 Y 发布了，读取会返回 Y 的文档，而不是 404。\n- 影响：#34040 的验收写的是\"X 的文档或 404，绝不返回别的持有者的\"。PR #34241 修好了\"X 和 Y 都发布\"的情况，这一格仍是旧答案。包名写错的作者会悄悄拿到别的包的内容。\n- 修法方向：X 不持有这个名字时回答 404，覆盖所有不按包读取的类型。这是 200→404 的收窄，需要声明。\n- 优先级 p2，本区（S5）处理。\n\n## Measured\n\nThis was measured on the composed artifact rig by the #34040 dev, before and after PR #34241. Package Y ships doc N and X ships no doc N. `GET /meta/doc/N?package=X` answers 200 with Y's doc, through the registry's `getItem` prefer-local fallback to the first composite.\n\nSeam (read): `packages/metadata-protocol/src/protocol-meta-item-reads.ts` `readMetaItem`, step 3 after step 2 declines another package's service copy. The family that PR #34241 enumerates is doc, view, translation, field, seed, datasource, external_catalog and object_extension.\n\n## Acceptance\n\n1. An exact `?package=X` read of a name X holds no item of answers 404, for the family the registry does not read by package. Pin it in both registration orders. CONTROLs: X holds the name (unchanged), and the types the exact qualifier covers (unchanged).\n2. Declaration: `Clause-②: yes (narrowing)` (200→404), `!` title, BREAKING banner, ADR-0087 marker and dogfood battery.\n3. Check `/layers?package=X` and `readCodeLayerForCarryForward`, which also call `readItemFromMetadataService(type, name, X)`. Align them in the same PR or name them.\n\nPrior rulings read: ADR-0150 D3/D5 (an exact address answers that holder) and red line 2; #34040's acceptance (\"X's doc or 404, never another holder's\"); ruling 6893582352 on #33264. PR #34241 depends on this card: it leaves this cell unchanged to keep `Clause-②: no`. Open after #34241 merges, or merge-tree against it.\n\n## Dedupe\n\nI searched \"doc package 404 another holder\" and \"service copy package exact\"; the only hit was #34040 itself."
+}

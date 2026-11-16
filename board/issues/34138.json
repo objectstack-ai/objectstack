@@ -1,0 +1,37 @@
+{
+  "number": 34138,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0094 notes that a revertCommit projector failure reaches the caller",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T21:25:29Z",
+  "updated_at": "2026-11-16T01:08:07Z",
+  "closed_at": "2026-11-16T01:08:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-16T01:08:05Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34138",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Dnx7PUeFruJdBHdG9Tmzjt)_\n\nFixes #34077\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只在 ADR-0094 里加注记,不改代码。状态行加一条 2026-11-15 修订;9 月 4 日修订里那句「投影器失败只记日志、不报给调用方」后面、该修订表格正下方、D2 下同一说法的 9 月 4 日注记里,各加一个 ⚠️ 指针。原文一个字不改。\n- 为什么改:PR #33805 之后,撤销一次提交(`revertCommit`)时投影器失败,该条目会进 `failed[]`,整体回 `success: false`,调用方能看到;ADR 还写着「不报给调用方」,读者会被误导。按版本回滚(`rollbackMetaItem`)没变,仍然只记日志,原句对它照旧成立。\n- 风险与回滚:纯文档、只增不删,不影响任何运行行为。回滚即 revert 本 PR 一个提交。\n- 先看:`docs/adr/0094-sys-permission-set-pure-projection.md` 的四处新增:第 3 行状态行末尾、第 130–135 行(D2 注记内)、第 575–580 行(修订表格正下方)、第 599–609 行(9 月 4 日修订的 `projectionApplied` 一条下)。\n- 两分钟验证:`git diff --word-diff origin/main...HEAD -- docs/adr/0094-sys-permission-set-pure-projection.md`,预期只有 `{+…+}` 新增,没有 `[-…-]` 删除。\n- 需要你做的:请批准并合并,或批准后由席位落地。\n\n## What changes\n\nADR-0094's 2026-09-04 amendment says, verbatim: \"`rollbackMetaItem` and both `revertCommit` limbs declare no such key on their response types and #14982 deliberately added none: there the projector is called and awaited, and a failure is logged without reaching the caller.\"\n\nPremise, read on `main` (`385ea1cc`), `packages/metadata-protocol/src/protocol-package-commits.ts`:\n\n- `revertCommit`, soft-remove limb and restore limb: each reads the projector's answer, and a `success: false` marks the item's step as not applied; an item with any such step settles into `failed[]` (row state named, the projector's own error text left on the log line) instead of `reverted[]`, and the revert answers `success: false`. Landed by PR #33805 (`568f214a6c`), the sibling fix of PR #34063. Pinned by `protocol.revert-commit-honest-outcome.test.ts` (\"the projector failing on the restore limb…\", \"…on the soft-remove limb…\").\n- `rollbackMetaItem`: still `await host.runMutationProjector({...})` with the answer discarded, then `success: true`. **The 2026-09-04 sentence is kept for it** and the notes say so.\n- No `projectionApplied` key was added to either response type, so the first half of the sentence still holds; only \"logged without reaching the caller\" is stale, and only for the two `revertCommit` limbs.\n\nFour add-only insertions in `docs/adr/0094-sys-permission-set-pure-projection.md`; no existing character is removed or rewritten, no sentence moves:\n\n1. `**Status**:` line: ` · **Amended** (2026-11-15, #34077): …` appended in the form of the line's existing 2026-10-14 entry, narrowed to the `revertCommit` limbs, citing PR #33805.\n2. An in-place `⚠️ **Amended 2026-11-15 (#34077 / PR #33805)**` pointer indented under the 2026-09-04 bullet, right after the quoted sentence, anchored at `packages/metadata-protocol/src/protocol-package-commits.ts#revertCommit`.\n3. **Beyond the card's two items (declared; accepted by review 6901691666):** the same pointer inside D2's own 2026-09-04 note, after \"three of the seven call and await the projector without putting an outcome on the response.\" That note repeats the stale claim for the same two limbs; leaving one copy unmarked is the defect an at-tier review flagged on PR #34063. Add-only, same narrowing.\n4. **Fix round 1 (review 6901691666, S-1):** a ⚠️ pointer directly below the amendment's door table, saying the `—` in the two `revertCommit` rows now means only that the answer carries no `projectionApplied` key, and that a projector failure there is reported through `failed[]` and `success: false`; the `rollbackMetaItem` row is unchanged. No table cell is touched. (N-2: the Status entry, text this PR adds, now names where the notes sit.)\n\n`docs/adr/README.md` is not regenerated: `adr-index` reports it current (the 0094 row's status cell truncates before the appended text).\n\n## Tests\n\nNone: docs-only diff, no code, no test. `skip-changeset` (`docs/adr/**` publishes nothing).\n\n## Acceptance notes\n\n- Authoring ran in an isolated os-dev subagent pinned to the contract-review tier (`dispatch-gates --tier`: MANDATORY for `docs/adr/**`), effort xhigh, on this branch; this thread is served below that tier. Recorded here and in the report's deviations.\n- Same amendment, outside this card's surface, filed by the seat as #34142 (serial after this card): its tripwire `git grep -c \"this.runMutationProjector(\" -- packages/metadata-protocol/src/protocol.ts` no longer answers `7`, because the call sites moved into facet files (`protocol-save.ts`, `protocol-history-and-publish.ts`, `protocol-diff-delete-load.ts`, `protocol-package-commits.ts`). The amendment itself says that answer means the table went stale. Not touched here.\n- Landing: expect Tier H (a grown Status line reads as -1/+1; the low-risk add-only reader refuses it). The PR stays a draft until a GOVERNED_APPROVERS approval.\n\n## Verification\n\nHead `bd358f52` (fix round 1 on top of `2cc431b3`). `dispatch-gates --commands` derives the same 21 commands; all 21 re-run on this head, all exit 0; `--ran` reconciles: \"21 derived famil(ies) accounted for — 21 run, 0 NOT-MEASURED (a DERIVED zero …)\". The round on `2cc431b3` was also 21/21 exit 0.\n\n<details><summary>Gate record at bd358f52 (21 commands)</summary>\n\n```text\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:adr-anchors :: exit 0\npnpm check:adr-index :: exit 0\npnpm check:adr-symbol-anchors :: exit 0\npnpm check:ci-filter-parity :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-prior-rulings :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n</details>\n\nAdd-only proof against `main`: `git diff --word-diff` shows 0 `[-…-]` runs over main's text (the line-3 word-diff inside the fix commit touches only text this PR added); stripping the four insertions reproduces the base file byte for byte. `git diff --check` clean; no control bytes.\n\n<!-- signed: domain:skills#2 · os-steve · session_01ADHkmT7hSxSj6X3GqfXJCn -->\n"
+}

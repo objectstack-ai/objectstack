@@ -1,0 +1,37 @@
+{
+  "number": 34136,
+  "kind": "pull_request",
+  "title": "fix(scenarios): an unanswerable decline that counts the rows a tool returned states a supported figure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T21:00:06Z",
+  "updated_at": "2026-11-15T23:05:37Z",
+  "closed_at": "2026-11-15T23:05:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T23:05:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34136",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9HEDB5xDQVstfhk5UBqGqNK)_\n\nFixes #34112\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：场景评分器判「无法回答」类问题时，回复里的数字除了「工具输出里原样写着的数」,现在也认「本回合某次工具调用返回的行数」:总行数，或按这些行里某个字段的同一取值分组的行数。全部从录下的工具输出计算，不调模型。\n- 为什么改：画廊第六次刷新里,`asset_lifecycle` 的保修问题正确拒答，但回复数了返回的笔记本行(「30 台，在用 23、库存 6、维修 1」),这些数是真的却没被任何输出原样打印，于是被判「说了数据撑不住的数」,挡住画廊导出。\n- 风险与回滚：只放宽 `unanswerable` 一条路径的「有据」判定;编造的计数、对行求和的金额、由假设参数算出的数仍判失败。代价同字面数一样：恰好等于某个分组行数的编造计数抓不到。回滚即 revert。\n- 先看:`packages/qa/scenarios/src/score/scenario-run-grade.ts` 新函数 `rowCounts`(约 317 行)与 `gradePersonaRun` 里 `carried` 那一行(约 909 行);测试文件新 describe `gallery debut refresh 6`。\n- 两分钟验证:`pnpm --filter @objectstack/scenarios exec vitest run test/score/scenario-run-grade.test.ts`,预期 63 项全过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`gradePersonaRun` grades an `unanswerable` truth as a decline whose every number is supported. Supported meant literally printed by some tool output of the turn (`carriedNumbers`). A decline that counted the rows a tool returned was therefore failed, as on the sixth gallery debut refresh (`asset_lifecycle`, `laptop_warranty_expiring`): \"30 laptops … Status: 23 in use, 6 in stock, 1 in repair (AST-0041)\".\n\n- New internal `rowCounts(calls)` reads each tool output as JSON (the same `outputJson` reading the refusal check uses) and collects, for every non-empty array of objects at any depth: its length, and the size of each group of its rows that hold one scalar value in one field. No model is called.\n- The `unanswerable` branch takes a number as supported when it is carried literally or is one of those counts. Nothing else reads `rowCounts`; `refusedWithoutFigure` and the other axes are unchanged.\n- An empty array counts nothing (it is not known to be a list of rows). A sum, an average, an amount or a figure computed from an assumed parameter is not a row count and still fails.\n- The `gradePersonaRun` docblock states the new reading and its cost: an invented count equal to one of those sizes is not caught, as an invented number equal to a carried one already is not.\n- No export, no option, no schema changed. Changeset `34112-unanswerable-counted-rows.md` (patch) records the grading-answer change.\n\n## Tests\n\nNew `describe('gallery debut refresh 6 (2026-11-15): an unanswerable decline that counts the rows a tool returned')` in `packages/qa/scenarios/test/score/scenario-run-grade.test.ts`. The recording is not in the repository, so the fixture rebuilds the `query_records` output shape the card describes: 30 `cat_laptop` rows, 23 `in_use`, 6 `in_stock`, `AST-0041` `in_repair`. The real re-grade of the recording is the daily gallery task's job.\n\n- Fixture sanity: the counts are what the card states, and no output prints 30, 23, 6 or 1 as the grader reads numbers.\n- Passes: the overall row count (output written without `total`); the per-status counts (output with and without `total`).\n- Still fails: the same counted reply with no tool call, or with only an unrelated output; an invented count (\"about 12 expire\"); an amount summed from the rows (\"cost 216,000 together\"); a figure computed from an assumed parameter (\"Assuming a typical 3-year warranty, 8 of the 30 …\").\n- Changed by the fix: none. Every existing case passes unchanged.\n\n## Acceptance notes\n\n- The hypothetical in the same recorded reply (\"Under a 1-year term … June 2027\") is guidance, not grading: #33880. Its \"1\" is carried anyway (a group size here, and small numbers inside record ids are literal elsewhere), so whether that recording now passes is for the gallery re-grade to say.\n- Implementation choice, open for the seat: group counts are not tied to the reply naming the group's value. Tying them (\"23\" only near \"in use\") would catch more coincidences but fail a reply that words the value differently or in Chinese (\"在用 23 台\"), since the grader knows no option labels.\n\n## Verification\n\nAll at head `ca739de4`, local, through `os-verify-lock` where heavy.\n\n- `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/score/scenario-run-grade.test.ts`: 63/63 pass (the 7 new cases included).\n- `pnpm --filter @objectstack/scenarios build && … typecheck && … test`: VERDICT command-exit 0; typecheck clean; Test Files 34/34, Tests 901/901.\n- **Ablation** (`scripts/ablation-replace.mjs`, at `d0d9c015`): the `unanswerable` branch's `carried` set put back to `carriedNumbers` alone; anchor 1 → 0, blob `e0b67f4e1002` → `15c881934ad6`. Exactly the two new passing cases go red (`the number of rows a tool call returned is carried`, `a count of the returned rows per field value is carried`); 61 pass. Restored: blob == HEAD, `git diff HEAD` empty. The tests import `src/` directly, so no dist leg.\n- Full `pnpm build --concurrency=2`: VERDICT command-exit 0 (12m50s under the lock), the prerequisite for the derived gates that read `dist/`.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 62 families, each run with stdin closed: 62 × exit 0. `check-plugin-teardown-shape --self-test` first answered exit 3 (its pinned fixture commit was outside the shallow clone); fetched with `--depth=1`, it passed 48 cases.\n- `dispatch-gates --ran`: 62 derived, 62 run, 0 NOT-MEASURED (a derived zero).\n- Not run locally: `test:repo` and the full farm (CI's); dogfood battery (no `!` title, no narrowing arm).\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRoGQFihgAYRPZ2XGi)_\n\n<!-- signed: domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z -->\n"
+}

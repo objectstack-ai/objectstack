@@ -1,0 +1,34 @@
+{
+  "number": 34143,
+  "kind": "issue",
+  "title": "cli: os audit verify refuses to boot an app that declares queues and assignmentRules (\"no 'ownership-queue' service is registered\"), same class as #33608 on a different command",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A5",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T21:38:16Z",
+  "updated_at": "2026-11-16T01:18:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34143",
+  "body": "## What happens (@objectstack 18.5.0, downstream carbon-black CRM, 2026-11-15)\n\nFound by steedos-labs/os-project-blackcat-crm#113, the deployment and ops manual, which documents audit-ledger verification. The app declares ADR-0142 queues (2) and assignment rules (2), inherited from HotCRM. `objectstack audit verify` exits 2 before reading the ledger:\n\n```\n◆ Audit · verify\n  ✗ [ObjectQLPlugin] the stack declares queues (2) and assignmentRules (2), but no 'ownership-queue' service is registered, so no queue would resolve and no assignment rule would route a row. Add @objectstack/plugin-sharing to the composition (it registers 'ownership-queue'); the job-queue service named 'queue' is a different service and does not serve ownership queues.\n```\n\n- It reproduces on 18.4.0 and on 18.5.0.\n- On the same database and app, `objectstack migrate plan` boots and reports the schema in sync. `os serve` runs fine.\n\n## Relation to #33608\n\n#33608 had the same refusal on `os migrate summary-nulls`. Its fix (PR #33879) routes every `os migrate` subcommand through the served-platform composition in `bootSchemaStack`. `os audit verify` has its own boot and was not covered. Other CLI commands that boot the stack outside `bootSchemaStack` may have the same gap.\n\n## Ask\n\n1. `os audit verify` boots a stack that declares queues and assignment rules. Either it composes plugin-sharing, as the served platform does, or it treats queue and assignment-rule metadata as inert for a read-only ledger check.\n2. Sweep the other stack-booting CLI commands outside `bootSchemaStack` for the same gap, and fix each one or show it does not need the fix.\n3. A regression test runs `os audit verify` on a fixture with one queue and one assignment rule.\n\n## Downstream impact\n\nThe ops manual cannot give a working audit-verification step. It currently states the command fails and points here. No app-side workaround is planned; the app will not remove its queues.\n\nDedupe words: audit verify, ownership-queue, plugin-sharing, CLI boot composition."
+}

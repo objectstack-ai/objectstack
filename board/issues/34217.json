@@ -1,0 +1,31 @@
+{
+  "number": 34217,
+  "kind": "issue",
+  "title": "i18n: the packaged base reads a disabled package's same-name validation rule, so the enabled rule's message stays untranslated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:07:22Z",
+  "updated_at": "2026-11-16T01:07:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34217",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ① a gap the #33800 dev measured in round 3 of PR #34156, after review-a's should-fix 6903069973 on that PR. PR #34156 fixes the same gap for added fields only (`packagedAddedFields`). ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** 已停用的包里有同名校验规则时，它仍会覆盖已启用扩展包的规则，被当成\"打包基线\"。\n- **影响：** 非默认语言下，已启用规则的提示句被判为\"已改写\"，于是保留源语言、不翻译。\n- **建议：** p3，跟 #34156 的同一过滤一起修，改动很小。\n\n## What happens\n\n`SchemaRegistry.getPackagedObjectBase` builds `validations` through `packagedRules` from every `extend` contributor, disabled packages included. The served fold withholds a disabled package's extension.\n\nMeasured with a probe on the built dist, at PR #34156 head `265a82f18`: an enabled extender and a later disabled extender declare a rule of the same name. The served object carries the enabled rule's message, but the base carries the disabled one's: `{ served: ['Enabled says.'], base: ['Disabled says.'] }`. The translator therefore reads the enabled rule's message as diverged from its packaged baseline, and it stays in the source language under a non-default locale. `engine-validation-messages` reads the same base.\n\n## Change\n\nApply the `isPackageDisabled` filter that PR #34156 adds for added fields to the contributors `packagedRules` reads, and to its `extended` test. Add one pin beside #34156's: a disabled later extender's same-name rule leaves the base on the enabled rule, and the zh-CN read translates it.\n\nPrior rulings read: review-a's comment 6903069973 on PR #34156, which names this follow-up; seat ruling 6895879286 on #33800, option A. No ruling makes the base read disabled packages on purpose.\nDedupe words: packagedRules disabled package; getPackagedObjectBase validations disabled; withholdDisabledExtensions packaged base."
+}

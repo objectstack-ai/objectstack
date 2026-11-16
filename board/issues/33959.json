@@ -2,8 +2,8 @@
   "number": 33959,
   "kind": "issue",
   "title": "新增全仓调度车道 repo:objectstack：多席按区租约调度本仓全部卡片，信箱协调分工",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "zhuangjianguo",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:56:56Z",
-  "updated_at": "2026-11-15T15:01:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T21:43:23Z",
+  "closed_at": "2026-11-15T21:43:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

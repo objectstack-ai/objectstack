@@ -2,8 +2,8 @@
   "number": 33980,
   "kind": "issue",
   "title": "Modal dialogs: Tab is trapped when an inline tooltip under a focused trigger unmounts (Radix FocusScope reads the removal as focus lost) — class-wide close after #33862",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T15:19:37Z",
-  "updated_at": "2026-11-15T18:23:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T22:49:21Z",
+  "closed_at": "2026-11-15T22:47:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33980",
   "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ an out-of-scope finding of the #33862 dev (os-dev report 6896489173 on PR #33960), class a.\nReader: `domain:ui` (`ui/patches/@radix-ui__react-focus-scope.patch`, or `ui/packages/components/src/ui/tooltip.tsx`). Grade suggestion: p3 (no second trapped site is measured yet; the one measured site is fixed locally by #33960).\nDedupe: `is:issue is:open focus trap tooltip dialog Tab`, `FocusScope MutationObserver`, `keyboard trap modal tooltip` — no open card covers it.\n\n## 维护者速读\n\n#33862 的根因是一类问题：弹窗（Dialog / Sheet / AlertDialog）里，一个可聚焦元素带内联 tooltip，按 Tab 离开时 tooltip 被卸载，弹窗的焦点陷阱把这次卸载误判为“焦点元素消失”，把焦点拉回弹窗本身，键盘用户就出不去。#33960 只在导入向导这一处把 tooltip 挪到弹窗外；其他位置是否也有同样问题尚未测量。\n\n## Facts (measured by the #33862 dev on main `895783a1`)\n\n- Mechanism: Radix `FocusScope`'s `handleMutations` refocuses the container when it sees a removed node while focus is between two elements; a `TooltipContent` mounted inline inside the dialog is removed on the trigger's blur, in that gap.\n- `@object-ui/components`' `TooltipContent` (`ui/packages/components/src/ui/tooltip.tsx`) renders `TooltipPrimitive.Content` inline, with no `TooltipPrimitive.Portal` (upstream shadcn portals it).\n- The repo already patches `@radix-ui/react-focus-scope@1.1.16` (`ui/patches/@radix-ui__react-focus-scope.patch`, README section) for a different race.\n- Other disabled-reason wrappers: none measured inside a modal dialog; `DisabledReasonTrigger` reaches one only if metadata places it there (not measured).\n\n## Ask\n\nClose the class at its root, chosen by measurement:\n- A: extend the focus-scope patch so `handleMutations` refocuses the container only when the last focused element is no longer inside it (closes every blur-driven unmount, not only tooltips); or\n- B: portal `TooltipContent` in `@object-ui/components` (matches upstream shadcn; closes the tooltip half only).\nMeasure first which inline-tooltip triggers sit inside modal dialogs today, then pick; say why the other was not taken. Pins: #33960's `ui/e2e/import-wizard-keyboard-tab-order.spec.ts` stays green with the local portal removed (proves the class fix covers it), plus a FocusScope or tooltip unit case; ablate red.\n\nBlocked-by: #33862"

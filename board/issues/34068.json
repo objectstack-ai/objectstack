@@ -2,7 +2,7 @@
   "number": 34068,
   "kind": "pull_request",
   "title": "docs(qa): cover the #33761 ledger gaps and name --reporter=tree for per-file pin scoring",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:42:17Z",
-  "updated_at": "2026-11-15T18:08:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T21:44:11Z",
+  "closed_at": "2026-11-15T21:44:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T21:44:09Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34068",

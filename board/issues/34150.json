@@ -1,0 +1,35 @@
+{
+  "number": 34150,
+  "kind": "issue",
+  "title": "Queue-flake anchor: packages/app-shell/src/hooks/__tests__/useLauncherApps-26838.test.tsx",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "priority:p3",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T22:01:52Z",
+  "updated_at": "2026-11-15T23:53:36Z",
+  "closed_at": "2026-11-15T23:53:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34150",
+  "body": "`packages/app-shell/src/hooks/__tests__/useLauncherApps-26838.test.tsx` has ejected **3 pull requests** from the merge\nqueue within a rolling 24 hours — **3 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #34088 | independent | [43765282829](https://github.com/objectstack-ai/objectstack/actions/runs/43765282829) |\n| #34108 | independent | [43756689931](https://github.com/objectstack-ai/objectstack/actions/runs/43756689931) |\n| #34109 | independent | [43767190319](https://github.com/objectstack-ai/objectstack/actions/runs/43767190319) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [43767190319](https://github.com/objectstack-ai/objectstack/actions/runs/43767190319) (PR #34109).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:packages/app-shell/src/hooks/__tests__/useLauncherApps-26838.test.tsx -->"
+}

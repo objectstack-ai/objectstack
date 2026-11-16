@@ -1,0 +1,29 @@
+{
+  "number": 34155,
+  "kind": "issue",
+  "title": "objectql: a registration-time declaration so the engine can tell which read middleware may narrow rows after the driver call",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T22:18:14Z",
+  "updated_at": "2026-11-15T22:18:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34155",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate: seat ruling on PR #33652, contract finding S1, option B filed as its own card (the seat took option C in that PR). ⛔ Not a claim. Needs a maintainer ruling before anyone claims it.\n\n## 维护者速读\n\n关系半连接（#33652）与 ADR-0139 的 `ReadableIds` 叶子一样，只把「为该对象注册」的读规则（对象级中间件、`afterFind` 钩子）视为在驱动调用之后收窄行的规则。本卡提议在注册时增加一个声明，让引擎知道哪些读中间件可能在驱动调用之后收窄行，从而不再依赖注册方式本身。这是 spec contracts 面的扩展，需要维护者裁决后才能认领。\n\n## What exists\n\n- `packages/objectql/src/relation-semi-join.ts` plans a single-valued relation condition on a read verb as one subquery where it is provably the same read as the id read, and keeps the id read for a related object that an object-keyed middleware or an `afterFind` hook shapes.\n- ADR-0139 D5.2 bounds a `ReadableIds` parent the same way: a read middleware is known by the object it is registered for.\n- The docs pages (`content/docs/protocol/objectql/query-syntax.mdx`, `content/docs/kernel/contracts/data-engine.mdx`) state the author-facing rule: a read rule that narrows a related object's rows after its driver call bounds a relation condition only when it is registered for that object.\n\n## What this card asks\n\nA registration-time declaration (an option of `registerMiddleware`, `IObjectQLEngine` in `packages/spec/src/contracts/objectql-engine.ts`) by which a read middleware states whether it may narrow rows after the driver call, so the engine, the relation semi-join and the ADR-0139 composition can read it as a registry fact. This widens the spec contracts surface and implies auditing every in-repo registration.\n\n## Decision needed\n\nWhether to add the declaration, its spelling and default, and whether ADR-0139 D5.2 is amended with it.\n\nDedupe words: registerMiddleware declaration, read middleware after driver call, relation semi-join, ADR-0139 D5.2"
+}

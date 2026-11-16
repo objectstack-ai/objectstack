@@ -1,0 +1,34 @@
+{
+  "number": 34187,
+  "kind": "issue",
+  "title": "Marketplace catalog asks install-local where runtime-config says it is not mounted, and is answered 404",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:12:16Z",
+  "updated_at": "2026-11-16T02:09:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34187",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① found while measuring objectstack-ai/cloud#4300 (hosted console calls to routes the host does not serve). Dedupe: `install-local 404 marketplace catalog`, `listLocalInstalls installLocal false` return no card.\nConsumer: objectstack-ai/cloud#4300 (Blocked-by this card; closes on a pin bump and a re-measure).\n\n## 维护者速读\n\n- 要做的：应用市场目录页像包详情页一样，只在 `features.installLocal` 为 true 时才读 install-local。\n- 为什么：托管环境不挂载 install-local，runtime-config 也如实返回 `installLocal: false`，但目录页不看这个开关，每次加载和刷新都得到 404。\n- 需要你做的：无。\n\n## What happens\n\nThe catalog page `/_console/system/marketplace` asks `GET /api/v1/marketplace/install-local` on every first load and Refresh. A hosted environment answers `404 ROUTE_NOT_FOUND`; its `GET /api/v1/runtime/config` answers `features.installLocal: false` in the same session. Measured on cloud main 7317e42 with the framework at b914e7247f (18.5.0).\n\n- Caller: `ui/packages/app-shell/src/console/marketplace/MarketplacePage.tsx:476` (`Promise.all([listLocalInstalls(), listOrgPackages(), listInstalledPackages()])`), unchanged at objectstack main (`:473`).\n- The package page already gates the same read on `getRuntimeConfig().features.installLocal` (`MarketplacePackagePage.tsx:371`).\n\n## Change\n\n1. The catalog's side load reads install-local only when `features.installLocal` is true.\n2. Done when a test pins that no install-local request is made with `installLocal: false`, and the list still shows with it true.\n\nSeam: `runtime:cloud-connection RuntimeConfigPlugin features.installLocal` → `renderer:MarketplacePage`."
+}

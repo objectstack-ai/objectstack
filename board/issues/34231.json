@@ -1,0 +1,31 @@
+{
+  "number": 34231,
+  "kind": "pull_request",
+  "title": "test(app-shell): load the lazy object list at collection in the disabled-package deep-link suite",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:44:06Z",
+  "updated_at": "2026-11-16T02:05:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34231",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9QjKmMVoDWtE45ELv1652Kd)_\n\nPart of #33581\n\nClause-②: no — a test's load order; no surface added or changed\nMetadata-protocol: none\n\n## 维护者速读\n\n- 做了什么：修 #34176 合入后留下的一个测试超时。`AppContent.disabledPackageDeepLink-13052` 的 (b) 用例在 main 上每次都在约 1000 ms 超时，合并队列里同步过 main 的 PR 会因此被踢出。\n- 原因（实测）：(b) 的“对象不存在”画在懒加载的对象列表路由里。#34176 之后，第一次画它还要冷加载 plugin-view 包入口，测试里总耗时超过了 `waitFor` 的 1 秒。断言本身只要约 40 ms。\n- 修法：按 ui/AGENTS.md 的懒边界规则，在测试文件模块作用域预载对象列表模块，冷加载算在收集阶段。同目录 dashboard 路由测试已经这样写。没有加大超时。\n- 产品侧：对象列表路由块在 AppContent 知道路由时就和元数据读取并行预载（objectui#12980），plugin-view 块作为它的静态依赖一起并行取。所以“对象不存在”不会多排一次队，产品代码不用改。\n- 风险：只改一个测试文件，不发布任何包，没有 changeset。\n- 需要你做的：无。合入后 #34180 可以重新排队。\n\n## What changes\n\n`ui/packages/app-shell/src/console/__tests__/AppContent.disabledPackageDeepLink-13052.test.tsx` imports `../../views/ObjectView` (and `@objectstack/lint`, which that module reaches) at module scope, beside `AppContent`, with a comment saying why. That is ui/AGENTS.md's rule for an assertion behind a `React.lazy` boundary, spelled as `AppContent.dashboardRouteReads-28784.test.tsx` already spells it for `DashboardView`.\n\n## Why\n\nCase `(b) CONTROL: 404 RESOURCE_NOT_FOUND still draws \"Object Not Found\"` timed out in queue build 43779205122 and on #34180's synced head (job 133021475780). Both contain `571cf9082a` (#34176).\n\nMeasured on this box (verbose reporter, the file alone under `os-verify-lock`, `@object-ui/app-shell^...` root deps built in both trees):\n\n| tree | (b) |\n|:--|--:|\n| `571cf9082a^` (`44fc2fc4`), 3 runs | passes; 691 ms on run 1 |\n| `main` (`aab8b318`), 3 runs | times out at ~1012 ms every run |\n| `main` + module-scope `import '@object-ui/plugin-view'` | 630 ms |\n| `main` + module-scope `import '../../views/ObjectView'` (this PR), 3 runs | 41 / 46 / 42 ms |\n\nSo the whole of (b)'s time is the cold load of the lazy route's modules. Before #34176 it was already 691 ms of a 1000 ms budget: `ObjectView`'s own graph, with plugin-view held by `AppContent`'s eager import. #34176 moved plugin-view's entry graph out of `AppContent`'s imports and into that first lazy load. The assertion itself takes about 40 ms.\n\n**Product.** (a) `OBJECT_PACKAGE_DISABLED` is drawn by `AppContent` itself. (b) `RESOURCE_NOT_FOUND` is drawn inside the lazy `ObjectView` route element, and has been since #33677. In the console, `preloadAppRouteChunk` starts that route chunk's import as soon as `AppContent` knows the route, in parallel with the route's metadata reads (objectui#12980). The plugin-view chunk is a static dependency of that chunk and is fetched with it, so the not-found state does not queue behind an extra serial load. No product change.\n\n## Tests\n\n- The file: 18/18 on three runs.\n- **Ablation** (`scripts/ablation-replace.mjs`): `import '../../views/ObjectView';` → `/* ablated */` reproduces the CI failure: `(b)` ✗ at 1016 ms, `Unable to find an element by: [data-testid=\"object-not-found\"]`. Restored: blob == HEAD, `git diff HEAD` empty.\n- No forced edits to other tests.\n\n## Verification\n\n- `dispatch-gates.mjs --commands` on head `8280ad42`: 27 commands, every one exit 0; `--ran`: `27 derived famil(ies) accounted for — 27 run, 0 NOT-MEASURED`. Among them `check:test-source-alias` (the added `@objectstack/lint` import), `check:type-check-debt` and `pnpm --dir ui exec vitest run scripts/`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmT5bCDp1MDcReXVCop\n"
+}

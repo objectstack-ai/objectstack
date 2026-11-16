@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "lease:A3",
-    "needs-user-decision",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T15:56:56Z",
-  "updated_at": "2026-11-15T15:56:56Z",
+  "updated_at": "2026-11-16T00:47:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34005",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: seat-directed (seat domain:server#5, after review-b PASS 6897184709 on PR #33958, item 2). Follow-up of #33745.\n\n## Today\n\nPR #33958 makes the AI tool `query_dataset` refuse a measure or dimension the dataset does not declare (400 `INVALID_FIELD`). The REST door `POST /api/v1/analytics/dataset/query` with a saved `datasetName` was left open on purpose: it still mints ad-hoc members (`count`, a raw field, an `amount_sum` suffix spelling, a dataset-qualified spelling) through `mintCallerMeasures` / `inferMeasure` in `packages/services/service-analytics/src/analytics-service.ts`. Dashboards and reports call that door, and it has no provenance block.\n\nThe spec already says the selection takes \"Measure names from the dataset\" (`packages/spec/src/api/analytics.zod.ts`, `DatasetSelectionSchema`), and ADR-0021 calls the dataset \"a declarative, closed surface\". So the REST door does not do what the spec sentence says, and ADR-0149 D2 has no line for the closed-member rule the tool now enforces.\n\n## Decision needed (maintainer)\n\n- **A. Close the REST door too (recommended).** `POST /analytics/dataset/query` with a saved dataset refuses undeclared members with the same 400 `INVALID_FIELD`, so every face reads the dataset the same way. Step 0 is a census: authored dashboards, reports and examples that select an undeclared member through this door. Each one found is fixed by declaring the member on its dataset, in the same PR. BREAKING (narrowing) declaration, with a contract-tier review. Governed-text half: one ADR-0149 D2 line naming the closed-member rule for both faces (skills lane, Tier H).\n- **B. Keep the REST door open.** Ad-hoc members stay allowed for dashboards and reports. The spec docblock is reworded to say the closed set binds the AI tools only, and ADR-0149 D2 gains a line saying so (governed text, skills lane). No runtime change.\n\nWhy A: one definition per dataset is what ADR-0021 and ADR-0149 set out. Today a dashboard tile can show a number labelled as a dataset metric that the dataset does not define, and the AI and the dashboard can then disagree. A's cost is the census and any declarations it finds. B leaves two rules for one schema.\n\nPrior rulings read: ADR-0021 (\"a declarative, closed surface … declared dimensions and measures\"); ADR-0149 D2 (the tools answer with the door's existing codes, `INVALID_FIELD` listed) and D4 (provenance composed only by the tool); `DatasetSelectionSchema` docblock \"Measure names from the dataset\". No ⛔ line allows undeclared members. Tests: PR #33958's parity test lists the tool/REST difference as by-contract; no other test pins the REST door minting undeclared members, but `measures: ['count']` calls exist on the cube door `/analytics/query`, which is out of this card (not a saved dataset).\n\n## Reader\n\ndomain:server area S2 (A3, service-analytics) for the code; domain:skills for the ADR-0149 D2 line. Size S–M (census-dependent)."

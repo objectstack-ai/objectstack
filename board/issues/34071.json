@@ -2,7 +2,7 @@
   "number": 34071,
   "kind": "pull_request",
   "title": "fix(pm): a mailbox knock's signature must be a session the named seat lists",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:44:53Z",
-  "updated_at": "2026-11-15T18:32:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T22:33:13Z",
+  "closed_at": "2026-11-15T22:33:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T22:33:11Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34071",

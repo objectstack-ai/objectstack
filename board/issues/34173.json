@@ -1,0 +1,32 @@
+{
+  "number": 34173,
+  "kind": "issue",
+  "title": "console: the bulk result dialog for an aggregate (all-or-nothing) action prints error.message against every selected row, reports \"Succeeded 0 / N\" after a partial move, and does not refresh the grid",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T23:22:00Z",
+  "updated_at": "2026-11-16T01:00:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34173",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the HotCRM 6.4.0 end-to-end customer test (round 2, hotcrm#2511), measured on @objectstack 18.5.0 (dev boot, console).\n\n**What a customer sees.** A rep selects two opportunities on the list and runs the script action **Update Stage → Needs Analysis** from the selection bar. One of the two deals is Closed Won. The handler moves the open deal and rejects once at the end, naming the deal that did not move (the all-or-nothing aggregate contract, objectui#3139). The console's bulk result dialog then:\n\n1. prints the rejection's `error.message` against **every** selected row, including the one that moved, instead of `userMessage`;\n2. reads **\"Succeeded 0 / 2\"**, although one row moved and keeps its new stage;\n3. does not refresh the grid, so the row that moved still shows its old stage until a manual reload.\n\n**Why it matters.** An aggregate handler has no way to say which rows succeeded. There is no per-row result protocol for aggregate actions, so the dialog treats a rejection as N row failures. A handler that does partial work (any non-transactional loop over the selection) is always reported as 0 / N.\n\n**Ask (platform decides the shape).**\n- Show `userMessage` (fall back to `message`) once for an aggregate rejection, not repeated per row.\n- Refresh the grid after an aggregate action settles, whether it resolved or rejected.\n- Consider a per-row result shape an aggregate handler can return or reject with, for example `{ succeeded: [ids], failed: [{ id, message }] }`, so the dialog can count truthfully.\n\n**Related, separate.** On 18.5.0 a script action body is given no locale: `ctx.session` carries userId, organizationId and positions only. A handler can therefore localize only the refusal sentences it catches (whose `userMessage` the engine already localizes), not its own summary lines. This is the same class as #34062 (flows cannot read the effective locale).\n\n**Re-check.** Use any aggregate script action that rejects after moving some rows. HotCRM `mass_update_stage` (hotcrm#2517) on two deals, one of them Closed Won, shows all three symptoms.\n\nResponsibility: platform console (bulk/selection-bar result dialog) and the aggregate action contract. Not fixable in app metadata."
+}

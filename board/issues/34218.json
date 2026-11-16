@@ -1,0 +1,36 @@
+{
+  "number": 34218,
+  "kind": "issue",
+  "title": "Approvals: no approver type can name the platform administrators, so a platform-wide review (cloud marketplace) opens on nobody",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "lease:A5",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:14:21Z",
+  "updated_at": "2026-11-16T02:02:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34218",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nRequest: assist (from the cloud lane; it blocks cloud follow-up card cloud#4632)\nFiling category: ① framework gap, measured by the cloud#4299 dev on the pin `b914e7247f` (run-stack `--with-ui --prod-like --seed`).\n\n## Business reason\n\nThe hosted cloud reviews marketplace submissions with the platform's own approvals engine (cloud ADR-0025, `marketplace-review-on-approvals.md` §8). The deciders are the **platform administrators**: those with a cross-tenant `admin_full_access` grant, or the declared, verified platform owner. None of the ten approver types at the pin can expand to that set:\n- `manager, position, department, team, queue, field, expression, org_membership_level, role (alias), user`.\n- The organization-scoped types expand inside the request's organization, which is the publisher's.\n- `user` needs a real id.\n- `expression` would make the cloud build its own snapshot list, which goes stale when someone's access is revoked.\n\nThe measured result: the approval request opens with an empty slate (`approver 'user:platform_admin' expanded to nobody`), and it sits in no one's queue.\n\n## Expected\n\nThe approvals engine has an approver binding that names the platform administrators. It is expanded live at node entry from the same source the platform's own admin check reads, with no organization scope, so revoking a grant takes effect at once. The binding never widens who may decide beyond that set.\n\n## Acceptance\n\nA flow whose approval node names that binding opens its request with the current platform administrators as pending approvers. A user who is not a platform administrator is not on the slate. A revoked administrator drops off the next request. `os lint` knows the type.\n\nReader who acts: the framework automation/approvals owner (`packages/spec` `approval.zod.ts` ApproverType, the approvals runtime's approver expansion).\nDedupe: `repo:objectstack-ai/objectstack approver platform admin type` → 0 relevant."
+}

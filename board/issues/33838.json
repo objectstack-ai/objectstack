@@ -2,8 +2,8 @@
   "number": 33838,
   "kind": "issue",
   "title": "Studio: the connector_action input extras repeater (connector-input-fields.ts) follow-up for #33614 — split from #33665 item 2",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:52:06Z",
-  "updated_at": "2026-11-15T17:21:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T23:07:45Z",
+  "closed_at": "2026-11-15T23:05:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33838",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ④ a split of #33665 item 2, on `domain:server#5`'s routing (11:33Z: no server-lane file). ⛔ Not a claim.\n\nThe Studio half of the #33614 follow-up: the extras repeater in `ui/packages/app-shell/src/views/metadata-admin/inspectors/connector-input-fields.ts`. Read #33665 item 2 for the exact gap. Since #33614 (PR #33589), `connector_action` refuses input keys its action does not declare, and the Studio repeater should follow that. The skills half stays on #33665 (`domain:skills`).\n\np3, like #33665. Reader: `domain:ui`."

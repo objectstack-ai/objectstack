@@ -1,0 +1,31 @@
+{
+  "number": 34206,
+  "kind": "issue",
+  "title": "metadata: GET /api/v1/meta/app/<id>/bundle recompiles the whole bundle on every request — a 304 still costs 170–340 ms of CPU, and it is the largest share of a page load's server CPU",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:52:53Z",
+  "updated_at": "2026-11-16T00:52:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34206",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: ① a measured defect behind objectstack-ai/cloud#4563 (hosted page load, p2). It was measured locally on cloud main `d97754b`, pin `b914e72` (objectstack 18.5.0), with HotCRM 6.4.0 and sample data in a free-plan hosted environment. The readings are in the cloud#4563 os-dev-report (6904212540). The cloud lane files this card; first touch is left to triage.\n\n## Measurement context (shared by the cloud#4563 split)\n\nLocally the same amplification as staging appears: the customer-list request set (31 requests) answered one at a time sums to\n≈ 0.5 s of runtime; the same set at once sums to ≈ 7.2 s (≈ 14×; staging reported ≈ 13×). Under the burst the `db` member stays at\n1–2 ms per request and `meta` stays flat, while the runtime's CPU over the burst (≈ 600–650 ms) is the burst's wall (≈ 510–550 ms):\nthe single Node event loop is saturated and every request queues behind every other request's CPU. Small requests amplify most\n(×30–×60, they have the most awaits per unit of work); the app bundles amplify least (×1.4–×2, they ARE the queue). So the amplifier\nis **event-loop CPU**, not the database connection pool and not metadata reads; the biggest single CPU item is **metadata bundle\ncompile**, recomputed on every request including a 304. Staging's tenant DB is remote Turso, which local SQLite cannot reproduce: an\nowner-run staging reading (no config change) settles how much of staging's per-request time is `db`.\n\n## This card\n\n- Reach: every console page load in a hosted environment (Setup overview, every app). Door: `GET /api/v1/meta/app/setup/bundle`, `GET /api/v1/meta/app/crm_enterprise/bundle`.\n- Reading (local, pin b914e724, HotCRM 6.4.0, admin owner, warm kernel): Setup bundle 1.41 MB, `meta` 276–313 ms per call, the same with `If-None-Match` (304, 0 B): `meta;dur=312.57 … handler;dur=336.58` — the ETag is computed over the freshly compiled body, so revalidation saves the bytes, not the work. First call after the metadata cache lapses: `meta=911 db=89 total=972`. HotCRM bundle 0.61 MB, 143–163 ms per call, same on 304.\n- Share of the page: per-request CPU alone, Setup page 24 requests sum 625 ms, of which the bundle is 282 ms (45%); customer list 31 requests sum 779 ms, bundle 181 ms (23%). Staging: `meta/app/setup/bundle` runtime 5962 ms in cloud#4563.\n- Profile (10 Setup bundle calls, inclusive): `readMetaItem` 1241 ms · `resolveCascadeDeleteObjects`/`collectCascadeDeleteObjects`/`cascadeRelationsInto` 553–581 ms · `getArtifactItem` 326 ms · `foldExtendersOntoDefinition` 238 ms · `translateMetaDocument` 215 ms · `representationEtag` 160 ms · `computeMetadataDiagnostics` 157 ms · `validateListViewFieldRefs` 82 ms.\n- Ask: serve a compiled bundle from a cache keyed by what it depends on (metadata revision, app, locale, the caller's permission scope), so a repeat and a 304 cost a lookup; and/or take the cascade-delete closure off the per-request path. Acceptance: a second identical bundle request (and a 304) has `meta` < 20 ms locally; first-call numbers unchanged or better.\n- Dedupe: `repo:objectstack-ai/objectstack is:issue is:open bundle in:title` → only #33817 (scoped list closure, unrelated). Related: #33631 (SQL perf epic).\n- Blocks: cloud#4563 acceptance 1 (server critical path < 3 s)."
+}

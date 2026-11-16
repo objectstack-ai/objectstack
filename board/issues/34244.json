@@ -1,0 +1,30 @@
+{
+  "number": 34244,
+  "kind": "issue",
+  "title": "Console: a packaged app's off-package lookup target, and a page's requiresObject, are still read by name and answer 404 when the host does not register them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:11:34Z",
+  "updated_at": "2026-11-16T02:11:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34244",
+  "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ two out-of-scope findings of the #34186–#34188 dev (os-dev-report 6905365224 on PR #34240, carrier: seat), class b. Both are pinned in existing harnesses, as cited below.\nReader: `domain:ui` (`ui/packages/app-shell/src/console/appObjectScope.ts`). Grade suggestion: p2, the same class as #34188, whose consumer is objectstack-ai/cloud#4300. The staging note on cloud#4300 (`GET /api/v1/meta/object/sys_approval_request` 404 opening HotCRM pages on a Free environment) is most likely this card, not #34188.\nDedupe: `package arm lookup target by name 404` and `requiresObject unregistered by-name`: only #34186–#34188.\nBlocked-by: #34188 (PR #34240 adds `servedLookupTargets`, the presence read this card reuses)\n\n## 维护者速读\n\n#34188 只修了「无包应用」的查找目标：先批量探一次服务端有哪些对象，只按名字读存在的那些。还有两条同类路径没覆盖：一是带包应用里、不在本包对象列表中的查找目标，二是页面 `requiresObject` 指向的对象。宿主没注册这些对象时，控制台仍按名字逐个请求，每次都得到 404。HotCRM 在免费环境里的 `sys_approval_request` 404 多半就是第一条。\n\n## Facts (read on PR #34240 head `f1521e97`)\n\n- In the package arm, `readPageObjectScope` and `readObjectRouteNames` still ask, by name, a lookup target that the package list does not hold. The existing pin `CONTROL: the same lookups drawn ask every target by name` (appObjectScope-12811) measures this. #34188's card said this arm already batch-reads (#29444); the dev measured that it does not, for off-package targets.\n- A page's `requiresObject` naming an object the host does not register is read by name and answers 404 (`AppContent.packagelessReads-29416` harness, `gone_obj`).\n\n## Ask\n\n1. In the package arm, ask an off-package lookup target by name only after the same one-request presence read (`servedLookupTargets`, `GET /meta/object?names=`) answers it served. Targets the package list holds read as today.\n2. Read a `requiresObject` the same way, so an unregistered one is never asked by name. Keep the gate's hide behaviour for an absent object.\n3. Pins: a packaged app's page with an off-package lookup to an unregistered object makes no by-name request for it; a `requiresObject` naming an unregistered object makes none. CONTROL: a registered off-package target and a registered `requiresObject` still resolve. Flip the 12811 CONTROL as a declared forced edit. Ablate red.\n\n⛔ Not a claim."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 34219,
+  "kind": "issue",
+  "title": "docs(permissions): rls.mdx says an app update widener reaches every readable row on a predicate write, but under record sharing a predicate write is bounded by the write scope",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:14:58Z",
+  "updated_at": "2026-11-16T01:14:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34219",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ① a gap found by contract review 6904564182 (M1, ③) on PR #34033 (#33928). The gap predates that PR; that PR adds two spellings to it. ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** 文档说应用的 update 规则能把批量（`multi: true`）写入放宽到\"调用者能读到的行\"，但在启用记录共享的私有对象上，批量写入只写调用者按共享可写的行。\n- **影响：** 按文档写放宽规则的作者，以为批量写能改到只读共享的行，实际不会写，也不报错。\n- **建议：** p2，纯文档修正，和 #34033 同期落地最好。\n\n## What the docs say against what is served\n\n- `content/docs/permissions/rls.mdx` (lines ~87-101, the write-widener section) says an authored `update` widener works as written. It says that on a `private` object the widener reaches the rows the caller can already read, and that a predicate (`multi: true`) update or delete is narrowed the same way.\n- Under record sharing (plugin-sharing composed), a predicate write meets the bulk write scope. That scope covers the rows the caller may write, by owner depth, queue and edit shares (ADR-0111 D3). A row the caller holds only on a read share, which an app `update` widener admits, is not written by a predicate write. The write answers no error. Addressing that row by id alone writes it.\n- PR #34033 moves two more spellings onto the predicate path: a scalar `where.id` beside another key under `multi: true`, and a falsy id. Its BREAKING text says so. `content/docs/releases/v17/17-2.mdx` prescribes the first spelling as a migration.\n- `content/docs/permissions/permissions-matrix.mdx` says a predicate write matches only the rows the caller can READ. It does not say that record sharing bounds the write by write scope.\n\n## Change\n\n- Correct the rls.mdx write-widener section and the permissions-matrix sentence. Under record sharing, a predicate write is bounded by the caller's write scope. An app widener admits by id what it admits, and a predicate write does not reach a read-shared row.\n- Add one sentence to the v17.2 migration note pointing at the by-id remedy.\n- This is docs only, with no behaviour change.\n\nPrior rulings read: contract record 6904564182 and its prior 6900670881 on PR #34033; the seat's ruling on #34033 M1 (keep following the engine, declare the narrowing); ADR-0111 D3. No ruling says a predicate write should honour an app widener past the sharing write scope.\nDedupe words: rls.mdx write widener predicate multi; permissions-matrix predicate write read scope."
+}

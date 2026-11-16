@@ -1,0 +1,31 @@
+{
+  "number": 34215,
+  "kind": "issue",
+  "title": "console: a single-record action's error toast and a per-record bulk row show the platform message, not the handler's userMessage",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T00:59:58Z",
+  "updated_at": "2026-11-16T01:49:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34215",
+  "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ an out-of-scope finding of the #34173 dev (os-dev-report 6904367386 on PR #34213, carrier: seat), class a. It was read in code, and the CONTROL pin of PR #34213 measures the per-record half.\nReader: `domain:ui` (`ui/packages/core/src/actions/ActionRunner.ts`, `ui/packages/plugin-grid/src/ObjectGrid.tsx`). Grade suggestion: p2, the same reach class as #34173 but on the more common path. Every script or server action whose handler throws a `userMessage` reaches it.\nDedupe: `is:issue is:open userMessage toast action`, and `script action userMessage display`: none.\nBlocked-by: #34173 (PR #34213 adds the carrier `ActionResult.userMessage`)\n\n## 维护者速读\n\n动作处理器抛出带 `userMessage` 的错误时（处理器写给用户、已按请求语言翻译的那句话），控制台的单条动作失败提示和批量逐条派发的失败行，仍然显示平台的整段 `message`，而不是 `userMessage`。#34173 已经让聚合批量动作改读 `userMessage`，并把它挂到 `ActionResult.userMessage` 上；这两处还没跟上。\n\n## Facts (read on PR #34213 head `2ee839f6`)\n\n- After PR #34213, a failed script/server dispatch carries the refusal's `error.userMessage` on `ActionResult.userMessage`, beside `error` (the whole text).\n- The single-record path: `ActionRunner`'s post-execution toast shows `result.error`.\n- The per-record bulk path (`bulkActions: ['NAME']`): `ObjectGrid`'s per-record runner throws `new Error(res.error)`, so the dialog's row lists the platform message. PR #34213's CONTROL pin measures exactly that row, by design.\n\n## Ask\n\n1. When a failed result carries `userMessage`, the single-record failure toast shows it. It falls back to `error` when `userMessage` is absent.\n2. The per-record bulk dispatch's failed row shows the row's `userMessage` the same way. The error CSV keeps the whole text, so nothing is lost for a support read.\n3. Pins: a toast with a `userMessage` refusal shows it; a row with one lists it; CONTROL: a refusal without `userMessage` keeps today's text on both. Flip PR #34213's per-record CONTROL as a declared forced edit. Ablate red.\n\n⛔ Not a claim."
+}

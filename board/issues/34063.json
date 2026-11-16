@@ -4,7 +4,7 @@
   "title": "docs(adr): ADR-0067 records the revert doors after #33805",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:33:56Z",
-  "updated_at": "2026-11-15T18:35:17Z",
+  "updated_at": "2026-11-16T01:12:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

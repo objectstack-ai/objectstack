@@ -2,8 +2,8 @@
   "number": 34021,
   "kind": "issue",
   "title": "pm-dispatch: name the two review steps L1 普通审核 and L2 契约审核, retire bare 复审/review for them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T16:28:36Z",
-  "updated_at": "2026-11-15T17:25:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T02:03:28Z",
+  "closed_at": "2026-11-16T02:01:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34021",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. The maintainer, 2026-11-15 (project chat): 「我觉得一步到位，先和我讨论区别最明显的名字，座位也可以改」, then 「L1 普通审核 / L2 契约审核」. Earlier the same day: 「复审车道和你这里的复审不是一个概念吗？ 你派出的任务需要审核，但未必都需要契约复审」.\n\n## Problem\n\nThe skill uses one word (复审 / 复核 / review) for two different steps:\n\n- the ordinary read every dispatched PR gets before landing (`review-checklist.md`, the area's review threads), and\n- the contract-surface review (`contract-review.md`, CONTRACT_REVIEW_TIER, the review lane `lanes/review.md`).\n\nRules written for one were read as binding the other. Two misreads happened on 2026-11-15: no-face PRs were left unreviewed, and same-account review threads were treated as barred (#34007).\n\n## Names (ruled)\n\n- **L1 普通审核**: the ordinary review every dispatched PR gets. Its rules are `review-checklist.md`, an ACCEPT read on a green final head, and delta reads after fixes.\n- **L2 契约审核**: the contract-surface review, added on top of L1 when a PR touches any of the four faces in `contract-review.md`. It never replaces L1.\n\n## Acceptance\n\n1. A short glossary sits at the pm-dispatch entry point (SKILL.md, or a reference SKILL.md points to first). It defines L1 and L2 and says:\n   - L1 rules do not apply to L2, and L2 rules do not apply to L1;\n   - the review lane's account and independence rules belong to L2 only;\n   - which L2 surfaces need a Fable reviewer (CONTRACT_REVIEW_TIER) and which run at TIER_DEFAULT.\n2. Every use of bare 复审 / 复核 / review / 审核 that means one of these two steps says L1 or L2. Grep every reference first; the census of `.claude/skills/pm-dispatch/**`, `.claude/agents/**`, AGENTS.md and `scripts/pm/**` goes in the PR body.\n3. Files and identifiers are renamed where the old name says only \"review\", for example `lanes/review.md` → the L2 lane name. Each old file path keeps a stub that points to the new one. Each old identifier (script flag, mailbox key, record recogniser label, `Reviewed-by:` trailer reader) stays accepted as an alias, so open PRs, records and running threads do not break. New writes use the new name.\n4. Seat and thread naming: new review threads are named by level (for example `L1-a`; the L2 lane seat by its L2 name). Running threads keep their names.\n5. Line ceilings and ratchet rows: stay within them, or raise a row citing this ruling.\n6. Gates: the pm self-tests, the skill gates and dispatch-gates are green.\n\n## Notes\n\n- Tier S (`.claude/**`): it lands on a CONTRACT_REVIEW_TIER PASS (that is, an L2 record).\n- #33938 (area-lease rules, near final) is not widened. This lands after it, with a merge-tree check."

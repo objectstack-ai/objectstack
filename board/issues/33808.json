@@ -2,8 +2,8 @@
   "number": 33808,
   "kind": "issue",
   "title": "Contract: AI-door confirmation rule binds every AI door, including the in-app assistant (#33689 Q1 ruled B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:13:42Z",
-  "updated_at": "2026-11-15T16:45:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T23:19:06Z",
+  "closed_at": "2026-11-15T23:18:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33808",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #33689. Q1 was ruled B by Leehom on 2026-11-15 at 11:10:57Z: he tapped 「B 同一规则，两套流程暂留」. The ruling record is on #33689.\n\n## 维护者速读\n\n1. **要做的**：在 AI 入口确认契约里写明：新规则对所有 AI 入口生效，包括应用内助手。\n2. **为什么**：同一个「需要确认」的声明，在哪个入口都该是同一条规则。两类待办进同一个收件箱，分开就留下一条旁路。\n3. **范围**：只改契约文字和固定测试。应用内确认卡和 `IAIService` 的待批成员保持不变。\n4. **需要你做的**：无。\n\n## Change (spec, `packages/spec/src/contracts/ai-service.ts`)\n\n- **Rule 1** covers every AI door that starts a declared-gated action (`ai.requiresConfirmation: true`), not only MCP `run_action` / `resume_run`.\n- **A paragraph on the in-app door.** It asks through its own channel: the inline pending-approval card and the inbox. When that channel is not wired, the action is not offered. Three points change from ADR-0011's queue as documented:\n  1. **Who decides:** only the person the call ran as, not any `ai:approve` holder. A host that wants a second person uses the existing `held` outcome (the approvals engine).\n  2. **Which credential:** a signed-in session only. An API key, token or AI identity is refused.\n  3. **As whom it runs:** as that person, with every gate re-checked.\n- `IAIService`'s `proposePendingAction` / `approvePendingAction` / `rejectPendingAction` stay. State the three points on their docblocks.\n- **Pins** follow the new sentences.\n\n## Declarations (expected)\n\n`Clause-②: yes (narrowing)`: an `ai:approve` holder approving someone else's item, and any non-session credential, are refused. Also `Metadata-protocol: semantic`. Measure first-party exposure (ui inbox 21 files, client SDK, examples, skills) and state it.\n\n## Not in scope\n\n- service-ai's approve and reject routes: a parked cloud lane card, linked from the #33689 ruling record.\n- Merging the two seams: #33806.\n- The runtime and MCP switch: the implementing card. It reads the ruling, so after approval the action runs as the person, is not asked again, and there is no host-set `confirm`.\n\nAnalysis: `/mnt/project-files/pm-orders/spec/33689-q1-decision-analysis.md` (project share). This card waits under 「当前任务处理完，合并后就下班」 (Leehom, 2026-11-15 at 11:07Z)."

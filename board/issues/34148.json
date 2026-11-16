@@ -1,0 +1,32 @@
+{
+  "number": 34148,
+  "kind": "issue",
+  "title": "console record page: a long text or formula value in the field grid renders on one line with an ellipsis, and the full value is only in a hover tooltip",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T21:59:27Z",
+  "updated_at": "2026-11-15T23:53:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34148",
+  "body": "## What happens\n\nThe record detail page's field grid renders a long text value, or a text-returning formula, on one line: `white-space: nowrap; text-overflow: ellipsis`. The full value is only in the span's `title` tooltip, so touch users and anyone reading it aloud never see it.\n\n- Found by the downstream carbon-black CRM (steedos-labs/os-project-blackcat-crm#148, PR #157), measured on @objectstack 18.4.0 in the console as admin, zh-CN and en.\n- The formula field `crm_quote_line_item.cb_margin_explanation` (预审说明) is an explanation sentence of about 80–120 characters, such as `… 2026-W46 6520 (山西工厂: 6260 + 260); 7123.89; 8.48% ≥ A 4%`.\n- On the line's record page it shows only 「成本周 最低到岸成本（工厂…」, which defeats its purpose: approvers read it to check the margin precheck verdict.\n\n## Why the app cannot fix it\n\n`FieldSchema` offers nothing that lets a formula wrap or take the full row width. `returnType` is `text` only, with no `textarea` / long-text return type, and there is no per-field display width or wrap option. Per the platform-first rule, the default is the fix point. The app adds no workaround.\n\n## Ask\n\nOne of these, or both:\n1. In the record detail field grid, wrap long `textarea`/long-text values and text formulas, or let them span the full row, instead of truncating to one line.\n2. Give text formulas a way to declare a long-text return type, so they render like a `textarea` field.\n\nAcceptance: a 120-character text formula value is fully visible on the record page at 1440 px and at phone width, without hovering.\n\nDedupe words: record detail long text truncated ellipsis, formula field nowrap title tooltip, field grid full width wrap."
+}

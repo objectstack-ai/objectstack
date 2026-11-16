@@ -2,7 +2,7 @@
   "number": 34056,
   "kind": "pull_request",
   "title": "fix(driver-turso): count remote-transport statements into Server-Timing db",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:30:37Z",
-  "updated_at": "2026-11-15T18:02:40Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T20:59:42Z",
+  "closed_at": "2026-11-15T20:59:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T20:59:37Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34056",

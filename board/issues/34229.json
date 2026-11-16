@@ -1,0 +1,30 @@
+{
+  "number": 34229,
+  "kind": "issue",
+  "title": "zh-CN: a person's display name is composed \"first last\" (「大雷 王」), where Chinese order is family name first with no space (「王大雷」)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:42:55Z",
+  "updated_at": "2026-11-16T01:43:07Z",
+  "closed_at": "2026-11-16T01:43:07Z",
+  "closed_by": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34229",
+  "body": "## What happens\n\nOn @objectstack 18.5.0, a zh-CN organization in the downstream carbon-black CRM (steedos-labs/os-project-blackcat-crm) has a contact with first_name 大雷 and last_name 王. Its name renders as 「大雷 王」:\n- in the record page lookup;\n- in the printed quote document (service-print), field 联系人.\n\nA Chinese reader expects 「王大雷」: family name first, no separator.\n\n## Ask\n\nCompose a person's display name by locale, or by script: for zh, ja and ko, `last + first` with no space; otherwise `first + \" \" + last`. This applies wherever the platform builds the name from first and last parts: the lookup display, print, and list cells. If the composition is metadata (a formula `name` field on the object), say so, and the downstream app will adjust its own formula. In that case, a platform helper or documented pattern for locale-aware name order would still help every app.\n\nDedupe words: Chinese name order, family name first, display name first last zh-CN, contact name 王大雷."
+}

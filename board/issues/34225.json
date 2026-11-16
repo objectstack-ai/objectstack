@@ -1,0 +1,31 @@
+{
+  "number": 34225,
+  "kind": "issue",
+  "title": "Setup Users: with SSO-only mode on, Set Password is offered on an IdP-provisioned user and then refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:34:59Z",
+  "updated_at": "2026-11-16T01:50:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34225",
+  "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ review#2's nit N3 on PR #34124 (record 6902922670), carried as out of scope by the #34010/#34130 dev (os-dev-report 6904842273, carrier: seat). Class a: read in code, not run.\nReader: `domain:ui` (`packages/platform-objects/src/identity/sys-user.object.ts`, the `set_user_password` action's `visible`), reading the server's identity-source rule in `packages/plugins/plugin-auth/src/sso-only-local-password.ts`. Grade suggestion: p3. Only SSO-only deployments see it, and the server already refuses the write.\nDedupe: `is:issue is:open set_user_password sso`, `SSO-only Set Password offered`: none.\nRelated: #34130 (PR #34124 removed `set_user_password`'s admin-plugin gate).\n\n## 维护者速读\n\n开启「仅 SSO 登录」模式后，Setup 用户列表里由身份提供方预置（IdP-provisioned）的用户行仍会显示「设置密码」按钮，但服务端会拒绝这个操作。按钮显示与否没有考虑用户的身份来源，管理员点了只会得到一个拒绝提示。\n\n## Facts (read on main after #34119, and on PR #34124 head `a2f47bbd`)\n\n- `admin-user-endpoints.ts` (about line 1166, `judgeSsoOnlyLocalPassword`): with SSO-only mode on, setting a password for an IdP-provisioned target is refused. Only the narrow break-glass case in `sso-only-local-password.ts` passes.\n- `sys_user.set_user_password`'s `visible` has no identity-source term, so the action is offered on those rows.\n- A pending SSO user (`pending-sso-marker.ts`) is refused the same way. Check whether `visible` already hides that case.\n\n## Ask\n\n1. Offer Set Password only where the server would accept it: hide it on a row the SSO-only rule refuses, using the same facts the door reads (SSO-only mode, the row's identity source), not a re-derived copy of the rule. If the facts are not visible to the action predicate today, say so and propose the smallest way to expose them.\n2. Pins: with SSO-only mode on, an IdP-provisioned row does not offer the action; CONTROL: a local-password row still offers it, and with SSO-only mode off every row keeps today's offer. Ablate red.\n\n⛔ Not a claim."
+}

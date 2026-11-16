@@ -1,0 +1,31 @@
+{
+  "number": 34221,
+  "kind": "issue",
+  "title": "Console: the create-workspace dialog shows the unpaid-organization limit refusal (UNPAID_ORGANIZATION_LIMIT_REACHED) with its next step",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T01:17:59Z",
+  "updated_at": "2026-11-16T01:17:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34221",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① the console half of objectstack-ai/cloud#4308 (maintainer ruling 6904224158 on that card), named as an objectstack carrier in its contract review (objectstack-ai/cloud PR #4626, record 6904645818). Dedupe: `UNPAID_ORGANIZATION_LIMIT_REACHED`, `organization limit console` find #32043 (the member-limit sibling) and nothing on this code.\nConsumer: objectstack-ai/cloud#4308 (hosted control plane).\n\n## 维护者速读\n\n- 要做的：控制台「新建工作区」对话框认出云端新的拒绝码 `UNPAID_ORGANIZATION_LIMIT_REACHED`，显示服务端给的本地化说明和下一步（升级到 Team），不再显示通用错误。\n- 为什么：裁定后每个账号最多 2 个不付费组织（免费加开发者），云端第三次创建会返回这个新码；控制台现在只认 better-auth 的 `YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`。\n- 需要你做的：无。\n\n## Change\n\n1. `ui/packages/app-shell/src/console/organizations/orgErrorMessage.ts` maps `UNPAID_ORGANIZATION_LIMIT_REACHED` the way it maps the existing organization-limit code. Prefer the producer's localized `message` (ruling C on #32440, #32654); fall back to a console string in every console locale. Show `details.next_step` as an action where the host gives one.\n2. Optional, if the host exposes it: the dialog says before the click that the account is at its unpaid limit. Only do this if discovery or `/auth/config` states it; do not guess the number.\n3. Done when a test pins the mapped message for the new code and the old code still maps as before."
+}

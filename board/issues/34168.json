@@ -1,0 +1,35 @@
+{
+  "number": 34168,
+  "kind": "issue",
+  "title": "Auth: the environment-access refusal carries the host's reason, and the cloud sign-in page names the organization (client_name) on an OAuth hand-off",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "lease:A1",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T22:43:22Z",
+  "updated_at": "2026-11-15T22:57:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34168",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ④ the framework half of objectstack-ai/cloud#4471 (a child of cloud#4465; the maintainer's word on those children: 「都是p1，车道自己认领就可以」), measured by the cloud#4471 card thread at objectstack `b914e7247f69`. Blocks: objectstack-ai/cloud#4471.\n\n## 维护者速读\n\n托管环境打开后直接跳到云端登录（cloud#4471 已开）。还差两处只能在平台做：云端登录页要显示「要进入哪个组织」，被拒时要说清是「不是这个组织的成员」还是「邀请还没接受」，以及该怎么做。现在平台的拒绝只有一个固定句子，登录页也只显示环境的域名。\n\n## Facts (objectstack `b914e7247f69`, cloud `main` 064a55e)\n\n- **The gate seam is a boolean.** `AuthManagerOptions.oidcAuthorizeGate?: (params: { userId; clientId }) => boolean | Promise<boolean>` (`plugin-auth/src/auth-manager.ts:969`). On `false`, `auth-manager-before-hook.ts:519-545` calls `answerRefusedAuthorization` (`oauth-authorize-refusal.ts`), which answers one fixed sentence everywhere: the `403` envelope `ENV_ACCESS_DENIED` / \"You are not authorized to sign in to this environment.\"; for a navigation with a registered `redirect_uri`, `302` back with `error=access_denied` and that same `error_description`; otherwise a fixed English HTML page.\n- **The environment's page maps by code only.** `ui/apps/console/src/pages/auth/ssoCallbackRefusal.ts` maps `access_denied` to one sentence; `error_description` is shown only under \"Technical details\".\n- **The cloud sign-in page shows the host, not a name.** `ui/apps/console/src/pages/auth/LoginPage.tsx:221-231` (`ssoTarget`) shows \"Continue to <redirect_uri host>\" on an OAuth hand-off.\n- **The vendor already has the pre-login name read.** `@better-auth/oauth-provider` 1.7.12 `POST /oauth2/public-client-prelogin` (`{ client_id, oauth_query }`, `publicSessionMiddleware`, behind the provider option `allowPublicClientPrelogin`) answers the client's public fields, `client_name` included. `GET /oauth2/public-client` needs a session.\n- **Cloud's half is done in cloud#4471's PR:** each environment's OAuth client is named after its organization (kept in sync on rename), and the cloud gate decides `{ allowed: false, reason: 'not_member' | 'invitation_pending' | 'unavailable', organizationName?, message }` (`packages/service-cloud/src/oidc-authorize-gate.ts` `decideEnvironmentAccess`); only the boolean reaches the seam today.\n\n## Work\n\n1. **The seam may say why.** `oidcAuthorizeGate` may return `boolean | { allowed: false; reason: string; message: string }` (a reason code from the host's closed set, and a sentence). Back-compatible: a boolean is answered exactly as today.\n2. **The refusal carries it.** The `403` envelope keeps `code: ENV_ACCESS_DENIED` and gains the host's `reason`; the redirect back keeps `error=access_denied` (RFC 6749) and sends the host's sentence as `error_description` plus the reason as a namespaced parameter (for example `error_reason=not_member`, name to be decided); the HTML page shows the host's sentence. The reason value is validated against `[a-z_]{1,40}` so no host can inject markup or text into a URL parameter.\n3. **The Console shows it.** On `access_denied` with a known reason (`not_member`, `invitation_pending`), the environment's sign-in page shows a localized sentence for that reason (en / zh-CN / ja-JP / es-ES), naming the organization when known, with the existing ways on (switch account, back to the console). Unknown or absent reason: today's sentence.\n4. **The cloud sign-in page names the relying party.** On an OAuth hand-off (`client_id` + `redirect_uri` on the URL), `LoginPage` reads `client_name` through `/oauth2/public-client-prelogin` (turning on `allowPublicClientPrelogin`) and shows \"Sign in to continue to <client_name>\"; on any failure, today's host line.\n\n## Acceptance\n\n- Tests: a boolean gate answers byte for byte as today (CONTROL); a reason gate's refusal carries the reason on the envelope, the redirect and the page; a reason outside the closed shape is dropped; the Console draws each reason's sentence and falls back for an unknown one; the hand-off line shows `client_name` and falls back to the host on a failed read.\n- No change to who is admitted.\n\n## Not in scope\n\nThe cloud's reasons and names (cloud#4471). A refusal shown on the cloud page instead of the environment's (the registered-`redirect_uri` rule stays).\n\nDedup words: oidcAuthorizeGate reason; access_denied error_description; public-client-prelogin client_name; LoginPage ssoTarget."
+}
