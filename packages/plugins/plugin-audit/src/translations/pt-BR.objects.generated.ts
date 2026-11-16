@@ -45,7 +45,8 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Uso de credencial",
           scim_refused: "Solicitação SCIM recusada",
           audit_signing_key_change: "Alteração da chave de assinatura de auditoria",
-          dataset_query: "Consulta de conjunto de dados"
+          dataset_query: "Consulta de conjunto de dados",
+          scim_manager_unresolved: "Gestor SCIM não resolvido"
         }
       },
       user_id: {
