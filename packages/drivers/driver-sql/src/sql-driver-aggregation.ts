@@ -3,7 +3,7 @@
 /**
  * [#29520 codemod] The "Aggregation" section of `SqlDriver`: the bodies of
  * `aggregate`, `aggregandColumnClassOf`, `foldEmptyAggregateAnswers` moved out
- * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * of `sql-driver.ts` whole (split by #29598 and #30139).
  *
  * A MOVE, not a redesign. {@link AggregationFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -29,9 +29,9 @@
  */
 
 import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
-import { emptyGroupValueFor } from '@objectstack/spec/data';
+import { emptyGroupValueFor, isComposedReadableIds } from '@objectstack/spec/data';
 import type { Knex } from 'knex';
-import type { DriverOptions } from '@objectstack/spec/data';
+import type { ComposedReadableIds, DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { AGGREGATE_ACCUMULATION, AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
 import type { AggregandColumnClass } from '@objectstack/core';
@@ -79,6 +79,10 @@ export interface AggregationHost {
 export class AggregationFacet {
   /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
   static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [relation group join] The related rows each relation joins, handed by
+    // the engine (`objectql` `relation-group-join.ts`); read once, judged
+    // before anything compiles.
+    const relationJoins = relationGroupJoinsOf(query);
     // [#33698] The per-measure `filter`s that carry a condition (`{}` is the
     // vacuous filter, same convention as `where` / `having`): each compiles
     // with the where compiler below, so each is primed and read like a `where`.
@@ -95,6 +99,13 @@ export class AggregationFacet {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    // …and the same two primes for each joined related object, whose scope
+    // compiles against its own table.
+    for (const join of relationJoins ?? []) {
+      if (join.parent === null) continue;
+      if (this.isMssql) await this.primeMssqlGuidColumns(join.parent.object, join.parent.scope);
+      if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object);
+    }
     const builder = this.getBuilder(object, options);
     // The column a FIELD names in this statement: its `external.columnMap`
     // remote column on a federated object, the field itself otherwise. Every
@@ -239,6 +250,61 @@ export class AggregationFacet {
         }
       }
     }
+
+    // [relation group join] Each relation the engine hands joins the related
+    // rows the caller may read, and groups by their attributes:
+    //
+    //   LEFT JOIN (SELECT id AS __rgN_id, attr AS __rgN_aJ … FROM related
+    //              WHERE <tenant wall> AND <composed read scope>) AS __rgN
+    //          ON fk = __rgN.__rgN_id
+    //   … GROUP BY __rgN.__rgN_aJ, CASE WHEN __rgN.__rgN_id IS NULL THEN 0 ELSE 1 END
+    //
+    // The derived table is compiled as a composed `ReadableIds` subquery is
+    // (`readableIdsSubquery`): the related object's tenant wall from THIS
+    // read's options (ADR-0139 D3 — the engine proved them the related read's
+    // own) and its composed scope through this same where compiler, so it
+    // binds only the scope's and the wall's own parameters, never one per
+    // related record. Its columns are renamed so no column of the
+    // aggregated table is ambiguous beside them; the join's left column is
+    // the FK, unqualified, for the same reason. `__rgN_id` is unique in the
+    // derived table (it is the key), so the join multiplies no row and every
+    // measure aggregates the rows it would have without it. The resolved
+    // column is `1` where a readable related record joined, `0` where none
+    // did (an empty relation, or a record the caller cannot read) — the
+    // attribute is NULL there, and the resolved column tells it from a real
+    // NULL. A `null` parent is a related object nothing is readable of.
+    (relationJoins ?? []).forEach((join, i) => {
+      const at = `__rg${i}`;
+      const idColumn = `${at}_id`;
+      if (join.parent === null) {
+        for (const a of join.attrs) builder.select(this.knex.raw(`NULL as ${this.aliasIdentifierSql(a.alias)}`));
+        builder.select(this.knex.raw(`0 as ${this.aliasIdentifierSql(join.resolvedAlias)}`));
+        presentedOutput.set(join.resolvedAlias, 'number');
+        return;
+      }
+      const related = join.parent.object;
+      const sub = this.getBuilder(related).select(
+        this.knex.raw(`?? as ${this.aliasIdentifierSql(idColumn)}`, [this.remoteColumn(related, 'id', 'id')]),
+      );
+      join.attrs.forEach((a, j) => {
+        sub.select(this.knex.raw(`?? as ${this.aliasIdentifierSql(`${at}_a${j}`)}`, [this.remoteColumn(related, a.attr, a.attr)]));
+      });
+      this.applyTenantScope(sub, related, options);
+      if (join.parent.scope !== undefined) this.applyFilters(sub, join.parent.scope, options);
+      const relatedTable = this.coercionKey(sub);
+      builder.leftJoin(sub.as(at), columnOf(join.field), `${at}.${idColumn}`);
+      join.attrs.forEach((a, j) => {
+        const ref = `${at}.${at}_a${j}`;
+        builder.groupBy(ref);
+        builder.select(this.knex.raw(`?? as ${this.aliasIdentifierSql(a.alias)}`, [ref]));
+        const kind = this.readPresentationKind(relatedTable, a.attr);
+        if (kind) presentedOutput.set(a.alias, kind);
+      });
+      const resolved = 'CASE WHEN ?? IS NULL THEN 0 ELSE 1 END';
+      builder.groupByRaw(resolved, [`${at}.${idColumn}`]);
+      builder.select(this.knex.raw(`${resolved} as ${this.aliasIdentifierSql(join.resolvedAlias)}`, [`${at}.${idColumn}`]));
+      presentedOutput.set(join.resolvedAlias, 'number');
+    });
 
     // [#6321] Was `query.aggregations || query.aggregate` / `agg.function ||
     // agg.func`. Neither `aggregate` nor `func` is declared anywhere in the
@@ -455,6 +521,52 @@ export class AggregationFacet {
     }
     return rows;
   }
+}
+
+/**
+ * [relation group join] The AST key the engine hands its relation joins on
+ * (`objectql` `relation-group-join.ts`, the same `Symbol.for` key — this
+ * package does not import the engine). A symbol, so no wire request and no
+ * JSON query can carry one; set by the engine after every middleware ran.
+ */
+export const RELATION_GROUP_JOINS: unique symbol = Symbol.for('objectstack.driver.aggregate.relationGroupJoins');
+
+/** One relation join, as the engine hands it. */
+export interface RelationGroupJoin {
+  /** The single-valued relation (FK) column of the aggregated object. */
+  readonly field: string;
+  /** The related rows the caller may read, composed by the engine; `null` = none. */
+  readonly parent: ComposedReadableIds | null;
+  readonly attrs: ReadonlyArray<{ readonly attr: string; readonly alias: string }>;
+  /** The output column: `1` where a readable related record joined, `0` where none did. */
+  readonly resolvedAlias: string;
+}
+
+/**
+ * The joins on `query`, or `undefined` when it carries none. A parent that is
+ * not a leaf the engine composed is refused before anything compiles, as an
+ * uncomposed `ReadableIds` leaf is: its scope is the only thing that bounds
+ * the joined rows, and ⛔ a scope the engine did not compose is never read as
+ * one.
+ */
+function relationGroupJoinsOf(query: DriverQuery): readonly RelationGroupJoin[] | undefined {
+  const joins = (query as unknown as Record<symbol, unknown>)[RELATION_GROUP_JOINS];
+  if (joins === undefined) return undefined;
+  const ok = Array.isArray(joins) && joins.every((j: RelationGroupJoin) =>
+    j !== null && typeof j === 'object'
+    && typeof j.field === 'string'
+    && (j.parent === null || isComposedReadableIds(j.parent))
+    && Array.isArray(j.attrs) && j.attrs.every((a) => typeof a?.attr === 'string' && typeof a?.alias === 'string')
+    && typeof j.resolvedAlias === 'string');
+  if (!ok) {
+    const err = new Error(
+      'aggregate: a relation group join the engine did not compose was refused; the query was NOT run.',
+    ) as Error & { code?: string; status?: number };
+    err.code = 'INTERNAL_ERROR';
+    err.status = 500;
+    throw err;
+  }
+  return joins as readonly RelationGroupJoin[];
 }
 
 /**

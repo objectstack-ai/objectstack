@@ -2262,7 +2262,8 @@ export const FieldSchema = lazySchema(() => {
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
       + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
-      + 'value in place of the reference; every other picker host leaves the entry out.',
+      + 'value in place of the reference; every other picker host leaves the entry out. A { $record } that reaches a '
+      + 'server unresolved is refused (INVALID_FILTER), never read as null.',
     ),
     orEmpty: z.boolean().optional().describe(
       'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
@@ -2280,8 +2281,10 @@ export const FieldSchema = lazySchema(() => {
     + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
     + 'empty or cannot be read (the hop\'s row or field does not come back, no object is named for the hop, or the host '
     + 'has no single-row reader), the entry is left out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
-    + 'server unresolved is refused, never read as null. The picker narrows the choice only: a rule the save must '
-    + 'enforce belongs on the server too.',
+    + 'server unresolved is refused (INVALID_FILTER), never read as null: by name, naming the field and the path, when '
+    + 'it arrives as the eq shorthand on a column other than a date, datetime or time column; any other operator, and '
+    + 'eq on a date, datetime or time column, is refused earlier, in generic words. The picker narrows the choice only: '
+    + 'a rule the save must enforce belongs on the server too.',
   ),
   dependsOn: z.array(z.union([z.string(), strictObject({
     surface: 'this dependsOn entry',

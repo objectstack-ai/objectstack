@@ -2056,3 +2056,109 @@ describe('ObjectGantt.retiredApiProvider-12325', () => {
     });
   });
 });
+
+// ── ObjectGantt.lookupParent-34395 ──────────────────────────────────────────────
+
+/**
+ * objectstack#34395 — a `parentField` that is a lookup nests its tasks.
+ *
+ * The record query auto-`$expand`s every lookup, so the value under a lookup
+ * `parentField` is the related ROW (`{ id, subject, … }`), not its id. The task
+ * tree keys parents by id (`GanttView.tree.test.tsx` pins that half), so the
+ * task's `parent` must be the parent task's `id` for the child to draw under
+ * it. These cases pin the half that lives here: what `ObjectGantt` hands the
+ * tree as `parent`, for an expanded lookup, a scalar id and no parent.
+ */
+describe('ObjectGantt.lookupParent-34395', () => {
+  let lastTasks: any[] = [];
+
+  beforeEach(() => {
+    lastTasks = [];
+    standIns.ganttView = ({ tasks }: any) => {
+      lastTasks = tasks;
+      return <div data-testid="gantt-view" data-task-count={String(tasks.length)} />;
+    };
+  });
+
+  const OBJECT_SCHEMA = {
+    name: 'psa_task',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      subject: { name: 'subject', type: 'text' },
+      start_date: { name: 'start_date', type: 'date' },
+      end_date: { name: 'end_date', type: 'date' },
+      // A self-lookup: the shape a project/subtask hierarchy is authored in.
+      parent_task: { name: 'parent_task', type: 'lookup', reference: 'psa_task' },
+    },
+  };
+
+  const PARENT_ROW = { id: 'p1', subject: 'Phase 1', start_date: '2026-01-01', end_date: '2026-01-20' };
+
+  function childRow(parent_task: unknown) {
+    return { id: 'c1', subject: 'Design', start_date: '2026-01-02', end_date: '2026-01-08', parent_task };
+  }
+
+  async function tasksFor(rows: any[]) {
+    const dataSource = {
+      find: vi.fn(async () => ({ data: rows, total: rows.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => OBJECT_SCHEMA),
+    } as any;
+    const schema: any = {
+      type: 'object-gantt',
+      objectName: 'psa_task',
+      gantt: {
+        titleField: 'subject',
+        startDateField: 'start_date',
+        endDateField: 'end_date',
+        parentField: 'parent_task',
+      },
+    };
+    render(<ObjectGantt schema={schema} dataSource={dataSource} />);
+    let settled: any[] = [];
+    await waitFor(() => {
+      const tasks = lastTasks;
+      expect(tasks.map((t) => t.title)).toEqual(rows.map((r) => r.subject));
+      settled = tasks;
+    });
+    return { tasks: settled, dataSource };
+  }
+
+  function byId(tasks: any[], id: string) {
+    const task = tasks.find((t) => String(t.id) === id);
+    expect(task, `task ${id}`).toBeDefined();
+    return task;
+  }
+
+  it('an expanded lookup parent hands the tree the parent task id, so the child nests', async () => {
+    const { tasks, dataSource } = await tasksFor([PARENT_ROW, childRow({ id: 'p1', subject: 'Phase 1' })]);
+    // The query really asks for the expansion this case feeds back.
+    expect(dataSource.find.mock.calls[0][1].$expand).toContain('parent_task');
+    const parent = byId(tasks, 'p1');
+    const child = byId(tasks, 'c1');
+    expect(child.parent).toBe(parent.id);
+    expect(parent.parent).toBeNull();
+  });
+
+  it('an expanded lookup parent that carries only `_id` resolves through it', async () => {
+    const { tasks } = await tasksFor([PARENT_ROW, childRow({ _id: 'p1', subject: 'Phase 1' })]);
+    expect(byId(tasks, 'c1').parent).toBe(byId(tasks, 'p1').id);
+  });
+
+  it('CONTROL: a scalar id parent still nests, passed through as it is', async () => {
+    const { tasks } = await tasksFor([PARENT_ROW, childRow('p1')]);
+    expect(byId(tasks, 'c1').parent).toBe('p1');
+    expect(byId(tasks, 'c1').parent).toBe(byId(tasks, 'p1').id);
+  });
+
+  it('CONTROL: a null or missing parent stays top-level', async () => {
+    const missing = { id: 'c2', subject: 'Review', start_date: '2026-01-09', end_date: '2026-01-12' };
+    const { tasks } = await tasksFor([PARENT_ROW, childRow(null), missing]);
+    expect(byId(tasks, 'p1').parent).toBeNull();
+    expect(byId(tasks, 'c1').parent).toBeNull();
+    expect(byId(tasks, 'c2').parent).toBeNull();
+  });
+});
