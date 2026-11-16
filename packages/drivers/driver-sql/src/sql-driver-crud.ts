@@ -48,9 +48,9 @@ import { StandardErrorCode } from '@objectstack/spec/api';
  *
  * knex compiles `forUpdate()` per dialect: `FOR UPDATE` on PostgreSQL, MySQL
  * and Oracle, the `UPDLOCK` table hint on SQL Server, and nothing at all on
- * SQLite, whose single-connection pool and database lock already keep a
- * concurrent commit out of an open transaction (the capability's TSDoc in
- * `data/driver.zod.ts`).
+ * SQLite, whose single-connection pool and database lock already keep another
+ * writer from changing a returned row behind the transaction: it waits, or one
+ * side fails busy (the capability's TSDoc in `data/driver.zod.ts`).
  *
  * A request with no `transaction` is refused, PRECONDITION_REQUIRED / 428: a
  * read outside a transaction has nothing to hold the lock to (on PostgreSQL a

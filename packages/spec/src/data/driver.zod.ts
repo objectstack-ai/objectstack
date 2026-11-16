@@ -120,17 +120,18 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    * with `transaction` set: a read outside a transaction has nothing to hold
    * the lock to. A driver honours it only when it declares
    * `DriverCapabilities.lockRows`. The engine never answers a request it
-   * cannot honour as if the rows were locked: a caller's `lockRows` on an
-   * object whose driver lacks the bit is refused `NOT_IMPLEMENTED` (501), and
-   * one with no transaction reaching that driver `PRECONDITION_REQUIRED`
-   * (428), before any driver runs.
+   * cannot honour as if the rows were locked: its read and delete verbs do not
+   * take the key from a caller, and any other option bag that carries it to
+   * the engine -> driver hop is refused there, before any driver runs:
+   * `NOT_IMPLEMENTED` (501) when the object's driver lacks the bit,
+   * `PRECONDITION_REQUIRED` (428) when no transaction reaches that driver.
    *
    * The engine's one sender is a predicate delete whose target is referenced by
    * delete-family lookups: it reads the matched ids, walks the cascade, then
-   * deletes those rows by id. Under the lock no concurrent commit can move a
+   * deletes those rows by id. Under the lock a concurrent writer cannot move a
    * matched row out of the caller's predicate between that read and the
-   * delete, so a guard such as "delete only if still pending" holds for the
-   * whole unit of work.
+   * delete and still see the row deleted, so a guard such as "delete only if
+   * still pending" holds for the whole unit of work.
    */
   lockRows: z.boolean().optional().describe('find() inside a transaction: lock the returned rows against concurrent writers until the transaction ends (SELECT … FOR UPDATE); honoured only by a driver declaring supports.lockRows'),
 }));
@@ -368,14 +369,17 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * transaction.
    *
    * The promise: when `find()` runs with both `transaction` and `lockRows`
-   * set, no other writer can commit a change to a row that read returned
-   * until that transaction ends. The writer waits, or one side fails loudly;
-   * it never commits in between. PostgreSQL and MySQL take row locks
-   * (`FOR UPDATE`), SQL Server an update lock (`UPDLOCK`). SQLite has no row
-   * locks and needs none: `driver-sql`'s pool holds one connection, so a
-   * second writer through this driver waits for it, and a writer in another
-   * process meets the database lock (busy) rather than slipping a commit
-   * between the read and the transaction's own write.
+   * set, no other writer changes a row that read returned behind the
+   * transaction's back. Either the writer waits until the transaction ends,
+   * or one of the two fails loudly; a writer's commit is never followed by a
+   * successful write of the transaction over the changed row. PostgreSQL and
+   * MySQL take row locks (`FOR UPDATE`): the writer waits. SQL Server takes an
+   * update lock (`UPDLOCK`). SQLite has no row locks and needs none:
+   * `driver-sql`'s pool holds one connection, so a second writer through the
+   * same driver waits for it, and a writer on another connection meets the
+   * database lock: in WAL mode (the file default) it commits and the
+   * transaction's own next write fails `SQLITE_BUSY_SNAPSHOT`; under a
+   * rollback journal the writer fails `SQLITE_BUSY`.
    *
    * What the engine does with it: a predicate delete on an object that
    * delete-family lookups reference reads the matched ids inside the unit of
@@ -393,7 +397,7 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    *
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
-  lockRows: z.boolean().optional().describe('`find()` honours `DriverOptions.lockRows` inside a transaction: no concurrent commit changes a returned row until the transaction ends (absence = false: the engine sends no lock request)'),
+  lockRows: z.boolean().optional().describe('`find()` honours `DriverOptions.lockRows` inside a transaction: no other writer changes a returned row behind the transaction (it waits, or one side fails) (absence = false: the engine sends no lock request)'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0

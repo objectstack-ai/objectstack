@@ -777,43 +777,55 @@ describe('[#34373] a predicate delete with a cascade locks the rows it walks', (
     expect(lockedReads(driver)).toHaveLength(0);
   });
 
-  it('refuses a caller\'s lockRows on an object whose driver cannot lock: NOT_IMPLEMENTED / 501, nothing deleted', async () => {
-    const { engine, driver } = await makeEngine([loner]);
-    await engine.insert('loner', { name: 'solo' });
-    driver.writes.length = 0;
-
-    await expect(engine.delete('loner', { where: { name: 'solo' }, multi: true, lockRows: true } as any))
-      .rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501, object: 'loner' });
-    expect(driver.rowsOf('loner')).toHaveLength(1);
-    expect(driver.writes).toHaveLength(0);
-  });
-
-  it('refuses a caller\'s lockRows outside a transaction: PRECONDITION_REQUIRED / 428, nothing read or deleted', async () => {
+  // A caller cannot ask for the lock through the read and delete verbs: their
+  // option sets are closed, and `lockRows` is not on them, so it is refused as
+  // an option the engine does not execute. Unchanged by this card; pinned so
+  // the one sender stays the engine's own.
+  it('the find and delete verbs refuse a caller\'s lockRows as an option they do not execute', async () => {
     const { engine, driver } = await makeEngine([loner], { lockRows: true });
     await engine.insert('loner', { name: 'solo' });
     driver.reads.length = 0;
     driver.writes.length = 0;
 
     await expect(engine.find('loner', { where: { name: 'solo' }, lockRows: true } as any))
-      .rejects.toMatchObject({ code: 'PRECONDITION_REQUIRED', status: 428, object: 'loner' });
+      .rejects.toThrow(/does not recognise option 'lockRows'/);
     await expect(engine.delete('loner', { where: { name: 'solo' }, multi: true, lockRows: true } as any))
-      .rejects.toMatchObject({ code: 'PRECONDITION_REQUIRED', status: 428, object: 'loner' });
+      .rejects.toThrow(/does not recognise option 'lockRows'/);
     expect(driver.reads).toHaveLength(0);
     expect(driver.writes).toHaveLength(0);
-    expect(driver.rowsOf('loner')).toHaveLength(1);
   });
 
-  it('hands a caller\'s lockRows inside engine.transaction() to a driver that declares the bit', async () => {
+  // A bag the engine hands on without a closed set (an insert's options) meets
+  // the engine -> driver hop's own check: a lock that cannot hold is refused
+  // before any driver runs.
+  it('refuses a lockRows its object\'s driver cannot honour: NOT_IMPLEMENTED / 501, nothing written', async () => {
+    const { engine, driver } = await makeEngine([loner]);
+    driver.writes.length = 0;
+
+    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as any))
+      .rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501, object: 'loner' });
+    expect(driver.writes).toHaveLength(0);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+  });
+
+  it('refuses a lockRows with no transaction to hold it: PRECONDITION_REQUIRED / 428, nothing written', async () => {
     const { engine, driver } = await makeEngine([loner], { lockRows: true });
-    await engine.insert('loner', { name: 'solo' });
-    driver.reads.length = 0;
+    driver.writes.length = 0;
 
-    const rows = await engine.transaction(async () =>
-      engine.find('loner', { where: { name: 'solo' }, lockRows: true } as any));
+    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as any))
+      .rejects.toMatchObject({ code: 'PRECONDITION_REQUIRED', status: 428, object: 'loner' });
+    expect(driver.writes).toHaveLength(0);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+  });
 
-    expect(rows).toHaveLength(1);
-    const locked = lockedReads(driver);
-    expect(locked).toHaveLength(1);
-    expect(locked[0].options.transaction).toBe(driver.begun[0]);
+  it('lets the same lockRows through inside engine.transaction() on a driver that declares the bit', async () => {
+    const { engine, driver } = await makeEngine([loner], { lockRows: true });
+    driver.writes.length = 0;
+
+    await engine.transaction(async () => engine.insert('loner', { name: 'solo' }, { lockRows: true } as any));
+
+    expect(driver.rowsOf('loner')).toHaveLength(1);
+    expect(driver.writes.filter((w: any) => w.op === 'create')).toHaveLength(1);
+    expect(driver.writes[0].transaction).toBe(driver.begun[0]);
   });
 });
