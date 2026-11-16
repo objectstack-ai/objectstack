@@ -88,6 +88,8 @@ import { saveRegistryQuestion } from './registry-question.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import { servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessContentPackage, shippingPackageIds } from './protocol-environment-rows.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
+import { pairsOf } from '@objectstack/metadata-core';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
@@ -826,6 +828,14 @@ export class ProtocolSaveFacet {
                 if (address.candidates.length > 1) {
                     throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
                 }
+                // [ADR-0150 D3, ruling A] …and the holders the read naming no
+                // package counts ({@link packagelessHolderRefusal}): a name only
+                // disabled packages hold is refused naming none, never written at
+                // the disabled package's row or as a new package-unbound row.
+                const holderRefusal = packagelessHolderRefusal(
+                    host, 'save', request.type, writeType, request.name, itemDiscriminator(writeType, request.item), address,
+                );
+                if (holderRefusal) throw holderRefusal;
                 if (address.packageId !== null) request = { ...request, packageId: address.packageId };
             }
         }
@@ -846,6 +856,21 @@ export class ProtocolSaveFacet {
                 singularType, request.name, itemDiscriminator(singularType, request.item),
             )
             : undefined;
+        // [ADR-0150 D3, ruling A] The draft save naming no package answers the
+        // holders as the publish-mode save above does
+        // ({@link packagelessHolderRefusal}), judged over the item's active rows
+        // and its drafts: the draft address alone took the disabled package's
+        // row, or a new package-unbound draft. An ambiguous draft address is
+        // left to the repository's `409`, as before.
+        if (draftAddress !== undefined && draftAddress.kind !== 'ambiguous') {
+            const member = itemDiscriminator(singularType, request.item);
+            const active = await host.packagelessAddress(singularType, request.name, member, 'active');
+            const holderRefusal = packagelessHolderRefusal(host, 'save', request.type, singularType, request.name, member, {
+                candidates: [...new Set([...active.candidates, ...draftAddress.drafts.candidates])],
+                unbound: active.unbound || draftAddress.drafts.unbound,
+            });
+            if (holderRefusal) throw holderRefusal;
+        }
 
         // [#26921] THE NAMED-BASE RULE for the binding a save naming no
         // package INHERITS: the package its address gives (the resolved
@@ -2885,4 +2910,85 @@ async function servedPackagelessSaveAddress(
     const shippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].filter((id) => !disabled(id));
     const content = packagelessContentPackage({ packageId: null, candidates: [] }, shippers.map((id) => ({ _packageId: id })));
     return typeof content === 'string' ? { packageId: content } : undefined;
+}
+
+/**
+ * [ADR-0150 D3, ruling A on the disabled-only name] The refusal of a write
+ * naming no package of a name every holder of which is disabled. A disabled
+ * package holds no name, so the read naming no package answers the missing
+ * name; the write names no package either, and points to the one way to act
+ * on that package's item. `409 RESOURCE_CONFLICT`, the refusal family of
+ * {@link packagelessAddressAmbiguityRefusal}, with no new code.
+ */
+export function disabledHoldersOnlyRefusal(
+    verb: 'save' | 'delete',
+    type: string,
+    name: string,
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+    const [nothing, single] = verb === 'save'
+        ? ['Nothing was written.', 'no row to write']
+        : ['Nothing was deleted.', 'no row to remove'];
+    const err = new Error(
+        `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
+        + `in process pass packageId. ${nothing} ${type} '${name}' is held by no enabled package, and a ${verb} `
+        + `that names none has ${single}.`,
+    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+    err.code = 'RESOURCE_CONFLICT';
+    err.status = 409;
+    return err;
+}
+
+/**
+ * [ADR-0150 D3] THE HOLDERS a write naming no package counts before it takes
+ * its address from the stored rows' bindings ({@link packagelessAddress}):
+ * the holders the read naming no package counts, so the bare save (publish
+ * and draft mode) and the bare delete answer the name as the bare read does.
+ * Asked after {@link servedPackagelessSaveAddress} (a name an enabled and a
+ * disabled package both hold) and after the rows' own refusal (two or more
+ * bindings), so neither answer moves.
+ *
+ *  - Every package holding the name is disabled (a registry holder, a code
+ *    shipper or a stored row's binding; a row bound to a disabled holder's
+ *    customization pair is that holder's): {@link disabledHoldersOnlyRefusal},
+ *    naming no package. The write edited the disabled package's row, or
+ *    stored a row every read then withholds.
+ *  - `undefined` otherwise: no holder, one enabled holder, a package-unbound
+ *    row stored at the address or the environment's own item (ADR-0150 D3
+ *    (a): the row the write edits), a type the registry does not read by
+ *    package, or a registry without the reads.
+ */
+export function packagelessHolderRefusal(
+    host: Pick<ProtocolHost, 'engine' | 'shippedArtifactsOf'>,
+    verb: 'save' | 'delete',
+    shownType: string,
+    type: string,
+    name: string,
+    member: string | undefined,
+    address: { readonly candidates: readonly string[]; readonly unbound: boolean },
+): (Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined {
+    if (address.unbound) return undefined;
+    const registry = host.engine?.registry as HolderRegistry | undefined;
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
+        return undefined;
+    }
+    if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    const disabled = (id: string): boolean => registry.isPackageDisabled?.(id) === true;
+    const known = [...new Set([
+        ...(registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? []),
+        ...shippingPackageIds(host.shippedArtifactsOf(type, name)),
+    ])];
+    const installed = installedManifestsOfEngine(host.engine);
+    const disabledHoldersPair = (id: string): boolean => known.some((holder) => disabled(holder) && pairsOf(holder, installed).includes(id));
+    const every = [...new Set([...known, ...address.candidates])];
+    if (every.length === 0 || every.some((id) => !disabled(id) && !disabledHoldersPair(id))) return undefined;
+    return disabledHoldersOnlyRefusal(verb, shownType, name);
+}
+
+/** The registry reads {@link packagelessHolderRefusal} asks, each optional-called. */
+interface HolderRegistry {
+    readsByPackage?(type: string): boolean;
+    getEnvironmentScopedItem?(type: string, name: string, member?: string): unknown;
+    packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined;
+    isPackageDisabled?(id: string): boolean;
 }
