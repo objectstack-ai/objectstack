@@ -70,8 +70,10 @@ import {
     judgeDroppedServiceRefusal,
     packageScopedRefusalOf,
     rethrowPackageScopedRefusal,
+    registryAnswerAtAddress,
     servedFromDisabledHolder,
     serviceAnswerFitsBareAction,
+    serviceCopyOfAnotherPackage,
 } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
@@ -296,9 +298,14 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
         // or a disabled package's customization ({@link servedFromDisabledHolder}),
         // as in {@link getMetaItem}.
+        // [ADR-0150 D3, red line 2] …or, at an address naming a package the
+        // exact qualifier does not judge, another package's item, as in
+        // {@link getMetaItem} ({@link serviceCopyOfAnotherPackage}): the
+        // lookups below read the package's own.
         if (fromService.data !== undefined && fromService.data !== null
             && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
-                || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
+                || await servedFromDisabledHolder(host, request.name, fromService.data)))
+            && !(exactAddress === undefined && serviceCopyOfAnotherPackage(host, request, fromService.data))) {
             // [#26699] …when it is the member this read addresses, as in
             // {@link getMetaItem}: the service keys a type's items by name
             // alone, so for a bundle it holds whichever member it
@@ -400,6 +407,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
         }
+        // [ADR-0150 D3/D5, red line 2] …and at such an address, the package's
+        // own item or none, as {@link getMetaItem}'s code step answers there
+        // ({@link registryAnswerAtAddress}): a package that holds no item of
+        // the name read another package's artifact or first composite.
+        if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember)));
         if (regItem !== undefined) code = regItem;
     }
 

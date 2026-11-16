@@ -37,7 +37,7 @@
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import type { TranslationBundle } from '@objectstack/spec/system';
-import { engineCanRollBack, readAuthoredTranslationLayer } from '@objectstack/core';
+import { engineCanRollBack, isPackageScopedType, readAuthoredTranslationLayer } from '@objectstack/core';
 import { restoreTranslatedEchoes } from './protocol-translated-echo.js';
 import type { RestoredTranslatedSlot } from './protocol-translated-echo.js';
 import {
@@ -49,6 +49,7 @@ import {
 import { pairsOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { storedBodyForCarryForward } from './protocol-credential-carry-forward.js';
+import { registryAnswerAtAddress, serviceCopyOfAnotherPackage } from './protocol-meta-item-reads.js';
 import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 import {
     HAND_CRAFTED_SCHEMAS,
@@ -1121,13 +1122,24 @@ export class ProtocolDiscoveryAndBasesFacet {
             name: string,
             packageId: string | null,): Promise<unknown> {
         const pkg = packageId ?? undefined;
+        // [ADR-0150 D3/D5, red line 2] At a package address of a type the
+        // exact qualifier does not judge, the code layer is that package's
+        // own item or none, as the by-name read's code steps answer there
+        // ({@link serviceCopyOfAnotherPackage}, {@link registryAnswerAtAddress}):
+        // the service keeps such a type by name alone, and a package holding
+        // no item of the name read another package's first composite, so the
+        // save carried that package's credential forward.
+        const address = { type, name, ...(pkg !== undefined ? { packageId: pkg } : {}) };
+        const atAddress = pkg !== undefined && !isPackageScopedType(type);
         const fromService = await host.readItemFromMetadataService(type, name, pkg);
-        if (fromService.data !== undefined && fromService.data !== null) return fromService.data;
+        if (fromService.data !== undefined && fromService.data !== null
+            && !(atAddress && serviceCopyOfAnotherPackage(host, address, fromService.data))) return fromService.data;
         let item: unknown = host.lookupArtifactItem(type, name, pkg) ?? host.engine.registry.getItem(type, name, pkg);
         if (item === undefined) {
             const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
             if (alt) item = host.engine.registry.getItem(alt, name, pkg);
         }
+        if (atAddress) item = registryAnswerAtAddress(host, address, item, undefined, () => true);
         if (item !== undefined && item !== null) return item;
         if (fromService.degraded) host.throwMetadataServiceUnavailable(fromService.errors);
         return undefined;

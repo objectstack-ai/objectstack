@@ -434,6 +434,36 @@ export function serviceCopyOfAnotherPackage(
     return !isPairOf(served, packageId, installed) && !isPairOf(packageId, served, installed);
 }
 
+/**
+ * [ADR-0150 D3/D5, red line 2] The item the code layers (the artifact lookup
+ * and the registry) answer at an address naming a package (`?package=X`) of
+ * a type the exact qualifier does not judge: X's own item, or nothing, so the
+ * read answers 404. Another package's item ({@link serviceCopyOfAnotherPackage}'s
+ * test, applied to the code layers' answer) is replaced by the registry's
+ * package slot for X; when X holds no item of the name, nothing is served.
+ *
+ * Before, a package that holds no item of the name answered `getItem`'s last
+ * tier, the first composite across packages: another package's item, under
+ * X's envelope. Unchanged: an item bound to no package (the environment's
+ * entry), an item stamped X, a customization pair's item, a stamp the
+ * registry does not know, and an `object`.
+ */
+export function registryAnswerAtAddress(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string; packageId?: string },
+    item: unknown,
+    member: string | undefined,
+    isWantedMember: (candidate: unknown) => boolean,
+): unknown {
+    if (!request.packageId || item === undefined || item === null) return item;
+    if (!serviceCopyOfAnotherPackage(host, request, item)) return item;
+    const scoped = host.engine?.registry as { getPackageScopedItem?(type: string, name: string, packageId: string, member?: string): unknown } | undefined;
+    const own = typeof scoped?.getPackageScopedItem === 'function'
+        ? scoped.getPackageScopedItem(request.type, request.name, request.packageId, member)
+        : undefined;
+    return own !== undefined && own !== null && isWantedMember(own) ? own : undefined;
+}
+
 /** The same item: one object, or (a loader's fresh copy) the same JSON. */
 function sameStoredItem(left: unknown, right: unknown): boolean {
     if (left === right) return true;
@@ -1222,6 +1252,9 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // member wherever it sits (its own [#22877] note), and still answers a
     // bundle that ships no canonical member at all; a named member that no
     // layer holds answers nothing, so the door answers it as absent.
+    // [ADR-0150 D3/D5] Whether the answer below is the code layers' (the
+    // artifact lookup and the registry), judged at the end of step 3.
+    const reachedCodeLayers = item === undefined;
     if (item === undefined && wantedMember !== undefined) {
         const artifact = host.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
         if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
@@ -1276,6 +1309,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         if (item !== undefined && wantedMember !== undefined && memberAddress !== undefined) {
             item = host.registryMemberServedAt(request.type, request.name, memberAddress, item, member);
         }
+    }
+    // [ADR-0150 D3/D5, red line 2] …and the code layers' answer at such an
+    // address is the package's own item or nothing
+    // ({@link registryAnswerAtAddress}): a package that holds no item of the
+    // name answered `getItem`'s first composite, another package's item.
+    if (reachedCodeLayers && exactAddress === undefined) {
+        item = registryAnswerAtAddress(host, request, item, member, isWantedMember);
     }
 
     // [#5840] The MetadataService half of the #5532 rule, and the last

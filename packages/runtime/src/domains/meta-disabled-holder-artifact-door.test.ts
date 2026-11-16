@@ -249,6 +249,68 @@ describe('[#34040] CONTROL — one body ships the doc: its exact address answers
     });
 });
 
+// [#34247, ADR-0150 D3/D5, red line 2] The exact address of a doc the package
+// it names ships none of, on the same rig: 404 on the plain read and `/layers`,
+// never another holder's doc. BASE (origin/main 01598d93, PR #34241 merged):
+// `?package=` of a package that ships no doc of the name (installed, or not
+// installed at all) answered 200 with a holder's doc on both transports and on
+// both doors (the first registered after the step-2 decline, else the service's
+// copy); `/layers?package=alpha` answered beta's code and effective layers even
+// where alpha ships the doc, whenever beta registered last.
+const GAMMA = 'com.qa.gamma';
+const NOT_INSTALLED = 'com.qa.unknown';
+
+/** The plain read and `/layers` of the doc at `?package=`, on both transports. */
+async function exactDocAndLayers(booted: Booted, packageId: string) {
+    const query = { package: packageId };
+    return [
+        ...(await exactDocDoors(booted, packageId)),
+        { door: `dispatcher doc/shared_doc/layers?package=${packageId}`, ...(await viaDispatcher(booted.kernel, '/meta/doc/shared_doc/layers', query)) },
+        { door: `rest doc/shared_doc/layers?package=${packageId}`, ...(await viaRest(booted, '/meta/:type/:name/layers', { type: 'doc', name: 'shared_doc' }, query)) },
+    ];
+}
+
+describe.each([
+    { order: 'alpha registered first, both ship', packages: [ALPHA, BETA, GAMMA], ships: [ALPHA, BETA] },
+    { order: 'beta registered first, both ship', packages: [BETA, ALPHA, GAMMA], ships: [ALPHA, BETA] },
+    { order: 'alpha registered first, beta alone ships', packages: [ALPHA, BETA, GAMMA], ships: [BETA] },
+    { order: 'beta registered first, beta alone ships', packages: [BETA, ALPHA, GAMMA], ships: [BETA] },
+])('[#34247] the artifact door: the exact address of a doc its package ships none of, $order', ({ packages, ships }) => {
+    let booted: Booted | undefined;
+
+    beforeAll(async () => {
+        booted = await bootArtifactKernel(packages, docBodyOf(ships));
+    }, 120_000);
+
+    afterAll(async () => {
+        if (!booted) return;
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        rmSync(booted.root, { recursive: true, force: true });
+    });
+
+    it('`?package=` of a package shipping none (installed or not) answers 404 on the plain read and /layers, both transports, never a holder\'s doc', async () => {
+        const nonHolders = [ALPHA, GAMMA, NOT_INSTALLED].filter((id) => !ships.includes(id));
+        for (const packageId of nonHolders) {
+            for (const answer of await exactDocAndLayers(booted!, packageId)) {
+                expect([answer.status, errorCodeOf(answer.body), answer.door], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND', answer.door]);
+                expect(JSON.stringify(answer.body ?? null), answer.door).not.toMatch(/(alpha|beta) doc/);
+            }
+        }
+    });
+
+    it('CONTROL: each holder\'s address answers its own doc on the plain read and /layers (code and effective), both transports', async () => {
+        for (const packageId of ships) {
+            const label = `${packageId.split('.').pop()} doc`;
+            for (const answer of await exactDocAndLayers(booted!, packageId)) {
+                const served = answer.door.includes('/layers')
+                    ? [answer.body?.code?.label, answer.body?.effective?.label]
+                    : [(answer.body?.item ?? answer.body)?.label];
+                expect([answer.status, ...served, answer.door], JSON.stringify(answer.body)).toEqual([200, ...served.map(() => label), answer.door]);
+            }
+        }
+    });
+});
+
 // [#34040 acceptance item 4, review-c N2/N6 on PR #34036] The bare doc read's
 // refusal on the same composed rig, and the two package-less registry entries
 // beside two enabled holders. A hydrated row is laid as the hydrator lays it:
