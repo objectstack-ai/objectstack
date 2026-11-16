@@ -30,6 +30,14 @@
  * break-glass clause, which kept a local credential reachable by population,
  * holds on self-hosted deployments only.
  *
+ * Membership and membership roles are the hosting organisation's too: the two
+ * doors that change them, `/organization/remove-member` and
+ * `/organization/update-member-role` (Make Owner included, which sends the
+ * owner role to it), refuse every request, as `/organization/invite-member`
+ * does. A change made here would hold in the environment alone. The one door
+ * left open is `/organization/add-member`, platform-administrator only: it is
+ * the operator's way to restore a membership the environment lost.
+ *
  * Every refusal is `409 RESOURCE_CONFLICT`, no code minted — the answer
  * cloud-connection's platform-managed doors give, on the same rule: the
  * refusal comes from the runtime's state, not from the request (ADR-0112's
@@ -83,6 +91,15 @@ export const CLOUD_MANAGED_REFUSAL_MESSAGES = {
   requestPasswordReset:
     "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and no "
     + 'local password is set or reset here for anyone, an administrator included. No reset link or code was sent.',
+  // `/organization/remove-member` (`sys_member.remove_member`).
+  removeMember:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + 'so a member cannot be removed here. Remove them in that organisation instead. No member was removed.',
+  // `/organization/update-member-role` (`sys_member.update_member_role` and
+  // `sys_member.transfer_ownership`, which sends the owner role to it).
+  updateMemberRole:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + "so a member's role cannot be changed here. Change it in that organisation instead. No role was changed.",
 } as const;
 
 /** The doors a cloud-managed environment narrows. */

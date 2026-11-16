@@ -799,6 +799,117 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the s
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Membership and roles
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * On a cloud-managed environment the organisation that hosts it manages who
+ * is a member and with which role. The two doors that change a membership,
+ * `remove-member` and `update-member-role` (Make Owner sends the owner role to
+ * the second), refuse with the invite-member envelope and write nothing; the
+ * remove-member permission arm and the role-change grant read stay behind the
+ * refusal, so neither runs. `add-member`, platform-administrator only, stays
+ * open: it restores a membership the environment lost. Self-hosted, every door
+ * answers as before.
+ */
+describe('on a cloud-managed environment, membership and roles are managed by the hosting organisation', () => {
+  type Staged = Awaited<ReturnType<typeof stage>>;
+  const memberships = (s: Staged) =>
+    ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.organization_id === DEFAULT_ORG);
+  const membershipOf = (s: Staged, userId: string) => memberships(s).find((m) => String(m.user_id) === userId);
+
+  /** The ordinary user's membership row, read before the case changes anything. */
+  const memberRow = (s: Staged) => {
+    const row = membershipOf(s, s.ids.member);
+    expect(row, 'fixture invariant: the ordinary user holds a default-org membership').toBeDefined();
+    expect(row.role, 'fixture invariant: as a plain member').toBe('member');
+    return row;
+  };
+
+  type DoorPath = '/organization/remove-member' | '/organization/update-member-role';
+  const DOORS: ReadonlyArray<
+    [string, DoorPath, 'removeMember' | 'updateMemberRole', (memberId: string) => Record<string, unknown>]
+  > = [
+    ['remove-member', '/organization/remove-member', 'removeMember',
+      (memberId) => ({ memberIdOrEmail: memberId, organizationId: DEFAULT_ORG })],
+    ['update-member-role', '/organization/update-member-role', 'updateMemberRole',
+      (memberId) => ({ memberId, role: 'admin', organizationId: DEFAULT_ORG })],
+    ['update-member-role to owner (Make Owner)', '/organization/update-member-role', 'updateMemberRole',
+      (memberId) => ({ memberId, role: 'owner', organizationId: DEFAULT_ORG })],
+  ];
+
+  it.each(DOORS)('%s answers 409 RESOURCE_CONFLICT to the owner, and the membership row is unchanged', async (_door, path, door, body) => {
+    const s = await stage();
+    const row = memberRow(s);
+    const before = structuredClone(memberships(s));
+    setManaged(true);
+    const v = await verdict(await s.fire(path, body(String(row.id)), s.bearers.admin));
+    expectManagedRefusal(v, door);
+    expect(memberships(s)).toEqual(before);
+  }, 120_000);
+
+  it.each(DOORS)('%s refuses ahead of the arms behind it: no permission judge runs and no grant read is taken', async (_door, path, _key, body) => {
+    const s = await stage();
+    const row = memberRow(s);
+    const permissionJudge = vi.spyOn(s.manager, 'assertRemoveMemberPermitted');
+    const grantRead = vi.spyOn(s.manager as any, 'roleChangeGrantDeps');
+    setManaged(true);
+    const v = await verdict(await s.fire(path, body(String(row.id)), s.bearers.admin));
+    expect(v.status, v.text).toBe(409);
+    expect(permissionJudge).not.toHaveBeenCalled();
+    expect(grantRead).not.toHaveBeenCalled();
+  }, 120_000);
+
+  it.each(DOORS)('CONTROL: self-hosted, %s answers 200 and changes the membership as before', async (_door, path, _key, body) => {
+    const s = await stage();
+    const row = memberRow(s);
+    const permissionJudge = vi.spyOn(s.manager, 'assertRemoveMemberPermitted');
+    const grantRead = vi.spyOn(s.manager as any, 'roleChangeGrantDeps');
+    const sent = body(String(row.id));
+    const v = await verdict(await s.fire(path, sent, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    if (path === '/organization/remove-member') {
+      expect(membershipOf(s, s.ids.member)).toBeUndefined();
+      // The spy legs above are measured against arms that do run here.
+      expect(permissionJudge).toHaveBeenCalled();
+    } else {
+      expect(membershipOf(s, s.ids.member)?.role).toBe(sent.role);
+      expect(grantRead).toHaveBeenCalled();
+    }
+  }, 120_000);
+
+  it('CONTROL: add-member still answers a platform administrator, and restores a membership the environment lost', async () => {
+    const s = await stage();
+    const row = memberRow(s);
+    s.engine.tables.set(
+      'sys_member',
+      ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.id !== row.id),
+    );
+    expect(membershipOf(s, s.ids.member)).toBeUndefined();
+    setManaged(true);
+    const v = await verdict(
+      await s.fire('/organization/add-member', { userId: s.ids.member, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.admin),
+    );
+    expect(v.status, v.text).toBe(200);
+    expect(membershipOf(s, s.ids.member)?.role).toBe('member');
+  }, 120_000);
+
+  it('CONTROL: invite-member keeps its own refusal, not a membership one', async () => {
+    const s = await stage();
+    setManaged(true);
+    const v = await verdict(
+      await s.fire('/organization/invite-member', {
+        email: 'newcomer.membership@example.com',
+        role: 'member',
+        organizationId: DEFAULT_ORG,
+      }, s.bearers.admin),
+    );
+    expectManagedRefusal(v, 'invitation');
+    expect(s.invitationsOf('newcomer.membership@example.com')).toHaveLength(0);
+  }, 120_000);
+});
+
 describe('[#25083] what a host that mounts its own twin of a door imports', () => {
   // The cloud mounts a per-environment twin of `set-initial-password`
   // (objectstack-ai/cloud#3169). It takes the same arm from the package entry,
