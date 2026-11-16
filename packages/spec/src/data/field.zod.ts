@@ -1315,6 +1315,12 @@ const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/
  * - **Path.** A field of the edited record (`quote_date`), or ONE lookup hop
  *   from it (`account.cb_market`: the `account` lookup on the edited record,
  *   then `cb_market` on the account it points at). Two hops are refused.
+ *   [#34378] A path through or to a MULTI-VALUED field (`isMultiValueField`:
+ *   one flagged `multiple: true`, or a multiselect, checkboxes or tags field)
+ *   has no single value — `accounts.cb_market` through a `multiple: true`
+ *   lookup, `tags`, or `account.markets` ending at one — so it is not resolved,
+ *   and `os lint` refuses it (`object-field-ref-unknown`). The picker's
+ *   handling of such a path is #34389.
  * - **Operator.** Only the six scalar comparisons
  *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
  *   value: never a member of an `in` / `notIn` list.
@@ -1361,7 +1367,9 @@ export const LookupFilterRecordReferenceSchema = lazySchema(() => strictObject({
   }).describe('Path of the value on the record being edited: a field name (`quote_date`) or one lookup hop (`account.cb_market`) — at most one dot.'),
 })).describe(
   'A lookupFilters comparand read from the record being edited: { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup hop). '
-  + 'The picker replaces it with that value before querying; unlike { $field }, which names a column of the candidate row.',
+  + 'The picker replaces it with that value before querying; unlike { $field }, which names a column of the candidate row. '
+  + 'A path through or to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) '
+  + 'has no single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`).',
 );
 
 export type LookupFilterRecordReference = z.input<typeof LookupFilterRecordReferenceSchema>;
@@ -2262,7 +2270,9 @@ export const FieldSchema = lazySchema(() => {
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
       + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
-      + 'value in place of the reference; every other picker host leaves the entry out.',
+      + 'value in place of the reference; every other picker host leaves the entry out. A { $record } path through or '
+      + 'to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) has no '
+      + 'single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`).',
     ),
     orEmpty: z.boolean().optional().describe(
       'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
