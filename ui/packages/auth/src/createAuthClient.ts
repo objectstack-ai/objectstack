@@ -10,7 +10,7 @@ import { createAuthClient as createBetterAuthClient, parseJSON } from 'better-au
 import { organizationClient, twoFactorClient } from 'better-auth/client/plugins';
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
-  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
+  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationProofInput, AuthInvitationProofOutcome, AuthPublicConfig,
   SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
@@ -1382,6 +1382,33 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     async acceptInvitation(invitationId: string): Promise<void> {
       const { error } = await (betterAuth as any).organization.acceptInvitation({ invitationId });
       if (error) throw toAuthError(error, 'Failed to accept invitation');
+    },
+
+    async acceptInvitationWithProof(input: AuthInvitationProofInput): Promise<AuthInvitationProofOutcome> {
+      const url = `${origin}${basePath}/organization/accept-invitation-with-proof`;
+      const response = await bearerFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(input),
+      });
+      const body = (await response.json().catch(() => null)) as
+        | { outcome?: unknown; organizationId?: unknown; code?: string; message?: string; error?: { code?: string; message?: string } }
+        | null;
+      if (!response.ok) {
+        const code = body?.code ?? body?.error?.code;
+        const err = new Error(
+          body?.message ?? body?.error?.message ?? `Invitation acceptance failed with status ${response.status}`,
+        ) as Error & { code?: string; status?: number };
+        if (code) err.code = code;
+        err.status = response.status;
+        throw err;
+      }
+      if (body?.outcome === 'accepted' && typeof body.organizationId === 'string') {
+        return { outcome: 'accepted', organizationId: body.organizationId };
+      }
+      if (body?.outcome === 'sign_in' || body?.outcome === 'verify_email') return { outcome: body.outcome };
+      throw new Error('acceptInvitationWithProof: unexpected response body');
     },
 
     async rejectInvitation(invitationId: string): Promise<void> {
