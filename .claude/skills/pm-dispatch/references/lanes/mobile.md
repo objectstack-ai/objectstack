@@ -4,9 +4,9 @@
 
 ## 形态
 
-- 本席为姊妹仓执行座位:mobile 仓认领、派发、复核,按落地条落地;余止于 ACCEPT,归维护者。
+- 本席为姊妹仓执行座位:mobile 仓认领、派发、L1,按落地条落地;余止于 ACCEPT,归维护者。
 - 按需席:维护者以指令行 `pm-dispatch mobile` 召唤;本席不建巡查 routine。
-- 退席按 SKILL.md 自退四件(队列空、无在飞、无待复核、决策箱无新答复)。
+- 退席按 SKILL.md 自退四件(队列空、无在飞、无待 L1/L2、决策箱无新答复)。
 - 信箱随召唤开、随退席关。
 - 前提:mobile 仓的原生壳改造已进其 `main`;之前 ⛔ 不召唤本席。
 - 座位贴住 mobile 仓,带 `pm:seat`;车队总表经 `fleet-roster.mjs` 默认仓列读到它。
@@ -42,7 +42,7 @@
 - 落地前读 `main` 最新 EAS Build/Update 运行:有 build/publish 步骤真跑即停落,升决策箱求新裁定。
 - 设备验证无 CI 载体:需真机的验收项写进 PR `## 维护者速读` 的「需要你做的」。
 - ⛔ 未上真机的项不报已验;落地不等于已上真机。
-- 本仓有 `.changeset/` 而无 changeset 门禁:用户可见变更随 PR 带 changeset,席位复核时核对。
+- 本仓有 `.changeset/` 而无 changeset 门禁:用户可见变更随 PR 带 changeset,席位 L1 审核时核对。
 - 不扩散需求:创业阶段聚焦原则全额适用;原生能力卡第一问恒为 Web 是否真做不到。
 - 框架单源在 SKILL.md 〈升级与决策〉,⛔ 不另抄。
 - pm 状态机词表各仓统一,幂等创建在 `scripts/pm/ensure-pm-labels.sh`,对 mobile 实跑是落地步骤。

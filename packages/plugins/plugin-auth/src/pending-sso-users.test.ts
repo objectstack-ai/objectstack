@@ -34,6 +34,7 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { SysUser } from '@objectstack/platform-objects/identity';
+import { celEngine } from '@objectstack/formula';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-33181';
@@ -237,10 +238,12 @@ beforeAll(async () => {
  * staging gave, so no case sees another's writes. The tests switch the mode
  * on afterwards: every door under test reads the accessor per request.
  */
-async function stage(opts: { adminPlugin?: boolean; host?: EnvironmentUserHost | 'none'; tables?: Map<string, any[]> } = {}) {
+async function stage(
+  opts: { adminPlugin?: boolean; host?: EnvironmentUserHost | 'none'; tables?: Map<string, any[]>; config?: Record<string, unknown> } = {},
+) {
   const engine = createMemoryEngine();
   for (const [name, rows] of structuredClone(opts.tables ?? staged.tables)) engine.tables.set(name, rows);
-  const manager = makeManager(engine, opts.adminPlugin ?? false);
+  const manager = makeManager(engine, opts.adminPlugin ?? false, opts.config);
   const told: Array<{ kind: string; event: EnvironmentUserEvent }> = [];
   const recordingHost: EnvironmentUserHost = {
     userAdded: (event) => void told.push({ kind: 'added', event }),
@@ -1075,5 +1078,252 @@ describe('[#33186] the Setup → Users add actions reach the pending-person door
     }
     expect(s.users()).toHaveLength(before);
     expect(s.row(ADD_DIALOG.email)).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: the console's offer of a DECLARED action, and what it posts
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Shared by the two describes below; the first one's header says how they judge.
+
+/** The session payload's principal for the staged admin: the platform-admin rung the doors' gate judges. */
+const ADMIN_PRINCIPAL = { id: 'staged-admin', email: EMAILS.admin, positions: [] as string[], isPlatformAdmin: true };
+
+function declaredAction(name: string) {
+  const action = (SysUser.actions ?? []).find((a) => a.name === name);
+  if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+  return action;
+}
+
+/** The console's verdict on the declared action for this row, under the features this kernel serves. */
+function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Record<string, unknown>): boolean | string {
+  const raw = declaredAction(name).visible as unknown;
+  const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
+  if (typeof source !== 'string') return `NO CEL SOURCE on ${name}`;
+  const features = (s.manager.getPublicConfig() as any).features;
+  const user = { ...ADMIN_PRINCIPAL, id: s.ids.admin };
+  const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, extra: { current_user: user, user, ctx: { user }, features } });
+  if (!r.ok) return `FAULT ${r.error.message.split('\n')[0]!.trim()}`;
+  return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+}
+
+/**
+ * What the action posts for this row: its constant `bodyExtra`, the record id
+ * under `recordIdParam`, then the collected params.
+ */
+function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
+  const action = declaredAction(name);
+  const target = String(action.target);
+  expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
+  const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
+  for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
+  const extra = ((action as { bodyExtra?: Record<string, unknown> }).bodyExtra ?? {});
+  return { path: target.slice(BASE.length), body: { ...extra, [String(action.recordIdParam)]: userId, ...collected } };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Deactivate / Reactivate are offered without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.ban_user` / `unban_user` are the deactivate / reactivate doors'
+// first-party callers. On a kernel without the better-auth admin plugin the
+// doors work (above), so the console must offer them there too. Each case
+// judges the DECLARED action's `visible` against the features THIS kernel
+// serves (`getPublicConfig().features`, what `/auth/config` hands the console)
+// through the engine the console delegates to, then posts what the action
+// submits — its `recordIdParam` naming the row, its params collected — to its
+// `target`. CONTROL: an action whose door needs the plugin stays hidden there.
+
+describe('[#33759] Ban / Unban are offered and work without the admin plugin', () => {
+  it.each([
+    ['unmanaged', false],
+    ['managed', true],
+  ] as const)('%s kernel: Ban is offered and refuses the next session, then Unban is offered and restores it', async (_kind, managed) => {
+    const s = managed ? await managedStage() : await stage();
+    expect((s.manager.getPublicConfig() as any).features.admin, 'this kernel serves features.admin off').toBe(false);
+
+    expect(offeredOn(s, 'ban_user', s.row(EMAILS.member)!)).toBe(true);
+    expect(offeredOn(s, 'unban_user', s.row(EMAILS.member)!)).toBe(false);
+    const ban = actionCall('ban_user', s.ids.member, { banReason: 'left the company' });
+    const banned = await s.fire(ban.path, ban.body, s.bearers.admin);
+    expect(banned.status, await banned.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.banned).toBe(true);
+
+    const refused = await verdict(await s.signIn(EMAILS.member));
+    expect(refused.status, refused.text).toBe(403);
+    expect(refused.code).toBe(BANNED_USER_SESSION_REFUSAL.code);
+    expect(s.rowsOf('sys_session', s.ids.member)).toHaveLength(0);
+
+    expect(offeredOn(s, 'unban_user', s.row(EMAILS.member)!)).toBe(true);
+    expect(offeredOn(s, 'ban_user', s.row(EMAILS.member)!)).toBe(false);
+    const unban = actionCall('unban_user', s.ids.member);
+    const unbanned = await s.fire(unban.path, unban.body, s.bearers.admin);
+    expect(unbanned.status, await unbanned.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.banned).toBe(false);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+
+  it('CONTROL: an admin-plugin-only action stays hidden on that kernel and is offered once the plugin is on', async () => {
+    const off = await stage();
+    expect(offeredOn(off, 'impersonate_user', off.row(EMAILS.member)!)).toBe(false);
+    const on = await stage({ adminPlugin: true });
+    expect((on.manager.getPublicConfig() as any).features.admin).toBe(true);
+    expect(offeredOn(on, 'impersonate_user', on.row(EMAILS.member)!)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Unlock is offered and works without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.unlock_user` posts to `admin/unlock-user`, an ObjectStack mount
+// (ADR-0069 D2) whose handler clears the lockout through the data engine; the
+// lockout itself (`sys_user.locked_until` / `failed_login_count`) is stamped by
+// this plugin's own sign-in path, with no better-auth admin plugin involved.
+// Each case locks the member the way the lockout locks anyone, by
+// `lockoutThreshold` wrong passwords through the real sign-in, shows the right
+// password refused while the lock holds, then judges and drives the DECLARED
+// action against the door and signs in again.
+
+describe('[#34010] Unlock is offered and works without the admin plugin', () => {
+  const LOCKOUT = { lockoutThreshold: 3, lockoutDurationMinutes: 15 };
+  const WRONG_PASSWORD = 'Wr0ng!Guess-34010';
+
+  /** Lock the member through the sign-in lockout itself, and show the lock holding against the right password. */
+  async function lockMember(s: Awaited<ReturnType<typeof stage>>): Promise<void> {
+    for (let i = 0; i < LOCKOUT.lockoutThreshold; i++) {
+      expect((await s.signIn(EMAILS.member, WRONG_PASSWORD)).status, `wrong password ${i + 1}`).toBe(401);
+    }
+    const lockedUntil = new Date(s.row(EMAILS.member)!.locked_until).getTime();
+    expect(lockedUntil, 'the lockout stamped a lock in the future').toBeGreaterThan(Date.now());
+    const sessions = s.rowsOf('sys_session', s.ids.member).length;
+    const held = await verdict(await s.signIn(EMAILS.member));
+    expect(held.status, held.text).toBe(401);
+    expect(s.rowsOf('sys_session', s.ids.member), 'the locked account got no session').toHaveLength(sessions);
+  }
+
+  it.each([
+    ['unmanaged', false],
+    ['managed', true],
+  ] as const)('%s kernel: a locked account is offered Unlock, the door releases it, and the next sign-in succeeds', async (_kind, managed) => {
+    const s = managed ? await managedStage({ config: LOCKOUT }) : await stage({ config: LOCKOUT });
+    expect((s.manager.getPublicConfig() as any).features.admin, 'this kernel serves features.admin off').toBe(false);
+    await lockMember(s);
+
+    expect(offeredOn(s, 'unlock_user', s.row(EMAILS.member)!)).toBe(true);
+    const unlock = actionCall('unlock_user', s.ids.member);
+    // The door's platform-admin gate holds without the plugin: a caller without
+    // the standing is refused and the lock stays.
+    const denied = await verdict(await s.fire(unlock.path, unlock.body, s.bearers.idp));
+    expect(denied.status, denied.text).toBe(403);
+    expect(denied.code).toBe('PERMISSION_DENIED');
+    expect(s.row(EMAILS.member)!.locked_until).toBeTruthy();
+
+    const res = await s.fire(unlock.path, unlock.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
+    expect(Number(s.row(EMAILS.member)!.failed_login_count)).toBe(0);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+
+  it('CONTROL: with the plugin on, Unlock is offered and releases the account as before', async () => {
+    const s = await stage({ adminPlugin: true, config: LOCKOUT });
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(true);
+    await lockMember(s);
+
+    expect(offeredOn(s, 'unlock_user', s.row(EMAILS.member)!)).toBe(true);
+    const unlock = actionCall('unlock_user', s.ids.member);
+    const res = await s.fire(unlock.path, unlock.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Set Password is offered and works without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.set_user_password` posts to `admin/set-user-password`, plugin-auth's
+// wrapper registered ahead of the catch-all: it runs the platform-admin gate,
+// then hashes through better-auth's core `internalAdapter`, which every kernel
+// carries, with or without the vendor admin plugin. Each case judges the
+// DECLARED action under the features the kernel serves, drives what it posts
+// (its `bodyExtra`, `recordIdParam` and collected params), and signs in with
+// the new password. The action's other rule is kept: it is hidden on a
+// cloud-managed environment, whose door refuses every target.
+
+describe('[#34130] Set Password is offered and works without the admin plugin', () => {
+  const COLLECTED = { newPassword: NEW_PASSWORD, mustChangePassword: false, revokeSessionsAndKeys: false };
+
+  it('unmanaged kernel: Set Password is offered, the door sets the password, and the member signs in with it', async () => {
+    const s = await stage();
+    const features = (s.manager.getPublicConfig() as any).features;
+    expect(features.admin, 'this kernel serves features.admin off').toBe(false);
+    expect(features.cloudManaged ?? false).toBe(false);
+
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(true);
+    const call = actionCall('set_user_password', s.ids.member, COLLECTED);
+    // The door's platform-admin gate holds without the plugin: a caller without
+    // the standing is refused and the old password still signs in.
+    const denied = await verdict(await s.fire(call.path, call.body, s.bearers.idp));
+    expect(denied.status, denied.text).toBe(403);
+    expect(denied.code).toBe('PERMISSION_DENIED');
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(401);
+
+    const res = await s.fire(call.path, call.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+    expect((await s.signIn(EMAILS.member)).status).toBe(401);
+  });
+
+  it('unmanaged kernel: with the dialog defaults the door also flags the member and revokes their sessions', async () => {
+    const s = await stage();
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(false);
+    // The values the dialog submits when the admin types only the password:
+    // every other declared param at its declared default.
+    const defaults = Object.fromEntries(
+      (declaredAction('set_user_password').params ?? [])
+        .filter((p) => p.defaultValue !== undefined)
+        .map((p) => [String(p.name ?? p.field), p.defaultValue]),
+    );
+    expect(defaults).toEqual({ mustChangePassword: true, revokeSessionsAndKeys: true });
+    expect(s.rowsOf('sys_session', s.ids.member).length, 'the member holds a session before').toBeGreaterThan(0);
+
+    const call = actionCall('set_user_password', s.ids.member, { newPassword: NEW_PASSWORD, ...defaults });
+    const v = await verdict(await s.fire(call.path, call.body, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    const data = JSON.parse(v.text).data;
+    expect(data.mustChangePassword).toBe(true);
+    expect(data.revokeSessionsAndKeys).toBe(true);
+    expect(data.revoked?.complete).toBe(true);
+    expect(s.row(EMAILS.member)!.must_change_password).toBe(true);
+    // Revocation stamps each session row rather than deleting it.
+    const sessions = s.rowsOf('sys_session', s.ids.member);
+    expect(data.revoked.sessions).toBe(sessions.length);
+    for (const row of sessions) {
+      expect(row.revoke_reason).toBe('admin_password_reset');
+      expect(new Date(row.expires_at).getTime()).toBeLessThanOrEqual(Date.now());
+    }
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+  });
+
+  it('managed kernel: Set Password stays hidden, the rule kept beside the dropped gate', async () => {
+    const s = await managedStage();
+    const features = (s.manager.getPublicConfig() as any).features;
+    expect(features.admin).toBe(false);
+    expect(features.cloudManaged).toBe(true);
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(false);
+  });
+
+  it('CONTROL: with the plugin on, Set Password is offered and sets the password as before', async () => {
+    const s = await stage({ adminPlugin: true });
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(true);
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(true);
+    const call = actionCall('set_user_password', s.ids.member, COLLECTED);
+    const res = await s.fire(call.path, call.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
   });
 });

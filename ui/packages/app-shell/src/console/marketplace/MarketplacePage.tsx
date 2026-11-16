@@ -65,6 +65,8 @@ import { packagesHref } from '../../views/metadata-admin/packageSource.js';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 import { MarketplaceFacetFilters } from './MarketplaceFacetFilters.js';
 import { CardLanguagesLine } from './MarketplaceLanguages.js';
+import { indexInstalls, updateTarget, type InstallIndex } from './installState.js';
+import { UpdateAvailableBadge } from './UpdateAvailableBadge.js';
 import {
   EMPTY_FACET_SELECTION,
   NO_SERVED_FACETS,
@@ -420,16 +422,11 @@ function MarketplacePageBody() {
     protocolNote?: string;
   } | null>(null);
   const [orgDeploy, setOrgDeploy] = useState<OrgDeployState | null>(null);
-  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
-  // Packages the control plane lists as uninstalled (a soft disable that keeps
-  // the row): not installed, and the org card offers Reinstall for them.
-  const [disabledIds, setDisabledIds] = useState<Set<string>>(new Set());
-
-  const installedByManifestId = useMemo(() => {
-    const m = new Map<string, LocalInstallEntry>();
-    for (const e of installed) m.set(e.manifestId, e);
-    return m;
-  }, [installed]);
+  // What this environment holds, from BOTH install listings: the one state the
+  // catalog card and the org card draw (`installState.ts`). A package the
+  // control plane lists as uninstalled (a soft disable that keeps the row) is
+  // in `disabled`: not installed, and the org card offers Reinstall for it.
+  const [installIndex, setInstallIndex] = useState<InstallIndex>(() => indexInstalls([], []));
 
   // The catalog read the page is showing: search, selection and page window.
   // `catalogRequestKey` is its spelling, and the read effect's dependency.
@@ -472,8 +469,15 @@ function MarketplacePageBody() {
           (resp) => ({ resp, failure: null }),
           (e: unknown) => ({ resp: null, failure: toLoadFailure(e) }),
         ),
+        // Install-local is asked only where the runtime mounts it, the gate the
+        // package page reads too: elsewhere it is a 404 on every load and Refresh
+        // (objectstack#34187), and the ledger it would list is empty.
         withSideLoads
-          ? Promise.all([listLocalInstalls(), listOrgPackages(), listInstalledPackages()])
+          ? Promise.all([
+            getRuntimeConfig().features.installLocal ? listLocalInstalls() : Promise.resolve([]),
+            listOrgPackages(),
+            listInstalledPackages(),
+          ])
           : null,
       ]);
       if (!current()) return;
@@ -481,12 +485,7 @@ function MarketplacePageBody() {
         const [installs, org, cloudInstalled] = sides;
         setInstalled(installs);
         setOrgItems(org.items ?? []);
-        const ids = new Set<string>();
-        const disabled = new Set<string>();
-        for (const e of installs) ids.add(e.manifestId);
-        for (const e of cloudInstalled.items) (e.disabled ? disabled : ids).add(e.manifestId);
-        setInstalledIds(ids);
-        setDisabledIds(disabled);
+        setInstallIndex(indexInstalls(installs, cloudInstalled.items));
         sideLoaded.current = true;
       }
       if (catalog.failure !== null) {
@@ -825,14 +824,15 @@ function MarketplacePageBody() {
           )}
           <div className={CARD_GRID}>
             {orgItems.map((pkg) => {
-              const isInstalled = installedIds.has(pkg.manifest_id);
+              const installEntry = installIndex.installed.get(pkg.manifest_id);
+              const isInstalled = !!installEntry;
               // Uninstalled on the control plane, which keeps the row: the
               // install door re-enables that row, so the action reads Reinstall.
-              const isDisabled = !isInstalled && disabledIds.has(pkg.manifest_id);
+              const isDisabled = installIndex.disabled.has(pkg.manifest_id);
               // objectui#11760 — the same page's other "Installed": an org
               // package installed into this runtime that it refused to load at
               // startup reads "Not loaded", from the local listing's marker.
-              const notLoaded = !!installedByManifestId.get(pkg.manifest_id)?.notLoaded;
+              const notLoaded = !!installEntry?.notLoaded;
               return (
                 <Card key={pkg.id} className="flex flex-col" data-testid={`org-card-${pkg.manifest_id}`}>
                   <PackageCardHeader
@@ -957,7 +957,12 @@ function MarketplacePageBody() {
         <div className={CARD_GRID}>
           {shown.map(({ it: pkg, taxonomy }) => {
             const primaryFunction = taxonomy.businessFunctions[0];
-            const localEntry = installedByManifestId.get(pkg.manifest_id);
+            const installEntry = installIndex.installed.get(pkg.manifest_id);
+            // The package page's update rule, for a loaded install only: a
+            // refused one reads "Not loaded", which Details explains.
+            const updateTo = installEntry && !installEntry.notLoaded
+              ? updateTarget(installEntry.version, pkg.latest_version?.version)
+              : null;
             const loc = localizePackage(pkg, language);
             return (
               <Card
@@ -998,10 +1003,10 @@ function MarketplacePageBody() {
                         drawn as "Installed": its version and the destructive
                         "Not loaded" badge, as Installed Apps draws the same
                         entry (objectui#11645). Details carries the reason. */}
-                    {localEntry && (localEntry.notLoaded ? (
+                    {installEntry && (installEntry.notLoaded ? (
                       <>
                         <Badge variant="outline" className="text-xs">
-                          {t('marketplace.versionBadge', { version: localEntry.version })}
+                          {t('marketplace.versionBadge', { version: installEntry.version })}
                         </Badge>
                         <Badge variant="destructive" className="text-xs">
                           {t('marketplace.notLoaded.badge')}
@@ -1011,11 +1016,19 @@ function MarketplacePageBody() {
                       <Badge
                         variant="default"
                         className="text-xs bg-green-600 hover:bg-green-600"
+                        data-testid="marketplace-card-installed"
                       >
                         <CheckCircle2 className="h-3 w-3 mr-1" aria-hidden="true" />
-                        {t('marketplace.installedBadge', { version: localEntry.version })}
+                        {t('marketplace.installedBadge', { version: installEntry.version })}
                       </Badge>
                     ))}
+                    {updateTo && (
+                      <UpdateAvailableBadge
+                        version={updateTo}
+                        className="text-xs"
+                        data-testid="marketplace-card-update"
+                      />
+                    )}
                     {pkg.latest_version?.version && (
                       <Badge variant="outline" className="text-xs">
                         <Package className="h-3 w-3 mr-1" aria-hidden="true" />

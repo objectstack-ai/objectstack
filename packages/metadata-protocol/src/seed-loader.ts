@@ -20,6 +20,8 @@ import {
   isTenancyDisabled,
   referenceTargetOf,
   resolveInjectedSystemColumns,
+  // [#33791] The injected `owner_id`'s own definition, the one the registry adds.
+  OWNER_FIELD_DEF,
   // [#24624] The ONE declaration of which field types the engine masks on read
   // (and which `managedBy` buckets exempt them), and the mask itself (ADR-0100).
   isMaskedOnReadFieldType,
@@ -29,7 +31,7 @@ import {
   RAW_FILE_VALUES_CONTEXT_KEY,
 } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
-import { SystemObjectName } from '@objectstack/spec/system';
+import { SystemFieldName, SystemObjectName } from '@objectstack/spec/system';
 import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
@@ -507,6 +509,34 @@ function seedRowTenantColumn(definition: unknown): string | null {
   const resolved = resolveTenantFieldName(definition);
   if (resolved !== null) return resolved;
   return resolveInjectedSystemColumns(definition).tenant ? DEFAULT_TENANT_FIELD : null;
+}
+
+/**
+ * [#33791] The fields the seed reference graph reads for one object: the ones
+ * its definition declares, plus `owner_id` when the system-column pass injects
+ * it and the object does not declare it.
+ *
+ * The definition the loader resolves is the metadata service's, which is what
+ * the author wrote. An object that relies on the platform's owner has no
+ * `owner_id` there: objectql adds it at registration, from the same
+ * `resolveInjectedSystemColumns` plan read here, as {@link OWNER_FIELD_DEF} (a
+ * `sys_user` lookup). Read from the declared fields alone, a seed value naming
+ * a person in that column was written as the name itself, while a declared
+ * person field on the same row resolved. With it, the injected owner is a
+ * reference exactly as a declared `sys_user` lookup named `owner_id` is: the
+ * same resolution, the same organization-scoped membership probe, and NULL with
+ * the same "not a member" error for a person outside the load's organization.
+ *
+ * A declared `owner_id` is the author's and wins, whatever its type (the
+ * registry lets it win too). An object the pass gives no owner (`ownership:
+ * 'org' | 'none' | 'business_unit'`, `managedBy`, a `sys_*` name,
+ * `systemFields: false`) gets nothing added.
+ */
+function seedReferenceGraphFields(definition: { fields: Record<string, unknown> }): Record<string, unknown> {
+  const fields = definition.fields;
+  if (Object.prototype.hasOwnProperty.call(fields, SystemFieldName.OWNER_ID)) return fields;
+  if (!resolveInjectedSystemColumns(definition).owner) return fields;
+  return { ...fields, [SystemFieldName.OWNER_ID]: OWNER_FIELD_DEF };
 }
 
 /** [ADR-0131 D9] Does a seed row of this object need an organization? See {@link seedRowTenantColumn}. */
@@ -1290,7 +1320,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       const references: ReferenceResolutionParsed[] = [];
 
       if (objDef && objDef.fields) {
-        const fields = objDef.fields as Record<string, any>;
+        // [#33791] The declared fields plus the injected `owner_id`.
+        const fields = seedReferenceGraphFields(objDef) as Record<string, any>;
         for (const [fieldName, fieldDef] of Object.entries(fields)) {
           if (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail' || fieldDef.type === 'user') {
             // [#18550] The read goes through the ONE arbiter, which also

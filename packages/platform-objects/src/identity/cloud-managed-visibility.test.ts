@@ -6,16 +6,20 @@
  * its people arrive from the organisation's identity provider. Six actions are
  * hidden while the flag is on — the four `invite_user` mirrors, `create_user`
  * and `set_user_password` — and each is offered as before when the flag is
- * off (ruling 6341690661 on #25083, Q3 A and Q4 A).
+ * off (ruling 6341690661 on #25083, Q3 A and Q4 A). `resend_invitation`
+ * rides the invite mirrors' door, so it is hidden the same way (its own
+ * block below).
  *
  * Not pinned here: a payload that omits the flag. plugin-auth's drift guard
  * holds the served boolean key set stable, and this engine faults on ANY
  * flag the payload lacks (`default-on` ones too), so that case is the
  * consumer's fault handling, the same for every flag.
  *
- * Each of the six already carries another flag's gate (`organization` or
- * `admin`) through `requiresFeature`, so the `cloudManaged` gate is written in
- * `visible` and the two compose. The predicates are EVALUATED through the
+ * Five of the six also carry another flag's gate (`organization` or `admin`)
+ * through `requiresFeature`, so the `cloudManaged` gate is written in
+ * `visible` and the two compose. `set_user_password` carries none: its door
+ * works without the better-auth admin plugin (the admin block header in
+ * `sys-user.object.ts`), so `cloudManaged` is its only flag. The predicates are EVALUATED through the
  * canonical engine the console delegates to (`@objectstack/formula`), on the
  * parsed object, so the lowered envelope is what is judged; a string match
  * would stay green on a predicate that faults or never answers true.
@@ -31,7 +35,7 @@ import { SysOrganization } from './sys-organization.object.js';
 /** Holds every standing the six doors ask for: the platform-admin rung and the owner grade. */
 const ADMIN = { id: 'u_admin', email: 'admin@example.com', positions: ['org_owner'], isPlatformAdmin: true };
 
-/** The other flags the six inputs are gated on, all on, so `cloudManaged` alone decides. */
+/** The other flags five of the six inputs are gated on, all on, so `cloudManaged` alone decides. */
 const OTHER_FLAGS = { organization: true, admin: true };
 
 const SIX: ReadonlyArray<[string, { actions?: unknown }, string]> = [
@@ -71,8 +75,53 @@ describe('features.cloudManaged hides the six doors that add people', () => {
     expect(offered(visibleOf(def, name), { ...OTHER_FLAGS, cloudManaged: false })).toBe(true);
   });
 
-  it.each(SIX)('%s keeps its other flag: off hides it whatever cloudManaged says', (_site, def, name) => {
+  /** The five that carry another flag; `set_user_password` carries only `cloudManaged`. */
+  const GATED_TWICE = SIX.filter(([site]) => site !== 'sys_user.set_user_password');
+
+  it.each(GATED_TWICE)('%s keeps its other flag: off hides it whatever cloudManaged says', (_site, def, name) => {
     expect(offered(visibleOf(def, name), { organization: false, admin: false, cloudManaged: false })).toBe(false);
+  });
+
+  it('sys_user.set_user_password reads no other flag: offered with the admin plugin off, hidden managed', () => {
+    const source = visibleOf(SysUser, 'set_user_password');
+    expect(offered(source, { organization: false, admin: false, cloudManaged: false })).toBe(true);
+    expect(offered(source, { organization: false, admin: false, cloudManaged: true })).toBe(false);
+  });
+});
+
+/**
+ * `sys_invitation.resend_invitation` is not a door that adds a person, so it
+ * is not among the six above, but it rides the same door: a resend IS a call
+ * to invite-member, which a cloud-managed environment refuses (`409
+ * RESOURCE_CONFLICT`, resends included). So it carries the same gate as the
+ * invite mirrors: hidden while managed, offered as before on a pending row
+ * (unexpired or past its `expires_at`) when the flag is off.
+ */
+describe('features.cloudManaged hides Resend Invitation, whose door it refuses', () => {
+  const resendOffered = (record: Record<string, unknown>, features: Record<string, unknown>): boolean | string => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visibleOf(SysInvitation, 'resend_invitation') },
+      { record, extra: { current_user: ADMIN, user: ADMIN, ctx: { user: ADMIN }, features } },
+    );
+    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
+    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+  };
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const ROWS: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ['an unexpired pending row', { id: 'inv_1', status: 'pending', email: 'b@example.com', role: 'member', expires_at: new Date(Date.now() + DAY_MS).toISOString() }],
+    ['a pending row past its expires_at', { id: 'inv_1', status: 'pending', email: 'b@example.com', role: 'member', expires_at: new Date(Date.now() - DAY_MS).toISOString() }],
+  ];
+
+  it.each(ROWS)('is hidden on %s while the environment is cloud-managed', (_row, record) => {
+    expect(resendOffered(record, { ...OTHER_FLAGS, cloudManaged: true })).toBe(false);
+  });
+
+  it.each(ROWS)('is offered on %s as before when the flag is off', (_row, record) => {
+    expect(resendOffered(record, { ...OTHER_FLAGS, cloudManaged: false })).toBe(true);
+  });
+
+  it('keeps its organization gate: off hides it whatever cloudManaged says', () => {
+    expect(resendOffered(ROWS[0][1], { organization: false, admin: true, cloudManaged: false })).toBe(false);
   });
 });
 

@@ -49,7 +49,7 @@ import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refu
 import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
-import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHomeAmounts } from './home-amount-projection.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
@@ -1545,7 +1545,7 @@ export class UpdateFacet {
                    : undefined;
                  assertRecordCurrencyCodes(
                    object, currencyFields, followCodes ? followCodes(currencyImage) : currencyImage,
-                   'update', currencyPayload, hookContext.input.id, updateMsgCtx,
+                   'update', currencyPayload, hookContext.input.id, updateMsgCtx, parentCodeFieldServingOf(this._registry),
                  );
                }
                // [ADR-0144 D2, amended] …and a record a child row follows the
@@ -1954,7 +1954,7 @@ export class UpdateFacet {
                          recordCurrencyPairs(currencyFields), images.map((i) => i.image), this.homeAmountServing(opCtx.context).parentRows,
                        );
                        for (const { row, image } of images) {
-                           assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx);
+                           assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx, parentCodeFieldServingOf(this._registry));
                        }
                    }
                    // [ADR-0144 D2, amended] The predicate-path twin of the

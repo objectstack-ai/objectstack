@@ -409,3 +409,155 @@ describe('[ADR-0139 D6 as amended] a leaf inside a composed scope is composed to
     expect(outer.scope).toBe(scope);
   });
 });
+
+// ── [#33696 · ruling record 6893666857] step 5: the required master's leaf over an unrestricted master ──
+//
+// A leaf over the REQUIRED master of a `controlled_by_parent` object, the whole
+// comparand of a `$in` on that master field in an AND position, is dropped when
+// the master's answered scope is unrestricted AND the caller holds View All on
+// that object (the security service's effective object-permission map); a
+// scope left empty by the drop is unrestricted itself, so a chain drops whole
+// only when every hop is. Every other position, an optional master, a
+// restricted hop, a caller without View All, a delegated caller, a service
+// without the map or one whose map throws, and a leaf on an object that is not
+// `controlled_by_parent` compose exactly as before. The rows this
+// serves are measured on the real stack in `@objectstack/plugin-security`
+// (`security-plugin-cbp-read-filter.test.ts`).
+describe('[#33696 ruling 6893666857] the required master\'s leaf over an unrestricted master is dropped, nowhere else', () => {
+  let engine: ObjectQL;
+  let calls: SeenCall[];
+
+  const cbp = (name: string, fk: string, master: string, required: boolean) => ({
+    name,
+    label: name,
+    sharingModel: 'controlled_by_parent',
+    fields: {
+      name: { name: 'name', type: 'text' },
+      [fk]: { name: fk, type: 'master_detail', reference: master, required },
+    },
+  });
+  const ACCOUNT = { name: 'rid_r4_account', label: 'Account', fields: { owner: { name: 'owner', type: 'text' } } };
+  const OPP = cbp('rid_r4_opp', 'account', 'rid_r4_account', true);
+  const LINE = cbp('rid_r4_line', 'opp', 'rid_r4_opp', true);
+  const NOTE = cbp('rid_r4_note', 'opp', 'rid_r4_opp', false);
+  /** The leaf the controlled-by-parent derivation answers for a detail over `master` on `fk`. */
+  const leafOn = (fk: string, master: string) => ({ [fk]: { $in: ReadableIds.of(master) } });
+  /** View All on every detail: the effective map a security service answers for an administrator. */
+  const VIEW_ALL_DETAILS = { rid_r4_opp: { viewAllRecords: true }, rid_r4_line: { viewAllRecords: true }, rid_r4_note: { modifyAllRecords: true } };
+  /**
+   * The service of the chain: the opportunity's scope is its leaf over the
+   * account; the account's is `accountScope`; the caller's effective map is
+   * `effective` (`null`: the service has no such member; a function: its answer).
+   */
+  const chain = (accountScope: unknown, effective: unknown = VIEW_ALL_DETAILS) => {
+    const security = makeSecurity({
+      scope: (object) => (object === 'rid_r4_opp' ? leafOn('account', 'rid_r4_account') : object === 'rid_r4_account' ? accountScope : undefined),
+    });
+    if (effective !== null) {
+      security.svc.getEffectiveObjectPermissions = async (context?: unknown) => {
+        security.asked.push('getEffectiveObjectPermissions');
+        return typeof effective === 'function' ? (effective as (c: unknown) => unknown)(context) : effective;
+      };
+    }
+    return security;
+  };
+  const whereOf = async (object: string, where: Record<string, unknown>, context: unknown = { userId: 'u1' }) => {
+    calls.length = 0;
+    await engine.find(object, { where, context: context as any });
+    expect(calls.map((c) => c.verb)).toEqual(['find']);
+    return calls[0].ast.where;
+  };
+
+  beforeEach(async () => {
+    const rec = makeRecordingDriver();
+    calls = rec.calls;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    await engine.init();
+    for (const def of [ACCOUNT, OPP, LINE, NOTE, CHILD, PARENT]) engine.registry.registerObject(def as any, 'test');
+    calls.length = 0;
+  });
+
+  it('every hop unrestricted: the leaf at the root, and as an `$and` member, is dropped; the masters are still asked', async () => {
+    const { svc, asked } = chain(undefined);
+    wire(engine, () => svc);
+    expect(await whereOf('rid_r4_line', leafOn('opp', 'rid_r4_opp'))).toEqual({});
+    // The effective map is asked once per read, and only once a leaf could be dropped.
+    expect(asked).toEqual([
+      'canReadObject:rid_r4_opp', 'getReadFilter:rid_r4_opp', 'canReadObject:rid_r4_account', 'getReadFilter:rid_r4_account',
+      'getEffectiveObjectPermissions',
+    ]);
+    expect(await whereOf('rid_r4_line', { $and: [{ name: 'x' }, leafOn('opp', 'rid_r4_opp')] })).toEqual({ $and: [{ name: 'x' }] });
+    expect(await whereOf('rid_r4_line', { name: 'x', ...leafOn('opp', 'rid_r4_opp') })).toEqual({ name: 'x' });
+  });
+
+  it('a restricted hop keeps the whole chain: the outer leaf composed, the inner one too', async () => {
+    const accountScope = { owner: 'u1' };
+    const { svc } = chain(accountScope);
+    wire(engine, () => svc);
+    const outer = (await whereOf('rid_r4_line', leafOn('opp', 'rid_r4_opp'))).opp.$in;
+    expect(isComposedReadableIds(outer)).toBe(true);
+    expect(outer.object).toBe('rid_r4_opp');
+    expect(isComposedReadableIds(outer.scope.account.$in)).toBe(true);
+    expect(outer.scope.account.$in.scope).toBe(accountScope);
+  });
+
+  it('an `$or` position, an OPTIONAL master and an object that is not controlled_by_parent compose as before', async () => {
+    const { svc } = chain(undefined);
+    wire(engine, () => svc);
+    const or = await whereOf('rid_r4_line', { $or: [leafOn('opp', 'rid_r4_opp'), { name: 'x' }] });
+    expect(isComposedReadableIds(or.$or[0].opp.$in)).toBe(true);
+    const optional = await whereOf('rid_r4_note', leafOn('opp', 'rid_r4_opp'));
+    expect(isComposedReadableIds(optional.opp.$in)).toBe(true);
+    // The master's own leaf was dropped, so its composed scope is unrestricted.
+    expect(optional.opp.$in.scope).toBeUndefined();
+    const plain = await whereOf('rid_child', branch('rid_parent'));
+    expect(isComposedReadableIds(plain.record_id.$in)).toBe(true);
+  });
+
+  it('a caller without View All on the detail keeps the whole chain, whatever the hops answer', async () => {
+    for (const [label, effective, context] of [
+      ['no View All on any detail', { rid_r4_line: { allowRead: true }, rid_r4_opp: { allowRead: true } }, { userId: 'u1' }],
+      ['View All on the read detail only', { rid_r4_line: { viewAllRecords: true } }, { userId: 'u1' }],
+      ['a service without the effective map', null, { userId: 'u1' }],
+      ['an effective map that throws', () => { throw new Error('resolution is down'); }, { userId: 'u1' }],
+      ['a delegated caller', VIEW_ALL_DETAILS, { userId: 'agent', onBehalfOf: { userId: 'u1' } }],
+    ] as const) {
+      const { svc } = chain(undefined, effective);
+      wire(engine, () => svc);
+      const outer = (await whereOf('rid_r4_line', leafOn('opp', 'rid_r4_opp'), context)).opp.$in;
+      expect(isComposedReadableIds(outer), label).toBe(true);
+      expect(isComposedReadableIds(outer.scope.account.$in), label).toBe(true);
+      expect(outer.scope.account.$in.scope, label).toBeUndefined();
+    }
+  });
+
+  it('a condition the caller writes on the required master, in the same read, is never dropped with the master\'s own leaf', async () => {
+    // A driver the nested-relation lowering plans a subquery for: the
+    // caller's `{ opp: { name: 'x' } }` becomes a leaf over the same master.
+    const rec = makeRecordingDriver('com.objectstack.driver.sql');
+    const planned = new ObjectQL();
+    planned.registerDriver(rec.driver, true);
+    await planned.init();
+    for (const def of [ACCOUNT, OPP, LINE]) planned.registry.registerObject(def as any, 'test');
+    const { svc } = chain(undefined);
+    wire(planned, () => svc);
+    rec.calls.length = 0;
+    await planned.find('rid_r4_line', { where: { $and: [leafOn('opp', 'rid_r4_opp'), { opp: { name: 'x' } }] }, context: { userId: 'u1' } as any });
+    // One driver call: the related read was planned, not run.
+    expect(rec.calls.map((c) => c.verb)).toEqual(['find']);
+    const where = rec.calls[0].ast.where;
+    // The master's own leaf is dropped for this View All reader; the caller's condition stays, as its subquery.
+    expect(where.$and).toHaveLength(1);
+    const leaf = where.$and[0].opp.$in;
+    expect(isComposedReadableIds(leaf)).toBe(true);
+    expect(leaf.object).toBe('rid_r4_opp');
+    expect(leaf.scope).toEqual({ name: 'x' });
+  });
+
+  it('a master the caller may not read keeps the leaf, answered `$in: []`', async () => {
+    const { svc } = makeSecurity({ canRead: (object) => object !== 'rid_r4_opp' });
+    wire(engine, () => svc);
+    expect(await whereOf('rid_r4_line', leafOn('opp', 'rid_r4_opp'))).toEqual({ opp: { $in: [] } });
+  });
+});

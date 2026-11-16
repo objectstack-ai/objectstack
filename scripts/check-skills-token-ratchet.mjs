@@ -814,8 +814,16 @@ export const CEILINGS = new Map([
   // measurement, zero headroom. Authority: the ruling of record that orders this text into
   // the published skills, objectstack-ai/cloud#3659 letter A (ruling comment 6682024726), via
   // the standing 2026-10-27 ruling (record 6513306068), quoted verbatim in the PR body.
-  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15256 / 4)
-  ['skills/objectstack-ui/SKILL.md', 3814],
+  // 3814 -> 3833: one clause in the line-item grid paragraph — "never add an 'Add line'
+  // button" is about the grid, and a record-header action that inserts a priced line is
+  // `rules/actions.md` — so the paragraph does not read as forbidding the action that file
+  // teaches. No passage of this file restates it or was found restating another, so nothing
+  // is cut first; the standing ruling's second half carries the raise, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). The file was 15253
+  // bytes (15233 priced, 3809 tokens, headroom 5) -> 15349 (15329 priced) -> 3833 tokens,
+  // the 5 absorbed, ceiling +19, pinned AT the measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15329 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3833],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -889,7 +897,19 @@ export const CEILINGS = new Map([
   // parenthetical is cut to a pointer (-168 bytes; home: rules/relationships.md § Delete
   // Behaviors, every fact). `wc -c` = 12831 bytes -> ceil(12831 / 4) = 3208 tokens: RE-LOCK
   // down at the landed count, zero headroom.
-  ['skills/objectstack-data/rules/field-types.md', 3208],
+  // 3208 -> 3349 (#33714, 2026-11-15): § Currency teaches the roll-up of a stored home
+  // amount: a `sum` / `min` / `max` / `avg` `summary` over a child's `homeAmount.field`
+  // declares `currencyMode: 'dynamic'` with no `defaultCurrency` and shows in
+  // `localization.currency`; `dynamic` on any other roll-up and a `currencyConfig` on a
+  // `count` are refused; one `project` / `expense` example. +689 bytes. PAID DOWN FIRST by
+  // two same-file restatement cuts, 115 bytes (45 + 70): the `currency` row's list of
+  // `currencyConfig` keys, cut to a pointer (home: § Currency, which spells all four), and
+  // the Autonumber snippet (home: the `autonumber` row's `format` example and the token
+  // table, both `CASE-{0000}`). `wc -c` = 13395 bytes -> ceil(13395 / 4) = 3349 tokens,
+  // zero headroom, ceiling +141, pinned AT the measurement. Standing ruling (2026-10-27,
+  // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
+  // ruling record 6513306068; seat widening record 6784270263.
+  ['skills/objectstack-data/rules/field-types.md', 3349],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
@@ -940,7 +960,23 @@ export const CEILINGS = new Map([
   // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
   // 6682024726); raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
-  ['skills/objectstack-data/rules/relationships.md', 4127],
+  // 4127 -> 4232: the roll-up section tells the builder to resolve a
+  // `security-rollup-source-unreadable` warning before finishing (grant the
+  // child read, or mask the parent summary on the set, View All / Modify All on
+  // the parent removed first), with one worked `client_viewer` example proven
+  // against the lint rule. PAID DOWN FIRST — two restatements cut from the
+  // same section, each keeping a home: the `procurement_receipt` /
+  // `received_amount` filtered-sum example (the section's code block shows
+  // `function: 'sum'` beside `filter: { status: 'received' }`, and the
+  // three-counts sentence carries "one child, several totals") and the
+  // "a child moving in or out of the predicate recomputes the parent" sentence
+  // (the section's opening: recomputed whenever a child is inserted, updated
+  // or deleted). Arithmetic in bytes against `main`'s 16444 (4111 tokens, 16
+  // under the old ceiling): -239 cut, +720 added -> 16925 (+481 net) ->
+  // ceil(16925 / 4) = 4232; the ceiling moves +105, pinned AT the measurement.
+  // Raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068), quoted verbatim and untranslated in the PR body.
+  ['skills/objectstack-data/rules/relationships.md', 4232],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1029,8 +1065,21 @@ export const CEILINGS = new Map([
   // `origin/main` the file was 15056 bytes (3764 tokens, headroom 4); the
   // LANDED file is 15834 bytes -> 3959 tokens, ceiling +191, pinned AT the
   // measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(15834 / 4)
-  ['skills/objectstack-data/rules/security.md', 3959],
+  // 3959 -> 4041: a `check` over a field the request never names refuses a
+  // plain create, and the tying field's `defaultValue: 'current_user'` (a
+  // `user` field) fills it before `check` is judged — four lines of prose
+  // under the § Row-Level Security example, whose second policy becomes the
+  // insert-only `own_tasks` that shows it. Same standing ruling, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). PAID DOWN
+  // FIRST: that example's `org_isolation` policy (137 bytes) — a select-only
+  // policy carrying `using` alone stays shown twice in the § Membership keys
+  // block, `current_user.organization_id` keeps its row in the placeholder
+  // table, and the tenant predicate itself is the Layer 0 wall of
+  // § Platform-global objects. On `origin/main` the file was 15834 bytes
+  // (3959 tokens, headroom 0); the LANDED file is 16164 bytes -> 4041 tokens,
+  // ceiling +82, pinned AT the measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(16164 / 4)
+  ['skills/objectstack-data/rules/security.md', 4041],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -1069,7 +1118,13 @@ export const CEILINGS = new Map([
   // file restates another). Maintainer ruling 2026-10-27 on the decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-query/rules/filters.md', 2482],
+  // 2482 -> 2473: re-locked AT the measurement after the no-value ordering
+  // rule (a null or absent column fails `$gt` / `$gte` / `$lt` / `$lte` /
+  // `$between`) was paid in-file by two restatements: the case-sensitivity
+  // paragraph (home: SKILL.md, String Operators) and a second `$between` Date
+  // example (home: the operator table's `$between` row). Arithmetic in bytes:
+  // 9925 -> 9892 (-33 net) -> ceil(9892 / 4) = 2473; headroom 0 tokens.
+  ['skills/objectstack-query/rules/filters.md', 2473],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
@@ -1108,8 +1163,28 @@ export const CEILINGS = new Map([
   // URL on a `type: 'url'` action"). The file is 9028 -> 9810 bytes -> 2453 tokens, the row's 8
   // bytes of headroom absorbed, ceiling +194, pinned AT the measurement. Same ruling as the lines
   // above (2026-10-27, tap A): 「A:先削重复,余额按实测提高」.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9810 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2453],
+  // 2453 -> 2777: an action that adds a child line sets the line's price — why a
+  // body inserting the parent, the product and the quantity alone stores no `amount`
+  // (`lookupAutofill` fills only the form and the grid, a stored `expression` reads only
+  // its own row), one type-checked example whose body reads the product's price, the
+  // `required` param where the persona sets prices, and the `beforeInsert` hook for lines
+  // written past the action. PAID DOWN FIRST by 85 bytes of true restatement in this file:
+  // the sentence "`locations` is an array of surfaces:" (the H2 above it names `locations`,
+  // the table header right below says "Surface", every example writes the array); the
+  // `opensInNewTab` H3's tail "— async / computed redirect" (its paragraph opens "A redirect
+  // URL computed after a fetch"); ", holes in either" on the `helpText` bullet (the bullet
+  // above it lists `description` and a param's `helpText` among the `{{ }}` copy holes).
+  // The file is 9807 -> 11106 bytes -> 2777 tokens, the row's 1 token of headroom absorbed,
+  // ceiling +324, pinned AT the measurement. Same ruling as the lines above (2026-10-27,
+  // tap A): 「A:先削重复,余额按实测提高」.
+  // 2777 -> 2808: that example gains `refreshAfter: true` (the line moves the invoice's
+  // roll-up) and a guard for a product `findOne` does not return, and the closing sentence
+  // says an import with automations off skips the hook. Nothing further in the file restates
+  // another passage (the 85 bytes above were what there was), so the same ruling's second
+  // half carries it: the file is 11106 -> 11231 bytes -> 2808 tokens, zero headroom before,
+  // ceiling +31, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11231 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2808],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

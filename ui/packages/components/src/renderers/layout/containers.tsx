@@ -20,7 +20,7 @@
 
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { ComponentRegistry, ExpressionEvaluator, declaredNameField, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
+import { ComponentRegistry, ExpressionEvaluator, declaredNameField, isElementDataSourceConfig, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
 import { actionRendersAt, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
@@ -597,6 +597,25 @@ const collectRelatedLists = (
 };
 
 /**
+ * objectstack#34250 — whether a collected `record:related_list` reads its
+ * PARENT from a `parentDataSource` binding of its own. Such a list hangs off the
+ * record its binding answers, not off the record context around the strip: on
+ * an app page there is none, and on a record page the page's record is not
+ * this list's parent. So the strip never probes it (it cannot name the parent
+ * to count for); the list reports the number it holds through its panel's
+ * count channel instead, and the tab is kept mounted while inactive so it can.
+ *
+ * Both doors the list itself is authored through are read, as `objectName` is
+ * read below: the `properties` bag (the spec's props door, which
+ * `SchemaRenderer` hoists for the list) and the hoisted key. The predicate is
+ * the one the list's own parent scope (`ParentRecordBinding` in
+ * `@object-ui/plugin-detail`) reads the binding by, so a value it would ignore
+ * leaves the list on the strip's probe, keyed on the page's record as before.
+ */
+const isParentBoundList = (rl: any): boolean =>
+  isElementDataSourceConfig(rl?.properties?.parentDataSource ?? rl?.parentDataSource);
+
+/**
  * One count probe: which collection to count, scoped how.
  *
  * `filter` is the declared scope carried on the `record:related_list` node
@@ -900,7 +919,9 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       if (itemGated && !recordLoaded) return;
       const lists = shownListsByItem[idx]
         .filter((entry) => recordLoaded || entry.gates.length === 0)
-        .map((entry) => entry.node);
+        .map((entry) => entry.node)
+        // objectstack#34250 — a parent-bound list reports its own number.
+        .filter((rl) => !isParentBoundList(rl));
       const probes: Array<Probe> = [];
       for (const rl of lists) {
         const objectName: string | undefined = rl?.properties?.objectName || rl?.objectName;
@@ -1104,7 +1125,13 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       // objectstack#26613 — a tab whose badge its list blocks answer is
       // mounted while inactive, so they run their queries; an authored count
       // needs none of that, and leaves the tab mounted on open only.
-      reportsListCount: !authoredCount && containsListViewNode((it as any).children),
+      // objectstack#34250 — a related list bound to its parent by
+      // `parentDataSource` answers its tab's badge the same way, so its tab
+      // is kept mounted too. Only a list the badge counts (its gates open).
+      reportsListCount:
+        !authoredCount &&
+        (containsListViewNode((it as any).children) ||
+          shownListsByItem[idx].some((entry) => isParentBoundList(entry.node))),
     };
   });
 
@@ -2053,6 +2080,15 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // `warnOnError: true`), so a broken predicate hides its button here exactly
   // as it does on the other surfaces, and says so once.
   const headerPredicateFields = headerObjectSchema?.fields;
+  // The record this header is ABOUT has not arrived yet: a record is bound (the
+  // host named its id) and its row is still absent — `RecordContextValue.data`
+  // is "undefined while loading", and the record page hands `null` until its
+  // read answers. That is its own state, not an empty record: an empty record
+  // makes every `record.<field>` predicate fault, which is an authoring error
+  // only when the key is missing from a record that DID load. A header with no
+  // record bound at all (no context, or no id) keeps evaluating as before, so a
+  // `record.*` predicate there still faults and says so.
+  const headerRecordPending = ctx != null && ctx.recordId != null && ctx.data == null;
   const headerPredicateScope = React.useMemo(() => {
     const scopeUser = (predicateScope as any)?.user;
     // Relation fields bind as the FOREIGN KEY the server stores, not as the
@@ -2104,17 +2140,27 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
    *     share `visible`'s `false`, which on this key means ENABLED — so
    *     `disabled: !current_user.can(…)` left the action pressable until the
    *     payload arrived, the one leg of this surface that failed open.
+   *
+   * While the record is PENDING (see `headerRecordPending`) nothing is
+   * evaluated: every predicate answers its `fallback` and reports nothing.
+   * Evaluating then meant evaluating against an empty record, where every
+   * `record.<field>` faults with "No such key" — and the fault report, which
+   * is warn-once per (label, predicate), told the author to "check the field
+   * names" of a field the object has, on every load, before the record it
+   * names had arrived. The predicate runs, and reports, once the record does.
    */
   const evalHeaderPredicate = React.useCallback(
     (pred: unknown, label: string, fallback: boolean): boolean =>
-      evalRowPredicate(pred as never, ctx?.data ?? {}, {
-        fallback,
-        scope: headerPredicateScope,
-        fields: headerPredicateFields,
-        warnOnError: true,
-        label,
-      }),
-    [ctx?.data, headerPredicateScope, headerPredicateFields],
+      headerRecordPending
+        ? fallback
+        : evalRowPredicate(pred as never, ctx?.data ?? {}, {
+          fallback,
+          scope: headerPredicateScope,
+          fields: headerPredicateFields,
+          warnOnError: true,
+          label,
+        }),
+    [ctx?.data, headerRecordPending, headerPredicateScope, headerPredicateFields],
   );
 
   const headerActionPlan = React.useMemo<{ actions: any[]; authoredKeys: ReadonlySet<string> }>(() => {
@@ -2557,6 +2603,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     const disabledReasonFor = (action: any): string | undefined => {
       const key = (action?.name || action?.id || '') as string;
       if (key === '' || !authoredHeaderActionKeys.has(key)) return undefined;
+      // A pending record answers `disabled`'s fallback (closed), which is not
+      // a fact about the record — so it is not explained as one.
+      if (headerRecordPending) return undefined;
       if (!resolveDisabled(action?.disabled, action?.name ?? action?.id)) return undefined;
       const declared = typeof action?.disabledReason === 'string' ? action.disabledReason : '';
       return declared.trim() !== ''

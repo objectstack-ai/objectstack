@@ -15,20 +15,24 @@
  *     managed-update whitelist is `{name, image, locale}`, so a picker that
  *     PATCHed `/api/v1/data/sys_user/:id` would be refused by the identity
  *     write guard — correctly — and would read as a Console bug.
- *  2. **The `visible` predicate carries the directory-sync term and NOT the
- *     self-service ownership term.** The three self-service identity actions
- *     on this object spell `record.source != "idp_provisioned"` as one half of
- *     `record.id == ctx.user.id && …`. Copying that predicate whole — the
- *     natural thing to do, and what a reader of the card would do — would hide
- *     an ADMIN action on someone else's row from every admin. The failure is
- *     silent and fail-closed (#8990): the button simply is not offered.
+ *  2. **The `visible` predicate reads NO record column — neither the
+ *     self-service ownership term nor the `source` term.** The three
+ *     self-service identity actions on this object spell
+ *     `record.source != "idp_provisioned"` beside `record.id == ctx.user.id`.
+ *     Copying either half — the natural thing to do — hides an ADMIN action
+ *     from rows the endpoint accepts: the ownership half from every admin,
+ *     the `source` half from every person who only signs in through SSO
+ *     (ADR-0135 D4 stamps them `idp_provisioned` with no directory behind
+ *     them; maintainer ruling record 6895645364, option A, has the endpoint
+ *     refuse only an identity a SCIM directory holds). The failure is silent
+ *     and fail-closed (#8990): the button simply is not offered.
  *  3. **No second copy of the server's refusals.** Self-assignment, cycle,
- *     depth, cross-organization and directory-owned identity are all enforced
+ *     depth, cross-organization and SCIM-held identity are all enforced
  *     at the write, in one derivation (`applyUserManagerLink`), which the bulk
  *     importer already routes onto rather than re-deriving. A client-side
  *     duplicate is the drift, not the safety net — so this file pins that the
- *     declaration reads exactly one record column and declares no predicate
- *     for any of the other four refusals.
+ *     declaration reads no record column and declares no predicate for any
+ *     of the five refusals.
  *
  * The sweep in `action-predicate-sparse-face.test.ts` already covers this
  * action's predicate for the sparse-face guard; that is deliberately not
@@ -130,14 +134,17 @@ describe('#19249 — sys_user.set_user_manager posts the admin endpoint', () => 
   it('⛔ declares no second copy of the server-side refusals', () => {
     // Every refusal is enforced at the write and surfaces from there. What
     // would go wrong quietly is a client-side re-derivation drifting from the
-    // endpoint's; so the predicate is pinned to the ONE column it reads, and
-    // the declaration to having no other gate at all.
+    // endpoint's; so the predicate is pinned to reading no record column at
+    // all, and the declaration to having no other gate.
     const visible = sourceOf(ACTION.visible);
     expect(visible).toBeDefined();
+    // Positive control: the standing term really is there, so the empty column
+    // set below is a reading of the predicate, not of an absent one.
+    expect(visible).toContain('current_user.isPlatformAdmin == true');
     const columns = new Set(
       [...visible!.matchAll(/record\.([a-z_][a-z0-9_]*)/gi)].map((m) => m[1]),
     );
-    expect([...columns]).toEqual(['source']);
+    expect([...columns]).toEqual([]);
     expect(ACTION.disabled).toBeUndefined();
     // The manager chain, the organization screen and the self-assignment check
     // are the endpoint's; none of them is expressible — or declared — here.
@@ -148,15 +155,22 @@ describe('#19249 — sys_user.set_user_manager posts the admin endpoint', () => 
   });
 });
 
-describe('#19249 — the visible predicate: directory-sync term, NOT the self-service one', () => {
+describe('the visible predicate: offered on every row, the SCIM-held refusal is the server\'s', () => {
   const visible = (): string => {
     const source = sourceOf(ACTION.visible);
     if (!source) throw new Error('set_user_manager has no CEL source');
     return source;
   };
 
-  it('is hidden for a directory-owned identity (the server answers 403 idp_provisioned)', () => {
-    expect(evaluate(visible(), { source: 'idp_provisioned' })).toBe(false);
+  it('⭐ is OFFERED on an idp_provisioned row — an SSO-only person\'s manager is set here', () => {
+    // The endpoint answers 200 for this row unless a SCIM directory holds it,
+    // and no column on the row says which; hiding the button here hid it from
+    // every person who ever signed in through SSO.
+    expect(evaluate(visible(), { id: 'someone_else', source: 'idp_provisioned' })).toBe(true);
+  });
+
+  it('is OFFERED on the sparse face too (no source column projected)', () => {
+    expect(evaluate(visible(), { id: 'someone_else' })).toBe(true);
   });
 
   it('⭐ is OFFERED to an admin on someone else\'s env-native row', () => {
@@ -165,19 +179,28 @@ describe('#19249 — the visible predicate: directory-sync term, NOT the self-se
     expect(evaluate(visible(), { id: 'someone_else', source: 'env_native' })).toBe(true);
   });
 
-  it('carries the same directory-sync term the self-service actions spell', () => {
-    // Byte-identical term, so the two never drift into two spellings of one
-    // rule — while the ownership half they also carry stays out (asserted
-    // above by the offered-to-an-admin verdict).
-    expect(visible()).toContain('record.source != "idp_provisioned"');
+  it('⛔ does NOT carry the self-service actions\' source term', () => {
+    // Positive control: the term is still spelled on the self-service side
+    // (password and identity edits stay hidden for a managed identity, ADR-0135
+    // D4), so its absence here is a reading, not a rename.
     const selfService = actionsOf().find((a) => a.name === 'change_my_password');
     expect(sourceOf(selfService?.visible)).toContain('record.source != "idp_provisioned"');
+    expect(visible()).not.toContain('record.source');
+  });
+
+  it('is still hidden from a caller without platform-admin standing', () => {
+    const member = { id: 'm_1', isPlatformAdmin: false, positions: [] as string[] };
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visible() },
+      { record: { id: 'someone_else', source: 'idp_provisioned' }, extra: { current_user: member, user: member, ctx: { user: member }, os: { user: member }, features: {} } },
+    );
+    expect(r.ok && r.value).toBe(false);
   });
 
   it('⛔ is NOT gated on features.admin, and that is deliberate', () => {
-    // The `admin` flag hides buttons whose endpoint is "only wired when
-    // `auth.plugins.admin` is enabled" — the 404-avoidance the block header on
-    // the admin actions states. This route is not one of those: it is an
+    // The `admin` flag hides buttons whose endpoint needs the better-auth
+    // admin plugin, so that the UI does not render buttons that 404 (the block
+    // header on the admin actions). This route is not one of those: it is an
     // ObjectStack mount registered unconditionally beside `unlock-user` and
     // authorized by the ADR-0068 platform-admin gate, so gating it would hide
     // a WORKING affordance on every host that never opted into that plugin —

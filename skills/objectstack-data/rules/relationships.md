@@ -82,13 +82,13 @@ sharingModel: 'controlled_by_parent',
 sharing: { controlledByParent: { writeRequiresMasterRead: true } },  // or ownerMayEdit
 ```
 
-- `ownerMayEdit: true` widens only the row owner's (`owner_id`) by-id update; insert,
-  delete, predicate (`multi: true`) updates and on-behalf-of writes still need master edit.
+- `ownerMayEdit: true` widens only the row owner's (`owner_id`) by-id update; every
+  other write, on-behalf-of included, still needs master edit.
 - `writeRequiresMasterRead: true`: whoever reads the master inserts, updates and
   deletes the detail under its own object permissions, RLS and FLS (re-points and
   each opted-in chain hop too; on-behalf-of, both users must read the master). The
-  ownership floor (rows you created) still binds predicate and on-behalf-of updates
-  and deletes. Refused beside `ownerMayEdit: true`, which it covers. Lint
+  ownership floor (rows you created) still binds predicate and, for both users, on-behalf-of
+  updates and deletes. Refused beside `ownerMayEdit: true`, which it covers. Lint
   `security-controlled-by-parent-owner-policy-without-opt-in` is silent here.
 
 The detail's own row policies AND in under both. Each is refused at parse under any
@@ -107,8 +107,8 @@ account: { type: 'master_detail', reference: 'account', required: false },
 A row with no master is its owner's (`owner_id`): the owner or View All on the
 detail reads it, the owner or Modify All writes it (no owner: View All / Modify
 All only). An insert naming no master is admitted. Setting a master asks edit
-on it, emptying one edit on the stored master (even under `ownerMayEdit`; read
-under `writeRequiresMasterRead`). A
+on it, emptying one edit on the stored master (both even under `ownerMayEdit`;
+read for both under `writeRequiresMasterRead`). A
 chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
@@ -212,14 +212,11 @@ parent-FK match). Dropped, the field counts EVERY child and shows a plausible
 wrong total that no check on the parent can see — worse than a visible 0. This
 is also how one child feeds several totals: completed / in-progress / overdue
 task counts are three `summary` fields over the same child, differing only in
-`filter`; one `procurement_receipt` child yields `received_amount`
-(`function: 'sum', filter: { status: 'received' }`). A select's value in
-`filter` is its option `value`, never its label; operator and compound forms
-work (`filter: { status: { $in: ['received', 'partial'] } }`). A child moving
-in or out of the predicate (a status change) recomputes the parent on its next
-write like any other child update. A **rate** (occupancy, completion rate = a
-child count ÷ a capacity) is a `formula` over a working `summary` — author the
-summary first; the rate computes only once it does.
+`filter`. A select's value in `filter` is its option `value`, never its label;
+operator and compound forms work
+(`filter: { status: { $in: ['received', 'partial'] } }`). A **rate** (occupancy,
+completion rate = a child count ÷ a capacity) is a `formula` over a working
+`summary` — author the summary first; the rate computes only once it does.
 
 **The recompute runs only on a child write.** A `summary` declared after its
 parent rows exist reads `NULL` on every existing parent until a child of it is
@@ -227,6 +224,22 @@ written. The backfill is `os migrate summary-nulls --apply`
 (`--recompute-undefined-on-empty OBJECT.FIELD` for a `min` / `max` / `avg`
 declared late) — never an edit to a child. Declare the summary with the object
 where you can; declared late, run the migration before you call the number ready.
+
+**Never finish with `security-rollup-source-unreadable` standing.** The total
+covers every child row and answers only to the parent field's own access, so
+`os build` warns for each permission set that reads the summary but not the
+child object, the aggregated field, or a field `filter` tests. Decide per set:
+it should see the children → grant the read; it should not → mask the summary
+on that set, after removing any View All / Modify All it holds on the parent
+(either overrides the mask).
+
+```typescript
+definePermissionSet({
+  name: 'client_viewer',
+  objects: { project: { allowRead: true } },  // no `task` read: warned
+  fields: { 'project.task_count': { readable: false } },  // the mask: resolved
+})
+```
 
 ## Inline Editing (Master-Detail Entry)
 

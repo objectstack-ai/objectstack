@@ -101,6 +101,7 @@ export class ReferencesAndMasterDetailFacet {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   }): void {
     this.i18nService = service;
     this.logger.info('I18nService configured for validation messages');
