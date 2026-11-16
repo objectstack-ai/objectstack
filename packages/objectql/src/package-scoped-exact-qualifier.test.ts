@@ -3058,6 +3058,61 @@ describe('[#33401] the read naming no package withholds a package-less row of a 
     expect(JSON.stringify(answer ?? null)).not.toContain('custom en-US');
   });
 
+  /**
+   * [review L2 S1] The card's CONTROL "a same-name item on another object is
+   * still served". An action is keyed `(package, object, name)`, and since
+   * #33898 the bare read grafts a holder's envelope only onto the item it
+   * holds at that `(object, name)`, so a package-less action reaches this arm
+   * unstamped. On another object it binds to no holder (`overlayRowBinding`
+   * answers `null`): the environment's own item, served. On the holder's own
+   * object it is that holder's customization: the read grafts the holder's
+   * envelope onto it, so it reaches the face stamped and is withheld by the
+   * face's rules for an item stamped with a disabled package
+   * (`isActionWithheldByDisabledPackage`, `isItemOfDisabledPackage`), as on
+   * `main`; this PR's arm does not decide it (measured: the arm ablated
+   * leaves that leg green, the two stamped-item rules ablated turn it red).
+   * Both registration orders; re-enabled is the CONTROL.
+   */
+  describe('[review L2 S1] a package-less action of a name only a disabled package holds', () => {
+    const actionBody = (label: string, objectName: string) => ({ name: 'approve', label, objectName, type: 'url', target: 'https://example.com' });
+    const shipAction = () => registry.registerItem('action', actionBody('alpha action', 'account'), 'name' as never, A);
+    const envAction = (objectName: string) => {
+      registry.registerItem('action', { ...actionBody('env action', objectName), _provenance: 'org' }, 'name' as never);
+      rows.push({
+        id: 'row_env_action', type: 'action', name: 'approve', state: 'active', package_id: null,
+        bundle_member: null, metadata: JSON.stringify(actionBody('env action', objectName)),
+      });
+    };
+    const readAction = () => protocol.getMetaItem({ type: 'action', name: 'approve' } as never);
+    const LEGS = [
+      ['another object (`contact`): no holder binds its key, so it is the environment\'s own item and is served', 'contact', true],
+      ['the holder\'s own object (`account`): the holder\'s customization under its envelope, withheld', 'account', false],
+    ] as const;
+    const ORDERS_ACTION = [['the holder registered first', false], ['the environment\'s item registered first', true]] as const;
+    const CELLS = LEGS.flatMap(([leg, objectName, served]) => ORDERS_ACTION.map(([order, envFirst]) => [leg, order, objectName, served, envFirst] as const));
+
+    it.each(CELLS)('%s; %s', async (_leg, _order, objectName, served, envFirst) => {
+      if (envFirst) envAction(objectName);
+      shipAction();
+      if (!envFirst) envAction(objectName);
+      registry.disablePackage(A);
+      const answer = await readAction();
+      if (served) {
+        expect(labelOf(answer)).toBe('env action');
+        expect((answer as { item?: { _packageId?: unknown } } | undefined)?.item?._packageId ?? null).toBeNull();
+      } else {
+        expect(answer?.item).toBeUndefined();
+        expect(JSON.stringify(answer ?? null)).not.toContain('env action');
+      }
+      // CONTROL — re-enabled: the environment's item is served on either object,
+      // under the holder's envelope only on the holder's own object.
+      registry.enablePackage(A);
+      const enabled = await readAction();
+      expect(labelOf(enabled)).toBe('env action');
+      expect((enabled as { item?: { _packageId?: unknown } } | undefined)?.item?._packageId ?? null).toBe(served ? null : A);
+    });
+  });
+
   it('the fr-FR row stored and hydrated into the registry: withheld too (BASE: the row)', async () => {
     tpl(A);
     custom('welcome', 'fr-FR');
