@@ -152,7 +152,9 @@ IPv6 form that carries them. A refused
 webhook delivery dead-letters at once as `EGRESS_REFUSED`; a refused `http` call
 fails its node with `EGRESS_REFUSED`. The boot logs one line saying the guard is
 active and how many targets are allowlisted, and the webhook plugin logs once how
-many stored `sys_webhook` rows target an address the guard refuses.
+many stored `sys_webhook` rows target an address the guard refuses. The guard needs a
+Node.js runtime: at boot it proves that the requests it sends are judged by it, and
+where it cannot, the boot fails and these requests are refused.
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
