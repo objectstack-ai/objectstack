@@ -111,18 +111,22 @@ export default function DocPage() {
         // need not be globally namespace-prefixed; the prefix becomes optional.
         //
         // An exact package address answers only that package's own doc
-        // (ADR-0150 D3/D5): `404` where the route's package ships none of the
-        // name. The route's segment is prefer-local context, never an exact
-        // address, so that answer falls back to the read by name, as the
-        // portal reads it: a cross-reference to another package's doc, and
+        // (ADR-0150 D3/D5): where the route's package ships none of the name,
+        // a `409` whose candidates name the packages that do, the route's not
+        // among them (ruling 6917064203 on objectstack#34398), or `404` when
+        // none does. The route's segment is prefer-local context, never an
+        // exact address, so either answer falls back to the read by name, as
+        // the portal reads it: a cross-reference to another package's doc, and
         // the app-name segment of a package that ships several apps (no
-        // package id at all), read the one holder, or the holders listed below.
+        // package id at all), read the one holder, or list the holders below.
         const client = adapter.getClient();
         let raw: any;
         try {
           raw = await client.meta.getItem('doc', name, appName ? { packageId: appName } : undefined);
         } catch (localErr: any) {
-          if (!appName || localErr?.httpStatus !== 404) throw localErr;
+          if (!appName) throw localErr;
+          const holders = conflictCandidates(localErr);
+          if (localErr?.httpStatus !== 404 && (holders === null || holders.includes(appName))) throw localErr;
           raw = await client.meta.getItem('doc', name);
         }
         const item = raw?.item ?? raw?.data ?? raw;

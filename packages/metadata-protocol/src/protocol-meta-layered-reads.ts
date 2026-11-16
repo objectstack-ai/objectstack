@@ -429,10 +429,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
         }
         // [ADR-0150 D3/D5, red line 2] …and at such an address, the package's
-        // own item or none, as {@link getMetaItem}'s code step answers there
+        // own item, as {@link getMetaItem}'s code step answers there
         // ({@link registryAnswerAtAddress}): a package that holds no item of
-        // the name read another package's artifact or first composite.
-        if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember)));
+        // the name read another package's artifact or first composite, and is
+        // now refused naming the holders (ruling 6917064203 on #34398).
+        if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember, { refuse: true })));
         if (regItem !== undefined) code = regItem;
     }
 

@@ -205,10 +205,11 @@ describe('CONTROL — what the exact qualifier keeps serving', () => {
     expect((await protocol.getMetaItem({ type: 'page', name: 'nothing', packageId: A }))?.item).toBeUndefined();
   });
 
-  it('a type outside the nine (view) keeps the prefer-local read at its holder; [#34247] a package holding none answers nothing (BASE: alpha\'s)', async () => {
+  it('a type outside the nine (view) keeps the prefer-local read at its holder; [#34247] a package holding none is refused naming the holder (BASE: alpha\'s)', async () => {
     registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
     expect(labelOf(await protocol.getMetaItem({ type: 'view', name: 'all', packageId: A }))).toBe('alpha view');
-    expect((await protocol.getMetaItem({ type: 'view', name: 'all', packageId: C }))?.item).toBeUndefined();
+    const err = await refusalOf(() => protocol.getMetaItem({ type: 'view', name: 'all', packageId: C }));
+    expect([err.code, err.status, err.refusal.reason, err.refusal.candidates]).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier', [{ kind: 'package', packageId: A }]]);
   });
 
   it('a read naming no package is E8\'s, unchanged', async () => {
@@ -395,7 +396,7 @@ describe('fail closed — a registry with no package-scoped resolver refuses wha
     expect(declaredRefusalMessage(err)).toBe(err.message);
   });
 
-  it('CONTROL: a type ADR-0150 does not address by package (view) keeps `getItem`\'s read, both ways; [#34247] a package holding none answers nothing', async () => {
+  it('CONTROL: a type ADR-0150 does not address by package (view) keeps `getItem`\'s read, both ways; [#34247] a package holding none answers nothing (no holder can be named without the slice)', async () => {
     registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
     expect(labelOf(await sliceless.getMetaItem({ type: 'view', name: 'all', packageId: A }))).toBe('alpha view');
     expect(labelOf(await sliceless.getMetaItem({ type: 'view', name: 'all' }))).toBe('alpha view');
@@ -581,10 +582,11 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       expect(() => protocol.admitEnvironmentQualifier({ type: 'flow', name: 'local' })).not.toThrow();
     });
 
-    it('CONTROL: a type outside the covered set (view) keeps the prefer-local read at its holder; [#34247] a package holding none answers nothing', async () => {
+    it('CONTROL: a type outside the covered set (view) keeps the prefer-local read at its holder; [#34247] a package holding none is refused naming the holder', async () => {
       registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
       expect(labelOf(await protocol.getMetaItem({ type: 'view', name: 'all', packageId: A }))).toBe('alpha view');
-      expect((await protocol.getMetaItem({ type: 'view', name: 'all', packageId: C }))?.item).toBeUndefined();
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'view', name: 'all', packageId: C }));
+      expect([err.code, err.status, err.refusal.reason, err.refusal.candidates]).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier', [{ kind: 'package', packageId: A }]]);
     });
   });
 });
@@ -835,8 +837,10 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
 
 /**
  * [#34247, ADR-0150 D3/D5, red line 2] The exact read of a name the package it
- * names holds no item of, for the same family: X's item or 404, never another
- * holder's. The step-2 decline above left such an address to the registry's
+ * names holds no item of, for the same family: never another holder's item.
+ * Where another package holds the name, the read is refused `409
+ * not-held-by-qualifier` naming the holders (ruling 6917064203 on #34398, which
+ * amends the card's "404"); a name nothing holds is the read's own 404. The step-2 decline above left such an address to the registry's
  * `getItem`, whose last tier is the first composite across packages, so
  * `?package=gamma` of a doc only alpha and beta ship served one of theirs.
  *
@@ -845,7 +849,7 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
  * registered holder's body, whichever copy the service kept, and with the
  * service holding nothing.
  */
-describe('[#34247] the exact read of a name the package holds no item of answers nothing, for every type the registry does not read by package', () => {
+describe('[#34247] the exact read of a name the package holds no item of is refused naming the holders, for every type the registry does not read by package', () => {
   const OUTSIDE_PINNED = MetadataTypeSchema.options.filter((type) => !(PACKAGE_SCOPED_READ_TYPES as readonly string[]).includes(type)
     && !(PACKAGE_SCOPED_TYPES as readonly string[]).includes(type) && !['position', 'capability', 'object'].includes(type));
   /** Judged by the exact qualifier after the layers: its own refusal, unchanged. */
@@ -874,24 +878,41 @@ describe('[#34247] the exact read of a name the package holds no item of answers
   });
 
   it.each(OUTSIDE_PINNED.flatMap((type) => [[type, [A, B]], [type, [B, A]]] as const))(
-    '%s, registered %j: `?package=` of a third package answers nothing, whichever holder\'s copy the service keeps',
+    '%s, registered %j: `?package=` of a third package (installed or not) is refused naming both holders, whichever holder\'s copy the service keeps, on the plain read and /layers',
     async (type, order) => {
       for (const id of order) shipParsed(type, 'shared', id);
       for (const kept of [...order, undefined]) {
         const served = servedWith(kept ? { name: 'shared', label: `${kept.split('.').pop()} ${type}`, _packageId: kept } : undefined);
         for (const packageId of [C, 'com.acme.unknown']) {
-          expect(await itemAt(served, type, packageId), `${type} at ${packageId}, the service keeping ${kept ?? 'nothing'}`).toBeUndefined();
+          const at = `${type} at ${packageId}, the service keeping ${kept ?? 'nothing'}`;
+          for (const read of [
+            () => served.getMetaItem({ type, name: 'shared', packageId }),
+            () => served.getMetaItemLayered({ type, name: 'shared', packageId }),
+          ]) {
+            const err = await refusalOf(read);
+            expect([err.code, err.status, err.refusal.reason, err.refusal.callerPackageId], at).toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier', packageId]);
+            expect(err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort(), at).toEqual([A, B]);
+          }
         }
       }
     },
   );
 
-  it.each(OUTSIDE_PINNED)('%s, one holder: `?package=` of another package answers nothing; the holder\'s own address its body', async (type) => {
+  it.each(OUTSIDE_PINNED)('%s, one holder: `?package=` of another package is refused naming the holder; the holder\'s own address its body', async (type) => {
     shipParsed(type, 'shared', A);
     for (const kept of [A, undefined]) {
       const served = servedWith(kept ? { name: 'shared', label: `alpha ${type}`, _packageId: kept } : undefined);
-      expect(await itemAt(served, type, B), `${type} at ${B}, the service keeping ${kept ?? 'nothing'}`).toBeUndefined();
+      const err = await refusalOf(() => served.getMetaItem({ type, name: 'shared', packageId: B }));
+      expect([err.code, err.status, err.refusal.reason, err.refusal.candidates], `${type} at ${B}, the service keeping ${kept ?? 'nothing'}`)
+        .toEqual(['RESOURCE_CONFLICT', 409, 'not-held-by-qualifier', [{ kind: 'package', packageId: A }]]);
       expect((await itemAt(served, type, A))?.label, `${type} at its holder`).toBe(`alpha ${type}`);
+    }
+  });
+
+  it.each(OUTSIDE_PINNED)('CONTROL — %s: a name no package holds is the read\'s own miss at any package address, never a refusal', async (type) => {
+    const served = servedWith(undefined);
+    for (const packageId of [A, C, 'com.acme.unknown']) {
+      expect(await itemAt(served, type, packageId), `${type} at ${packageId}`).toBeUndefined();
     }
   });
 

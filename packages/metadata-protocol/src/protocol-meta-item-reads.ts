@@ -53,6 +53,7 @@ import {
     declinesPackageLessRowAt,
     exactQualifierItem,
     isPackageLessRow,
+    notHeldByQualifierRefusal,
     refuseUnjudgeableByNameRead,
 } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
@@ -463,21 +464,29 @@ export function serviceCopyOfAnotherPackage(
 /**
  * [ADR-0150 D3/D5, red line 2] The item the code layers (the artifact lookup
  * and the registry) answer at an address naming a package (`?package=X`) of
- * a type the exact qualifier does not judge: X's own item, or nothing, so the
- * read answers 404. Another package's item ({@link serviceCopyOfAnotherPackage}'s
- * test, applied to the code layers' answer) is replaced by the registry's
- * package slot for X; when X holds no item of the name, nothing is served.
+ * a type the exact qualifier does not judge: X's own item. Another package's
+ * item ({@link serviceCopyOfAnotherPackage}'s test, applied to the code
+ * layers' answer) is replaced by the registry's package slot for X.
+ *
+ * When X holds no item of the name, a read (`options.refuse`) is refused
+ * `409 not-held-by-qualifier` naming each package that holds it (ruling
+ * 6917064203 on #34398), as the exact qualifier refuses the covered types; X
+ * need not be an installed package. Any other caller (the save's credential
+ * carry-forward) gets nothing, so it carries nothing.
  *
  * Before, a package that holds no item of the name answered `getItem`'s last
  * tier, the first composite across packages: another package's item, under
  * X's envelope. Unchanged: an item bound to no package (the environment's
- * entry), an item stamped X, a customization pair's item, a stamp the
- * registry does not know, and an `object`.
+ * entry, which answers first), an item stamped X, a customization pair's
+ * item, a stamp the registry does not know, and an `object`.
  *
  * ⛔ Not a security catalog type (`position`, `capability`; ADR-0131 D3):
  * the registry keeps one package holder of such a name, resolved by name
  * for the whole environment, so another package's address has no slot of
  * its own to answer with. Its answer there stays the code layers' own.
+ *
+ * @throws {PackageScopedNameRefusedError} `not-held-by-qualifier` (with
+ *   `options.refuse`), when X holds no item of the name and another package does.
  */
 export function registryAnswerAtAddress(
     host: Pick<ProtocolHost, 'engine'>,
@@ -485,14 +494,23 @@ export function registryAnswerAtAddress(
     item: unknown,
     member: string | undefined,
     isWantedMember: (candidate: unknown) => boolean,
+    options: { readonly refuse?: boolean } = {},
 ): unknown {
     if (!request.packageId || item === undefined || item === null || isSecurityCatalogType(request.type)) return item;
     if (!serviceCopyOfAnotherPackage(host, request, item)) return item;
-    const scoped = host.engine?.registry as { getPackageScopedItem?(type: string, name: string, packageId: string, member?: string): unknown } | undefined;
+    const scoped = host.engine?.registry as {
+        getPackageScopedItem?(type: string, name: string, packageId: string, member?: string): unknown;
+        packageScopedHoldersOf?(type: string, name: string): string[] | undefined;
+    } | undefined;
     const own = typeof scoped?.getPackageScopedItem === 'function'
         ? scoped.getPackageScopedItem(request.type, request.name, request.packageId, member)
         : undefined;
-    return own !== undefined && own !== null && isWantedMember(own) ? own : undefined;
+    if (own !== undefined && own !== null && isWantedMember(own)) return own;
+    if (options.refuse === true) {
+        const holders = (scoped?.packageScopedHoldersOf?.(request.type, request.name) ?? []).filter((holder) => holder !== request.packageId);
+        if (holders.length > 0) throw notHeldByQualifierRefusal(request.type, request.name, request.packageId, holders);
+    }
+    return undefined;
 }
 
 /** The same item: one object, or (a loader's fresh copy) the same JSON. */
@@ -1353,7 +1371,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // ({@link registryAnswerAtAddress}): a package that holds no item of the
     // name answered `getItem`'s first composite, another package's item.
     if (reachedCodeLayers && exactAddress === undefined) {
-        item = registryAnswerAtAddress(host, request, item, member, isWantedMember);
+        item = registryAnswerAtAddress(host, request, item, member, isWantedMember, { refuse: true });
     }
 
     // [#5840] The MetadataService half of the #5532 rule, and the last

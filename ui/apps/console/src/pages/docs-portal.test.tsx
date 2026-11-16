@@ -94,9 +94,15 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
     const holders = Object.keys(CONFLICT_CONTENT).filter((p) => name in CONFLICT_CONTENT[p]);
     WORLD.reads.push(packageId);
     // objectstack#34247 — the server's exact address answers only that
-    // package's own doc: 404 where it ships none of the name.
+    // package's own doc: where it ships none of the name, 409
+    // `not-held-by-qualifier` naming the holders (ruling 6917064203 on
+    // objectstack#34398), or 404 when no package ships it.
     if (packageId && WORLD.exact && !holders.includes(packageId)) {
-      throw failure(404, 'RESOURCE_NOT_FOUND', `doc "${name}" not found in package "${packageId}"`);
+      if (holders.length === 0) throw failure(404, 'RESOURCE_NOT_FOUND', `doc "${name}" not found`);
+      // The server's envelope carries the candidates, not the reason.
+      throw failure(409, 'RESOURCE_CONFLICT', `doc "${name}" is not held by package "${packageId}"`, {
+        candidates: holders.map((p) => ({ kind: 'package', packageId: p })),
+      });
     }
     if (packageId) return { item: { name, content: CONFLICT_CONTENT[packageId]?.[name] } };
     if (holders.length > 1) {

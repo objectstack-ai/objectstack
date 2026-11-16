@@ -288,12 +288,31 @@ describe.each([
         rmSync(booted.root, { recursive: true, force: true });
     });
 
-    it('`?package=` of a package shipping none (installed or not) answers 404 on the plain read and /layers, both transports, never a holder\'s doc', async () => {
+    // [ruling 6917064203 on #34398] Refused naming the holders, as the exact
+    // qualifier refuses the covered types; a qualifier that names no
+    // installed package (the Console's app-name segment) is answered the same.
+    it('`?package=` of a package shipping none (installed or not) is refused 409 `not-held-by-qualifier` naming the holders on the plain read and /layers, both transports, never a holder\'s doc', async () => {
         const nonHolders = [ALPHA, GAMMA, NOT_INSTALLED].filter((id) => !ships.includes(id));
         for (const packageId of nonHolders) {
             for (const answer of await exactDocAndLayers(booted!, packageId)) {
+                const body = JSON.stringify(answer.body ?? null);
+                const details = answer.body?.error && typeof answer.body.error === 'object' ? answer.body.error.details : answer.body?.details;
+                const named = ((details?.candidates ?? []) as Array<{ kind?: string; packageId?: string }>).map((c) => `${c.kind}:${c.packageId}`).sort();
+                expect([answer.status, errorCodeOf(answer.body), named, answer.door], body)
+                    .toEqual([409, 'RESOURCE_CONFLICT', ships.map((holder) => `package:${holder}`).sort(), answer.door]);
+                expect(body, answer.door).not.toMatch(/(alpha|beta) doc|# (alpha|beta)/);
+            }
+        }
+    });
+
+    it('CONTROL: a doc name no package ships is the read\'s own 404 at any package address, both transports', async () => {
+        for (const packageId of [ALPHA, GAMMA, NOT_INSTALLED]) {
+            const query = { package: packageId };
+            for (const answer of [
+                { door: `dispatcher doc/no_such_doc?package=${packageId}`, ...(await viaDispatcher(booted!.kernel, '/meta/doc/no_such_doc', query)) },
+                { door: `rest doc/no_such_doc?package=${packageId}`, ...(await viaRest(booted!, '/meta/:type/:name', { type: 'doc', name: 'no_such_doc' }, query)) },
+            ]) {
                 expect([answer.status, errorCodeOf(answer.body), answer.door], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND', answer.door]);
-                expect(JSON.stringify(answer.body ?? null), answer.door).not.toMatch(/(alpha|beta) doc/);
             }
         }
     });
