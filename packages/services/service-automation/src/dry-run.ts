@@ -76,6 +76,15 @@ import {
     type StepLogEntry,
 } from './engine.js';
 import { renderTextSlot } from './builtin/template.js';
+import { renderSaveNoticeMessage } from './builtin/save-notice-node.js';
+import {
+    engineUpdateDispatchRejectError,
+    resolveEngineDeleteDispatch,
+    resolveEngineUpdateDispatch,
+    type EngineDeleteDispatchInput,
+    type EngineUpdateDispatchData,
+    type EngineUpdateDispatchInput,
+} from '@objectstack/metadata-core';
 import { readCarriedRefusal } from './inner-refusal.js';
 
 /** The nodes that only route the run (`FlowDryRunRouteStep`). */
@@ -115,6 +124,7 @@ export interface DryRunHost {
     readonly isInputSchemaViolation: (err: unknown) => boolean;
     readonly getActionDescriptor: AutomationEngine['getActionDescriptor'];
     readonly renderRefusalMessage: AutomationEngine['renderRefusalMessage'];
+    readonly renderFlowTextSlot: AutomationEngine['renderFlowTextSlot'];
     readonly executeWithTimeout: AutomationEngine['executeWithTimeout'];
     readonly setNodeError: AutomationEngine['setNodeError'];
 }
@@ -136,6 +146,8 @@ interface Segment {
 
 interface DryRunState {
     readonly host: DryRunHost;
+    /** The definition's own `name`: the flow its nodes read their `flows.<flow>.…` keys under (the contract's **The name.**). */
+    readonly flowName: string;
     readonly root: Segment;
     /** Set once a node stops the run (`'stopped'`), or the run ended: no node runs after it. */
     halted: boolean;
@@ -228,8 +240,9 @@ type DataEngineLike = Record<string, unknown> & {
  *  - Any other read passes to the live engine, in the scope the node hands it
  *    (the named user's), and does not see the run's simulated writes.
  *  - `canWriteObject`, read off the `security` service the kernel serves
- *    (`security()`), judges an insert or an update; with none installed, or
- *    for a delete, the write answers `'not_judged'`.
+ *    (`security()`), judges an insert or an update, and a check that throws
+ *    is a denial (`'refused'`); with none installed, or for a delete, the
+ *    write answers `'not_judged'`.
  */
 export function dryRunDataEngine(real: unknown, security: () => unknown): unknown {
     const frame = frames.getStore();
@@ -252,8 +265,8 @@ export function dryRunDataEngine(real: unknown, security: () => unknown): unknow
                 .call(svc, object, operation, context, data);
             return allowed ? 'allowed' : 'refused';
         } catch {
-            // The check could not answer: not judged, never allowed.
-            return 'not_judged';
+            // The check's own contract: a throw is a denial.
+            return 'refused';
         }
     };
 
@@ -300,10 +313,16 @@ export function dryRunDataEngine(real: unknown, security: () => unknown): unknow
         },
         async update(object: string, data: unknown, options?: { where?: unknown; context?: unknown }) {
             const values = isPlainObject(data) ? { ...data } : {};
-            const ids = await targets(object, options?.where, options?.context);
+            // The engine's own dispatch decision, asked as the live update
+            // asks it: a call naming neither one row nor `multi` is refused
+            // with the engine's own error, after the permission gate and
+            // before any row is read, so it targets no row.
+            const dispatch = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, options as EngineUpdateDispatchInput | undefined);
+            const ids = dispatch.kind === 'reject' ? [] : await targets(object, options?.where, options?.context);
             const permission = await judge('update', object, options?.context, data);
             record({ operation: 'update', object, recordIds: ids, values, permission });
             if (permission === 'refused') throw writeRefusedError('update', object);
+            if (dispatch.kind === 'reject') throw engineUpdateDispatchRejectError(dispatch);
             for (const id of ids) {
                 const created = state.created.get(object)?.get(id);
                 if (created) { Object.assign(created, values); continue; }
@@ -314,8 +333,11 @@ export function dryRunDataEngine(real: unknown, security: () => unknown): unknow
             return ids.length;
         },
         async delete(object: string, options?: { where?: unknown; context?: unknown }) {
-            const ids = await targets(object, options?.where, options?.context);
+            // As `update`: the engine's own dispatch decision, and its own error.
+            const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
+            const ids = dispatch.kind === 'reject' ? [] : await targets(object, options?.where, options?.context);
             record({ operation: 'delete', object, recordIds: ids, permission: 'not_judged' });
+            if (dispatch.kind === 'reject') throw new Error(dispatch.message);
             let gone = state.deleted.get(object);
             if (!gone) state.deleted.set(object, (gone = new Set()));
             for (const id of ids) gone.add(id);
@@ -582,6 +604,15 @@ function setAtPath(root: Record<string, unknown>, path: string, value: unknown):
  * `connector_action`, its `connectorConfig`), with every CEL value slot
  * evaluated and every text slot rendered in the run's scope. The slots are the
  * spec's ledgers, the ones registration judges and the executors read.
+ *
+ * Each text slot renders as its live executor renders it, in the same locale
+ * (`options.locale`, on the run's context). Measured: the `notify` executor
+ * renders `title`, `message` and `actionUrl`, and the `http` executor `url`
+ * and each `headers` value, through `renderTextSlot` with no translation, so
+ * they render the authored text here too. The `save_notice` executor
+ * translates its `message` (`flows.<flow>.notices.<node_id>.message`), so it
+ * is rendered here by that executor's own {@link renderSaveNoticeMessage},
+ * under the definition's own name, never by a second lookup.
  */
 function outboundPayload(
     state: DryRunState,
@@ -604,14 +635,19 @@ function outboundPayload(
         const block = blocks[slot.block];
         if (isPlainObject(block)) setAtPath(block, slot.path, value);
     }
+    const renderSlot = (path: string, source: string): string | undefined => (
+        node.type === 'save_notice' && path === 'message'
+            ? renderSaveNoticeMessage(state.host, state.flowName, node.id, source, variables, context)
+            : renderTextSlot(source, variables, context.currency)
+    );
     for (const slot of flowNodeTextSlotSources(node.type, node.config)) {
         const config = blocks.config as Record<string, unknown>;
         if (slot.path.includes('.')) {
             const dot = slot.path.indexOf('.');
             const map = config[slot.path.slice(0, dot)];
-            if (isPlainObject(map)) map[slot.path.slice(dot + 1)] = renderTextSlot(slot.source, variables, context.currency);
+            if (isPlainObject(map)) map[slot.path.slice(dot + 1)] = renderSlot(slot.path, slot.source);
         } else {
-            config[slot.path] = renderTextSlot(slot.source, variables, context.currency);
+            config[slot.path] = renderSlot(slot.path, slot.source);
         }
     }
     return node.type === 'connector_action' ? blocks : blocks.config;
@@ -702,6 +738,13 @@ export async function dryRun(this: DryRunHost, definition: unknown, options: Flo
     // the definition against the named user. A dry run starts with no action
     // in hand, so no AI opt-in stands. The elevated self-triggered rule is the
     // by-name doors' alone (ruling B, record 6917953931).
+    // Every arm fails closed on unread grants: the tenant above (no
+    // membership read), `requiredPermissions` (no capability read), and the AI
+    // service account rule, which cannot tell an account from a person
+    // without them, so a `runAs: 'system'` definition is refused here.
+    if (needsGrants && grants === undefined && flow.runAs === 'system') {
+        return refused("The named user's grants could not be read, so a dry run cannot admit a definition that runs as the system.");
+    }
     const caller = {
         ...(grants?.principalKind ? { principalKind: grants.principalKind } : {}),
         systemPermissions: Array.isArray(grants?.systemPermissions) ? grants.systemPermissions : [],
@@ -745,6 +788,7 @@ export async function dryRun(this: DryRunHost, definition: unknown, options: Flo
 
     const state: DryRunState = {
         host: this,
+        flowName: flow.name,
         root: { children: [] },
         halted: false,
         created: new Map(),

@@ -5566,6 +5566,7 @@ export class AutomationEngine implements IAutomationService {
             isInputSchemaViolation,
             getActionDescriptor: (...a) => this.getActionDescriptor(...a),
             renderRefusalMessage: (...a) => this.renderRefusalMessage(...a),
+            renderFlowTextSlot: (...a) => this.renderFlowTextSlot(...a),
             executeWithTimeout: (...a) => this.executeWithTimeout(...a),
             setNodeError: (...a) => this.setNodeError(...a),
         };

@@ -10,14 +10,20 @@
  * is read off the calls it never got, not off the result.
  */
 import { describe, it, expect } from 'vitest';
-import { AI_ACCOUNT_ELEVATED_START_REFUSAL, requiredPermissionsRefusal } from '@objectstack/core';
-import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { AI_ACCOUNT_ELEVATED_START_REFUSAL, createMemoryI18n, requiredPermissionsRefusal } from '@objectstack/core';
+import {
+    assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch,
+    ENGINE_DELETE_REJECT_MESSAGE, ENGINE_UPDATE_REJECT_MESSAGE,
+} from '@objectstack/metadata-core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { flowNoticeMessageKey, flowRefusalMessageKey } from '@objectstack/spec/system';
 import type { FlowDryRunResult } from '@objectstack/spec/contracts';
 import { AutomationEngine, type FlowUserGrants } from './engine.js';
 import { registerCrudNodes } from './builtin/crud-nodes.js';
 import { registerLogicNodes } from './builtin/logic-nodes.js';
 import { registerLoopNode } from './builtin/loop-node.js';
+import { registerSaveNoticeNode } from './builtin/save-notice-node.js';
+import { i18nServiceReader } from './plugin.js';
 
 function makeLogger(): any {
     const l: any = { info() {}, warn() {}, error() {}, debug() {} };
@@ -72,6 +78,10 @@ interface Harness {
 function harness(opts: {
     grants?: Partial<FlowUserGrants>;
     canWrite?: (object: string, operation: string) => boolean;
+    /** Translation bundles by locale, served through the engine's one i18n source. */
+    bundles?: Record<string, Record<string, unknown>>;
+    /** The grants read fails (the resolver throws). */
+    grantsFail?: boolean;
 } = {}): Harness {
     const { data, calls } = liveData();
     const writeChecks: Harness['writeChecks'] = [];
@@ -91,6 +101,17 @@ function harness(opts: {
     registerLogicNodes(engine, ctx);
     registerCrudNodes(engine, ctx);
     registerLoopNode(engine, ctx);
+    registerSaveNoticeNode(engine, ctx);
+    if (opts.bundles) {
+        const i18n = createMemoryI18n();
+        for (const [locale, data] of Object.entries(opts.bundles)) i18n.loadTranslations(locale, data);
+        engine.setI18nServiceSource(i18nServiceReader({
+            getService: (<T>(name: string) => {
+                if (name === 'i18n') return i18n as T;
+                throw new Error(`service '${name}' not registered`);
+            }) as never,
+        }));
+    }
     const h: Harness = { engine, calls, approvalCalls: 0, writeChecks };
     // An approval node as the approvals plugin declares it: it pauses, so a
     // dry run must stop at it and never call it (that would create a request).
@@ -102,7 +123,7 @@ function harness(opts: {
         } as any),
         async execute() { h.approvalCalls++; return { success: true, suspend: true }; },
     });
-    engine.setUserGrantsResolver(async () => ({
+    engine.setUserGrantsResolver(async () => opts.grantsFail ? Promise.reject(new Error('grants store unreachable')) : ({
         positions: [],
         permissions: [],
         accessible_org_ids: ['org_1'],
@@ -110,6 +131,16 @@ function harness(opts: {
         ...opts.grants,
     }));
     return h;
+}
+
+/** A bundle holding `text` at the dotted translation `key`. */
+function bundleAt(key: string, text: string): Record<string, unknown> {
+    const parts = key.split('.');
+    const root: Record<string, unknown> = {};
+    let at = root;
+    for (const part of parts.slice(0, -1)) at = (at[part] = {}) as Record<string, unknown>;
+    at[parts[parts.length - 1]] = text;
+    return root;
 }
 
 const writes = (h: Harness) => h.calls.filter((c) => c.op === 'insert' || c.op === 'update' || c.op === 'delete');
@@ -289,6 +320,14 @@ describe('dryRun — admission (the by-name start rules, ruling B for runAs syst
         expect(result.steps).toEqual([]);
     });
 
+    it('refuses a runAs system definition when the named user\'s grants cannot be read (the account rule fails closed)', async () => {
+        const h = harness({ grantsFail: true });
+        const result = await h.engine.dryRun(gated({ type: 'schedule', runAs: 'system' }), { userId: 'usr_maker' });
+        expect(result.status).toBe('refused');
+        expect(result.steps).toEqual([]);
+        expect(result.refusal?.code).toBe('PERMISSION_DENIED');
+    });
+
     it('admits a runAs system schedule draft for the named user and never elevates it (ruling B)', async () => {
         const h = harness({ canWrite: () => true });
         const result = await h.engine.dryRun(flow([
@@ -378,5 +417,132 @@ describe('dryRun — unarmed, unregistered, and its own answers', () => {
             nodeId: 'call', nodeType: 'http', kind: 'outbound',
             payload: { url: 'https://example.test/deals/d1', method: 'POST', body: { amount: 7 } },
         });
+    });
+});
+
+describe('dryRun — text slots render as the live executor renders them, in options.locale', () => {
+    const NOTICE = 'Sent {{ record.name }} for approval';
+    const ZH_NOTICE = '已将 {{ record.name }} 提交审批';
+    const noticeDraft = () => ({
+        name: 'deal_submit', label: 'Deal submit', type: 'record_change',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { objectName: 'deal', triggerType: 'record-after-update' } },
+            { id: 'tell', type: 'save_notice', label: 'Tell', config: { message: NOTICE } },
+            { id: 'done', type: 'end', label: 'Done' },
+        ],
+        edges: chain('start', 'tell', 'done'),
+    });
+    const record = { id: 'd1', name: 'Acme renewal' };
+
+    it('a save_notice payload carries the zh-CN translation at flows.NAME.notices.NODE.message, and the authored text with no locale', async () => {
+        const h = harness({ bundles: { 'zh-CN': bundleAt(flowNoticeMessageKey('deal_submit', 'tell'), ZH_NOTICE) } });
+
+        const zh = await h.engine.dryRun(noticeDraft(), { userId: 'usr_maker', record, locale: 'zh-CN' });
+        const plain = await h.engine.dryRun(noticeDraft(), { userId: 'usr_maker', record });
+
+        expect(zh.status).toBe('completed');
+        expect(zh.steps.find((s) => s.nodeId === 'tell')).toMatchObject({ kind: 'outbound', payload: { message: '已将 Acme renewal 提交审批' } });
+        expect(plain.steps.find((s) => s.nodeId === 'tell')).toMatchObject({ kind: 'outbound', payload: { message: 'Sent Acme renewal for approval' } });
+    });
+
+    it('a refusing end node carries the zh-CN translation of its message', async () => {
+        const h = harness({ bundles: { 'zh-CN': bundleAt(flowRefusalMessageKey('draft_flow', 'finish'), '{{ record.name }} 不能提交') } });
+        const draft = flow([
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'finish', type: 'end', label: 'Finish', config: { outcome: 'refused', message: '{{ record.name }} cannot be submitted' } },
+        ], chain('start', 'finish'));
+
+        const zh = await h.engine.dryRun(draft, { userId: 'usr_maker', record, locale: 'zh-CN' });
+        const plain = await h.engine.dryRun(draft, { userId: 'usr_maker', record });
+
+        expect(zh.steps.find((s) => s.nodeId === 'finish')).toMatchObject({ refusalMessage: 'Acme renewal 不能提交' });
+        expect(plain.steps.find((s) => s.nodeId === 'finish')).toMatchObject({ refusalMessage: 'Acme renewal cannot be submitted' });
+    });
+});
+
+describe('dryRun — a refused write a fault edge contains', () => {
+    it('goes on along the fault edge: the write step carries the refusal and the handler runs after it', async () => {
+        const h = harness({ canWrite: () => false });
+        const result = await h.engine.dryRun(flow([
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'deal', fields: { stage: 'open' } } },
+            { id: 'handler', type: 'assignment', label: 'Handle', config: { assignments: { handled: { dialect: 'cel', source: 'true' } } } },
+            { id: 'ok', type: 'end', label: 'Ok' },
+            { id: 'end', type: 'end', label: 'End' },
+        ], [
+            { id: 'e0', source: 'start', target: 'mk' },
+            { id: 'e1', source: 'mk', target: 'ok' },
+            { id: 'e_fault', source: 'mk', target: 'handler', type: 'fault' },
+            { id: 'e2', source: 'handler', target: 'end' },
+        ]), { userId: 'usr_maker' });
+
+        expect(result.status).not.toBe('failed');
+        expect(writes(h)).toEqual([]);
+        const ids = result.steps.map((s) => s.nodeId);
+        expect(result.steps.find((s) => s.nodeId === 'mk')).toMatchObject({
+            kind: 'write', permission: 'refused', refusal: { code: 'PERMISSION_DENIED' },
+        });
+        expect(ids.indexOf('handler')).toBeGreaterThan(ids.indexOf('mk'));
+        expect(ids).not.toContain('ok');
+    });
+});
+
+describe('dryRun — an object-level write check that throws', () => {
+    it('reports the write refused, as a denial, and the run fails there', async () => {
+        const h = harness({ canWrite: () => { throw new Error('permission store unreachable'); } });
+        const result = await h.engine.dryRun(flow([
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'deal', fields: { stage: 'open' } } },
+            { id: 'end', type: 'end', label: 'End' },
+        ], chain('start', 'mk', 'end')), { userId: 'usr_maker' });
+
+        expect(result.status).toBe('failed');
+        expect(writes(h)).toEqual([]);
+        expect(result.steps.find((s) => s.nodeId === 'mk')).toMatchObject({
+            kind: 'write', permission: 'refused', refusal: { code: 'PERMISSION_DENIED' },
+        });
+    });
+});
+
+describe('dryRun — a predicate write the engine refuses without multi', () => {
+    const predicateWrite = (node: Record<string, unknown>) => flow([
+        { id: 'start', type: 'start', label: 'Start' },
+        node,
+        { id: 'end', type: 'end', label: 'End' },
+    ], chain('start', String(node.id), 'end'));
+
+    it('an update by predicate with no multi fails with the engine\'s own error, targeting and reading no row', async () => {
+        const h = harness({ canWrite: () => true });
+        const result = await h.engine.dryRun(predicateWrite(
+            { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'deal', filter: { stage: 'open' }, fields: { stage: 'won' } } },
+        ), { userId: 'usr_maker' });
+
+        expect(result.status).toBe('failed');
+        expect(writes(h)).toEqual([]);
+        expect(h.calls.filter((c) => c.op === 'find' || c.op === 'findOne')).toEqual([]);
+        expect(result.steps.find((s) => s.nodeId === 'up')).toMatchObject({ kind: 'write', operation: 'update', recordIds: [] });
+        expect(String(result.steps.find((s) => s.nodeId === 'up')?.error)).toContain(ENGINE_UPDATE_REJECT_MESSAGE);
+    });
+
+    it('a delete by predicate with no multi fails with the engine\'s own error', async () => {
+        const h = harness();
+        const result = await h.engine.dryRun(predicateWrite(
+            { id: 'rm', type: 'delete_record', label: 'Delete', config: { objectName: 'deal', filter: { stage: 'open' } } },
+        ), { userId: 'usr_maker' });
+
+        expect(result.status).toBe('failed');
+        expect(writes(h)).toEqual([]);
+        expect(result.steps.find((s) => s.nodeId === 'rm')).toMatchObject({ kind: 'write', operation: 'delete', recordIds: [] });
+        expect(String(result.steps.find((s) => s.nodeId === 'rm')?.error)).toContain(ENGINE_DELETE_REJECT_MESSAGE);
+    });
+
+    it('CONTROL — the same update declaring multi lists every row it matches', async () => {
+        const h = harness({ canWrite: () => true });
+        const result = await h.engine.dryRun(predicateWrite(
+            { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'deal', filter: { stage: 'open' }, fields: { stage: 'won' }, multi: true } },
+        ), { userId: 'usr_maker' });
+
+        expect(result.status).toBe('completed');
+        expect(result.steps.find((s) => s.nodeId === 'up')).toMatchObject({ kind: 'write', operation: 'update', recordIds: ['d1'] });
     });
 });
