@@ -107,10 +107,13 @@ export function readStoredSlate(raw: unknown): string[] {
 /**
  * Does `entry`, once stored on a slate, read back as holding the platform
  * administrators' slot ({@link readStoredSlate})? The slot is judged on the
- * slate the doors read, not on the string a resolution produced.
+ * slate the doors read, not on the value a resolution produced. Any entry is
+ * judged as the text it is stored as, so the answer is total: a value that is
+ * not text (a number, a list, an object) is judged as the text the stored
+ * slate holds for it.
  */
-export function readsAsPlatformAdminAddress(entry: string): boolean {
-  return readStoredSlate(entry).some(isPlatformAdminAddress);
+export function readsAsPlatformAdminAddress(entry: unknown): boolean {
+  return readStoredSlate(entry == null ? '' : String(entry)).some(isPlatformAdminAddress);
 }
 
 /**
@@ -120,8 +123,21 @@ export function readsAsPlatformAdminAddress(entry: string): boolean {
  * slate is resolved from anything but the approver type that names them,
  * which alone opens it.
  */
-export function withoutPlatformAdminAddress(ids: readonly string[]): string[] {
+export function withoutPlatformAdminAddress<T>(ids: readonly T[]): T[] {
   return ids.filter((id) => !readsAsPlatformAdminAddress(id));
+}
+
+/**
+ * [#34218] A request's pending slate as the decision, override and inbox
+ * doors read it: the stored slate ({@link readStoredSlate}), on which the
+ * platform administrators' slot stands only when the request records that a
+ * `platform_admin` approver opened it (`slotOpened`). On a request without
+ * that record no door reads the slot, whatever its stored text holds: only
+ * the approver type that names the platform administrators opens their slot.
+ */
+export function pendingSlateAsDoorsRead(stored: unknown, slotOpened: boolean): string[] {
+  const slate = readStoredSlate(stored);
+  return slotOpened ? slate : withoutPlatformAdminAddress(slate);
 }
 
 /**

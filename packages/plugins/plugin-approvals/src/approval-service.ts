@@ -103,6 +103,7 @@ import {
   equivalentApproverAddresses,
   heldSlot,
   isPlatformAdminAddress,
+  pendingSlateAsDoorsRead,
   readStoredSlate,
   readsAsPlatformAdminAddress,
   slateHoldsPlatformAdminAddress,
@@ -1655,6 +1656,38 @@ function bodyHoldsNode(body: unknown, node: object): boolean {
 const csvSplit: (raw: unknown) => string[] = readStoredSlate;
 
 /**
+ * [#34218] The record a request's config snapshot (`node_config_json`)
+ * carries, `true`, when the step that opened it named the platform
+ * administrators (approver type `platform_admin`, admitted at node entry) and
+ * the slate it opened on holds their slot. Only the open path writes it, from
+ * that judgement alone: a key of this name handed in with the step's config is
+ * dropped, and `ApprovalNodeConfigSchema` declares no such key.
+ */
+const PLATFORM_ADMIN_SLOT_SNAPSHOT_KEY = '__platformAdminSlotOpened';
+
+/**
+ * Does a request's config snapshot (the stored `node_config_json`, or that
+ * text parsed) record that a `platform_admin` approver opened its platform
+ * administrators' slot ({@link PLATFORM_ADMIN_SLOT_SNAPSHOT_KEY})?
+ */
+function platformAdminSlotOpened(snapshot: unknown): boolean {
+  const cfg = typeof snapshot === 'string' ? parseJson<unknown>(snapshot, undefined) : snapshot;
+  return !!cfg && typeof cfg === 'object' && (cfg as Record<string, unknown>)[PLATFORM_ADMIN_SLOT_SNAPSHOT_KEY] === true;
+}
+
+/**
+ * [#34218] A stored request's pending slate as every door reads it: the
+ * decision and override admissions, the per-viewer flags, the served request
+ * and the approver index behind the inbox. Only the approver type that names
+ * the platform administrators opens their slot, so the slot stands on it
+ * only for a request that records a `platform_admin` step opened it
+ * ({@link platformAdminSlotOpened}); on any other request no door reads it.
+ */
+function pendingSlateOf(row: { pending_approvers?: unknown; node_config_json?: unknown } | null | undefined): string[] {
+  return pendingSlateAsDoorsRead(row?.pending_approvers, platformAdminSlotOpened(row?.node_config_json));
+}
+
+/**
  * [ADR-0131] The organization a value names, or `null` for none — `NULL`,
  * absent or blank. The normalization `grantOrganizationOf`
  * (`@objectstack/core`, `resolve-authz-context.ts`) gives a stored grant row's
@@ -1723,7 +1756,8 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     cancel_reason: (row.cancel_reason as ApprovalCancelReason) ?? undefined,
     current_step: row.current_step ?? undefined,
     current_step_index: row.current_step_index ?? undefined,
-    pending_approvers: csvSplit(row.pending_approvers),
+    // [#34218] The slate as every door reads it ({@link pendingSlateOf}).
+    pending_approvers: pendingSlateAsDoorsRead(row.pending_approvers, platformAdminSlotOpened(cfg)),
     payload: parseJson(row.payload_json, undefined),
     flow_run_id: row.flow_run_id ?? undefined,
     flow_node_id: row.flow_node_id ?? undefined,
@@ -5196,6 +5230,13 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       configSnapshot.__resolvedFrom = resolvedFrom;
     }
     if (adminRescueNote) configSnapshot[ADMIN_RESCUE_NOTE_SNAPSHOT_KEY] = adminRescueNote;
+    // [#34218] Whether a `platform_admin` step opened the platform
+    // administrators' slot: the record the doors honour the slot on
+    // ({@link pendingSlateOf}). Written here alone, from this judgement alone.
+    const platformSlotOpened = this.namesPlatformAdminApprover(input.config)
+      && approvers.some(isPlatformAdminAddress);
+    delete configSnapshot[PLATFORM_ADMIN_SLOT_SNAPSHOT_KEY];
+    if (platformSlotOpened) configSnapshot[PLATFORM_ADMIN_SLOT_SNAPSHOT_KEY] = true;
     // [#25573] The record shows when the exclusion changed the route: the
     // route the request took once the submitter was off its slate.
     const exclusionNote: SubmitterExclusionNote | undefined = excludedFrom.size
@@ -5244,7 +5285,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       updated_at: now,
     };
     await this.engine.insert('sys_approval_request', row, { context: SYSTEM_CTX });
-    await this.syncApproverIndex(id, approvers, requestOrg, now);
+    await this.syncApproverIndex(id, approvers, requestOrg, now, platformSlotOpened);
     await this.engine.insert('sys_approval_action', await this.actionRow(row, {
       id: uid('aact'), request_id: id, organization_id: requestOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
@@ -5598,7 +5639,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
 
-    const pendingApprovers = csvSplit(raw.pending_approvers);
+    const pendingApprovers = pendingSlateOf(raw);
     // A privileged admin may override a stuck request (#3424) even when they
     // hold no slot — the escape hatch for an approval routed to an unstaffed
     // position or to approvers who have all left.
@@ -5803,7 +5844,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
             }),
           } : {}),
         }, { context: SYSTEM_CTX });
-        await this.syncApproverIndex(requestId, stillPending, org, now);
+        await this.syncApproverIndex(requestId, stillPending, org, now, platformAdminSlotOpened(config));
         const fresh = await this.readBackRequest(requestId, context);
         return { request: fresh, runId, nodeId, finalized: false, decision: input.decision };
       }
@@ -6469,7 +6510,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // one hardcoded English sentence that Console rendered verbatim in a
     // toast. See {@link ApprovalService.userFacingRefusal}.
     const overrideAdmits = raw.status === 'pending'
-      && this.isOverrideActor(context, raw.organization_id ?? null, csvSplit(raw.pending_approvers));
+      && this.isOverrideActor(context, raw.organization_id ?? null, pendingSlateOf(raw));
     // A request with no submitter is recalled only through the arm above (a
     // system context or the override actor, on `pending`): `actsAsSubmitter`
     // answers no for every actor there.
@@ -6897,7 +6938,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   ): Promise<ApprovalSendBackResult> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId, context);
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     const slot = await this.takenSlot(pending, actorId, context);
     if (!context.isSystem && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
@@ -7213,7 +7254,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (!to) throw new Error('VALIDATION_FAILED: `to` (new approver) is required');
     const raw = await this.loadPendingRow(requestId, context);
 
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     if (pending.includes(to)) {
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
@@ -7295,7 +7336,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       id: requestId, pending_approvers: next.join(','), updated_at: now, ...configPatch,
       pending_approver_labels: await this.slateLabels(next),
     }, { context: SYSTEM_CTX });
-    await this.syncApproverIndex(requestId, next, raw.organization_id ?? null, now);
+    await this.syncApproverIndex(requestId, next, raw.organization_id ?? null, now, platformAdminSlotOpened(raw.node_config_json));
 
     await this.notify({
       topic: 'approval.reassigned',
@@ -7445,7 +7486,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       throw new Error('THROTTLED: a reminder was already sent recently');
     }
 
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     const nowIso = now.toISOString();
     await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
@@ -7540,7 +7581,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // Minted by the server for a slot it names, on behalf of no reader — read
     // as the system, as before.
     const raw = await this.loadPendingRow(requestId, SYSTEM_CTX);
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     if (!pending.includes(approverId)) {
       throw new Error(`FORBIDDEN: '${approverId}' is not a pending approver on this request`);
     }
@@ -7736,7 +7777,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
     const raw = await this.loadPendingRow(requestId, context);
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     const slot = await this.takenSlot(pending, actorId, context);
     if (!context.isSystem && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
@@ -7776,7 +7817,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
     const raw = await this.loadPendingRow(requestId, context);
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     const isSubmitter = raw.submitter_id && String(raw.submitter_id) === String(actorId);
     // The submitter speaks as themselves; anyone else speaks from the slot
     // they take (`takenSlot`).
@@ -8828,7 +8869,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const escalateTo: string | undefined =
       typeof esc.escalateTo === 'string' && esc.escalateTo.trim() ? esc.escalateTo.trim() : undefined;
     const now = this.clock.now().toISOString();
-    const pending = csvSplit(raw.pending_approvers);
+    const pending = pendingSlateOf(raw);
     // [#23978] Every escalation sentence names the record the way every approval notification does.
     const about = { object: String(raw.object_name), recordId: String(raw.record_id) };
 
@@ -8898,7 +8939,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         id: raw.id, pending_approvers: escalatees.join(','), updated_at: now,
         pending_approver_labels: await this.slateLabels(escalatees),
       }, { context: SYSTEM_CTX });
-      await this.syncApproverIndex(raw.id, escalatees, raw.organization_id ?? null, now);
+      await this.syncApproverIndex(raw.id, escalatees, raw.organization_id ?? null, now, platformAdminSlotOpened(raw.node_config_json));
       await this.notify({
         topic: 'approval.escalated',
         organizationId: raw.organization_id,
@@ -9665,14 +9706,21 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * the approver set; an empty `approvers` clears the request's rows (the
    * request left `pending`). Diff-based so reassign/unanimous churn doesn't
    * rewrite untouched rows.
+   *
+   * [#34218] `platformSlotOpened` is the request's record that a
+   * `platform_admin` step opened the platform administrators' slot
+   * ({@link platformAdminSlotOpened}); without it the slot is not indexed, as
+   * no door reads it ({@link pendingSlateOf}).
    */
   private async syncApproverIndex(
     requestId: string,
     approvers: string[],
     org: string | null,
     now: string,
+    platformSlotOpened = false,
   ): Promise<void> {
-    const desired = new Set(approvers.map(a => String(a).trim()).filter(Boolean));
+    const indexed = platformSlotOpened ? approvers : withoutPlatformAdminAddress(approvers);
+    const desired = new Set(indexed.map(a => String(a).trim()).filter(Boolean));
     const existing = await this.engine.find('sys_approval_approver', {
       where: { request_id: requestId }, limit: 500, context: SYSTEM_CTX,
     });
@@ -9707,7 +9755,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const requests = keysetWalk<Record<string, any>>(
       (q) => this.engine.find('sys_approval_request', {
         ...q,
-        fields: ['id', 'pending_approvers', 'organization_id'],
+        // [#34218] The snapshot too: the slate is read as every door reads it.
+        fields: ['id', 'pending_approvers', 'organization_id', 'node_config_json'],
         context: SYSTEM_CTX,
       }),
       { where: { status: 'pending' }, pageSize: PAGE },
@@ -9715,7 +9764,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     for await (const rows of requests.pages()) {
       for (const r of rows) {
         desired.set(String(r.id), {
-          approvers: new Set(csvSplit(r.pending_approvers)),
+          approvers: new Set(pendingSlateOf(r)),
           org: r.organization_id ?? null,
         });
       }

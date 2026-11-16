@@ -41,10 +41,12 @@ import { AutomationEngine } from '@objectstack/service-automation';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindSecurityCatalogReader, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
 import { normalizeStackInput } from '@objectstack/spec';
+import { ApprovalNodeConfigSchema } from '@objectstack/spec/automation';
 import { runAuthoringRules, runRuntimeAuthoringRules, APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED } from '@objectstack/lint';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { registerApprovalNode } from './approval-node.js';
+import { readStoredSlate, readsAsPlatformAdminAddress } from './approver-address.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
@@ -165,6 +167,12 @@ async function packageObjects(): Promise<any[]> {
 
 const pkg = (id: string) => ({ id, name: id, version: '1.0.0', type: 'app' });
 
+/** The members each queue's expander answers, as the queue service would. */
+const QUEUES: Record<string, string[]> = {};
+
+/** The record a request's snapshot carries when a `platform_admin` step opened its slot. */
+const SLOT_RECORD_KEY = '__platformAdminSlotOpened';
+
 describe('platform_admin approver: one slot the platform administrators decide under', () => {
   let engine: ObjectQL;
   let svc: ApprovalService;
@@ -250,6 +258,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
       engine: engine as any,
       clock: { now: () => new Date(now += 1000) },
       logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+      ownershipQueues: () => ({ expandMembers: async (name: string) => QUEUES[name] ?? [] }),
     });
     svc.attachMessaging({
       emit: (async (input: { topic: string; audience: string[] }) => {
@@ -592,6 +601,89 @@ describe('platform_admin approver: one slot the platform administrators decide u
         expect((await svc.getRequest(row.id, SYSTEM))?.pending_approvers).toEqual(['u_alice']);
         await expectNoDoorReadsTheSlot(row.id);
       });
+    });
+
+    it('case 22: a queue\'s members open no slot the doors read', async () => {
+      QUEUES.queue_22 = ['u_member', SLOT, joined];
+      await opensOn('case_22', [{ type: 'queue', value: 'queue_22' }], ['u_member']);
+    });
+
+    it('case 23: an expression yielding a list of people opens no slot the doors read', async () => {
+      await opensOn('case_23', [{ type: 'expression', value: 'trigger.reviewers', resolveAs: 'user' }], ['u_member'], {},
+        { reviewers: ['u_member', SLOT, joined] });
+    });
+
+    it('the slot test is total: an entry that is not text is judged as the text the stored slate holds for it', () => {
+      const entries: unknown[] = [
+        42, true, null, undefined, { toString: () => SLOT }, [SLOT], ['u_alice', SLOT], [['u_alice', SLOT]],
+        [`u_alice, ${SLOT}`], ['u_alice', 'u_member'],
+      ];
+      const asStored = entries.map((entry) => readStoredSlate([entry].join(',')).includes(SLOT));
+      expect(entries.map((entry) => readsAsPlatformAdminAddress(entry))).toEqual(asStored);
+      expect(asStored.filter(Boolean)).toHaveLength(5);
+    });
+  });
+
+  describe('the doors honour the slot only on a request that records a platform_admin step opened it', () => {
+    const orgAdmin = () => as('u_org_admin', ORG, ['organization_admin']);
+    const snapshotOf = async (key: string): Promise<Record<string, unknown>> =>
+      JSON.parse(String((await requestRows(key))[0].node_config_json));
+    /** The request as a row that holds no such record: its stored slate and the rest of its snapshot as they are. */
+    const withoutTheRecord = async (key: string): Promise<void> => {
+      const [row] = await requestRows(key);
+      const snapshot = await snapshotOf(key);
+      delete snapshot[SLOT_RECORD_KEY];
+      await engine.update('sys_approval_request', { id: row.id, node_config_json: JSON.stringify(snapshot) },
+        { context: SYSTEM } as any);
+    };
+    const doorsRead = async (id: string) => {
+      await svc.rebuildApproverIndex();
+      return {
+        served: (await svc.getRequest(id, SYSTEM))?.pending_approvers,
+        listed: (await inbox(as('u_root'))).includes(id),
+        orgAdminOverrides: (await svc.getRequest(id, orgAdmin()) as any)?.viewer?.can_override,
+      };
+    };
+
+    it('CONTROL: a request a platform_admin step opened records it, and every door reads the slot', async () => {
+      const row = await open('recorded', 'host_review', [...PLATFORM, { type: 'user', value: 'u_alice' }]);
+      expect((await snapshotOf('recorded'))[SLOT_RECORD_KEY]).toBe(true);
+      expect(await doorsRead(row.id)).toEqual({ served: [SLOT, 'u_alice'], listed: true, orgAdminOverrides: false });
+      const out = await svc.decide(row.id, { decision: 'approve', actorId: SLOT } as any, as('u_root'));
+      expect(out.request.status).toBe('approved');
+      expect((await actionsOf(row.id)).find((a) => a.action === 'approve')).toMatchObject({ actor_id: 'u_root', acted_as: SLOT });
+    });
+
+    it('a request without the record: no door reads the slot its stored slate holds, and its people decide as before', async () => {
+      const row = await open('no_record', 'host_review', [...PLATFORM, { type: 'user', value: 'u_alice' }]);
+      await withoutTheRecord('no_record');
+      expect((await requestRows('no_record'))[0].pending_approvers).toBe(`${SLOT},u_alice`);
+      expect(await doorsRead(row.id)).toEqual({ served: ['u_alice'], listed: false, orgAdminOverrides: true });
+      await expect(svc.decide(row.id, { decision: 'approve', actorId: SLOT } as any, as('u_root')))
+        .rejects.toThrow(/^(REQUEST_NOT_FOUND|FORBIDDEN): /);
+      await expect(svc.decide(row.id, { decision: 'approve' } as any, as('u_root')))
+        .rejects.toThrow(/^(REQUEST_NOT_FOUND|FORBIDDEN): /);
+      const out = await svc.decide(row.id, { decision: 'approve' } as any, as('u_alice'));
+      expect(out.request.status).toBe('approved');
+    });
+
+    it('a request without the record: a vote that rewrites its slate indexes no slot for the inbox', async () => {
+      const row = await open('no_record_vote', 'host_review', [...PLATFORM, { type: 'user', value: 'u_alice' }],
+        { behavior: 'unanimous' });
+      await withoutTheRecord('no_record_vote');
+      await svc.rebuildApproverIndex();
+      await svc.decide(row.id, { decision: 'approve' } as any, as('u_alice'));
+      expect((await requestRows('no_record_vote'))[0]).toMatchObject({ status: 'pending', pending_approvers: SLOT });
+      expect(await inbox(as('u_root'))).not.toContain(row.id);
+      expect(await doorsRead(row.id)).toEqual({ served: [], listed: false, orgAdminOverrides: true });
+    });
+
+    it('only the open path writes the record: a step\'s config cannot carry it', async () => {
+      const declared = ApprovalNodeConfigSchema.safeParse({ approvers: PLATFORM, [SLOT_RECORD_KEY]: true });
+      expect(declared.success).toBe(false);
+      expect(declared.error?.issues.map((issue) => issue.code)).toContain('unrecognized_keys');
+      await open('handed', 'tenant_review', [{ type: 'user', value: 'u_alice' }], { [SLOT_RECORD_KEY]: true });
+      expect(await snapshotOf('handed')).not.toHaveProperty(SLOT_RECORD_KEY);
     });
   });
 
