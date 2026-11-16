@@ -6,7 +6,9 @@
  * its people arrive from the organisation's identity provider. Six actions are
  * hidden while the flag is on — the four `invite_user` mirrors, `create_user`
  * and `set_user_password` — and each is offered as before when the flag is
- * off (ruling 6341690661 on #25083, Q3 A and Q4 A).
+ * off (ruling 6341690661 on #25083, Q3 A and Q4 A). `resend_invitation`
+ * rides the invite mirrors' door, so it is hidden the same way (its own
+ * block below).
  *
  * Not pinned here: a payload that omits the flag. plugin-auth's drift guard
  * holds the served boolean key set stable, and this engine faults on ANY
@@ -73,6 +75,42 @@ describe('features.cloudManaged hides the six doors that add people', () => {
 
   it.each(SIX)('%s keeps its other flag: off hides it whatever cloudManaged says', (_site, def, name) => {
     expect(offered(visibleOf(def, name), { organization: false, admin: false, cloudManaged: false })).toBe(false);
+  });
+});
+
+/**
+ * `sys_invitation.resend_invitation` is not a door that adds a person, so it
+ * is not among the six above, but it rides the same door: a resend IS a call
+ * to invite-member, which a cloud-managed environment refuses (`409
+ * RESOURCE_CONFLICT`, resends included). So it carries the same gate as the
+ * invite mirrors: hidden while managed, offered as before on a pending row
+ * (unexpired or past its `expires_at`) when the flag is off.
+ */
+describe('features.cloudManaged hides Resend Invitation, whose door it refuses', () => {
+  const resendOffered = (record: Record<string, unknown>, features: Record<string, unknown>): boolean | string => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visibleOf(SysInvitation, 'resend_invitation') },
+      { record, extra: { current_user: ADMIN, user: ADMIN, ctx: { user: ADMIN }, features } },
+    );
+    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
+    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+  };
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const ROWS: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ['an unexpired pending row', { id: 'inv_1', status: 'pending', email: 'b@example.com', role: 'member', expires_at: new Date(Date.now() + DAY_MS).toISOString() }],
+    ['a pending row past its expires_at', { id: 'inv_1', status: 'pending', email: 'b@example.com', role: 'member', expires_at: new Date(Date.now() - DAY_MS).toISOString() }],
+  ];
+
+  it.each(ROWS)('is hidden on %s while the environment is cloud-managed', (_row, record) => {
+    expect(resendOffered(record, { ...OTHER_FLAGS, cloudManaged: true })).toBe(false);
+  });
+
+  it.each(ROWS)('is offered on %s as before when the flag is off', (_row, record) => {
+    expect(resendOffered(record, { ...OTHER_FLAGS, cloudManaged: false })).toBe(true);
+  });
+
+  it('keeps its organization gate: off hides it whatever cloudManaged says', () => {
+    expect(resendOffered(ROWS[0][1], { organization: false, admin: true, cloudManaged: false })).toBe(false);
   });
 });
 

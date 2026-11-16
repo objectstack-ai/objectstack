@@ -90,6 +90,12 @@ vi.mock('./MetadataInspector', () => ({
   useMetadataInspector: () => ({ showDebug: false, toggle: () => {} }),
 }));
 
+// The related list draws its rows through the registered `object-grid`. The
+// console registers it in `register-plugins.ts`; this page reached it only
+// through `@object-ui/plugin-view`'s entry until the shell took its view
+// helpers from `@object-ui/plugin-view/core` (objectstack#33581), so the
+// registration it renders through is loaded here, by name.
+import '@object-ui/plugin-grid';
 import { RecordDetailView } from './RecordDetailView';
 
 /**

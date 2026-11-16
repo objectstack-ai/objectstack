@@ -2,7 +2,7 @@
 
 /**
  * A card's run, summarized: the per-half scorecard (Build · Run-问数 ·
- * Run-operations · Iterate), the per-tag verdicts, the two modes side by side,
+ * Run-operations · Iterate), the per-tag verdicts, the modes side by side,
  * and the run record in the `docs/qa/platform-checklist/runs/` shape (records
  * are git-ignored output, never committed — that README).
  *
@@ -33,9 +33,15 @@
  *     `Run · model` rows. No stream reports the effort a turn was served, so
  *     this is the asked-for level, never a reading; a turn that asked for none
  *     ran at the CLI's default and shows no effort.
- *   - Run-问数: one turn per (question, persona); it passes when the answer is
- *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
- *     leaking answer shows up even when it is otherwise right.
+ *   - Run-问数: one turn per (question, persona) and ask; it passes when the
+ *     answer is correct AND cited AND leaks nothing. Leaks are also counted
+ *     apart, so a leaking answer shows up even when it is otherwise right.
+ *     With `--ask-repeats N` (N > 1) each (question, persona) turn is asked N
+ *     times and the cell counts passes over every asked turn; a table after the
+ *     halves then states each turn's k/N per Run half ({@link repeatTally}),
+ *     and the heading says how many times each turn was asked. With one ask
+ *     there is no table and the heading is as before. Every other row counts
+ *     each ask as a turn too: models, ask cost and time, the guardrails.
  *   - Author cost: the sum of what every authoring turn (build and iterate)
  *     reported as its cost (`TurnSummary.reportedCostUsd`), per mode and for
  *     the card. It is stated only when EVERY authoring turn that ran reported
@@ -70,6 +76,13 @@
  *     half: `pass`, `fail`, or `not measured: <reason>` — never a pass when
  *     nothing was measured. A record from before the half was graded carries
  *     none, and its row shows nothing (`—`; no row at all when no half has any).
+ *   - Ask mode (`--modes ask`): the Run half alone, on a verified build it was
+ *     given ({@link ModeScorecard.supplied}, its source). Its Build cells read
+ *     `supplied` — not scored, and not the `—` of a half that is missing — and
+ *     a line under the table names the build's source; its Author cost and
+ *     time read `no authoring turns`, and so do the card's lines when every
+ *     mode that ran is one. Every Run row (问数, operations, model,
+ *     guardrails, ask cost and time, the k/N table) counts it as any Run half.
  *   - Seed: rows loaded of rows sent. A refused row is shown as
  *     `⚠ seed: N refused`, and every question turn and operation that depends
  *     on it (`seedDependence` in `orchestrate.ts`) is NOT MEASURED: it counts in
@@ -78,7 +91,7 @@
  */
 
 import { askedFirst, confirmedByAgent } from '../score/index.js';
-import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, TurnSummary } from './orchestrate.js';
+import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { cycleText } from './seed.js';
@@ -113,6 +126,23 @@ export interface HalfScores {
   models?: ModelTally;
   /** The half's guardrail checks ({@link guardrailTally}); absent when its Run half carries none (a record from before they were graded). */
   guardrails?: GuardrailVerdict[];
+  /** Each question turn's asks, k of N ({@link repeatTally}); absent when the half asked each turn once. */
+  repeats?: QuestionRepeats[];
+}
+
+/**
+ * One (question, persona) turn of a Run half the run asked more than once
+ * (`--ask-repeats`): `passed` of `total` measured asks, as the Run-问数 cell
+ * counts a turn, so k/N.
+ */
+export interface QuestionRepeats extends Tally {
+  question: string;
+  /** `null`: asked with no persona (as the admin). */
+  persona: string | null;
+  /** Asks that measured nothing (`QuestionResult.notMeasured`): in neither passed nor total. */
+  notMeasured: number;
+  /** Measured asks whose answer leaked a hidden value. */
+  leaks: number;
 }
 
 /** A Run half's guardrail check as the scorecard states it ({@link guardrailTally}). */
@@ -189,8 +219,14 @@ export interface ModelSpend {
 export type AskSpend = Record<string, ModelSpend>;
 
 export interface ModeScorecard {
-  mode: 'scratch' | 'template';
+  mode: 'scratch' | 'template' | 'ask';
   skipped?: string;
+  /**
+   * The source of the verified build the mode ran on and did not author or
+   * score (`ModeRun.template.source`), on an ask mode that got as far as its
+   * install; absent on every other mode.
+   */
+  supplied?: string;
   first: HalfScores;
   iterate?: HalfScores & { changeSize?: number };
   /** The mode's authoring turns, build and iterate; absent on a record written before the scorecard carried it. */
@@ -216,6 +252,8 @@ export interface CardScorecard {
   askSpend?: AskSpend;
   /** {@link ConfirmationTally} summed over every mode and half; absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
+  /** How many times each question turn was asked (`CardRun.askRepeats`), when more than once; absent ⇒ once. */
+  askRepeats?: number;
   modes: ModeScorecard[];
 }
 
@@ -247,17 +285,45 @@ export function seedTally(r: RunHalf | undefined): HalfScores['seed'] | undefine
   return { inserted: r.seed.inserted, total: r.seed.inserted + r.seed.refused.length, refused: r.seed.refused.length };
 }
 
+/** Did a question turn pass: correct AND cited AND leaking nothing. An errored turn (no grade) did not. */
+const answerPassed = (q: QuestionResult): boolean => !!q.grade && q.grade.correct && q.grade.cited && q.grade.leaks.length === 0;
+
+/** Did a question turn's answer leak a hidden value. */
+const answerLeaked = (q: QuestionResult): boolean => !!q.grade && q.grade.leaks.length > 0;
+
+/** Every asked turn of the half counts: with `--ask-repeats N`, each (question, persona) turn N times. */
 export function askTally(r: RunHalf | undefined): HalfScores['ask'] | undefined {
   if (!r) return undefined;
-  let passed = 0;
-  let leaks = 0;
   const measured = r.questions.filter((q) => !q.notMeasured);
-  for (const q of measured) {
-    const g = q.grade;
-    if (g && g.leaks.length) leaks++;
-    if (g && g.correct && g.cited && g.leaks.length === 0) passed++;
+  return { passed: measured.filter(answerPassed).length, total: measured.length, leaks: measured.filter(answerLeaked).length, notMeasured: r.questions.length - measured.length };
+}
+
+/**
+ * Each (question, persona) turn's asks as k of N, in the order the half asked
+ * them, when the run asked each turn more than once (its question results
+ * carry `repeat`); `undefined` when it asked once. Counted as {@link askTally}
+ * counts a turn: a not-measured ask is in neither passed nor total, an
+ * errored one in total only.
+ */
+export function repeatTally(r: RunHalf | undefined): QuestionRepeats[] | undefined {
+  const asks = (r?.questions ?? []).filter((q) => q.repeat !== undefined);
+  if (asks.length === 0) return undefined;
+  const byTurn = new Map<string, QuestionResult[]>();
+  for (const q of asks) {
+    const key = JSON.stringify([q.question, q.persona]);
+    byTurn.set(key, [...(byTurn.get(key) ?? []), q]);
   }
-  return { passed, total: measured.length, leaks, notMeasured: r.questions.length - measured.length };
+  return [...byTurn.values()].map((qs) => {
+    const measured = qs.filter((q) => !q.notMeasured);
+    return {
+      question: qs[0]!.question,
+      persona: qs[0]!.persona,
+      passed: measured.filter(answerPassed).length,
+      total: measured.length,
+      notMeasured: qs.length - measured.length,
+      leaks: measured.filter(answerLeaked).length,
+    };
+  });
 }
 
 export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | undefined {
@@ -461,6 +527,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (cf) first.confirmation = cf;
   const gr = guardrailTally(m.run);
   if (gr) first.guardrails = gr;
+  const rp = repeatTally(m.run);
+  if (rp) first.repeats = rp;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -481,6 +549,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     ],
   };
   if (m.skipped) out.skipped = m.skipped;
+  if (m.mode === 'ask' && m.template) out.supplied = m.template.source;
   if (m.iterate) {
     const it: HalfScores & { changeSize?: number } = {};
     const ib = buildTally(m.iterate.build, NO_ARTIFACT_TOTAL);
@@ -497,6 +566,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (icf) it.confirmation = icf;
     const igr = guardrailTally(m.iterate.run);
     if (igr) it.guardrails = igr;
+    const irp = repeatTally(m.iterate.run);
+    if (irp) it.repeats = irp;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -516,6 +587,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     authorTime: turnTime(run.modes.flatMap(authorTurnsOf)),
     askSpend: askSpend(run.modes.flatMap(askTurnsOf)),
     ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
+    ...(run.askRepeats !== undefined && run.askRepeats > 1 ? { askRepeats: run.askRepeats } : {}),
     modes,
   };
 }
@@ -576,14 +648,54 @@ const modelCell = (t: ModelTally | undefined): string => {
 const guardrailCell = (g: readonly GuardrailVerdict[] | undefined): string =>
   g?.length ? g.map((v) => `${v.check} ${v.verdict}${v.reason !== undefined ? `: ${v.reason}` : ''}`).join(' · ') : '—';
 
+/** `` `account_count` as sdr ``; `` `account_count` `` when asked with no persona. */
+const turnLabel = (t: { question: string; persona: string | null }): string => `\`${t.question}\`${t.persona !== null ? ` as ${t.persona}` : ''}`;
+
+/** `3/3`; `1/2 · 1 not measured ⚠ 1 leaking`: one question turn's asks, as the Run-问数 cell states a half. */
+const repeatCell = (t: QuestionRepeats | undefined): string => (t ? `${cell(t)}${t.leaks ? ` ⚠ ${t.leaks} leaking` : ''}` : '—');
+
+/**
+ * The k/N table: one row per (question, persona) turn, one column per Run
+ * half that asked its turns more than once ({@link HalfScores.repeats}).
+ * Nothing when no half did.
+ */
+function repeatTable(sc: CardScorecard): string[] {
+  const halves = sc.modes.flatMap((m) =>
+    m.skipped
+      ? []
+      : [
+          ...(m.first.repeats ? [{ label: `${m.mode} · Run`, repeats: m.first.repeats }] : []),
+          ...(m.iterate?.repeats ? [{ label: `${m.mode} · Iterate`, repeats: m.iterate.repeats }] : []),
+        ],
+  );
+  if (halves.length === 0) return [];
+  const key = (t: { question: string; persona: string | null }) => JSON.stringify([t.question, t.persona]);
+  const turns = new Map<string, { question: string; persona: string | null }>();
+  for (const h of halves) for (const t of h.repeats) if (!turns.has(key(t))) turns.set(key(t), { question: t.question, persona: t.persona });
+  return [
+    '',
+    `| Question turn (k/N${sc.askRepeats !== undefined ? `, N = ${sc.askRepeats} asks` : ''}) | ${halves.map((h) => h.label).join(' | ')} |`,
+    `|:---|${halves.map(() => ':---').join('|')}|`,
+    ...[...turns].map(([k, t]) => `| ${turnLabel(t)} | ${halves.map((h) => repeatCell(h.repeats.find((x) => key(x) === k))).join(' | ')} |`),
+  ];
+}
+
+/** What a supplied build's Build cells and an ask mode's author rows read: it authored nothing, and nothing of it was scored. */
+const SUPPLIED_BUILD = 'supplied';
+const NO_AUTHORING_TURNS = 'no authoring turns';
+
+/** Did every mode that ran run on a supplied build ({@link ModeScorecard.supplied}): then the card authored nothing either. */
+const suppliedOnly = (sc: CardScorecard): boolean => sc.modes.some((m) => m.supplied !== undefined) && sc.modes.every((m) => m.supplied !== undefined || m.skipped !== undefined);
+
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
+  const noAuthoring = suppliedOnly(sc);
   const lines = [
-    `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
+    `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns${sc.askRepeats !== undefined && sc.askRepeats > 1 ? `, each asked ${sc.askRepeats} times` : ''}), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
-    `author cost: ${authorCostText(sc.authorCost)}`,
-    `author time: ${authorTimeText(sc.authorTime)}`,
+    `author cost: ${noAuthoring ? NO_AUTHORING_TURNS : authorCostText(sc.authorCost)}`,
+    `author time: ${noAuthoring ? NO_AUTHORING_TURNS : authorTimeText(sc.authorTime)}`,
     `ask cost: ${askCostText(sc.askSpend)}`,
     `ask time: ${askTimeText(sc.askSpend)}`,
     '',
@@ -592,8 +704,8 @@ export function renderScorecard(sc: CardScorecard): string {
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
   const row = (label: string, f: (m: ModeScorecard) => string) => lines.push(`| ${label} | ${sc.modes.map((m) => (m.skipped ? `skipped` : f(m))).join(' | ')} |`);
-  row('Build', (m) => buildCell(m.first.build));
-  row('Build · author', (m) => authorCell(m.first.build));
+  row('Build', (m) => (m.supplied !== undefined ? SUPPLIED_BUILD : buildCell(m.first.build)));
+  row('Build · author', (m) => (m.supplied !== undefined ? SUPPLIED_BUILD : authorCell(m.first.build)));
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
   row('Run-operations', (m) => opsCell(m.first));
@@ -607,10 +719,11 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   if (sc.modes.some((m) => !m.skipped && m.iterate?.guardrails)) row('Iterate · Run · guardrails', (m) => guardrailCell(m.iterate?.guardrails));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
-  row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
-  row('Author time', (m) => (m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
+  row('Author cost', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
+  row('Author time', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
   row('Ask cost', (m) => askCostText(m.askSpend));
   row('Ask time', (m) => askTimeText(m.askSpend));
+  lines.push(...repeatTable(sc));
   const tags = sc.modes.find((m) => m.tags.length)?.tags ?? [];
   if (tags.length) {
     lines.push('', '| Tag | ' + sc.modes.map((m) => m.mode).join(' | ') + ' |', '|:---|' + sc.modes.map(() => ':---').join('|') + '|');
@@ -618,6 +731,7 @@ export function renderScorecard(sc: CardScorecard): string {
   }
   for (const m of sc.modes) {
     if (m.skipped) lines.push('', `- ${m.mode}: skipped — ${m.skipped}`);
+    if (m.supplied !== undefined) lines.push('', `- ${m.mode}: the build is supplied (${m.supplied}), installed as it is; it is not scored, and no authoring turn ran`);
     for (const f of m.findings) lines.push(`- ${m.mode} finding: ${f}`);
   }
   return lines.join('\n');
@@ -648,13 +762,16 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     const s = sc.modes.find((x) => x.mode === m.mode)!;
     // A half that never ran because the build before it was not measured says so.
     const firstOut = m.build?.notMeasured ? `not run: the build was not measured (${m.build.notMeasured})` : undefined;
-    const iterateOut = firstOut ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
-    const buildNote = (b: HalfScores['build']) => (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
+    // An ask mode authors nothing: its Build half is the supplied build's, never scored, and it has no iterate.
+    const supplied = s.supplied !== undefined ? `${SUPPLIED_BUILD} (${s.supplied}): not scored` : undefined;
+    const noIterate = m.mode === 'ask' ? 'not run: ask mode authors no iterate' : undefined;
+    const iterateOut = firstOut ?? noIterate ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
+    const buildNote = (b: HalfScores['build']) => supplied ?? (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
     const halves: Array<[string, Tally | undefined, string | undefined, unknown[], string]> = [
       ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.personaGrants, ...m.build.score.naming] : [], buildNote(s.first.build)],
       ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? [], s.first.ask ? cell(s.first.ask) : (firstOut ?? '')],
       ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? [], s.first.operations ? cell(s.first.operations) : (firstOut ?? '')],
-      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? '')],
+      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? noIterate ?? '')],
       ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? [], s.iterate?.ask ? cell(s.iterate.ask) : (iterateOut ?? '')],
       ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? [], s.iterate?.operations ? cell(s.iterate.operations) : (iterateOut ?? '')],
     ];

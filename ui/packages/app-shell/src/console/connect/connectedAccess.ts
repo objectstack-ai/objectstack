@@ -35,9 +35,9 @@
  * assistants list's withdraw, which announces `sys_oauth_consent`.
  */
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useAuth } from '@object-ui/auth';
-import { useAdapter, useDataInvalidation } from '@object-ui/react';
+import { dataChangeMatches, subscribeDataChanges, useAdapter } from '@object-ui/react';
 import {
   API_KEY_LIST_FIELDS,
   isExpired,
@@ -115,62 +115,175 @@ export function combineConnectedReads(
   return { state: 'loading' };
 }
 
+/** The two reads one answer is built from. */
+interface ConnectedReads {
+  assistants: Read<ConnectedEntry[]>;
+  keys: Read<ConnectedEntry[]>;
+}
+
+const NOT_READ: ConnectedReads = { assistants: { state: 'loading' }, keys: { state: 'loading' } };
+
+/**
+ * One person's two reads, shared by every consumer mounted at the same time.
+ *
+ * Several surfaces ask this question on one page (Home draws the Connect an AI
+ * Assistant card and the administrator's checklist together), and each
+ * consumer owning its own effect sent the same two requests once per consumer.
+ * The entry lives while at least one consumer is subscribed: a consumer that
+ * mounts while it lives joins its answer (or its reads in flight) instead of
+ * asking again, and the entry is dropped with its last consumer, so a page
+ * mounted later reads afresh. A change to either record re-reads it for every
+ * consumer at once.
+ */
+interface SharedReads {
+  reads: ConnectedReads;
+  listeners: Set<() => void>;
+  /** Bumped per read started; an answer for an older read is dropped. */
+  assistantsRun: number;
+  keysRun: number;
+  stopListening: (() => void) | null;
+}
+
+/** Keyed by the adapter, then the person: two adapters never share a read. */
+const sharedByAdapter = new WeakMap<object, Map<string, SharedReads>>();
+
+type AccessAdapter = NonNullable<ReturnType<typeof useAdapter>>;
+
+function publish(entry: SharedReads, next: Partial<ConnectedReads>): void {
+  entry.reads = { ...entry.reads, ...next };
+  for (const listener of Array.from(entry.listeners)) listener();
+}
+
+function readAssistants(adapter: AccessAdapter, entry: SharedReads): void {
+  const run = ++entry.assistantsRun;
+  // Through a promise, so an adapter without the auth client is a failed
+  // read rather than a throw.
+  Promise.resolve()
+    .then(() => adapter.getClient().oauth.authorizedClients.list())
+    .then(
+      (value) => {
+        if (run === entry.assistantsRun) {
+          publish(entry, { assistants: { state: 'ready', value: value.clients.map(assistantEntry) } });
+        }
+      },
+      () => {
+        if (run === entry.assistantsRun) publish(entry, { assistants: { state: 'failed' } });
+      },
+    );
+}
+
+function readKeys(adapter: AccessAdapter, entry: SharedReads, userId: string): void {
+  const run = ++entry.keysRun;
+  Promise.resolve()
+    .then(() =>
+      adapter.find('sys_api_key', {
+        $filter: { user_id: userId },
+        $select: [...API_KEY_LIST_FIELDS],
+      }),
+    )
+    .then(
+      (res) => {
+        if (run !== entry.keysRun) return;
+        const readAt = Date.now();
+        const rows = (res?.data ?? []) as ApiKeyRow[];
+        publish(entry, {
+          keys: {
+            state: 'ready',
+            value: rows.filter((k) => !k.revoked && !isExpired(k, readAt)).map(keyEntry),
+          },
+        });
+      },
+      () => {
+        if (run === entry.keysRun) publish(entry, { keys: { state: 'failed' } });
+      },
+    );
+}
+
+function subscribeShared(adapter: AccessAdapter, userId: string, listener: () => void): () => void {
+  let byUser = sharedByAdapter.get(adapter as object);
+  if (!byUser) {
+    byUser = new Map();
+    sharedByAdapter.set(adapter as object, byUser);
+  }
+  let entry = byUser.get(userId);
+  if (!entry) {
+    entry = { reads: NOT_READ, listeners: new Set(), assistantsRun: 0, keysRun: 0, stopListening: null };
+    byUser.set(userId, entry);
+  }
+  const shared = entry;
+  shared.listeners.add(listener);
+  if (!shared.stopListening) {
+    // The first consumer: read both records, and re-read whichever changes.
+    shared.stopListening = subscribeDataChanges((change) => {
+      if (dataChangeMatches(change, 'sys_oauth_consent')) readAssistants(adapter, shared);
+      if (dataChangeMatches(change, 'sys_api_key')) readKeys(adapter, shared, userId);
+    });
+    readAssistants(adapter, shared);
+    readKeys(adapter, shared, userId);
+  }
+  return () => {
+    shared.listeners.delete(listener);
+    if (shared.listeners.size > 0) return;
+    shared.stopListening?.();
+    shared.stopListening = null;
+    if (byUser?.get(userId) === shared) byUser.delete(userId);
+  };
+}
+
+function sharedSnapshot(adapter: AccessAdapter, userId: string): ConnectedReads {
+  return sharedByAdapter.get(adapter as object)?.get(userId)?.reads ?? NOT_READ;
+}
+
+/** What `useSyncExternalStore` is handed for one adapter and person. */
+interface StoreDoor {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => ConnectedReads;
+}
+
+const NO_STORE: StoreDoor = { subscribe: () => () => {}, getSnapshot: () => NOT_READ };
+
+/**
+ * One door per adapter and person, held outside React: `useSyncExternalStore`
+ * re-subscribes whenever the `subscribe` it is handed changes identity, and a
+ * re-subscribe that empties the entry would read again, so the identity is
+ * keyed on the inputs themselves rather than on a memoised callback.
+ */
+const doorsByAdapter = new WeakMap<object, Map<string, StoreDoor>>();
+
+function storeDoor(adapter: AccessAdapter | null | undefined, userId: string | null): StoreDoor {
+  if (!adapter || !userId) return NO_STORE;
+  let byUser = doorsByAdapter.get(adapter as object);
+  if (!byUser) {
+    byUser = new Map();
+    doorsByAdapter.set(adapter as object, byUser);
+  }
+  let door = byUser.get(userId);
+  if (!door) {
+    door = {
+      subscribe: (listener) => subscribeShared(adapter, userId, listener),
+      getSnapshot: () => sharedSnapshot(adapter, userId),
+    };
+    byUser.set(userId, door);
+  }
+  return door;
+}
+
 /**
  * `enabled: false` reads nothing and answers `unknown`: a caller that may not
  * need the answer (a dismissed Home card, a member's Home with no checklist)
  * costs no request. Hooks cannot be called conditionally, so this is how a
  * caller skips the read.
+ *
+ * Every consumer of one adapter and person mounted at the same time shares
+ * one pair of reads (see {@link SharedReads}).
  */
 export function useConnectedAccess({ enabled = true }: { enabled?: boolean } = {}): ConnectedAccess {
   const adapter = useAdapter();
   const { user } = useAuth();
   const userId = enabled ? user?.id ?? null : null;
-  const consentsNonce = useDataInvalidation('sys_oauth_consent');
-  const keysNonce = useDataInvalidation('sys_api_key');
 
-  const [assistants, setAssistants] = useState<Read<ConnectedEntry[]>>({ state: 'loading' });
-  const [keys, setKeys] = useState<Read<ConnectedEntry[]>>({ state: 'loading' });
-
-  useEffect(() => {
-    if (!adapter || !userId) return;
-    let live = true;
-    // Through a promise, so an adapter without the auth client is a failed
-    // read rather than a throw out of the effect.
-    Promise.resolve()
-      .then(() => adapter.getClient().oauth.authorizedClients.list())
-      .then(
-        (value) => live && setAssistants({ state: 'ready', value: value.clients.map(assistantEntry) }),
-        () => live && setAssistants({ state: 'failed' }),
-      );
-    return () => {
-      live = false;
-    };
-  }, [adapter, userId, consentsNonce]);
-
-  useEffect(() => {
-    if (!adapter || !userId) return;
-    let live = true;
-    adapter
-      .find('sys_api_key', {
-        $filter: { user_id: userId },
-        $select: [...API_KEY_LIST_FIELDS],
-      })
-      .then(
-        (res) => {
-          if (!live) return;
-          const readAt = Date.now();
-          const rows = (res?.data ?? []) as ApiKeyRow[];
-          setKeys({
-            state: 'ready',
-            value: rows.filter((k) => !k.revoked && !isExpired(k, readAt)).map(keyEntry),
-          });
-        },
-        () => live && setKeys({ state: 'failed' }),
-      );
-    return () => {
-      live = false;
-    };
-  }, [adapter, userId, keysNonce]);
+  const door = storeDoor(adapter, userId);
+  const { assistants, keys } = useSyncExternalStore(door.subscribe, door.getSnapshot, door.getSnapshot);
 
   if (!adapter || !userId) return { state: 'unknown' };
   return combineConnectedReads(assistants, keys);

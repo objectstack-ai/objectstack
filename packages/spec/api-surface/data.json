@@ -1039,6 +1039,7 @@
     "lintAuthoredRecordKeys (function)",
     "lowerFilterCondition (function)",
     "markFilterSubtreeProvenance (function)",
+    "masterDetailRequiredOmitted (function)",
     "matchesLikePattern (function)",
     "materializeTreeSelfReferences (function)",
     "missingFieldValues (function)",
