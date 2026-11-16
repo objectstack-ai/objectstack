@@ -92,6 +92,12 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
   const conflictRead = (name: string, packageId: string | undefined) => {
     if (name === 'broken_doc') throw failure(500, 'INTERNAL_ERROR', 'The metadata service is unavailable');
     const holders = Object.keys(CONFLICT_CONTENT).filter((p) => name in CONFLICT_CONTENT[p]);
+    WORLD.reads.push(packageId);
+    // objectstack#34247 — the server's exact address answers only that
+    // package's own doc: 404 where it ships none of the name.
+    if (packageId && WORLD.exact && !holders.includes(packageId)) {
+      throw failure(404, 'RESOURCE_NOT_FOUND', `doc "${name}" not found in package "${packageId}"`);
+    }
     if (packageId) return { item: { name, content: CONFLICT_CONTENT[packageId]?.[name] } };
     if (holders.length > 1) {
       throw failure(409, 'RESOURCE_CONFLICT', `doc "${name}" is held by ${holders.length} packages`, {
@@ -100,7 +106,7 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
     }
     return { item: { name, content: holders.length ? CONFLICT_CONTENT[holders[0]][name] : undefined } };
   };
-  const WORLD = { authored: false, conflict: false };
+  const WORLD = { authored: false, conflict: false, exact: false, reads: [] as Array<string | undefined> };
   const ADAPTER = {
     getClient: () => ({
       meta: {
@@ -558,5 +564,53 @@ describe('objectstack#34070 — a doc name two packages ship lists its candidate
     expect(await screen.findByText('Failed to load documentation')).toBeInTheDocument();
     expect(screen.getByText('The metadata service is unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Packages that provide this document' })).toBeNull();
+  });
+
+  /**
+   * objectstack#34247 — the server's `?package=X` read answers X's own doc or
+   * 404. The route's segment is ADR-0048 prefer-local context, not an exact
+   * address: the doc the route's package ships none of is read by name.
+   */
+  describe('objectstack#34247 — a doc the route\'s package ships none of is read by name', () => {
+    beforeEach(() => {
+      WORLD.exact = true;
+      WORLD.reads.length = 0;
+    });
+    afterEach(() => {
+      WORLD.exact = false;
+    });
+
+    it('a cross-reference from one package\'s docs to another package\'s doc renders that doc', async () => {
+      render(<Portal entry="/apps/com.example.alpha/docs/com.example.alpha/beta_start" />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent('BETA BODY');
+      expect(WORLD.reads).toEqual(['com.example.alpha', undefined]);
+    });
+
+    it('an app-name segment that names no package renders the doc its one holder ships', async () => {
+      render(<Portal entry="/apps/alpha_suite/docs/com.example.alpha/alpha_welcome" />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent('ALPHA BODY');
+      expect(WORLD.reads).toEqual(['alpha_suite', undefined]);
+    });
+
+    it('a name two other packages ship lists both holders', async () => {
+      render(<Portal entry="/apps/alpha_suite/docs/com.example.alpha/shared_guide" />);
+      const links = within(await candidateList()).getAllByRole('link');
+      expect(links.map((l) => l.getAttribute('href'))).toEqual([
+        '/apps/com.example.alpha/docs/shared_guide',
+        '/apps/com.example.beta/docs/shared_guide',
+      ]);
+    });
+
+    it('CONTROL: the route\'s own package\'s doc is read at its package address only', async () => {
+      render(<Portal entry="/apps/com.example.beta/docs/com.example.beta/shared_guide" />);
+      expect(await screen.findByTestId('doc-content')).toHaveTextContent('BETA SHARED BODY');
+      expect(WORLD.reads).toEqual(['com.example.beta']);
+    });
+
+    it('CONTROL: a name no package ships is still "not found"', async () => {
+      render(<Portal entry="/apps/com.example.alpha/docs/com.example.alpha/nobody_doc" />);
+      expect(await screen.findByText(/It may belong to a package that is not installed/)).toBeInTheDocument();
+      expect(screen.queryByTestId('doc-content')).toBeNull();
+    });
   });
 });

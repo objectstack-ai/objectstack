@@ -306,6 +306,29 @@ describe.each([
         }
     });
 
+    // [review S1] Measured, unresolved: the environment's entry answers first
+    // only beside two or more enabled holders (#34248's acceptance). Beside
+    // one holder, the registry (and so `MetadataFacade.get`) answers a
+    // stamp-less bare entry while the bare doors keep the holder's doc, as on
+    // main. Declared in the changeset; a second holder flips the doors to the
+    // entry (the #34248 pins below).
+    it.runIf(ships.length === 1)('[measured, unresolved] one holder beside a stamp-less bare entry: the bare doors serve the holder\'s doc on both transports while the registry answers the entry', async () => {
+        const label = `${ships[0]!.split('.').pop()} doc`;
+        const bareSlot = (booted!.engine.registry as unknown as { metadata: Map<string, Map<string, unknown>> }).metadata.get('doc')!;
+        const before = bareSlot.has('shared_doc') ? { held: bareSlot.get('shared_doc') } : undefined;
+        booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'bare entry', content: '# bare' } as never, 'name' as never);
+        try {
+            expect((booted!.engine.registry.resolveItem('doc', 'shared_doc', null) as { label?: string } | undefined)?.label).toBe('bare entry');
+            for (const answer of await bareDoors(booted!, 'doc', 'shared_doc')) {
+                const served = answer.door.endsWith('/layers') ? answer.body?.effective?.label : (answer.body?.item ?? answer.body)?.label;
+                expect([answer.status, served, answer.door], JSON.stringify(answer.body)).toEqual([200, label, answer.door]);
+            }
+        } finally {
+            if (before) bareSlot.set('shared_doc', before.held);
+            else bareSlot.delete('shared_doc');
+        }
+    });
+
     it('CONTROL: each holder\'s address answers its own doc on the plain read and /layers (code and effective), both transports', async () => {
         for (const packageId of ships) {
             const label = `${packageId.split('.').pop()} doc`;
@@ -321,9 +344,13 @@ describe.each([
 
 // [#34040 acceptance item 4, review-c N2/N6 on PR #34036] The bare doc read's
 // refusal on the same composed rig, and the two package-less registry entries
-// beside two enabled holders. A hydrated row is laid as the hydrator lays it:
-// the stored `sys_metadata` row, and its package-less copy in the registry's
-// bare slot (stamped with the `sys_metadata` sentinel).
+// beside two enabled holders. A hydrated row is laid as the hydrator lays it
+// when it reads the row before any package ships the name (a doc saved, then
+// two packages that ship it installed): the stored `sys_metadata` row, and in
+// the registry's bare slot the body `hydrateOverlayIntoRegistry` registers,
+// `stateTenantAuthorship(withRowBinding(body, null))`: no `_packageId`,
+// `_provenance: 'org'`. With the artifacts read first, the hydrator grafts the
+// first holder's envelope onto the row instead (the last pin below).
 //
 // [#34248, ruling 6893582352] Either entry is the environment's own item, and
 // the environment's own item answers first: the bare doors serve it (the plain
@@ -410,14 +437,39 @@ describe.each([
         await expectRefusedNamingBoth();
     });
 
-    it('[#34248] a hydrated package-less row: the plain read, /layers (its registry copy as the code layer, the row as the overlay) and /published serve the row on both transports, never the holder registered last; each exact address reads its own doc', async () => {
+    // [review M1] The hydrator's entry is tenant-authored, so it is no code
+    // layer (#21059): `code` is null, and the row is the overlay and the
+    // effective layer. Measured at 989f4ad7 before the fix: the plain read
+    // served the row while `/layers` answered `effective: null` (the sealed
+    // doc's row declined) and both `/published` doors served an empty body.
+    it('[#34248] a hydrated package-less row (hydrated before the artifacts): the plain read, /layers (no code layer, the row as overlay and effective) and /published serve the row on both transports, never the holder registered last; each exact address reads its own doc', async () => {
         await layEnvironmentDocRow(booted!.engine);
-        booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'environment doc', content: '# env', _packageId: 'sys_metadata' } as never, 'name' as never);
-        await expectBareDoorsServe({ item: 'environment doc', code: 'environment doc', overlay: 'environment doc' });
+        booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'environment doc', content: '# env', _provenance: 'org' } as never, 'name' as never);
+        await expectBareDoorsServe({ item: 'environment doc', code: undefined, overlay: 'environment doc' });
         await expectExactReadsOwnDoc();
         // The row alone, its registry copy gone: no exemption, refused again.
         docRegistryOf(booted!).delete('shared_doc');
         await expectRefusedNamingBoth();
+    });
+
+    // [review M1] The same stored row hydrated by the production read
+    // (`loadMetaFromDb`) after the artifacts registered: the hydrator grafts
+    // the first holder's envelope onto it, so no package-less entry exists
+    // and every bare door refuses naming both, as on main (measured at
+    // origin/main c9346317 and at this head). The other holder's address
+    // reads its own doc.
+    it('CONTROL [#34248]: the row hydrated after the artifacts (`loadMetaFromDb`) wears the first holder\'s envelope, and the bare doors refuse 409 naming both on both transports', async () => {
+        const hydrated = await (booted!.kernel.getService('protocol') as { loadMetaFromDb(): Promise<{ loaded: number; errors: number }> }).loadMetaFromDb();
+        expect([hydrated.loaded > 0, hydrated.errors]).toEqual([true, 0]);
+        const entry = docRegistryOf(booted!).get('shared_doc') as { _packageId?: unknown; _provenance?: unknown } | undefined;
+        expect([entry?._packageId, entry?._provenance]).toEqual([packages[0], 'package']);
+        await expectRefusedNamingBoth();
+        const second = packages[1]!;
+        for (const answer of await exactDocDoors(booted!, second)) {
+            expect([answer.status, (answer.body?.item ?? answer.body)?.label, answer.door], JSON.stringify(answer.body))
+                .toEqual([200, `${second.split('.').pop()} doc`, answer.door]);
+        }
+        docRegistryOf(booted!).delete('shared_doc');
     });
 });
 

@@ -109,7 +109,22 @@ export default function DocPage() {
         // ADR-0048 — pass the route's package so the single-doc fetch is
         // package-scoped (prefer-local) on the server. With this, doc names
         // need not be globally namespace-prefixed; the prefix becomes optional.
-        const raw: any = await adapter.getClient().meta.getItem('doc', name, appName ? { packageId: appName } : undefined);
+        //
+        // An exact package address answers only that package's own doc
+        // (ADR-0150 D3/D5): `404` where the route's package ships none of the
+        // name. The route's segment is prefer-local context, never an exact
+        // address, so that answer falls back to the read by name, as the
+        // portal reads it: a cross-reference to another package's doc, and
+        // the app-name segment of a package that ships several apps (no
+        // package id at all), read the one holder, or the holders listed below.
+        const client = adapter.getClient();
+        let raw: any;
+        try {
+          raw = await client.meta.getItem('doc', name, appName ? { packageId: appName } : undefined);
+        } catch (localErr: any) {
+          if (!appName || localErr?.httpStatus !== 404) throw localErr;
+          raw = await client.meta.getItem('doc', name);
+        }
         const item = raw?.item ?? raw?.data ?? raw;
         if (cancelled) return;
         if (item && typeof item.content === 'string') {

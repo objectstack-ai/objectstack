@@ -895,6 +895,24 @@ describe('[#34247] the exact read of a name the package holds no item of answers
     }
   });
 
+  /**
+   * [review S2] Outside the family: a security catalog type (ADR-0131 D3)
+   * keeps one package holder of a name, resolved by name environment-wide, so
+   * another package's address has no slot of its own. `registryAnswerAtAddress`
+   * leaves its answer to the code layers, on the plain read and `/layers`.
+   */
+  it.each(['position', 'capability'])('CONTROL — %s (one holder, security catalog): `?package=` of another package keeps the code layers\' answer, the holder\'s item, on the plain read and /layers', async (type) => {
+    shipParsed(type, 'shared', A);
+    for (const kept of [A, undefined]) {
+      const served = servedWith(kept ? { name: 'shared', label: `alpha ${type}`, _packageId: kept } : undefined);
+      const at = `${type} at ${B}, the service keeping ${kept ?? 'nothing'}`;
+      expect((await itemAt(served, type, B))?.label, at).toBe(`alpha ${type}`);
+      const layered = await served.getMetaItemLayered({ type, name: 'shared', packageId: B });
+      expect([(layered?.code as { label?: string } | null)?.label, (layered?.effective as { label?: string } | null)?.label], `${at} (/layers)`)
+        .toEqual([`alpha ${type}`, `alpha ${type}`]);
+    }
+  });
+
   it.each(OUTSIDE_PINNED)('CONTROL — %s: the environment\'s package-less entry and the holder\'s pair are served as before', async (type) => {
     shipParsed(type, 'shared', A);
     const served = servedWith(undefined);

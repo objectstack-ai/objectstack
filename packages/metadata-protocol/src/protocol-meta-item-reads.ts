@@ -25,7 +25,7 @@ import {
     packageScopedRefusalMessage,
     type PackageScopedRefusal,
 } from '@objectstack/core';
-import { isPairOf, itemDiscriminator } from '@objectstack/metadata-core';
+import { isPairOf, isSecurityCatalogType, itemDiscriminator } from '@objectstack/metadata-core';
 import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
@@ -473,6 +473,11 @@ export function serviceCopyOfAnotherPackage(
  * X's envelope. Unchanged: an item bound to no package (the environment's
  * entry), an item stamped X, a customization pair's item, a stamp the
  * registry does not know, and an `object`.
+ *
+ * ⛔ Not a security catalog type (`position`, `capability`; ADR-0131 D3):
+ * the registry keeps one package holder of such a name, resolved by name
+ * for the whole environment, so another package's address has no slot of
+ * its own to answer with. Its answer there stays the code layers' own.
  */
 export function registryAnswerAtAddress(
     host: Pick<ProtocolHost, 'engine'>,
@@ -481,7 +486,7 @@ export function registryAnswerAtAddress(
     member: string | undefined,
     isWantedMember: (candidate: unknown) => boolean,
 ): unknown {
-    if (!request.packageId || item === undefined || item === null) return item;
+    if (!request.packageId || item === undefined || item === null || isSecurityCatalogType(request.type)) return item;
     if (!serviceCopyOfAnotherPackage(host, request, item)) return item;
     const scoped = host.engine?.registry as { getPackageScopedItem?(type: string, name: string, packageId: string, member?: string): unknown } | undefined;
     const own = typeof scoped?.getPackageScopedItem === 'function'

@@ -800,9 +800,17 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // layer it derives from, not the value the by-name read serves.
     // [#28409] …and an orphaned row (above) is a shadowed layer of the
     // same kind: `effective` is the code layer the by-name read serves.
+    // [#34248, ruling 6893582352] …but not the package-less row behind a bare
+    // doc read's environment entry, beside two enabled holders: the entry the
+    // hydrator lays for it is tenant-authored, so it is no code layer (#21059,
+    // above), and the row it came from is the environment's own item, which
+    // answers first. Declined, `effective` was the empty code layer while the
+    // plain read served the row.
+    const environmentRowAnswers = bareDocEnvironmentEntry !== undefined
+        && isPackageLessRow({ package_id: overlayBinding });
     const effectiveBase: unknown | null = expandedFrom !== undefined
         ? expandedFrom.item
-        : overlay !== null && !orphaned && !host.declinesStoredRow(request.type, request.name, overlayRow)
+        : overlay !== null && !orphaned && (environmentRowAnswers || !host.declinesStoredRow(request.type, request.name, overlayRow))
             ? host.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
             : code;
     // [#21738] The lock is the one item-lock resolution's — the
