@@ -61,6 +61,8 @@ import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
 import { ITEM_KEY_DISCRIMINATORS, isPairOf, itemDiscriminator, pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { permissionSetHoldersMeet } from '@objectstack/core';
+import { lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf, type ArtifactLookupHost } from './protocol-artifact-lookup.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -151,6 +153,18 @@ export function refusePackagedBaseOverride(
                 request.type, request.packageId as string,
             );
         }
+        // [ADR-0150 D2, #34226] A permission set is `(package, name)`: a save
+        // a package addresses to its own set of a name another namespace's
+        // package ships overrides no shipped set, so the seal does not judge
+        // it. Every save that does override one stays sealed, as before: one
+        // naming no package, one addressed to the shipper, one addressed to
+        // the shipper's customization pair (whatever the pair's namespace),
+        // and one addressed to a package that shares the shipper's set of the
+        // name ({@link overridesShippedPermissionSet}).
+        if (namedBase && (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'permission'
+            && !overridesShippedPermissionSet(this.engine, request.packageId as string, request.name)) {
+            return;
+        }
         // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
         // and names the managed package for every other type; the code and
         // the status are unchanged. [#23577] Every write reads it, whatever
@@ -177,6 +191,49 @@ export function refusePackagedBaseOverride(
         (err as any).status = 403;
         throw err;
     }
+}
+
+/**
+ * [ADR-0150 D2/D9, ADR-0131 D6, #34226] Does a save of the permission set
+ * `name` addressed to the package `writer` override a set a package ships?
+ *
+ * A set is `(package, name)`, and a name is one set per namespace: two
+ * packages share one set of a name exactly when the ONE predicate the install
+ * gate and the save door's name rule ask says they meet
+ * (`permissionSetHoldersMeet`, `@objectstack/core`). So the save overrides the
+ * set a package Q ships when `writer` is Q, when `writer` is Q's
+ * customization pair (ADR-0146: the pair customizes Q's own items, whatever
+ * namespace the pair declares), or when `writer` meets Q under that predicate
+ * (a co-owner of Q's namespace, a platform namespace, a package with no
+ * namespace, a name the platform requests by spelling). Every package that
+ * ships the name is judged, never the first found, so the answer is the same
+ * in every registration order.
+ *
+ * `true` when no shipping package can be read: the seal then judges the name
+ * as it always did. The plugin-security lock judges the same three
+ * relations for the same write (`packaged-permission-set-lock-gate.ts`).
+ */
+function overridesShippedPermissionSet(engine: unknown, writer: string, name: string): boolean {
+    const lookup: Pick<ArtifactLookupHost, 'engine' | 'lookupArtifactItem' | 'shippingPackagesOf'> = {
+        engine: engine as ArtifactLookupHost['engine'],
+        lookupArtifactItem: (...a) => lookupArtifactItem.call(lookup, ...a),
+        shippingPackagesOf: (...a) => shippingPackagesOf.call(lookup, ...a),
+    };
+    const shippers = new Set<string>();
+    for (const artifact of shippedArtifactsOf.call(lookup, 'permission', name)) {
+        const packageId = (artifact as { _packageId?: unknown } | null)?._packageId;
+        if (typeof packageId === 'string' && packageId !== '') shippers.add(packageId);
+    }
+    if (shippers.size === 0) return true;
+    const registry = (engine as { registry?: { getPackage?: (id: string) => { manifest?: { namespace?: unknown } } | undefined } } | null)?.registry;
+    const namespaceOf = (packageId: string): string | undefined => {
+        const namespace = registry?.getPackage?.(packageId)?.manifest?.namespace;
+        return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+    };
+    const installed = installedManifestsOfEngine(engine);
+    return [...shippers].some((shipper) => shipper === writer
+        || isPairOf(writer, shipper, installed)
+        || permissionSetHoldersMeet(namespaceOf(writer), namespaceOf(shipper), name));
 }
 
 /**

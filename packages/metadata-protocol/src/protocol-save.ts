@@ -1824,6 +1824,7 @@ export class ProtocolSaveFacet {
                 state: mode === 'draft' ? 'draft' : 'active',
                 body: request.item,
                 ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
+                packageId: request.packageId,
             });
         }
 
