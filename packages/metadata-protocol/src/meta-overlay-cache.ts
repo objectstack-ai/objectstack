@@ -44,7 +44,7 @@
  * naive shape the trap describes, and it also silently breaks the three
  * mutable, non-`sys_metadata` sources the merged answer depends on — see next.
  *
- * ## ⭐ Why only the row set is cached, and never the merged answer
+ * ## ⭐ Why THIS cache holds only the row set, and never the merged answer
  *
  * Measured on the shipped ref: `getMetaItems`' answer is a function of FOUR
  * mutable sources, and the write epoch observes only ONE of them.
@@ -61,6 +61,13 @@
  * keeps the cache's reach exactly co-extensive with what its key can validate:
  * the one source the epoch does see. That containment is the whole argument for
  * this shape, and it is the property to protect when editing this file.
+ *
+ * This is a statement about THIS module, not a ban on caching a merged answer
+ * anywhere. ADR-0156 states when a compiled metadata answer may be cached: only
+ * when every source it reads counts its own changes at its own mutation point,
+ * and a time bound covers what this process cannot see. A source in the table
+ * above without a counter makes such a cache decline. That cache lives in its
+ * own layer; it never moves this one below the merge.
  *
  * ## Invalidation
  *
