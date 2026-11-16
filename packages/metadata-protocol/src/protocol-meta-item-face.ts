@@ -313,9 +313,9 @@ export async function servedRowHolderOf(
         return undefined;
     }
     if ([...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].some((id) => !disabled(id))) return undefined;
-    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
-        return undefined;
-    }
+    const environmentItem = typeof registry.getEnvironmentScopedItem === 'function'
+        && registry.getEnvironmentScopedItem(type, name, member) !== undefined;
+    if (environmentItem && options.refuseWithoutDisabled !== true) return undefined;
     // The item's active rows, read once: every row binds a holder, and only
     // the rows the reads serve make a served one (S4). An unprovisioned store
     // holds no row.
@@ -327,6 +327,14 @@ export async function servedRowHolderOf(
         activeRows = [];
     }
     const rows = await host.packagelessAddress(type, name, member, 'active', activeRows);
+    // [#33210, ADR-0150 D3] The registry's environment item of a name no
+    // package ships is the bare slot's entry, the row hydrated last: after a
+    // reboot that is the package-less row whenever it was saved last. Beside
+    // rows bound to two or more packages it is no environment item but a
+    // customization of a name it cannot say whose, judged with them below, so
+    // the answer follows no save order. Otherwise the environment's own item
+    // leaves the read as it was.
+    if (environmentItem && !(rows.unbound && rows.candidates.length > 1)) return undefined;
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     const anyDisabled = [...every, ...rows.candidates].some(disabled);
     // [#33210] The no-disabled arm judges a package-less row itself
