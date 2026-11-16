@@ -19,8 +19,8 @@
  * - The picker resolves a reference only where its host SAYS a single record
  *   is being edited: a record form stamps that on the field it hands the
  *   widget (`withRecordBeingEdited`). Every other host — a bulk action over
- *   selected rows, an action's parameter dialog, a filter panel — leaves every
- *   `{ $record }` entry out, whatever values it passes the widget: the values
+ *   selected rows, an action's parameter dialog, inline edit on a record
+ *   page — leaves every `{ $record }` entry out, whatever values it passes the widget: the values
  *   such a host passes are not the record the author's path names.
  * - An entry whose referenced value is empty — null, unset, `''`, an empty
  *   list, a hop whose lookup is unset — is left out of the query, the rule an
@@ -32,6 +32,7 @@
  */
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { SchemaRendererContext } from '@object-ui/react';
+import { referenceTargetOf } from '@objectstack/spec/data';
 import type { Field as SpecField, LookupFilterRecordReference } from '@objectstack/spec/data';
 
 /** One authored `lookupFilters` entry, typed by reference to the spec row. */
@@ -120,6 +121,11 @@ function referencedId(v: unknown): string | undefined {
  * the object each `{ $record }` hop's lookup references (read off `fields`,
  * the edited object's field map). `def` itself when its filters read no
  * record. Only a host that edits one record calls this.
+ *
+ * A hop's object is the spec's `referenceTargetOf` — the one arbiter the
+ * `$record` path rule of the object linter also asks — so a hop through a
+ * field whose target the type fixes (`user` → `sys_user`, with no
+ * `reference` written) is named like one through a `lookup`.
  */
 export function withRecordBeingEdited<T extends object>(
   def: T,
@@ -129,8 +135,8 @@ export function withRecordBeingEdited<T extends object>(
   if (!readsRecord(filters)) return def;
   const hopObjects: Record<string, string> = {};
   for (const { via } of recordReferenceHops(filters)) {
-    const reference = (fields?.[via] as { reference?: unknown } | undefined)?.reference;
-    if (typeof reference === 'string' && reference !== '') hopObjects[via] = reference;
+    const target = referenceTargetOf(fields?.[via]);
+    if (target) hopObjects[via] = target;
   }
   const stamp: RecordBeingEdited = { hopObjects };
   return { ...def, [RECORD_BEING_EDITED_KEY]: stamp };

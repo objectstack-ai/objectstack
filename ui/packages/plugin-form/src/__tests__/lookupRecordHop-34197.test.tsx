@@ -110,3 +110,84 @@ describe('record forms say a record is being edited, and name the object a { $re
     expect(priceBookFilters).toEqual([EXPECTED]);
   });
 });
+
+/**
+ * A hop through a `user` field: its target is fixed by the type (`sys_user`),
+ * with no `reference` written, so the form names it through the spec's
+ * `referenceTargetOf` — the arbiter the object linter's `$record` rule asks.
+ */
+const TASK = {
+  name: 'task',
+  fields: {
+    subject: { type: 'text', label: 'Subject' },
+    owner: { type: 'user', label: 'Owner' },
+    territory: {
+      type: 'lookup',
+      label: 'Territory',
+      reference: 'territory',
+      lookupFilters: [{ field: 'region', operator: 'eq', value: { $record: 'owner.region' } }],
+    },
+  },
+};
+
+function userHopDataSource(owner: unknown) {
+  const territoryFilters: unknown[] = [];
+  const userReads: unknown[] = [];
+  const row = { id: 't1', subject: 'T', owner, territory: null };
+  const ds = {
+    getObjectSchema: async (name: string) => (name === 'task' ? TASK : { name, fields: { name: { type: 'text' } } }),
+    findOne: async (object: string, id: string, params: unknown) => {
+      if (object === 'sys_user') {
+        userReads.push([id, params]);
+        return { id: 'u1', name: 'Ann', region: 'emea' };
+      }
+      return row;
+    },
+    find: async (object: string, params: any) => {
+      if (object === 'territory') territoryFilters.push(params?.$filter);
+      return { data: [], total: 0 };
+    },
+    create: async () => row,
+    update: async () => row,
+  };
+  return { ds, territoryFilters, userReads };
+}
+
+async function openTerritory() {
+  let trigger: HTMLElement | null = null;
+  await waitFor(() => {
+    trigger = document.querySelector('[data-testid="lookup-trigger-territory"]');
+    if (!trigger) throw new Error('form not ready');
+  }, { timeout: 5000 });
+  await act(async () => {
+    fireEvent.click(trigger!);
+  });
+}
+
+describe('a { $record } hop through a user field resolves in a record form (#34197)', () => {
+  it('the user held as an id: the form names sys_user, the picker reads the hop and sends its value', async () => {
+    const { ds, territoryFilters, userReads } = userHopDataSource('u1');
+    render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ObjectForm schema={{ type: 'object-form', objectName: 'task', mode: 'edit', recordId: 't1' } as any} dataSource={ds as any} />
+      </SchemaRendererProvider>,
+    );
+    await openTerritory();
+    await waitFor(() => expect(territoryFilters.length).toBeGreaterThan(0), { timeout: 5000 });
+    expect(territoryFilters).toEqual([{ region: 'emea' }]);
+    expect(userReads).toEqual([['u1', { $select: ['id', 'region'] }]]);
+  });
+
+  it('the user held as an expanded row: the value is read off it, with no request', async () => {
+    const { ds, territoryFilters, userReads } = userHopDataSource({ id: 'u1', name: 'Ann', region: 'apac' });
+    render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ObjectForm schema={{ type: 'object-form', objectName: 'task', mode: 'edit', recordId: 't1' } as any} dataSource={ds as any} />
+      </SchemaRendererProvider>,
+    );
+    await openTerritory();
+    await waitFor(() => expect(territoryFilters.length).toBeGreaterThan(0), { timeout: 5000 });
+    expect(territoryFilters).toEqual([{ region: 'apac' }]);
+    expect(userReads).toEqual([]);
+  });
+});

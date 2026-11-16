@@ -23,7 +23,6 @@ import {
   type LookupFilterEntry,
 } from './lookupRecordReference.js';
 import type { RecordPickerFilterColumn } from './RecordPickerDialog.js';
-
 import { PeoplePicker } from './PeoplePicker.js';
 import { useRecordQuery } from './useRecordQuery.js';
 import { objectResolvesSearch } from './searchOffer.js';

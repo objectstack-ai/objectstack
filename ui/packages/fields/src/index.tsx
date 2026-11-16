@@ -5382,7 +5382,8 @@ export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js'
 // `permission-ref` field's definition, so the widget recognises the grant's
 // name column by its object and its column, not by its column name alone.
 export { FORM_OBJECT_KEY, withFormObject } from './widgets/permissionSetHolders.js';
-// A lookup whose `lookupFilters` read a `{ $record }` hop carries the object each hop points at.
+// A record form stamps any lookup whose `lookupFilters` read `{ $record }`: one record is being edited here,
+// with the object each hop points at. Only a field carrying the stamp resolves a `{ $record }`.
 export { RECORD_BEING_EDITED_KEY, withRecordBeingEdited } from './widgets/lookupRecordReference.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
