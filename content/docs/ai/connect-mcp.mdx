@@ -433,8 +433,9 @@ can reach is the **default exposure policy (v1)**:
 - **An approver's decisions are exposed to the approver's agent.** The four
   decisions on an approval request (`sys_approval_request`): approve, reject,
   reassign and send back, are exposed with `ai.requiresConfirmation: true`, so
-  `run_action` never decides on the agent's call: the approver confirms it in
-  the app, or the call is refused (`428`) on a server with no
+  `run_action` decides only once the approver confirms: in the client when it
+  supports elicitation and the connection can carry the question, and
+  otherwise in the app, or the call is refused (`428`) on a server with no
   pending-confirmation service. Once confirmed, each forwards
   to its approvals route as the caller, and the approval service admits the
   same people the console's buttons admit: a current approver of the request,
