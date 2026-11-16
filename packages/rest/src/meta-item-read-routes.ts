@@ -366,7 +366,12 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     }
                     await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
                 } catch (error: any) {
-                    handleRouteError(res, error);
+                    // [#32622, ADR-0150 D5] A package-scoped refusal of the
+                    // layered read carries its holders as `details.candidates`,
+                    // as the plain read's catch answers it (#32201) and the
+                    // deprecated `?layers=` spelling, which that catch serves,
+                    // already did; anything else answers as before.
+                    handleRouteError(res, error, undefined, { packageScopedCandidates: true });
                 }
             },
             metadata: {

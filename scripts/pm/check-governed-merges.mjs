@@ -436,7 +436,7 @@
  *      Tier S arm (objectui's, measured, refuses `.claude/**` without an
  *      authorized approval; cloud's, objectos' and hotcrm's are unread and fail
  *      closed to H).
- *   S  席内达档复核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
+ *   S  席内达档 L2 审核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
  *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
@@ -1305,7 +1305,7 @@ export const GOVERNED_TIERS = Object.freeze({
   }),
   [GOVERNED_TIER_S]: Object.freeze({
     id: GOVERNED_TIER_S,
-    name: 'Tier S(席内达档复核落地)',
+    name: 'Tier S(席内达档 L2 审核落地)',
     landing:
       'the owning seat lands it through the queue on a `## Contract review` record for the CURRENT head ' +
       '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`) and every check green',
@@ -3320,7 +3320,7 @@ export function renderTestVerdict(verdict) {
   if (tier === GOVERNED_TIER_S) {
     return (
       `${head}\n` +
-      `  ⛔  GOVERNED — Tier S(席内达档复核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
+      `  ⛔  GOVERNED — Tier S(席内达档 L2 审核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
       `      seat lands this PR through the queue once its thread (or its card) carries a \`## Contract review\` record\n` +
       `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — and every\n` +
       `      check green (AGENTS.md Prime Directive #14).\n` +
@@ -5291,12 +5291,13 @@ const ARM_FAVOURABLE_CHANGESET = "---\n'@objectstack/skills': patch\n---\n\nClau
 
 /**
  * The answer to one of the arm's git reads that gives the arm no reason (#33765 N-a): a clean changeset for the
- * guard's `show SHA:PATH`, and every path a modified regular file for its `diff-tree`; null for any other read,
- * which then cannot be answered the arm's way. Pure.
+ * guard's `show SHA:PATH`, and every path a modified regular file for its `diff-tree --raw` status read; null for
+ * any other read — the ADR leg's `diff-tree -p` patch read included (#33539: a status listing is no patch, and
+ * no stand-in patch is favourable) — which then cannot be answered the arm's way. Pure.
  */
 export function favourableArmGitRead(argv, paths) {
   if (argv?.[0] === 'show' && ARM_CHANGESET_SHOW.test(String(argv[1] ?? ''))) return ARM_FAVOURABLE_CHANGESET;
-  if (argv?.[0] === 'diff-tree') return (Array.isArray(paths) ? paths : []).map((p) => `:100644 100644 ${'0'.repeat(40)} ${'0'.repeat(40)} M\0${p}\0`).join('');
+  if (argv?.[0] === 'diff-tree' && argv.includes('--raw') && !argv.includes('-p')) return (Array.isArray(paths) ? paths : []).map((p) => `:100644 100644 ${'0'.repeat(40)} ${'0'.repeat(40)} M\0${p}\0`).join('');
   return null;
 }
 
@@ -7338,7 +7339,7 @@ async function selfTest() {
     const textS = renderTestVerdict(testVerdict([WF], { repo: REPO, workflowDiff: readS }));
     const textH = renderTestVerdict(testVerdict([WF], { repo: REPO, workflowDiff: readH }));
     const textN = renderTestVerdict(testVerdict([WF], { repo: REPO }));
-    assert('the-words-name-the-split-in-all-three-readings', /Tier S\(席内达档复核落地\)/.test(textS) && /Tier S by content/.test(textS) && /Tier H by content/.test(textH) && /new `continue-on-error`/.test(textH) && /content NOT MEASURED/.test(textN) && /landing tier: H/.test(textN), `${textS}\n${textH}\n${textN}`);
+    assert('the-words-name-the-split-in-all-three-readings', /Tier S\(席内达档 L2 审核落地\)/.test(textS) && /Tier S by content/.test(textS) && /Tier H by content/.test(textH) && /new `continue-on-error`/.test(textH) && /content NOT MEASURED/.test(textN) && /landing tier: H/.test(textN), `${textS}\n${textH}\n${textN}`);
     assert('a-verdict-with-no-workflow-hit-prints-no-split-line', !/split \(ruling record/.test(renderTestVerdict(testVerdict(['AGENTS.md'], { repo: REPO }))) && renderWorkflowSplitLines([]) === '');
     const pr = (over = {}) => pullWorkflowDiff({ derivation: { pull: 7, headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) }, paths: [WF], sameCheckout: true, run: () => ({ ok: false, out: '' }), git: () => '', ...over });
     assert('--pr-reads-the-split-only-from-a-checkout-holding-both-commits-else-UNMEASURED', pr().measured === false && /not in this checkout/.test(pr().reason) && pr({ sameCheckout: false }).measured === false && pr({ derivation: { pull: 7 } }).measured === false, JSON.stringify([pr().reason, pr({ sameCheckout: false }).reason]));
@@ -7390,7 +7391,7 @@ async function selfTest() {
     assert('⭐ a-pure-skills-diff-with-its-changeset-on-Clause-2-no-is-Tier-S', tier([SK, CS], read([SK, CS])) === GOVERNED_TIER_S && testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) }).tier === GOVERNED_TIER_S, reasons([SK, CS], read([SK, CS])));
     assert('⭐ with-its-changeset-and-docs-prose-riders-it-stays-Tier-S', tier([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'], read([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'])) === GOVERNED_TIER_S);
     assert('a-ui-skills-diff-and-both-catalogs-together-are-Tier-S', tier([UISK, CS], read([UISK, CS])) === GOVERNED_TIER_S && tier([SK, UISK, CS], read([SK, UISK, CS])) === GOVERNED_TIER_S);
-    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return /Tier S\(席内达档复核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
+    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return /Tier S\(席内达档 L2 审核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
 
     // ⛔ Published source or any path outside the allowlist: H.
     assert('⛔ skills-plus-packages-spec-stays-H', tier([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts'])) === GOVERNED_TIER_H && /outside skills wording and prose: packages\/spec/.test(reasons([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts']))));
@@ -10912,7 +10913,18 @@ async function selfTest() {
       await unmeasured({ git: diffTreeThrows }, /could not read `git diff-tree/) === true &&
       await unmeasured({ git: gitWith((a) => { if (a[0] === 'diff-tree') throw new Error('fatal: bad object'); if (a[0] === 'show') throw new Error('fatal: unable to read'); if (a[0] === 'ls-tree') return `${CS}\0`; }) }, /could not read `git show.*`git diff-tree/) === true);
     assert('⛔ #33765-N-a-an-unread-read-the-arm-has-no-favourable-answer-for-stays-NOT-MEASURED', favourableArmGitRead(['rev-parse', 'x'], [SK]) === null &&
-      favourableArmGitRead(['show', `${LANDED}:${CS}`], [SK]) !== null && favourableArmGitRead(['diff-tree', LANDED], [SK]).includes(`M\0${SK}\0`));
+      favourableArmGitRead(['show', `${LANDED}:${CS}`], [SK]) !== null && favourableArmGitRead(['diff-tree', '--raw', LANDED], [SK]).includes(`M\0${SK}\0`));
+    // #33539 S7: the ADR leg's patch read has no favourable answer; one that fails alone leaves the landing NOT MEASURED.
+    const ADRP = 'docs/adr/0097-upstream-availability.md';
+    const adrPatchThrows = (args) => {
+      if (args[0] === 'diff-tree' && args.includes('-p')) throw new Error('fatal: bad object');
+      if (args[0] === 'diff-tree') return `:100644 100644 ${'1'.repeat(40)} ${'2'.repeat(40)} M\0${ADRP}\0`;
+      return runGit(args);
+    };
+    assert('⛔ #33539-S7-an-ADR-landing-whose-patch-read-alone-fails-stays-NOT-MEASURED-only-the-raw-read-has-a-favourable-answer',
+      await unmeasured({ paths: [ADRP], git: adrPatchThrows }, /could not read `git diff-tree/) === true &&
+      favourableArmGitRead(addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], [LANDED], ADRP), [ADRP]) === null &&
+      favourableArmGitRead(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--raw', '-z', '-m', '--first-parent', LANDED], [ADRP]) !== null);
     // #33765 N-b: an unread labels list is an unread input, though no git read failed.
     assert('⛔ #33765-N-b-an-unread-labels-list-alone-is-NOT-MEASURED-not-tier-h', await unmeasured({ pull: { labels: null } }, /could not read its labels/) === true &&
       armReadsNotMeasured([], { measured: true }, runGit, null).includes('its labels') && armReadsNotMeasured([], { measured: true }, runGit).length === 0);

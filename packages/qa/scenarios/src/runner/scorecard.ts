@@ -94,6 +94,7 @@ import { askedFirst, confirmedByAgent } from '../score/index.js';
 import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
+import { promptChoiceText, type PromptChoice } from './prompts.js';
 import { cycleText } from './seed.js';
 
 export interface Tally {
@@ -254,6 +255,8 @@ export interface CardScorecard {
   confirmation?: ConfirmationTally;
   /** How many times each question turn was asked (`CardRun.askRepeats`), when more than once; absent ⇒ once. */
   askRepeats?: number;
+  /** The prompt choice the run sent (`CardRun.promptChoice`), when a flag set one; absent ⇒ the default prompts. */
+  promptChoice?: PromptChoice;
   modes: ModeScorecard[];
 }
 
@@ -588,6 +591,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     askSpend: askSpend(run.modes.flatMap(askTurnsOf)),
     ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
     ...(run.askRepeats !== undefined && run.askRepeats > 1 ? { askRepeats: run.askRepeats } : {}),
+    ...(run.promptChoice !== undefined ? { promptChoice: run.promptChoice } : {}),
     modes,
   };
 }
@@ -694,6 +698,7 @@ export function renderScorecard(sc: CardScorecard): string {
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns${sc.askRepeats !== undefined && sc.askRepeats > 1 ? `, each asked ${sc.askRepeats} times` : ''}), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
+    ...(sc.promptChoice ? [`prompts: ${promptChoiceText(sc.promptChoice)}`, ''] : []),
     `author cost: ${noAuthoring ? NO_AUTHORING_TURNS : authorCostText(sc.authorCost)}`,
     `author time: ${noAuthoring ? NO_AUTHORING_TURNS : authorTimeText(sc.authorTime)}`,
     `ask cost: ${askCostText(sc.askSpend)}`,
