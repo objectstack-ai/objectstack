@@ -75,6 +75,7 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
   describePackageScopedHolder,
+  hasPlatformAdminStanding,
   holdsPlatformPermissionSet,
   isGrantActive,
   omitInternalFieldsFromWriteResponse,
@@ -101,6 +102,8 @@ import {
   addressedPosition,
   equivalentApproverAddresses,
   heldSlot,
+  isPlatformAdminAddress,
+  PLATFORM_ADMIN_ADDRESS,
   positionAddresses,
   slateNamesAPerson,
   type ActingCaller,
@@ -176,6 +179,19 @@ export interface ApprovalEngine {
    * resolver itself takes).
    */
   getSchema?(objectName: string): unknown;
+  /**
+   * The package registry, read by the `platform_admin` approver's origin gate
+   * ({@link ApprovalService.platformAdminApproverRefusal}): the row the
+   * registering door wrote for a package, with its `source`. Optional so a
+   * double without it answers "origin unknown", and the gate refuses.
+   */
+  registry?: { getPackage?(id: string): { source?: unknown } | undefined };
+  /**
+   * `ObjectQL.residualOwnerSource`: the registering door's statement for an
+   * artifact residual's owner id, which has no registry row. Read by the same
+   * gate; absent, a residual owner's origin is unknown and the gate refuses.
+   */
+  residualOwnerSource?(ownerId: string): 'code' | 'marketplace' | undefined;
 }
 
 /**
@@ -2015,6 +2031,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
   /** [decision 6840464379] {@link authorizeSchemaRead}'s verdict, kept per request context. */
   private readonly schemaReadVerdicts = new WeakMap<object, Promise<boolean>>();
+  /** {@link platformAdminStanding}'s answers, kept per request context and user. */
+  private readonly platformAdminStandings = new WeakMap<object, Map<string, Promise<boolean>>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
@@ -2603,6 +2621,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     for (const position of context.positions ?? []) {
       if (positionAddresses(position).includes(named)) return named;
     }
+    // The platform administrators' slot: admitted only while the server finds
+    // the caller in that standing, asked now (`hasPlatformAdminStanding`, the
+    // one per-user predicate), never read off the envelope.
+    if (isPlatformAdminAddress(named) && await this.platformAdminStanding(context, uid)) return named;
     // Email last — it costs a read, so only when nothing cheaper matched.
     if (named.includes('@') && await this.callerHasEmail(uid, named)) return named;
 
@@ -2665,7 +2687,36 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const userId = context?.userId != null ? String(context.userId) : '';
     if (!userId) return null;
     const email = await this.callerAccountEmail(userId);
-    return { userId, email, positions: context?.positions ?? [] };
+    const platformAdmin = await this.platformAdminStanding(context, userId);
+    return { userId, email, positions: context?.positions ?? [], platformAdmin };
+  }
+
+  /**
+   * Is `userId` in platform-administrator standing right now? The answer of
+   * `hasPlatformAdminStanding` (`@objectstack/core`), the platform's one
+   * per-user predicate: the stored cross-tenant grant and the verified
+   * configured owner both meet there. It is read from the stored rows, never
+   * from the envelope's `posture`, so a revoked administrator holding a
+   * session minted before the revocation acts under nothing, and it decides
+   * whether the caller acts under {@link PLATFORM_ADMIN_ADDRESS}.
+   *
+   * Asked once per execution context (the object a transport builds per
+   * request) and user: the inbox read, the decision's actor check and its slot
+   * test share one answer. Fail-closed: the predicate answers `false` on any
+   * unreadable lookup.
+   */
+  private async platformAdminStanding(context: ExecutionContext, userId: string): Promise<boolean> {
+    const key = context && typeof context === 'object' ? (context as object) : undefined;
+    const memo = key ? this.platformAdminStandings.get(key) : undefined;
+    const known = memo?.get(userId);
+    if (known) return known;
+    const asked = hasPlatformAdminStanding(this.engine, userId);
+    if (key) {
+      const perUser = memo ?? new Map<string, Promise<boolean>>();
+      perUser.set(userId, asked);
+      if (!memo) this.platformAdminStandings.set(key, perUser);
+    }
+    return asked;
   }
 
   /**
@@ -2887,6 +2938,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // declared, the resolver returns the request org without reading anything.
     const directoryOrg = await this.directoryOrgFor(a, organizationId);
     const crossOrg = directoryOrg !== organizationId;
+
+    // The platform administrators: ONE address slot, never the people in it.
+    // Who may name this type is judged once, at node entry, before any slate
+    // is resolved ({@link platformAdminApproverRefusal}); who takes the slot
+    // is judged per caller, live, at the inbox and at each decision.
+    if (type === 'platform_admin') return [PLATFORM_ADMIN_ADDRESS];
 
     if (type === 'user') {
       // #27397: the value is the slot only when an account carries it — asked
@@ -3759,6 +3816,65 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return queues.expandMembers(queueName, organizationId ?? null, {
       purpose: 'addressing', onFailedRead: 'refuse', ...(callerPackageId ? { callerPackageId } : {}),
     });
+  }
+
+  /**
+   * Why an approval step may NOT name the platform administrators, or
+   * `undefined` when it may (or names no `platform_admin` approver at all, in
+   * `approvers` or `fallbackApprovers`).
+   *
+   * It may only in the running body of a flow a package ships, when that
+   * package came from the deployment's own code: `callerPackageId` is the
+   * armed body's package ({@link flowPackageOf}, the engine's
+   * `armedFlowPackage`), and the registry row the registering door wrote for
+   * it says `source: 'code'`. A residual owner, which has no row, counts only
+   * when the door that registered it recorded it as `code`
+   * (`residualOwnerSource`). The same origin reading the automation service's
+   * installed-package ref refusal takes (`nonHostDeclaringPackageOf`).
+   *
+   * Everything else is refused, fail closed: a flow authored in this
+   * environment, an environment override of a packaged flow (the engine names
+   * no package for the body it arms), a package installed from the
+   * marketplace or created here, and an origin nobody records. ⛔ Never asked
+   * of `packagedFlowOwner`: it names who ships the flow's NAME, so an override
+   * of a host flow would pass.
+   */
+  private platformAdminApproverRefusal(
+    config: { approvers?: unknown; fallbackApprovers?: unknown } | null | undefined,
+    callerPackageId: string | null,
+  ): string | undefined {
+    const names = (list: unknown): boolean => Array.isArray(list)
+      && list.some((a) => canonicalApproverType(String((a as { type?: unknown } | null)?.type ?? '')) === 'platform_admin');
+    if (!names(config?.approvers) && !names(config?.fallbackApprovers)) return undefined;
+    if (!callerPackageId) {
+      return 'the body that runs is no package\'s own: a flow authored in this environment, an environment '
+        + 'override of a packaged flow, or a body whose package the engine cannot name.';
+    }
+    let row: { source?: unknown } | undefined;
+    try {
+      row = this.engine.registry?.getPackage?.(callerPackageId);
+    } catch {
+      return `the origin of package '${callerPackageId}' could not be read.`;
+    }
+    if (row !== undefined) {
+      if (row.source === 'code') return undefined;
+      const source = String(row.source);
+      const origin = source === 'marketplace'
+        ? 'was installed from the marketplace'
+        : source === 'authored' ? 'was created in this environment' : 'records no deployment origin';
+      return `the body that runs is package '${callerPackageId}''s, which ${origin} (source '${source}').`;
+    }
+    let residual: 'code' | 'marketplace' | undefined;
+    try {
+      residual = this.engine.residualOwnerSource?.(callerPackageId);
+    } catch {
+      residual = undefined;
+    }
+    if (residual === 'code') return undefined;
+    return residual === 'marketplace'
+      ? `the body that runs is package '${callerPackageId}''s, which was installed from the marketplace.`
+      : `the body that runs is package '${callerPackageId}''s, which no registration in this runtime records as `
+        + 'the deployment\'s own.';
   }
 
   /**
@@ -4672,6 +4788,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // No package is asked here, so no stamp can have withdrawn.
     const flowSlot = isWithdrawnRequestFlow(runSlot) ? undefined : runSlot;
     const callerPackageId = this.flowPackageOf(flowSlot?.key ?? input.flowName);
+    // `platform_admin` addresses the deployment's platform administrators, so
+    // only a flow body a `code` package ships may name it. Refused here, fail
+    // closed and before any slate is read or any row written.
+    const platformAdminRefused = this.platformAdminApproverRefusal(input.config, callerPackageId);
+    if (platformAdminRefused) {
+      throw new Error(
+        `FORBIDDEN: approval node '${input.nodeId}'${input.flowName ? ` of flow '${input.flowName}'` : ''} names `
+        + `the platform administrators (approver type 'platform_admin'), and ${platformAdminRefused} Only the `
+        + `running body of a flow shipped by a package this deployment registers in code may name them. The node `
+        + `does not open. Route the step to people of the request's organization, or ship the flow in a package `
+        + `the deployment registers in code.`,
+      );
+    }
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
     // submitter is taken off every slate this request can open on. It runs on

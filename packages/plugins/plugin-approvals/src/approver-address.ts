@@ -59,6 +59,28 @@
  */
 
 /**
+ * The ONE slot a `platform_admin` approver opens: an address, not a person.
+ * It names the deployment's platform administrators as a class, so it is
+ * never expanded to the people in it (`hasPlatformAdminStanding` is a
+ * per-user predicate and forbids the population read). A caller acts under it
+ * exactly when the server finds them in that standing, at the moment they
+ * ask ({@link ActingCaller.platformAdmin}), so a revocation takes effect at
+ * the next read or decision, on requests opened before it too.
+ *
+ * Spelled `type:value` like every other address literal: the readers that
+ * tell a person from an address (notification fan-out, the record-read
+ * grant, out-of-office, labels) test for the colon, and this slot must read
+ * as an address to every one of them. It names no person, so it grants no
+ * record read and is told nothing.
+ */
+export const PLATFORM_ADMIN_ADDRESS = 'platform_admin:*';
+
+/** Does `address` name the platform administrators' slot ({@link PLATFORM_ADMIN_ADDRESS})? */
+export function isPlatformAdminAddress(address: string): boolean {
+  return address === PLATFORM_ADMIN_ADDRESS;
+}
+
+/**
  * The prefixes under which a slot address names a position: `position:` alone
  * (ADR-0090 D3 — the retired `role:` is no alias of it). Kept a list so every
  * reader below reads the one set the acting path admits.
@@ -118,12 +140,21 @@ export interface ActingCaller {
   readonly userId: string;
   readonly email?: string | null;
   readonly positions?: readonly unknown[];
+  /**
+   * Whether the server finds the caller in platform-administrator standing
+   * (`hasPlatformAdminStanding`, read live for this request). `true` adds
+   * {@link PLATFORM_ADMIN_ADDRESS} to the addresses they act under; absent
+   * reads as `false`, so a caller built without asking acts under nothing
+   * more than before.
+   */
+  readonly platformAdmin?: boolean;
 }
 
 /**
  * Every slot address the caller acts under WITHOUT naming one — the default
- * actor — in the order a slot is taken: the user id, the account's email, then
- * the address of every held position.
+ * actor — in the order a slot is taken: the user id, the account's email, the
+ * address of every held position, then the platform administrators' slot for a
+ * caller in that standing.
  *
  * The email is matched as the account stores it. `resolveActor` admits a
  * NAMED email case-insensitively, and that named spelling is judged by
@@ -133,6 +164,7 @@ export function actingAddresses(caller: ActingCaller): string[] {
   const out = [caller.userId];
   if (caller.email) out.push(caller.email);
   for (const position of caller.positions ?? []) out.push(...positionAddresses(position));
+  if (caller.platformAdmin === true) out.push(PLATFORM_ADMIN_ADDRESS);
   return [...new Set(out)];
 }
 
@@ -156,6 +188,12 @@ export function actorAddresses(actorId: string, caller: ActingCaller | null): st
  * slate is a `type:value` literal, left by an approver target that resolved to
  * no holder (`position:<p>`, `team:<t>`, a stored `role:<p>`).
  *
+ * One literal counts as naming someone: {@link PLATFORM_ADMIN_ADDRESS}. It is
+ * not an approver target that found nobody; it is the address the platform
+ * administrators decide under, and it is never expanded. Read as empty, the
+ * default `admin_rescue` would replace it with the request organization's
+ * administrators, the very people the type exists to keep off the slate.
+ *
  * `false` is the slate the open path hands to the node's `onEmptyApprovers`
  * policy, and the one it re-tests after a `fallback` before the default
  * `admin_rescue` opens on the organization's administrators (#22824). One
@@ -165,7 +203,7 @@ export function actorAddresses(actorId: string, caller: ActingCaller | null): st
  * is not a reader of the equivalence above.
  */
 export function slateNamesAPerson(slate: readonly string[]): boolean {
-  return slate.some((address) => !!address && !address.includes(':'));
+  return slate.some((address) => !!address && (!address.includes(':') || isPlatformAdminAddress(address)));
 }
 
 /**

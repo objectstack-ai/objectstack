@@ -356,6 +356,12 @@ export interface AuthoringRuleContext {
    * so a name it does not carry is refused there; on the CLI commands they are
    * one app's declaration, and the object-reference ladder (sibling packages,
    * platform names, a platform-prefixed name advised at `warning`) applies.
+   *
+   * `validateApprovalApprovers` reads its presence only, on the same kind of
+   * argument: a flow written at the publish door is authored in the
+   * deployment, never a package's own code, so a `platform_admin` approver in
+   * it is refused there; the CLI commands read a package's source and cannot
+   * know which door will register it, so they refuse nothing.
    */
   runtimeWriteType?: string;
   /**
@@ -1627,7 +1633,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `approver.value` is just a string to Zod. It is not just a string here.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
-    run: (stack) => validateApprovalApprovers(stack),
+    // At the runtime door a flow is authored in the deployment, so a
+    // `platform_admin` approver in it is refused there (`atSaveDoor`, read off
+    // `runtimeWriteType`'s presence; see that field).
+    run: (stack, ctx) => validateApprovalApprovers(stack, { atSaveDoor: ctx.runtimeWriteType !== undefined }),
   },
   // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and the
   // ruling of record on #29007 (6574393684, letter B) refuses it: an object
