@@ -335,6 +335,15 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // enforced its row is stale: delete it and decide the offer then — that
   // decision belongs to the enforcement, not to this gate.
 
+  // A boolean whose UNSET state is the meaning, and no default to show it.
+  {
+    kind: 'omit',
+    type: 'skill',
+    path: ROOT_PATH,
+    key: 'mcpPrompt',
+    why: "unset means offered as an MCP prompt and only `false` withholds the skill, so the key's meaning lives in its absence, and it deliberately has no schema default (an undeclared skill parses byte-identical). The form's boolean control is a switch that draws unset as off, so every offered skill would read as withheld; a select writes its option value as a string, which this boolean key refuses. Authored in source or through the metadata API, where the describe text says what `false` does",
+  },
+
   // Platform-written, never authored.
   {
     kind: 'omit',
