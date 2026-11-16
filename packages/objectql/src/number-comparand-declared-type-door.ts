@@ -147,8 +147,8 @@
  * The nested-relation form is SERVED at `where` (`relation-filter-lowering.ts`).
  * There a no-operator object beneath a relation column is not refused by the
  * arm above: it is admitted against the related object's declarations
- * (`admitRelationCondition` — one level, declared keys, a registered related
- * object) or refused in words of its own. The engine then walks the admitted
+ * (`admitRelationCondition` — up to three relationships, declared keys, a
+ * registered related object) or refused in words of its own. The engine then walks the admitted
  * `where` again with this SAME walk ({@link mapRelationConditions}) to collect
  * each condition and, after reading the related object, to replace it — so the
  * door and the lowering find a condition at the same boundaries by

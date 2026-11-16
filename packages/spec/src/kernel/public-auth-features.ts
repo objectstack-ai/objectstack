@@ -257,11 +257,10 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'opt-in',
     gatedInputs: [
       'sys_user.actions.create_user',
-      // `ban_user` / `unban_user` are not booked: their doors are ObjectStack
-      // mounts that work without the admin plugin, so neither is gated on this
-      // flag (see the admin block header in sys-user.object.ts).
-      'sys_user.actions.unlock_user',
-      'sys_user.actions.set_user_password',
+      // `ban_user` / `unban_user` / `unlock_user` / `set_user_password` are
+      // not booked: their doors are ObjectStack mounts that work without the
+      // admin plugin, so none is gated on this flag (see the admin block
+      // header in sys-user.object.ts).
       // 'sys_user.actions.set_user_role' retired (#9968) — see the removal
       // note beside `impersonate_user` in sys-user.object.ts.
       'sys_user.actions.impersonate_user',
@@ -418,8 +417,13 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * start, or when the setting was turned on after start-up and the door is not
  * mounted). It gates no spec input and changes no server door: the server's
  * password sign-in is the same either way.
+ *
+ * `publicBaseUrl` is the deployment's public base URL (the canonical origin
+ * every link the auth layer hands out is built on, sub-path included), served
+ * as an address only. Its reader is the console's mobile-app connect page,
+ * which encodes it in the connect code. It gates no spec input.
  */
-export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions', 'localSignIn'] as const;
+export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions', 'localSignIn', 'publicBaseUrl'] as const;
 
 /**
  * Capabilities that are RESERVED but deliberately **not advertised** — the

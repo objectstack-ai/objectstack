@@ -289,7 +289,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 - 终报 JSON 形状住 `.claude/agents/os-dev.md`,⛔ 不抄第二份;`needs_decision` 时 `open_questions` 非空。
 - `premise_still_valid: false` + `pr: null` 是合法终报,当再分诊输入作 L1 审核,永不当失败派发。
-- `out_of_scope_findings` 每条 `class: a|b|c`+`reach:`+证据,或 `carrier:`(承接者);皆无 ⇒ Acceptance notes。
 - dev 不立卡;ACCEPT 逐条一行 `filed #N`/`Acceptance notes`/`dropped — 因`;三类由席位立在修复仓。
 - 席位读 PR `## Acceptance notes`,实属三类的经立卡门补立、归挂;门外已立卡关 not planned。
 - 同族发现并入收口卡(一卡覆盖全族位置,带枚举钉子),⛔ 不开单点卡;无则第二次即开。
@@ -312,6 +311,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 ```text
 Claim: PM loop round N
 Session: `session_<id>`
+Thread session: `session_<id>` (mode:thread only: the card thread's own session, which knocks the seat mailbox as its delegate; nothing after the id; omit otherwise)
 Account: `<github-login>` (the seat's linked user as `GET /user` answers it; always the card's assignee)
 Branch: `claude/issue-<n>-<slug>`
 Worktree: `<repo>-issue-<n>`
