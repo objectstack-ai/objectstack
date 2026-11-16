@@ -333,12 +333,13 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
   },
   recordBeingEdited: {
     readers: ['entry@fields/src/widgets/lookupRecordReference.ts'],
-    why: 'RUNTIME-ONLY (objectstack#34197) — stamped by `ObjectForm` and `buildSectionFields` (`withRecordBeingEdited`) on '
-      + 'a lookup whose `lookupFilters` read `{ $record }`: the record form\'s statement that one record is being edited, '
-      + 'with the object each hop points at. A host that edits no single record must not be able to claim it. The '
-      + 'invariant is held by the two builders and by the closed spec shapes (the published `customFields` member and '
-      + 'action params refuse the key); this face\'s loose `FormFieldSchema`, which can author it on an inline form '
-      + 'field, is tracked by objectstack#34344.',
+    why: 'RUNTIME-ONLY (objectstack#34197, objectstack#34344) — the record form\'s statement that one record is being '
+      + 'edited, with the object each hop points at, stamped (`withRecordBeingEdited`) on a lookup whose `lookupFilters` '
+      + 'read `{ $record }`. A host that edits no single record must not be able to claim it. Two things hold that: '
+      + 'the widget honours only a stamp `withRecordBeingEdited` issued, so the key written as data, on this face\'s '
+      + 'loose `FormFieldSchema` or anywhere else, is no stamp; and a record form stamps every field it draws, '
+      + 'generated or inline, in the one step every layout draws through (`gateFormFields`), dropping an authored '
+      + 'key first. Not declared here, deliberately: no document authors it.',
   },
   homeAmountSource: {
     readers: [CURRENCY],
