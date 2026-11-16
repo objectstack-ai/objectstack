@@ -471,7 +471,8 @@ function lookupTargetNames(def: any): string[] {
  * out ({@link readDashboardWidgetObjects}'s read, objectstack#29444); a target
  * joins the by-name scope only once that read has answered it served.
  *
- * The package arm is left as it is: its targets ride the package scope.
+ * The package arm is left as it is: a target its package list does not hold is
+ * still asked by name there.
  */
 function servedLookupTargets(
   readObjectScope: ReadObjectScope,

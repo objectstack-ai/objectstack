@@ -291,3 +291,102 @@ describe('objectstack#33343 — a hidden lookup asks no definition of its target
     );
   });
 });
+
+describe('objectstack#34188 — a lookup target the host does not register is never asked by name', () => {
+  /**
+   * The control plane's Members page binds `sys_invitation`, whose drawn
+   * `business_unit_id` lookup points at `sys_business_unit`, an object the
+   * control plane does not register: asked by name it answered 404 on every
+   * open. Its app has no package, so the page reads the names-only scope.
+   * The list door's `?names=` read answers an absent name by leaving it out,
+   * and this adapter answers it so.
+   */
+  const CP_OBJECTS = [
+    {
+      name: 'sys_invitation',
+      fields: {
+        business_unit_id: { type: 'lookup', reference: 'sys_business_unit' },
+        inviter_id: { type: 'lookup', reference: 'sys_user' },
+      },
+    },
+    { name: 'sys_user', fields: {} },
+  ];
+  const CP_APPS = [{ name: 'cp', navigation: [] }];
+  const TEAM_PAGE = { name: 'team', object: 'sys_invitation' };
+
+  function makeListingAdapter(calls: string[]) {
+    return {
+      clearCache: vi.fn(),
+      invalidateCache: vi.fn(),
+      getObjectSchema(this: { getClient(): any }, name: string) {
+        return this.getClient()
+          .meta.getItem('object', name)
+          .then((res: any) => (res && typeof res === 'object' && 'item' in res ? res.item : res));
+      },
+      getClient: () => ({
+        meta: {
+          getItems: (type: string, options?: { names?: readonly string[] }) => {
+            const all: any[] = type === 'object' ? CP_OBJECTS : type === 'app' ? CP_APPS : [];
+            if (options?.names) {
+              calls.push(`${type}?names=${options.names.join(',')}`);
+              return Promise.resolve({ type, items: structuredClone(all.filter((o) => options.names!.includes(o.name))) });
+            }
+            calls.push(type);
+            return Promise.resolve({ type, items: structuredClone(all) });
+          },
+          getItem: (type: string, name: string) => {
+            calls.push(`${type}/${name}`);
+            const item = (type === 'object' ? CP_OBJECTS : []).find((o) => o.name === name);
+            return item ? Promise.resolve({ item: structuredClone(item) }) : Promise.reject(new Error('404'));
+          },
+        },
+      }),
+    } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
+  }
+
+  /** What the route reads, through the same `readAppObjectScope` `AppContent` reads. */
+  function RouteProbe({ subPath }: { subPath: string }) {
+    const { apps, readObjectScope } = useMetadata();
+    const app = apps.find((a: any) => a?.name === 'cp');
+    const read =
+      app && readObjectScope
+        ? readAppObjectScope(readObjectScope, app, subPath, '', [], () => ({ page: TEAM_PAGE, settled: true }))
+        : undefined;
+    const names = ((read?.scope?.objects ?? []) as any[]).map((o) => o?.name).sort().join(',');
+    return <div data-testid="scope">{names}</div>;
+  }
+
+  function mountRoute(subPath: string) {
+    sessionStorage.clear();
+    const calls: string[] = [];
+    const view = render(
+      <MetadataProvider adapter={makeListingAdapter(calls)}>
+        <MemoryRouter initialEntries={['/']}>
+          <RouteProbe subPath={subPath} />
+        </MemoryRouter>
+      </MetadataProvider>,
+    );
+    return { calls, scope: () => view.getByTestId('scope').textContent };
+  }
+
+  it.each([
+    ['a page bound to the object', 'page/team'],
+    ["the object's own list route", 'sys_invitation'],
+  ])('%s asks no definition of the unregistered target by name', async (_arm, subPath) => {
+    const { calls, scope } = mountRoute(subPath);
+    await waitFor(() => expect(scope()).toContain('sys_user'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).not.toContain('object/sys_business_unit');
+    // Asked once, in the read that leaves an absent name out.
+    expect(calls.filter((c) => c.includes('sys_business_unit'))).toEqual(['object?names=sys_business_unit,sys_user']);
+  });
+
+  it.each([
+    ['a page bound to the object', 'page/team'],
+    ["the object's own list route", 'sys_invitation'],
+  ])('CONTROL: on %s a registered target still resolves into the scope', async (_arm, subPath) => {
+    const { calls, scope } = mountRoute(subPath);
+    await waitFor(() => expect(scope()).toBe('sys_invitation,sys_user'));
+    expect(calls).toContain('object/sys_user');
+  });
+});
