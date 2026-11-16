@@ -422,7 +422,8 @@ describe('a form entry\'s own label wins over the bundle\'s object-field transla
 
     // The banner/toast frame names every refused row by the label on screen.
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalled());
-    const msg = String(vi.mocked(toast.error).mock.calls.at(-1)?.[0]);
+    const calls = vi.mocked(toast.error).mock.calls;
+    const msg = String(calls[calls.length - 1]?.[0]);
     expect(msg).toContain(ENTRY_NAME_SERVED);
     expect(msg).not.toContain(AGENT_NAME_TRANSLATED);
     expect(msg).toContain(AGENT_EMAIL_TRANSLATED);
