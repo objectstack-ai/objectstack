@@ -2926,10 +2926,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         a, record, organizationId, now, opts?.substitutions, onDirectoryFailure, opts?.callerPackageId ?? null,
       );
       // The platform administrators' slot is opened by the approver type that
-      // names them, and by nothing else: whatever another type resolves to (a
-      // value, a record field, a manager, an out-of-office delegate, a
-      // directory row), the slot is not opened through it. It names no one, so
-      // the slate reads as it would without it, as before this type existed.
+      // names them, and by nothing else: the slot is judged on the resolved
+      // slate. It names no one, so a slate reads as it would without it, as
+      // before this type existed.
       // Who may name the type itself is judged at node entry
       // ({@link platformAdminApproverRefusal}).
       const ids = canonicalApproverType(String(a.type)) === 'platform_admin'
@@ -3920,11 +3919,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * Is the step being opened a node of the body armed under the flow's key,
    * the body {@link flowPackageOf} answers the origin of? The executor hands
    * the node object it runs; the armed body is read under the same key the
-   * origin is read under (the run's slot, else the bare name). A run that
-   * resumed on another body (a stored version, an earlier registration) runs
-   * nodes that are not this body's, and its origin is not the armed one's.
-   * `false` when no node was handed, the engine cannot name the armed body, or
-   * the read fails: fail closed.
+   * origin is read under (the run's slot, else the bare name), so the origin
+   * answered is the origin of the body whose step is being opened, in every
+   * run state. `false` when no node was handed, the engine cannot name the
+   * armed body, or the read fails: fail closed.
    */
   private async stepRunsInArmedBody(
     node: unknown,
@@ -4450,10 +4448,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // no slot — with the "expanded to nobody" warning, and its hops leave the
     // collector so no substitution is audited or notified. A failed read
     // proves nothing, so the delegate stays.
-    // An out-of-office delegation hands a person's slot to another person. One
-    // that ends on the platform administrators' slot names no person, and that
-    // slot is opened only by the approver type that names them, so the slot
-    // stays with the original approver and the hops are not audited.
+    // A delegation hands a slot to a person. The platform administrators' slot
+    // is opened only by the approver type that names them, so the slot stays
+    // with the original approver and the hops are not audited.
     if (current !== start && isPlatformAdminAddress(current)) {
       this.logger?.warn?.(
         `[approvals] out-of-office delegate of '${start}' is the platform administrators' slot, which a delegation `
@@ -7231,10 +7228,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       if (!context.isSystem && !isOverride && slot === undefined) {
         throw new Error(`FORBIDDEN: actor '${actorId}' is not a pending approver`);
       }
-      // The platform's place on a request stays the platform's: holding
-      // another slot of the slate does not hand it on. It moves for a caller
-      // in platform-administrator standing now, the platform override, or the
-      // system.
+      // The platform's place on a request stays the platform's: it moves for
+      // a caller in platform-administrator standing now, the platform
+      // override, or the system.
       if (isPlatformAdminAddress(from) && !context.isSystem && !isOverride
         && !(await this.platformAdminStanding(context, context.userId != null ? String(context.userId) : ''))) {
         throw new Error(

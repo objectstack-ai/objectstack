@@ -396,61 +396,61 @@ describe('platform_admin approver: one slot the platform administrators decide u
   });
 
   describe('the slot is opened only by the approver type that names it: every other way a slate is resolved opens no slot', () => {
-    it('a user approver whose value is the slot opens none; the slate keeps its people', async () => {
-      const row = await open('via_user', 'tenant_review', [{ type: 'user', value: SLOT }, { type: 'user', value: 'u_alice' }]);
+    it('case 1: the resolved slate holds no slot the typed approver did not open', async () => {
+      const row = await open('case_1', 'tenant_review', [{ type: 'user', value: SLOT }, { type: 'user', value: 'u_alice' }]);
       expect(row.pending_approvers).toEqual(['u_alice']);
     });
 
-    it('a record field holding the slot opens none', async () => {
-      const row = await open('via_field', 'tenant_review', [{ type: 'field', value: 'reviewer' }], {},
+    it('case 2: the resolved slate holds no slot the typed approver did not open', async () => {
+      const row = await open('case_2', 'tenant_review', [{ type: 'field', value: 'reviewer' }], {},
         { fields: { reviewer: `${SLOT},u_alice` } });
       expect(row.pending_approvers).toEqual(['u_alice']);
     });
 
-    it('an expression resolved as users that yields the slot opens none', async () => {
-      const row = await open('via_expression', 'tenant_review',
+    it('case 3: the resolved slate holds no slot the typed approver did not open', async () => {
+      const row = await open('case_3', 'tenant_review',
         [{ type: 'expression', value: 'trigger.reviewer', resolveAs: 'user' }, { type: 'user', value: 'u_alice' }], {},
         { fields: { reviewer: SLOT } });
       expect(row.pending_approvers).toEqual(['u_alice']);
     });
 
-    it('a directory row holding the slot opens none', async () => {
+    it('case 4: the resolved slate holds no slot the typed approver did not open', async () => {
       await engine.insert('sys_user_position', {
-        id: 'pos_slot', user_id: SLOT, position: 'deal_desk', organization_id: ORG,
+        id: 'pos_case_4', user_id: SLOT, position: 'deal_desk', organization_id: ORG,
       }, { context: SYSTEM } as any);
       try {
-        const row = await open('via_directory', 'tenant_review',
+        const row = await open('case_4', 'tenant_review',
           [{ type: 'position', value: 'deal_desk' }, { type: 'user', value: 'u_alice' }]);
         expect(row.pending_approvers).toEqual(['u_alice']);
       } finally {
-        await engine.delete('sys_user_position', { where: { id: 'pos_slot' }, context: SYSTEM } as any);
+        await engine.delete('sys_user_position', { where: { id: 'pos_case_4' }, context: SYSTEM } as any);
       }
     });
 
-    it('an SLA escalation onto a position whose holder row holds the slot does not hand the request to it', async () => {
+    it('case 5: a later slate holds no slot the typed approver did not open', async () => {
       await engine.insert('sys_user_position', {
-        id: 'pos_slot_esc', user_id: SLOT, position: 'escalation_desk', organization_id: ORG,
+        id: 'pos_case_5', user_id: SLOT, position: 'escalation_desk', organization_id: ORG,
       }, { context: SYSTEM } as any);
       try {
-        await open('via_escalation', 'tenant_review', [{ type: 'user', value: 'u_alice' }],
+        await open('case_5', 'tenant_review', [{ type: 'user', value: 'u_alice' }],
           { escalation: { timeoutHours: 1, action: 'reassign', escalateTo: 'escalation_desk', notifySubmitter: false } });
         now += 2 * 3600_000;
         await svc.runEscalations();
-        expect((await requestRows('via_escalation'))[0].pending_approvers).not.toContain(SLOT);
+        expect((await requestRows('case_5'))[0].pending_approvers).not.toContain(SLOT);
       } finally {
-        await engine.delete('sys_user_position', { where: { id: 'pos_slot_esc' }, context: SYSTEM } as any);
+        await engine.delete('sys_user_position', { where: { id: 'pos_case_5' }, context: SYSTEM } as any);
       }
     });
 
-    it('an out-of-office delegation that ends on the slot leaves the slot with the person', async () => {
+    it('case 6: the resolved slate keeps its people and holds no slot the typed approver did not open', async () => {
       await engine.insert('sys_approval_delegation', {
-        id: 'dlg_alice', delegator_id: 'u_alice', delegate_id: SLOT, organization_id: ORG,
+        id: 'dlg_case_6', delegator_id: 'u_alice', delegate_id: SLOT, organization_id: ORG,
       }, { context: SYSTEM } as any);
       try {
-        const row = await open('via_delegation', 'tenant_review', [{ type: 'user', value: 'u_alice' }]);
+        const row = await open('case_6', 'tenant_review', [{ type: 'user', value: 'u_alice' }]);
         expect(row.pending_approvers).toEqual(['u_alice']);
       } finally {
-        await engine.delete('sys_approval_delegation', { where: { id: 'dlg_alice' }, context: SYSTEM } as any);
+        await engine.delete('sys_approval_delegation', { where: { id: 'dlg_case_6' }, context: SYSTEM } as any);
       }
     });
   });
@@ -458,36 +458,36 @@ describe('platform_admin approver: one slot the platform administrators decide u
   describe('the platform\'s place on a mixed slate moves only for the platform or the system', () => {
     const mixed = (key: string) => open(key, 'host_review', [...PLATFORM, { type: 'user', value: 'u_alice' }]);
 
-    it('the ordinary slot holder cannot move it', async () => {
-      const row = await mixed('move_by_holder');
+    it('a caller without platform standing cannot move it', async () => {
+      const row = await mixed('move_1');
       await expect(svc.reassign(row.id, { actorId: 'u_alice', from: SLOT, to: 'u_member' }, as('u_alice')))
         .rejects.toThrow(/^FORBIDDEN: actor 'u_alice' may not move the platform administrators' slot/);
-      expect((await requestRows('move_by_holder'))[0].pending_approvers).toBe(`${SLOT},u_alice`);
+      expect((await requestRows('move_1'))[0].pending_approvers).toBe(`${SLOT},u_alice`);
     });
 
     it('a platform administrator can', async () => {
-      const row = await mixed('move_by_platform');
+      const row = await mixed('move_2');
       await svc.reassign(row.id, { actorId: SLOT, from: SLOT, to: 'u_member' }, as('u_root'));
-      expect((await requestRows('move_by_platform'))[0].pending_approvers).toBe('u_member,u_alice');
+      expect((await requestRows('move_2'))[0].pending_approvers).toBe('u_member,u_alice');
     });
 
     it('the system can', async () => {
-      const row = await mixed('move_by_system');
+      const row = await mixed('move_3');
       await svc.reassign(row.id, { actorId: 'system', from: SLOT, to: 'u_member' }, SYSTEM);
-      expect((await requestRows('move_by_system'))[0].pending_approvers).toBe('u_member,u_alice');
+      expect((await requestRows('move_3'))[0].pending_approvers).toBe('u_member,u_alice');
     });
   });
 
   describe('the origin is answered for the body whose step is being opened', () => {
-    it('a node that is not the armed body\'s is refused, though the armed body is a code package\'s', async () => {
-      await expect(open('other_body', 'host_review', PLATFORM, {}, { node: { ...ARMED_NODE } }))
+    it('a step the answered origin does not describe is refused', async () => {
+      await expect(open('origin_1', 'host_review', PLATFORM, {}, { node: { ...ARMED_NODE } }))
         .rejects.toThrow(/^FORBIDDEN: approval node 'review' of flow 'host_review' names the platform administrators/);
-      await expect(open('no_body', 'host_review', PLATFORM, {}, { node: undefined }))
+      await expect(open('origin_2', 'host_review', PLATFORM, {}, { node: undefined }))
         .rejects.toThrow(/^FORBIDDEN: /);
-      expect(await requestRows('other_body')).toEqual([]);
+      expect(await requestRows('origin_1')).toEqual([]);
     });
 
-    it('the approval executor hands the node it runs: the armed body\'s opens, another body\'s does not', async () => {
+    it('the approval executor hands the step it runs, and the origin is answered for that step', async () => {
       const executors: any[] = [];
       registerApprovalNode({ registerNodeExecutor: (e: any) => { executors.push(e); } } as any, svc);
       const executor = executors.find((e) => e.type === 'approval');
@@ -498,11 +498,11 @@ describe('platform_admin approver: one slot the platform administrators decide u
         ]);
         return executor.execute(node, variables, { object: 'crm_deal', userId: 'u_sub', organizationId: ORG, tenantId: ORG });
       };
-      expect(await run('exec_armed', ARMED_NODE)).toMatchObject({ success: true, suspend: true });
-      const other = await run('exec_other', { ...ARMED_NODE });
+      expect(await run('origin_3', ARMED_NODE)).toMatchObject({ success: true, suspend: true });
+      const other = await run('origin_4', { ...ARMED_NODE });
       expect(other.success).toBe(false);
       expect(other.error).toMatch(/FORBIDDEN: approval node 'review'/);
-      expect(await requestRows('exec_other')).toEqual([]);
+      expect(await requestRows('origin_4')).toEqual([]);
     });
   });
 

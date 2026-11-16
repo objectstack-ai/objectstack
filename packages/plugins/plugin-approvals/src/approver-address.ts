@@ -67,7 +67,7 @@
  * ask ({@link ActingCaller.platformAdmin}), so a revocation takes effect at
  * the next read or decision, on requests opened before it too.
  *
- * Spelled `type:value` like every other address literal: the readers that
+ * Spelled `type:value` like every other address: the readers that
  * tell a person from an address (notification fan-out, the record-read
  * grant, out-of-office, labels) test for the colon, and this slot must read
  * as an address to every one of them. It names no person, so it grants no
@@ -207,7 +207,7 @@ export function actorAddresses(actorId: string, caller: ActingCaller | null): st
  * slate is a `type:value` literal, left by an approver target that resolved to
  * no holder (`position:<p>`, `team:<t>`, a stored `role:<p>`).
  *
- * One literal counts as naming someone: {@link PLATFORM_ADMIN_ADDRESS}. It is
+ * One address counts as naming someone: {@link PLATFORM_ADMIN_ADDRESS}. It is
  * not an approver target that found nobody; it is the address the platform
  * administrators decide under, and it is never expanded. Read as empty, the
  * default `admin_rescue` would replace it with the request organization's
