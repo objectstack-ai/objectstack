@@ -314,6 +314,12 @@ describe('SCIM manager projection: the directory sets, changes and clears sys_us
     ])));
     expect(renamed.status, await renamed.clone().text()).toBe(200);
     expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+
+    // A replace NAMES the manager, so it reaches the projection: the same
+    // manager is not judged again, though linking it afresh would be past the cap.
+    const resent = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp.scimId}`, userBody('emp', { value: boss.scimId })));
+    expect(resent.status, await resent.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(boss.userId);
   });
 
   it('a deprovision is never refused over a manager reference that no longer resolves', async () => {
