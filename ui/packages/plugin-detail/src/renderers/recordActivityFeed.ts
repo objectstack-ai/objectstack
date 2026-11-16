@@ -779,6 +779,46 @@ export function normalizeFeedTypes(value: unknown, block: string): FeedItemType[
 }
 
 /**
+ * Whether a feed whose authored `types` is `value` can show a comment
+ * (objectstack#34371): no `types` authored, or an allow-list that names
+ * `comment`, through the same {@link normalizeFeedTypes} reading
+ * {@link applyFeedConfig} filters by — so the answer and the rows cannot
+ * disagree.
+ *
+ * A block for which this is `false` offers no comment composer and no
+ * Comments-only filter: a comment posted there is stored and then filtered out
+ * of the very feed it was posted to, which reads to the member as a lost post.
+ */
+export function feedTypesAdmitComments(value: unknown, block: string): boolean {
+  const types = normalizeFeedTypes(value, block);
+  return types === undefined || types.includes('comment');
+}
+
+/** Blocks already told that their `types` withholds the composer. See {@link warnOnce}. */
+const warnedWithheldCommentComposers = new Set<string>();
+
+/** Test seam: forget which blocks have already been told. */
+export function resetWithheldCommentComposerWarnings(): void {
+  warnedWithheldCommentComposers.clear();
+}
+
+/**
+ * The author-facing half of {@link feedTypesAdmitComments} (objectstack#34371):
+ * once per block (`block` plus the node's `id`, when it has one) and authored
+ * `types`, name the block, its `types` and both fixes. Called only where the
+ * composer would otherwise have been offered (`showCommentInput` not `false`).
+ */
+export function warnWithheldCommentComposer(block: string, nodeId: string | undefined, types: unknown): void {
+  const scope = nodeId ? `${block} "${nodeId}"` : block;
+  const shown = JSON.stringify(types);
+  warnOnce(warnedWithheldCommentComposers, scope, [shown], () =>
+    `[${scope}] offers no comment composer and no Comments-only filter: its \`types\` (${shown}) `
+      + 'leaves out "comment", so a comment posted here would be stored and never shown on this block. '
+      + 'To take comments on this block, add "comment" to `types`; to keep it activity-only, '
+      + 'set `showCommentInput: false`.');
+}
+
+/**
  * What the contract admits as this block's row cap: a positive integer NUMBER.
  *
  * `@objectstack/spec` declares the member `z.number().int().positive()`
