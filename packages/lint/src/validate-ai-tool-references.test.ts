@@ -280,6 +280,23 @@ describe('validate-ai-tool-references', () => {
     expect(control[0].message).toContain('delete_packages');
   });
 
+  /**
+   * The build agent's read-only flow-run reader: a skill naming
+   * `list_flow_runs` resolves; a near name nobody registers does not.
+   */
+  it('resolves the service-ai-studio flow-run reader', () => {
+    expect(validateAiToolReferences({ skills: [{ name: 's', tools: ['list_flow_runs'] }] })).toEqual([]);
+
+    // The control: a fictional neighbour registered by nobody is still
+    // reported, so this pin fails on a universe widened too far.
+    const control = validateAiToolReferences({
+      skills: [{ name: 's', tools: ['list_flow_runs', 'retry_flow_run'] }],
+    });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[1]');
+    expect(control[0].message).toContain('retry_flow_run');
+  });
+
   it('reports stable paths and tolerates junk shapes', () => {
     const stack = {
       skills: [{ name: 's', tools: ['query_records', 'nope_tool'] }],

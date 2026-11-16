@@ -64,6 +64,15 @@ describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
     expect(isPlatformProvidedToolName('query_datasets')).toBe(false);
   });
 
+  it('lists the build agent\'s read-only flow-run reader', () => {
+    // Cloud `service-ai-studio` registers it; while the registry lacked it, a
+    // skill naming it read as a fictional tool.
+    expect(PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']).toContain('list_flow_runs');
+    expect(isPlatformProvidedToolName('list_flow_runs')).toBe(true);
+    // The control: the singular nobody registers still misses.
+    expect(isPlatformProvidedToolName('list_flow_run')).toBe(false);
+  });
+
   it('each group is sorted, so diffs stay reviewable', () => {
     for (const [pkg, names] of Object.entries(PLATFORM_TOOLS_BY_PACKAGE)) {
       expect([...names].sort(), pkg).toEqual([...names]);
