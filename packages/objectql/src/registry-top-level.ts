@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#33949 codemod] The top-level declarations ahead of `SchemaRegistry` in
-// `registry.ts` that moved out whole by `scripts/codemod-split-registry.mjs`
+// `registry.ts` that moved out whole by
+// the #33949 split codemod (PR #34285, kept in its branch history, not committed)
 // (lever (b) of ruling 6591753301).
 //
 // A MOVE, not a redesign: each declaration below is its `registry.ts` text

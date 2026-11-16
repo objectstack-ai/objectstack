@@ -11,9 +11,10 @@
  * when a body assigns it), so a body reads and writes the registry exactly as
  * the per-call literal let it.
  *
- * Written by `scripts/codemod-split-registry.mjs`; it imports types only, so it forms no
- * evaluation cycle and is evaluated before the class whichever module loads
- * first. `index.ts` re-exports nothing from this module.
+ * Written by the #33949 split codemod (PR #34285, kept in its branch history,
+ * not committed); it imports types only, so it forms no evaluation cycle
+ * and is evaluated before the class whichever module loads first.
+ * `index.ts` re-exports nothing from this module.
  */
 
 import type { SchemaRegistry } from './registry.js';

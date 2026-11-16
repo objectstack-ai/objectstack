@@ -13,7 +13,8 @@
  * `registerObjectExtension`, `extensionTargetKey`, `withdrawObjectExtension`,
  * `removeObjectOverlay`, `assertSingleOwnerPerObject`,
  * `unregisterObjectsByPackage`, `unregisterObject` moved out of `registry.ts`
- * whole by `scripts/codemod-split-registry.mjs`.
+ * whole by
+ * the #33949 split codemod (PR #34285, kept in its branch history, not committed).
  *
  * A MOVE, not a redesign. {@link PlatformGlobalFacet} is a stateless facet of `SchemaRegistry`
  * (ruling 6624345766): each static method of it is the body of the `SchemaRegistry`
