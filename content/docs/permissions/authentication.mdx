@@ -1318,9 +1318,9 @@ every membership in it) answers `409 RESOURCE_CONFLICT` there and changes
 nothing, and their seven actions are hidden. The one exception is
 `POST /api/v1/auth/organization/add-member`, which admits exactly a platform
 administrator, adding a membership, so the operator can restore one the
-environment lost. The administrator names the membership tier in the request's
-required `role` (a request without one is refused `400`), and ObjectStack passes
-it to better-auth unchanged. A signed-in caller who is not a platform
+environment lost. The administrator names the membership tier in the request
+body, where it is required (a request without it is refused `400`), and
+ObjectStack passes it to better-auth unchanged. A signed-in caller who is not a platform
 administrator is refused `403 PERMISSION_DENIED`, and a caller with no session
 is answered `401 UNAUTHENTICATED`. The other
 organization doors write no membership row (teams, invitations, the active
