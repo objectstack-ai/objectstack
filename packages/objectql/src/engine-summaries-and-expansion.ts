@@ -51,6 +51,29 @@ import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
 /**
+ * The engine's own mark on the master `update` a roll-up recompute issues
+ * ({@link SummariesAndExpansionFacet.recomputeSummaries}): the write is the
+ * SYSTEM's on the master's audit trail. `ObjectQLPlugin`'s
+ * `sys_stamp_audit_update` hook reads it off the hook's `input.options` and
+ * stamps `updated_by = null` (ADR-0118 D1: a system actor is `null` in a user
+ * lookup column, no system account, no sentinel) and a fresh `updated_at`,
+ * instead of the triggering child writer's `userId`. Ruling recorded on the
+ * card, comment 6902001862: 「确定汇总字段自动重算时主记录的修改人和修改时间怎么记」
+ * → 「记为系统并刷新时间」.
+ *
+ * An OPTION, not a context key, so it reaches exactly the one update it is put
+ * on: the master's hooks keep the caller's context — `userId` included, so a
+ * record-triggered flow or a hook on the master still knows who triggered the
+ * write — and a write one of those hooks issues through `ctx.api` carries the
+ * context, never this bag. A symbol, so no options object a door assembles
+ * from a request can carry it (`rejectUnknownEngineOptions` reads string keys
+ * only, and JSON has no symbols). `Symbol.for`, so every bundle of this
+ * package — both entries, ESM and CJS — names the one key, the shape
+ * `SECURITY_SERVICE_SOURCE_SLOT` takes for the same reason.
+ */
+export const SUMMARY_RECOMPUTE_WRITE: unique symbol = Symbol.for('objectstack.objectql.summaryRecomputeWrite');
+
+/**
  * The `ObjectQL` members the bodies of {@link SummariesAndExpansionFacet} read — every one of
  * them, and no other. Each is typed AS the class member (an indexed access on
  * the class), so a change to a member's signature on the class is a change
@@ -441,6 +464,17 @@ export class SummariesAndExpansionFacet {
    * `update` of the parent is refused exactly as before), the summary field
    * stays subject to the parent's FLS on read, and the only value this path can
    * move is the one the author DECLARED as a function of the child collection.
+   *
+   * # Who the master's audit trail names
+   *
+   * The SYSTEM, not the child's writer: the parent update carries
+   * {@link SUMMARY_RECOMPUTE_WRITE}, so the audit stamp writes
+   * `updated_by = null` and refreshes `updated_at` (a figure on the master did
+   * change). Elevation alone would not say this — `userId` rides the elevated
+   * context on purpose, and the stamp reads it — which is how a finance user
+   * who only inserted an invoice came to read as the contract's last editor.
+   * Insert, update, delete and a re-parent of a child all reach the master
+   * through this one write, so they all stamp the same way.
    */
   static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryRetryOptions' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
@@ -467,7 +501,11 @@ export class SummariesAndExpansionFacet {
             // lives where the insert-time seed and the one-off NULL backfill
             // can read the identical computation instead of copying it.
             const value = await aggregateSummaryValue(this.facade, desc, parentId, systemCtx);
-            await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: systemCtx } as any);
+            await this.update(
+              desc.parentObject,
+              { id: parentId, [desc.summaryField]: value },
+              { context: systemCtx, [SUMMARY_RECOMPUTE_WRITE]: true } as any,
+            );
           }, this.summaryRetryOptions);
         } catch (err) {
           // Retries exhausted (or a non-transient failure). Record it so the
