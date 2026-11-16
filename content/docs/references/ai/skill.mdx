@@ -37,10 +37,11 @@ const result = SkillSchema.parse(data);
 | **label** | `string` | ✅ | Skill display name |
 | **description** | `string` | optional | Skill description |
 | **surface** | `Enum<'ask' \| 'build' \| 'both'>` | optional (default: `"ask"`) | Agent surface this skill binds to ('ask' \| 'build' \| 'both') — ADR-0063 §3; read by the cloud agent runtime only |
-| **instructions** | `string` | optional | LLM instructions when skill is active — also served as an MCP prompt |
-| **tools** | `string[]` | ✅ | Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime; an MCP server whose prompts `registerSkillPrompts` installs offers the skill only when it serves every tool named here (an `action_` entry also through `run_action`) |
+| **instructions** | `string` | optional | LLM instructions when skill is active — also served as an MCP prompt unless mcpPrompt is false |
+| **tools** | `string[]` | ✅ | Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime; an MCP server whose prompts `registerSkillPrompts` installs offers the skill only when it serves every tool named here (an `action_` entry also through `run_action`); `mcpPrompt: false` withholds it from MCP whatever this binding |
 | **triggerConditions** | `{ field: string; operator: Enum<'eq' \| 'neq' \| 'in' \| 'not_in' \| 'contains'>; value: string \| string[] }[]` | optional | Programmatic activation conditions — evaluated by the cloud agent runtime only |
 | **active** | `boolean` | optional (default: `true`) | Whether the skill is enabled |
+| **mcpPrompt** | `boolean` | optional | Whether this skill is offered as an MCP prompt. false = written for the in-product agents only: never listed by prompts/list and unknown to prompts/get on any MCP connection, whatever its tools binding. Absent or true = offered where the server serves its tools |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this skill. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
