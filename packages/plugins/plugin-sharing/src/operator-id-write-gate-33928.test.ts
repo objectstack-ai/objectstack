@@ -238,18 +238,20 @@ describe('sharing write gate: a write the engine runs as a predicate meets the b
       expect(other?.name ?? null).not.toBe('written');
     });
 
-    it('a falsy id names no row: no error, nothing written', async () => {
+    it('a falsy id: the answer is no error (it names no row, so nothing is written)', async () => {
       const { mine, theirs } = await seedLines('p2');
 
       expect(await delMany({ id: '' })).toMatchObject({ kind: 'landed' });
       expect(await delMany({ id: 0 })).toMatchObject({ kind: 'landed' });
       expect(await updMany({ id: '' }, { stage: 'p2_written' })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ id: 0 }, { stage: 'p2_written' })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ stage: 'p2_none' }, { id: '', stage: 'p2_written' })).toMatchObject({ kind: 'landed' });
 
       expect(await storedLines('p2')).toEqual([...mine, theirs].sort());
       for (const id of [...mine, theirs]) expect(await stageOf(id)).toBe('p2');
     });
 
-    it('an empty `$in` matches no row: no error, nothing written', async () => {
+    it('an empty `$in`: the answer is no error (it matches no row, so nothing is written)', async () => {
       const { mine, theirs } = await seedLines('p3');
 
       expect(await delMany({ id: { $in: [] } })).toMatchObject({ kind: 'landed' });
@@ -268,6 +270,49 @@ describe('sharing write gate: a write the engine runs as a predicate meets the b
       expect(await updMany({ id: { $in: ['p4_read'] } }, { stage: 'p4_written' })).toMatchObject({ kind: 'landed' });
 
       expect(await stageOf('p4_read')).toBe('p4');
+    });
+
+    it('control: an `$eq` update of a row the caller owns writes it', async () => {
+      const { mine, theirs } = await seedLines('p7');
+
+      expect(await updMany({ id: { $eq: mine[0] } }, { stage: 'p7_written' })).toMatchObject({ kind: 'landed' });
+
+      expect(await stageOf(mine[0])).toBe('p7_written');
+      expect(await stageOf(mine[1])).toBe('p7');
+      expect(await stageOf(theirs)).toBe('p7');
+    });
+
+    it('a call the engine refuses at dispatch meets the engine refusal the system context gets, not a sharing refusal, and nothing is written', async () => {
+      const { mine, theirs } = await seedLines('p6');
+      const refusalOf = (p: Promise<unknown>) =>
+        p.then(
+          () => ({ kind: 'landed' as const }),
+          (e: { code?: unknown; status?: unknown; message?: unknown } | null) => ({
+            kind: 'refused' as const,
+            code: e?.code == null ? undefined : String(e.code),
+            status: e?.status == null ? undefined : Number(e.status),
+            message: String(e?.message),
+          }),
+        );
+      // A scalar id beside another where key, without `multi`.
+      const del = (context: unknown) => refusalOf(ql.delete(LINE, { where: { id: theirs, stage: 'p6' }, context } as never));
+      const upd = (context: unknown) =>
+        refusalOf(ql.update(LINE, { stage: 'p6_written' }, { where: { id: theirs, stage: 'p6' }, context } as never));
+      // A payload id beside a where predicate.
+      const updPayload = (context: unknown) =>
+        refusalOf(ql.update(LINE, { id: theirs, stage: 'p6_written' }, { where: { stage: 'p6' }, context } as never));
+
+      for (const call of [del, upd, updPayload]) {
+        const asSystem = await call(SYSTEM);
+        const asMember = await call(asCaller());
+        expect(asSystem).toMatchObject({ kind: 'refused' });
+        expect(asMember).toEqual(asSystem);
+        expect(asMember).not.toMatchObject({ code: 'FORBIDDEN' });
+        expect(asMember).not.toMatchObject({ status: 403 });
+      }
+
+      expect(await storedLines('p6')).toEqual([...mine, theirs].sort());
+      for (const id of [...mine, theirs]) expect(await stageOf(id)).toBe('p6');
     });
 
     it('control: the system context writes every row the predicate matches', async () => {

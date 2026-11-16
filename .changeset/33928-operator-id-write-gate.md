@@ -6,13 +6,14 @@ fix(plugin-sharing)!: the write gate judges by id exactly the writes the engine 
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
-Skills-docs: none — the docs already state the rule this gate now follows for every predicate write: a predicate (`multi: true`) update or delete writes only the rows the caller may write (`content/docs/permissions/permissions-matrix.mdx`, `content/docs/permissions/rls.mdx`), and no skill teaches either shape named below.
 
 <!-- adr-0087: not-required (no-migration-prescription) a runtime authorization answer moves: no metadata key, accepted value or stored row changes, so `os migrate meta` has nothing to rewrite -->
 
 The sharing write gate now takes its by-id or bulk branch from the engine's own dispatch decision for the write's options. A write the engine runs by id is judged by id, as before. Every other write is one the engine runs as a predicate, an `$in` or `$eq` on `id` included, and it meets the bulk write scope: it writes the rows the caller may update or delete, leaves the others as they were, and answers no error.
 
 A member's multi-row delete or update of rows it owns, on a `private` or `public_read` object with an `owner_id`, now lands where it answered 403 FORBIDDEN.
+
+A call the engine refuses at dispatch (for example a scalar `where.id` beside another key without `multi: true`, or a payload `id` beside a `where` predicate) now gets the engine's own refusal, the answer a system caller gets, instead of this gate's 403 first. It is refused either way and nothing is written.
 
 **BREAKING** for a caller of a multi-row (`multi: true`) update or delete in one of two shapes, both of which the engine runs as a predicate and the gate now judges as one:
 
