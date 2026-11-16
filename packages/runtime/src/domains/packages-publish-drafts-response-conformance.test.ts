@@ -21,7 +21,7 @@
  * `responseSchema: 'PublishPackageDraftsResponseSchema'`.
  *
  * The protocol producer's own half of the face (counts, elements, advisories,
- * in-batch seed/materialize aggregates, opaque `probes`) is pinned against the
+ * in-batch seed/materialize aggregates, the modeled `probes`) is pinned against the
  * real `ObjectStackProtocolImplementation` in
  * `packages/objectql/src/publish-package-drafts-response-conformance.test.ts`;
  * here the protocol is a double and the flip loop, the announce, the seed
@@ -156,7 +156,7 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         expect(parsed.published[0]!.version).toBe('sha256:aa11');
         // The route-attached ADR-0045 receipt is ON the wire and declared.
         expect(parsed.unhiddenApps).toEqual(['crm', 'ops']);
-        // Opaque probes crossed the route untouched.
+        // The modeled probes report crossed the route untouched.
         expect(parsed.probes).toEqual({ issues: [], checked: { seeds: 0, views: 0, widgets: 0, objects: 0 } });
         expect(parsed.commitId).toBe('cmt_01');
     });
