@@ -376,7 +376,7 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
  * ## The holders: two readings, met
  *
  *  - **The stored active rows** of the environment (ADR-0131 D6), by
- *    ``package_id`. A set published through the metadata door is stored, and
+ *    `package_id`. A set published through the metadata door is stored, and
  *    the registry holds it in its package's overlay slot, which the
  *    registry's package-held reading does not count, so only the row says
  *    which package it belongs to — the half the registry's reading cannot see,

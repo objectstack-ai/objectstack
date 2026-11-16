@@ -469,7 +469,8 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
     const FIN = 'com.qa.fin';
     /** A second package of the `crm` namespace: its co-owner (CONTROL). */
     const CRM_TWO = 'com.qa.crm_two';
-    const NS: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr', [FIN]: 'fin', [CRM_TWO]: 'crm' };
+    const CRM_CUSTOM = `${CRM}.custom`;
+    const NS: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr', [FIN]: 'fin', [CRM_TWO]: 'crm', [CRM_CUSTOM]: 'crmx' };
     const N = 'qa_shared_reader';
     const setOf = (cap: string) => ({ ...permissionSet(N), label: cap, systemPermissions: [cap] });
     const manifestOf = (id: string, sets: string[] = []) =>
@@ -615,6 +616,58 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
                 { packageId: CRM, tenantAuthored: false }, { packageId: HR, tenantAuthored: true },
             ]);
         }
+    });
+
+    const packageConflict = (incoming: string, holder: string) =>
+        ({ catalogType: 'permission', name: N, incomingPackageId: incoming, existingHolder: { kind: 'package', packageId: holder } });
+    const environmentConflict = (incoming: string) =>
+        ({ catalogType: 'permission', name: N, incomingPackageId: incoming, existingHolder: { kind: 'environment' } });
+    const envelopeOf = (error: any) => {
+        const envelope = error?.cause ?? error;
+        return { code: envelope?.code, status: envelope?.status, conflicts: envelope?.conflicts };
+    };
+
+    it('a package\'s stored set counts as its holding of the name: a package of the same namespace declaring or registering the name after it is refused, and before it the save is refused', async () => {
+        // The stored set first, then the second holder: the package door and the item seam.
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores, [CRM]);
+        expect((await save(protocol, CRM, 'cap_crm')).success).toBe(true);
+        const installed = await refusal(async () => engine.registry.installPackage(manifestOf(CRM_TWO, [N]), 'authored'));
+        expect(envelopeOf(installed)).toEqual({ code: 'NAMESPACE_CONFLICT', status: 422, conflicts: [packageConflict(CRM_TWO, CRM)] });
+        engine.registry.installPackage(manifestOf(CRM_TWO), 'authored');
+        const registered = await refusal(async () => engine.registry.registerItem('permission', setOf('cap_crm_two') as any, 'name', CRM_TWO));
+        expect(envelopeOf(registered)).toEqual({ code: 'NAMESPACE_CONFLICT', status: 422, conflicts: [packageConflict(CRM_TWO, CRM)] });
+        expect(await grants(engine, [CRM])).toEqual({ [CRM]: ['cap_crm'] });
+        // The second holder first, then the stored set: the save door.
+        const other = await boot(new Map(), [CRM]);
+        other.engine.registry.installPackage(manifestOf(CRM_TWO, [N]), 'authored');
+        const saved = await refusal(() => save(other.protocol, CRM, 'cap_crm'));
+        expect([saved?.code, saved?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
+        // A package of another namespace still declares the name beside the stored set.
+        engine.registry.installPackage(manifestOf(HR, [N]), 'authored');
+    });
+
+    it('a cold boot over a package\'s stored set is refused when a package of the same namespace declares the name, as before (ADR-0048 N.3)', async () => {
+        const stores: Stores = new Map();
+        const first = await boot(stores, [CRM]);
+        expect((await save(first.protocol, CRM, 'cap_crm')).success).toBe(true);
+        const error = await refusal(() => boot(stores, [CRM, CRM_TWO], undefined, { [CRM_TWO]: [N] }));
+        expect(envelopeOf(error)).toEqual({ code: 'NAMESPACE_CONFLICT', status: 422, conflicts: [environmentConflict(CRM_TWO)] });
+        // CONTROL: a package of another namespace declaring the name boots beside the stored set.
+        const booted = await boot(stores, [CRM, HR], undefined, { [HR]: [N] });
+        expect(await grants(booted.engine, [CRM])).toEqual({ [CRM]: ['cap_crm'] });
+    });
+
+    it('a cold boot over a stored set held against a package that ships the name is refused, as before (ADR-0048 N.3)', async () => {
+        const stores: Stores = new Map();
+        const first = await boot(stores, [CRM, HR, CRM_CUSTOM]);
+        expect((await save(first.protocol, HR, 'cap_other')).success).toBe(true);
+        const rows = stores.get('sys_metadata')!;
+        const [key, row] = [...rows].find(([, r]) => r.type === 'permission')!;
+        rows.set(key, { ...row, package_id: CRM_CUSTOM });
+        const ship = (target: ObjectQL) => target.registry.registerItem('permission', setOf('cap_crm_shipped') as any, 'name', CRM);
+        const error = await refusal(() => boot(stores, [CRM, HR, CRM_CUSTOM], ship));
+        expect(envelopeOf(error)).toEqual({ code: 'NAMESPACE_CONFLICT', status: 422, conflicts: [environmentConflict(CRM)] });
     });
 
     it('CONTROL — a second package of the SAME namespace is still refused beside a stored set; the remedy names steps the writer can take, never an edit inside the other package', async () => {
