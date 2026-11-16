@@ -235,6 +235,8 @@
     "ui/BulkActionParam:placeholder",
     "ui/BulkActionParam:required",
     "ui/BulkActionParam:type",
+    "ui/BulkActionResult:failed",
+    "ui/BulkActionResult:succeeded",
     "ui/CalendarConfig:allDayField",
     "ui/CalendarConfig:colorField",
     "ui/CalendarConfig:endDateField",
