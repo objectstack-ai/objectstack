@@ -39,6 +39,10 @@ import { FLOW_NODE_CONFIG_TYPES, fieldsForNodeType, mergeServerFlowFields, type 
 import { jsonSchemaToFlowFields } from './json-schema-to-fields';
 import { flowFieldZh } from '../i18n';
 import type { ScopeGroup } from './useFlowScope';
+// The inspector reaches `objectPickerClosure`'s and `celAuthoring`'s dynamic
+// `@objectstack/lint` import; its first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
