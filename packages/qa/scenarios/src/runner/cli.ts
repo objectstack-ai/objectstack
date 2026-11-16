@@ -76,7 +76,9 @@
  *                        replay (`recorded:`) under other choices than its
  *                        recording's is refused before any card runs
  *   --template F         a verified build (dist/objectstack.json) for template
- *                        and ask modes
+ *                        and ask modes; a record whose template or ask mode
+ *                        installed it names its file and sha256 (`template`),
+ *                        so `summary` can tell runs on one build from another's
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored;
  *                        ./scenario-runs when run from the published package)
@@ -87,6 +89,10 @@
  *                        `workspace` — this checkout, built and packed as the
  *                        release would publish it (unreleased; never exported;
  *                        refused when run from the published package, which has no checkout)
+ *
+ * `run-scenarios summary <record|dir>…` (`objectstack-scenarios summary`) reads
+ * run records back instead and prints one author-model × ask-model table per
+ * card and mode (`summary.ts`; its own flags, `--card` and `--mode`).
  *
  * ⛔ No API-billed model: the live driver refuses to start when an API key is
  * configured (the cost ruling on cloud#3600).
@@ -104,12 +110,16 @@ import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } f
 import { CodexDriver } from './drivers/codex.js';
 import { ExternalDriver } from './drivers/external.js';
 import { CAPABILITY_AREAS_DIR, locateLibraryRoot } from './library.js';
-import { askModeRefusal, minutesText, runCard, type ProjectOps } from './orchestrate.js';
+import { askModeRefusal, minutesText, runCard, type CardRun, type ProjectOps } from './orchestrate.js';
 import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { PROMPT_LANGS, PROMPT_LENGTHS, promptChoiceText, promptLanguageRefusal, statedPromptChoice, type PromptChoice, type PromptLang, type PromptLength } from './prompts.js';
 import { rebaseScenario } from './run-date.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
+import { SUPPLIED_TEMPLATE_SOURCE, summaryMain, suppliedTemplateOf, type SuppliedTemplate } from './summary.js';
+
+/** The `summary` command, re-exported so the published bin reaches it through this built entry (`src/bin.ts`). */
+export { summaryMain };
 
 /** The dev admin `objectstack dev --fresh` seeds; the runner and the gallery exporter sign in as it. */
 export const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
@@ -326,7 +336,19 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
   throw new Error(`unknown driver \`${spec}\` (claude, codex, external:COMMAND, recorded:FILE)`);
 }
 
+/**
+ * The record with its supplied template named (`template`, top level), when a
+ * template or ask mode of the run installed the `--template` file; the record
+ * unchanged otherwise, so a run without one keeps its bytes.
+ */
+export function withSuppliedTemplate(record: Record<string, unknown>, cardRun: CardRun, supplied: SuppliedTemplate | undefined): Record<string, unknown> {
+  const installed = cardRun.modes.some((m) => m.template?.source === SUPPLIED_TEMPLATE_SOURCE);
+  return supplied && installed ? { ...record, template: supplied } : record;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
+  // `summary` reads records back; it runs nothing (`summary.ts`).
+  if (argv[0] === 'summary') return summaryMain(argv.slice(1));
   const args = parseArgs(argv);
   const here = dirname(fileURLToPath(import.meta.url));
   // The checkout, or the library root the published package carries (`library.ts`).
@@ -408,7 +430,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     boot: (dir) => bootDev(dir),
     harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }),
   };
-  const template = args.template ? JSON.parse(readFileSync(args.template, 'utf8')) : undefined;
+  const templateBytes = args.template ? readFileSync(args.template) : undefined;
+  const template = templateBytes ? JSON.parse(templateBytes.toString('utf8')) : undefined;
+  /** The template's file name and sha256, for a record whose template or ask mode installed it (`SuppliedTemplate`). */
+  const supplied = args.template && templateBytes ? suppliedTemplateOf(args.template, templateBytes) : undefined;
   let framework: string | undefined;
   try {
     // Only a checkout has a framework commit: an installed package may sit in someone else's repository.
@@ -430,7 +455,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
-    const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
+    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
     console.log(renderScorecard(cardScorecard(cardRun, packages)));
