@@ -2377,7 +2377,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
-  [LAND_DOGFOOD_BATTERY]: 33,
+  [LAND_DOGFOOD_BATTERY]: 37,
 });
 const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -2987,7 +2987,7 @@ export async function selfTest() {
     // ⭐ The card's both-ways rows.
     const na = await land(pull({ cards: { 8: [report(NA)] } }));
     t('⭐ REFUSED: a `!` title whose newest report says `n/a` — exit 2, ZERO sends, no pr_ready, nothing written', refused(na), REFUSED, na.text.slice(-600));
-    t('…and the refusal names the title marker, the report comment id, its dogfood_battery text, and what clears it', ['`!` before the colon of the title', 'report: comment 501', JSON.stringify(NA), 'to clear: run the full dogfood battery on head', HEAD].map((w) => na.text.includes(w)), [true, true, true, true, true]);
+    t('…and the refusal names the title marker, the report comment id, its dogfood_battery text, why, and what clears it', ['`!` before the colon of the title', 'report: comment 501', JSON.stringify(NA), 'why: the battery was not run', 'to clear: run the full dogfood battery on head', HEAD].map((w) => na.text.includes(w)), [true, true, true, true, true, true]);
     const onHead = await land(pull());
     t('⭐ PASSES: a `!` title whose newest report ran on the head — ONE dispatch, comment → pr_ready → automerge_enable, ready and armed, exit 0', [onHead.exit, onHead.sent[0]?.actions.map((a) => a.op), onHead.fake.board.draft, onHead.text.includes('② dogfood gate ✓'), onHead.text.includes('ran on the head')], [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], false, true, true], onHead.text.slice(-600));
     t('…from the pull and the card thread alone — no commit walk when the battery names the head', onHead.fake.calls.map((c) => c.op), ['card-read', 'pull-read', 'comments-list', 'card-read', 'comments-list', 'pull-read']);
@@ -3000,36 +3000,48 @@ export async function selfTest() {
     const twoMerges = await land(pull({ cards: { 8: [report(RAN_BELOW)] }, commits: { [HEAD]: [STRAY, MAIN_SIDE], [STRAY]: [BELOW, MAIN_SIDE] }, onBase: [MAIN_SIDE] }));
     t('…and over TWO merges of main, each judged', [twoMerges.exit, twoMerges.text.includes('ran 2 merge(s)')], [EXIT_OK, true]);
     const notMain = await land(pull({ cards: { 8: [report(RAN_BELOW)] }, commits: { [HEAD]: [BELOW, STRAY] }, onBase: [MAIN_SIDE] }));
-    t('⛔ REFUSED: a merge whose second parent the base does not hold — a merge of another branch is new code', [...refused(notMain), notMain.text.includes('does not hold')], [...REFUSED, true]);
+    t('⛔ REFUSED: a merge whose second parent the base does not hold — a merge of another branch is new code', [...refused(notMain), notMain.text.includes('which `main` does not hold')], [...REFUSED, true]);
     const plain = await land(pull({ title: 'fix(pm): an ordinary fixture', cards: { 8: [report(NA)] } }));
     t('⭐ NOT JUDGED: no `!` and no `(narrowing)` arm lands as today — even over an `n/a` report — with no gate read at all', [plain.exit, plain.text.includes('not judged'), plain.fake.calls.map((c) => c.op)], [EXIT_OK, true, ['card-read', 'card-read', 'comments-list', 'pull-read']]);
     const widening = await land(pull({ title: 'feat(pm): a widening fixture', body: 'Fixes #8\n\nClause-②: yes (widening)\n', cards: {} }));
     t('…a `(widening)` arm is not a marker either', [widening.exit, widening.text.includes('not judged')], [EXIT_OK, true]);
 
     // FAIL CLOSED — every case NOT MEASURED is a refusal.
+    // Each case: its board, and the fragment of the `why` only its own branch prints — so a branch ablated away
+    // cannot hide behind a later refusal that happens to fire too.
     const cases = {
-      'an UNREADABLE title': pull({ title: '' }),
-      'a MALFORMED `Clause-②:` line on an unmarked title': pull({ title: 'fix: x', body: 'Fixes #8\n\nClause-②: maybe\n' }),
-      'NO CARD — no closing keyword, no `Part of`, no dev branch': pull({ body: 'A body naming nothing.\n', ref: 'feature/x' }),
-      'a card thread that does not read': pull({ cards: {} }),
-      'NO REPORT on the card': pull({ cards: { 8: [{ id: 9, created_at: '2026-11-08T14:00:00Z', user: { login: FLEET }, body: 'Claim: PM loop round 1' }] } }),
-      'an UNPARSABLE report': pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{ "dogfood_battery": \n\`\`\`\n` })] } }),
-      'a report with no `dogfood_battery`': pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{"issue": 8, "status": "done"}\n\`\`\`\n` })] } }),
-      'a battery naming NO sha': pull({ cards: { 8: [report('ran the battery · VERDICT command-exit 0')] } }),
-      'a TRUNCATED listing': pull({ cards: { 8: [...Array.from({ length: LAND_COMMENT_PAGE_CAP * 100 }, (_, i) => ({ id: 1000 + i, created_at: '2026-11-08T10:00:00Z', user: { login: FLEET }, body: 'note' }))] } }),
-      'a walk commit that does not read': pull({ cards: { 8: [report(RAN_BELOW)] } }),
-      [`a battery more than ${LAND_MERGE_HOP_CAP} merges below the head`]: pull({
-        head: 'f'.repeat(40),
-        cards: { 8: [report(RAN_BELOW)] },
-        commits: Object.fromEntries(Array.from({ length: LAND_MERGE_HOP_CAP + 1 }, (_, i) => [(i === 0 ? 'f'.repeat(40) : (i.toString(16).padStart(2, '0')).repeat(20)), [i === LAND_MERGE_HOP_CAP ? BELOW : ((i + 1).toString(16).padStart(2, '0')).repeat(20), MAIN_SIDE]])),
-        onBase: [MAIN_SIDE],
-      }),
+      'an UNREADABLE title': [pull({ title: '' }), 'its title did not read'],
+      'a MALFORMED `Clause-②:` line on an unmarked title': [pull({ title: 'fix: x', body: 'Fixes #8\n\nClause-②: maybe\n' }), 'reads malformed'],
+      'a pull that does not read': [{ ...pull(), hooks: { 'pull-read': [{ status: 404 }] } }, 'the pull did not read'],
+      'a pull read with no full head sha': [pull({ head: 'abc' }), 'no full head sha'],
+      'NO CARD — no closing keyword, no `Part of`, no dev branch': [pull({ body: 'A body naming nothing.\n', ref: 'feature/x' }), 'why: no card'],
+      'a card thread that does not read': [pull({ cards: {} }), "card #8's thread did not read"],
+      'NO REPORT on the card': [pull({ cards: { 8: [{ id: 9, created_at: '2026-11-08T14:00:00Z', user: { login: FLEET }, body: 'Claim: PM loop round 1' }] } }), 'carries no `os-dev-report` by'],
+      'an UNPARSABLE report': [pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{ "dogfood_battery": \n\`\`\`\n` })] } }), 'no readable `dogfood_battery`'],
+      'a report with no `dogfood_battery`': [pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{"issue": 8, "status": "done"}\n\`\`\`\n` })] } }), 'no readable `dogfood_battery`'],
+      'a battery naming NO sha': [pull({ cards: { 8: [report('ran the battery · VERDICT command-exit 0')] } }), 'names no sha it ran on'],
+      'a TRUNCATED listing': [pull({ cards: { 8: [...Array.from({ length: LAND_COMMENT_PAGE_CAP * 100 }, (_, i) => ({ id: 1000 + i, created_at: '2026-11-08T10:00:00Z', user: { login: FLEET }, body: 'note' }))] } }), 'TRUNCATED listing'],
+      'a walk commit that does not read': [pull({ cards: { 8: [report(RAN_BELOW)] } }), 'is NOT MEASURED'],
+      'a compare that does not read': [pull({ cards: { 8: [report(RAN_BELOW)] }, commits: { [HEAD]: [BELOW, MAIN_SIDE] }, onBase: [MAIN_SIDE] }), 'did not read (GET'],
+      [`a battery more than ${LAND_MERGE_HOP_CAP} merges below the head`]: [
+        pull({
+          head: 'f'.repeat(40),
+          cards: { 8: [report(RAN_BELOW)] },
+          commits: Object.fromEntries(Array.from({ length: LAND_MERGE_HOP_CAP + 1 }, (_, i) => [(i === 0 ? 'f'.repeat(40) : i.toString(16).padStart(2, '0').repeat(20)), [i === LAND_MERGE_HOP_CAP ? BELOW : (i + 1).toString(16).padStart(2, '0').repeat(20), MAIN_SIDE]])),
+          onBase: [MAIN_SIDE],
+        }),
+        `is not reached within ${LAND_MERGE_HOP_CAP} merges`,
+      ],
     };
-    for (const [name, board] of Object.entries(cases)) {
+    cases['a compare that does not read'][0].hooks = { 'compare-read': [{ status: 404 }] };
+    for (const [name, [board, why]] of Object.entries(cases)) {
       const run = await land(board);
-      t(`⛔ FAIL CLOSED: ${name} refuses — exit 2, zero sends, nothing written`, refused(run), REFUSED, run.text.slice(-400));
+      t(`⛔ FAIL CLOSED: ${name} refuses — exit 2, zero sends, nothing written, its own reason printed`, [...refused(run), run.text.includes(why)], [...REFUSED, true], run.text.slice(-400));
     }
-    const pageCount = (await land(cases['a TRUNCATED listing'])).fake.calls.filter((c) => c.op === 'comments-list').length;
+    const atCap = cases[`a battery more than ${LAND_MERGE_HOP_CAP} merges below the head`][0];
+    const oneShorter = await land({ ...atCap, commits: { ...atCap.commits, [(LAND_MERGE_HOP_CAP).toString(16).padStart(2, '0').repeat(20)]: undefined, [(LAND_MERGE_HOP_CAP - 1).toString(16).padStart(2, '0').repeat(20)]: [BELOW, MAIN_SIDE] } });
+    t(`…while a battery exactly ${LAND_MERGE_HOP_CAP} merges below the head passes — the cap is the hop count, not one short of it`, [oneShorter.exit, oneShorter.text.includes(`ran ${LAND_MERGE_HOP_CAP} merge(s)`)], [EXIT_OK, true], oneShorter.text.slice(-400));
+    const pageCount = (await land(cases['a TRUNCATED listing'][0])).fake.calls.filter((c) => c.op === 'comments-list').length;
     t('…the truncated listing read exactly the page cap and stopped', pageCount, LAND_COMMENT_PAGE_CAP);
 
     // Whose report, and which one.
