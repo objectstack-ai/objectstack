@@ -216,7 +216,7 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
         fields: { 'deal.restricted_note': { readable: true, editable: false } },
       })],
     },
-    params: { permissionSet: 'deal_manager', field: 'deal.restricted_note', object: 'deal', bypass: 'modify', inert: 'edit' },
+    params: { permissionSet: 'deal_manager', field: 'deal.restricted_note', object: 'deal', inert: 'edit' },
   },
   {
     label: 'field mask and lock under Modify All',
@@ -228,19 +228,19 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
         fields: { 'deal.margin': { readable: false, editable: false } },
       })],
     },
-    params: { permissionSet: 'deal_manager', field: 'deal.margin', object: 'deal', bypass: 'modify', inert: 'both' },
+    params: { permissionSet: 'deal_manager', field: 'deal.margin', object: 'deal', inert: 'both' },
   },
   {
-    label: 'field mask under View All',
+    label: 'field mask alone under Modify All',
     rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
     stack: {
       permissions: [PermissionSetSchema.parse({
         name: 'directory_masked',
-        objects: { sys_user: { allowRead: true, viewAllRecords: true } },
-        fields: { 'sys_user.email': { readable: false, editable: false } },
+        objects: { sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+        fields: { 'sys_user.email': { readable: false, editable: true } },
       })],
     },
-    params: { permissionSet: 'directory_masked', field: 'sys_user.email', object: 'sys_user', bypass: 'view', inert: 'read' },
+    params: { permissionSet: 'directory_masked', field: 'sys_user.email', object: 'sys_user', inert: 'read' },
   },
   {
     label: 'hidden master reference',
@@ -306,7 +306,7 @@ const findingOf = (c: (typeof CASES)[number]): SecurityFinding => {
 /** The params that are NAMES the sentence must show (not the variant selectors). */
 const namesOf = (params: Record<string, string>): string[] =>
   Object.entries(params)
-    .filter(([key, value]) => key !== 'bypass' && key !== 'remedy' && key !== 'inert' && value !== '')
+    .filter(([key, value]) => key !== 'remedy' && key !== 'inert' && value !== '')
     .map(([, value]) => value);
 
 describe('security-posture user text · the catalog', () => {
@@ -389,24 +389,26 @@ describe('security-posture user text · rendered from the rule\'s real findings'
     expect(addOwner).toContain('Give "omd_obligation" a record owner (owner_id)');
   });
 
-  it('names the bypass the set actually holds', () => {
-    const [modifyLock, modifyBoth, view] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
+  it('names the one bypass the rule reports, Modify All, and never View All', () => {
+    const sentences = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
       .map((c) => findingUserMessage(findingOf(c), ['en'])!);
-    for (const modify of [modifyLock!, modifyBoth!]) expect(modify).toContain('Modify All Records');
-    expect(view).toContain('View All Records');
-    expect(view).not.toContain('Modify All Records');
+    expect(sentences).toHaveLength(3);
+    for (const sentence of sentences) {
+      expect(sentence).toContain('Modify All Records');
+      expect(sentence).not.toContain('View All Records');
+    }
   });
 
-  it('calls ineffective only the half of the field restriction the bypass unbinds, as the rule\'s message does', () => {
-    const [modifyLock, modifyBoth, view] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
+  it('calls ineffective only the half of the field restriction Modify All unbinds, as the rule\'s message does', () => {
+    const [modifyLock, modifyBoth, modifyMask] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
       .map((c) => findingUserMessage(findingOf(c), ['en'])!);
-    // View All beside a read mask and an edit lock: only the mask is inert.
-    // The lock still binds, so the sentence neither calls the restriction
-    // ineffective as a whole nor prescribes deleting it.
-    expect(view).toContain('hiding field "sys_user.email" has no effect');
-    expect(view).not.toContain('read-only');
-    expect(view).not.toContain('delete the field restriction');
-    expect(view).toContain('let the set read the field');
+    // Modify All beside a read mask on an editable row: only the mask is
+    // inert, so the sentence neither names a read-only half nor prescribes
+    // deleting the restriction.
+    expect(modifyMask).toContain('hiding field "sys_user.email" has no effect');
+    expect(modifyMask).not.toContain('read-only');
+    expect(modifyMask).not.toContain('delete the field restriction');
+    expect(modifyMask).toContain('let the set read the field');
     // Modify All beside an edit lock alone: the lock is inert.
     expect(modifyLock).toContain('making field "deal.restricted_note" read-only has no effect');
     expect(modifyLock).not.toContain('hiding');
@@ -417,11 +419,11 @@ describe('security-posture user text · rendered from the rule\'s real findings'
   });
 
   it('renders the three field-restriction sentences apart in every platform locale', () => {
-    // Same names and the same bypass, so only `inert` tells the three apart.
+    // Same names, so only `inert` tells the three apart.
     const findings = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT).map(findingOf);
     for (const tag of PLATFORM_LOCALE_TAGS) {
-      const [lock, both, view] = findings.map((f) => findingUserMessage({ ...f, userTextParams: { ...f.userTextParams!, permissionSet: 'p', field: 'f', object: 'o', bypass: 'modify' } }, [tag])!);
-      expect(new Set([lock, both, view]).size, tag).toBe(3);
+      const [lock, both, mask] = findings.map((f) => findingUserMessage({ ...f, userTextParams: { ...f.userTextParams!, permissionSet: 'p', field: 'f', object: 'o' } }, [tag])!);
+      expect(new Set([lock, both, mask]).size, tag).toBe(3);
     }
   });
 });

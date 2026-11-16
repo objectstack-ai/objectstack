@@ -296,6 +296,35 @@ export interface UseObjectChatOptions {
   onSend?: (content: string, messages: ObjectChatMessage[]) => void;
 }
 
+/** A JSON value a {@link ChatFilePart}'s `providerMetadata` may hold. */
+export type ChatFileJsonValue =
+  | null
+  | string
+  | number
+  | boolean
+  | ChatFileJsonValue[]
+  | { [key: string]: ChatFileJsonValue };
+
+/**
+ * A file the user turn carries, already stored where the server can read it:
+ * the AI SDK's own `file` UI part, declared here structurally so this package
+ * does not republish the pinned SDK type. The send passes it to the SDK as is,
+ * so it reaches the chat route inside the user message's `parts`, before the
+ * text part, with every field below intact.
+ *
+ * `url` names the stored file — never an inline data URL, which would put the
+ * bytes into the request body and into the stored conversation.
+ * `providerMetadata` carries what the host's agent needs to find the file again
+ * (the console puts its `sys_file` id under `objectstack.fileId`).
+ */
+export interface ChatFilePart {
+  type: 'file';
+  mediaType: string;
+  filename?: string;
+  url: string;
+  providerMetadata?: Record<string, Record<string, ChatFileJsonValue>>;
+}
+
 /**
  * Return type of useObjectChat.
  */
@@ -309,8 +338,15 @@ export interface UseObjectChatReturn {
   isLoading: boolean;
   /** Current error, if any */
   error: Error | undefined;
-  /** Send a new user message */
-  sendMessage: (content: string, files?: File[]) => void;
+  /**
+   * Send a new user message.
+   *
+   * `files` is not sent: a raw `File` has no stored address to put in a part,
+   * so a host uploads it first and passes the result as `fileParts`, which the
+   * API mode sends as the turn's file parts. The local (demo) mode has no
+   * server and sends neither.
+   */
+  sendMessage: (content: string, files?: File[], fileParts?: readonly ChatFilePart[]) => void;
   /** Stop the current streaming response */
   stop: () => void;
   /** Reload / retry the last assistant message */
@@ -1006,14 +1042,19 @@ export function useObjectChat(options: UseObjectChatOptions = {}): UseObjectChat
   }));
 
   const sendMessage = useCallback(
-    (content: string) => {
+    (content: string, _files?: File[], fileParts?: readonly ChatFilePart[]) => {
       const trimmed = content.trim();
       if (!trimmed) return;
       const nextMessages: ObjectChatMessage[] = [
         ...apiMessages,
         { id: generateUniqueId('msg'), role: 'user', content: trimmed },
       ];
-      aiSendMessage({ text: trimmed });
+      // Copied, not cast: the SDK's own `files` type checks each part here.
+      aiSendMessage(
+        fileParts && fileParts.length > 0
+          ? { text: trimmed, files: fileParts.map((part) => ({ ...part })) }
+          : { text: trimmed },
+      );
       setApiInput('');
       onSend?.(trimmed, nextMessages);
     },

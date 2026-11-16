@@ -36,7 +36,9 @@ import { FlowExprIssue } from './FlowExprIssue.js';
 import { FlowFieldHelp } from './FlowFieldHelp.js';
 import {
   isEditableValueEnvelope,
+  isRecordFieldValueSlot,
   isValueEnvelopeSlot,
+  recordFieldValueRefusal,
   valueEnvelopeRefusal,
   writeValueEnvelope,
 } from './flow-value-envelope.js';
@@ -798,7 +800,13 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           // objectui#12101 — a map whose every value is a flow text slot (http
           // `headers`) renders `{{ }}` holes in each value cell.
           valueMode: field.refMode === 'hole' ? 'hole' : undefined,
-          valueRefusal: isFilterOperandSlot(context?.node?.type, field.path) ? filterOperandRefusal : undefined,
+          // A record write's `fields` value may also be a text envelope, so
+          // its cells are judged by the spec's record-field rule.
+          valueRefusal: isFilterOperandSlot(context?.node?.type, field.path)
+            ? filterOperandRefusal
+            : isRecordFieldValueSlot(context?.node?.type, field.path)
+              ? recordFieldValueRefusal
+              : undefined,
           // objectstack#33838 — a map the run judges against a closed key set
           // (a connector action's declared inputs): each other key is marked
           // as refused, and the declared keys no sibling field types are
