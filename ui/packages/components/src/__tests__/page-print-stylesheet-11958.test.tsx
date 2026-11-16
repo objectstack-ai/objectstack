@@ -84,7 +84,9 @@ describe('buildPagePrintStylesheet — one print-CSS rule per declared key (obje
       expect(css).toContain(`${table} > thead { display: table-header-group !important; }`);
       expect(css).toContain(`${table} > tfoot { display: table-footer-group !important; }`);
     }
-    expect(buildPagePrintStylesheet({})).not.toContain(PRINT_RUNNING_ATTRIBUTE + ']) {');
+    // The running region's block rule, spelled whole: the data-table fit rule
+    // (objectstack#34228) names the attribute too, to exclude that table.
+    expect(buildPagePrintStylesheet({})).not.toContain(`:has(> table[${PRINT_RUNNING_ATTRIBUTE}]) {`);
     expect(buildPagePrintStylesheet({})).not.toContain(`${table} {`);
   });
 
