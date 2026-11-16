@@ -18,9 +18,16 @@
  * would be worse than the bug.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { AppPlugin, collectBundleFunctions, loadArtifactBundle } from '@objectstack/runtime';
+import Compile from '../commands/compile.js';
+import { bundleConfigModule } from './config.js';
 import {
   GRAFTABLE_RUNTIME_MEMBERS,
+  graftAuthoredCode,
   graftAuthoredRuntimeMembers,
   isAppPluginLike,
 } from './graft-runtime-hooks.js';
@@ -188,5 +195,182 @@ describe('graftAuthoredRuntimeMembers', () => {
       onDisable: async () => {},
     }));
     expect((app.bundle as any).onDisable).toBeUndefined();
+  });
+});
+
+/**
+ * One module evaluation per boot. An artifact's callables arrive from its
+ * compiled runtime module (`objectstack-runtime.*.mjs`, an esbuild bundle of the
+ * same config source), while the graft supplies the LOADED module's `onEnable`.
+ * Left at that, the two are two evaluations of one source: state `onEnable`
+ * binds at module scope is written into a copy no handler reads — on `os dev`
+ * over a host config, a job reading it failed every run with "no data engine"
+ * while `os start` (one evaluation) served it.
+ *
+ * Composed as serve composes it, from the real producer to the real reader: a
+ * project compiled in-process by `os compile`, the artifact loaded by the
+ * runtime's own `loadArtifactBundle` (which imports the runtime module), the
+ * config module loaded by serve's own loader, the wrap a real `AppPlugin`, and
+ * each handler read through `collectBundleFunctions` — the map a job's and a
+ * string-named hook's `handler` resolve against.
+ */
+describe('graftAuthoredCode — onEnable and every handler run from one module evaluation', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const PKG = resolve(HERE, '../..');
+  const ENGINE = { tag: 'the-engine' };
+  let dir = '';
+  let config: Record<string, any>;
+  let artifact: Record<string, any>;
+  let wrap: InstanceType<typeof AppPlugin>;
+  let artifactFns: Record<string, (ctx: any) => any>;
+  let graft: Awaited<ReturnType<typeof graftAuthoredCode>>;
+
+  beforeAll(async () => {
+    // Under the package's git-ignored `tmp/`, so the fixture's
+    // `@objectstack/spec` import resolves through this package's dependencies.
+    await mkdir(join(PKG, 'tmp'), { recursive: true });
+    dir = await mkdtemp(join(PKG, 'tmp', 'one-evaluation-'));
+    const configPath = join(dir, 'objectstack.config.ts');
+    // `engine` is module state `onEnable` binds; the job handler and the hook
+    // read it. Both name a module-scope binding, so the extractor refuses them
+    // a metadata body and they run only from the runtime module — the shape of
+    // a job that binds its data engine once at enable.
+    await writeFile(configPath, `import { defineStack } from '@objectstack/spec';
+
+let engine: { tag: string } | undefined;
+
+export default defineStack({
+  manifest: { id: 'com.example.one', namespace: 'one', version: '1.0.0', type: 'app', name: 'One' },
+  objects: [{
+    name: 'one_item',
+    label: 'Item',
+    sharingModel: 'public_read_write',
+    fields: { note: { type: 'text', label: 'Note' } },
+  }],
+  hooks: [{
+    name: 'one_mark',
+    object: 'one_item',
+    events: ['beforeInsert'],
+    handler: async (ctx: any) => { ctx.input.note = engine ? engine.tag : 'unset'; },
+  }],
+  functions: {
+    one_dispatch: async () => {
+      if (!engine) throw new Error("Job 'one_dispatch' has no data engine");
+      return engine.tag;
+    },
+  },
+  onEnable: async (ctx: any) => { engine = ctx.ql; },
+} as any);
+`, 'utf8');
+    const artifactPath = join(dir, 'dist', 'objectstack.json');
+    const cwd = process.cwd();
+    for (const stream of ['log', 'warn', 'error'] as const) vi.spyOn(console, stream).mockImplementation(() => {});
+    process.chdir(dir);
+    try {
+      await Compile.run([configPath, '--output', artifactPath]);
+    } finally {
+      process.chdir(cwd);
+      vi.restoreAllMocks();
+    }
+
+    const { mod } = await bundleConfigModule(configPath);
+    config = mod.default;
+    artifact = await loadArtifactBundle(artifactPath, { tag: '[serve]', unwrapEnvelope: true });
+    artifactFns = collectBundleFunctions(artifact);
+    wrap = new AppPlugin(artifact, undefined, { securityMetadataRegistrar: 'artifact-door' });
+    graft = await graftAuthoredCode([wrap], config);
+  }, 120_000);
+
+  afterAll(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it('the fixture reaches the split: the artifact\'s handlers came from its runtime module, not the config module', () => {
+    expect(artifact.runtimeModule).toMatch(/^\.\/objectstack-runtime\.[a-f0-9]+\.mjs$/);
+    expect(typeof artifactFns.one_dispatch).toBe('function');
+    expect(typeof artifactFns.one_mark).toBe('function');
+    expect(artifactFns.one_dispatch).not.toBe(config.functions.one_dispatch);
+  });
+
+  it('grafts the module\'s onEnable and re-points every runtime-module handler at the module\'s own', () => {
+    expect(graft.grafted).toEqual(['onEnable']);
+    expect(graft.rebound?.slice().sort()).toEqual(['one_dispatch', 'one_mark']);
+    expect(graft.unbound).toEqual([]);
+    expect((wrap.bundle as any).onEnable).toBe(config.onEnable);
+  });
+
+  it('a job handler and a hook see the state onEnable bound', async () => {
+    await (wrap.bundle as any).onEnable({ ql: ENGINE });
+    const fns = collectBundleFunctions(wrap.bundle);
+    await expect(fns.one_dispatch({})).resolves.toBe(ENGINE.tag);
+    const ctx = { input: {} as Record<string, unknown> };
+    await fns.one_mark(ctx);
+    expect(ctx.input.note).toBe(ENGINE.tag);
+  });
+});
+
+describe('graftAuthoredCode — where no split exists, and where the module cannot answer', () => {
+  const authored = (extra: Record<string, unknown> = {}) => ({
+    manifest: { id: 'com.example.todo' },
+    onEnable: async () => {},
+    ...extra,
+  });
+
+  it('re-points the refs the module serves and reports the ones it does not (an artifact older than its source)', async () => {
+    const fromModule = () => 'module';
+    const stale = () => 'runtime-module';
+    const app = artifactApp('com.example.todo', {
+      runtimeModule: './objectstack-runtime.0123456789abcdef.mjs',
+      functions: { kept: { handler: () => 'runtime-module', effect: 'writes' }, gone: stale },
+    });
+    const result = await graftAuthoredCode([app], authored({ functions: { kept: fromModule } }));
+
+    expect(result.rebound).toEqual(['kept']);
+    expect(result.unbound).toEqual(['gone']);
+    expect(result.runtimeModule).toBe('./objectstack-runtime.0123456789abcdef.mjs');
+    // The declaration beside the callable survives the re-point.
+    expect((app.bundle as any).functions.kept).toEqual({ handler: fromModule, effect: 'writes' });
+    expect((app.bundle as any).functions.gone).toBe(stale);
+  });
+
+  it('re-points the array form too, and never gives an entry without a callable one', async () => {
+    const fromModule = () => 'module';
+    const app = artifactApp('com.example.todo', {
+      runtimeModule: './objectstack-runtime.0123456789abcdef.mjs',
+      functions: [{ name: 'kept', handler: () => 'runtime-module' }, { name: 'declared_only', effect: 'pure' }],
+    });
+    const result = await graftAuthoredCode([app], authored({
+      functions: { kept: fromModule, declared_only: () => 'module' },
+    }));
+
+    expect(result.rebound).toEqual(['kept']);
+    expect((app.bundle as any).functions).toEqual([
+      { name: 'kept', handler: fromModule },
+      { name: 'declared_only', effect: 'pure' },
+    ]);
+  });
+
+  it('leaves a bundle with no runtime module exactly as the graft left it', async () => {
+    const own = () => 'own';
+    const app = artifactApp('com.example.todo', { functions: { kept: own } });
+    const result = await graftAuthoredCode([app], authored({ functions: { kept: () => 'module' } }));
+
+    expect(result).toEqual(graftAuthoredRuntimeMembers([artifactApp('com.example.todo', { functions: { kept: own } })],
+      authored({ functions: { kept: () => 'module' } })));
+    expect((app.bundle as any).functions.kept).toBe(own);
+  });
+
+  it('leaves a bundle whose own onEnable won: none of the module\'s code runs there', async () => {
+    const own = () => 'own';
+    const app = artifactApp('com.example.todo', {
+      runtimeModule: './objectstack-runtime.0123456789abcdef.mjs',
+      onEnable: async () => {},
+      functions: { kept: own },
+    });
+    const result = await graftAuthoredCode([app], authored({ functions: { kept: () => 'module' } }));
+
+    expect(result.reason).toBe('already-present');
+    expect(result.rebound).toBeUndefined();
+    expect((app.bundle as any).functions.kept).toBe(own);
   });
 });
