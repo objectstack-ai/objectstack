@@ -96,9 +96,10 @@ describe('MCP resume_run — where it is registered', () => {
       expect(tool.description, name).toContain('confirm: true');
       expect(tool.description, name).toContain("Under an AI service account's own key");
       expect(tool.description, name).toContain('refused whatever it sends');
-      expect(tool.inputSchema.properties.confirm.description, name).toContain(
-        "Under an AI service account's own key it is not read",
-      );
+      // [#33690] The member is not read by either tool for anyone now: a
+      // declared-gated call is handed to the person, whatever it says.
+      expect(tool.inputSchema.properties.confirm.description, name).toContain('Not read by this tool');
+      expect(tool.description, name).toContain('pending_confirmation');
     }
     expect(tools.run_action.description).toContain('ai.requiresConfirmation: false when it is safe unattended');
   });
