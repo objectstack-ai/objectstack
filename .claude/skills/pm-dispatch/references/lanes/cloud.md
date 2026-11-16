@@ -4,7 +4,7 @@
 
 ## 形态
 
-- 本车道为单车道仓执行座位,可分席 `repo:cloud#N`:在 cloud 仓认领、派发、复核、落地。
+- 本车道为单车道仓执行座位,可分席 `repo:cloud#N`:在 cloud 仓认领、派发、L1 审核、落地。
 - cloud 卡首触归本车道,⛔ 不归分诊(`triage-duties.md` 日对账条);分诊只做下文兜底。
 - 卡线程派发令住项目文件的 `pm-orders/cloud/seatN/` 目录。
 

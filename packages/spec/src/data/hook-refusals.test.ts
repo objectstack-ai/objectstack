@@ -14,6 +14,7 @@ import {
 } from './hook-refusal-codes';
 import { hookRefusalMessageKey } from '../system/i18n-resolver';
 import { TranslationDataSchema } from '../system/translation.zod';
+import { hookForm } from './hook.form';
 
 // #26170 (maintainer ruling 6431311681, letter A): a hook declares its refusal
 // catalogue, `refusals: { <CODE>: { message, status? } }`, and its body refuses
@@ -448,5 +449,28 @@ describe('the translation address of a reason — `hooks.<hook>.refusals.<CODE>.
   it('refuses a key a reason translation does not hold', () => {
     const r = TranslationDataSchema.safeParse({ hooks: { h: { refusals: { C: { reasons: { r: { title: 'x' } } } } } } });
     expect(r.success).toBe(false);
+  });
+});
+
+// The form row says who may declare a catalogue, and that is what HookSchema
+// answers: a sandboxed js body or an in-process handler (the form offers the
+// legacy `handler` row too), never an expression body.
+describe('hookForm refusals row — help names every hook kind that may declare one', () => {
+  type Row = { field?: string; helpText?: string; fields?: Row[] };
+  const rows: Row[] = (hookForm.sections ?? []).flatMap((s) => (s.fields ?? []) as Row[]);
+  const help = (field: string): string => {
+    const found = rows.flatMap((r) => [r, ...(r.fields ?? [])]).filter((r) => r.field === field);
+    expect(found).toHaveLength(1);
+    return found[0].helpText ?? '';
+  };
+
+  it('names the handler beside the js body and does not limit the catalogue to js bodies', () => {
+    const text = help('refusals');
+    expect(text).toMatch(/\bhandler\b/);
+    expect(text).not.toMatch(/bodies only/i);
+  });
+
+  it('the handler it names is a row the same form offers', () => {
+    expect(help('handler')).not.toBe('');
   });
 });

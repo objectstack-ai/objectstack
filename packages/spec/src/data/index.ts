@@ -423,6 +423,12 @@ export * from './injected-system-column-provenance';
 // that writes `controlled_by_parent` asks the spec instead of restating it.
 export * from './controlled-by-parent-master';
 
+// [ADR-0055 §1 as amended · ruling A] `defineStack`'s record that an author
+// omitted `required` on a `controlled_by_parent` object's `master_detail` —
+// the parse has already written `false` there. Only the reader is published;
+// `@objectstack/lint` reads it to report the omitted spelling.
+export { masterDetailRequiredOmitted } from './master-detail-required-omission';
+
 // record-currency path refusals (ADR-0144 D2/D6, amended) — the one wording of
 // "segment 2 of a `PARENT_FIELD.CODE_FIELD` path names no code field" and of a
 // `record` roll-up over a child amount that follows no parent. Read by

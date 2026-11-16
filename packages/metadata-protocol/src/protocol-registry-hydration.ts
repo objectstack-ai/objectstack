@@ -141,6 +141,18 @@ type ServiceRead = { data: unknown; degraded: boolean; errors: string[] };
  * Asked of the service rather than the registry: tier 1 has already healed
  * whenever the registry holds the base's composite artifact under a shadow, so
  * this read is reached exactly where it does not.
+ *
+ * [#33832, ADR-0150 D3, epic ruling 6818436831] ⛔ Except where the service
+ * cannot name a holder. A type addressed by `(package, name)` that the service
+ * stores by name alone (outside `PACKAGE_SLOTTED_STORE_TYPES`: `dashboard`,
+ * `report`, `page`, `app`, …) keeps ONE item per name, the one registered
+ * last, and answers it to a read naming any package or none. Where the
+ * registry holds the name for two or more packages, that answer is a pick, and
+ * registered in the bare slot it served the last-registered holder's item to
+ * every bare registry lookup and listed it twice. So no baseline is read: a
+ * settled miss, and tier 3 retires only the removed row's own entry. The bare
+ * slot stays empty, and a read naming no package answers the registry's
+ * refusal naming every holder, as the hydrator leaves it.
  */
 async function readHealBaseline(
     host: Pick<ProtocolHost, 'engine' | 'readItemFromMetadataService'>,
@@ -148,6 +160,12 @@ async function readHealBaseline(
     name: string,
     packageId: string | undefined,
 ): Promise<ServiceRead> {
+    const canonical = canonicalMetaType(type);
+    if (isPackageScopedType(canonical) && !PACKAGE_SLOTTED_STORE_TYPES.has(canonical)) {
+        const registry = (host.engine as { registry?: { packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined } } | undefined)?.registry;
+        const holders = registry?.packageScopedHoldersOf?.(canonical, name, undefined, { includeDisabledPackages: true }) ?? [];
+        if (holders.length > 1) return { data: undefined, degraded: false, errors: [] };
+    }
     const own = await host.readItemFromMetadataService(type, name, packageId);
     if (packageId === undefined || (own.data !== undefined && own.data !== null) || own.degraded) return own;
     try {

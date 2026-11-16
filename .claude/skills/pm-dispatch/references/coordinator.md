@@ -23,13 +23,13 @@
 - 卡线程上限全项目一个数,由维护者按项目言明;未言明取各席 `batch` 之和。
 - 席位随时交候选:卡号、优先级、派发令全文、建议 effort;⛔ 不等自己的槽位。
 - coordinator 排队开线程:p1 先于 p2,同级先到先开;满即排队,线程交回或 PR 合入即释放。
-- 槽位只算在建的线程:等人(授权批准、决策卡)或等席位复核的卡线程不占槽。
+- 槽位只算在建的线程:等人(授权批准、决策卡)或等席位 L1/L2 审核的卡线程不占槽。
 - S 卡的席内子代理只计该席 `batch`,不计本上限。
 
 ## 四、effort 与档位按难度(coordinator 开线程时读;席位请线程时读)
 
 - 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
-- 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` 复核。
+- 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` L2 审核。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位写分析时读)
 
