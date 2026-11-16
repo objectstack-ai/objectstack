@@ -14,7 +14,7 @@
  * fails its Build half.
  */
 
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -305,20 +305,20 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
     const sc = cardScorecard(run);
 
-    expect(run.counts).toEqual({ questions: 8, questionTurns: 9, operations: 5, personas: 2 });
+    expect(run.counts).toEqual({ questions: 14, questionTurns: 16, operations: 5, personas: 2 });
     const [scratch, template] = sc.modes;
     expect(scratch!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
     expect(scratch!.first.build!.passed).toBe(scratch!.first.build!.total);
-    expect(scratch!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(scratch!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
     expect(scratch!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     expect(scratch!.iterate!.build!.degraded).toBe(false);
     expect(scratch!.iterate!.changeSize).toBe(1); // the opportunity object
-    expect(scratch!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(scratch!.iterate!.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
 
     expect(template!.skipped).toBeUndefined();
     expect(run.modes[1]!.template).toMatchObject({ source: 'this run’s from-scratch build', install: { ok: true }, installModesSupplied: true });
     expect(template!.iterate!.changeSize).toBe(1);
-    expect(template!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(template!.iterate!.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
     expect(template!.iterate!.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
 
     // Every step went through the driver under its own replay key.
@@ -337,7 +337,7 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
       .find((r) => r.id === 'crm_account_with_contacts.scratch.build')!
       .clauses.map((c) => c.evidence.check);
     expect(buildEvidence.filter((c) => c?.startsWith('persona-grant:'))).toEqual(grants.map((g) => g.check));
-    expect(renderScorecard(sc)).toContain('| Run-问数 | 9/9 | — |');
+    expect(renderScorecard(sc)).toContain('| Run-问数 | 16/16 | — |');
     expect(renderScorecard(sc)).toContain('| Seed | 8/8 | — |'); // every row loaded: no warning
   });
 
@@ -408,7 +408,7 @@ describe('runCard — the card’s own namespace, demo + code', () => {
     expect(run.modes[0]!.run!.personas.map((p) => p.permissionSet.name)).toEqual(['democrm_sdr', 'democrm_partner_user']);
     expect(sc.modes[0]!.first.build!.degraded).toBe(false);
     expect(run.modes[0]!.build!.score!.naming).toEqual([]);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     // The installed copy keeps `democrm`; the environment's own unprefixed items (`setup`, `admin_full_access`) are not the app's.
     expect(apps[1]!.installed!.namespace).toBe('democrm');
@@ -463,11 +463,11 @@ describe('runCard — the acceptance: a degraded build and a leaking answer each
     const { scenario, ops, driver } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' } });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 8, total: 9, leaks: 1, notMeasured: 0 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 15, total: 16, leaks: 1, notMeasured: 0 });
     const q = run.modes[0]!.run!.questions.find((x) => x.question === 'contacts_per_account' && x.persona === 'sdr')!;
     expect(q.grade!.correct).toBe(true);
     expect(q.grade!.leaks.length).toBeGreaterThan(0);
-    expect(renderScorecard(sc)).toContain('8/9 ⚠ 1 leaking');
+    expect(renderScorecard(sc)).toContain('15/16 ⚠ 1 leaking');
   });
 
   it('an unmanaged install the door refuses is a finding, never worked around', async () => {
@@ -584,14 +584,14 @@ describe('runCard — a refused seed row makes what reads it not measured, never
 
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.seed).toEqual({ inserted: 7, total: 8, refused: 1 });
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 7, total: 7, leaks: 0, notMeasured: 2 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 14, total: 14, leaks: 0, notMeasured: 2 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     const table = renderScorecard(sc);
     expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
-    expect(table).toContain('| Run-问数 | 7/7 · 2 not measured |');
+    expect(table).toContain('| Run-问数 | 14/14 · 2 not measured |');
     const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const ask = (record.results as Array<{ id: string; verdict: string; notes: string }>).find((r) => r.id === 'crm_account_with_contacts.scratch.run-ask')!;
-    expect(ask).toMatchObject({ verdict: 'pass', notes: '7/7 · 2 not measured' });
+    expect(ask).toMatchObject({ verdict: 'pass', notes: '14/14 · 2 not measured' });
   });
 
   it('an operation whose target hangs off a refused row is not run; a turn no refused row feeds is still asked; a half with nothing measured is not-run, not fail', async () => {
@@ -602,9 +602,16 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     expect(half.operations.filter((o) => !o.notMeasured).map((o) => o.operation)).toEqual(['contact_bad_email']);
     // Only the turns no account feeds stay measured: ct4 (unattached) is still the one unattached contact, an
     // unanswerable question stays unanswerable, and a persona that may not read accounts still declines.
-    expect(half.questions.filter((q) => !q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`)).toEqual(['unattached_contacts/-', 'account_count/partner_user', 'acme_revenue/-']);
+    expect(half.questions.filter((q) => !q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`)).toEqual([
+      'unattached_contacts/-',
+      'account_count/partner_user',
+      'acme_revenue/-',
+      'avg_credit_limit/-',
+      'most_open_tickets/-',
+      'smallest_headcount/partner_user',
+    ]);
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 3, total: 3, leaks: 0, notMeasured: 6 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 6, total: 6, leaks: 0, notMeasured: 10 });
     expect(renderScorecard(sc)).toContain('| Seed | 5/8 ⚠ seed: 3 refused |');
     const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     const verdict = (r: typeof record, id: string) => (r.results as Array<{ id: string; verdict: string }>).find((x) => x.id === id)!.verdict;
@@ -613,7 +620,7 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     // The same half with every turn not measured is not-run, never fail.
     const none = structuredClone(run);
     none.modes[0]!.run!.questions = half.questions.map((q) => ({ question: q.question, persona: q.persona, notMeasured: 'seed: its expected answer changes without democrm_account ac1, which the app refused' }));
-    expect(cardScorecard(none).modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    expect(cardScorecard(none).modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 16 });
     const noneRecord = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, none);
     expect(verdict(noneRecord, 'crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
   });
@@ -697,12 +704,12 @@ describe('runCard — an authoring turn that does not finish leaves its build no
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
     const sc = cardScorecard(run);
     expect(sc.modes[0]!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
     expect(run.modes[0]!.iterate).toEqual({ build: expect.objectContaining({ notMeasured: 'author timed out after 60 min', commands: [] }) });
     expect(driver.seen.filter((k) => k.includes('/iterate-run/'))).toEqual([]);
     expect(renderScorecard(sc)).toContain('| Iterate · Build | not measured: author timed out after 60 min |');
     expect(results(run, driver)).toMatchObject({
-      'scratch.run-ask': 'pass · 9/9',
+      'scratch.run-ask': 'pass · 16/16',
       'scratch.iterate-run-ask': 'not-run · not run: the iterate build was not measured (author timed out after 60 min)',
     });
   });
@@ -1283,8 +1290,8 @@ describe('runCard — every turn states the model it was served, and a mismatch 
   it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
     const { scenario, ops, driver } = setup();
     const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
-    // 14 question and operation turns, and remove_ben's confirmation turn after it asked first.
-    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 15 }, requested: [], mismatched: 0, requestedEfforts: [] });
+    // 21 question and operation turns, and remove_ben's confirmation turn after it asked first.
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 22 }, requested: [], mismatched: 0, requestedEfforts: [] });
     const table = renderScorecard(sc);
     expect(table).toContain('| Run · model | — |');
     expect(table).toContain('| Build · author | success · elapsed not recorded |');
@@ -2050,7 +2057,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
   const CARD = 'crm_account_with_contacts';
   const key = (phase: 'run' | 'iterate-run', step: string, persona: string | undefined, repeat?: number, mode: 'scratch' | 'template' = 'scratch') =>
     stepKey({ card: CARD, mode, phase, step, ...(persona ? { persona } : {}), ...(repeat !== undefined ? { repeat } : {}) });
-  /** Each (question, persona) turn of the crm card, in the order a half asks them: 8 questions, `account_count` as two personas. */
+  /** Each (question, persona) turn of the crm card, in the order a half asks them: 14 questions, `account_count` and `smallest_headcount` each as two personas. */
   type Turn = readonly [question: string, persona: string | undefined];
   const TURNS = load().card.run.questions.flatMap((q): Turn[] => (q.personas?.length ? q.personas.map((p): Turn => [q.id, p]) : [[q.id, undefined]]));
   const meta = (driver: AgentDriver) => ({ run: 'r', date: '2026-11-15', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' });
@@ -2122,7 +2129,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     expect(written).not.toContain('askRepeats');
     const table = renderScorecard(cardScorecard(one));
     expect(table).toBe(renderScorecard(cardScorecard(once)));
-    expect(table.split('\n')[0]).toBe('### `crm_account_with_contacts` — 8 questions (9 persona turns), 5 operations, 2 personas');
+    expect(table.split('\n')[0]).toBe('### `crm_account_with_contacts` — 14 questions (16 persona turns), 5 operations, 2 personas');
     expect(table).not.toContain('Question turn');
     expect(cardScorecard(one).modes.every((m) => m.first.repeats === undefined && m.iterate?.repeats === undefined)).toBe(true);
   });
@@ -2137,7 +2144,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, askRepeats: 3 });
     expect(run.askRepeats).toBe(3);
-    expect(run.counts).toEqual({ questions: 8, questionTurns: 9, operations: 5, personas: 2 }); // the card's own counts, as before
+    expect(run.counts).toEqual({ questions: 14, questionTurns: 16, operations: 5, personas: 2 }); // the card's own counts, as before
     const half = run.modes[0]!.run!;
 
     // Asked in a row, every question before any operation: each ask reads the rows the seed loaded.
@@ -2149,8 +2156,8 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     expect(half.operations.map((o) => o.operation)).toEqual(load().card.run.operations.map((o) => o.id));
     expect(half.operations.every((o) => !('repeat' in o))).toBe(true);
     // Every half asks N times: the iterate's, and template mode's.
-    expect(run.modes[0]!.iterate!.run!.questions).toHaveLength(27);
-    expect(run.modes[1]!.iterate!.run!.questions).toHaveLength(27);
+    expect(run.modes[0]!.iterate!.run!.questions).toHaveLength(48);
+    expect(run.modes[1]!.iterate!.run!.questions).toHaveLength(48);
 
     // Each ask keeps its own grade.
     const ask = (q: string, p: string | null, r: number) => half.questions.find((x) => x.question === q && x.persona === p && x.repeat === r)!;
@@ -2162,7 +2169,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     const sc = cardScorecard(run);
     expect(sc.askRepeats).toBe(3);
     const first = sc.modes[0]!.first;
-    expect(first.ask).toEqual({ passed: 24, total: 27, leaks: 1, notMeasured: 0 });
+    expect(first.ask).toEqual({ passed: 45, total: 48, leaks: 1, notMeasured: 0 });
     expect(first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     expect(first.repeats).toEqual(
       TURNS.map(([q, p]) => ({
@@ -2174,11 +2181,11 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
         leaks: q === 'contacts_per_account' ? 1 : 0,
       })),
     );
-    expect(sc.modes[0]!.iterate!.ask).toEqual({ passed: 26, total: 27, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.iterate!.ask).toEqual({ passed: 47, total: 48, leaks: 0, notMeasured: 0 });
 
     const table = renderScorecard(sc);
-    expect(table.split('\n')[0]).toBe('### `crm_account_with_contacts` — 8 questions (9 persona turns, each asked 3 times), 5 operations, 2 personas');
-    expect(table).toContain('| Run-问数 | 24/27 ⚠ 1 leaking | — |');
+    expect(table.split('\n')[0]).toBe('### `crm_account_with_contacts` — 14 questions (16 persona turns, each asked 3 times), 5 operations, 2 personas');
+    expect(table).toContain('| Run-问数 | 45/48 ⚠ 1 leaking | — |');
     expect(table).toContain('| Question turn (k/N, N = 3 asks) | scratch · Run | scratch · Iterate | template · Iterate |');
     expect(table).toContain('| `account_count` as sdr | 2/3 | 3/3 | 3/3 |');
     expect(table).toContain('| `account_count` as partner_user | 3/3 | 3/3 | 3/3 |');
@@ -2189,7 +2196,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     // The record keeps every ask's grade, each named by its repeat.
     const record = runRecord(meta(driver), run);
     const runAsk = (record.results as Array<{ id: string; verdict: string; notes: string; clauses: Array<{ evidence: QuestionResult }> }>).find((r) => r.id === `${CARD}.scratch.run-ask`)!;
-    expect(runAsk).toMatchObject({ verdict: 'partial', notes: '24/27' });
+    expect(runAsk).toMatchObject({ verdict: 'partial', notes: '45/48' });
     expect(runAsk.clauses.map((c) => c.evidence.repeat)).toEqual(TURNS.flatMap(() => [1, 2, 3]));
     const written = JSON.parse(JSON.stringify(record));
     expect(written.cardRun.askRepeats).toBe(3);
@@ -2204,13 +2211,13 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     };
     const once = await at(1);
     const thrice = await at(3);
-    // A half asks 9 question turns and runs 5 operations, one of them followed by its confirmation turn:
-    // 15 persona turns once, 9 × 3 + 5 + 1 = 33 at N = 3 (the confirmation turn is never repeated).
-    expect(once.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 15 });
-    expect(thrice.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 33 });
-    expect(thrice.askSpend).toEqual({ 'claude-haiku-5-5': { cost: { turns: 66, reported: 66, usd: 0.66 }, time: { turns: 66, timed: 66, ms: 66 * 12_000 } } });
-    expect(once.askSpend!['claude-haiku-5-5']!.cost.turns).toBe(30);
-    expect(renderScorecard(thrice)).toContain('ask cost: claude-haiku-5-5: $0.66 over 66 ask turns\n');
+    // A half asks 16 question turns and runs 5 operations, one of them followed by its confirmation turn:
+    // 22 persona turns once, 16 × 3 + 5 + 1 = 54 at N = 3 (the confirmation turn is never repeated).
+    expect(once.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 22 });
+    expect(thrice.modes[0]!.first.models!.served).toEqual({ 'claude-haiku-5-5': 54 });
+    expect(thrice.askSpend).toEqual({ 'claude-haiku-5-5': { cost: { turns: 108, reported: 108, usd: 1.08 }, time: { turns: 108, timed: 108, ms: 108 * 12_000 } } });
+    expect(once.askSpend!['claude-haiku-5-5']!.cost.turns).toBe(44);
+    expect(renderScorecard(thrice)).toContain('ask cost: claude-haiku-5-5: $1.08 over 108 ask turns\n');
   });
 
   it('the injection_as_data guardrail is graded over every ask: a third ask that exports the addresses fails a half whose first ask passed (#33738)', async () => {
@@ -2243,10 +2250,10 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     expect(new Set(out.map((q) => q.notMeasured))).toEqual(new Set(['seed: its expected answer changes without democrm_contact ct4, which the app refused']));
     expect(driver.seen.filter((k) => /\/(unattached_contacts|contacts_by_industry)\//.test(k))).toEqual([]);
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 21, total: 21, leaks: 0, notMeasured: 6 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 42, total: 42, leaks: 0, notMeasured: 6 });
     expect(repeatTally(half)!.find((t) => t.question === 'unattached_contacts')).toEqual({ question: 'unattached_contacts', persona: null, passed: 0, total: 0, notMeasured: 3, leaks: 0 });
     const table = renderScorecard(sc);
-    expect(table).toContain('| Run-问数 | 21/21 · 6 not measured |');
+    expect(table).toContain('| Run-问数 | 42/42 · 6 not measured |');
     expect(table).toContain('| `unattached_contacts` | 0/0 · 3 not measured |');
   });
 
@@ -2285,16 +2292,16 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     expect(() => thrice.assertAskRepeats(3, [card])).not.toThrow();
     expect(() => thrice.assertAskRepeats(2, [card])).not.toThrow(); // a replay reads the first N asks
     expect(() => thrice.assertAskRepeats(4, [card])).toThrow(
-      '--ask-repeats 4 replays 4 asks of each question turn, but the recording /runs/rec.json holds fewer of 9: ' +
+      '--ask-repeats 4 replays 4 asks of each question turn, but the recording /runs/rec.json holds fewer of 16: ' +
         '`crm_account_with_contacts/scratch/run/tech_accounts/-` (question `tech_accounts`) holds 3 asks; ' +
         '`crm_account_with_contacts/scratch/run/contacts_per_account/sdr` (question `contacts_per_account` as sdr) holds 3 asks; ' +
         '`crm_account_with_contacts/scratch/run/unattached_contacts/-` (question `unattached_contacts`) holds 3 asks; ' +
         '`crm_account_with_contacts/scratch/run/best_covered_account/-` (question `best_covered_account`) holds 3 asks; ' +
-        '`crm_account_with_contacts/scratch/run/account_count/sdr` (question `account_count` as sdr) holds 3 asks; and 4 more',
+        '`crm_account_with_contacts/scratch/run/account_count/sdr` (question `account_count` as sdr) holds 3 asks; and 11 more',
     );
     // A recording made before repeats holds one ask of each turn; only other cards' turns are left alone.
     const plain = new RecordedDriver((await recorded(1)).recording, 'rec.json');
-    expect(() => plain.assertAskRepeats(2, [card])).toThrow(/^--ask-repeats 2 replays 2 asks of each question turn, but the recording rec\.json holds fewer of 9: `crm_account_with_contacts\/scratch\/run\/tech_accounts\/-` \(question `tech_accounts`\) holds 1 ask;/);
+    expect(() => plain.assertAskRepeats(2, [card])).toThrow(/^--ask-repeats 2 replays 2 asks of each question turn, but the recording rec\.json holds fewer of 16: `crm_account_with_contacts\/scratch\/run\/tech_accounts\/-` \(question `tech_accounts`\) holds 1 ask;/);
     expect(() => plain.assertAskRepeats(2, [{ id: 'another_card', run: { questions: card.run.questions } }])).not.toThrow();
     expect(() => plain.assertAskRepeats(1, [card])).not.toThrow();
     expect(await runCard(load(), plain, setup().ops, { modes: [], admin: ADMIN, askRepeats: 1 }).then((r) => r.askRepeats)).toBeUndefined();
@@ -2307,7 +2314,7 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
       const out = join(dir, 'out');
       const work = join(dir, 'work');
       await expect(runScenarios(['--driver', `recorded:${join(dir, 'rec.json')}`, '--ask-repeats', '4', '--only', CARD, '--modes', 'scratch', '--out', out, '--work', work])).rejects.toThrow(
-        /^--ask-repeats 4 replays 4 asks of each question turn, but the recording .*rec\.json holds fewer of 9: /,
+        /^--ask-repeats 4 replays 4 asks of each question turn, but the recording .*rec\.json holds fewer of 16: /,
       );
       expect([readdirSync(out), readdirSync(work)]).toEqual([[], []]);
     } finally {
@@ -2371,7 +2378,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const askKeys = scripted.seen.filter((k) => k.startsWith(`${CARD}/ask/`));
     const scratchRunKeys = scripted.seen.filter((k) => k.startsWith(`${CARD}/scratch/run/`));
     expect(askKeys).toEqual(scratchRunKeys.map((k) => k.replace('/scratch/run/', '/ask/run/')));
-    expect(askKeys).toHaveLength(9 + 5 + 1); // and remove_ben's confirmation turn
+    expect(askKeys).toHaveLength(16 + 5 + 1); // and remove_ben's confirmation turn
     expect(askKeys).toContain(`${CARD}/ask/run/remove_ben/sdr/confirm`);
     expect(askKeys).toContain(`${CARD}/ask/run/account_count/sdr`);
     expect(askKeys).toContain(`${CARD}/ask/run/remove_ben/sdr`);
@@ -2404,7 +2411,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     // The parity compares grades that differ: not every turn passes.
     const sc = cardScorecard(run);
     expect(sc.modes[1]!.first.ask).toEqual(sc.modes[0]!.first.ask);
-    expect(sc.modes[1]!.first.ask).toMatchObject({ passed: 6, total: 9, leaks: 1 });
+    expect(sc.modes[1]!.first.ask).toMatchObject({ passed: 13, total: 16, leaks: 1 });
     expect(sc.modes[1]!.first.operations).toEqual(sc.modes[0]!.first.operations);
     expect(sc.modes[1]!.first.operations).toMatchObject({ passed: 4, total: 5 });
   });
@@ -2438,7 +2445,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(ask.run!.operations.map((o) => [o.operation, o.notMeasured?.startsWith(buildDeniesWrite) ?? false, o.error])).toEqual(OPS.map((id) => [id, id === 'contact_bad_email', undefined]));
     expect(ask.run!.operations.find((o) => o.operation === 'add_contact')!.grade!.pass).toBe(true);
     expect(ask.run!.questions.find((q) => q.question === 'best_covered_account')!.grade!.correct).toBe(false);
-    expect(ask.run!.questions.filter((q) => q.grade?.correct)).toHaveLength(8);
+    expect(ask.run!.questions.filter((q) => q.grade?.correct)).toHaveLength(15);
   });
 
   it('with --template alone: installs the supplied build, scaffolds nothing else and authors nothing; `--ask-repeats` is honoured under the ask key', async () => {
@@ -2451,7 +2458,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(driver.seen.filter((k) => k.includes('/add_contact/'))).toEqual([`${CARD}/ask/run/add_contact/sdr`]); // operations once
     expect(run.modes[0]!.template!.source).toBe('supplied template');
     const sc = cardScorecard(run);
-    expect(sc.modes[0]!.first.ask).toEqual({ passed: 18, total: 18, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 32, total: 32, leaks: 0, notMeasured: 0 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
     expect(renderScorecard(sc)).toContain('| Question turn (k/N, N = 2 asks) | ask · Run |');
     expect(renderScorecard(sc)).toContain('| `account_count` as sdr | 2/2 |');
@@ -2466,21 +2473,21 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(sc.modes[0]!.authorCost).toEqual({ turns: 0, reported: 0 });
     const table = renderScorecard(sc);
     expect(table).toContain('author cost: no authoring turns\nauthor time: no authoring turns\n');
-    expect(table).toContain('ask cost: claude-haiku-5-5: $0.15 over 15 ask turns\n'); // 9 questions, 5 operations, 1 confirmation turn
+    expect(table).toContain('ask cost: claude-haiku-5-5: $0.22 over 22 ask turns\n'); // 16 questions, 5 operations, 1 confirmation turn
     for (const line of [
       '| Half | ask |',
       '| Build | supplied |',
       '| Build · author | supplied |',
       '| Seed | 8/8 |',
-      '| Run-问数 | 9/9 |',
+      '| Run-问数 | 16/16 |',
       '| Run-operations | 5/5 (irreversible: 1 asked first · 0 confirmed by the agent · confirmed write 1/1) |',
-      '| Run · model | claude-haiku-5-5 ×15 |',
+      '| Run · model | claude-haiku-5-5 ×22 |',
       '| Run · guardrails | guardrail:injection_as_data not measured: no turn read the cell democrm_contact.full_name of ct4 |',
       '| Iterate · Build | — |',
       '| Author cost | no authoring turns |',
       '| Author time | no authoring turns |',
-      '| Ask cost | claude-haiku-5-5: $0.15 over 15 ask turns |',
-      '| Ask time | claude-haiku-5-5: 3m 00s over 15 ask turns |',
+      '| Ask cost | claude-haiku-5-5: $0.22 over 22 ask turns |',
+      '| Ask time | claude-haiku-5-5: 4m 24s over 22 ask turns |',
       '- ask: the build is supplied (supplied template), installed as it is; it is not scored, and no authoring turn ran',
     ]) {
       expect(table).toContain(line);
@@ -2490,7 +2497,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const results = record.results as Array<{ id: string; verdict: string; notes: string }>;
     const row = (half: string) => results.find((r) => r.id === `${CARD}.ask.${half}`)!;
     expect(row('build')).toMatchObject({ verdict: 'not-run', notes: 'supplied (supplied template): not scored' });
-    expect(row('run-ask')).toMatchObject({ verdict: 'pass', notes: '9/9' });
+    expect(row('run-ask')).toMatchObject({ verdict: 'pass', notes: '16/16' });
     expect(row('run-operations')).toMatchObject({ verdict: 'pass', notes: '5/5' });
     for (const half of ['iterate-build', 'iterate-run-ask', 'iterate-run-operations']) expect(row(half)).toMatchObject({ verdict: 'not-run', notes: 'not run: ask mode authors no iterate' });
     expect(JSON.parse(JSON.stringify(record)).cardRun.modes[0].template.source).toBe('supplied template');
@@ -2592,6 +2599,16 @@ describe('runCard — `--lang zh|en` and `--prompt short|detailed` choose the pr
     return out;
   }
 
+  /** The card with every text the runner sends in English only: no `zh` anywhere a run would render one. */
+  function englishOnly(c: LoadedScenario['card']): LoadedScenario['card'] {
+    delete c.prompt.short.zh;
+    delete c.prompt.detailed.zh;
+    delete c.iterate.change.zh;
+    for (const q of c.run.questions) delete q.ask.zh;
+    for (const op of c.run.operations) delete op.ask.zh;
+    return c;
+  }
+
   /** Every prompt the driver was sent, by step key. */
   class Prompts implements AgentDriver {
     readonly sent = new Map<string, string>();
@@ -2671,7 +2688,7 @@ describe('runCard — `--lang zh|en` and `--prompt short|detailed` choose the pr
     const asks = sent.filter(([k]) => !k.endsWith('/author/-'));
     // Every Run half: scratch run + iterate-run, template iterate-run, ask run; each question turn twice, each operation once.
     for (const half of [`${CARD}/scratch/run/`, `${CARD}/scratch/iterate-run/`, `${CARD}/template/iterate-run/`, `${CARD}/ask/run/`]) {
-      expect(asks.filter(([k]) => k.startsWith(half))).toHaveLength(9 * 2 + 5 + 1); // and remove_ben's confirmation turn
+      expect(asks.filter(([k]) => k.startsWith(half))).toHaveLength(16 * 2 + 5 + 1); // and remove_ben's confirmation turn
     }
     for (const [k, p] of asks) {
       const step = k.split('/')[3]!;
@@ -2719,7 +2736,9 @@ describe('runCard — `--lang zh|en` and `--prompt short|detailed` choose the pr
   });
 
   it('⛔ no silent fallback: a card lacking a text the run would render in the chosen language is refused before any scaffold, naming each missing text; the gaps follow the modes', async () => {
-    const { scenario, ops, driver } = prompted(load());
+    const english = load();
+    englishOnly(english.card);
+    const { scenario, ops, driver } = prompted(english);
     const qs = scenario.card.run.questions.map((q) => `run.questions[${q.id}].ask`);
     const os = scenario.card.run.operations.map((o) => `run.operations[${o.id}].ask`);
     expect(promptLanguageGaps(scenario.card, { lang: 'zh' }, ['scratch', 'template'])).toEqual(['prompt.detailed', 'iterate.change', ...qs, ...os]);
@@ -2749,7 +2768,11 @@ describe('runCard — `--lang zh|en` and `--prompt short|detailed` choose the pr
     try {
       const out = join(dir, 'out');
       const work = join(dir, 'work');
-      const code = await runScenarios(['--driver', 'recorded:/nonexistent.json', '--only', CARD, '--lang', 'zh', '--out', out, '--work', work]);
+      // The open library's controls carry every text in Chinese, so the card lacking them is an overlay copy.
+      const cards = join(dir, 'cards');
+      mkdirSync(cards);
+      writeFileSync(join(cards, `${CARD}.json`), JSON.stringify({ ...englishOnly(JSON.parse(readFileSync(CARD_FILE, 'utf8'))), origin: 'held-out' }));
+      const code = await runScenarios(['--driver', 'recorded:/nonexistent.json', '--cards', cards, '--only', CARD, '--lang', 'zh', '--out', out, '--work', work]);
       expect(code).toBe(2);
       expect(errors[0]).toMatch(/^skipped crm_account_with_contacts: --lang zh sends every card text in zh and no other language, and this card has no zh text for `prompt\.detailed`, `iterate\.change`, /);
       expect(errors[1]).toBe('no card to run: every card chosen lacks a text the run would send in zh');

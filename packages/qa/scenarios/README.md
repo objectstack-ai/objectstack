@@ -222,6 +222,34 @@ pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # o
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
 (git-ignored) and prints the scorecard.
 
+### Many runs in one table — `summary`
+
+```bash
+pnpm --filter @objectstack/scenarios run-scenarios summary "$PWD/runs/haiku" "$PWD/runs/opus"  # files or directories, at every depth; absolute: pnpm runs it in the package directory
+npx @objectstack/scenarios summary --card crm_account_with_contacts --mode ask runs/   # one card, one mode
+```
+
+`summary` (`src/runner/summary.ts`) reads run records back and prints markdown to stdout: one table per card and mode,
+rows the model the build's authoring turn was **served**, columns the models the question and operation turns were
+served (the asked-for name beside it when it is another, and the asked-for effort when the record has one). It reads
+files only: no model, no network, and no score of its own — every figure is the record's scorecard's.
+
+- **Cells**: the runs of that row and column, summed — Build, Run-问数 (with `--ask-repeats`, also the k/N spread of
+  the question turns: `3/3 ×7 · 2/3 ×1`), Run-operations, the Iterate halves when a run iterated, then ask cost and
+  ask time over every persona turn of the mode. A cost or time is summed only when every run of the cell states one.
+- **Template and ask modes** author no first build: the row is the build they were supplied. `run --template F`
+  writes the file's name and sha256 at the record's top level (`template`), so runs on one template share a row; a
+  record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
+  `this run’s from-scratch build` takes that run's scratch author.
+- **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
+  driver (a replay is its own driver). When they do not, that table is refused with a line naming each difference and
+  the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
+- **Older records**: a field a record predates (served models, ask cost and time, the package source) reads
+  `not recorded`, never a zero. An effort set only through `CLAUDE_CODE_EFFORT_LEVEL` was never recorded, so runs that
+  differ only in it share a row.
+- `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
+  on stderr; a file named directly that is not a run record fails the command.
+
 ### Running from npm
 
 No checkout needed: the package's `objectstack-scenarios` command is the same runner, with the same flags.
@@ -230,6 +258,7 @@ No checkout needed: the package's `objectstack-scenarios` command is the same ru
 npx @objectstack/scenarios run --only service_desk --modes scratch   # one card, scratch mode
 npx @objectstack/scenarios run                                       # every card, both modes
 npx @objectstack/scenarios run --cards ./my-cards                    # a directory of your own, loaded as the overlay
+npx @objectstack/scenarios summary scenario-runs/                    # one author × ask table per card and mode
 npx @objectstack/scenarios help                                      # the commands; `version` prints the package version
 ```
 
@@ -363,7 +392,7 @@ npx @objectstack/scenarios help                                      # the comma
   card that lacks one of the texts the run's modes render in that language (scratch: the build prompt `--prompt` names,
   the iterate change, every question and operation; template: all but the build prompt; ask: the questions and
   operations) is skipped before the first card runs, before any scaffold or boot, with a line naming each missing text
-  (``skipped crm_account_with_contacts: … no zh text for `prompt.detailed`, `iterate.change`, …``), and the other cards
+  (``skipped some_card: … no zh text for `prompt.detailed`, `iterate.change`, …``; the open library's three controls carry every text in both), and the other cards
   run; with none left the run exits 2. `--prompt short|detailed` picks the card prompt the build turn is given; the
   iterate turn is given `iterate.change` either way. With neither flag nothing changes, byte for byte: each text in
   English when the card has it, else in Chinese, the build turn given `prompt.detailed`, and the record, the scorecard
