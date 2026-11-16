@@ -259,6 +259,67 @@ describe('resolveFilterTokens — the record-context token refuses by name', () 
   });
 });
 
+describe('[#34199] resolveFilterTokens — an unresolved { $record } comparand refuses by name', () => {
+  // A FULL context, as for `{record_id}`: nothing a request carries resolves it.
+  const full = { now: NOW, userId: 'usr_1', orgId: 'org_9', timezone: 'UTC' };
+
+  function refusal(filter: unknown): { code?: string; status?: number; message: string } {
+    let err: unknown;
+    try {
+      resolveFilterTokens(filter, full);
+    } catch (e) {
+      err = e;
+    }
+    expect(err, 'expected a refusal').toBeInstanceOf(Error);
+    return err as { code?: string; status?: number; message: string };
+  }
+
+  it.each([
+    // The two shapes a picker that does not resolve it sends (the card's market entry).
+    ['the eq shorthand', { cb_market: { $record: 'account.cb_market' } }, 'cb_market', 'account.cb_market', 'filter.cb_market'],
+    ['an operator comparand', { cb_market: { $eq: { $record: 'account.cb_market' } } }, 'cb_market', 'account.cb_market', 'filter.cb_market.$eq'],
+    ['an ordering comparand', { valid_from: { $lte: { $record: 'quote_date' } } }, 'valid_from', 'quote_date', 'filter.valid_from.$lte'],
+    ['inside $or beside a literal', { $or: [{ cb_market: 'export' }, { cb_market: { $record: 'account.cb_market' } }] }, 'cb_market', 'account.cb_market', 'filter.$or[1].cb_market'],
+    ['under $not', { $not: { cb_market: { $ne: { $record: 'account.cb_market' } } } }, 'cb_market', 'account.cb_market', 'filter.$not.cb_market.$ne'],
+    ['beside a string token it no longer depends on', { $and: [{ owner: '{current_user_id}' }, { cb_market: { $record: 'account.cb_market' } }] }, 'cb_market', 'account.cb_market', 'filter.$and[1].cb_market'],
+    ['the nested-relation form', { account: { cb_market: { $record: 'account.cb_market' } } }, 'account.cb_market', 'account.cb_market', 'filter.account.cb_market'],
+    ['a rule entry, as a lookupFilters entry is written', [{ field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } }], 'cb_market', 'account.cb_market', 'filter[0].value'],
+    ['a [field, op, value] tuple', ['cb_market', '=', { $record: 'account.cb_market' }], 'cb_market', 'account.cb_market', 'filter[2]'],
+  ])('%s: INVALID_FILTER / 400 naming the field, the $record path and the position', (_label, filter, field, path, at) => {
+    const err = refusal(filter);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(`{ "$record": "${path}" }`);
+    expect(err.message).toContain(`on field "${field}"`);
+    expect(err.message).toContain(`at ${at} reached the server unresolved`);
+  });
+
+  it('refuses a malformed reference by its key too, and one at the root names no field', () => {
+    const malformed = refusal({ cb_market: { $record: 'account.cb_market', addDays: 1 } });
+    expect(malformed.code).toBe('INVALID_FILTER');
+    expect(malformed.message).toContain('on field "cb_market"');
+    const root = refusal({ $record: 'account.cb_market' });
+    expect(root.code).toBe('INVALID_FILTER');
+    expect(root.status).toBe(400);
+    expect(root.message).not.toContain('on field');
+    expect(root.message).toContain('at filter reached the server unresolved');
+  });
+
+  it('control — a filter with no placeholder still returns by reference, nested objects included', () => {
+    const plain = { cb_market: 'export', account: { region: 'NA' }, meta: { $eq: 'x' }, $or: [{ score: { $gt: 1 } }] };
+    expect(resolveFilterTokens(plain, full)).toBe(plain);
+  });
+
+  it('control — string tokens and the $now anchor resolve as before, with `record` only as a value', () => {
+    expect(resolveFilterTokens({ owner: '{current_user_id}', due: { $lt: '{today}' }, note: '$record', kind: 'record' }, full)).toEqual({
+      owner: 'usr_1', due: { $lt: '2026-07-15' }, note: '$record', kind: 'record',
+    });
+    expect(resolveFilterTokens({ due: { $gte: { $now: true, addDays: -1 } } }, full)).toEqual({
+      due: { $gte: { $now: NOW.toISOString(), addDays: -1 } },
+    });
+  });
+});
+
 describe('resolveFilterTokens — tree walk', () => {
   const ctx = { now: NOW, userId: 'usr_1', orgId: 'org_9' };
 

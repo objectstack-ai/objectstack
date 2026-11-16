@@ -111,6 +111,14 @@
  * to `null`, `undefined` or the literal: a count written as "about this
  * record" would otherwise come back as "about nobody", or, with the condition
  * gone, "about everybody".
+ *
+ * # A `{ $record }` comparand always refuses here too
+ *
+ * [#34199] The `lookupFilters` comparand `{ $record: 'path' }` reads the record
+ * a form is editing, which only that form's record picker knows, so it is the
+ * same case as `{record_id}` in object form: refused by name on every path,
+ * `INVALID_FILTER` / 400 naming the field, the `$record` path and where it
+ * sits — see {@link isRecordReference}.
  */
 
 import {
@@ -521,6 +529,9 @@ function hasFilterToken(node: unknown): boolean {
   if (node && typeof node === 'object' && !(node instanceof Date)) {
     // [#25808] An unresolved `$now` anchor is a placeholder by construction.
     if (isUnresolvedNowAnchor(node)) return true;
+    // [#34199] So is a `{ $record }` reference — one the walk refuses, so the
+    // fast path must not hand it back by reference for want of a string token.
+    if (isRecordReference(node)) return true;
     return Object.values(node as Record<string, unknown>).some(hasFilterToken);
   }
   return false;
@@ -572,6 +583,101 @@ class MalformedNowAnchorError extends Error {
   }
 }
 
+/**
+ * [#34199] `{ $record: 'path' }` — the `lookupFilters` comparand that reads the
+ * RECORD BEING EDITED (`LookupFilterRecordReferenceSchema`,
+ * `@objectstack/spec/data`): a field of that record, or one lookup hop from it
+ * (`account.cb_market`). Only the record picker of the form editing that
+ * record can resolve it — it sends the referenced value in its place before
+ * the query leaves the browser — and no server path knows which record a form
+ * is editing. So, like `{record_id}`, it never resolves here: any plain object
+ * carrying an own `$record` key, at any depth and in any position, is refused
+ * by name ({@link UnresolvedRecordReferenceError}) before a driver sees it.
+ *
+ * Refused HERE because this is the one pass every engine read and write
+ * filter, and every analytics filter, goes through, whether or not it holds a
+ * string token. Before this, the reference reached the driver and was refused
+ * there in words that never named it (driver-memory: an unsupported operator
+ * `"$record"`; driver-sql: an operator withheld from the message). The refusal reads
+ * the KEY, not the shape: a malformed reference (`{ $record: 1 }`, a key
+ * beside `$record`) is no more resolvable than a well-formed one.
+ *
+ * Doors upstream of this pass may refuse first, in their own words: the
+ * engine's comparand-type door refuses any plain object under an operator
+ * (`{ f: { $eq: { $record: 'x' } } }`), and the temporal door a non-date
+ * comparand on a date column. Either way the filter never runs.
+ */
+function isRecordReference(node: unknown): node is Record<string, unknown> {
+  return !!node && typeof node === 'object' && !Array.isArray(node)
+    && Object.prototype.hasOwnProperty.call(node, '$record');
+}
+
+/** One step of the walk: the node descended from and the key or index taken. */
+interface FilterWalkStep {
+  readonly parent: unknown;
+  readonly key: string | number;
+}
+
+/**
+ * [#34199] The field a `{ $record }` comparand is aimed at, read off the walk's
+ * steps: the non-`$` keys on the way down (`account` then `region` for the
+ * nested-relation form), a rule entry's own `field` when the reference is its
+ * `value` (`{ field, operator, value }`), and the head of a `[field, op,
+ * value]` tuple. `undefined` when no field names it (the filter's root).
+ */
+function fieldOfRecordReference(steps: readonly FilterWalkStep[]): string | undefined {
+  let parts: string[] = [];
+  for (const { parent, key } of steps) {
+    if (Array.isArray(parent)) {
+      if (key === 2 && parent.length === 3 && typeof parent[0] === 'string') parts = [parent[0]];
+      continue;
+    }
+    const k = String(key);
+    if (k.startsWith('$')) continue;
+    const ruleField = (parent as Record<string, unknown>).field;
+    if (k === 'value' && typeof ruleField === 'string') parts = [ruleField];
+    else parts.push(k);
+  }
+  return parts.length > 0 ? parts.join('.') : undefined;
+}
+
+/** [#34199] Where the walk stands, spelled from the filter's root: `filter.$or[0].cb_market`. */
+function filterLocation(steps: readonly FilterWalkStep[]): string {
+  return steps.reduce<string>((at, { key }) => (typeof key === 'number' ? `${at}[${key}]` : `${at}.${key}`), 'filter');
+}
+
+/**
+ * [#34199] An unresolved `{ $record }` comparand met at resolution — see
+ * {@link isRecordReference}. `INVALID_FILTER` / 400, the code every comparand
+ * door answers with and the one the drivers answered this input with before;
+ * the message names the field, the `$record` path and where it sits.
+ * ⛔ Not `FILTER_TOKEN_UNRESOLVED`: that code's declared meaning is a
+ * vocabulary placeholder string the request carries no context for, and the
+ * `{ $record }` reference is a comparand object, not a placeholder string.
+ *
+ * Not exported, like the module's other `INVALID_FILTER` refusals: a caller
+ * reads `code` and `status`.
+ */
+class UnresolvedRecordReferenceError extends Error {
+  readonly status = 400;
+  readonly code = 'INVALID_FILTER' satisfies StandardErrorCode;
+
+  constructor(reference: Record<string, unknown>, steps: readonly FilterWalkStep[]) {
+    const field = fieldOfRecordReference(steps);
+    super(
+      `A { "$record": ${JSON.stringify(reference.$record)} } comparand ` +
+      `${field ? `on field "${field}" ` : ''}at ${filterLocation(steps)} reached the server unresolved, ` +
+      'and is refused rather than compared. { $record } reads the record being edited (a field of it, ' +
+      'or one lookup hop such as "account.cb_market"), and only the record picker of the form editing ' +
+      'that record can resolve it: the picker sends the referenced value in its place. No server path ' +
+      'knows which record a form is editing, so reading the reference as null, or comparing the object ' +
+      'as a literal, would answer rows the filter was written to exclude. Send the referenced value ' +
+      'itself, or write { $record } only in a lookup field\'s lookupFilters, where the picker resolves it.',
+    );
+    this.name = 'UnresolvedRecordReferenceError';
+  }
+}
+
 /** [#25808] The anchor with its instant pinned — see {@link isUnresolvedNowAnchor}. */
 function resolveNowAnchor(node: { $now: true; addDays?: unknown }, now: Date): Record<string, unknown> {
   const offset = node.addDays;
@@ -612,6 +718,17 @@ export function resolveFilterTokens<T>(
   // One instant for the whole tree (see FilterTokenResolutionContext.now).
   const pinned: FilterTokenResolutionContext = { ...ctx, now: ctx.now ?? new Date() };
 
+  // [#34199] Where the walk stands, read only to word a refusal. Pushed and
+  // popped around each descent; a throw abandons the whole walk, so it needs
+  // no unwinding.
+  const steps: FilterWalkStep[] = [];
+  const descend = (parent: unknown, key: string | number, child: unknown): unknown => {
+    steps.push({ parent, key });
+    const out = walk(child);
+    steps.pop();
+    return out;
+  };
+
   const walk = (node: unknown): unknown => {
     if (typeof node === 'string') {
       const cls = classifyFilterToken(node);
@@ -624,16 +741,18 @@ export function resolveFilterTokens<T>(
       if (resolved === undefined) throw new UnknownFilterTokenError(cls.token);
       return resolved;
     }
-    if (Array.isArray(node)) return node.map(walk);
+    if (Array.isArray(node)) return node.map((v, i) => descend(node, i, v));
     // [ADR-0139 D1] The leaf by reference, brand intact (see above).
     if (isReadableIds(node)) return node;
     if (node && typeof node === 'object') {
       // Dates and other class instances are comparands, not filter structure.
       if (node instanceof Date) return node;
+      // [#34199] A `{ $record }` reference never resolves on a server.
+      if (isRecordReference(node)) throw new UnresolvedRecordReferenceError(node, steps);
       // [#25808] The now anchor: its instant pinned, its offset kept.
       if (isUnresolvedNowAnchor(node)) return resolveNowAnchor(node, pinned.now!);
       const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = walk(v);
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = descend(node, k, v);
       return out;
     }
     return node;
