@@ -1222,9 +1222,8 @@ export function createObjectQLAdapterFactory(
       // by id, and return it. A single-use auth value is redeemed at most
       // once, even across processes sharing a database — the row goes back
       // only to the call whose own delete removed it (`removedByThisDelete`),
-      // and every other call is answered `null`, as the vendor's contract
-      // reads: "exactly one caller receives the row; subsequent racers
-      // receive `null`".
+      // and every other call is answered `null`, as better-auth's `consumeOne`
+      // contract requires.
       consumeOne: async <T>(
         { model, where }: { model: string; where: CleanedWhere[] },
       ): Promise<T | null> => {
@@ -1241,7 +1240,8 @@ export function createObjectQLAdapterFactory(
         // privileged accessor reads the stored row, and after the delete
         // there is none.
         await reattachInternalFieldsOnRead(internalFieldEngine, objectName, record);
-        if (!(await removedByThisDelete(dataEngine, objectName, record.id))) return null;
+        const deletion = dataEngine.delete(objectName, { where: { id: record.id } });
+        if (!(await removedByThisDelete(deletion, objectName))) return null;
         const norm = normaliseLegacyDates(model, record);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -1295,8 +1295,9 @@ export function createObjectQLAdapterFactory(
 }
 
 /**
- * Delete one row by id and answer whether THIS call removed it — the fact a
- * single-use redemption (`consumeOne`) is decided on.
+ * Answer whether a by-id delete of one `objectName` row (`deletion`, already
+ * issued) removed it for THIS call — the fact a single-use redemption
+ * (`consumeOne`) is decided on.
  *
  * The engine's by-id delete answers it one of three ways (`IDataEngine.delete`;
  * `packages/objectql/src/engine-delete-and-aggregate.ts`): `true` when its
@@ -1310,10 +1311,10 @@ export function createObjectQLAdapterFactory(
  * rather than read as either: a redemption the adapter cannot attribute to
  * this call is never handed to its caller.
  */
-async function removedByThisDelete(engine: IDataEngine, objectName: string, id: unknown): Promise<boolean> {
+async function removedByThisDelete(deletion: Promise<unknown>, objectName: string): Promise<boolean> {
   let answer: unknown;
   try {
-    answer = await engine.delete(objectName, { where: { id } });
+    answer = await deletion;
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code === 'RECORD_NOT_FOUND') return false;
     throw error;

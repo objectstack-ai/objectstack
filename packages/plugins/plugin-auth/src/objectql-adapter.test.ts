@@ -866,7 +866,7 @@ describe('a single-use auth value is redeemed at most once, even across processe
     expect(await stored(a.driver, 'race-both-paused')).toHaveLength(0);
   });
 
-  it('a redemption whose delete arrives after the value was redeemed receives null', async () => {
+  it('a redemption of a value already redeemed elsewhere receives null', async () => {
     const file = sharedFile();
     const bothRead = gate(2);
     let aDone!: Promise<unknown>;
