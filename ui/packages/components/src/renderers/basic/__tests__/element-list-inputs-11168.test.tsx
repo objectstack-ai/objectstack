@@ -338,3 +338,17 @@ describe('element:repeater `dataSource.sort` — the items the adapter is handed
     expect(inputsOf(REPEATER).has('sort')).toBe(false);
   });
 });
+
+describe('element:repeater — declines the total it never draws', () => {
+  it('every read carries `$count: false`, so the server skips its `count(*)`', async () => {
+    // The repeater prints rows and never a record count; a paged read without
+    // the opt-out pays for a total nothing on screen shows.
+    const find = mountRepeater({}, { limit: 5 });
+    await waitFor(() => expect(find).toHaveBeenCalled());
+    for (const query of queries(find)) {
+      expect(query.$count).toBe(false);
+      // Reachability: the binding's limit still pages the read.
+      expect(query.$top).toBe(5);
+    }
+  });
+});

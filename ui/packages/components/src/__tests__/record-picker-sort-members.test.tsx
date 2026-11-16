@@ -147,3 +147,18 @@ describe('element:record_picker — the `sort` MEMBER shape the renderer reads (
     expect(await orderbyOf({}, { sort: flatSort })).toBeUndefined();
   });
 });
+
+describe('element:record_picker — declines the total it never draws', () => {
+  it('SUBJECT — the paged read carries `$count: false`, so the server skips its `count(*)`', async () => {
+    // The picker draws the rows it was handed and never a record count; a
+    // read without the opt-out pays for a total nothing on screen shows.
+    const adapter = makeAdapter();
+    renderPicker({}, adapter, { object: 'account' });
+    await waitFor(() => expect(adapter.find).toHaveBeenCalled());
+    const [object, query] = adapter.find.mock.calls[0] as [string, Record<string, unknown>];
+    expect(object).toBe('account');
+    expect(query.$count).toBe(false);
+    // Reachability: it is still a paged read, the case the server counts.
+    expect(query.$top).toBe(50);
+  });
+});
