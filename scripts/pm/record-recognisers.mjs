@@ -3588,8 +3588,7 @@ export async function selfTest() {
       const ONE = (rows, card = CARD(34013)) => R([{ card, rows }]);
       const DELEGATE = (r, seat = 'domain:skills#2', session = T) => read(KNOCK(seat, session), r).signature;
       const BASE = [CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, OWN(TEMPLATE))];
-      const skillMd = readFileSync(fileURLToPath(new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url)), 'utf8');
-      t('⭐ writer and reader one spelling: the claim template carries exactly ONE `Thread session:` line, a backticked session placeholder right after the key — and the reader reads that spelling with a real id', skillMd.split('\n').filter((l) => /^Thread session:/u.test(l)).length === 1 && /^Thread session: `session_<id>` \(/mu.test(skillMd) && claimThreadSession(TEMPLATE) === T && claimThreadSession(`${TEMPLATE}  `) === T);
+      t('⭐ the template\'s spelling, with a real id, reads its session — the key starting the line, the backticked id, nothing after it but blanks', claimThreadSession(TEMPLATE) === T && claimThreadSession(`${TEMPLATE}  `) === T && claimThreadSession(`Claim: x\r\n${TEMPLATE}\r\nSeat: y`) === T);
       t('⭐ the template spelling JOINS the roster: the card thread ringing under its seat\'s signature reads `listed`, via the claim it was named on', (() => { const s = DELEGATE(ONE(BASE)); return s.state === 'listed' && s.seat === 'domain:skills#2' && s.session === T && s.via === 'claim on #34013 (comment 1) Thread session'; })());
       const OTHER = {
         'a bare id': [`Session: \`${S2}\``, `Thread session: ${T}`],
