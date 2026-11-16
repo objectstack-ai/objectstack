@@ -554,7 +554,10 @@ describe('useBulkExecutor', () => {
       expect(result.current.result?.succeeded).toBe(5);
     });
 
-    it('attributes a failed aggregate call to every id with the real error — no per-record re-dispatch', async () => {
+    // [objectstack#34173] A rejection is ONE outcome for the selection, not
+    // the same error attributed to every id: the one call cannot say which
+    // rows it wrote before it stopped.
+    it('a failed aggregate call is one outcome for the selection — no per-id error, no per-record re-dispatch', async () => {
       const runAggregate = vi.fn(async () => {
         throw new Error('zip generation failed');
       });
@@ -568,12 +571,41 @@ describe('useBulkExecutor', () => {
 
       expect(runAggregate).toHaveBeenCalledTimes(1);
       expect(runAction).not.toHaveBeenCalled();
+      expect(result.current.result?.aggregateRejection).toEqual({ message: 'zip generation failed' });
+      expect(result.current.result?.errors).toEqual([]);
       expect(result.current.result?.succeeded).toBe(0);
-      expect(result.current.result?.failed).toBe(2);
-      expect(result.current.result?.errors).toEqual([
-        { id: 'a', error: 'zip generation failed' },
-        { id: 'b', error: 'zip generation failed' },
-      ]);
+    });
+
+    it('the rejection reports its producer-marked userMessage, not its message', async () => {
+      const runAggregate = vi.fn(async () => {
+        throw Object.assign(new Error('HOOK_ABORTED: deal_b is closed_won'), {
+          userMessage: 'Deal B is Closed Won and was not moved.',
+        });
+      });
+      const { result } = renderHook(() =>
+        useBulkExecutor({ resource: 'opportunity', dataSource: ds(), runAggregate }));
+
+      await act(async () => {
+        await result.current.run(agg(), [{ id: 'a' }, { id: 'b' }], {});
+      });
+
+      expect(result.current.result?.aggregateRejection).toEqual({
+        message: 'Deal B is Closed Won and was not moved.',
+      });
+      expect(result.current.result?.errors).toEqual([]);
+    });
+
+    it('a resolved aggregate call carries no rejection', async () => {
+      const runAggregate = aggregateStub();
+      const { result } = renderHook(() =>
+        useBulkExecutor({ resource: 'device', dataSource: ds(), runAggregate }));
+
+      await act(async () => {
+        await result.current.run(agg(), [{ id: 'a' }, { id: 'b' }], {});
+      });
+
+      expect(result.current.result?.aggregateRejection).toBeUndefined();
+      expect(result.current.result).toMatchObject({ total: 2, succeeded: 2, failed: 0, errors: [] });
     });
 
     it('fails loudly when no runAggregate is wired instead of degrading to per-record fan-out', async () => {
@@ -586,8 +618,8 @@ describe('useBulkExecutor', () => {
       });
 
       expect(runAction).not.toHaveBeenCalled();
-      expect(result.current.result?.failed).toBe(2);
-      expect(result.current.result?.errors[0].error).toContain('no dispatcher wired');
+      expect(result.current.result?.aggregateRejection?.message).toContain('no dispatcher wired');
+      expect(result.current.result?.errors).toEqual([]);
     });
 
     it('retry() refuses aggregate rows — the whole-run re-run is the retry', async () => {

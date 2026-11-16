@@ -122,6 +122,48 @@ const CUSTOM_HEADERS_CREDENTIAL: DropReason = {
 };
 
 /**
+ * The HTTP methods a webhook may no longer deliver with, upper-cased.
+ *
+ * `GET` left both authoring surfaces (the spec's `WebhookSchema.method` and the
+ * `sys_webhook` `method` select — ADR-0049 enforce-or-remove): every delivery
+ * sends the event envelope as its request body and a GET carries none, so no
+ * GET webhook ever delivered. A row stored with `get` before the option left
+ * still loads, and is PARKED here rather than dispatched.
+ */
+const RETIRED_WEBHOOK_METHODS: ReadonlySet<string> = new Set(['GET']);
+
+/**
+ * The ADR-0112 pair a retired-method park carries: the standard-catalog
+ * member for "this row content is not acceptable", judged at delivery — the
+ * pair `webhook-legacy-cleartext.ts` carries on its own delivery door. (The
+ * save door refusing the same value is the engine's record validator, which
+ * answers with its own code.) A standard-catalog code needs no ledger row.
+ */
+const RETIRED_METHOD_PARK_CODE = 'VALIDATION_ERROR';
+const RETIRED_METHOD_PARK_STATUS = 400;
+
+/**
+ * [#8069 park path] The reason a subscription whose stored method is retired
+ * is parked with, or `undefined` for a deliverable method. It names the method
+ * and the fix, and says the method is left as stored: converting it would
+ * start sending another method to an endpoint the administrator configured
+ * for GET, so no conversion is made, here or anywhere.
+ */
+function retiredMethodParkReason(name: string, method: string): string | undefined {
+    if (!RETIRED_WEBHOOK_METHODS.has(method)) return undefined;
+    return (
+        `[${RETIRED_METHOD_PARK_CODE}/${RETIRED_METHOD_PARK_STATUS}] webhook '${name}' is stored with HTTP method `
+        + `${method}, which a webhook can no longer use: every delivery sends the event as its request body and a `
+        + `${method} request carries none, so this event was NOT delivered — recorded here rather than sent. `
+        + 'This row was never sent and cannot be redelivered. The stored method is left exactly as it is: it is '
+        + 'never converted, because sending another method to an endpoint configured for '
+        + `${method} would be a different request. Fix: edit the webhook and set its method to POST, PUT, PATCH `
+        + 'or DELETE, whichever the endpoint accepts a body on; the subscription re-arms at the next periodic '
+        + 'refresh, and later events are delivered normally.'
+    );
+}
+
+/**
  * Optional logger interface (subset of console / kernel logger).
  */
 interface OptionalLogger {
@@ -333,6 +375,13 @@ export class AutoEnqueuer {
      * is deleted and re-created reports again.
      */
     private readonly organizationRefusalReported = new Set<string>();
+    /**
+     * Webhook ids whose retired-method park has been said out loud
+     * ({@link reportRetiredMethod}) — the #8022 say-once shape: once per
+     * parked subscription, again after its method is fixed and it breaks
+     * again. Pruned on refresh with the two ledgers above.
+     */
+    private readonly retiredMethodReported = new Set<string>();
     /** [ADR-0131 D2/D6] The declared-webhook reader, when the host binds one. */
     private readonly declared?: DeclaredWebhookReader;
     /** Self-heal subscription on the activation ledger — bound only with {@link declared}. */
@@ -499,6 +548,16 @@ export class AutoEnqueuer {
         for (const row of rows) {
             const sub = this.parseRow(row);
             if (!sub) continue;
+            // A row parked for its retired method (see `parseRow`) is never
+            // sent, so neither credential is resolved for it: a parked row
+            // carries no secret and no header map (the #8069 park rule), and a
+            // decrypt for a subscription that cannot deliver buys nothing.
+            if (sub.parkedReason) {
+                this.reportRetiredMethod(sub);
+                add(sub);
+                continue;
+            }
+            this.retiredMethodReported.delete(sub.id);
             // [#7799, #7986] Neither credential is in the row we just read —
             // the signing key and the custom header map both live encrypted in
             // `sys_secret`, and this read path returns only a mask. Dereference
@@ -521,7 +580,11 @@ export class AutoEnqueuer {
         // deactivated. Otherwise the set grows for the life of the process, and
         // a webhook turned off while broken and later turned back on still
         // broken would have its first report suppressed as a repeat.
-        if (this.droppedForSecret.size > 0 || this.organizationRefusalReported.size > 0) {
+        if (
+            this.droppedForSecret.size > 0
+            || this.organizationRefusalReported.size > 0
+            || this.retiredMethodReported.size > 0
+        ) {
             const live = new Set(rows.map((r) => String(r?.id)));
             for (const sub of declared.subscriptions) live.add(sub.id);
             for (const id of this.droppedForSecret) {
@@ -530,6 +593,9 @@ export class AutoEnqueuer {
             // [#13566] Same pruning for the organization-refusal ledger.
             for (const id of this.organizationRefusalReported) {
                 if (!live.has(id)) this.organizationRefusalReported.delete(id);
+            }
+            for (const id of this.retiredMethodReported) {
+                if (!live.has(id)) this.retiredMethodReported.delete(id);
             }
         }
 
@@ -629,6 +695,13 @@ export class AutoEnqueuer {
             definition_json: JSON.stringify({ timeoutMs: wh.timeoutMs }),
         });
         if (!sub) return null;
+        // `WebhookSchema` refuses a retired method, so a declaration parsed by
+        // `DeclaredWebhookSource` cannot carry one; a reader that hands one in
+        // anyway is parked by `parseRow` like a row, with no credentials.
+        if (sub.parkedReason) {
+            this.reportRetiredMethod(sub);
+            return sub;
+        }
         const { secret } = splitWebhookSecret(wh as Record<string, unknown>);
         const { headers } = splitWebhookHeaders(wh as Record<string, unknown>);
         if (secret) sub.secret = secret;
@@ -1047,6 +1120,34 @@ export class AutoEnqueuer {
         }
     }
 
+    /**
+     * Report a subscription parked for its retired method, once
+     * ({@link retiredMethodReported}). `error` by the AGENTS.md question: the
+     * webhook keeps reading `active: true` in Setup while no matching event
+     * is delivered. The consequence and the fix are the park reason itself,
+     * which each dead row carries too.
+     */
+    private reportRetiredMethod(sub: CachedSubscription): void {
+        if (this.retiredMethodReported.has(sub.id)) return;
+        this.retiredMethodReported.add(sub.id);
+        const message =
+            `[webhook-auto-enqueuer] webhook '${sub.name}' is PARKED: ${sub.parkedReason} Until then every matching `
+            + 'record change is recorded in sys_http_delivery as a dead row with 0 attempts carrying this reason, '
+            + 'while the row keeps reading active:true in Setup.';
+        const meta = {
+            id: sub.id,
+            webhook: sub.name,
+            method: sub.method,
+            code: RETIRED_METHOD_PARK_CODE,
+            status: RETIRED_METHOD_PARK_STATUS,
+        };
+        if (typeof this.logger?.error === 'function') {
+            this.logger?.error(message, undefined, meta);
+        } else {
+            this.logger?.warn?.(message, meta);
+        }
+    }
+
     private parseRow(row: any): CachedSubscription | null {
         if (!row?.id || !row?.url) return null;
         // `triggers` is now authored as a multi-select (stored as an array), but
@@ -1127,17 +1228,26 @@ export class AutoEnqueuer {
             }
         }
 
+        const name = (row.name as string) ?? row.id;
+        // Method is authored via a select whose option values are lowercased
+        // (post/put/…); upper-case here so delivery uses a canonical HTTP
+        // method regardless of whether the row was authored before or after
+        // the select change (legacy rows stored 'POST').
+        const method = String(row.method ?? defn.method ?? 'POST').toUpperCase();
+        // A method no webhook can deliver with (`GET`, stored before the select
+        // and the spec dropped it) PARKS the subscription: it stays cached, and
+        // each event it matches is written as a terminal `dead` row carrying
+        // this reason instead of being enqueued (#8069's path). The method
+        // itself is carried through unchanged — parking never rewrites it.
+        const parkedReason = retiredMethodParkReason(name, method);
         return {
             id: row.id as string,
-            name: (row.name as string) ?? row.id,
+            name,
             objectName: row.object_name ? String(row.object_name) : undefined,
             triggers,
             url: String(row.url),
-            // Method is authored via a select whose option values are lowercased
-            // (get/post/…); upper-case here so delivery uses a canonical HTTP
-            // method regardless of whether the row was authored before or after
-            // the select change (legacy rows stored 'POST').
-            method: String(row.method ?? defn.method ?? 'POST').toUpperCase(),
+            method,
+            ...(parkedReason ? { parkedReason } : {}),
             // `headers` and `secret` are both filled by attachCredentials()
             // from their encrypted columns, NOT read off the row — see #7799
             // (secret) and #7986 (headers).

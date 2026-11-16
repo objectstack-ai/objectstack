@@ -408,6 +408,18 @@ npx @objectstack/scenarios help                                      # the comma
   read relative to it (`account` → `democrm_account`), because a scaffolded project and the unmanaged install both
   refuse bare object names. Views, docs, positions and capabilities (`<ns>.<short>`) keep the prefix too (ADR-0150 bucket 1 and
   D7): the scorer reports each bare one as a failing Build check (`bare-name:<type>:<name>`); other items may be bare.
+- **Roll-ups over withheld data** (`rollupSourceCharges` in `orchestrate.ts`): every build that produces an artifact
+  (scratch and its iterate, template's iterate on what the app serves) is read by `@objectstack/lint`'s own
+  `security-rollup-source-unreadable` rule (`validateRollupSourceVisibility`), run on the artifact itself, never on
+  `os build`'s kept output. A finding is charged when its permission set is a persona's (`<namespace>_<persona id>`) and
+  the card's `hidden` for that persona withholds the roll-up's child object, or the child field the finding names (the
+  aggregated one, or the filtered one the set cannot read): the roll-up still shows that persona an aggregate of what
+  it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
+  in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
+  is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
+  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
+  charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
