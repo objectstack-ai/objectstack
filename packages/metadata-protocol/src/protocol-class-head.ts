@@ -12,8 +12,8 @@
  * `onMetadataMutation`, `emitMetadataMutation`, `attachMetadataMutationPubSub`,
  * `detachMetadataMutationPubSub`, `applyRemoteMetadataMutation`,
  * `resyncMetadataMutationPubSub` (#31722, written here beside its lane),
- * `onMetaItemPublished`, `getOverlayRepo` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`; `registerUninstallGuard` (#31232) was
+ * `onMetaItemPublished`, `getOverlayRepo` moved out of `protocol.ts` whole (split
+ * by #29998 and #30954); `registerUninstallGuard` (#31232) was
  * written here in the same shape, beside `registerUninstallCleanup`.
  *
  * A MOVE, not a redesign. `ProtocolClassHeadFacet` is a stateless facet over the host

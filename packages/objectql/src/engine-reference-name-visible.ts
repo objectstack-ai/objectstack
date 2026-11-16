@@ -64,7 +64,7 @@
  * at run time, and nothing re-exports it.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30415),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  */
@@ -268,7 +268,7 @@ async function servableNameField(
 /**
  * [#30020 codemod] The `formulaReadsReference` slot of the host
  * `ObjectQL#serveReferenceNames` hands {@link serveReferenceNames}: moved here
- * whole by `--hand-slots` of `scripts/codemod-split-engine.mjs`, and the slot
+ * whole by the codemod's `--hand-slots` (split by #30987), and the slot
  * names it.
  */
 export const formulaReadsReference: ReferenceNameVisibleHost['formulaReadsReference'] = (name, def, fields) => {

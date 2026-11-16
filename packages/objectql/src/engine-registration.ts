@@ -9,7 +9,7 @@
  * `registerDatasourceDef`, `applyExternalDriverFloor`, `listDatasourceDefs`,
  * `markDatasourceUnavailable`, `clearDatasourceUnavailable`,
  * `getDefaultDriverName`, `listUnavailableDatasources`, `assertWriteAllowed`
- * moved out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * moved out of `engine.ts` whole (split by #30012 and #30716).
  * `isExternalWriteForbidden` (#30370) was written here, beside the gate whose
  * verdict it answers.
  *
