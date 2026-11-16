@@ -76,9 +76,9 @@ page and a `slotted` / `html` / `react` page.
 `repeatFooter` repeat the page's own `header` / `footer` region on every sheet
 (refused without that region; off = printed once); `pageNumbers` prints sheet
 number and count; the page-break hints `repeatTableHeaders` (on by default)
-and `avoidBreakInside` (keep each block whole). Where sections may break
-between sheets, author one `record:details` block per section: a
-multi-section block moves to the next sheet whole.
+and `avoidBreakInside` (keep each block whole on one sheet when it fits).
+Where sections may break between sheets, author one `record:details` block
+per section: a multi-section block moves to the next sheet whole.
 
 Every block, at any depth, must draw all it declares, the same at any
 width: the containers `page:section` / `page:card` /
@@ -227,9 +227,8 @@ function Page() {
 });
 ```
 
-**Safety / availability.** `kind:'react'` executes author code in the app, so it is gated
-by the host capability `react-pages` — **OFF by default**: a react page's source is code
-every viewer runs. A deployment that trusts its authors turns it on server-side
+**Safety / availability.** `kind:'react'` is gated by the host capability
+`react-pages` — **OFF by default**: a react page's source is code every viewer runs. A deployment that trusts its authors turns it on server-side
 with `OS_PAGE_REACT_ENABLED=true`; while off, the page shows a "disabled" notice instead.
 `os build` does NOT lint react source — errors surface
 at render behind an error boundary, so always test a react page in the browser.
