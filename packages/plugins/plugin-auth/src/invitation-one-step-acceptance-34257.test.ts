@@ -846,11 +846,35 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     expect(oneStepSignInState({ ...ALLOWED, ...change })).toBe(reason);
   });
 
+  // The claim stores, written out: each standing-grant object and the reason
+  // its row answers. The module derives what it reads from its classification
+  // table; this list pins that table's claims, so a store moved out of the
+  // claims turns its cases below red.
+  const CLAIM_STORES: ReadonlyArray<readonly [StandingGrantObject, OneStepSignInState]> = [
+    ['sys_api_key', 'api_key'],
+    ['sys_oauth_consent', 'oauth_consent'],
+    ['sys_oauth_access_token', 'oauth_token'],
+    ['sys_oauth_refresh_token', 'oauth_token'],
+    ['sys_oauth_application', 'oauth_client'],
+    ['sys_device_code', 'device_code'],
+    ['sys_two_factor', 'second_factor'],
+    ['sys_sso_provider', 'sso_provider'],
+    ['sys_scim_connection_credential', 'scim_credential'],
+    ['sys_scim_user', 'idp_linked'],
+    ['sys_scim_subject', 'idp_linked'],
+    ['sys_scim_projection_grant', 'idp_linked'],
+    ['sys_scim_identity_tombstone', 'idp_linked'],
+  ];
+
+  it('the standing grants the door reads are the claim stores', () => {
+    expect(STANDING_GRANTS.map(({ object, reason }) => [object, reason])).toEqual(CLAIM_STORES.map(([o, r]) => [o, r]));
+  });
+
   const withGrant = (object: StandingGrantObject, reading: StandingGrantReading | undefined): Partial<OneStepAccountReading> => ({
     standingGrants: { ...ALLOWED.standingGrants, [object]: reading } as Record<StandingGrantObject, StandingGrantReading>,
   });
 
-  it.each(STANDING_GRANTS.map(({ object, reason }) => [object, reason] as const))(
+  it.each(CLAIM_STORES)(
     'the judge answers sign_in for a row of %s, as %s, and as grant_unreadable when it cannot be read or was not read',
     (object, reason) => {
       expect(oneStepSignInState({ ...ALLOWED, ...withGrant(object, { ok: true, held: true }) })).toBe(reason);
@@ -884,7 +908,7 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
   // One boot for every store: each store has its own invitation, account and
   // client address, so no window counts another's requests.
   let shared: Promise<Awaited<ReturnType<typeof boot>>> | undefined;
-  it.each(STANDING_GRANT_OBJECTS.map((object, i) => [object, i] as const))(
+  it.each(CLAIM_STORES.map(([object], i) => [object, i] as const))(
     'an unverified account holding a row of %s signs in as today, and is accepted once the row is gone',
     async (object, i) => {
       shared ??= boot();
