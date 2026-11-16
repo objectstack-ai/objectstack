@@ -4174,7 +4174,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   deferSummaryRecompute<T>(callback: () => Promise<T>): Promise<T> {
     // [#33795] The body is in `engine-summaries-and-expansion.ts` (see `SummariesAndExpansionHost`).
-    return SummariesAndExpansionFacet.deferSummaryRecompute.call(summariesAndExpansionHost.of(this), callback);
+    return SummariesAndExpansionFacet.deferSummaryRecompute.call(summariesAndExpansionHost.of(this), callback) as Promise<T>;
   }
 
   private initializeSummaryFields(object: string, record: any): any {

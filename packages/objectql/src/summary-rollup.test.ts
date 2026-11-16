@@ -790,3 +790,197 @@ describe('[#33795] grouped roll-up recompute', () => {
     expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 2, line_count: 1 });
   });
 });
+
+describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+  let driver: any;
+  /** Every write to an `inv` parent, in order: the recompute's own writes are the only ones these tests make. */
+  let parentWrites: Array<Record<string, unknown>>;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    driver = d.driver;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'region',
+      fields: {
+        name: { type: 'text' },
+        grand_total: { type: 'summary', summaryOperations: { object: 'inv', field: 'line_total', function: 'sum' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+      },
+    } as any);
+    parentWrites = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => { parentWrites.push({ ...ctx.input.data }); }, { object: 'inv' });
+  });
+
+  /** Three parents, two lines each: a=5, b=7, c=9. */
+  async function seed() {
+    const [a, b, c] = await engine.insert('inv', [{ name: 'A' }, { name: 'B' }, { name: 'C' }]) as any[];
+    const lines = await engine.insert('inv_line', [
+      { inv: a.id, amount: 1 }, { inv: b.id, amount: 2 }, { inv: c.id, amount: 3 },
+      { inv: a.id, amount: 4 }, { inv: b.id, amount: 5 }, { inv: c.id, amount: 6 },
+    ]) as any[];
+    parentWrites.length = 0;
+    return { a, b, c, lines };
+  }
+
+  const aggregateReads = (from: number) => log.slice(from).filter((e) => e.op === 'find' && e.object === 'inv_line').length;
+
+  it('a loop of single-row updates recomputes once, when the scope ends', async () => {
+    const { a, b, c, lines } = await seed();
+    const before = log.length;
+    const answer = await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+      // Nothing recomputed yet: every parent still holds its pre-batch value.
+      expect(parentWrites).toHaveLength(0);
+      return 'done';
+    });
+    expect(answer).toBe('done');
+    // One write per parent for the whole batch (outside a scope: one per row),
+    // and one grouped aggregate per summary field (outside: one per row per field).
+    expect(parentWrites).toHaveLength(3);
+    expect(aggregateReads(before)).toBe(2);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50, line_count: 2 });
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 70, line_count: 2 });
+    expect(storeFor('inv').get(c.id)).toMatchObject({ line_total: 90, line_count: 2 });
+  });
+
+  it('control: the same loop outside a scope recomputes after every row', async () => {
+    const { lines } = await seed();
+    for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+    expect(parentWrites).toHaveLength(6);
+  });
+
+  it('a hook reading the parent summary during the batch reads the value from before the batch', async () => {
+    const { a, lines } = await seed();
+    const seen: unknown[] = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      const parent = await engine.findOne('inv', { where: { id: a.id } } as any);
+      seen.push((parent as any)?.line_total);
+    }, { object: 'inv_line' });
+    const mine = lines.filter((l: any) => l.inv === a.id);
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of mine) await engine.update('inv_line', { amount: 100 }, { where: { id: line.id } });
+    });
+    // Both rows read 5, the pre-batch total; one by one, the second read 104.
+    expect(seen).toEqual([5, 5]);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 200 });
+  });
+
+  it('a nested call joins the open scope; the outermost one recomputes', async () => {
+    const { a, lines } = await seed();
+    await engine.deferSummaryRecompute(async () => {
+      await engine.deferSummaryRecompute(async () => {
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id } });
+      });
+      expect(parentWrites).toHaveLength(0);
+      await engine.update('inv_line', { amount: 0 }, { where: { id: lines[3].id } });
+    });
+    expect(parentWrites).toHaveLength(1);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 0, line_count: 2 });
+  });
+
+  it('a summary over a summary recomputes up the chain when the scope ends', async () => {
+    const [r] = await engine.insert('region', [{ name: 'R' }]) as any[];
+    const [a, b] = await engine.insert('inv', [{ name: 'A', region: r.id }, { name: 'B', region: r.id }]) as any[];
+    const lines = await engine.insert('inv_line', [{ inv: a.id, amount: 10 }, { inv: b.id, amount: 32 }]) as any[];
+    expect(storeFor('region').get(r.id).grand_total).toBe(42);
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: 1 }, { where: { id: line.id } });
+      expect(storeFor('region').get(r.id).grand_total).toBe(42);
+    });
+    expect(storeFor('region').get(r.id).grand_total).toBe(2);
+  });
+
+  it('a callback that throws: the rows that landed are recomputed, and its error is rethrown', async () => {
+    const { a, b, lines } = await seed();
+    const boom = new Error('row 2 refused');
+    await expect(engine.deferSummaryRecompute(async () => {
+      await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id } });
+      await engine.update('inv_line', { amount: 0 }, { where: { id: lines[1].id } });
+      throw boom;
+    })).rejects.toBe(boom);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 4 });
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 5 });
+  });
+
+  it('a recompute that fails after the callback resolved: ERR_SUMMARY_RECOMPUTE, written = the callback result', async () => {
+    const { a, b, lines } = await seed();
+    const update = driver.update;
+    driver.update = async (object: string, id: string, data: Record<string, unknown>) => {
+      if (object === 'inv' && id === a.id) throw new Error('parent write refused');
+      return update.call(driver, object, id, data);
+    };
+    let caught: any;
+    try {
+      await engine.deferSummaryRecompute(async () => {
+        for (const line of lines.slice(0, 2)) await engine.update('inv_line', { amount: 0 }, { where: { id: line.id } });
+        return { rows: 2 };
+      });
+    } catch (e) { caught = e; }
+    expect(caught?.code).toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(caught.written).toEqual({ rows: 2 });
+    expect(caught.failures.map((f: any) => [f.parentId, f.field]).sort()).toEqual([[a.id, 'line_count'], [a.id, 'line_total']]);
+    // The rows are stored, and the other parent was still recomputed.
+    expect(storeFor('inv_line').get(lines[0].id).amount).toBe(0);
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 5 });
+  });
+
+  it('inside a transaction the recompute runs before the commit', async () => {
+    const { a, lines } = await seed();
+    const events: string[] = [];
+    engine.registerHook('beforeUpdate', async () => { events.push('parent write'); }, { object: 'inv' });
+    driver.commit = async () => { events.push('commit'); };
+    await engine.transaction(async (trxCtx: any) => {
+      await engine.deferSummaryRecompute(async () => {
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id }, context: trxCtx } as any);
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[3].id }, context: trxCtx } as any);
+      });
+    });
+    expect(events).toEqual(['parent write', 'commit']);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 0 });
+  });
+
+  it('a write the callback started and did not await recomputes at once once the scope has ended', async () => {
+    const { a, lines } = await seed();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let late!: Promise<unknown>;
+    await engine.deferSummaryRecompute(async () => {
+      late = (async () => { await gate; await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id } }); })();
+    });
+    expect(parentWrites).toHaveLength(0);
+    release();
+    await late;
+    expect(parentWrites).toHaveLength(1);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 4 });
+  });
+
+  it('a scope with no roll-up write runs nothing', async () => {
+    const before = log.length;
+    await engine.deferSummaryRecompute(async () => { await engine.insert('region', { name: 'R' }); });
+    expect(parentWrites).toHaveLength(0);
+    expect(aggregateReads(before)).toBe(0);
+  });
+});
