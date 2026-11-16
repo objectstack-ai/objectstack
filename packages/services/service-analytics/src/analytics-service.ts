@@ -3144,6 +3144,10 @@ export class AnalyticsService implements IAnalyticsService {
             // measures, as the published gates read the cube after
             // `ensureCube`, so a minted measure is judged by the field it
             // aggregates.
+            // [ADR-0021] No undeclared SELECTION member reaches this branch
+            // now: `assertSelectionMembersDeclared` refuses it above, before
+            // the branch, so the minting described above no longer serves a
+            // caller-named measure on this path.
             const minted = mintCallerMeasures(q.measures, compiled.cube, compiled.cube.name, compiled.durations);
             const cube: Cube = Object.keys(minted).length > 0
               ? { ...compiled.cube, measures: { ...compiled.cube.measures, ...minted } }
@@ -3155,6 +3159,9 @@ export class AnalyticsService implements IAnalyticsService {
             // (`bogus`) is refused `INVALID_FIELD` / 400 with the same message,
             // where the evaluator grouped every row under one `null` key. One
             // that names a real field (`amount`) groups by it, here as there.
+            // [ADR-0021] An undeclared selection dimension no longer reaches
+            // this branch (`assertSelectionMembersDeclared` refuses it first);
+            // these gates now meet only a declared member over a stale field.
             this.assertMeasureFields(q, cube, Object.keys(compiled.cube.measures), true);
             this.assertDimensionFields(q, cube, Object.keys(compiled.cube.dimensions), true);
             // [#28257] …and the structured-JSON dimension door (#20807): a

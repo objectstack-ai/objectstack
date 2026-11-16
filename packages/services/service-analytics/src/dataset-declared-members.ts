@@ -39,7 +39,21 @@ export interface UndeclaredSelectionMember {
   member: string;
   /** The selection key it was found under. */
   param: Extract<AnalyticsRequestKey, 'measures' | 'dimensions' | 'timeDimensions'>;
+  /**
+   * True for a `timeDimensions` entry carrying a `dateRange` in a selection
+   * that asks for a `compareTo`: the date key of a comparison window. A
+   * dashboard compare widget lowers its date window into `timeDimensions`
+   * under the filtered field's name, so this is how a dashboard date-range
+   * field that is not also a declared dimension's name arrives here.
+   */
+  compareWindow?: boolean;
 }
+
+/** The selection shape {@link undeclaredSelectionMembers} reads. */
+export type JudgedSelection = Pick<DatasetSelection, 'measures' | 'dimensions'> & {
+  timeDimensions?: ReadonlyArray<{ dimension?: unknown; dateRange?: unknown } | null | undefined>;
+  compareTo?: unknown;
+};
 
 /**
  * The members `selection` names that `dataset` does not declare, in request
@@ -49,7 +63,7 @@ export interface UndeclaredSelectionMember {
  */
 export function undeclaredSelectionMembers(
   dataset: Pick<Dataset, 'measures' | 'dimensions'>,
-  selection: Pick<DatasetSelection, 'measures' | 'dimensions'> & { timeDimensions?: ReadonlyArray<{ dimension?: unknown } | null | undefined> },
+  selection: JudgedSelection,
 ): UndeclaredSelectionMember[] {
   const measures = new Set((dataset.measures ?? []).map((m) => m.name));
   const dimensions = new Set((dataset.dimensions ?? []).map((d) => d.name));
@@ -63,12 +77,34 @@ export function undeclaredSelectionMembers(
   };
   judge(Array.isArray(selection.measures) ? selection.measures : [], measures, 'measures');
   judge(Array.isArray(selection.dimensions) ? selection.dimensions : [], dimensions, 'dimensions');
-  judge(
-    (Array.isArray(selection.timeDimensions) ? selection.timeDimensions : []).map((td) => td?.dimension),
-    dimensions,
-    'timeDimensions',
-  );
+  const timeDimensions = Array.isArray(selection.timeDimensions) ? selection.timeDimensions : [];
+  judge(timeDimensions.map((td) => td?.dimension), dimensions, 'timeDimensions');
+  if (selection.compareTo != null) {
+    for (const u of undeclared) {
+      if (u.param === 'timeDimensions' && timeDimensions.some((td) => td?.dimension === u.member && td?.dateRange != null)) {
+        u.compareWindow = true;
+      }
+    }
+  }
   return undeclared;
+}
+
+/**
+ * The remedy sentence for an undeclared comparison-window date key, or `''`
+ * when no undeclared member is one. A bare "not declared" does not tell a
+ * dashboard author what to change: the key is the dashboard date-range field,
+ * which the dashboard names against the object, not against the dataset.
+ */
+export function compareWindowRemedy(undeclared: readonly UndeclaredSelectionMember[]): string {
+  const keys = undeclared.filter((u) => u.compareWindow).map((u) => u.member);
+  if (keys.length === 0) return '';
+  const quoted = keys.map((k) => `"${k}"`).join(', ');
+  return ` ${keys.length === 1 ? 'The dimension' : 'The dimensions'} ${quoted} ${keys.length === 1 ? 'is' : 'are'} the date key of `
+    + 'this query\'s comparison window (`compareTo`): a dashboard compare widget lowers its date window into '
+    + '`timeDimensions` under the filtered field\'s name, which is usually the dashboard date-range field. '
+    + `Declare a date dimension named ${quoted} on the dataset (over that field), or set the widget's `
+    + '`compareTo.dimension` to a declared date dimension (the widget then compares only over a window its '
+    + 'own filter states on that dimension).';
 }
 
 /** `measure "x", dimension "y"` — the members a refusal names, in request order. */
@@ -97,7 +133,9 @@ export function listMemberNames(names: readonly string[]): string {
  * dataset does not declare: `INVALID_FIELD` / 400 (`invalidMemberError`,
  * `member` / `param` / `cube` of the first undeclared entry), naming every
  * undeclared member, the members THIS caller may use, and the remedy — select
- * a declared name, or declare the member on the dataset.
+ * a declared name, or declare the member on the dataset. When the member is a
+ * comparison window's date key ({@link compareWindowRemedy}), the refusal also
+ * names the compare widget's remedy.
  */
 export function undeclaredMembersRefusal(
   dataset: Pick<Dataset, 'name' | 'measures' | 'dimensions'>,
@@ -110,7 +148,8 @@ export function undeclaredMembersRefusal(
       + 'answers only the members its dataset declares, by their declared names. '
       + `Measures you may use: ${listMemberNames(usableDeclaredMembers(dataset.measures, admitted?.measures))}. `
       + `Dimensions you may use: ${listMemberNames(usableDeclaredMembers(dataset.dimensions, admitted?.dimensions))}. `
-      + 'Use one of these, or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.',
+      + 'Use one of these, or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.'
+      + compareWindowRemedy(undeclared),
     { member: first.member, param: first.param, cube: dataset.name },
   );
 }

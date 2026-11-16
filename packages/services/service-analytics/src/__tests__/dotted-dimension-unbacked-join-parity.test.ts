@@ -29,7 +29,9 @@
  * `bogus` are refused by the closed-member rule on every face, ahead of the
  * relationship-path gate, with one message. That gate stays pinned through
  * what still reaches it: a `runtimeFilter` member (filter keys are fields, not
- * members) and the cube faces further down this file.
+ * members) and the cube faces further down this file. The served case stays
+ * pinned as a DECLARED dimension over the backed path (`account_name`, which
+ * reads `account.name`), on both live strategies.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -65,6 +67,17 @@ const shape = {
 const UNBACKED = DatasetSchema.parse({ name: 'os28258_deals', ...shape });
 /** Declares `account`, and nothing past it. */
 const BACKED = DatasetSchema.parse({ name: 'os28258_deals_by_account', include: ['account'], ...shape });
+/**
+ * Declares `account` AND a dimension over it (`account_name` reads
+ * `account.name`): the backed relationship path, spelled the way a dataset
+ * query may select it — by its declared name.
+ */
+const BACKED_DECLARED = DatasetSchema.parse({
+  name: 'os28258_deals_by_account_name',
+  include: ['account'],
+  ...shape,
+  dimensions: [...shape.dimensions, { name: 'account_name', field: 'account.name', type: 'string' }],
+});
 
 type Face = 'native' | 'objectql' | 'preview';
 const FACES: readonly Face[] = ['native', 'objectql', 'preview'];
@@ -99,6 +112,11 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
       undefined,
       face === 'preview' ? { previewDrafts: true } : undefined,
     );
+
+  const groupsOf = (rows: unknown, dimension: string) =>
+    (rows as Array<Record<string, unknown>>)
+      .map((r) => ({ key: r[dimension], total: Number(r.total) }))
+      .sort((a, b) => String(a.key).localeCompare(String(b.key)));
 
   beforeAll(async () => {
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
@@ -187,6 +205,21 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
     }
     expect(refusals[1].message).toBe(refusals[0].message);
     expect(refusals[2].message).toBe(refusals[0].message);
+  });
+
+  it("CONTROL: a DECLARED dimension over the backed 'account.name' serves on both live strategies, the same groups", async () => {
+    const expected = [{ key: 'Acme', total: 130 }, { key: 'Globex', total: 50 }];
+    for (const face of ['native', 'objectql'] as const) {
+      const result = await ask(face, BACKED_DECLARED, { dimensions: ['account_name'], measures: ['total'] });
+      expect(groupsOf(result.rows, 'account_name'), face).toEqual(expected);
+    }
+    // [#28555] The preview joins nothing, so it refuses the backed path with
+    // its own refusal — neither this gate's nor the closed-member rule's.
+    const err = await refusalOf(ask('preview', BACKED_DECLARED, { dimensions: ['account_name'], measures: ['total'] }));
+    expect(err.code, err.message).toBe('INVALID_FIELD');
+    expect(err.status).toBe(400);
+    expect(err.message).not.toContain('which the dataset does not declare');
+    expect(err.message).not.toContain('does not declare the dimension');
   });
 
   it("CONTROL: a measure mistake beside an unbacked dotted dimension is answered about the measure on every face", async () => {

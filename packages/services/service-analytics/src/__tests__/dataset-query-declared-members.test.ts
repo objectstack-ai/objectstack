@@ -18,7 +18,8 @@
  * Unchanged, and pinned as controls: every declared member is served; a
  * declared member over a field the caller may not read still reaches the
  * field gate (403); a caller who may not read the object at all gets the read
- * refusal (403), never a member list; the cube door (`query()`, not a
+ * refusal (403), and one the read gate cannot decide for gets its 503, never
+ * a member list either way; the cube door (`query()`, not a
  * dataset) still mints `count`.
  */
 
@@ -44,6 +45,7 @@ const OBJECTS: Record<string, { fields: Record<string, Record<string, unknown>> 
     },
   },
   crm_locked: { fields: { id: { type: 'text' }, amount: { type: 'number' } } },
+  crm_flaky: { fields: { id: { type: 'text' }, amount: { type: 'number' } } },
 };
 
 const PIPELINE: Dataset = DatasetSchema.parse({
@@ -70,12 +72,24 @@ const LOCKED: Dataset = DatasetSchema.parse({
   measures: [{ name: 'total', label: 'Total', aggregate: 'sum', field: 'amount' }],
 });
 
+/** The read gate cannot reach a verdict on `crm_flaky` for u_me (its lookup throws: the 503 answer). */
+const FLAKY: Dataset = DatasetSchema.parse({
+  name: 'flaky_ds',
+  label: 'Flaky',
+  object: 'crm_flaky',
+  dimensions: [],
+  measures: [{ name: 'total', label: 'Total', aggregate: 'sum', field: 'amount' }],
+});
+
 const nativeSql = () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false });
 
 /** u_me may not read `crm_locked` nor the `margin` field; u_admin reads everything. */
 const security = {
   getReadFilter: async () => undefined,
-  canReadObject: (object: string, ctx?: ExecutionContext) => !(ctx?.userId === 'u_me' && object === 'crm_locked'),
+  canReadObject: (object: string, ctx?: ExecutionContext) => {
+    if (ctx?.userId === 'u_me' && object === 'crm_flaky') throw new Error('permission store unreachable');
+    return !(ctx?.userId === 'u_me' && object === 'crm_locked');
+  },
   getReadableFields: async (object: string, ctx?: ExecutionContext) => {
     const all = Object.keys(OBJECTS[object]?.fields ?? {});
     return ctx?.userId === 'u_me' ? all.filter((f) => f !== 'margin') : all;
@@ -179,11 +193,59 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(reads).toEqual([]);
   });
 
+  it('CONTROL: a caller the read gate cannot decide for gets that gate\'s 503, never a member list', async () => {
+    const { service, reads } = await boot();
+    const e = await service.queryDataset(FLAKY, { measures: ['count'] } as never, ME).catch((err) => err);
+    expect(e).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(messageOf(e)).not.toContain('Measures you may use');
+    expect(messageOf(e)).not.toContain('total');
+    expect(reads).toEqual([]);
+  });
+
   it('CONTROL: a declared member over a field the caller may not read still reaches the field gate (403)', async () => {
     const { service, reads } = await boot();
     const e = await service.queryDataset(PIPELINE, { measures: ['margin_total'] } as never, ME).catch((err) => err);
     expect(e).toMatchObject({ status: 403 });
     expect(reads).toEqual([]);
+  });
+
+  it('a comparison window over an undeclared date key names the compare widget\'s remedy', async () => {
+    // A dashboard compare widget lowers the dashboard date-range filter into
+    // `timeDimensions` under the filtered FIELD's name (`closed_on`), which
+    // this dataset declares only as `close_month`.
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        {
+          measures: ['revenue'],
+          timeDimensions: [{ dimension: 'closed_on', dateRange: ['2026-01-01', '2026-03-31'] }],
+          compareTo: { kind: 'previousPeriod' },
+        } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'closed_on', param: 'timeDimensions', cube: 'pipeline' });
+    expect(messageOf(e)).toContain('The dataset "pipeline" does not declare the dimension "closed_on".');
+    expect(messageOf(e)).toContain(
+      'The dimension "closed_on" is the date key of this query\'s comparison window (`compareTo`)',
+    );
+    expect(messageOf(e)).toContain('Declare a date dimension named "closed_on" on the dataset (over that field)');
+    expect(messageOf(e)).toContain("or set the widget's `compareTo.dimension` to a declared date dimension");
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: the same undeclared time dimension with no comparison gets no compare-widget remedy', async () => {
+    const { service } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        { measures: ['revenue'], timeDimensions: [{ dimension: 'closed_on', dateRange: ['2026-01-01', '2026-03-31'] }] } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'closed_on' });
+    expect(messageOf(e)).not.toContain('comparison window');
   });
 
   it('CONTROL: every declared measure and dimension, a declared time dimension included, is served', async () => {
