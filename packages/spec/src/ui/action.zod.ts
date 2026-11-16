@@ -835,12 +835,93 @@ const ACTION_HISTORY =
  * and `preflight.fields` share, so the param dialog's preflight panel and the
  * one-shot result dialog draw from one vocabulary. The renderer contract of
  * each member is on `resultDialog`.
+ *
+ * `table` is a FIELD format only: it needs the field's own `columns`, so the
+ * dialog-level default and a column's cell take {@link actionAnswerScalarFormat},
+ * the set derived from this one with `table` excluded (#34391).
  */
-const ACTION_ANSWER_FIELD_FORMATS = ['qrcode', 'code-list', 'secret', 'text', 'json'] as const;
+const ACTION_ANSWER_FIELD_FORMATS = ['qrcode', 'code-list', 'secret', 'text', 'json', 'table'] as const;
+
+const ActionAnswerFieldFormatSchema = z.enum(ACTION_ANSWER_FIELD_FORMATS);
+
+/**
+ * The field set minus `table`: the formats of `resultDialog.format` (a default
+ * carries no `columns`) and of a table column's cell (a table does not nest).
+ * Derived with `.exclude`, never a second hand-written list, so a format added
+ * to the field set reaches both. `subject` names the slot in the refusal.
+ */
+function actionAnswerScalarFormat(tableRefusal: string) {
+  return ActionAnswerFieldFormatSchema.exclude(['table'], {
+    error: (issue) => (issue.input === 'table' ? tableRefusal : undefined),
+  });
+}
+
+/**
+ * One column of a `table` field: a dot `path` into ONE element of the array,
+ * an optional header `label`, an optional cell `format`. It reuses the field
+ * row's alias map where it applies.
+ */
+const ActionAnswerTableColumnSchema = strictObject({
+  surface: 'this table column',
+  history: ACTION_HISTORY,
+  aliases: { key: 'path', field: 'path', name: 'path', title: 'label', display: 'format', render: 'format' },
+}, {
+  path: z.string().describe('Dot path into one element of the array (e.g. "email", "result.reason").'),
+  label: I18nLabelSchema.optional().describe('Column header. Omitted, the header is the column `path`.'),
+  format: actionAnswerScalarFormat(
+    '`table` is a field format, not a cell format: a cell draws one value of one row, and a table does not '
+    + 'nest. Drop `format` (a cell whose value is an object or an array is drawn as compact JSON text), or '
+    + "write `format: 'json'`.",
+  ).optional().describe('Cell format: the field formats minus `table`. Omitted, a scalar draws as `text`; a value that is an object or an array draws as compact JSON text.'),
+});
+
+/**
+ * [#34391] The cross-key refusals of one answer row — `columns` belongs to
+ * `format: 'table'` and to nothing else, both ways round:
+ *
+ *  1. `columns` beside any other `format` (or none — the dialog-level default
+ *     is never `table`) would parse clean and never be read.
+ *  2. `format: 'table'` without `columns` is refused, NOT defaulted to the
+ *     element's keys: the column list is the contract the console draws
+ *     exactly, and guessing keys out of a JSON array is the consumer dialect
+ *     Prime Directive 12 forbids. An empty list draws no column, so it is
+ *     refused too.
+ */
+function refuseTableColumnContradictions(
+  row: { format?: string; columns?: unknown[] },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (row.format === 'table') {
+    if (row.columns === undefined || row.columns.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['columns'],
+        message:
+          "`format: 'table'` draws each element of the array at `path` as one row, and needs `columns` to "
+          + 'say which values of an element are its cells, in order: the console draws exactly the listed '
+          + "columns and never guesses them from the element's keys. Add `columns: [{ path, label }]`, one "
+          + 'entry per cell.',
+      });
+    }
+    return;
+  }
+  if (row.columns !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['columns'],
+      message:
+        "`columns` lists the cells of a `format: 'table'` field, and this field's format is "
+        + (row.format === undefined ? 'not `table` (the dialog-level default is never `table`)' : `\`${row.format}\``)
+        + ', so the list would parse clean and never be read. Write '
+        + "`format: 'table'` on this field to draw the array as rows, or drop `columns`.",
+    });
+  }
+}
 
 /**
  * One row of the fields an action shows from a server answer: a dot `path`
- * into the answer, an optional `label`, an optional `format` override.
+ * into the answer, an optional `label`, an optional `format` override, and —
+ * for `format: 'table'` only — its `columns`.
  * `resultDialog.fields` and `preflight.fields` are built from this one row
  * (#31840), so the row's keys, aliases and format set cannot drift between
  * them; each caller names its own surface and what `path` is read against.
@@ -853,8 +934,9 @@ function actionAnswerFieldRow(surface: string, pathDescription: string) {
   }, {
     path: z.string().describe(pathDescription),
     label: I18nLabelSchema.optional(),
-    format: z.enum(ACTION_ANSWER_FIELD_FORMATS).optional().describe('Per-field format override.'),
-  });
+    format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override.'),
+    columns: z.array(ActionAnswerTableColumnSchema).optional().describe("The cells of a `format: 'table'` field, in order — required by `table`, refused beside any other format."),
+  }).superRefine(refuseTableColumnContradictions);
 }
 
 export const ActionAiSchema = strictObject({
@@ -1722,6 +1804,18 @@ const actionObject = () => strictObject({
    *   toggle and copy button.
    * - `text` — plain text with copy.
    * - `json` — pretty-printed JSON in a monospace block.
+   * - `table` (#34391) — value must be an array; each element is one row and
+   *   each entry of the field's `columns` one cell, in `columns` order. The
+   *   header of a column is its `label`, falling back to its `path`. A cell
+   *   reads the column's dot `path` in the element and draws in the column's
+   *   `format` (omitted: a scalar as `text`); a cell whose value is an object
+   *   or an array, and every cell of an element that is not an object, draws
+   *   as compact JSON text. `[]` draws the header row over an empty-state
+   *   line. A value that is missing is skipped like any other field's, and a
+   *   value that is not an array draws as `json`, as `code-list` does.
+   *   `table` is a field format only: it requires `columns` (never guessed
+   *   from the element's keys), `columns` is refused beside any other format,
+   *   and neither the dialog-level `format` nor a cell takes `table`.
    *
    * The dialog SHOULD set `refreshAfter` to true on close (separate from
    * the existing `refreshAfter` flag, which fires immediately on success).
@@ -1734,11 +1828,15 @@ const actionObject = () => strictObject({
     title: I18nLabelSchema.optional(),
     description: I18nLabelSchema.optional(),
     acknowledge: I18nLabelSchema.optional().describe('Acknowledge button label, e.g. "I have saved this"'),
-    format: z.enum(ACTION_ANSWER_FIELD_FORMATS).optional().describe('Default format for fields without their own format. Defaults to json when omitted.'),
+    format: actionAnswerScalarFormat(
+      "`table` is a per-field format only: the dialog-level `format` is the default for fields without "
+      + 'their own, and a default carries no `columns`. Write `format: \'table\'` with its `columns` on the '
+      + 'field that holds the array.',
+    ).optional().describe('Default format for fields without their own format: any field format but `table`, which needs the field\'s own `columns`. Defaults to json when omitted.'),
     fields: z.array(actionAnswerFieldRow(
       'this result dialog field',
       'Dot path into result.data (e.g. "totpURI", "client.client_secret").',
-    )).optional().describe('Which fields from result.data to render. Omit to dump full JSON.'),
+    )).optional().describe('Which fields from result.data to render. Omit to dump full JSON. A field with `format: \'table\'` draws an array of objects as rows, one cell per entry of its `columns`, in order; the columns are never guessed from the elements\' keys.'),
   }).optional().describe('Render API response in a one-shot reveal dialog (suppresses successMessage when set).'),
   /**
    * [#31840] Preflight read — one same-origin `GET` the param dialog sends
@@ -1852,7 +1950,7 @@ const actionObject = () => strictObject({
     fields: z.array(actionAnswerFieldRow(
       'this preflight field',
       'Dot path into the selected answer (e.g. "findings", "verdict.summary").',
-    )).optional().describe('Which values of the selected answer the panel shows, in `resultDialog.fields`\' row and format set. Omit to show the selected answer as JSON.'),
+    )).optional().describe('Which values of the selected answer the panel shows, in `resultDialog.fields`\' row and format set — `table` and its `columns` included, drawn by the same renderer contract. Omit to show the selected answer as JSON.'),
     seed: z.array(strictObject({
       surface: 'this preflight seed',
       history: ACTION_HISTORY,
