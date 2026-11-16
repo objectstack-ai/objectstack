@@ -514,9 +514,10 @@ describe.each([
 // slot. M1: a package's row and its customization pair's undeclared row are
 // one holder, whichever was saved (and so hydrated) last; the pair is never
 // named. M2: a dependent's added member over a base that holds the name only
-// as a stored row is the dependent's alone at that member (#28802); the
-// base's row of another member is no second holder there, and `/layers` does
-// not move. Both save orders, before and after a reboot. Measured on this
+// as a stored row is no second holder (#28802); the base's row of another
+// member is no second holder there either, so nothing is refused. [#33210 (c)]
+// The read naming no package reads the base's address there, as for a base
+// that ships the name (404). Both save orders, before and after a reboot. Measured on this
 // branch before the fix (1ab9370442): M1 refused 409 naming the base and its
 // pair in one save order; M2 refused 409 naming the base and the dependent.
 // On `main` 89d7bef033 neither refuses, and both answer as below.
@@ -609,21 +610,36 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
     const A = 'com.qa.mailrowbase';
     const D = 'com.qa.mailrowaddon';
     const template = (locale: string, subject: string) => ({ label: subject, locale, subject, bodyHtml: `<p>${subject}</p>` });
+    // [#33210 (c), #28802 R2] …and one answer, whether the base holds the
+    // name as a stored row or ships it: the read naming no package at the
+    // dependent's added member reads the base's address, which holds no
+    // `fr-FR` (404), on the plain read, /layers and the execution face; the
+    // dependent's own address serves its row. FROM (`main` 66f6638fa4): with a
+    // row-held base all three served the dependent's row (the M2 answer of
+    // #32607), while with a shipped base all three answered 404.
     it.each([
-        { order: 'A saved first', saved: [A, D] },
-        { order: 'D saved first', saved: [D, A] },
-    ])('M2, $order: the dependent\'s added `fr-FR` over a row-held base is served as the dependent\'s on the plain read, /layers and the execution face, before and after a reboot', async ({ saved }) => {
+        { order: 'row-held base, A saved first', ships: false, saved: [A, D] },
+        { order: 'row-held base, D saved first', ships: false, saved: [D, A] },
+        { order: 'shipped base (CONTROL)', ships: true, saved: [D] },
+    ])('M2, $order: the dependent\'s added `fr-FR` answers 404 on the plain read, /layers and the execution face naming no package, and is served at its own address, before and after a reboot', async ({ ships, saved }) => {
         const file = freshFile();
-        const manifests = [appManifest(A), appManifest(D, { dependencies: { [A]: '*' } })];
+        const manifests = [
+            appManifest(A, ships ? { emailTemplates: [{ name: 'rowmail', ...template('en-US', 'base en') }] } : {}),
+            appManifest(D, { dependencies: { [A]: '*' } }),
+        ];
         let booted = await bootManifests(manifests, file);
         const observe = async (b: Booted) => {
             const read = await get(b.kernel, '/meta/email_template/rowmail', { member: 'fr-FR' });
-            expect([read.status, unwrap(read.body)?.item?.subject, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'addon fr', D]);
+            expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
             const layers = await get(b.kernel, '/meta/email_template/rowmail/layers', { member: 'fr-FR' });
-            expect([layers.status, unwrap(layers.body)?.effective?.subject], JSON.stringify(layers.body)).toEqual([200, 'addon fr']);
+            expect([layers.status, codeOf(layers.body)], JSON.stringify(layers.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+            for (const answer of [read, layers]) expect(JSON.stringify(answer.body ?? null)).not.toContain('addon fr');
             // `/published` takes no member selector (400 VALIDATION_ERROR): it reads the canonical member only.
             const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'rowmail', member: 'fr-FR' });
-            expect(executed?.item?.subject).toBe('addon fr');
+            expect(executed?.item ?? null, JSON.stringify(executed ?? null)).toBeNull();
+            // The dependent's own address serves its row.
+            const own = await get(b.kernel, '/meta/email_template/rowmail', { member: 'fr-FR', package: D });
+            expect([own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([200, 'addon fr', D]);
             // CONTROL: the base's own `en-US` stays the base's.
             const en = await get(b.kernel, '/meta/email_template/rowmail', { member: 'en-US' });
             expect([en.status, unwrap(en.body)?.item?.subject], JSON.stringify(en.body)).toEqual([200, 'base en']);
@@ -641,36 +657,6 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
             await observe(booted);
         } finally {
             await down(booted);
-        }
-    }, 240_000);
-
-    it.each([{ base: 'row-held' }, { base: 'shipped' }])('PROBE33210 $base', async ({ base }) => {
-        const file = freshFile();
-        const manifests = [appManifest(A, base === 'shipped' ? { emailTemplates: [{ name: 'rowmail', ...template('en-US', 'base en') }] } : {}), appManifest(D, { dependencies: { [A]: '*' } })];
-        for (const leg of ['before', 'after']) {
-            const b = await bootManifests(manifests, file);
-            try {
-                if (leg === 'before') {
-                    if (base === 'row-held') await layRow(b.engine, 'email_template', 'rowmail', A, template('en-US', 'base en'));
-                    await layRow(b.engine, 'email_template', 'rowmail', D, template('fr-FR', 'addon fr'));
-                }
-                const cell = async (path: string, q: Record<string, string>) => { const r = await get(b.kernel, path, q); const u = unwrap(r.body); return [r.status, u?.item?.subject ?? u?.effective?.subject ?? codeOf(r.body) ?? null, u?.packageId ?? null]; };
-                let exec: unknown;
-                try { exec = (await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'rowmail', member: 'fr-FR' }))?.item?.subject ?? 'no item'; } catch (e) { exec = (e as any)?.code; }
-                const reg: any = b.engine.registry;
-                console.log('PROBE33210', base, leg, JSON.stringify({
-                    plain: await cell('/meta/email_template/rowmail', { member: 'fr-FR' }),
-                    layers: await cell('/meta/email_template/rowmail/layers', { member: 'fr-FR' }),
-                    atA: await cell('/meta/email_template/rowmail', { member: 'fr-FR', package: A }),
-                    atD: await cell('/meta/email_template/rowmail', { member: 'fr-FR', package: D }),
-                    en: await cell('/meta/email_template/rowmail', { member: 'en-US' }),
-                    exec,
-                    holders: reg.packageScopedHoldersOf('email_template', 'rowmail', null),
-                    holdersAll: reg.packageScopedHoldersOf('email_template', 'rowmail', null, { includeDisabledPackages: true }),
-                }));
-            } finally {
-                await down(b);
-            }
         }
     }, 240_000);
 });

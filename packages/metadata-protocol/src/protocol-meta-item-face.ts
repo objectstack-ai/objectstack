@@ -43,11 +43,11 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import { resolveBundleMemberSelector } from './protocol-bundle-members.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { pairsOf } from '@objectstack/metadata-core';
+import { packageDependencyClosure, pairsOf, type PackageClosureRegistry } from '@objectstack/metadata-core';
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import type { PrereadActiveRows } from './protocol-meta-item-reads.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import { overlayMemberWhere } from './migrations/overlay-index.js';
+import { OVERLAY_MEMBER_COLUMN, overlayMemberValue, overlayMemberWhere } from './migrations/overlay-index.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import {
     isActionWithheldByDisabledPackage,
@@ -327,10 +327,13 @@ export async function servedRowHolderOf(
         activeRows = [];
     }
     const rows = await host.packagelessAddress(type, name, member, 'active', activeRows);
-    if (rows.unbound) return undefined;
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     const anyDisabled = [...every, ...rows.candidates].some(disabled);
+    // [#33210] The no-disabled arm judges a package-less row itself
+    // ({@link storedRowHoldersRefusal}); beside a disabled holder it leaves
+    // the read as it was.
     if (!anyDisabled) return options.refuseWithoutDisabled === true ? storedRowHoldersRefusal(host, type, name, member, every, activeRows, rows.candidates) : undefined;
+    if (rows.unbound) return undefined;
     const installed = installedManifestsOfEngine(host.engine);
     const pairRow = (row: { package_id?: unknown }): boolean =>
         typeof row.package_id === 'string' && every.some((holder) => pairsOf(holder, installed).includes(row.package_id as string));
@@ -387,7 +390,13 @@ const STORED_ROW_HOLDERS_REFUSAL: unique symbol = Symbol.for('objectstack.metada
  * ({@link ObjectStackProtocolImplementation.declinesStoredRow}) and a row of a
  * customization pair of another package the rows or the registry name
  * (`pairsOf`), which is that package's customization, never a holder of its
- * own. An unbound package-less row among them leaves the read as it was.
+ * own.
+ *
+ * [#33210, ADR-0150 red line 2] A package-less row among them is no holder
+ * and no tie-break: beside two or more holders the read is refused naming
+ * them, as `/layers` refuses the same rows (`packagelessLayeredReadRefusal`),
+ * where it served a row by store order; beside one holder or none it leaves
+ * the read as it was.
  */
 async function storedRowHoldersRefusal(
     host: ServedRowHost,
@@ -404,7 +413,13 @@ async function storedRowHoldersRefusal(
         && known.some((holder) => holder !== row.package_id && pairsOf(holder, installed).includes(row.package_id as string));
     const holding = await host.packagelessAddress(type, name, member, 'active', activeRows.filter((row) =>
         !host.declinesStoredRow(type, name, row) && !pairOfAnother(row)));
-    if (holding.unbound) return undefined;
+    // [#33210, ADR-0150 red line 2] A package-less row beside two or more
+    // holders is a customization of a name it cannot say whose (the
+    // registry binds it to no package): reading past it still leaves those
+    // holders, so it is refused naming them below, as `/layers` refuses it,
+    // and never served in their place. Beside one holder or none it leaves
+    // the read as it was.
+    if (holding.unbound && holding.candidates.length < 2) return undefined;
     // [#32662 scope note (b), ADR-0150 D3] One holder whose rows are its own
     // and its customization pair's: the read is that holder's, at its address,
     // as `/published` reads it, so the layer served is its own row in both
@@ -543,6 +558,87 @@ export async function declaredMemberOverrideAddressOf(
         : undefined;
 }
 
+/**
+ * [#33210 (c), ADR-0150 D3, #28802 R2] The address a read naming no package
+ * takes for a bundle member that only a dependent's ADDITION holds, over a
+ * base that holds the name only as stored rows: that base. The read then
+ * answers the base's member, which it does not hold (404), as it does when the
+ * base ships the name, where `packagelessContentPackage` reads the shipper.
+ * `undefined` leaves the read as it was.
+ *
+ * Measured on `main` 66f6638fa4, on a booted kernel, before and after a
+ * reboot. Base A holds `welcome` in `en-US`, and dependent D, which declares
+ * A, holds `fr-FR`. When A ships `en-US`, the plain read, `/layers` and the
+ * execution face at `fr-FR` answered 404. When A holds `en-US` only as a
+ * stored row, all three served D's row. In both, the registry named A the
+ * name's one holder (a bundle addition holds no name). The two differed only
+ * in the grain the base was read at: the shippers at the name, the rows'
+ * bindings at the member.
+ *
+ * Judged at the rows' grain, as the registry judges an addition
+ * (`isBundleAddition`). Every active row at the member is bound to a package,
+ * and none is declined ({@link ObjectStackProtocolImplementation.declinesStoredRow}).
+ * Over the name's active rows, exactly one other package B holds members. B is
+ * in each such package's declared dependency closure, the package is not in
+ * B's, it is no customization pair of B (`pairsOf`: a pair's added member is
+ * served on its base's address already, #28802 ruling A), and none of its
+ * members is one B holds. The arm applies only to a bundled type the registry
+ * reads by package, for a name no package ships (a shipped name is the
+ * shipper's already), with no environment item at the member and no disabled
+ * package among them (the served-holder judgment above reads those).
+ */
+export async function rowHeldBaseAddressOf(
+    host: ServedRowHost,
+    type: string, name: string, member: string | undefined,
+): Promise<string | undefined> {
+    const registry: any = host.engine?.registry;
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (overlayMemberValue(singular, member) === undefined) return undefined;
+    if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size > 0) return undefined;
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
+        return undefined;
+    }
+    let activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>;
+    try {
+        activeRows = await host.readItemActiveRows(type, name);
+    } catch (error) {
+        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        activeRows = [];
+    }
+    const rows = activeRows.filter((row) => rowMatchesOverlayWhere(row, { type: singular, name, state: 'active' }));
+    const memberWhere = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, member) };
+    const atMember = rows.filter((row) => rowMatchesOverlayWhere(row, memberWhere));
+    const packageOf = (row: { package_id?: unknown }): string | undefined =>
+        typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : undefined;
+    if (atMember.length === 0 || atMember.some((row) => packageOf(row) === undefined || host.declinesStoredRow(type, name, row))) {
+        return undefined;
+    }
+    const membersOf = new Map<string, Set<string | null>>();
+    for (const row of rows) {
+        const packageId = packageOf(row);
+        if (packageId === undefined || host.declinesStoredRow(type, name, row)) continue;
+        const stored = (row as Record<string, unknown>)[OVERLAY_MEMBER_COLUMN];
+        const members = membersOf.get(packageId) ?? new Set<string | null>();
+        members.add(typeof stored === 'string' && stored !== '' ? stored : null);
+        membersOf.set(packageId, members);
+    }
+    const additions = new Set(atMember.map((row) => packageOf(row)!));
+    const bases = [...membersOf.keys()].filter((id) => !additions.has(id));
+    if (bases.length !== 1) return undefined;
+    const [base] = bases;
+    if (typeof registry.isPackageDisabled === 'function' && [base, ...additions].some((id) => registry.isPackageDisabled(id) === true)) {
+        return undefined;
+    }
+    const installed = installedManifestsOfEngine(host.engine);
+    const closure = (id: string): readonly string[] => packageDependencyClosure(id, registry as PackageClosureRegistry)?.dependencies ?? [];
+    const baseMembers = membersOf.get(base)!;
+    const isAddition = (id: string): boolean => closure(id).includes(base) && !closure(base).includes(id)
+        && !pairsOf(base, installed).includes(id)
+        && ![...membersOf.get(id)!].some((held) => baseMembers.has(held));
+    return [...additions].every(isAddition) ? base : undefined;
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'readMetaItem'> & ServedRowHost,
@@ -583,10 +679,16 @@ export async function readMetaItemFace(
     // [#32849] …and a member whose one shipper's declared override is stored
     // is read at that shipper ({@link declaredMemberOverrideAddressOf}).
     const member = request.packageId ? undefined : resolveBundleMemberSelector(request.type, request.member);
+    // [#33210 (c)] …and a member only a dependent's addition holds, over a
+    // base holding the name only as stored rows, is read at that base
+    // ({@link rowHeldBaseAddressOf}), as it is when the base ships the name.
     const servedAddress = request.packageId
         ? undefined
         : await servedAddressOf(judgeHost, request.type, request.name, member, { refuseWithoutDisabled: true })
-            ?? (request.state === 'draft' ? undefined : await declaredMemberOverrideAddressOf(judgeHost, request.type, request.name, member));
+            ?? (request.state === 'draft'
+                ? undefined
+                : await declaredMemberOverrideAddressOf(judgeHost, request.type, request.name, member)
+                    ?? await rowHeldBaseAddressOf(judgeHost, request.type, request.name, member));
     const answer = await this.readMetaItem(servedAddress === undefined ? request : { ...request, packageId: servedAddress }, { face, ...(activeRows !== undefined ? { activeRows } : {}) });
     // [#28877] The served read of an `action` also withholds one that launches
     // into a disabled package, as the served list does.
