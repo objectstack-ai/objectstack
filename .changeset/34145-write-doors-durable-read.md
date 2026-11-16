@@ -1,12 +1,18 @@
 ---
-'@objectstack/runtime': patch
-'@objectstack/service-automation': patch
+'@objectstack/runtime': minor
+'@objectstack/service-automation': minor
 ---
 
-fix(runtime): the automation write doors judge a flow name over every holder, whatever the holder's package's enable state
+fix(runtime)!: the automation write doors judge a flow name over every holder, whatever the holder's package's enable state
 
-Clause-②: no
+Clause-②: yes (narrowing)
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, slot key, run key or binding moves. The narrowed answer is one write door's verdict on a package-less write onto a name two packages hold, in a composition with no metadata store: there is nothing stored for a migration to rewrite and no tombstone. -->
+
+**BREAKING** only for a composition with no metadata store (no metadata protocol): a package-less `PUT /automation/NAME` or `POST /automation` onto a flow name two packages hold, one of them disabled, after the disable's re-sync withdrew the disabled package's slot, was accepted (`200`) and written into the enabled package's flow. It is now refused `409 RESOURCE_CONFLICT`, naming every holder, before anything is registered. Remedy: name the package. The bare write door names none, so save that package's flow through the metadata door with `?package=`, which needs a metadata store.
+
+**Added:** `AutomationEngine.getHeldFlow(name)` on `@objectstack/service-automation`: the flow the engine holds under a bare name, judged over every holder (a disabled package's included; a name two packages hold refused `409`). The write doors below read it.
 
 Four `/automation` write doors ask a lasting question of a flow name: the clone door's taken-name check on the new name, the copy a refused definition write (`POST /`, `PUT /automation/NAME`) puts back, the credential `PUT /automation/NAME` keeps when the body leaves it out, and the `DELETE /automation/NAME` existence check. They read the engine's served view (`getFlow`), in which a flow whose one package is disabled is no flow. They now read the flow the engine holds over every holder, through the engine's new engine-local `AutomationEngine.getHeldFlow(name)`, so their answers no longer depend on whether that package is enabled. For a flow whose only package is disabled while the engine still holds it:
 
