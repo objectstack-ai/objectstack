@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveOrganizationLocale, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -2235,6 +2235,19 @@ export class AutomationServicePlugin implements Plugin {
         // reads the `i18n` service through this reader when a refusing `end`
         // node renders, never at boot (see `i18nServiceReader`).
         this.engine.setI18nServiceSource(i18nServiceReader(ctx));
+
+        // [ruling 6913660232] The organization's language, for a record field
+        // value marked as text: its Localization setting when somebody set it,
+        // else the app's declared `i18n.defaultLocale` — the one reader of that
+        // ladder. Both services are probed when a record node asks, never at
+        // boot, for `i18nServiceReader`'s reason.
+        this.engine.setOrganizationLocaleResolver(async (tenantId) => {
+            let settings: unknown;
+            let i18n: unknown;
+            try { settings = ctx.getService('settings'); } catch { settings = undefined; }
+            try { i18n = ctx.getService('i18n'); } catch { i18n = undefined; }
+            return (await resolveOrganizationLocale({ settings, i18n, organizationId: tenantId }))?.locale;
+        });
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
