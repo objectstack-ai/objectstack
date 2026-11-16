@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/objectql': patch
 '@objectstack/driver-sql': patch
 '@objectstack/driver-memory': patch
@@ -9,7 +9,8 @@
 feat(objectql): a nested-relation condition, and an analytics dimension through a lookup, are refused up front with a stable 400 on a driver that compiles no semi-join (MongoDB, OData), decided by the new `DriverCapabilities.readableIdsLeaf` bit
 
 Clause-②: yes
-Metadata-protocol: none
+Metadata-protocol: added
+Skills-docs: follow-up #33875 — skills/objectstack-query/SKILL.md (its nested-relation row still promises the capped id read on every driver; MongoDB and OData now refuse it)
 
 **`DriverCapabilities.readableIdsLeaf`** (`@objectstack/spec`) is a new optional capability bit: the driver's filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf. `driver-sql` declares it on every dialect (`SqliteWasmDriver` and `TursoDriver` inherit it), and so does `driver-memory`. MongoDB and OData do not. Absence means `false`.
 
