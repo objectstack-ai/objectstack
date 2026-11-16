@@ -458,8 +458,18 @@ describe('#34257 — a signed-in return accepts only a verified address', () => 
 
 
 // The tables a redemption writes: the account, its credential, its sessions,
-// the membership, the invitation and the proof row.
-const WRITTEN_TABLES = ['sys_user', 'sys_account', 'sys_session', 'sys_member', 'sys_invitation', 'sys_verification'];
+// the membership, the invitation and the proof row; and the standing grants
+// the judge reads, which nothing here writes.
+const WRITTEN_TABLES = [
+  'sys_user',
+  'sys_account',
+  'sys_session',
+  'sys_member',
+  'sys_invitation',
+  'sys_verification',
+  'sys_api_key',
+  'sys_oauth_consent',
+];
 const writtenState = (engine: MemoryEngine) =>
   JSON.stringify(WRITTEN_TABLES.map((table) => [table, engine.tables.get(table) ?? []]));
 
@@ -661,6 +671,16 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     /** Put the account into the state, and answer how to take it out again. */
     enter(booted: Booted, email: string): Promise<() => Promise<void> | void>;
   }
+  const findThrowsFor = (engine: MemoryEngine, object: string, error: Error) => {
+    const find = engine.find.bind(engine);
+    engine.find = async (name: string, q: any = {}) => {
+      if (name === object) throw error;
+      return find(name, q);
+    };
+    return () => {
+      engine.find = find;
+    };
+  };
   const findThrowsForSource = (engine: MemoryEngine) => {
     const find = engine.find.bind(engine);
     engine.find = async (name: string, q: any = {}) => {
@@ -709,6 +729,26 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
           userRow(engine, email)!.phone_number_verified = false;
         };
       },
+    },
+    // A standing grant counts as a claim, a revoked one included.
+    api_key: {
+      enter: async ({ engine }, email) => {
+        await engine.insert('sys_api_key', { id: `key_${email}`, user_id: userRow(engine, email)!.id, revoked: true });
+        return () => {
+          engine.tables.set('sys_api_key', (engine.tables.get('sys_api_key') ?? []).filter((k) => k.id !== `key_${email}`));
+        };
+      },
+    },
+    oauth_consent: {
+      enter: async ({ engine }, email) => {
+        await engine.insert('sys_oauth_consent', { id: `consent_${email}`, user_id: userRow(engine, email)!.id, client_id: 'client_34257', scopes: '["openid"]' });
+        return () => {
+          engine.tables.set('sys_oauth_consent', (engine.tables.get('sys_oauth_consent') ?? []).filter((c) => c.id !== `consent_${email}`));
+        };
+      },
+    },
+    grant_unreadable: {
+      enter: async ({ engine }) => findThrowsFor(engine, 'sys_oauth_consent', new Error('store unavailable')),
     },
     idp_provisioned: {
       enter: async ({ engine }, email) => {
@@ -759,6 +799,8 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     accountProviders: ['credential'],
     twoFactorEnabled: false,
     phoneNumberVerified: undefined,
+    apiKeys: { ok: true, held: false },
+    oauthConsents: { ok: true, held: false },
     source: { ok: true, value: 'env_native' },
     ssoOnly: false,
     emailPasswordEnabled: true,
@@ -778,6 +820,10 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     ['a second-factor flag stored in no form the judge reads', { twoFactorEnabled: 'true' }, 'unrecognised'],
     ['a verified phone number', { phoneNumberVerified: true }, 'verified_phone'],
     ['a phone flag stored in no form the judge reads', { phoneNumberVerified: 1 }, 'unrecognised'],
+    ['an API key', { apiKeys: { ok: true, held: true } }, 'api_key'],
+    ['an OAuth client consent', { oauthConsents: { ok: true, held: true } }, 'oauth_consent'],
+    ['API keys that cannot be read', { apiKeys: { ok: false } }, 'grant_unreadable'],
+    ['OAuth client consents that cannot be read', { oauthConsents: { ok: false } }, 'grant_unreadable'],
     ['an identity-provider source', { source: { ok: true, value: 'idp_provisioned' } }, 'idp_provisioned'],
     ['a pending single sign-on', { source: { ok: true, value: 'idp_pending' } }, 'pending_sso'],
     ['an unreadable source', { source: { ok: false } }, 'source_unreadable'],
@@ -787,6 +833,21 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     ['email and password not declared on', { emailPasswordEnabled: undefined }, 'email_password_off'],
   ])('the judge answers sign_in for %s', (_label, change, reason) => {
     expect(oneStepSignInState({ ...ALLOWED, ...change })).toBe(reason);
+  });
+
+  it('a grant table that does not exist holds no grant: the account is accepted', async () => {
+    const booted = await boot();
+    const { engine, manager, invite } = booted;
+    const email = 'grants-absent@example.com';
+    const { invitation, proof } = await invite(email);
+    await signUp(manager, engine, email);
+    const leaveKeys = findThrowsFor(engine, 'sys_api_key', new Error('SQLITE_ERROR: no such table: sys_api_key'));
+    findThrowsFor(engine, 'sys_oauth_consent', new Error('SQLITE_ERROR: no such table: sys_oauth_consent'));
+    try {
+      await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'G', password: NEW_PASSWORD }));
+    } finally {
+      leaveKeys();
+    }
   });
 
   it('every state the closing rule names has a case, and no case names another state', () => {

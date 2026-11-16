@@ -60,16 +60,22 @@
  * The door sets a password on an existing account only when it reads that the
  * mailbox is the account's one claim: the address is not verified, the
  * account's only sign-in account is its email and password one or it has
- * none, it has no second factor and no verified phone number, its identity
- * source is local, and the server allows a local password here (not SSO-only,
- * email and password on). Every other account, including one in a state no
- * rule names, answers `sign_in`, and the proof stays unspent.
+ * none, it has no second factor, no verified phone number, no API key and no
+ * OAuth client consent, its identity source is local, and the server allows a
+ * local password here (not SSO-only, email and password on). Every other
+ * account, including one in a state no rule names, answers `sign_in`, and the
+ * proof stays unspent.
  *
  * The judge, {@link oneStepSignInState}, is an allow-list: it lets the
  * password be set only when every value it reads is positively the one that
  * carries no other claim, and a value no rule names answers `sign_in` as
  * `unrecognised`. Its reasons are {@link ONE_STEP_SIGN_IN_STATES}; the card's
  * test pins one case per reason.
+ *
+ * Standing grants count as claims ({@link readStandingGrant}): any
+ * `sys_api_key` or `sys_oauth_consent` row of the user, revoked or not,
+ * answers `sign_in`. A table that does not exist holds no rows; a read that
+ * fails answers `sign_in` as `grant_unreadable`.
  *
  * An account that passes gets the typed password in place of its own, and
  * every one of its sessions is revoked with the reason a password reset
@@ -91,11 +97,12 @@
  */
 
 import { isCloudManaged } from '@objectstack/core';
+import { isMissingTableError } from '@objectstack/types';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { incrementFixedWindow, InProcessCounterStore, type CounterStore } from './rate-limit-storage.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { isPendingSsoSource } from './pending-sso-marker.js';
-import { isIdpProvisionedSource, readUserSource } from './sso-only-local-password.js';
+import { isIdpProvisionedSource, readUserSource, type UserSourceReader } from './sso-only-local-password.js';
 
 /** The door's path, under the auth mount. */
 export const ACCEPT_INVITATION_ONE_STEP_PATH = '/organization/accept-invitation-one-step';
@@ -236,6 +243,12 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'second_factor',
   /** The account has a verified phone number. */
   'verified_phone',
+  /** The account holds an API key, revoked or not. */
+  'api_key',
+  /** The account holds an OAuth client consent, revoked or not. */
+  'oauth_consent',
+  /** The account's standing grants cannot be read. */
+  'grant_unreadable',
   /** The account is provisioned by an identity provider. */
   'idp_provisioned',
   /** The account is waiting for its first single sign-on. */
@@ -260,6 +273,35 @@ function isOff(value: unknown): boolean {
   return value === false || value === null || value === undefined;
 }
 
+/** The objects whose rows are a user's standing grants, each read by `user_id`. */
+export const STANDING_GRANT_OBJECTS = ['sys_api_key', 'sys_oauth_consent'] as const;
+
+/** Whether a user holds any row of one standing-grant object; `ok: false` when it cannot be read. */
+export type StandingGrantReading = { ok: true; held: boolean } | { ok: false };
+
+const SYSTEM_READ = { context: { isSystem: true, positions: [], permissions: [] } } as const;
+
+/**
+ * Does `userId` hold any row of `object`, revoked or not? One indexed read by
+ * `user_id`, `id` only, as the system. A table that does not exist holds no
+ * rows; any other failure, or no read surface, is `ok: false`.
+ */
+export async function readStandingGrant(
+  engine: UserSourceReader | undefined,
+  object: (typeof STANDING_GRANT_OBJECTS)[number],
+  userId: string,
+): Promise<StandingGrantReading> {
+  if (!engine?.find) return { ok: false };
+  try {
+    const rows = await engine.find(object, { where: { user_id: userId }, fields: ['id'], limit: 1 }, SYSTEM_READ);
+    if (!Array.isArray(rows)) return { ok: false };
+    return { ok: true, held: rows.length > 0 };
+  } catch (e) {
+    if (isMissingTableError(e, object)) return { ok: true, held: false };
+    return { ok: false };
+  }
+}
+
 /** What the judge reads of an existing account and the server. */
 export interface OneStepAccountReading {
   /** `user.emailVerified`, as stored. */
@@ -270,6 +312,10 @@ export interface OneStepAccountReading {
   twoFactorEnabled: unknown;
   /** `user.phoneNumberVerified`, as stored (absent without the plugin). */
   phoneNumberVerified: unknown;
+  /** Any `sys_api_key` row of the user ({@link readStandingGrant}). */
+  apiKeys: StandingGrantReading;
+  /** Any `sys_oauth_consent` row of the user ({@link readStandingGrant}). */
+  oauthConsents: StandingGrantReading;
   /** `sys_user.source`, or `ok: false` when it cannot be read. */
   source: { ok: true; value: string | null } | { ok: false };
   /** SSO-only mode. */
@@ -289,6 +335,9 @@ export function oneStepSignInState(account: OneStepAccountReading): OneStepSignI
   if (!account.accountProviders.every((providerId) => providerId === 'credential')) return 'linked_provider';
   if (!isOff(account.twoFactorEnabled)) return account.twoFactorEnabled === true ? 'second_factor' : 'unrecognised';
   if (!isOff(account.phoneNumberVerified)) return account.phoneNumberVerified === true ? 'verified_phone' : 'unrecognised';
+  if (!account.apiKeys.ok || !account.oauthConsents.ok) return 'grant_unreadable';
+  if (account.apiKeys.held !== false) return 'api_key';
+  if (account.oauthConsents.held !== false) return 'oauth_consent';
   if (!account.source.ok) return 'source_unreadable';
   const source = account.source.value;
   if (!LOCAL_SOURCES.has(source)) {
@@ -406,12 +455,21 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       const found = await internal.findUserByEmail(email, { includeAccounts: true });
       const existing = found?.user;
       if (existing) {
+        const engine = host.getDataEngine() as UserSourceReader | undefined;
+        const userId = String(existing.id);
+        const [apiKeys, oauthConsents, source] = await Promise.all([
+          readStandingGrant(engine, 'sys_api_key', userId),
+          readStandingGrant(engine, 'sys_oauth_consent', userId),
+          readUserSource(engine, userId),
+        ]);
         const state = oneStepSignInState({
           emailVerified: existing.emailVerified,
           accountProviders: (found.accounts ?? []).map((a: any) => a?.providerId),
           twoFactorEnabled: existing.twoFactorEnabled,
           phoneNumberVerified: existing.phoneNumberVerified,
-          source: await readUserSource(host.getDataEngine() as never, String(existing.id)),
+          apiKeys,
+          oauthConsents,
+          source,
           ssoOnly: host.isSsoOnlyMode(),
           emailPasswordEnabled: ctx.context.options.emailAndPassword?.enabled,
         });
