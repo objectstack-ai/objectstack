@@ -5383,7 +5383,8 @@ export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js'
 // name column by its object and its column, not by its column name alone.
 export { FORM_OBJECT_KEY, withFormObject } from './widgets/permissionSetHolders.js';
 // A record form stamps any lookup whose `lookupFilters` read `{ $record }`: one record is being edited here,
-// with the object each hop points at. Only a field carrying the stamp resolves a `{ $record }`.
+// with the object each hop points at. Only a field carrying a stamp `withRecordBeingEdited` issued resolves a
+// `{ $record }`; the key written as data is no stamp.
 export { RECORD_BEING_EDITED_KEY, withRecordBeingEdited } from './widgets/lookupRecordReference.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
