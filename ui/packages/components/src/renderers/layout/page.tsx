@@ -29,7 +29,13 @@ import { pickLocalized, useDisplayLocale, useObjectTranslation } from '@object-u
 import { compile, manifestFromConfigs, type Diagnostic } from '@objectstack/sdui-parser';
 import { PAGE_TEMPLATE_SLOTS, type PageTemplate } from '@objectstack/spec/ui';
 import { ReactKindPage } from './react-page';
-import { PRINT_PAGE_ATTRIBUTE, PRINT_RUNNING_ATTRIBUTE, buildPagePrintStylesheet, isPagePrintDeclaration } from './page-print';
+import {
+  PRINT_PAGE_ATTRIBUTE,
+  PRINT_RUNNING_ATTRIBUTE,
+  buildPagePrintStylesheet,
+  isPagePrintDeclaration,
+  watchBlocksTallerThanSheet,
+} from './page-print';
 import { cn } from '../../lib/utils';
 import { PageBlockGrid } from './page-block-grid';
 import { PageDescriptionContext } from './page-description-context';
@@ -806,6 +812,17 @@ export const PageRenderer: React.FC<{
   const print = isPagePrintDeclaration(schema.print) ? schema.print : null;
   const printStylesheet = print ? buildPagePrintStylesheet(print) : null;
 
+  // `avoidBreakInside` keeps a block whole when it fits one sheet; a block
+  // taller than a sheet is marked at print time so it does not leave the
+  // sheet it would start on blank (objectstack#34427, `./page-print.ts`).
+  const pageRootRef = React.useRef<HTMLDivElement>(null);
+  const avoidBreakInside = print?.avoidBreakInside === true;
+  React.useEffect(() => {
+    const root = pageRootRef.current;
+    if (!avoidBreakInside || !root) return undefined;
+    return watchBlocksTallerThanSheet(root);
+  }, [avoidBreakInside]);
+
   // The element the regions are laid out in, whose width each region's
   // posture is judged against (objectui#12703): the max-width body, not the
   // padded outer wrapper, so a centred body on a very wide screen is "the
@@ -927,6 +944,7 @@ export const PageRenderer: React.FC<{
         'min-h-full w-full bg-background p-3 md:p-4 lg:p-6',
         className,
       )}
+      ref={pageRootRef}
       data-page-type={pageType}
       data-obj-id={dataObjId}
       data-obj-type={dataObjType}

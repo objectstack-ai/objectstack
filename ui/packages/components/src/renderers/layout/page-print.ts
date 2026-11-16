@@ -35,7 +35,10 @@
  *  - `repeatTableHeaders` (on when omitted) → `thead { display:
  *    table-header-group }`; set to `false` it is `table-row-group`, which does
  *    not repeat;
- *  - `avoidBreakInside` → `break-inside: avoid` on every block of a region.
+ *  - `avoidBreakInside` → `break-inside: avoid` on every block of a region
+ *    that fits one sheet. A block taller than a sheet cannot be kept whole,
+ *    and is marked at print time ({@link watchBlocksTallerThanSheet}) so it
+ *    starts where it stands instead of on the next sheet.
  *
  * Besides the keys, the rules every print page needs: everything on the
  * document that is not the print page, an ancestor of it, or inside it is
@@ -69,6 +72,17 @@ export const PRINT_RUNNING_ATTRIBUTE = 'data-print-running';
  * `@object-ui/fields`, which spells the same literal).
  */
 export const PRINT_PLAIN_BADGE_ATTRIBUTE = 'data-select-badge';
+
+/**
+ * The DOM attribute the print-time measure ({@link markBlocksTallerThanSheet})
+ * sets on a region block taller than one sheet's body room; on such a block
+ * the sheet lifts `avoidBreakInside`'s `break-inside: avoid`. Internal: no
+ * author writes it, and it only changes paper.
+ */
+export const PRINT_TALLER_THAN_SHEET_ATTRIBUTE = 'data-print-taller-than-sheet';
+
+/** A block of a region: the element `avoidBreakInside` keeps whole. */
+const REGION_BLOCK = '[data-region] > *';
 
 const PAPER_SIZES: ReadonlySet<string> = new Set(['A4', 'A5', 'Letter', 'Legal']);
 const ORIENTATIONS: ReadonlySet<string> = new Set(['portrait', 'landscape']);
@@ -178,8 +192,76 @@ export function buildPagePrintStylesheet(print: PagePrintDeclaration): string {
     `${page} thead:not(table[${PRINT_RUNNING_ATTRIBUTE}] > thead) { display: ${print.repeatTableHeaders === false ? 'table-row-group' : 'table-header-group'} !important; }`,
   ];
   if (print.avoidBreakInside === true) {
-    rules.push(`${page} [data-region] > * { break-inside: avoid; }`);
+    rules.push(
+      `${page} ${REGION_BLOCK} { break-inside: avoid; }`,
+      // A block that cannot fit any sheet is not kept whole: it starts on the
+      // current sheet and breaks where the sheet ends, as with the key off.
+      `${page} [data-region] > [${PRINT_TALLER_THAN_SHEET_ATTRIBUTE}] { break-inside: auto; }`,
+    );
   }
   rules.push(...paperFitRules(page), ...paperFaceRules(page));
   return `@media print {\n  ${rules.join('\n  ')}\n}\n`;
+}
+
+/**
+ * Mark each region block taller than one sheet's body room, measured on the
+ * PRINT layout, and return that room in CSS pixels (objectstack#34427).
+ *
+ * `avoidBreakInside` keeps each block whole on one sheet when it fits (the
+ * key's `.describe()` in `@objectstack/spec`). `break-inside: avoid` alone
+ * cannot tell a block that fits from one that fits no sheet: Chromium moves
+ * both to the next sheet before breaking them, so a block taller than a sheet
+ * left the rest of the current sheet blank and could cost one sheet more.
+ * CSS cannot condition a break on a block's height, so this reads it:
+ *
+ *  - the sheet's page area is the root element's client height, which on
+ *    paper is the `@page` box less its margins, whichever rule set them (the
+ *    page's declared `margins`, else the console's default sheet margin);
+ *  - the running-region table's `thead` / `tfoot` repeat on every sheet, so
+ *    their height is taken off it;
+ *  - every mark is cleared first, so each block is measured as
+ *    `break-inside: avoid` lays it out: a block that fits is laid out whole
+ *    and keeps its height, one that does not is broken across sheets and
+ *    measures taller still.
+ *
+ * Only meaningful while the print layout is in force: call it from
+ * {@link watchBlocksTallerThanSheet}, never on screen.
+ */
+export function markBlocksTallerThanSheet(page: Element): number {
+  const sheet = page.ownerDocument.documentElement.clientHeight;
+  const running = page.querySelector<HTMLTableElement>(`table[${PRINT_RUNNING_ATTRIBUTE}]`);
+  const repeated =
+    (running?.tHead?.getBoundingClientRect().height ?? 0) + (running?.tFoot?.getBoundingClientRect().height ?? 0);
+  const room = sheet - repeated;
+  const blocks = [...page.querySelectorAll(REGION_BLOCK)];
+  for (const block of blocks) block.removeAttribute(PRINT_TALLER_THAN_SHEET_ATTRIBUTE);
+  const taller = blocks.filter((block) => block.getBoundingClientRect().height > room);
+  for (const block of taller) block.setAttribute(PRINT_TALLER_THAN_SHEET_ATTRIBUTE, '');
+  return room;
+}
+
+/**
+ * Run {@link markBlocksTallerThanSheet} on `page` each time the document
+ * enters print, and clear the marks when it leaves. Returns the unsubscribe.
+ *
+ * The `print` media query's change is the moment: Chromium fires it with the
+ * print layout already in force (sheet-wide boxes, sheet-high viewport), and a
+ * mark set in the listener reaches the printed sheets. `beforeprint` is too
+ * early: it fires while the screen layout is still in force. A document with
+ * no `matchMedia` (a test DOM) gets no listener.
+ */
+export function watchBlocksTallerThanSheet(page: Element): () => void {
+  const media = page.ownerDocument.defaultView?.matchMedia?.('print');
+  if (!media || typeof media.addEventListener !== 'function') return () => undefined;
+  const onChange = (event: MediaQueryListEvent) => {
+    if (event.matches) {
+      markBlocksTallerThanSheet(page);
+      return;
+    }
+    for (const block of page.querySelectorAll(`[${PRINT_TALLER_THAN_SHEET_ATTRIBUTE}]`)) {
+      block.removeAttribute(PRINT_TALLER_THAN_SHEET_ATTRIBUTE);
+    }
+  };
+  media.addEventListener('change', onChange);
+  return () => media.removeEventListener('change', onChange);
 }
