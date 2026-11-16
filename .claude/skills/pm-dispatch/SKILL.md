@@ -47,7 +47,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 - L1 普通审核:派发 PR 皆欠;派发席或其 L1 线程照 L1 清单在定稿绿 head 读 ACCEPT,修后读 delta。
 - L2 契约审核:PR 碰 `references/contract-review.md` 契约四面才欠,加在 L1 之上,⛔ 永不替代 L1。
-- L2 档:schema、governed 规则文本、收窄 ⇒ `CONTRACT_REVIEW_TIER`;仅 `Clause-②: yes` ⇒ `TIER_DEFAULT`。
+- L2 档随面定(`contract-review.md`);L1 与 `TIER_DEFAULT` 审核恒归车道,⛔ 永不归 L2 席。
 - ⛔ L1 规则不及 L2,L2 规则不及 L1;L2 席的账号、独立性、信箱与只写记录诸规只管 L2 席。
 - GitHub PR review 与 CI check 名不属两级;旧词与旧路径只读不写,唯在座 `review#N` 席仍写原名。
 
