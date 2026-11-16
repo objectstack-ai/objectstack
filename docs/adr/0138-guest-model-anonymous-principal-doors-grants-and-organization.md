@@ -300,7 +300,7 @@ under class 2, ahead of the allowlist, so it is judged as this door and not as c
 infrastructure. The same ruling's Q2 B leaves the verification posture as it was: an
 invitation-link sign-up still owes the verification mail.
 
-**Amended 2026-11-16 — the one-step invitation acceptance, a class-2-shaped door.** Card
+**Amended 2026-11-16 — the one-step invitation acceptance and the OAuth client-name read, class-2-shaped doors.** Card
 [#34257](https://github.com/objectstack-ai/objectstack/issues/34257), on the owning seat's rulings in
 claim amendment
 [`6906424686`](https://github.com/objectstack-ai/objectstack/issues/34257#issuecomment-6906424686),
@@ -319,6 +319,13 @@ proof unspent. It carries a per-address and per-invitation rate limit, as ADR-01
 Enforced by `packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`,
 ledgered in `packages/plugins/plugin-auth/src/auth-route-ledger.ts`; it sits in the `/auth`
 namespace and is classified under class 2 the way the preview above is.
+
+The same amendment admits a second door of class 2's shape, added by
+[#34168](https://github.com/objectstack-ai/objectstack/issues/34168):
+`GET /api/v1/auth/oauth2/client-name`, a public read. What admits the request: a request the server
+itself signed, which names one OAuth client. What it answers: that client's display name and nothing
+else, and only for the client the signed request names. Every other request gets one uniform 404.
+It is rate-limited per client address on the counter the invitation preview above uses, as ADR-0121 D6 requires.
 
 This refines ruling [`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861)
 Q2 B, recorded above as "an invitation-link sign-up still owes the verification mail". A
