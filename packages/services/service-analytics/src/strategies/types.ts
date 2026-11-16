@@ -263,4 +263,46 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * it had.
    */
   hasObjectMiddleware?(objectName: string): boolean | undefined;
+  /**
+   * The data engine's aggregate of `objectName`, grouped ALSO by attributes of
+   * related records (one {@link RelationGroupAggregateRelation} per relation),
+   * which a SQL driver answers as one `LEFT JOIN … GROUP BY` — or `undefined`
+   * when the host cannot run it (no data engine bridged by this package).
+   *
+   * `ObjectQLStrategy` serves a cross-object dimension through it first, and
+   * by its FK-expand (`resolveFkAttr`, an `id IN (…)` read of the related
+   * object) only when this is absent or answers `joined: false`: the engine
+   * declines every read it cannot prove is the FK-expand's own read as one
+   * statement (a driver that compiles no join — memory, MongoDB, OData —
+   * among them), before it reads anything the strategy's path reads again.
+   *
+   * `AnalyticsServicePlugin` wires it only when it bridges `executeAggregate`
+   * itself, to the same engine. Declared HERE rather than on the spec's
+   * {@link StrategyContext} for the reason `getDatasetScope` is: nothing about
+   * it is an authorable surface.
+   */
+  executeRelationGroupAggregate?(
+    objectName: string,
+    options: Parameters<NonNullable<StrategyContext['executeAggregate']>>[1],
+    relations: readonly RelationGroupAggregateRelation[],
+  ): Promise<RelationGroupAggregateAnswer>;
 }
+
+/** One relation a {@link DatasetScopedStrategyContext.executeRelationGroupAggregate} groups through. */
+export interface RelationGroupAggregateRelation {
+  /** The single-valued relation (FK) field of the aggregated object. */
+  readonly field: string;
+  /** The object it references (the hop the door admitted and scoped). */
+  readonly object: string;
+  /** The caller's read scope of `object`, judged and marked as at `resolveFkAttr`. */
+  readonly where?: Record<string, unknown>;
+  /** Each related attribute, and the output column it answers under. */
+  readonly attrs: ReadonlyArray<{ readonly attr: string; readonly alias: string }>;
+  /** The output column: `1` where a readable related record joined, `0` where none did. */
+  readonly resolvedAlias: string;
+}
+
+/** The engine's answer: the grouped rows, or why it declined (the rows path then serves). */
+export type RelationGroupAggregateAnswer =
+  | { readonly joined: true; readonly rows: Record<string, unknown>[] }
+  | { readonly joined: false; readonly reason: string };

@@ -81,7 +81,11 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-const fold = (artifact: unknown) => ({ objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') });
+const fold = (artifact: unknown) => ({
+    objects: resolveStackCollection(artifact, 'objects'),
+    objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
+    data: resolveStackCollection(artifact, 'data'),
+});
 
 async function mount(options: { installed?: Row; planUpgrade?: false; columns?: Row[]; overrides?: unknown; registryPackages?: Row[]; driver?: unknown } = {}) {
     const register = vi.fn();
@@ -492,5 +496,53 @@ describe('step 2c′: the schema upgrade verdict on a managed re-install', () =>
         const res = await door.install(makeC({ manifest: V2 }));
         expect(res.status).toBe(200);
         expect(entry()?.schemaUpgradeConfirmation).toBeUndefined();
+    });
+});
+
+describe('step 2c′ judges an objectExtensions field like an owned one (#34095)', () => {
+    /** The vendor package, adding fields to an object another package owns. */
+    const extending = (version: string, fields: Row) => ({
+        ...vendorBody(version, { company: { type: 'text' } }),
+        objectExtensions: [{ extend: 'crm_account', fields }],
+    });
+
+    it('a retyped extension field answers 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED naming it, and writes nothing', async () => {
+        const door = await mount({ installed: extending('1.0.0', { tier: { type: 'text' } }) });
+        const before = ledgerFiles();
+
+        const res = await door.install(makeC({ manifest: extending('2.0.0', { tier: { type: 'number' } }) }));
+
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('SCHEMA_UPGRADE_CONFIRMATION_REQUIRED');
+        expect(res.payload.error.details.findings).toEqual([expect.objectContaining({
+            kind: 'type_change', object: 'crm_account', field: 'tier', from: 'text', to: 'number', category: 'needs_confirm',
+        })]);
+        expect(door.register).not.toHaveBeenCalled();
+        expect(ledgerFiles()).toEqual(before);
+    });
+
+    it('an extension field dropped beside one added answers 409 as a suspected rename', async () => {
+        const door = await mount({ installed: extending('1.0.0', { tier: { type: 'text' } }) });
+        const res = await door.install(makeC({ manifest: extending('2.0.0', { segment: { type: 'text' } }) }));
+        expect(res.status).toBe(409);
+        expect(res.payload.error.code).toBe('SCHEMA_UPGRADE_CONFIRMATION_REQUIRED');
+        expect(res.payload.error.details.findings).toEqual([expect.objectContaining({
+            kind: 'suspected_rename', object: 'crm_account', field: 'tier', candidates: [{ field: 'segment', type: 'text' }],
+        })]);
+    });
+
+    it('the dry run lists an added extension field; adding it, or dropping one alone, installs unrefused as an owned field does', async () => {
+        const door = await mount({ installed: extending('1.0.0', { tier: { type: 'text' } }) });
+        const preview = await door.install(makeC({ manifest: extending('2.0.0', { tier: { type: 'text' }, invoiced_amount: { type: 'number' } }), dryRun: true }));
+        expect(preview.status).toBe(200);
+        expect(preview.payload.data.plan.fields.added).toEqual([
+            { object: 'crm_account', field: 'invoiced_amount', type: 'number', required: false, stored: true },
+        ]);
+
+        const added = await door.install(makeC({ manifest: extending('2.0.0', { tier: { type: 'text' }, invoiced_amount: { type: 'number' } }) }));
+        expect(added.status).toBe(200);
+        const dropped = await door.install(makeC({ manifest: extending('3.0.0', { tier: { type: 'text' } }) }));
+        expect(dropped.status).toBe(200);
+        expect(new LocalManifestSource(dir).read(VENDOR).entry?.schemaUpgradeConfirmation).toBeUndefined();
     });
 });
