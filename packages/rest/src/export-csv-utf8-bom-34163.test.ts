@@ -19,7 +19,8 @@
  *
  *  - csv: one mark, then the header row, for a Chinese header and value;
  *  - csv with zero rows (an explicit `fields=` makes the header
- *    authoritative): one mark, then the header row alone;
+ *    authoritative): one mark, then the header row alone; with no
+ *    authoritative header nothing is written, and the file stays zero bytes;
  *  - json and xlsx: no mark;
  *  - round trip: the exported bytes, mark included, parse through the csv
  *    import (`parseCsvToRows`) to the same header names and cells.
@@ -147,12 +148,13 @@ describe('[#34163] export: a csv body opens with one UTF-8 byte-order mark — s
         expect(text.slice(1).split(/\r?\n/).filter((l) => l.length > 0)).toEqual(['名称,备注']);
     });
 
-    it('csv with zero rows and no authoritative header: the file is the mark alone', async () => {
+    it('csv with zero rows and no authoritative header: still a zero-byte file, no lone mark', async () => {
         // Schema-derived header with no security projection stays unwritten
-        // at zero rows (FLS-hidden names never leak); the mark still opens it.
+        // at zero rows (FLS-hidden names never leak): nothing is written, so
+        // there is nothing for the mark to open.
         const { status, bytes } = await exportBytes(EMPTY, '?format=csv');
         expect(status).toBe(200);
-        expect(Array.from(bytes)).toEqual([...BOM_BYTES]);
+        expect(bytes.length).toBe(0);
     });
 
     it('json carries no mark', async () => {

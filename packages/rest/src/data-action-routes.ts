@@ -1222,9 +1222,9 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // re-imports to the stored value (one exception: `unmarkCsvTextCell`).
     // xlsx and json are unaffected.
     //
-    // [#34163] csv only: the body opens with one UTF-8 byte-order mark
-    // (`UTF8_BOM`), so Excel reads the saved file as UTF-8. json and xlsx
-    // carry none.
+    // [#34163] csv only: a body with content opens with one UTF-8 byte-order
+    // mark (`UTF8_BOM`), so Excel reads the saved file as UTF-8; an export
+    // that writes nothing stays a zero-byte file. json and xlsx carry none.
     //
     // [#24945] Boolean / toggle cells are written in the language of the
     // header row: `templateText(locale).booleanWords` (yes / no, or 是 / 否 for
@@ -1673,16 +1673,6 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     // runs at least once (`limit` is at least 1), so the
                     // closing `]` below always has its opener.
                     if (format === 'json' && firstChunk) res.write('[');
-                    // [#34163] csv opens with the UTF-8 byte-order mark,
-                    // once, ahead of everything else in the body: the header
-                    // row, the first data row under `header=false`, or nothing
-                    // on an empty file. The response's `charset=utf-8` does not
-                    // travel with the saved file, and Excel reads a csv without
-                    // the mark in the system ANSI code page, so every non-ASCII
-                    // header and cell opened garbled. Written after the first
-                    // read for json's reason above. The csv import strips one
-                    // leading mark (`parseCsvToRows`), so the file re-imports.
-                    if (format === 'csv' && firstChunk) res.write(UTF8_BOM);
                     // [#27755] The xlsx workbook writer opens after the first
                     // read for the same reason: opening it commits the stream
                     // too, so a refused query answered 200 instead of the 400
@@ -1723,7 +1713,16 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
 
                     if (format === 'csv') {
                         const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone, booleanWords);
-                        res.write(text);
+                        // [#34163] The body's first write carries the UTF-8
+                        // byte-order mark in front of it, once: the header row,
+                        // or the first data row under `header=false`. The
+                        // answer's `charset=utf-8` does not travel with the
+                        // saved file, and Excel reads a csv without the mark in
+                        // the system ANSI code page, so every non-ASCII header
+                        // and cell opened garbled. The csv import strips one
+                        // leading mark (`parseCsvToRows`), so the file
+                        // re-imports unchanged.
+                        res.write(firstChunk ? UTF8_BOM + text : text);
                     } else if (format === 'xlsx') {
                         if (firstChunk && includeHeader) {
                             xlsx!.ws.addRow((fields ?? []).map((f) => headerLabel(f, metaMap))).commit();
@@ -1779,7 +1778,9 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     (readableProjected || !fieldsFromSchema)
                 ) {
                     if (format === 'csv') {
-                        res.write(rowsToCsv(fields, [], true, metaMap));
+                        // [#34163] The header row is this body's first write,
+                        // so it carries the mark as the first chunk's does.
+                        res.write(UTF8_BOM + rowsToCsv(fields, [], true, metaMap));
                     } else if (format === 'xlsx') {
                         xlsx!.ws.addRow(fields.map((f) => headerLabel(f, metaMap))).commit();
                     }
