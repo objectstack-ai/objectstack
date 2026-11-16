@@ -303,6 +303,11 @@ export const PUBLIC_AUTH_FEATURES = {
       // Hidden in the console only: the server keeps answering it on an
       // `env_native` row, so the break-glass admin stays editable.
       'sys_user.actions.set_user_password',
+      // Membership and roles are managed by the hosting organisation: the two
+      // doors that change them refuse, and Make Owner rides update-member-role.
+      'sys_member.actions.update_member_role',
+      'sys_member.actions.remove_member',
+      'sys_member.actions.transfer_ownership',
     ],
     notes:
       'Served from the one isCloudManaged() accessor in @objectstack/core. ' +

@@ -1301,6 +1301,14 @@ sign-in through any other one leaves the person pending. Their positions, permis
 from the moment they are added, so seed data and approval flows can name them
 before they sign in. Off a managed environment both doors answer `409`.
 
+Membership and membership roles on a cloud-managed environment are managed in
+the organisation that hosts it, so `POST /api/v1/auth/organization/remove-member`
+and `POST /api/v1/auth/organization/update-member-role` (Make Owner included)
+answer `409 RESOURCE_CONFLICT` there and change nothing, and their row actions
+are hidden; the one exception is `POST /api/v1/auth/organization/add-member`,
+which stays open to a platform administrator to restore a membership the
+environment lost.
+
 Signing in does not lock the manager: a platform administrator still changes
 it with **Set Manager** (`POST /api/v1/auth/admin/set-user-manager`). That
 endpoint refuses only a person a SCIM directory holds, whose manager is changed

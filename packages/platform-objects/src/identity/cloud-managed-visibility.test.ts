@@ -189,3 +189,42 @@ describe('features.cloudManaged offers the two doors that add a pending person',
     expect(offeredSites).toEqual(SIX.map(([site]) => site));
   });
 });
+
+/**
+ * Membership and roles on a cloud-managed environment are managed by the
+ * organisation that hosts it, so the three row actions that change them are
+ * hidden while the flag is on: Change Role and Make Owner (both call
+ * update-member-role) and Remove Member (remove-member), each of whose doors
+ * refuses there. Each is offered as before when the flag is off. Add Member
+ * stays offered to a platform administrator on a managed environment: its
+ * door is the one left open, to restore a membership the environment lost.
+ */
+describe('features.cloudManaged hides the row actions that change a membership or its role', () => {
+  const MEMBER_ROW = { id: 'mem_1', user_id: 'u_member', organization_id: 'org_1', role: 'member' };
+  const THREE: ReadonlyArray<[string]> = [['update_member_role'], ['remove_member'], ['transfer_ownership']];
+
+  const rowOffered = (name: string, features: Record<string, unknown>): boolean | string => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visibleOf(SysMember, name) },
+      { record: MEMBER_ROW, extra: { current_user: ADMIN, user: ADMIN, ctx: { user: ADMIN }, features } },
+    );
+    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
+    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+  };
+
+  it.each(THREE)('sys_member.%s is hidden while the environment is cloud-managed', (name) => {
+    expect(rowOffered(name, { ...OTHER_FLAGS, cloudManaged: true })).toBe(false);
+  });
+
+  it.each(THREE)('sys_member.%s is offered to the owner as before when the flag is off', (name) => {
+    expect(rowOffered(name, { ...OTHER_FLAGS, cloudManaged: false })).toBe(true);
+  });
+
+  it.each(THREE)('sys_member.%s keeps its organization gate: off hides it whatever cloudManaged says', (name) => {
+    expect(rowOffered(name, { organization: false, admin: true, cloudManaged: false })).toBe(false);
+  });
+
+  it('sys_member.add_member stays offered to a platform administrator while the environment is cloud-managed', () => {
+    expect(rowOffered('add_member', { ...OTHER_FLAGS, cloudManaged: true })).toBe(true);
+  });
+});
