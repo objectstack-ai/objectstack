@@ -170,7 +170,8 @@ describe('element:record_picker — dataSource.view (objectstack#6953)', () => {
     );
     await waitFor(() => expect(adapter.find).toHaveBeenCalled());
     expect(adapter.find.mock.calls[0][0]).toBe('account');
-    // Only the renderer's own default cap: no flat key reaches the query.
-    expect(firstQuery(adapter)).toEqual({ $top: 50 });
+    // Only the renderer's own default cap, and the total it declines beside
+    // a paged read: no flat key reaches the query.
+    expect(firstQuery(adapter)).toEqual({ $top: 50, $count: false });
   });
 });

@@ -340,7 +340,7 @@ describe('element:repeater `dataSource.sort` — the items the adapter is handed
 });
 
 describe('element:repeater — declines the total it never draws', () => {
-  it('every read carries `$count: false`, so the server skips its `count(*)`', async () => {
+  it('a paged read carries `$count: false`, so the server skips its `count(*)`', async () => {
     // The repeater prints rows and never a record count; a paged read without
     // the opt-out pays for a total nothing on screen shows.
     const find = mountRepeater({}, { limit: 5 });
@@ -349,6 +349,15 @@ describe('element:repeater — declines the total it never draws', () => {
       expect(query.$count).toBe(false);
       // Reachability: the binding's limit still pages the read.
       expect(query.$top).toBe(5);
+    }
+  });
+
+  it('CONTROL: an unpaged read sends neither `$top` nor `$count` — the server counts nothing there', async () => {
+    const find = mountRepeater({});
+    await waitFor(() => expect(find).toHaveBeenCalled());
+    for (const query of queries(find)) {
+      expect(query).not.toHaveProperty('$count');
+      expect(query).not.toHaveProperty('$top');
     }
   });
 });

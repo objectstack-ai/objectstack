@@ -220,10 +220,12 @@ function RepeaterRenderer({ schema }: { schema: any }) {
         const query: any = {};
         if (queryFilter) query.$filter = queryFilter;
         if (sort) query.$orderby = sort;
-        if (limit) query.$top = limit;
-        // Only the rows are drawn, never a record count, so the total is
-        // declined: the server then skips the `count(*)` beside a paged read.
-        query.$count = false;
+        if (limit) {
+          query.$top = limit;
+          // Only the rows are drawn, never a record count, so a paged read
+          // declines the total: the server then skips its `count(*)`.
+          query.$count = false;
+        }
         const res = await adapter.find(object, query);
         // `data` is the ONE rows member `QueryResult` (`@object-ui/types`)
         // declares; the bare-array arm stays because fakes at this seam really
