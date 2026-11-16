@@ -15,12 +15,14 @@
  * so `owner_id` read right; a `Field.user()` or `Field.lookup('sys_user')`
  * column naming the owner stayed NULL.
  *
- * The control boots the same app un-walled. There the boot seed loads before
- * the dev admin exists, so its person columns have nobody to resolve to, and
- * only the first-admin handoff writes `owner_id` afterwards. That outcome is
- * measured on main and pinned here as it stands: the fix waits only for the
- * walled bootstrap's own `default` organization, so the un-walled boot must
- * read exactly as before.
+ * The second leg boots the same app un-walled. There the boot seed loads
+ * before the dev admin exists, so its person columns have nobody to resolve to
+ * when the seed runs, and the first-admin handoff writes `owner_id` and no
+ * other column. The seed loader therefore holds each person reference its last
+ * pass left NULL, on the row it landed on, and the runtime's AppPlugin retries
+ * them once a `sys_user` row is inserted, writing each one that now resolves
+ * while its column is still NULL. So the un-walled boot resolves the owner too,
+ * through its own moment rather than the walled replay's.
  *
  * ## What is real
  *
@@ -184,7 +186,7 @@ describe('the walled Default Organization’s seed resolves the platform owner i
   });
 });
 
-describe('control: the same seed on an un-walled boot reads as it did before the fix', () => {
+describe('the same seed on an un-walled boot resolves the first admin once that admin exists', () => {
   const env = legEnv([
     ['OS_TENANCY_POSTURE', undefined],
     ['OS_AUTH_MEMBERSHIP_POLICY', undefined],
@@ -201,12 +203,16 @@ describe('control: the same seed on an un-walled boot reads as it did before the
     env.restore();
   });
 
-  it('the wall is down, the seed landed once before the admin existed, and only the handoff owns the row', async () => {
+  it('the wall is down, the seed landed once before the admin existed, and every person reference naming the admin resolves to the admin', async () => {
     const tenancy: any = await booted.stack.kernel.getServiceAsync('tenancy');
     expect(tenancy.isolationActive).toBe(false);
     expect(booted.adminId).not.toBe('');
     const rows = await ownerTasks(booted.ql, {});
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ assignee: null, reviewer: null, owner_id: booted.adminId });
+    expect(rows[0]).toMatchObject({
+      assignee: booted.adminId,
+      reviewer: booted.adminId,
+      owner_id: booted.adminId,
+    });
   });
 });
