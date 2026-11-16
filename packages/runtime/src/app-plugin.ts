@@ -964,6 +964,8 @@ export class AppPlugin implements Plugin {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
+            // [#34273] An action's declared refusal is translated as a hook's is.
+            i18n: hookRefusalI18nReader(ctx),
             getService: (name) => ctx.getService(name),
         }));
         if (installed !== false) {

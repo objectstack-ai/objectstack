@@ -77,6 +77,7 @@ import {
 import { mapDataError } from '@objectstack/types';
 import {
   inProcessHostSurface,
+  resolveActionRefusal,
   resolveHookRefusal,
   resolveInProcessHookRefusal,
   type HookRefusalI18nSource,
@@ -91,9 +92,10 @@ interface FactoryOptions {
   appId: string;
   logger?: any;
   /**
-   * [#26170] Where a hook's declared refusal is translated: the `i18n`
-   * service, read at refusal time (see `resolveHookRefusal`). Absent, a
-   * declared refusal is answered with its declared message.
+   * [#26170] Where a hook's declared refusal — and, #34273, an action's — is
+   * translated: the `i18n` service, read at refusal time (see
+   * `resolveHookRefusal`, `resolveActionRefusal`). Absent, a declared refusal
+   * is answered with its declared message.
    */
   i18n?: HookRefusalI18nSource;
   /**
@@ -606,7 +608,7 @@ export function hookBodyRunnerFactory(
 export function actionBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
-): (action: { name: string; body?: unknown; object?: string; type?: string; timeoutMs?: number }) =>
+): (action: { name: string; body?: unknown; object?: string; type?: string; timeoutMs?: number; refusals?: unknown }) =>
   | ((actionCtx: any) => Promise<unknown>)
   | undefined {
   return (action) => {
@@ -694,8 +696,13 @@ export function actionBodyRunnerFactory(
         warnDiscardedRecordWrites(result, action.name, action.object, opts);
         return result.value;
       } catch (err: any) {
-        logBodyThrow(opts, { kind: 'action', name: action.name }, err);
-        throw err;
+        // [#34273] An action that declares `refusals` refuses by code only,
+        // exactly as a hook does: the body's throw is answered with the
+        // declared entry in the caller's locale, or refused loudly when the
+        // catalogue cannot answer it. Everything else leaves as thrown.
+        const answered = resolveActionRefusal(action, err, actionCtx, { i18n: opts.i18n, logger: opts.logger });
+        logBodyThrow(opts, { kind: 'action', name: action.name }, answered);
+        throw answered;
       }
     };
   };

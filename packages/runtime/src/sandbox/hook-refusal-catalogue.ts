@@ -68,9 +68,15 @@
  */
 
 import type { Hook } from '@objectstack/spec/data';
-import { undeclaredHookRefusalAtRun, undeclaredHookRefusalReasonAtRun } from '@objectstack/spec/data';
-import { hookRefusalMessageKey, resolveBundleLocale } from '@objectstack/spec/system';
+import {
+  undeclaredActionRefusalAtRun,
+  undeclaredActionRefusalReasonAtRun,
+  undeclaredHookRefusalAtRun,
+  undeclaredHookRefusalReasonAtRun,
+} from '@objectstack/spec/data';
+import { actionRefusalMessageKey, hookRefusalMessageKey, resolveBundleLocale } from '@objectstack/spec/system';
 import { templateEngine } from '@objectstack/formula';
+import { isObjectLessActionKey, standaloneActionOwnerKey } from '@objectstack/objectql';
 import { sandboxBusinessMessage } from '@objectstack/types';
 import {
   SandboxError,
@@ -130,8 +136,56 @@ interface DeclaredRefusal {
 /** [#33214] What a hook's throw named beside its code: a declared reason and the params its holes name. */
 export type HookRefusalAddress = SandboxRefusalAddress;
 
+/**
+ * [#34273] The declaration a catalogue sits on — a hook, or an action — as
+ * the shared answer below needs it: its name for the log and fault text, the
+ * key its translations are read at, and the two run-time fault sentences.
+ * The answer itself is one code path for both, so a hook's refusal and an
+ * action's cannot be answered differently.
+ */
+interface RefusalOwner {
+  /** `hook 'NAME'` / `action 'NAME'`, for the log lines. */
+  label: string;
+  messageKey(code: string, reason?: string): string;
+  undeclaredAtRun(code: string | undefined, declared: readonly string[]): string;
+  undeclaredReasonAtRun(code: string, reason: string, declared: readonly string[]): string;
+}
+
+function hookOwner(hookName: string): RefusalOwner {
+  return {
+    label: `hook '${hookName}'`,
+    messageKey: (code, reason) => hookRefusalMessageKey(hookName, code, reason),
+    undeclaredAtRun: (code, declared) => undeclaredHookRefusalAtRun(hookName, code, declared),
+    undeclaredReasonAtRun: (code, reason, declared) => undeclaredHookRefusalReasonAtRun(hookName, code, reason, declared),
+  };
+}
+
+/** [#34273] An action as the catalogue reads it: its name, its OWN object (absent: object-less), its catalogue. */
+export interface ActionRefusalDeclaration {
+  name: string;
+  /** The object the action is declared on (`ActionSchema.objectName`). */
+  objectName?: string;
+  /** The object that declares it inline, as the bundle collector stamps it. */
+  object?: string;
+  refusals?: unknown;
+}
+
+function actionOwner(action: ActionRefusalDeclaration): RefusalOwner {
+  const name = String(action.name);
+  // The action's OWN object, read by the one owner-key ladder
+  // (`objectName`, then `object`, else object-less) — never re-spelled here.
+  const ownerKey = standaloneActionOwnerKey(action);
+  const object = isObjectLessActionKey(ownerKey) ? undefined : ownerKey;
+  return {
+    label: `action '${name}'`,
+    messageKey: (code, reason) => actionRefusalMessageKey(object, name, code, reason),
+    undeclaredAtRun: (code, declared) => undeclaredActionRefusalAtRun(name, code, declared),
+    undeclaredReasonAtRun: (code, reason, declared) => undeclaredActionRefusalReasonAtRun(name, code, reason, declared),
+  };
+}
+
 /** The hook's catalogue, or `undefined` when it declares none. */
-function catalogueOf(hook: Pick<Hook, 'refusals'>): Record<string, DeclaredRefusal> | undefined {
+function catalogueOf(hook: Pick<Hook, 'refusals'> | ActionRefusalDeclaration): Record<string, DeclaredRefusal> | undefined {
   const refusals = (hook as { refusals?: unknown }).refusals;
   return refusals && typeof refusals === 'object' ? (refusals as Record<string, DeclaredRefusal>) : undefined;
 }
@@ -172,10 +226,21 @@ export function fillHookRefusalParams(
   params: Record<string, unknown> | undefined,
   logger?: { warn?: (...args: any[]) => void },
 ): string {
+  return fillRefusalParams(hookOwner(hookName), template, declared, params, logger);
+}
+
+/** {@link fillHookRefusalParams} for any declared refusal owner — a hook's or an action's (#34273). */
+function fillRefusalParams(
+  owner: RefusalOwner,
+  template: string,
+  declared: readonly string[],
+  params: Record<string, unknown> | undefined,
+  logger?: { warn?: (...args: any[]) => void },
+): string {
   const result = renderHookTemplate(template, declared, params);
   if (result.ok) return result.value;
   logger?.warn?.(
-    `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error}), `
+    `[BodyRunner] ${owner.label}: its refusal sentence did not render (${result.error}), `
       + 'so it is served as written.',
   );
   return template;
@@ -234,11 +299,23 @@ export function declaredRefusalMessage(
   logger?: { warn?: (...args: any[]) => void },
   address?: HookRefusalAddress,
 ): string {
+  return ownerRefusalMessage(hookOwner(hookName), code, entry, locale, i18n, logger, address);
+}
+
+function ownerRefusalMessage(
+  owner: RefusalOwner,
+  code: string,
+  entry: DeclaredRefusal,
+  locale: string | undefined,
+  i18n: HookRefusalI18nSource | undefined,
+  logger?: { warn?: (...args: any[]) => void },
+  address?: HookRefusalAddress,
+): string {
   const reason = declaredReason(entry, address);
   const declaredSentence = reason !== undefined ? entry.reasons![reason]!.message : entry.message;
-  const picked = pickTranslatedSentence(hookName, code, reason, declaredSentence, locale, i18n, logger);
+  const picked = pickTranslatedSentence(owner, code, reason, declaredSentence, locale, i18n, logger);
   const params = Array.isArray(entry.params) ? entry.params : [];
-  return params.length > 0 ? fillHookRefusalParams(hookName, picked, params, address?.params, logger) : picked;
+  return params.length > 0 ? fillRefusalParams(owner, picked, params, address?.params, logger) : picked;
 }
 
 /**
@@ -255,7 +332,7 @@ function declaredReason(entry: DeclaredRefusal, address: HookRefusalAddress | un
 
 /** The translation of a declared sentence in `locale`, or the declared sentence itself. */
 function pickTranslatedSentence(
-  hookName: string,
+  owner: RefusalOwner,
   code: string,
   reason: string | undefined,
   declared: string,
@@ -271,14 +348,14 @@ function pickTranslatedSentence(
     return declared;
   }
   if (!service || typeof service.t !== 'function') return declared;
-  const key = hookRefusalMessageKey(hookName, code, reason);
+  const key = owner.messageKey(code, reason);
   try {
     const translated = service.t(key, negotiatedLocale(service, locale));
     // II18nService echoes the key back on a miss.
     if (typeof translated === 'string' && translated.trim().length > 0 && translated !== key) return translated;
   } catch (err: unknown) {
     logger?.warn?.(
-      `[BodyRunner] hook '${hookName}': the i18n service threw reading '${key}' `
+      `[BodyRunner] ${owner.label}: the i18n service threw reading '${key}' `
         + `(${err instanceof Error ? err.message : String(err)}), so the refusal shows its declared message.`,
     );
   }
@@ -292,11 +369,11 @@ function pickTranslatedSentence(
  * builds its `SandboxError` from it with the code it read.
  */
 function declaredAnswer(
-  hook: Pick<Hook, 'name'>,
+  owner: RefusalOwner,
   thrownCode: string,
   entry: DeclaredRefusal,
   address: HookRefusalAddress | undefined,
-  engineCtx: { session?: { locale?: unknown } } | undefined,
+  locale: unknown,
   opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } },
 ): { fault: SandboxError } | { message: string; status: number } {
   // A reason is judged only under a code that declares `reasons`; under any
@@ -304,11 +381,10 @@ function declaredAnswer(
   const reason = address?.reason;
   const reasons = entry.reasons && typeof entry.reasons === 'object' ? entry.reasons : undefined;
   if (reason !== undefined && reasons && !Object.prototype.hasOwnProperty.call(reasons, reason)) {
-    return { fault: new SandboxError(undeclaredHookRefusalReasonAtRun(String(hook.name), thrownCode, reason, Object.keys(reasons))) };
+    return { fault: new SandboxError(owner.undeclaredReasonAtRun(thrownCode, reason, Object.keys(reasons))) };
   }
-  const locale = engineCtx?.session?.locale;
-  const message = declaredRefusalMessage(
-    String(hook.name),
+  const message = ownerRefusalMessage(
+    owner,
     thrownCode,
     entry,
     typeof locale === 'string' ? locale : undefined,
@@ -332,6 +408,43 @@ export function resolveHookRefusal(
 ): unknown {
   const catalogue = catalogueOf(hook);
   if (!catalogue) return err;
+  return resolveSandboxedRefusal(hookOwner(String(hook.name)), catalogue, err, engineCtx?.session?.locale, opts);
+}
+
+/**
+ * [#34273] Answer a sandboxed ACTION body's throw against the action's
+ * refusal catalogue (`ActionSchema.refusals`) — the action twin of
+ * {@link resolveHookRefusal}, called by the action body runner. One answer
+ * for both: a declared code (and declared reason) is answered with the
+ * entry's sentence in the caller's locale — picked at
+ * `objects.<object>._actions.<action>.refusals.…` or
+ * `globalActions.<action>.refusals.…` (`actionRefusalMessageKey`) — its
+ * status, and the code on the wire; anything else the body threw is refused
+ * loudly; a host-relayed error, a nested refusal, the sandbox's own fault and
+ * a crash pass through unchanged.
+ *
+ * The caller's locale is the action context's `executionContext.locale` —
+ * the request's negotiated language, the one a flow action's run reads.
+ */
+export function resolveActionRefusal(
+  action: ActionRefusalDeclaration,
+  err: unknown,
+  actionCtx: { executionContext?: { locale?: unknown } } | undefined,
+  opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } } = {},
+): unknown {
+  const catalogue = catalogueOf(action);
+  if (!catalogue) return err;
+  return resolveSandboxedRefusal(actionOwner(action), catalogue, err, actionCtx?.executionContext?.locale, opts);
+}
+
+/** The one answer {@link resolveHookRefusal} and {@link resolveActionRefusal} give a sandboxed body's throw. */
+function resolveSandboxedRefusal(
+  owner: RefusalOwner,
+  catalogue: Record<string, DeclaredRefusal>,
+  err: unknown,
+  locale: unknown,
+  opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } },
+): unknown {
   // Not the body's own throw: the engine's error relayed as itself, the
   // sandbox's own fault, a host error re-thrown unchanged, a nested refusal.
   if (!(err instanceof SandboxError) || err.innerMessage === undefined) return err;
@@ -342,9 +455,9 @@ export function resolveHookRefusal(
   const code = typeof err.code === 'string' && err.code.length > 0 ? err.code : undefined;
   const entry = code !== undefined && Object.prototype.hasOwnProperty.call(catalogue, code) ? catalogue[code] : undefined;
   if (code === undefined || !entry) {
-    return new SandboxError(undeclaredHookRefusalAtRun(String(hook.name), code, Object.keys(catalogue)));
+    return new SandboxError(owner.undeclaredAtRun(code, Object.keys(catalogue)));
   }
-  const answer = declaredAnswer(hook, code, entry, sandboxRefusalAddressOf(err), engineCtx, opts);
+  const answer = declaredAnswer(owner, code, entry, sandboxRefusalAddressOf(err), locale, opts);
   if ('fault' in answer) return answer.fault;
   return new SandboxError(err.message, answer.message, { code, status: answer.status, userMessage: answer.message });
 }
@@ -524,15 +637,16 @@ export function resolveInProcessHookRefusal(
   };
   const code = typeof thrown.code === 'string' && thrown.code.length > 0 ? thrown.code : undefined;
   const entry = code !== undefined && Object.prototype.hasOwnProperty.call(catalogue, code) ? catalogue[code] : undefined;
+  const owner = hookOwner(String(hook.name));
   if (code === undefined || !entry) {
-    return new SandboxError(undeclaredHookRefusalAtRun(String(hook.name), code, Object.keys(catalogue)));
+    return new SandboxError(owner.undeclaredAtRun(code, Object.keys(catalogue)));
   }
   const address: HookRefusalAddress = {};
   if (typeof thrown.reason === 'string' && thrown.reason.length > 0) address.reason = thrown.reason;
   if (thrown.params !== null && typeof thrown.params === 'object' && !Array.isArray(thrown.params)) {
     address.params = thrown.params as Record<string, unknown>;
   }
-  const answer = declaredAnswer(hook, code, entry, address, engineCtx, opts);
+  const answer = declaredAnswer(owner, code, entry, address, engineCtx?.session?.locale, opts);
   if ('fault' in answer) return answer.fault;
   return new SandboxError(`hook '${String(hook.name)}' threw: ${flattenThrown(err)}`, answer.message, {
     code,
