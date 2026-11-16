@@ -454,6 +454,46 @@ describe('[#34226] a permission set is (package, name): the seal and the lock ju
       expect(metaRowsOf(engine).map((r) => r.state)).toEqual(['draft']);
     }, 30_000);
 
+    // [#32396] On a runtime that cannot roll back, a refused package publish undoes
+    // each promotion it made by hand. The undo addresses the same package the
+    // promotion did, so it judges hr's own set N as the promotion did.
+    it(`${order}: a refused batch publish on a runtime that cannot roll back undoes hr's own set N and puts its draft back (FROM left live)`, async () => {
+      const { engine, protocol } = await composition(order);
+      Object.assign(engine, {
+        getDefaultDriverName: () => 'remote',
+        getDriverByName: () => ({ supports: { transactionsUnsupported: true } }),
+      });
+      const LATER = 'qa_zz_refused_later';
+      expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr'), packageId: HR, mode: 'draft' })).toBeNull();
+      expect(await save(protocol, { type: 'permission', name: LATER, item: { ...setOf('cap_later'), name: LATER }, packageId: HR, mode: 'draft' })).toBeNull();
+      const draftOf = (name: string) => metaRowsOf(engine).find((r) => r.name === name && r.state === 'draft');
+      const draftBefore = { metadata: draftOf(N)?.metadata, checksum: draftOf(N)?.checksum };
+      expect(draftBefore.metadata).toBeDefined();
+
+      // The later promotion's write is refused after hr's N was promoted.
+      const host = protocol as unknown as {
+        promoteDraftForPublish(req: { name: string; judgeOnly?: boolean }): Promise<unknown>;
+        publishPackageDrafts(req: { packageId: string }): Promise<{ outcome: string; failed: Array<{ name: string; code?: string }> }>;
+      };
+      const real = host.promoteDraftForPublish.bind(host);
+      const promoted: string[] = [];
+      host.promoteDraftForPublish = async (req) => {
+        if (!req.judgeOnly) {
+          if (req.name === LATER) throw Object.assign(new Error('conflict'), { code: 'METADATA_CONFLICT', status: 409 });
+          promoted.push(req.name);
+        }
+        return real(req);
+      };
+
+      const res = await host.publishPackageDrafts({ packageId: HR });
+
+      expect(promoted, 'hr\'s N is promoted before the refused write').toEqual([N]);
+      expect(res.outcome).toBe('refused');
+      expect(res.failed.find((f) => f.name === N)?.code, 'undone, not reported live').toBe('BATCH_ABORTED');
+      expect(metaRowsOf(engine).map((r) => `${String(r.name)}:${String(r.state)}`).sort()).toEqual([`${LATER}:draft`, `${N}:draft`]);
+      expect({ metadata: draftOf(N)?.metadata, checksum: draftOf(N)?.checksum }).toEqual(draftBefore);
+    }, 30_000);
+
     it(`${order}: the lock gate judges the same relations: hr's own set passes, every override of crm's set is locked`, async () => {
       const { gate } = await composition(order);
       expect(await gate(HR)).toBeNull();
