@@ -24,6 +24,11 @@ import { AggregationFunction } from '../data/query.zod';
  *
  * Only the shape is spec. The producer is the cloud AI service's
  * `resultSourceBlock()`; a reader is the console chat's answer-source block.
+ * `scope` is one of two values, both required to be stated: the producer
+ * judges it per call from `ISecurityService.getReadFilter(object, ctx)`
+ * (`visible_to_you` when a row restriction applied, `all_records` when that
+ * call answered `undefined`), and the reader states an access line for
+ * `visible_to_you` only.
  *
  * Every optional key is LEFT OUT when it does not apply, never sent as
  * `null`: a `null` is refused. The object is a plain object, so a key a newer
@@ -41,9 +46,13 @@ export const ObjectQuerySourceSchema = lazySchema(() => z.object({
     'The caller\'s `where`, in the `$` query dialect, exactly as the engine accepted it: machine names only, '
     + 'no field labels, date placeholders such as `{today}` as written. Absent when no condition applied',
   ),
-  scope: z.literal('visible_to_you').describe(
-    'The row scope the figures cover: only the records the caller may read, after sharing and row-level '
-    + 'narrowing. Always present; this is its only value',
+  scope: z.enum(['visible_to_you', 'all_records']).describe(
+    'The row scope the figures cover, judged by the producer from '
+    + '`ISecurityService.getReadFilter(object, ctx)` for this caller and object. `visible_to_you`: a row '
+    + 'restriction applied, so the figures cover only the records the caller may read, after sharing and '
+    + 'row-level narrowing. `all_records`: `getReadFilter` answered `undefined` for this caller and object, '
+    + 'so no row restriction applied. A restriction applied is the fact stated, not a count of rows excluded. '
+    + 'Always present, one of these two values',
   ),
   groupBy: z.array(z.string()).optional().describe('The field names the figures were grouped by, in order'),
   aggregations: z.array(z.object({
