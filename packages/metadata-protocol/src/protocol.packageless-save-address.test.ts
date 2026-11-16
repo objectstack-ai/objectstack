@@ -419,9 +419,10 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         });
 
         it('with the environment\'s row on `task` stored too, a save on `invoice` is still P\'s customization', async () => {
-            const { protocol, rows } = makeProtocol();
+            const { protocol, rows, seedRow } = makeProtocol();
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
-            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+            // Stored as the other save order leaves it (the environment's save first).
+            seedRow({ type: 'action', name: NAME, package_id: null, metadata: JSON.stringify(action(NAME, 'env', 'task')), checksum: 'sha-env' });
 
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'invoice') });
 
