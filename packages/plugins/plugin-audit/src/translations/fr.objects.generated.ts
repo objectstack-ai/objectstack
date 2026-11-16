@@ -45,7 +45,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Utilisation d’identifiants",
           scim_refused: "Requête SCIM refusée",
           audit_signing_key_change: "Changement de clé de signature d’audit",
-          dataset_query: "Requête de jeu de données"
+          dataset_query: "Requête de jeu de données",
+          scim_manager_unresolved: "Responsable SCIM non résolu"
         }
       },
       user_id: {

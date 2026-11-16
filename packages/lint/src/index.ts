@@ -338,8 +338,9 @@ export {
   APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
   APPROVAL_DECISION_OUTPUTS_RESERVED,
   APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
+  APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
 } from './validate-approval-approvers.js';
-export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
+export type { ApprovalApproverFinding, ApprovalApproverSeverity, ValidateApprovalApproversOptions } from './validate-approval-approvers.js';
 
 export {
   validateAssignmentRules,

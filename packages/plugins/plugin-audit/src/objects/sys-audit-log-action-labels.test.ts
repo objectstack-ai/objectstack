@@ -43,6 +43,8 @@ describe('sys_audit_log.action option labels', () => {
       'audit_signing_key_change',
       // A new value, added writer-first; no existing value moved.
       'dataset_query',
+      // #33918: a new value, added writer-first; no existing value moved.
+      'scim_manager_unresolved',
     ]);
   });
 

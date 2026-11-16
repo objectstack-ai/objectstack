@@ -3333,13 +3333,17 @@ const MANAGER_ONLY_ROUTES =
   'an existing user — and links each row once every row in the file exists, through those same ' +
   'refusals; a link it cannot make is reported on that row\'s manager result and never fails the ' +
   'user it imported. The column is also written by a seed, or by any other system-context ' +
-  'write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ' +
-  'populate it too, but only through a provisioning path your own deployment supplies: this ' +
-  'platform declares the SCIM \'manager\' attribute without projecting it onto the column — and ' +
-  'where a SCIM directory holds an identity the admin operation refuses, the import\'s ' +
-  'manager_id column included, leaving that directory the one surface that authors its ' +
-  'manager. An identity that only signs in through SSO, with no SCIM directory behind it, is set ' +
-  'through the admin operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
+  'write, which bypasses the managed-update whitelist. SCIM provisioning populates it too, for an ' +
+  'active user a SCIM directory holds and only from the connection that provisioned that user\'s ' +
+  'profile: the Enterprise User \'manager\' attribute, whose value is the manager\'s SCIM resource ' +
+  'id, is written onto the column on a SCIM create, replace or patch that names the attribute, ' +
+  'through those same refusals. A write that does not name it leaves the column as it is, and an ' +
+  'id that names no existing user the connection provisioned is served and leaves the column unchanged. ' +
+  'Where a SCIM directory holds an identity, the admin operation refuses it, the import\'s ' +
+  'manager_id column included, leaving that directory the one surface that authors its manager. Any other directory sync ' +
+  'populates it only through a provisioning path your own deployment supplies. An identity that ' +
+  'only signs in through SSO, with no SCIM directory behind it, is set through the admin ' +
+  'operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
   'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
   'of on the organization\'s administrators, which needs no write to the column at all.';
 

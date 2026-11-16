@@ -1257,7 +1257,11 @@ export const CEILINGS = new Map([
   // 77 → 76 (#25753): lines that named objectui as a sibling repo retired; landed count.
   // Renamed from `references/review-checklist.md` by the two review levels (ruling record
   // 6897685514): the L1 checklist, same 76 lines, the key moved with the file.
-  ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 76],
+  // 76 → 80 (#34343): four lines, two review rules — a one-off codemod is never committed, and a move's growth is
+  // accounted per file. The ruling of record is that card's body, which quotes the maintainer verbatim —
+  // 「这种代码就是垃圾啊，我为什么要合并，以及如何避免类似的问题」 and 「yes」 to the proposal — and names the review
+  // checklist and both rules. Measured delta +4 (76 → 80 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 80],
   // The old path's stub: one pointer line to the file above, so a link, a record or a
   // running thread that still names it lands somewhere (same ruling record). A NEW row at
   // its landed count; the stub is deleted with the alias, never grown.
