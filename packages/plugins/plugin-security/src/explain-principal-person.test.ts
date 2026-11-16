@@ -52,10 +52,10 @@ const DIRECTORY_SET = PermissionSetSchema.parse({
 });
 /**
  * The same directory with the email column withheld by field-level security.
- * Every user row is reached by a row policy rather than `viewAllRecords`: a
- * set holding View All on an object votes `readable: true` on every field of
- * it (ADR-0066 D2 ⑧ as amended, ruling of record 6573563853), so its own mask
- * could not withhold the email.
+ * Every user row is reached by a row policy rather than `viewAllRecords`. The
+ * shape predates the ADR-0066 D2 ⑧ note of 2026-11-15, under which a View All
+ * set's own `readable: false` row binds that set's holders; it is kept because
+ * it withholds the email whichever way the set reaches the rows.
  */
 const MASKED_DIRECTORY_SET = PermissionSetSchema.parse({
   name: 'qa_pp_directory_masked',

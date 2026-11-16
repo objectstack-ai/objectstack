@@ -540,6 +540,12 @@ export class PermissionEvaluator {
    * super-user bits but named no field cast no vote, so an app set's
    * `readable: false` hid the field from a platform admin who also held it.
    * Union without deny is otherwise unchanged.
+   *
+   * [ADR-0066 D2 ⑧ note of 2026-11-15] The vote is asked per field: a set
+   * holding View All without Modify All casts no read vote on a field its OWN
+   * row declares `readable: false`, so that row binds the set's holders.
+   * Another set's View All or Modify All still reads the field, and a Modify
+   * All set votes on every field as before, its own rows included.
    */
   getFieldPermissions(
     objectName: string,
@@ -570,14 +576,14 @@ export class PermissionEvaluator {
       }
     }
 
-    // [Ruling of record 6573563853] The super-user vote — the same function the
-    // row-blind `/auth/me/permissions` merge applies.
-    const superVote = superuserFieldVote(permissionSets, objectName);
-    if (superVote) {
-      for (const perm of Object.values(result)) {
-        perm.readable = true;
-        if (superVote.editable) perm.editable = true;
-      }
+    // [Ruling of record 6573563853; ADR-0066 D2 ⑧ note of 2026-11-15] The
+    // super-user vote, per field — the same function the row-blind
+    // `/auth/me/permissions` merge applies.
+    for (const [fieldName, perm] of Object.entries(result)) {
+      const superVote = superuserFieldVote(permissionSets, objectName, fieldName);
+      if (!superVote) continue;
+      perm.readable = true;
+      if (superVote.editable) perm.editable = true;
     }
 
     return result;
