@@ -967,7 +967,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       refusals: {
         label: "拒否カタログ",
-        helpText: "本体がスローする SCREAMING_SNAKE のコード（例: CLEAN_VERSION_REQUIRED）をキーとする拒否カタログ。呼び出し元には宣言したメッセージ（その言語に翻訳）と宣言したステータスが返ります。JavaScript（L2）本体のみ"
+        helpText: "フックがスローする SCREAMING_SNAKE のコード（例: CLEAN_VERSION_REQUIRED）をキーとする拒否カタログ。呼び出し元には宣言したメッセージ（その言語に翻訳）と宣言したステータスが返ります。JavaScript（L2）本体またはハンドラーで使用可能。expression 本体では拒否されます"
       },
       "refusals.message": {
         label: "メッセージ",

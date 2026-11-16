@@ -66,6 +66,9 @@ vi.mock('../useMetadata', async (importOriginal) => ({
   useMetadataClient: () => h.client,
 }));
 
+// The source under test reaches a dynamic `import('@objectstack/lint')`; pay
+// that load during collection, never inside a case's clocked window.
+import '@objectstack/lint';
 import { useObjectFields } from './useObjectFields';
 import { t, useMetadataLocale } from '../i18n';
 import { FlowNodeConfigField } from '../inspectors/FlowNodeConfigField';
@@ -190,8 +193,18 @@ function startNodeScope(objectName: string): TriggerScope | undefined {
   return resolveFlowScope(draft, 'start').trigger;
 }
 
-/** Open the entry condition's SUBJECT dropdown and read every subject it offers. */
-async function entrySubjects(objectName: string, expectField: string): Promise<string[]> {
+/**
+ * The CEL spelling an option offers. The entry-condition builder names a field
+ * subject by its label with its spelling beside it (`labelSubjects`,
+ * objectstack#33864); a subject with no label (`previous`) is its spelling.
+ */
+function spellingOf(option: HTMLElement): string {
+  const hint = option.querySelector('.font-mono');
+  return (hint ?? option).textContent ?? '';
+}
+
+/** Open the entry condition's SUBJECT dropdown and read the spelling of every subject it offers. */
+async function entrySubjects(objectName: string, expectOption: string): Promise<string[]> {
   const { container } = render(
     <FlowNodeConfigField
       field={ENTRY_CONDITION}
@@ -203,14 +216,14 @@ async function entrySubjects(objectName: string, expectField: string): Promise<s
   const trigger = container.querySelectorAll('[role="combobox"]')[0] as HTMLElement;
   await userEvent.click(trigger);
   // Waits for the catalog: the options follow the field read when it lands.
-  await screen.findByRole('option', { name: expectField });
-  return screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  await screen.findByRole('option', { name: expectOption });
+  return screen.getAllByRole('option').map(spellingOf);
 }
 
 describe('the flow entry-condition builder offers a draft-only object\'s fields (objectui#11895)', () => {
   it('offers the draft object\'s fields, not only `previous`', async () => {
     installServer(WORLD);
-    const opts = await entrySubjects('repair_ticket', 'issue_summary');
+    const opts = await entrySubjects('repair_ticket', 'Issue summary issue_summary');
     expect(opts).toContain('issue_summary');
     expect(opts).toContain('severity');
     expect(opts).toContain('previous.issue_summary');
@@ -218,7 +231,7 @@ describe('the flow entry-condition builder offers a draft-only object\'s fields 
 
   it('CONTROL — a published object\'s fields are offered as before', async () => {
     installServer(WORLD);
-    const opts = await entrySubjects('account', 'industry');
+    const opts = await entrySubjects('account', 'Industry industry');
     expect(opts).toContain('name');
     expect(opts).toContain('industry');
   });

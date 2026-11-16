@@ -19,8 +19,12 @@
  *     first Build and Run rows are `not-run` by construction (the mode installs
  *     a verified build and builds nothing first), so they are not asked. A
  *     template mode that was skipped holds `not-run` in every row and fails.
- *   - No turn may be NOT MEASURED, in any Run half the record holds (the
- *     first Run and the iterate re-run, both modes), questions and operations
+ *   - An ask mode, when the record holds it, owes nothing and is not judged:
+ *     it ran the questions and operations on a supplied build and authored
+ *     none, so it says nothing about the scratch build the gallery ships
+ *     ({@link ASK_MODE_NOT_EXPORTED}). It never fails the record either.
+ *   - No turn may be NOT MEASURED, in any Run half the record holds of the
+ *     scratch and template modes (the first Run and the iterate re-run), questions and operations
  *     alike. The scorecard leaves a not-measured turn (one that reads a seed
  *     row the app refused) out of both passed and total, so its half can still
  *     read `pass`; the gallery is trust-first, and a turn nobody measured is a
@@ -28,6 +32,10 @@
  */
 
 import type { ScenarioRunRecord, Verdict } from './record.js';
+
+/** Why the gallery passes over a record's ask mode: its pass rule and its transcript show the build this app ships. */
+export const ASK_MODE_NOT_EXPORTED =
+  'the ask mode ran the questions and operations on a supplied build and authored nothing, so it says nothing about the build this app ships: it is not judged or shown here';
 
 /** The halves each mode owes, in the record's row order. */
 export const OWED_HALVES = {
@@ -66,6 +74,7 @@ export function judgeRecord(record: ScenarioRunRecord): PassJudgement {
     }
   }
   for (const m of record.cardRun.modes) {
+    if (m.mode === 'ask') continue; // ASK_MODE_NOT_EXPORTED
     const runs = [
       ['run', m.run],
       ['iterate-run', m.iterate?.run],

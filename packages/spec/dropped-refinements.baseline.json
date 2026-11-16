@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 265,
-    "droppedRefinementSites": 1069,
+    "droppedRefinementSites": 1081,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -147,6 +147,7 @@
         "manifest.objects.element.fields.out.valueType",
         "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "manifest.objects.element.fields.out.valueType.summaryOperations",
         "manifest.objects.element.lifecycle",
         "manifest.objects.element.membershipKeys",
@@ -324,6 +325,7 @@
         "data.options[1].manifest.objects.element.fields.out.valueType",
         "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "data.options[1].manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "data.options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.objects.element.membershipKeys",
@@ -472,6 +474,7 @@
         "options[1].manifest.objects.element.fields.out.valueType",
         "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "options[1].manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.objects.element.membershipKeys",
@@ -560,6 +563,7 @@
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
@@ -621,6 +625,7 @@
         "data.fields.out.valueType",
         "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.inlineColumns.element",
+        "data.fields.out.valueType.lookupFilters.element",
         "data.fields.out.valueType.relatedListFilter.lazy",
         "data.fields.out.valueType.summaryOperations",
         "data.lifecycle",
@@ -993,6 +998,7 @@
         "",
         "currencyConfig",
         "inlineColumns.element",
+        "lookupFilters.element",
         "relatedListFilter.lazy",
         "summaryOperations"
       ]
@@ -1117,6 +1123,7 @@
         "fields.out.valueType",
         "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
+        "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "fields.out.valueType.summaryOperations",
         "lifecycle",
@@ -1139,6 +1146,7 @@
         "fields.out.valueType",
         "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
+        "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "fields.out.valueType.summaryOperations"
       ]
@@ -1440,6 +1448,7 @@
         "field",
         "field.currencyConfig",
         "field.inlineColumns.element",
+        "field.lookupFilters.element",
         "field.relatedListFilter.lazy",
         "field.summaryOperations"
       ]
@@ -1464,6 +1473,7 @@
         "operations.element.options[0].field",
         "operations.element.options[0].field.currencyConfig",
         "operations.element.options[0].field.inlineColumns.element",
+        "operations.element.options[0].field.lookupFilters.element",
         "operations.element.options[0].field.relatedListFilter.lazy",
         "operations.element.options[0].field.summaryOperations",
         "operations.element.options[3].object",
@@ -1500,6 +1510,7 @@
         "object.fields.out.valueType",
         "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.inlineColumns.element",
+        "object.fields.out.valueType.lookupFilters.element",
         "object.fields.out.valueType.relatedListFilter.lazy",
         "object.fields.out.valueType.summaryOperations",
         "object.lifecycle",
@@ -1542,6 +1553,7 @@
         "options[0].field",
         "options[0].field.currencyConfig",
         "options[0].field.inlineColumns.element",
+        "options[0].field.lookupFilters.element",
         "options[0].field.relatedListFilter.lazy",
         "options[0].field.summaryOperations",
         "options[3].object",
