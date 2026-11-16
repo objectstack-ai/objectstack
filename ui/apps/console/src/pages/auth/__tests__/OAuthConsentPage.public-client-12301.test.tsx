@@ -339,6 +339,9 @@ describe('OAuthConsentPage — after a decision', () => {
   const decided = (redirect: string) => () =>
     respond({ kind: 'http', status: 200, body: { redirect_uri: redirect } });
 
+  // While a decision is in flight Authorize reads "Authorizing…".
+  const authorizeOrPending = () => screen.getByRole('button', { name: /Authoriz/ });
+
   function spyAssign() {
     return vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
   }
@@ -369,8 +372,7 @@ describe('OAuthConsentPage — after a decision', () => {
     expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith(redirect);
     // Nothing on the page can post the spent query again.
-    expect(screen.queryByRole('button', { name: /Authorize/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Deny/ })).toBeNull();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryByTestId('oauth-consent-destination')).toBeNull();
     const calls = decisionCalls(fetchMock);
     expect(calls).toHaveLength(1);
@@ -409,7 +411,7 @@ describe('OAuthConsentPage — after a decision', () => {
     // Let the decision's `finally` run before reading the buttons.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByTestId('oauth-consent-handed-off')).toBeNull();
-    expect(authorizeButton().hasAttribute('disabled')).toBe(true);
+    expect(authorizeOrPending().hasAttribute('disabled')).toBe(true);
     expect(denyButton().hasAttribute('disabled')).toBe(true);
   });
 
@@ -427,7 +429,7 @@ describe('OAuthConsentPage — after a decision', () => {
     await screen.findByTestId('oauth-consent-destination');
     fireEvent.click(authorizeButton());
     await waitFor(() => expect(denyButton().hasAttribute('disabled')).toBe(true));
-    expect(authorizeButton().hasAttribute('disabled')).toBe(true);
+    expect(authorizeOrPending().hasAttribute('disabled')).toBe(true);
 
     refuse(undefined);
     await waitFor(() => expect(authorizeButton().hasAttribute('disabled')).toBe(false));
