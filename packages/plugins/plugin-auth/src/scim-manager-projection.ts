@@ -105,6 +105,7 @@ import {
   screenUserManagerLink,
   writeUserManagerLink,
   type SetUserManagerDeps,
+  type SetUserManagerRefusal,
 } from './admin-set-user-manager.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import { runAfterResponse } from './run-after-response.js';
@@ -276,6 +277,31 @@ async function scimInvalidValue(code: string, detail: string): Promise<Error> {
   return error;
 }
 
+/**
+ * The SCIM error for one of the admin endpoint's structural refusals. Switched
+ * on the refusal's OWN code, so nothing is re-derived here; each code is
+ * spelled as a literal at its stamp, so `check:dispatcher-error-vocabulary`
+ * reads exactly which codes this door answers. A code the screen does not
+ * stamp today has no SCIM mapping and fails loudly (the vendor answers a 500
+ * and writes nothing) rather than being answered under another code.
+ */
+async function scimRefusalError(refusal: SetUserManagerRefusal): Promise<Error> {
+  switch (refusal.code) {
+    case 'INVALID_FIELD':
+      return scimInvalidValue('INVALID_FIELD', refusal.message);
+    case 'INVALID_REFERENCE':
+      return scimInvalidValue('INVALID_REFERENCE', refusal.message);
+    case 'RESOURCE_CONFLICT':
+      return scimInvalidValue('RESOURCE_CONFLICT', refusal.message);
+    case 'VALUE_OUT_OF_RANGE':
+      return scimInvalidValue('VALUE_OUT_OF_RANGE', refusal.message);
+    default:
+      return new Error(
+        `[auth] SCIM manager projection: the manager refusal code '${refusal.code}' has no SCIM mapping`,
+      );
+  }
+}
+
 const text = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
 /** The admin endpoint's own dependencies (the engine), plus the operator channel. */
@@ -373,7 +399,7 @@ export function createScimManagerProjection(deps: ScimManagerProjectionDeps): Sc
 
     if (managerId !== null) {
       const refusal = await screenUserManagerLink(deps, engine, state.userId, managerId);
-      if (refusal) throw await scimInvalidValue(refusal.code, refusal.message);
+      if (refusal) throw await scimRefusalError(refusal);
     }
 
     // Attributed to the connection (`svc:scim:CONNECTION_ID`) inside a SCIM
