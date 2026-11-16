@@ -441,6 +441,17 @@ describe('[#33918] SCIM manager projection: an unresolvable reference leaves one
     }
   });
 
+  it('a manager.value past 256 characters is the vendor\'s 400: nothing written, no row', async () => {
+    const h = await boot();
+    const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: 'v'.repeat(257) })));
+    const text = await res.text();
+    expect(res.status, text).toBe(400);
+    expect((JSON.parse(text) as { scimType?: string }).scimType).toBe('invalidValue');
+    expect(await h.engine.find('sys_user', { where: { email: 'emp@acme.com' }, fields: ['id'] }, SYSTEM)).toEqual([]);
+    expect(await h.unresolvedEvents()).toEqual([]);
+    expect(h.unresolvedWarns()).toHaveLength(0);
+  });
+
   it('rows follow the warn\'s rate: one per connection per window, and the next carries the dropped count', async () => {
     const h = await boot();
     await provision(h, 'a', { value: 'no-such-1' });
