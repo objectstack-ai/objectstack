@@ -120,6 +120,7 @@
     "api/DeleteResponse",
     "api/DeviceRequestResponse",
     "api/DeviceTokenResponse",
+    "api/DiffMetaItemRequest",
     "api/DiffMetaItemResponse",
     "api/DisablePackageRequest",
     "api/DisablePackageResponse",

@@ -23,7 +23,7 @@ import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/objectql';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedRefusal } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { RestServer, META_ITEM_HISTORY_PARAMS, META_ITEM_ROLLBACK_PARAMS } from './rest-server.js';
+import { RestServer, META_ITEM_DIFF_PARAMS, META_ITEM_HISTORY_PARAMS, META_ITEM_ROLLBACK_PARAMS } from './rest-server.js';
 
 const ITEM = '/api/v1/meta/:type/:name';
 const PARAMS = { type: 'flow', name: 'shared_flow' };
@@ -65,6 +65,8 @@ function boot(options: { refuse?: boolean; real?: boolean } = {}) {
         getMetaItem: vi.fn().mockResolvedValue({ type: 'flow', name: 'shared_flow', item: { name: 'shared_flow' }, lock: 'none' }),
         historyMetaItem: answer({ events: [] }),
         rollbackMetaItem: answer({ success: true, version: 'v', seq: 2, restoredFromVersion: 1 }),
+        // [#33308] The diff door, pinned in its own describe below.
+        diffMetaItem: answer({ type: 'flow', name: 'shared_flow', fromVersion: 1, toVersion: 3, added: [], removed: [], changed: [] }),
     };
     // The real protocol judges the selector; only the plain read the history
     // door asks first (its read-refusal gate) is answered by the stub.
@@ -155,4 +157,63 @@ describe('the history and rollback doors take `?package=`, the `/layers` spellin
             expect(answer.body?.error, JSON.stringify(answer.body)).toContain('"package" selector');
         });
     }
+});
+
+/**
+ * [ADR-0150 D3/D4, #33308] `GET /meta/:type/:name/diff`, the third door of the
+ * family, takes `?package=` the same way: the holder whose versions it
+ * compares. The real-boot pins live in
+ * `history-diff-two-holders-33308.dogfood.test.ts`.
+ */
+describe('the diff door takes `?package=`, the `/layers` spelling (#33308)', () => {
+    const DIFF = `${ITEM}/diff`;
+
+    it('declares `package` in its closed query set', () => {
+        expect(META_ITEM_DIFF_PARAMS).toContain('package');
+    });
+
+    it('PRESERVATION — the package reaches `diffMetaItem` beside both bounds, under either spelling', async () => {
+        for (const query of [{ from: '1', to: '3' }, { fromVersion: '1', toVersion: '3' }]) {
+            const { protocol, drive } = boot();
+            const answer = await drive('GET', DIFF, { ...query, package: 'com.acme.alpha.custom' });
+            expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+            expect(protocol.diffMetaItem.mock.calls[0][0], JSON.stringify(query)).toEqual({
+                type: 'flow', name: 'shared_flow', fromVersion: 1, toVersion: 3, packageId: 'com.acme.alpha.custom',
+            });
+        }
+    });
+
+    it('CONTROL — no package, `all` and the empty string send no `packageId`', async () => {
+        for (const query of [{}, { package: 'all' }, { package: '' }]) {
+            const { protocol, drive } = boot();
+            const answer = await drive('GET', DIFF, query);
+            expect(answer.status, `${JSON.stringify(query)}: ${JSON.stringify(answer.body)}`).toBe(200);
+            expect(Object.keys(protocol.diffMetaItem.mock.calls[0][0]), JSON.stringify(query)).not.toContain('packageId');
+        }
+    });
+
+    it('REFUSAL — a repeated `?package=` is a located 400 and the protocol is never called', async () => {
+        const { protocol, drive } = boot();
+        const answer = await drive('GET', DIFF, { package: ['com.acme.alpha.custom', 'com.acme.beta.custom'] });
+        expect(answer.status).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(answer.body?.error?.message).toContain('"package" query parameter was supplied 2 times');
+        expect(protocol.diffMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('REFUSAL — the protocol\'s two-holder refusal is a 409 naming every holder in `details.candidates`', async () => {
+        const { drive } = boot({ refuse: true });
+        const answer = await drive('GET', DIFF, {});
+        expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+        expect([...(answer.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(answer.body))
+            .toEqual(['com.acme.alpha.custom', 'com.acme.beta.custom']);
+    });
+
+    it('REFUSAL — `?package=` on a type not stored per package is a 400 naming the parameter', async () => {
+        const { drive } = boot({ real: true });
+        const answer = await drive('GET', DIFF, { package: 'com.acme.alpha' }, {}, { type: 'view', name: 'shared_view' });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+        expect(answer.body?.code, JSON.stringify(answer.body)).toBe('VALIDATION_ERROR');
+        expect(answer.body?.error, JSON.stringify(answer.body)).toContain('"package" selector');
+    });
 });
