@@ -37,6 +37,7 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 
 const OBJ = 'qa_fhf_account';
 const REGION = 'qa_fhf_region';
+const NOTE = 'qa_fhf_note';
 const SET = 'qa_fhf_reader';
 const SECOND = 'qa_fhf_second';
 const DELEGATOR_SET = 'qa_fhf_delegator';
@@ -89,6 +90,19 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     objects: [
       ...(opts.delegatorFields ? [SysPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPosition, SysUserPermissionSet, SysOrganization, SysUser, SysMember] : []),
       {
+        name: NOTE,
+        label: 'Note',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          plain: { name: 'plain', type: 'text' },
+          // A masking rule with no unmask gate: served masked to every non-system caller.
+          code: { name: 'code', type: 'text', maskingRule: { keepHead: 1, keepTail: 1 } },
+          code_copy: { name: 'code_copy', type: 'formula', returnType: 'text', expression: cel('record.code') },
+          plain_copy: { name: 'plain_copy', type: 'formula', returnType: 'text', expression: cel('record.plain') },
+        },
+      },
+      {
         name: REGION,
         label: 'Region',
         sharingModel: 'public_read_write',
@@ -139,6 +153,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   } as never);
   await engine.syncSchemas();
   await installDefaultOrganization(engine);
+  await engine.insert(NOTE, [{ id: 'n1', plain: 'open', code: 'ABCDEFG' }], SYS);
   await engine.insert(REGION, [{ id: 'r1', name: 'North', secret_score: 7, gated_score: 3, region_phone: '13900001111' }], SYS);
   if (opts.delegatorFields) {
     await engine.insert('sys_user', { id: DELEGATOR, name: DELEGATOR, email: `${DELEGATOR}@example.test` }, SYS);
@@ -158,7 +173,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   const set = PermissionSetSchema.parse({
     name: SET,
     ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
-    objects: { [OBJ]: grant, [REGION]: grant },
+    objects: { [OBJ]: grant, [REGION]: grant, [NOTE]: grant },
     ...(opts.fields ? { fields: opts.fields } : {}),
   });
   const second = PermissionSetSchema.parse({
@@ -435,6 +450,24 @@ describe('a formula over a partially masked field is absent, not partially maske
   it('a caller holding the unmask capability reads both in full', async () => {
     const { engine } = await boot({ capabilities: ['qa_fhf_unmask'] });
     expect(await findA1(engine)).toMatchObject({ phone: '13812345678', phone_copy: '13812345678' });
+  });
+});
+
+describe('a formula over a field served masked to every caller (a masking rule with no unmask gate) is absent', () => {
+  it('find: the input is served masked, the formula over it is absent, a formula over a plain field stays; the projection leaves it out', async () => {
+    const { engine, plugin } = await boot();
+    const note = await engine.findOne(NOTE, { where: { id: 'n1' }, context: { ...CALLER } } as never) as Record<string, unknown>;
+    expect(note).toMatchObject({ code: 'A*****G', plain_copy: 'open' });
+    expect(note).not.toHaveProperty('code_copy');
+    const readable = new Set(await plugin.getReadableFields(NOTE, { ...CALLER }));
+    expect(readable.has('code_copy')).toBe(false);
+    expect(readable.has('plain_copy')).toBe(true);
+  });
+
+  it('control: a system context reads the input and the formula in full', async () => {
+    const { engine } = await boot();
+    expect(await engine.findOne(NOTE, { where: { id: 'n1' }, context: { isSystem: true } } as never))
+      .toMatchObject({ code: 'ABCDEFG', code_copy: 'ABCDEFG' });
   });
 });
 
