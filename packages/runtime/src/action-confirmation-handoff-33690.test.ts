@@ -96,7 +96,8 @@ function makeHarness(opts: { service?: unknown } = {}) {
             return { success: true, status: 'completed', output: {}, durationMs: 1 };
         }),
     };
-    const object = { name: OBJECT, label: 'Lead', fields: { status: { type: 'text' }, name: { type: 'text' } }, actions: [GATED, GATED_FLOW, GATED_UPDATE, PLAIN] };
+    // `nameField` names the record's title, which an elicitation carries (#33712).
+    const object = { name: OBJECT, label: 'Lead', nameField: 'name', fields: { status: { type: 'text' }, name: { type: 'text' } }, actions: [GATED, GATED_FLOW, GATED_UPDATE, PLAIN] };
     const ql: any = {
         executeAction: vi.fn(async () => ({ ran: 'script' })),
         registry: { getObject: () => object, getItem: () => undefined },
@@ -369,5 +370,158 @@ describe('[#33690] CONTROL: the doors outside the amendment keep the member gate
         const refused = actionConfirmationRefusal({} as any, GATED, {}, OBJECT, PERSON);
         expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
         expect(refused?.details).not.toHaveProperty('reason');
+    });
+});
+
+/**
+ * [#33712] Step 1 of the amended contract: where the MCP door holds the
+ * person's client (`door.elicitConfirmation`, passed by the tool only when the
+ * client advertised `elicitation`), the person is asked there, after the same
+ * gates the hand-off asks, and never for an AI service account. `accept` runs
+ * the call once; `decline`, `cancel` and `timed_out` refuse it with their
+ * contract reasons; nothing is handed off on any answer.
+ */
+type ElicitAnswer = 'accept' | 'decline' | 'cancel' | 'timed_out';
+function makeElicitor(...answers: Array<ElicitAnswer | Error>) {
+    const queue = [...answers];
+    return vi.fn(async (_subject: Record<string, unknown>) => {
+        const next = queue.shift() ?? 'cancel';
+        if (next instanceof Error) throw next;
+        return next;
+    });
+}
+
+describe('[#33712] run_action: a client that can be elicited is asked in place, and its answer stands', () => {
+    it('accept: the call dispatches exactly once, as any admitted call, and nothing is handed off', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const elicitConfirmation = makeElicitor('accept');
+
+        const answer = await h.bridgeAs(PERSON).runAction(
+            GATED.name, { recordId: 'lead_1', params: { note: 'stale' } }, { elicitConfirmation },
+        );
+
+        expect(answer).toMatchObject({ ok: true, action: GATED.name, objectName: OBJECT, recordId: 'lead_1' });
+        expect(h.ql.executeAction).toHaveBeenCalledTimes(1);
+        expect(service.submit).not.toHaveBeenCalled();
+        // The question names the action, the object and the record: its id, and
+        // its title, which the caller-scope subject load read.
+        expect(elicitConfirmation).toHaveBeenCalledTimes(1);
+        expect(elicitConfirmation.mock.calls[0][0]).toEqual({
+            actionName: GATED.name, actionLabel: GATED.label, objectName: OBJECT, recordId: 'lead_1', recordTitle: 'Ada',
+        });
+    });
+
+    it('an accept covers that one call: the next call is asked again', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const elicitConfirmation = makeElicitor('accept', 'decline');
+        const bridge = h.bridgeAs(PERSON);
+        await bridge.runAction(GATED.name, { recordId: 'lead_1' }, { elicitConfirmation });
+        const refused = await refusalOf(bridge.runAction(GATED.name, { recordId: 'lead_1' }, { elicitConfirmation }));
+        expect(refused.details).toMatchObject({ reason: 'declined' });
+        expect(elicitConfirmation).toHaveBeenCalledTimes(2);
+        expect(h.ql.executeAction).toHaveBeenCalledTimes(1);
+    });
+
+    for (const [answer, reason] of [
+        ['decline', 'declined'],
+        ['cancel', 'cancelled'],
+        ['timed_out', 'timed_out'],
+    ] as const) {
+        it(`${answer}: refused 428 ACTION_CONFIRMATION_REQUIRED, reason ${reason}; nothing runs and nothing is handed off`, async () => {
+            const service = makeConfirmationService();
+            const h = makeHarness({ service });
+            const refused = await refusalOf(h.bridgeAs(PERSON).runAction(
+                GATED.name, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true }, { elicitConfirmation: makeElicitor(answer) },
+            ));
+            expect({ code: refused.code, status: refused.status }).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+            expect(refused.details).toEqual({
+                actionName: GATED.name, objectName: OBJECT, confirmationMember: AI_ACTION_CONFIRMATION_MEMBER, reason,
+            });
+            expect(h.ql.executeAction).not.toHaveBeenCalled();
+            expect(service.submit).not.toHaveBeenCalled();
+        });
+    }
+
+    it('an elicitor that fails reads as a dismissal: reason cancelled, nothing runs', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const refused = await refusalOf(h.bridgeAs(PERSON).runAction(
+            GATED.name, { recordId: 'lead_1' }, { elicitConfirmation: makeElicitor(new Error('connection closed')) },
+        ));
+        expect(refused.details).toMatchObject({ reason: 'cancelled' });
+        expect(h.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('[ADR-0151 D3 rule 3] an AI service account is refused before anyone is asked: reason service_account', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const elicitConfirmation = makeElicitor('accept');
+        const refused = await refusalOf(h.bridgeAs(ACCOUNT).runAction(GATED.name, { recordId: 'lead_1' }, { elicitConfirmation }));
+        expect(refused.details).toMatchObject({ reason: 'service_account' });
+        expect(elicitConfirmation).not.toHaveBeenCalled();
+        expect(h.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('a record the caller cannot read is refused 404 before anyone is asked', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const elicitConfirmation = makeElicitor('accept');
+        const refused = await refusalOf(h.bridgeAs(PERSON).runAction(GATED.name, { recordId: 'lead_2' }, { elicitConfirmation }));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(elicitConfirmation).not.toHaveBeenCalled();
+        expect(h.ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: an action that declares no confirmation runs at once, and nobody is asked', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const elicitConfirmation = makeElicitor('decline');
+        const answer = await h.bridgeAs(PERSON).runAction(PLAIN.name, { recordId: 'lead_1' }, { elicitConfirmation });
+        expect(answer).toMatchObject({ ok: true, action: PLAIN.name });
+        expect(elicitConfirmation).not.toHaveBeenCalled();
+    });
+});
+
+describe('[#33712] resume_run: a client that can be elicited is asked in place for the run\'s action', () => {
+    async function pausedRun(h: ReturnType<typeof makeHarness>): Promise<string> {
+        const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        h.automation.execute.mockClear();
+        return started.runId;
+    }
+
+    it('accept: the run resumes with the call\'s values, and nothing is handed off', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const runId = await pausedRun(h);
+        const elicitConfirmation = makeElicitor('accept');
+
+        const answer = await h.bridgeAs(PERSON).resumeRun(runId, { values: { reason: 'done' } }, { elicitConfirmation });
+
+        expect(answer).toMatchObject({ ok: true, action: GATED_FLOW.name, objectName: OBJECT });
+        expect(h.automation.resume).toHaveBeenCalledTimes(1);
+        expect(h.automation.resume.mock.calls[0]).toEqual([runId, { variables: { reason: 'done' } }]);
+        expect(service.submit).not.toHaveBeenCalled();
+        expect(elicitConfirmation.mock.calls[0][0]).toMatchObject({ actionName: GATED_FLOW.name, objectName: OBJECT, recordId: 'lead_1' });
+    });
+
+    it('decline: refused, reason declined, and the run stays paused', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const runId = await pausedRun(h);
+        const refused = await refusalOf(h.bridgeAs(PERSON).resumeRun(
+            runId, { values: { reason: 'done' } }, { elicitConfirmation: makeElicitor('decline') },
+        ));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+        expect(refused.details).toMatchObject({ actionName: GATED_FLOW.name, objectName: OBJECT, reason: 'declined' });
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        expect(h.runs.get(runId)?.status).toBe('paused');
+        expect(service.submit).not.toHaveBeenCalled();
+    });
+
+    it('[ADR-0151 D3 rule 3] an AI service account\'s resume is refused before anyone is asked', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
+        const elicitConfirmation = makeElicitor('accept');
+        const refused = await refusalOf(h.bridgeAs(ACCOUNT).resumeRun(started.runId, { values: { reason: 'x' } }, { elicitConfirmation }));
+        expect(refused.details).toMatchObject({ reason: 'service_account' });
+        expect(elicitConfirmation).not.toHaveBeenCalled();
+        expect(h.automation.resume).not.toHaveBeenCalled();
     });
 });
