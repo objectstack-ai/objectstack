@@ -187,8 +187,8 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
                 id: 'com.qa.suite',
                 version: '1.0.0',
                 packages: [
-                    { manifest: { id: 'com.qa.one', version: '1.0.0', type: 'app', namespace: 'qa_one', objects: [] } },
-                    { manifest: { id: 'com.qa.two', version: '1.0.0', type: 'module', namespace: 'QA_N', objects: [] } },
+                    { manifest: { id: 'com.qa.one', name: 'qa_one', version: '1.0.0', type: 'app', namespace: 'qa_one', objects: [] } },
+                    { manifest: { id: 'com.qa.two', name: 'qa_two', version: '1.0.0', type: 'module', namespace: 'QA_N', objects: [] } },
                 ],
             },
         });
@@ -196,6 +196,22 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
         expect(res.payload.error.message).toContain(declaredSentence('QA_N'));
         expect(res.payload.error.message).toContain('`packages.1.manifest.namespace`');
         expectNothingWritten(h);
+    });
+
+    it('lit control — the same artifact with conforming member namespaces installs', async () => {
+        const h = await mount(dir);
+        const res = await h.install({
+            manifest: {
+                id: 'com.qa.suite',
+                version: '1.0.0',
+                packages: [
+                    { manifest: { id: 'com.qa.one', name: 'qa_one', version: '1.0.0', type: 'app', namespace: 'qa_one', objects: [] } },
+                    { manifest: { id: 'com.qa.two', name: 'qa_two', version: '1.0.0', type: 'module', namespace: 'qa_two', objects: [] } },
+                ],
+            },
+        });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(readdirSync(dir)).toEqual(['com.qa.suite.json']);
     });
 
     it('lit control — a conforming namespace still installs', async () => {
