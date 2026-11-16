@@ -7927,6 +7927,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
         member?: string,
+        /** [ADR-0150 D4] The body a draft save writes; omitted, the stored package-unbound draft's. */
+        body?: unknown,
     ): Promise<
         | { kind: 'ambiguous'; candidates: readonly string[] }
         | {
@@ -7939,8 +7941,10 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessDraftAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
+            getOverlayRepo: () => this.getOverlayRepo(),
+            readItemActiveRows: (...a) => this.readItemActiveRows(...a),
         };
-        return packagelessDraftAddress.call(host, type, name, member);
+        return packagelessDraftAddress.call(host, type, name, member, body);
     }
 
     /**

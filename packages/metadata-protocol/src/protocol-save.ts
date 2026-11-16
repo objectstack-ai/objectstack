@@ -853,25 +853,17 @@ export class ProtocolSaveFacet {
         // read here for the two gates below that judge the row it lands in.
         // Read once, for the same authoring saves the publish-mode address
         // above is resolved for.
-        const packagelessDraft = mode === 'draft'
+        // [ADR-0150 D4] …asked of the body this save writes, so an action
+        // draft the environment owns is judged as the package-unbound draft
+        // the repository writes it as.
+        const draftAddress = mode === 'draft'
             && request.packageId == null
             && request.source === undefined
             && request.writeFace !== 'package-duplicate'
             ? await host.packagelessDraftAddress(
-                singularType, request.name, itemDiscriminator(singularType, request.item),
+                singularType, request.name, itemDiscriminator(singularType, request.item), request.item,
             )
             : undefined;
-        // [ADR-0150 D4, ruling 6902014292] …and an action draft whose body
-        // binds an object no package's active row binds the name to is the
-        // environment's own draft, as the repository writes it
-        // (`resolveWriteHead`, the one rule {@link actionHeldOnlyOnOtherObjects}):
-        // the gates below judge the package-unbound draft it lands in.
-        const draftAddress = packagelessDraft !== undefined
-            && packagelessDraft.kind !== 'ambiguous'
-            && packagelessDraft.into !== null
-            && await packagelessActionKeyedAddress(host, singularType, request.name, request.item, { candidates: [packagelessDraft.into] }) === 'environment'
-            ? { ...packagelessDraft, key: null, into: null }
-            : packagelessDraft;
 
         // [#26921] THE NAMED-BASE RULE for the binding a save naming no
         // package INHERITS: the package its address gives (the resolved

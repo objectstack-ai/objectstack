@@ -479,6 +479,74 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         expect(rows('action', NAME, 'draft')).toEqual([]);
     });
 
+    it('the per-item publish of the draft beside a sole binding to a package that is NOT INSTALLED: the environment\'s row', async () => {
+        const { protocol, rows, seedRow } = makeProtocol();
+        const GONE = 'com.qa.uninstalled';
+        seedRow({ type: 'action', name: NAME, package_id: GONE, metadata: JSON.stringify(action(NAME, 'gone', 'invoice')), checksum: 'sha-gone' });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+        await protocol.publishMetaItem({ type: 'action', name: NAME });
+
+        expect(stored(rows('action', NAME))).toEqual([[GONE, 'invoice', 'gone'], [null, 'task', 'env']]);
+        expect(rows('action', NAME, 'draft')).toEqual([]);
+    });
+
+    describe('two packages holding the name on two other objects: the draft save, its publish and its discard (FROM: 409 naming both at each door)', () => {
+        async function twoHolders() {
+            const fixture = makeProtocol();
+            await fixture.protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await fixture.protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'product'), packageId: OTHER_WRITABLE });
+            return fixture;
+        }
+
+        it('the draft save writes the environment\'s draft', async () => {
+            const { protocol, rows } = await twoHolders();
+
+            const drafted = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+            expect(drafted.message).toBe(`Saved action '${NAME}' (env-wide, state=draft) [seq=${drafted.seq}]`);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q']]);
+        });
+
+        it('the per-item publish naming no package promotes it into the environment\'s row', async () => {
+            const { protocol, rows } = await twoHolders();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+            const published = await protocol.publishMetaItem({ type: 'action', name: NAME });
+
+            expect(published.success).toBe(true);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q'], [null, 'task', 'env']]);
+            expect(rows('action', NAME, 'draft')).toEqual([]);
+        });
+
+        it('the draft discard naming no package removes it; both packages\' rows untouched', async () => {
+            const { protocol, rows } = await twoHolders();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+            const receipt = await protocol.deleteMetaItem({ type: 'action', name: NAME, state: 'draft' });
+
+            expect(receipt.success).toBe(true);
+            expect(rows('action', NAME, 'draft')).toEqual([]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q']]);
+        });
+    });
+
+    it('an ENABLED holder on `invoice`, and an ENABLED and a DISABLED holder on `task`: the save on `task` is the enabled holder\'s at `task`', async () => {
+        const { protocol, rows } = makeProtocol();
+        const THIRD = 'com.qa.thirdapp';
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'task'), packageId: OTHER_WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'r', 'task'), packageId: THIRD });
+        protocol.engine.registry.isPackageDisabled = (id: string) => id === THIRD;
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'task') });
+
+        // Without the disabled holder the same save is the `409` CONTROL below.
+        expect(saved.message).toBe(`Saved action '${NAME}' (env-wide, package=${OTHER_WRITABLE}, state=active) [seq=${saved.seq}]`);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'task', 'edited'], [THIRD, 'task', 'r']]);
+    });
+
     describe('CONTROLs (unchanged)', () => {
         it('the draft save on `invoice`, the object P binds: P\'s draft, and its publish is P\'s row', async () => {
             const { protocol, rows } = makeProtocol();
@@ -500,6 +568,33 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
 
             expect(saved.message).toBe(`Saved action '${NAME}' (env-wide, package=${WRITABLE}, state=active) [seq=${saved.seq}]`);
             expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'edited']]);
+        });
+
+        it('an enabled holder on `invoice` and a disabled holder on `task`: the DRAFT save on `task` is still refused 409 naming both (the publish-mode save writes the disabled holder\'s row)', async () => {
+            const { protocol, rows, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'task'), packageId: OTHER_WRITABLE });
+            protocol.engine.registry.isPackageDisabled = (id: string) => id === OTHER_WRITABLE;
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' }));
+
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(metadataWrites().length).toBe(before);
+            expect(rows('action', NAME, 'draft')).toEqual([]);
+        });
+
+        it('with the environment\'s DRAFT on `task` stored, a draft save on `invoice` is P\'s draft, and the environment\'s draft stays (FROM: adopted into P and rewritten on `invoice`)', async () => {
+            const { protocol, rows, seedRow } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            seedRow({ type: 'action', name: NAME, state: 'draft', package_id: null, metadata: JSON.stringify(action(NAME, 'env', 'task')), checksum: 'sha-env-draft' });
+
+            const drafted = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'invoice'), mode: 'draft' });
+
+            expect(drafted.message).toBe(`Saved action '${NAME}' (env-wide, package=${WRITABLE}, state=draft) [seq=${drafted.seq}]`);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[WRITABLE, 'invoice', 'edited'], [null, 'task', 'env']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
         });
 
         it('with the environment\'s row on `task` stored too, a save on `invoice` is still P\'s customization', async () => {

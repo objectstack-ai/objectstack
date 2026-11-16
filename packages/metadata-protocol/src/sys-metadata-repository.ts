@@ -1130,6 +1130,19 @@ export class SysMetadataRepository implements MetadataRepository {
         where: this.whereFor(ref, state, null, member),
         context,
       });
+      // [ADR-0150 D4, ruling 6902014292] …but never an action draft bound to
+      // another object than the body: that is the environment's own pending
+      // draft of its own item, not a pre-fix draft of the package's, and it
+      // stays where it is (the one rule's object filter,
+      // {@link actionRowsBindingObjectOf}).
+      if (
+        row
+        && body !== undefined
+        && (PLURAL_TO_SINGULAR[ref.type] ?? ref.type) === 'action'
+        && actionRowsBindingObjectOf(body, [row as { metadata?: unknown }]).length === 0
+      ) {
+        row = null;
+      }
     }
     return { row: row ?? null, targetPackageId, ...(ambiguousPackages ? { ambiguousPackages } : {}) };
   }

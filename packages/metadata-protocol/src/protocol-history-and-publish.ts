@@ -25,7 +25,7 @@
 
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
-import { DraftConflictError, actionHeldOnlyOnOtherObjects, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
+import { DraftConflictError, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 import { ConflictError } from '@objectstack/metadata-core';
 import type { MetadataItem } from '@objectstack/metadata-core';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
@@ -664,7 +664,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -834,22 +834,6 @@ export class ProtocolHistoryAndPublishFacet {
             } else {
                 draftKey = address.key;
                 promoteInto = address.into;
-                // [ADR-0150 D4, ruling 6902014292] An unbound action draft
-                // whose body binds an object no package's active row binds
-                // the name to is the environment's own draft (the draft save
-                // wrote it unbound for that reason): it is promoted into the
-                // package-unbound active row, never adopted into the holder,
-                // whose item on its own object stays as it is. The one rule
-                // the save and the draft save read ({@link actionHeldOnlyOnOtherObjects}).
-                if (singularType === 'action' && draftKey === null && promoteInto !== null && address.kind === 'draft') {
-                    const unboundDraft = await repo.get(
-                        { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
-                        { state: 'draft', packageId: null, ...memberOption(request.member) },
-                    );
-                    if (unboundDraft && actionHeldOnlyOnOtherObjects(singularType, unboundDraft.body, await host.readItemActiveRows(singularType, request.name))) {
-                        promoteInto = null;
-                    }
-                }
                 // No draft at the address while another package's draft is
                 // stored: the promotion's `NO_DRAFT`, naming the drafts that
                 // remain and the request that reaches them.

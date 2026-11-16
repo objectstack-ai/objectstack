@@ -102,6 +102,38 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
     expect(await routeTarget(`/actions/_env/showcase_task/${name}`)).toEqual([400, 'env']);
   }, 120_000);
 
+  it('FROM (#33904): a save on `showcase_task` carrying the version the bare read served is refused as a version conflict, before and after the environment\'s row exists', async () => {
+    const name = 'qa_version_other_p';
+    expect((await put(`/meta/action/${name}?package=${PKG}`, action(name, 'pkg', 'showcase_invoice'))).status).toBe(200);
+    /** The version the by-name read naming no package serves: P's item's, until #33904. */
+    const bareVersion = async () => {
+      const res = await stack.apiAs(admin, 'GET', `/meta/action/${name}`);
+      const body: any = await res.json();
+      expect(res.status, JSON.stringify(body).slice(0, 300)).toBe(200);
+      const version = body?.data?.version ?? body?.version;
+      expect(typeof version).toBe('string');
+      return version as string;
+    };
+    const putIfMatch = async (version: string) => {
+      const res = await stack.api(`/meta/action/${name}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${admin}`, 'If-Match': version },
+        body: JSON.stringify(action(name, 'env', 'showcase_task')),
+      });
+      return { status: res.status, text: await res.text() };
+    };
+
+    // The parent is read at the environment's row, which the bare read does not serve.
+    const first = await putIfMatch(await bareVersion());
+    expect(first.status, first.text).toBe(409);
+    expect(first.text).toContain('CONFLICT');
+
+    expect((await put(`/meta/action/${name}`, action(name, 'env', 'showcase_task'))).status).toBe(200);
+    const again = await putIfMatch(await bareVersion());
+    expect(again.status, again.text).toBe(409);
+    expect(await read(`/meta/action/${name}?package=${PKG}`)).toEqual(['showcase_invoice', 'pkg', PKG]);
+  }, 120_000);
+
   it('the DRAFT save on `showcase_task` and its per-item publish write the environment\'s item; P\'s item on `showcase_invoice` is untouched', async () => {
     const name = 'qa_draft_other_p';
     expect((await put(`/meta/action/${name}?package=${PKG}`, action(name, 'pkg', 'showcase_invoice'))).status).toBe(200);
