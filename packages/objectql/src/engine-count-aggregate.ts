@@ -154,7 +154,7 @@ export async function count(
          // `find()` fallback below composes at its own boundary.
          return driver.count(
            object,
-           await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context),
+           await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context, countOpts),
            countOpts,
          );
      }

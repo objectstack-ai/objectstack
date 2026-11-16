@@ -380,7 +380,7 @@ gh label create needs:pack-smoke -R objectstack-ai/objectstack -c 006b75 -d "Opt
 gh label create needs:upgrade-harness -R objectstack-ai/objectstack -c 006b75 -d "Opt-in pre-merge 18.x upgrade harness: an 18.0 database boots on this PR's merge preview (#24522)" 2>/dev/null || true
 
 # needs:contract-review — a MARKER, never a gate; rules in
-# .claude/skills/pm-dispatch/references/contract-review.md 〈等复核标记〉. The
+# .claude/skills/pm-dispatch/references/contract-review.md 〈等 L2 标记〉. The
 # dispatching seat hangs it on the PR at ACCEPT when either clause-② limb hits
 # and no same-form PASS is on the current head; the seat posting that PASS, or
 # the dispatching seat at merge/close, clears it (a FAIL leaves it on). Named

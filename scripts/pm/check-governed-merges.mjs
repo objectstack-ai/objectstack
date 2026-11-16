@@ -436,7 +436,7 @@
  *      Tier S arm (objectui's, measured, refuses `.claude/**` without an
  *      authorized approval; cloud's, objectos' and hotcrm's are unread and fail
  *      closed to H).
- *   S  席内达档复核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
+ *   S  席内达档 L2 审核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
  *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
@@ -1305,7 +1305,7 @@ export const GOVERNED_TIERS = Object.freeze({
   }),
   [GOVERNED_TIER_S]: Object.freeze({
     id: GOVERNED_TIER_S,
-    name: 'Tier S(席内达档复核落地)',
+    name: 'Tier S(席内达档 L2 审核落地)',
     landing:
       'the owning seat lands it through the queue on a `## Contract review` record for the CURRENT head ' +
       '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`) and every check green',
@@ -3320,7 +3320,7 @@ export function renderTestVerdict(verdict) {
   if (tier === GOVERNED_TIER_S) {
     return (
       `${head}\n` +
-      `  ⛔  GOVERNED — Tier S(席内达档复核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
+      `  ⛔  GOVERNED — Tier S(席内达档 L2 审核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
       `      seat lands this PR through the queue once its thread (or its card) carries a \`## Contract review\` record\n` +
       `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — and every\n` +
       `      check green (AGENTS.md Prime Directive #14).\n` +
@@ -7339,7 +7339,7 @@ async function selfTest() {
     const textS = renderTestVerdict(testVerdict([WF], { repo: REPO, workflowDiff: readS }));
     const textH = renderTestVerdict(testVerdict([WF], { repo: REPO, workflowDiff: readH }));
     const textN = renderTestVerdict(testVerdict([WF], { repo: REPO }));
-    assert('the-words-name-the-split-in-all-three-readings', /Tier S\(席内达档复核落地\)/.test(textS) && /Tier S by content/.test(textS) && /Tier H by content/.test(textH) && /new `continue-on-error`/.test(textH) && /content NOT MEASURED/.test(textN) && /landing tier: H/.test(textN), `${textS}\n${textH}\n${textN}`);
+    assert('the-words-name-the-split-in-all-three-readings', /Tier S\(席内达档 L2 审核落地\)/.test(textS) && /Tier S by content/.test(textS) && /Tier H by content/.test(textH) && /new `continue-on-error`/.test(textH) && /content NOT MEASURED/.test(textN) && /landing tier: H/.test(textN), `${textS}\n${textH}\n${textN}`);
     assert('a-verdict-with-no-workflow-hit-prints-no-split-line', !/split \(ruling record/.test(renderTestVerdict(testVerdict(['AGENTS.md'], { repo: REPO }))) && renderWorkflowSplitLines([]) === '');
     const pr = (over = {}) => pullWorkflowDiff({ derivation: { pull: 7, headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) }, paths: [WF], sameCheckout: true, run: () => ({ ok: false, out: '' }), git: () => '', ...over });
     assert('--pr-reads-the-split-only-from-a-checkout-holding-both-commits-else-UNMEASURED', pr().measured === false && /not in this checkout/.test(pr().reason) && pr({ sameCheckout: false }).measured === false && pr({ derivation: { pull: 7 } }).measured === false, JSON.stringify([pr().reason, pr({ sameCheckout: false }).reason]));
@@ -7391,7 +7391,7 @@ async function selfTest() {
     assert('⭐ a-pure-skills-diff-with-its-changeset-on-Clause-2-no-is-Tier-S', tier([SK, CS], read([SK, CS])) === GOVERNED_TIER_S && testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) }).tier === GOVERNED_TIER_S, reasons([SK, CS], read([SK, CS])));
     assert('⭐ with-its-changeset-and-docs-prose-riders-it-stays-Tier-S', tier([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'], read([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'])) === GOVERNED_TIER_S);
     assert('a-ui-skills-diff-and-both-catalogs-together-are-Tier-S', tier([UISK, CS], read([UISK, CS])) === GOVERNED_TIER_S && tier([SK, UISK, CS], read([SK, UISK, CS])) === GOVERNED_TIER_S);
-    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return /Tier S\(席内达档复核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
+    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return /Tier S\(席内达档 L2 审核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
 
     // ⛔ Published source or any path outside the allowlist: H.
     assert('⛔ skills-plus-packages-spec-stays-H', tier([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts'])) === GOVERNED_TIER_H && /outside skills wording and prose: packages\/spec/.test(reasons([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts']))));
