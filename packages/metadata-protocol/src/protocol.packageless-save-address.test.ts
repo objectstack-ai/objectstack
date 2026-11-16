@@ -407,7 +407,41 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q'], [null, 'task', 'env']]);
     });
 
+    it('the DRAFT save on `task` writes the environment\'s draft (FROM: P\'s draft), and P\'s rows are untouched', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+        expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
+    });
+
+    it('the per-item publish naming no package promotes that draft into the environment\'s row (FROM: over P\'s item on `invoice`)', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+        const published = await protocol.publishMetaItem({ type: 'action', name: NAME });
+
+        expect(published.success).toBe(true);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'task', 'env']]);
+        expect(rows('action', NAME, 'draft')).toEqual([]);
+    });
+
     describe('CONTROLs (unchanged)', () => {
+        it('the draft save on `invoice`, the object P binds: P\'s draft, and its publish is P\'s row', async () => {
+            const { protocol, rows } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'invoice'), mode: 'draft' });
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[WRITABLE, 'invoice', 'edited']]);
+
+            await protocol.publishMetaItem({ type: 'action', name: NAME });
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'edited']]);
+            expect(rows('action', NAME, 'draft')).toEqual([]);
+        });
+
         it('the same save on `invoice`, the object P binds: re-addressed into P, as the generic pin above', async () => {
             const { protocol, rows } = makeProtocol();
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });

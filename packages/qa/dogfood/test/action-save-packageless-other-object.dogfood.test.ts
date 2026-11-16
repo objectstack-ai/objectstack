@@ -11,6 +11,11 @@
 // `showcase_task` (`?package=P` served the environment's body), and
 // `/actions/_env/showcase_task/NAME` answered 404.
 //
+// The draft door keys the action alike: a package-less `?mode=draft` save on
+// `showcase_task` writes the environment's draft, and the per-item publish
+// naming no package promotes it into the environment's item (FROM: the draft
+// was adopted into P and its publish overwrote P's item on `showcase_invoice`).
+//
 // CONTROLs: the same save on `showcase_invoice` is still P's customization,
 // and a managed package's action name is still refused 403 NOT_OVERRIDABLE.
 //
@@ -78,6 +83,25 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
     expect(await routeTarget(`/actions/showcase_invoice/${name}`)).toEqual([400, 'pkg']);
     expect(await routeTarget(`/actions/showcase_task/${name}`)).toEqual([400, 'env']);
     // FROM: 404, the environment held no item of the name.
+    expect(await routeTarget(`/actions/_env/showcase_task/${name}`)).toEqual([400, 'env']);
+  }, 120_000);
+
+  it('the DRAFT save on `showcase_task` and its per-item publish write the environment\'s item; P\'s item on `showcase_invoice` is untouched', async () => {
+    const name = 'qa_draft_other_p';
+    expect((await put(`/meta/action/${name}?package=${PKG}`, action(name, 'pkg', 'showcase_invoice'))).status).toBe(200);
+
+    const drafted = await put(`/meta/action/${name}?mode=draft`, action(name, 'env', 'showcase_task'));
+    expect(drafted.status, drafted.text).toBe(200);
+    // FROM: `package=com.example.qasaveother`, the draft adopted into P.
+    expect(drafted.message).not.toContain('package=');
+    expect(await read(`/meta/action/${name}?package=${PKG}`)).toEqual(['showcase_invoice', 'pkg', PKG]);
+
+    const published = await stack.apiAs(admin, 'POST', `/meta/action/${name}/publish`, {});
+    expect(published.status, await published.clone().text()).toBe(200);
+
+    // FROM: `['showcase_task', 'env', PKG]`, the publish wrote P's row.
+    expect(await read(`/meta/action/${name}?package=${PKG}`)).toEqual(['showcase_invoice', 'pkg', PKG]);
+    expect(await routeTarget(`/actions/showcase_invoice/${name}`)).toEqual([400, 'pkg']);
     expect(await routeTarget(`/actions/_env/showcase_task/${name}`)).toEqual([400, 'env']);
   }, 120_000);
 

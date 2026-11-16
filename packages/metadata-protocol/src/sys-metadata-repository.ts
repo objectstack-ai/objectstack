@@ -63,6 +63,7 @@ import { hashSpec, orderedMapKeys, ConflictError, readLegacyOrganizationRows } f
 // #4825 deliberately retired. See `@objectstack/metadata/errors` for why that
 // leaf subpath exists.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { boundObjectOf } from '@objectstack/metadata/stored-item-package';
 // [ruling 6677709817 (c)] The snapshot body both history writers store: the
 // written body without what the type's redactor marks not carried forward.
 import { historySnapshotBody } from '@objectstack/metadata/history-snapshot';
@@ -704,6 +705,50 @@ export function unboundItemDraftAddress(
 }
 
 /**
+ * [ADR-0150 D4, ruling 6902014292] THE owner-key rule of the package-less
+ * write address for an `action`: whether `item`, written naming no package,
+ * is the ENVIRONMENT'S OWN item rather than a customization of a package's.
+ * D4 keys an action `(package, objectName, name)`, so a package's action on
+ * object A is not the item a body bound to object B addresses.
+ *
+ * `true` when `activeRows` (the item's active rows, every binding) hold a row
+ * bound to a package and no such row binds the object `item` binds
+ * ({@link boundObjectOf}; object-less is its own key): no package holds this
+ * item, so the write is the package-unbound row and every package's row stays
+ * where it is. `false` for every other type, for an item no package's row
+ * holds, and as soon as one package's row binds `item`'s object: that write is
+ * still the package's customization (ADR-0150 D4, R15). A stored body that
+ * does not parse is read as binding `item`'s object, so it never drops a
+ * holder from the key.
+ *
+ * One rule for every door that writes an action naming no package: the
+ * publish-mode save (`protocol-save.ts`), the draft save
+ * ({@link SysMetadataRepository.put}, through `resolveWriteHead`), and the
+ * per-item publish of the draft that save wrote (`protocol-history-and-publish.ts`).
+ *
+ * Deliberately NOT exported from the package entry.
+ */
+export function actionHeldOnlyOnOtherObjects(
+  type: string,
+  item: unknown,
+  activeRows: ReadonlyArray<{ package_id?: unknown; metadata?: unknown }>,
+): boolean {
+  if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'action') return false;
+  const held = activeRows.filter((row) => typeof row?.package_id === 'string' && row.package_id !== '');
+  if (held.length === 0) return false;
+  const object = boundObjectOf(item);
+  return !held.some((row) => {
+    let document: unknown;
+    try {
+      document = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+    } catch {
+      return true;
+    }
+    return boundObjectOf(document) === object;
+  });
+}
+
+/**
  * One live `watch()` subscription, as a record rather than a bare listener.
  *
  * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
@@ -946,6 +991,13 @@ export class SysMetadataRepository implements MetadataRepository {
     packageId: string | null | undefined,
     ctx?: Record<string, unknown>,
     member?: string | null,
+    /**
+     * [ADR-0150 D4] The body the write carries, when the caller has it
+     * ({@link put}); it keys an action's inherited binding by its object
+     * ({@link actionHeldOnlyOnOtherObjects}). Omitted, the binding is inherited
+     * by name, as before.
+     */
+    body?: unknown,
   ): Promise<{ row: any | null; targetPackageId: string | null; ambiguousPackages?: readonly string[] }> {
     const context = { ...ctx, isSystem: true };
     let targetPackageId: string | null = packageId ?? null;
@@ -974,7 +1026,12 @@ export class SysMetadataRepository implements MetadataRepository {
       for (const activeRow of (activeRows ?? []) as Array<{ package_id?: unknown }>) {
         if (typeof activeRow?.package_id === 'string' && activeRow.package_id !== '') bindings.add(activeRow.package_id);
       }
-      if (bindings.size === 1) targetPackageId = [...bindings][0] ?? null;
+      // [ADR-0150 D4, ruling 6902014292] An action draft whose body binds an
+      // object no package's active row binds the name to is the environment's
+      // own draft: it inherits no package, and no package's row is touched.
+      if (body !== undefined && actionHeldOnlyOnOtherObjects(ref.type, body, (activeRows ?? []) as ReadonlyArray<{ package_id?: unknown; metadata?: unknown }>)) {
+        targetPackageId = null;
+      } else if (bindings.size === 1) targetPackageId = [...bindings][0] ?? null;
       else if (bindings.size > 1) ambiguousPackages = [...bindings].sort();
       else {
         // [#23657, ADR-0070 TL;DR 1] No active row bound to a package (an
@@ -1164,7 +1221,7 @@ export class SysMetadataRepository implements MetadataRepository {
       // the one {@link headAt} answers too, so the head a caller was served
       // for this address is the head this lock judges.
       const { row: existing, targetPackageId, ambiguousPackages } = await this.resolveWriteHead(
-        ref, state, opts.packageId, ctx, member,
+        ref, state, opts.packageId, ctx, member, body,
       );
       // [#23297] A draft that names no package, of an item whose active rows
       // are bound to two or more packages, has no single row to write: refused
