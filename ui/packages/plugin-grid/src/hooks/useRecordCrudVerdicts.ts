@@ -34,9 +34,21 @@
  * and the detail header read the same number by construction rather than by
  * two implementations agreeing.
  *
+ * ## Asked when the row actions are reached for, not on first paint
+ *
+ * (objectstack#34208.) Each batch costs the server tens of milliseconds and
+ * dozens of queries, and the answer only matters to Edit / Delete — items a
+ * row shows inside its menus. So the hook asks nothing until a row-action
+ * surface calls {@link RecordCrudVerdicts.requestVerdicts}: a pointer or the
+ * focus reaching a row's actions, a menu holding them opening. Until then the
+ * rows keep the object-level verdict, which is the fail-open state below, and
+ * verdicts the cache already holds are still published. The one exception is
+ * `updateOnMount`, for a surface that reads `update` while it renders (the
+ * inline-editable cells): that operation is asked when the rows arrive.
+ *
  * ## Fail OPEN on every uncertainty — degrade to today, never over-hide
  *
- * No answer yet, a non-OK response, a deployment without
+ * Not asked yet, no answer yet, a non-OK response, a deployment without
  * `@objectstack/plugin-security`, a row missing from the verdict map, a split
  * SPA origin where the cookie doesn't reach the API: the row's verdict is
  * `undefined` and the caller keeps the OBJECT-level answer, i.e. exactly what
@@ -434,7 +446,39 @@ function askBatch(
   return answer;
 }
 
-const NO_VERDICTS: RecordCrudVerdictLookup = () => undefined;
+/**
+ * The page's verdicts, plus the two things a row-action surface needs to ask
+ * for them on demand (objectstack#34208).
+ *
+ * Calling it is the {@link RecordCrudVerdictLookup}: `undefined` is UNKNOWN,
+ * never "denied".
+ */
+export interface RecordCrudVerdicts extends RecordCrudVerdictLookup {
+  /**
+   * The rows' actions are about to be used — a pointer or the focus reached a
+   * row's actions, or a menu holding them opened. The first call asks the
+   * explain engine about the page; every later call is free, so a surface may
+   * call it on every such signal without counting.
+   */
+  readonly requestVerdicts: () => void;
+  /**
+   * A question this hook sent is still on the wire. A menu that offers Edit /
+   * Delete off the object-level verdict meanwhile shows them inert rather
+   * than clickable, so an item the answer is about to remove cannot be
+   * clicked into a refused write.
+   */
+  readonly pending: boolean;
+}
+
+function lookupOf(
+  verdicts: ReadonlyMap<string, boolean>,
+  requestVerdicts: () => void,
+  pending: boolean,
+): RecordCrudVerdicts {
+  const lookup: RecordCrudVerdictLookup = (recordId, operation) =>
+    recordId == null ? undefined : verdicts.get(`${operation}:${String(recordId)}`);
+  return Object.assign(lookup, { requestVerdicts, pending });
+}
 
 export function useRecordCrudVerdicts(opts: {
   /** The object the rows belong to; absent (element data source) = no question to ask. */
@@ -449,8 +493,16 @@ export function useRecordCrudVerdicts(opts: {
   update?: boolean;
   /** Ask about `delete` at all. Same gate as {@link update}. */
   delete?: boolean;
-}): RecordCrudVerdictLookup {
-  const { objectName, recordIds, update: wantUpdate, delete: wantDelete } = opts;
+  /**
+   * Ask about `update` when the rows arrive instead of on the first
+   * {@link RecordCrudVerdicts.requestVerdicts} (objectstack#34208): something
+   * on screen reads it while rendering, before any row action is used — the
+   * inline-editable cells (objectstack#27365). `delete` is still asked on
+   * demand.
+   */
+  updateOnMount?: boolean;
+}): RecordCrudVerdicts {
+  const { objectName, recordIds, update: wantUpdate, delete: wantDelete, updateOnMount } = opts;
   // Read the context directly (not `useSchemaContext`, which throws when no
   // provider is mounted): a standalone grid embed has no host fetch and must
   // still degrade to the global one rather than crash the render.
@@ -473,16 +525,38 @@ export function useRecordCrudVerdicts(opts: {
   const ids = React.useMemo<readonly string[]>(() => JSON.parse(idsKey) as string[], [idsKey]);
 
   const [verdicts, setVerdicts] = React.useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const [pending, setPending] = React.useState(false);
+
+  // [objectstack#34208] The object whose rows' actions have been reached for on
+  // this list, or `null` until then. Until then nothing is asked: the
+  // first paint of a list sends no explain request, and rows keep the
+  // object-level verdict (fail open — the same rendering the list had before
+  // the answer landed, and before this hook existed). Once reached for, the
+  // list keeps its verdicts current as it always did — a new page, a data
+  // change — because its user has shown they act on rows here.
+  const [demandedFor, setDemandedFor] = React.useState<string | null>(null);
+  const demanded = !!objectName && demandedFor === objectName;
+  const requestVerdicts = React.useCallback(() => {
+    if (objectName) setDemandedFor(objectName);
+  }, [objectName]);
 
   React.useEffect(() => {
     retainForPrincipal(principal);
+    // What the rows' surfaces read: published from the cache whenever it holds
+    // an answer, asked or not, so a revisited page never blinks.
     const operations: RecordCrudOperation[] = [];
     if (wantUpdate) operations.push('update');
     if (wantDelete) operations.push('delete');
     if (!objectName || ids.length === 0 || operations.length === 0) {
       setVerdicts(new Map());
+      setPending(false);
       return;
     }
+    // What is ASKED: every wanted operation once the row actions were reached
+    // for; before that, only `update` when a surface reads it on paint.
+    const toAskFor = demanded
+      ? operations
+      : operations.filter((operation) => operation === 'update' && updateOnMount);
     let cancelled = false;
     const doFetch = apiFetch ?? fetch;
 
@@ -498,28 +572,32 @@ export function useRecordCrudVerdicts(opts: {
       setVerdicts(next);
     };
 
-    void (async () => {
-      const settled: Promise<void>[] = [];
-      for (const operation of operations) {
-        // A row on the wire is joined, not asked again (objectui#13341); only
-        // the rows nobody has asked about go out, still batched under the cap.
-        const toAsk = new Set<string>();
-        for (const id of ids) {
-          const key = cacheKey(principal, objectName, id, operation);
-          if (verdictCache.has(key)) continue;
-          const pending = pendingVerdicts.get(key);
-          if (pending) settled.push(pending);
-          else toAsk.add(id);
-        }
-        const missing = Array.from(toAsk);
-        for (let i = 0; i < missing.length; i += EXPLAIN_BATCH_MAX_RECORD_IDS) {
-          const chunk = missing.slice(i, i + EXPLAIN_BATCH_MAX_RECORD_IDS);
-          settled.push(askBatch(principal, objectName, operation, chunk, doFetch));
-        }
+    const settled: Promise<void>[] = [];
+    for (const operation of toAskFor) {
+      // A row on the wire is joined, not asked again (objectui#13341); only
+      // the rows nobody has asked about go out, still batched under the cap.
+      const toAsk = new Set<string>();
+      for (const id of ids) {
+        const key = cacheKey(principal, objectName, id, operation);
+        if (verdictCache.has(key)) continue;
+        const inFlightAnswer = pendingVerdicts.get(key);
+        if (inFlightAnswer) settled.push(inFlightAnswer);
+        else toAsk.add(id);
       }
-      await Promise.all(settled);
-      if (!cancelled) publish();
-    })();
+      const missing = Array.from(toAsk);
+      for (let i = 0; i < missing.length; i += EXPLAIN_BATCH_MAX_RECORD_IDS) {
+        const chunk = missing.slice(i, i + EXPLAIN_BATCH_MAX_RECORD_IDS);
+        settled.push(askBatch(principal, objectName, operation, chunk, doFetch));
+      }
+    }
+    setPending(settled.length > 0);
+    if (settled.length > 0) {
+      void Promise.all(settled).then(() => {
+        if (cancelled) return;
+        publish();
+        setPending(false);
+      });
+    }
 
     // Rows already in the cache answer on this render rather than after the
     // round trip — paging back to a visited page never blinks through the
@@ -529,11 +607,10 @@ export function useRecordCrudVerdicts(opts: {
     return () => {
       cancelled = true;
     };
-  }, [objectName, ids, wantUpdate, wantDelete, apiFetch, principal, invalidationNonce]);
+  }, [objectName, ids, wantUpdate, wantDelete, updateOnMount, demanded, apiFetch, principal, invalidationNonce]);
 
-  return React.useMemo<RecordCrudVerdictLookup>(() => {
-    if (verdicts.size === 0) return NO_VERDICTS;
-    return (recordId, operation) =>
-      recordId == null ? undefined : verdicts.get(`${operation}:${String(recordId)}`);
-  }, [verdicts]);
+  return React.useMemo<RecordCrudVerdicts>(
+    () => lookupOf(verdicts, requestVerdicts, pending),
+    [verdicts, requestVerdicts, pending],
+  );
 }

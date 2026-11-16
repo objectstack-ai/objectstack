@@ -148,10 +148,15 @@ export interface ChecklistCompletion {
 /**
  * The checklist's completion, counted over the rows it shows that are not
  * optional. An optional row neither holds the checklist open nor counts toward
- * the progress line.
+ * the progress line. `isOptional` defaults to the platform's own optional rows;
+ * the checklist passes its profile's answer (`isProfileOptionalRow`), which a
+ * host can widen.
  */
-export function checklistCompletion(rows: ReadonlyArray<{ id: string; done: boolean }>): ChecklistCompletion {
-  const required = rows.filter((row) => !isOptionalRow(row.id));
+export function checklistCompletion(
+  rows: ReadonlyArray<{ id: string; done: boolean }>,
+  isOptional: (id: string) => boolean = isOptionalRow,
+): ChecklistCompletion {
+  const required = rows.filter((row) => !isOptional(row.id));
   const done = required.filter((row) => row.done).length;
   return { done, total: required.length, complete: done === required.length };
 }

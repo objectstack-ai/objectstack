@@ -39,7 +39,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, act, waitFor } from '@testing-library/react';
 import * as React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
-import { TextField, TextCellRenderer, getCellRenderer, registerFieldRenderer } from '@object-ui/fields';
+import {
+  FormulaCellRenderer,
+  FormulaField,
+  TextField,
+  TextCellRenderer,
+  getCellRenderer,
+  registerFieldRenderer,
+} from '@object-ui/fields';
 import { RecordDetailsRenderer } from '../record-details';
 
 /** The case subject the browser pass read cut. */
@@ -63,17 +70,21 @@ const caseSchema = {
 };
 const BODY_FIELDS = ['subject', 'reference'];
 
-async function renderBody(record: Record<string, unknown>) {
-  const ds = { getObjectSchema: vi.fn(async () => caseSchema) };
+async function renderBody(
+  record: Record<string, unknown>,
+  schema: typeof caseSchema = caseSchema,
+  bodyFields: string[] = BODY_FIELDS,
+) {
+  const ds = { getObjectSchema: vi.fn(async () => schema) };
   render(
     <RecordContextProvider
-      objectName="support_case"
+      objectName={schema.name}
       recordId="C2"
       data={{ id: 'C2', case_number: 'CASE-00002', ...record }}
-      objectSchema={caseSchema}
+      objectSchema={schema}
       dataSource={ds as never}
     >
-      <RecordDetailsRenderer schema={{ fields: BODY_FIELDS } as never} />
+      <RecordDetailsRenderer schema={{ fields: bodyFields } as never} />
     </RecordContextProvider>,
   );
   await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
@@ -192,6 +203,102 @@ describe('objectstack#25897 — CONTROLS', () => {
       expect(cell.querySelector('em[data-host-text]')?.textContent).toBe(SUBJECT);
     } finally {
       registerFieldRenderer('text', shipped);
+    }
+  });
+});
+
+/**
+ * objectstack#34148 — a text-returning formula wraps in `record:details` read
+ * mode too.
+ *
+ * A downstream CRM read a margin-precheck explanation (a text formula of about
+ * 120 characters) cut to one line with an ellipsis, the whole sentence only in
+ * a hover `title`. `formula` maps to `FormulaCellRenderer`, whose text face is
+ * the grid's one-line `TextCellRenderer`. The row now reads it through
+ * `FormulaField`, the face the record form draws.
+ * The change is a renderer choice and a class list, so a viewport-sized
+ * happy-dom render covers 1440 px and phone width alike: no layout engine
+ * runs, and none is needed to read which element draws the value.
+ *
+ * Controls: the grid keeps the one-line formula cell; a number formula keeps
+ * its number text; a host's own `formula` face is kept on the record page.
+ */
+const EXPLANATION = (
+  'Lowest landed cost of cost week 2026-W46: 6520 (Shanxi plant: 6260 + 260); quoted 7123.89; margin 8.48% >= tier A 4%, passes.'
+).slice(0, 120);
+
+const quoteLineSchema = {
+  name: 'quote_line',
+  label: 'Quote line',
+  nameField: 'case_number',
+  fields: {
+    case_number: { type: 'text', label: 'Line' },
+    explanation: { type: 'formula', label: 'Precheck Explanation', returnType: 'text', expression: 'record.case_number' },
+    undeclared: { type: 'formula', label: 'Undeclared Formula', expression: 'record.case_number' },
+    margin: { type: 'formula', label: 'Margin', returnType: 'number', scale: 2, expression: '1' },
+  },
+} as unknown as typeof caseSchema;
+const QUOTE_LINE_FIELDS = ['explanation', 'undeclared', 'margin'];
+const QUOTE_LINE = { explanation: EXPLANATION, undeclared: EXPLANATION, margin: 1234.5 };
+
+const formulaReadDisplay = (name: string, value: unknown, extra: Record<string, unknown>) =>
+  markupOf(<FormulaField field={{ name, type: 'formula', label: name, ...extra } as never} value={value} onChange={() => {}} readonly />);
+
+for (const [layout, width] of [['desktop 1440', 1440], ['phone', MOBILE_WIDTH]] as const) {
+  describe(`objectstack#34148 — record:details read mode, ${layout}: a long text formula wraps`, () => {
+    const cellLayout = layout === 'phone' ? 'mobile' : 'desktop';
+    beforeEach(pinViewport(width));
+
+    it('the fixture is a 120-character value', () => {
+      expect(EXPLANATION).toHaveLength(120);
+    });
+
+    for (const [label, name, extra] of [
+      ['Precheck Explanation', 'explanation', { returnType: 'text', expression: 'record.case_number' }],
+      ['Undeclared Formula', 'undeclared', { expression: 'record.case_number' }],
+    ] as const) {
+      it(`a formula \`${name}\` cell holds the read display FormulaField renders, and wraps`, async () => {
+        await renderBody(QUOTE_LINE, quoteLineSchema, QUOTE_LINE_FIELDS);
+        const cell = valueCellOf(label, cellLayout);
+        expect(cell.innerHTML).toBe(formulaReadDisplay(name, EXPLANATION, extra));
+        const node = drawingNodeOf(cell, EXPLANATION);
+        expect(node.textContent).toBe(EXPLANATION);
+        expect(oneLineClassesBetween(node, cell)).toEqual([]);
+        // The whole value is the visible text, not a hover tooltip.
+        expect(node).not.toHaveAttribute('title');
+      });
+    }
+  });
+}
+
+describe('objectstack#34148 — CONTROLS', () => {
+  beforeEach(pinViewport(1440));
+
+  it('the grid keeps its one-line formula cell, titled with the whole value', () => {
+    expect(getCellRenderer('formula')).toBe(FormulaCellRenderer);
+    const { container } = render(
+      <FormulaCellRenderer value={EXPLANATION} field={{ name: 'explanation', type: 'formula', returnType: 'text' } as never} />,
+    );
+    const span = container.querySelector('span');
+    expect(span).toHaveClass('truncate');
+    expect(span).toHaveAttribute('title', EXPLANATION);
+  });
+
+  it('a number formula keeps its number text on the record page', async () => {
+    await renderBody(QUOTE_LINE, quoteLineSchema, QUOTE_LINE_FIELDS);
+    expect(valueCellOf('Margin', 'desktop').textContent).toBe('1,234.50');
+  });
+
+  it("a host's own `formula` face is kept on the record page", async () => {
+    const shipped = getCellRenderer('formula');
+    const HostFormula = ({ value }: { value: unknown }) => <em data-host-formula>{String(value)}</em>;
+    try {
+      registerFieldRenderer('formula', HostFormula as never);
+      await renderBody(QUOTE_LINE, quoteLineSchema, QUOTE_LINE_FIELDS);
+      const cell = valueCellOf('Precheck Explanation', 'desktop');
+      expect(cell.querySelector('em[data-host-formula]')?.textContent).toBe(EXPLANATION);
+    } finally {
+      registerFieldRenderer('formula', shipped);
     }
   });
 });

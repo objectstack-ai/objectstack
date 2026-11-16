@@ -222,9 +222,10 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
             .toEqual(['nav_connect_agent']);
         expect(groupChildren(account.body?.item, 'grp_account_developer'))
             .toEqual(['nav_account_api_keys', 'nav_account_oauth_apps']);
-        // The whole served tree, counted: 12 authored ids (the AI Assistant
-        // slot among them) + the one contributed.
-        expect(navIds(account.body?.item)).toHaveLength(13);
+        // The whole served tree, counted: 13 authored ids (the AI Assistant
+        // slot among them) + the one contributed. (12 authored until the
+        // Mobile App entry, `nav_account_mobile_app`, joined after Profile.)
+        expect(navIds(account.body?.item)).toHaveLength(14);
         // …and the entry's TARGET rode along, so the menu item resolves.
         expect(JSON.stringify(account.body)).toContain('connect_agent');
 

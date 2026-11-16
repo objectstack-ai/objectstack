@@ -49,6 +49,7 @@ import {
   skillPromptListEntry,
   skillPromptRefusalError,
   skillPromptResult,
+  skillPromptWithdrawn,
   type McpSkillBridge,
   type SkillPrompt,
 } from './skill-prompts.js';
@@ -2464,11 +2465,25 @@ export class MCPServerRuntime {
         },
         async () => {
           // Re-read at call time so an edited skill serves fresh instructions.
-          const lookup = lookupSkillPrompt(await listSkillPrompts(skillBridge), entry.face);
+          // One read: the projection and the withdrawal check below see the same rows.
+          const rows = (await skillBridge.listSkills()) ?? [];
+          const lookup = lookupSkillPrompt(
+            await listSkillPrompts({ ...skillBridge, listSkills: async () => rows }),
+            entry.face,
+          );
           if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
           if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
-          // Gone since the snapshot: the snapshot's one skill, as before.
-          if (entry.prompts.length === 1) return skillPromptResult(entry.prompts[0]);
+          if (entry.prompts.length === 1) {
+            // [#34167] Withdrawn since the snapshot (`mcpPrompt: false`):
+            // answered as the SDK answers a name it never registered. This
+            // server's list is a boot snapshot and keeps the name until
+            // restart; the get stops serving it at once.
+            if (skillPromptWithdrawn(rows, entry.prompts[0])) {
+              throw new McpError(ErrorCode.InvalidParams, `Prompt ${entry.face} not found`);
+            }
+            // Gone since the snapshot: the snapshot's one skill, as before.
+            return skillPromptResult(entry.prompts[0]);
+          }
           throw skillPromptRefusalError({
             status: 'refused',
             message: duplicateSkillFaceMessage(entry),

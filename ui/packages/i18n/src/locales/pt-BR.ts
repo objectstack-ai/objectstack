@@ -553,6 +553,7 @@ const pt = {
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
       succeededRecords: "Registros concluídos",
+      aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Alguns registros podem já ter sido alterados; ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",
@@ -2412,6 +2413,8 @@ const pt = {
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Adicione seu primeiro aplicativo', todo: 'Ainda não há um aplicativo seu. Instale um pelo marketplace ou crie um, e ele aparecerá no Início.', done: 'Um aplicativo seu está no Início.' },
+      firstRecord: { title: 'Adicione seu primeiro registro', todo: 'Ninguém criou um registro nos seus aplicativos ainda.', done: 'Um registro foi criado nos seus aplicativos.', action: 'Abrir aplicativo' },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",
@@ -5227,6 +5230,25 @@ const pt = {
     sourceRequired: "Uma página {{kind}} requer um {{source}} não vazio.",
     loading: "Carregando o runtime do React…",
     error: "Erro na página React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicativo móvel",
+    subtitle: "Conecte o aplicativo móvel ObjectOS a este servidor",
+    scanHint: "Abra o aplicativo móvel ObjectOS e escaneie este código para conectá-lo a este servidor.",
+    qrAlt: "Código QR que conecta o aplicativo móvel ObjectOS a este servidor",
+    linkLabel: "Link de conexão",
+    copy: "Copiar link",
+    copied: "Link copiado",
+    privacy: "O código contém apenas o endereço deste servidor, nunca a sua conta.",
+    loadFailed: "Não foi possível ler o endereço público deste servidor. Recarregue a página para tentar novamente.",
+    unreachableTitle: "Um celular não consegue acessar o endereço deste servidor",
+    unreachableBody: "O endereço deste servidor é {{address}}, um endereço local ou privado que um celular não consegue abrir, então nenhum código é exibido. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    insecureTitle: "O endereço deste servidor não usa HTTPS",
+    insecureBody: "O endereço deste servidor é {{address}}. O aplicativo móvel faz login por ele, então ele precisa usar HTTPS, e nenhum código é exibido. Sirva este servidor por HTTPS, defina {{setting}} com o endereço https:// dele, por exemplo {{example}}, e reinicie-o.",
+    unpublishedTitle: "Este servidor não publica seu endereço público",
+    unpublishedBody: "Nenhum código é exibido: este servidor ainda não oferece seu endereço público ao aplicativo móvel. Atualize o servidor para uma versão compatível.",
   },
 };
 

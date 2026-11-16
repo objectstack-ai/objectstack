@@ -500,3 +500,69 @@ describe('deriveDetail takes the line-position field from the spec (deriveInline
     expect(sortFieldOf(child({ position: { type: 'number' }, sequence: { type: 'number' } }))).toBe('position');
   });
 });
+
+/**
+ * objectstack-ai/objectstack#34286 — a column over a `formula` / `summary`
+ * child field takes the type its VALUE is declared as, read the way the
+ * formula cell reads it (`FormulaCellRenderer`, objectui#11748 /
+ * objectui#12111): a summary declaring its currency is money, else the
+ * declared `returnType` decides, else the column hydrates as it always has.
+ */
+describe('hydrateColumns types a formula / summary column by its declared value type (#34286)', () => {
+  const lineSchema = {
+    name: 'quote_line',
+    fields: {
+      quote: { type: 'master_detail', reference: 'quote' },
+      quantity: { type: 'number', label: 'Quantity' },
+      unit_price: { type: 'currency', label: 'Unit price' },
+      total_price: { type: 'formula', label: 'Total', expression: 'quantity * unit_price', returnType: 'currency' },
+      weight: { type: 'formula', label: 'Weight', expression: 'quantity * 2', returnType: 'number', scale: 1 },
+      ships_on: { type: 'formula', label: 'Ships on', expression: 'x', returnType: 'date' },
+      is_large: { type: 'formula', label: 'Large', expression: 'x', returnType: 'boolean' },
+      line_code: { type: 'formula', label: 'Code', expression: 'x', returnType: 'text' },
+      undeclared: { type: 'formula', label: 'Undeclared', expression: 'quantity * unit_price' },
+      tax_total: { type: 'summary', label: 'Tax', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+      line_count: { type: 'summary', label: 'Lines' },
+    },
+  };
+  const hydrate = (names: string[]) =>
+    Object.fromEntries(hydrateColumns(names.map((name) => ({ name })) as any, lineSchema, { booleanLabel }).map((c) => [c.name, c]));
+
+  it('a formula declaring returnType currency hydrates as a computed currency column', () => {
+    expect(hydrate(['total_price']).total_price).toMatchObject({
+      type: 'currency',
+      label: 'Total',
+      computed: true,
+      expr: 'quantity * unit_price',
+      required: false,
+    });
+  });
+
+  it('returnType number → number (its scale carried); date → date; boolean → select with the boolean labels; text → text', () => {
+    const byName = hydrate(['weight', 'ships_on', 'is_large', 'line_code']);
+    expect(byName.weight).toMatchObject({ type: 'number', computed: true, scale: 1 });
+    expect(byName.ships_on.type).toBe('date');
+    expect(byName.is_large).toMatchObject({
+      type: 'select',
+      options: [{ label: en.common.yes, value: 'true' }, { label: en.common.no, value: 'false' }],
+    });
+    expect(byName.line_code.type).toBe('text');
+  });
+
+  it('a summary declaring its currency hydrates as currency', () => {
+    expect(hydrate(['tax_total']).tax_total.type).toBe('currency');
+  });
+
+  it('CONTROL — a formula with no returnType, and a summary declaring no currency, hydrate as before (text)', () => {
+    const byName = hydrate(['undeclared', 'line_count']);
+    expect(byName.undeclared).toMatchObject({ type: 'text', computed: true });
+    expect(byName.line_count.type).toBe('text');
+  });
+
+  it('CONTROL — an authored type wins over the returnType, and a plain currency field is unchanged', () => {
+    const cols = hydrateColumns([{ name: 'total_price', type: 'number' }, { name: 'unit_price' }] as any, lineSchema, { booleanLabel });
+    expect(cols[0].type).toBe('number');
+    expect(cols[0].computed).toBeUndefined(); // an authored column is returned as written
+    expect(cols[1].type).toBe('currency');
+  });
+});
