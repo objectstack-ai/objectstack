@@ -91,12 +91,37 @@ export function slateHoldsPlatformAdminAddress(slate: readonly string[]): boolea
 }
 
 /**
- * `ids` without the platform administrators' slot. Read where a slate is
- * resolved from anything but the approver type that names them, which alone
- * opens it.
+ * A stored slate as every door reads it back. `pending_approvers` is stored
+ * as one text, and the decision and override admissions, the per-viewer
+ * flags and the approver-index rebuild all read it through this function
+ * (the approval service's `csvSplit` is it). An address on a slate is what
+ * this answers, never the string a resolution produced, so a rule about which
+ * addresses a slate may hold is judged on this answer.
+ */
+export function readStoredSlate(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  return String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Does `entry`, once stored on a slate, read back as holding the platform
+ * administrators' slot ({@link readStoredSlate})? The slot is judged on the
+ * slate the doors read, not on the string a resolution produced.
+ */
+export function readsAsPlatformAdminAddress(entry: string): boolean {
+  return readStoredSlate(entry).some(isPlatformAdminAddress);
+}
+
+/**
+ * `ids` without any entry that reads back as the platform administrators'
+ * slot ({@link readsAsPlatformAdminAddress}): the slot is judged on the slate
+ * as the doors read it, so such an entry adds nothing to it. Read where a
+ * slate is resolved from anything but the approver type that names them,
+ * which alone opens it.
  */
 export function withoutPlatformAdminAddress(ids: readonly string[]): string[] {
-  return ids.filter((id) => !isPlatformAdminAddress(id));
+  return ids.filter((id) => !readsAsPlatformAdminAddress(id));
 }
 
 /**

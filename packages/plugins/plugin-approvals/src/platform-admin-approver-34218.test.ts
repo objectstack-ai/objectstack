@@ -35,8 +35,9 @@
  *   the platform administrator takes no slot on it.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { AutomationEngine } from '@objectstack/service-automation';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindSecurityCatalogReader, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
 import { normalizeStackInput } from '@objectstack/spec';
@@ -117,6 +118,12 @@ const NAME_OWNER: Record<string, string | undefined> = {
   host_review: 'com.host.review',
   host_review_overridden: 'com.host.review',
 };
+/** A stand-in for the flow engine's reads, answering from the tables above. */
+const STAND_IN_AUTOMATION = {
+  armedFlowPackage: (name: string) => ARMED[name],
+  packagedFlowOwner: (name: string) => NAME_OWNER[name],
+  getFlow: async () => ARMED_BODY,
+} as any;
 
 const text = (name: string) => ({ name, label: name, type: 'text' as const });
 const objectDef = (name: string, fields: string[], extra: Record<string, unknown> = {}) => ({
@@ -203,7 +210,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
     const defs = [
       // Accounts belong to no organization: membership says which they are in.
       {
-        ...objectDef('sys_user', ['name', 'email'], { email_verified: { name: 'email_verified', label: 'v', type: 'boolean' } }),
+        ...objectDef('sys_user', ['name', 'email', 'manager_id'], { email_verified: { name: 'email_verified', label: 'v', type: 'boolean' } }),
         systemFields: { tenant: false },
       },
       // Organizations belong to no organization (ADR-0131).
@@ -211,7 +218,9 @@ describe('platform_admin approver: one slot the platform administrators decide u
       objectDef('sys_member', ['user_id', 'organization_id', 'role']),
       objectDef('sys_user_position', ['user_id', 'position', 'organization_id']),
       objectDef('sys_user_permission_set', ['user_id', 'permission_set', 'organization_id']),
-      objectDef('crm_deal', ['title', 'reviewer', 'organization_id']),
+      objectDef('crm_deal', ['title', 'reviewer', 'subject', 'organization_id'], {
+        reviewers: { name: 'reviewers', label: 'reviewers', type: 'lookup', reference: 'sys_user', multiple: true },
+      }),
       ...(await packageObjects()),
     ];
     for (const def of defs) engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
@@ -247,11 +256,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
         if (input.topic === 'approval.requested') told.push(input.audience);
       }) as any,
     });
-    svc.attachAutomation({
-      armedFlowPackage: (name: string) => ARMED[name],
-      packagedFlowOwner: (name: string) => NAME_OWNER[name],
-      getFlow: async () => ARMED_BODY,
-    } as any);
+    svc.attachAutomation(STAND_IN_AUTOMATION);
   });
 
   afterAll(async () => {
@@ -452,6 +457,223 @@ describe('platform_admin approver: one slot the platform administrators decide u
       } finally {
         await engine.delete('sys_approval_delegation', { where: { id: 'dlg_case_6' }, context: SYSTEM } as any);
       }
+    });
+  });
+
+  describe('the slot is judged on the slate the decision, override and inbox doors read: no route opens it but the typed approver', () => {
+    const person = { type: 'user', value: 'u_member' };
+    const joined = `u_alice,${SLOT}`;
+    const orgAdmin = () => as('u_org_admin', ORG, ['organization_admin']);
+    /**
+     * The doors, each as it reads the stored slate: the request as the
+     * service serves it, the approver index as plugin start rebuilds it from
+     * the stored slate (the inbox), the decision admission for a caller in
+     * platform standing naming the slot, and the override admission (a slate
+     * holding the slot would withhold the tenant arm).
+     */
+    const expectNoDoorReadsTheSlot = async (id: string) => {
+      expect((await svc.getRequest(id, SYSTEM))?.pending_approvers).not.toContain(SLOT);
+      await svc.rebuildApproverIndex();
+      expect(await inbox(as('u_root'))).not.toContain(id);
+      await expect(svc.decide(id, { decision: 'approve', actorId: SLOT } as any, as('u_root')))
+        .rejects.toThrow(/^(REQUEST_NOT_FOUND|FORBIDDEN): /);
+      expect((await svc.getRequest(id, orgAdmin()) as any)?.viewer?.can_override).toBe(true);
+    };
+    const withRows = async (object: string, rows: Array<Record<string, unknown>>, body: () => Promise<void>) => {
+      for (const row of rows) await engine.insert(object, row, { context: SYSTEM } as any);
+      try {
+        await body();
+      } finally {
+        for (const row of rows) await engine.delete(object, { where: { id: row.id }, context: SYSTEM } as any);
+      }
+    };
+    const opensOn = async (key: string, approvers: any[], expected: string[], extra = {}, fields = {}) => {
+      const row = await open(key, 'tenant_review', approvers, extra, { fields });
+      expect(row.pending_approvers).toEqual(expected);
+      await expectNoDoorReadsTheSlot(row.id);
+      return row;
+    };
+
+    it('case 7: an approver entry opens no slot the doors read', async () => {
+      await opensOn('case_7', [person, { type: 'user', value: joined }], ['u_member']);
+    });
+
+    it('case 8: an approver entry opens no slot the doors read', async () => {
+      await opensOn('case_8', [person, { type: 'user', value: `u_alice, ${SLOT}` }], ['u_member']);
+    });
+
+    it('case 9: an approver entry opens no slot the doors read', async () => {
+      await opensOn('case_9', [person, { type: 'team', value: `no_team,${SLOT}` }], ['u_member']);
+    });
+
+    it('case 10: an approver entry opens no slot the doors read', async () => {
+      await opensOn('case_10', [person, { type: 'position', value: `nobody,${SLOT}` }], ['u_member']);
+    });
+
+    it('case 11: an approver entry opens no slot the doors read', async () => {
+      await opensOn('case_11', [person, { type: 'org_membership_level', value: `nobody,${SLOT}` }], ['u_member']);
+    });
+
+    it('case 12: an approver entry opens no slot the doors read', async () => {
+      await opensOn('case_12', [person, { type: 'department', value: `no_unit,${SLOT}` }], ['u_member']);
+    });
+
+    it('case 13: a record value opens no slot the doors read', async () => {
+      await opensOn('case_13', [person, { type: 'field', value: 'reviewers' }], ['u_member'], {}, { reviewers: [joined] });
+    });
+
+    it('case 14: a directory value opens no slot the doors read', async () => {
+      await withRows('sys_user', [{ id: 'u_case_14', name: 'u_case_14', manager_id: joined }], async () => {
+        await opensOn('case_14', [person, { type: 'manager', value: 'subject' }], ['u_member'], {}, { subject: 'u_case_14' });
+      });
+    });
+
+    it('case 15: a directory value opens no slot the doors read', async () => {
+      await withRows('sys_user_position', [{ id: 'pos_case_15', user_id: joined, position: 'desk_15', organization_id: ORG }], async () => {
+        await opensOn('case_15', [person, { type: 'position', value: 'desk_15' }], ['u_member']);
+        await opensOn('case_15b', [person, { type: 'expression', value: "'desk_15'", resolveAs: 'position' }], ['u_member']);
+      });
+    });
+
+    it('case 16: a delegation opens no slot the doors read, and the slot stays with its approver', async () => {
+      await withRows('sys_approval_delegation', [{
+        id: 'dlg_case_16', delegator_id: 'u_alice', delegate_id: `u_member,${SLOT}`, organization_id: ORG,
+      }], async () => {
+        await opensOn('case_16', [person, { type: 'user', value: 'u_alice' }], ['u_member', 'u_alice']);
+      });
+    });
+
+    it('case 17: a fallback slate opens no slot the doors read', async () => {
+      await opensOn('case_17', [{ type: 'position', value: 'nobody_holds_this' }], ['u_member'], {
+        onEmptyApprovers: 'fallback', fallbackApprovers: [person, { type: 'team', value: `no_team,${SLOT}` }],
+      });
+    });
+
+    it('case 18: the administrators\' slate opens no slot the doors read', async () => {
+      await withRows('sys_member', [{ id: 'm_case_18', user_id: joined, organization_id: ORG, role: 'admin' }], async () => {
+        await withRows('sys_user_permission_set', [{
+          id: 'ups_case_18', user_id: joined, permission_set: 'organization_admin', organization_id: ORG,
+        }], async () => {
+          await opensOn('case_18', [{ type: 'position', value: 'nobody_holds_this' }], ['u_org_admin']);
+        });
+      });
+    });
+
+    it('case 19: a slate rewritten by a vote holds no slot the doors read', async () => {
+      const row = await opensOn('case_19',
+        [person, { type: 'user', value: 'u_alice' }, { type: 'team', value: `no_team,${SLOT}` }],
+        ['u_member', 'u_alice'], { behavior: 'unanimous' });
+      const out = await svc.decide(row.id, { decision: 'approve' } as any, as('u_member'));
+      expect(out.request.pending_approvers).toEqual(['u_alice']);
+      await expectNoDoorReadsTheSlot(row.id);
+    });
+
+    it('case 20: a slate the SLA hands over holds no slot the doors read', async () => {
+      await withRows('sys_user_position', [
+        { id: 'pos_case_20', user_id: joined, position: 'desk_20', organization_id: ORG },
+        { id: 'pos_case_20b', user_id: 'u_member', position: `desk_20b,${SLOT}`, organization_id: ORG },
+      ], async () => {
+        for (const [key, escalateTo] of [['case_20', 'desk_20'], ['case_20b', `position:desk_20b,${SLOT}`]]) {
+          const row = await open(key, 'tenant_review', [{ type: 'user', value: 'u_alice' }],
+            { escalation: { timeoutHours: 1, action: 'reassign', escalateTo, notifySubmitter: false } });
+          now += 2 * 3600_000;
+          await svc.runEscalations();
+          expect((await svc.getRequest(row.id, SYSTEM))?.pending_approvers).toEqual(['u_alice']);
+          await expectNoDoorReadsTheSlot(row.id);
+        }
+      });
+    });
+
+    it('case 21: a hand-off target puts no slot on the slate the doors read', async () => {
+      await withRows('sys_user_position', [{ id: 'pos_case_21', user_id: 'u_member', position: `desk_21,${SLOT}`, organization_id: ORG }], async () => {
+        const row = await open('case_21', 'tenant_review', [{ type: 'user', value: 'u_alice' }]);
+        await expect(svc.reassign(row.id, { actorId: 'u_alice', to: `position:desk_21,${SLOT}` }, as('u_alice')))
+          .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to /);
+        expect((await svc.getRequest(row.id, SYSTEM))?.pending_approvers).toEqual(['u_alice']);
+        await expectNoDoorReadsTheSlot(row.id);
+      });
+    });
+  });
+
+  describe('the origin is answered for the body whose step is being opened, on the real flow engine', () => {
+    const HOST_FLOW = 'host_review_real';
+    const flowDef = {
+      name: HOST_FLOW, label: 'Host review', type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'platform_admin' }] } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'review' },
+        { id: 'e2', source: 'review', target: 'end', label: 'approve' },
+        { id: 'e3', source: 'review', target: 'end', label: 'reject' },
+      ],
+    };
+    const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as any;
+    let automation: AutomationEngine;
+    let armedNode: any;
+
+    beforeAll(async () => {
+      automation = new AutomationEngine(quiet);
+      registerApprovalNode(automation as any, svc, quiet);
+      automation.setPackagedFlowSource((name) => (name === HOST_FLOW ? 'com.host.review' : undefined));
+      automation.registerFlow(HOST_FLOW, flowDef, { source: 'package', packageId: 'com.host.review' });
+      svc.attachAutomation(automation as any);
+      armedNode = (await automation.getFlow(HOST_FLOW))?.nodes.find((n: any) => n.id === 'review');
+    });
+
+    afterAll(() => {
+      svc.attachAutomation(STAND_IN_AUTOMATION);
+      vi.restoreAllMocks();
+    });
+
+    const deal = async (key: string) => {
+      await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: ORG }, { context: SYSTEM } as any);
+      return { id: `D_${key}`, title: key };
+    };
+    const openDirect = async (key: string, node: unknown, flowKey?: string) => svc.openNodeRequest({
+      object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: HOST_FLOW, flowKey,
+      config: { approvers: [{ type: 'platform_admin' }], behavior: 'first_response' } as any,
+      submitterId: 'u_sub', record: await deal(key), organizationId: ORG, node,
+    }, as('u_sub'));
+
+    it('a real run of a code package\'s flow opens on the slot, the origin read for the body it runs', async () => {
+      expect(automation.armedFlowPackage(HOST_FLOW)).toBe('com.host.review');
+      const slotRead = vi.spyOn(automation, 'getFlowSlot');
+      const record = await deal('real_run');
+      const result = await automation.execute(HOST_FLOW, {
+        object: 'crm_deal', record, userId: 'u_sub', organizationId: ORG, tenantId: ORG,
+      } as any);
+      expect(result).toMatchObject({ status: 'paused' });
+      expect(slotRead).toHaveBeenCalledWith('com.host.review', HOST_FLOW);
+      expect(await requestRows('real_run')).toMatchObject([{ status: 'pending', pending_approvers: SLOT }]);
+      slotRead.mockRestore();
+    });
+
+    it('the slot read: the armed body\'s own step opens, and a step it does not hold is refused', async () => {
+      const slotRead = vi.spyOn(automation, 'getFlowSlot');
+      const opened = await openDirect('real_slot', armedNode, HOST_FLOW);
+      expect(opened).toMatchObject({ status: 'pending', pending_approvers: [SLOT] });
+      expect(slotRead).toHaveBeenCalledWith('com.host.review', HOST_FLOW);
+      await expect(openDirect('real_slot_copy', { ...armedNode }, HOST_FLOW))
+        .rejects.toThrow(/^FORBIDDEN: approval node 'review' of flow 'host_review_real' names the platform administrators/);
+      expect(await requestRows('real_slot_copy')).toEqual([]);
+      slotRead.mockRestore();
+    });
+
+    it('the bare read: the armed body\'s own step opens, and a step it does not hold is refused', async () => {
+      const slotRead = vi.spyOn(automation, 'getFlowSlot');
+      const bareRead = vi.spyOn(automation, 'getFlow');
+      const opened = await openDirect('real_bare', armedNode);
+      expect(opened).toMatchObject({ status: 'pending', pending_approvers: [SLOT] });
+      expect(bareRead).toHaveBeenCalledWith(HOST_FLOW);
+      expect(slotRead).not.toHaveBeenCalled();
+      await expect(openDirect('real_bare_copy', { ...armedNode }))
+        .rejects.toThrow(/^FORBIDDEN: approval node 'review' of flow 'host_review_real' names the platform administrators/);
+      expect(await requestRows('real_bare_copy')).toEqual([]);
+      slotRead.mockRestore();
+      bareRead.mockRestore();
     });
   });
 

@@ -103,6 +103,8 @@ import {
   equivalentApproverAddresses,
   heldSlot,
   isPlatformAdminAddress,
+  readStoredSlate,
+  readsAsPlatformAdminAddress,
   slateHoldsPlatformAdminAddress,
   withoutPlatformAdminAddress,
   PLATFORM_ADMIN_ADDRESS,
@@ -1644,11 +1646,13 @@ function bodyHoldsNode(body: unknown, node: object): boolean {
   return false;
 }
 
-function csvSplit(raw: unknown): string[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
-  return String(raw).split(',').map(s => s.trim()).filter(Boolean);
-}
+/**
+ * Split a comma-joined text (or an array) into its trimmed, non-empty parts.
+ * It is {@link readStoredSlate}, the one reading of a stored slate
+ * (`pending_approvers`) every door takes, so a rule judged on a slate's
+ * addresses there is judged on what these readers read.
+ */
+const csvSplit: (raw: unknown) => string[] = readStoredSlate;
 
 /**
  * [ADR-0131] The organization a value names, or `null` for none — `NULL`,
@@ -2907,6 +2911,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         );
         if (opts?.resolvedFrom) opts.resolvedFrom[`expression#${idx}`] = resolved.raw;
         const kept = resolved.slots.filter((entry) => !!entry.id);
+        // The platform administrators' slot, judged on the slate as the doors
+        // read it back ({@link withoutPlatformAdminAddress}).
         const opened = withoutPlatformAdminAddress(kept.map((entry) => entry.id));
         if (opened.length !== kept.length) this.warnPlatformSlotNotOpened('expression', idx);
         for (const entry of kept) {
@@ -2926,10 +2932,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         a, record, organizationId, now, opts?.substitutions, onDirectoryFailure, opts?.callerPackageId ?? null,
       );
       // The platform administrators' slot is opened by the approver type that
-      // names them, and by nothing else: the slot is judged on the resolved
-      // slate. It names no one, so a slate reads as it would without it, as
-      // before this type existed.
-      // Who may name the type itself is judged at node entry
+      // names them, and by nothing else: the slot is judged on the slate as
+      // every door reads it back once stored ({@link readStoredSlate}), not on
+      // the string a resolution produced. An entry that reads back as the slot
+      // adds nothing. Who may name the type itself is judged at node entry
       // ({@link platformAdminApproverRefusal}).
       const ids = canonicalApproverType(String(a.type)) === 'platform_admin'
         ? resolvedIds
@@ -4451,7 +4457,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // A delegation hands a slot to a person. The platform administrators' slot
     // is opened only by the approver type that names them, so the slot stays
     // with the original approver and the hops are not audited.
-    if (current !== start && isPlatformAdminAddress(current)) {
+    if (current !== start && readsAsPlatformAdminAddress(current)) {
       this.logger?.warn?.(
         `[approvals] out-of-office delegate of '${start}' is the platform administrators' slot, which a delegation `
         + `cannot hand a request to, so the slot stays with '${start}'. Point the delegation at a person, or `
@@ -7382,13 +7388,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * is that docblock's.
    */
   private async reassignTargetRefusal(to: string, organizationId: string | null): Promise<string | undefined> {
+    // Judged first, on the slate as the doors read it back once `to` is stored
+    // on it: a hand-off never puts the platform administrators' slot there.
+    if (readsAsPlatformAdminAddress(to)) {
+      return 'it is the platform administrators\' slot, which only an approval step that names them opens.';
+    }
     const position = addressedPosition(to);
     if (position !== undefined) {
       if ((await this.expandPositionUsers(position, organizationId)).length) return undefined;
       return `no one holds position '${position}' in this request's organization.`;
-    }
-    if (isPlatformAdminAddress(to)) {
-      return 'it is the platform administrators\' slot, which only an approval step that names them opens.';
     }
     if (to.includes(':')) {
       return 'it is a slot literal no approver acts under, so no one could ever decide the request.';
