@@ -3116,7 +3116,7 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const moveEli = opOf(run, 'move_eli');
     expect(moveEli.notMeasured).toBe(
-      'restore: the rows could not be restored to the seeded state: democrm_contact: 1 added (new-add_contact) (refused: delete democrm_contact new-add_contact: 403 PERMISSION_DENIED refused by the double; delete democrm_contact new-add_contact: 403 PERMISSION_DENIED refused by the double; delete democrm_contact new-add_contact: 403 PERMISSION_DENIED refused by the double)',
+      'restore: the rows could not be restored to the seeded state: democrm_contact: 1 added (new-add_contact) (refused: delete democrm_contact new-add_contact: 403 PERMISSION_DENIED refused by the double)',
     );
     expect([moveEli.grade, moveEli.observation, moveEli.turn, moveEli.restored]).toEqual([undefined, undefined, undefined, undefined]);
     expect(driver.seen.some((k) => k.includes('/move_eli/'))).toBe(false);
@@ -3125,7 +3125,7 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     // A harness with no row delete at all says so.
     const bare = setup({ app: () => Object.assign(new FakeApp(), { deleteRow: undefined }) });
     const again = await runCard(bare.scenario, bare.driver, bare.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
-    expect(opOf(again, 'move_eli').notMeasured).toContain('(refused: delete democrm_contact new-add_contact: this app harness has no row delete');
+    expect(opOf(again, 'move_eli').notMeasured).toContain('(refused: delete democrm_contact new-add_contact: this app harness has no row delete)');
   });
 
   it('restoreSeededRows: sets back only what moved, through the seed path; derived fields and the clock are neither compared nor written', async () => {

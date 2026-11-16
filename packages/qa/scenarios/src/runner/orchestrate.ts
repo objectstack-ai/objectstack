@@ -1153,9 +1153,10 @@ export async function restoreSeededRows(
   const deleted = new Set<string>();
   const reinserted = new Set<string>();
   const setBack = new Map<string, Set<string>>();
-  const refusals: string[] = [];
+  /** The refusals met, each named once however many rounds met it. */
+  const refusals = new Set<string>();
   const refused = (what: string, r: { status: number; code?: string; message?: string }) =>
-    refusals.push(`${what}: ${r.status}${r.code ? ` ${r.code}` : ''}${r.message ? ` ${r.message.slice(0, 120)}` : ''}`);
+    refusals.add(`${what}: ${r.status}${r.code ? ` ${r.code}` : ''}${r.message ? ` ${r.message.slice(0, 120)}` : ''}`);
   const record = (): RowRestore | undefined =>
     deleted.size || reinserted.size || setBack.size
       ? {
@@ -1185,13 +1186,13 @@ export async function restoreSeededRows(
     if (round === RESTORE_ROUNDS) {
       const restored = record();
       const still = drifts.map(driftText).join('; ');
-      return { ...(restored ? { restored } : {}), failed: `the rows could not be restored to the seeded state: ${still}${refusals.length ? ` (refused: ${refusals.slice(0, 3).join('; ')})` : ''}` };
+      return { ...(restored ? { restored } : {}), failed: `the rows could not be restored to the seeded state: ${still}${refusals.size ? ` (refused: ${[...refusals].slice(0, 3).join('; ')})` : ''}` };
     }
     // 1. The rows a turn added.
     for (const d of drifts) {
       for (const id of d.added) {
         if (!app.deleteRow) {
-          refusals.push(`delete ${d.object} ${id}: this app harness has no row delete`);
+          refusals.add(`delete ${d.object} ${id}: this app harness has no row delete`);
           continue;
         }
         const r = await app.deleteRow(d.object, id);
