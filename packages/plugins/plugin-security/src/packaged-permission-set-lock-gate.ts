@@ -69,15 +69,14 @@ import {
  * [ADR-0150 D2/D9, ADR-0131 D6, #34226] Does a write of the permission set
  * `name` addressed to the package `writer` override the set the package
  * `declarer` ships? A set is `(package, name)`, one set per namespace: it does
- * when `writer` is the declarer, the declarer's customization pair (ADR-0146,
- * whatever namespace the pair declares), or a package the declarer meets
- * under the ONE predicate the install gate and the save door's name rule ask
- * (`permissionSetHoldersMeet`). The metadata protocol's seal judges the same
+ * when `writer` is the declarer's customization pair (ADR-0146, whatever
+ * namespace the pair declares), or a package the declarer meets under the ONE
+ * predicate the install gate and the save door's name rule ask
+ * (`permissionSetHoldersMeet`), the declarer itself included. The metadata protocol's seal judges the same
  * three relations for the same write (`overridesShippedPermissionSet`,
  * `protocol-packaged-base-refusal.ts`).
  */
 function overridesDeclaredSet(ql: any, writer: string, declarer: string, name: string): boolean {
-  if (writer === declarer) return true;
   const registry = ql?.registry as (InstalledPackageSource & { getPackage?: (id: string) => any }) | undefined;
   if (isPairOf(writer, declarer, installedManifestsOf(registry))) return true;
   const namespaceOf = (packageId: string): string | undefined => {

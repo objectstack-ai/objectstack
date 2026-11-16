@@ -31,7 +31,7 @@ import type { MetadataItem } from '@objectstack/metadata-core';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { serveStoredHashTokens, servedContentHash } from './metadata-redaction.js';
-import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import type { OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
@@ -664,7 +664,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -1251,7 +1251,7 @@ export class ProtocolHistoryAndPublishFacet {
                 ...(draftForGate ? { judged: { body: draftForGate.body, packageId: promoteInto } } : {}),
             };
         }
-        const artifactBacked = host.isArtifactBacked(singularType, request.name);
+        const artifactBacked = host.isArtifactBacked(singularType, request.name) && !isOwnPermissionSetWrite(host.engine, singularType, request.name, promoteInto);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
         const ref = {

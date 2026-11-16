@@ -46,7 +46,7 @@ import type {
     StoredMigrationTodo,
 } from './stored-migration.js';
 import { droppedWithheldKeyNotices } from './protocol-credential-carry-forward.js';
-import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { flowVerdictBody } from './protocol-flow-save-replay.js';
 import { withParsedStoredActions } from './protocol-stored-action-parse.js';
@@ -1909,7 +1909,7 @@ export class ProtocolSaveFacet {
         }
         if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-        const artifactBacked = host.isArtifactBacked(singularTypeForRepo, request.name);
+        const artifactBacked = host.isArtifactBacked(singularTypeForRepo, request.name) && !isOwnPermissionSetWrite(host.engine, singularTypeForRepo, request.name, request.packageId);
         // [ADR-0146 D2] An admitted declared override writes the pair's own
         // row; it edits no managed item, so the store judges a runtime write.
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride

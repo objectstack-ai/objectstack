@@ -160,11 +160,8 @@ export function refusePackagedBaseOverride(
         // naming no package, one addressed to the shipper, one addressed to
         // the shipper's customization pair (whatever the pair's namespace),
         // and one addressed to a package that shares the shipper's set of the
-        // name ({@link overridesShippedPermissionSet}).
-        if (namedBase && (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'permission'
-            && !overridesShippedPermissionSet(this.engine, request.packageId as string, request.name)) {
-            return;
-        }
+        // name ({@link isOwnPermissionSetWrite}).
+        if (isOwnPermissionSetWrite(this.engine, request.type, request.name, request.packageId)) return;
         // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
         // and names the managed package for every other type; the code and
         // the status are unchanged. [#23577] Every write reads it, whatever
@@ -194,6 +191,25 @@ export function refusePackagedBaseOverride(
 }
 
 /**
+ * [ADR-0150 D2/D9, ADR-0131 D6, #34226] Is a write of `(type, name)` addressed
+ * to `packageId` a package's OWN permission set, beside sets other namespaces'
+ * packages ship — a write that overrides no shipped set
+ * ({@link overridesShippedPermissionSet}), though the name is artifact-backed?
+ *
+ * The one verdict every door that judges such a write as an override of the
+ * shipped base reads in place of the name-wide artifact check: the save door's
+ * seal ({@link refusePackagedBaseOverride}), and the write intent the save door
+ * and the draft promotion hand the repository (`override-artifact` is the
+ * repository's managed seal). `false` for every other type, and for a write
+ * naming no package.
+ */
+export function isOwnPermissionSetWrite(engine: unknown, type: string, name: string, packageId: string | null | undefined): boolean {
+    if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'permission') return false;
+    if (typeof packageId !== 'string' || packageId === '') return false;
+    return !overridesShippedPermissionSet(engine, packageId, name);
+}
+
+/**
  * [ADR-0150 D2/D9, ADR-0131 D6, #34226] Does a save of the permission set
  * `name` addressed to the package `writer` override a set a package ships?
  *
@@ -201,11 +217,11 @@ export function refusePackagedBaseOverride(
  * packages share one set of a name exactly when the ONE predicate the install
  * gate and the save door's name rule ask says they meet
  * (`permissionSetHoldersMeet`, `@objectstack/core`). So the save overrides the
- * set a package Q ships when `writer` is Q, when `writer` is Q's
- * customization pair (ADR-0146: the pair customizes Q's own items, whatever
- * namespace the pair declares), or when `writer` meets Q under that predicate
- * (a co-owner of Q's namespace, a platform namespace, a package with no
- * namespace, a name the platform requests by spelling). Every package that
+ * set a package Q ships when `writer` is Q's customization pair (ADR-0146:
+ * the pair customizes Q's own items, whatever namespace the pair declares), or
+ * when `writer` meets Q under that predicate: Q itself, a co-owner of Q's
+ * namespace, a platform namespace, a package with no namespace, a name the
+ * platform requests by spelling. Every package that
  * ships the name is judged, never the first found, so the answer is the same
  * in every registration order.
  *
@@ -231,8 +247,8 @@ function overridesShippedPermissionSet(engine: unknown, writer: string, name: st
         return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
     };
     const installed = installedManifestsOfEngine(engine);
-    return [...shippers].some((shipper) => shipper === writer
-        || isPairOf(writer, shipper, installed)
+    // A package meets itself under the predicate, so the shipper's own save is judged by the last clause.
+    return [...shippers].some((shipper) => isPairOf(writer, shipper, installed)
         || permissionSetHoldersMeet(namespaceOf(writer), namespaceOf(shipper), name));
 }
 
