@@ -238,6 +238,11 @@ class ScriptedDriver implements AgentDriver {
     if (op.outcome.kind === 'refused') {
       return turn('That was refused.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: JSON.stringify({ error: { code: op.outcome.code } }), isError: true }]);
     }
+    if (task.confirmation) {
+      // The person confirmed: delete the target through the door's confirm-gated delete, as the MCP door would.
+      app.rows[op.object] = rows.filter((r) => r.id !== op.target);
+      return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: op.object, recordId: op.target, confirm: true }, output: '{"ok":true}' }]);
+    }
     return turn('This cannot be undone — do you want me to delete it? Please confirm.');
   }
 }
@@ -258,7 +263,7 @@ export async function runCrm(
     work?: string;
     date?: string;
     iterateRun?: boolean;
-    modes?: Array<'scratch' | 'template'>;
+    modes?: Array<'scratch' | 'template' | 'ask'>;
     /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[];
     /** The package source the record states; default published 18.3.0. */ packages?: PackageSource;
     /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;

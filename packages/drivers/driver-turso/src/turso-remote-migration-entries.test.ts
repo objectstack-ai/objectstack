@@ -120,13 +120,14 @@ async function withLegacyColumn(): Promise<{ file: string; remote: TursoDriver; 
 describe('drop_column', () => {
   it('drops the column and every index keyed on it, keeping the rows', async () => {
     const { file, remote, drop } = await withLegacyColumn();
-    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_legacy', 'idx_t_name_legacy']);
+    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_created_at_id', 'idx_t_legacy', 'idx_t_name_legacy']);
 
     const { applied, skipped } = await remote.applyMigrationEntries([drop], { allowDestructive: true });
 
     expect([applied, skipped]).toEqual([[drop], []]);
     expect(await columnsOf(file, 't')).not.toContain('legacy');
-    expect(await indexesOf(file, 't')).toEqual({});
+    // [#33695] The implicit default-order index is keyed on no dropped column, so it stays.
+    expect(Object.keys(await indexesOf(file, 't'))).toEqual(['idx_t_created_at_id']);
     expect(await secondConnection(file, 'SELECT id, name FROM "t" ORDER BY id')).toEqual([
       { id: 'a', name: 'A' },
       { id: 'b', name: 'B' },
@@ -139,7 +140,7 @@ describe('drop_column', () => {
     const { file, remote, drop } = await withLegacyColumn();
     expect(await remote.applyMigrationEntries([drop])).toEqual({ applied: [], skipped: [drop] });
     expect(await columnsOf(file, 't')).toContain('legacy');
-    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_legacy', 'idx_t_name_legacy']);
+    expect(Object.keys(await indexesOf(file, 't')).sort()).toEqual(['idx_t_created_at_id', 'idx_t_legacy', 'idx_t_name_legacy']);
   });
 
   it('a column SQLite refuses to drop is skipped, and the indexes dropped before it are rolled back', async () => {
@@ -190,7 +191,8 @@ describe('the index entries', () => {
     expect(drop).toBeDefined();
 
     expect(await remote.applyMigrationEntries([drop], { allowDestructive: true })).toEqual({ applied: [drop], skipped: [] });
-    expect(await indexesOf(file, 'indexed_t')).toEqual({});
+    // [#33695] Only the undeclared index goes; the implicit default-order index stays.
+    expect(Object.keys(await indexesOf(file, 'indexed_t'))).toEqual(['idx_indexed_t_created_at_id']);
     expect(await remote.applyMigrationEntries([drop], { allowDestructive: true })).toEqual({ applied: [drop], skipped: [] });
   });
 

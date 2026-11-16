@@ -100,6 +100,7 @@
     "data/LocalStoragePersistenceConfig",
     "data/LocationCoordinates",
     "data/LocationValue",
+    "data/LookupFilterRecordReference",
     "data/Mapping",
     "data/Metric",
     "data/MongoConfig",

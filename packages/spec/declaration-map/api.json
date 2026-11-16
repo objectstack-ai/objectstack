@@ -227,6 +227,8 @@
     "DeviceRequestResponseSchema": "api/DeviceRequestResponse",
     "DeviceTokenResponse": "api/DeviceTokenResponse",
     "DeviceTokenResponseSchema": "api/DeviceTokenResponse",
+    "DiffMetaItemRequest": "api/DiffMetaItemRequest",
+    "DiffMetaItemRequestSchema": "api/DiffMetaItemRequest",
     "DiffMetaItemResponse": "api/DiffMetaItemResponse",
     "DiffMetaItemResponseSchema": "api/DiffMetaItemResponse",
     "DiscardPackageDraftsResponse": "api/DiscardPackageDraftsResponse",

@@ -20,8 +20,8 @@
  * the same cloud-as-IdP authorization gate, the same break-glass
  * last-local-credential refusal, the same audience posture and uniqueness
  * refusal on password sign-up, the same cloud-managed invite-member refusal,
- * the same account lockout gate, and the same first-user `disableSignUp` flip
- * — in the same order.
+ * the same account lockout gate (on every password door), and the same
+ * first-user `disableSignUp` flip — in the same order.
  *
  * ## How the moved body reaches the class
  *
@@ -62,14 +62,14 @@ import { isCloudManaged } from '@objectstack/core';
 import { VENDOR_ROLE_SCALAR_ADMIN_PATHS } from './admin-impersonate-endpoint.js';
 import { setAuthActorResolver } from './auth-actor-attribution.js';
 import { AuthManager } from './auth-manager.js';
-import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
+import { passwordSignInDoorOf, recordLockoutRequest } from './auth-manager-sign-in-lockout.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import {
   isLastLocalCredentialHolder,
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
-import { answerRefusedAuthorization } from './oauth-authorize-refusal.js';
+import { answerRefusedAuthorization, gateAnswerRefuses, refusalDetailOf } from './oauth-authorize-refusal.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import {
   SSO_ONLY_RESET_UNREADABLE_MESSAGE,
@@ -157,6 +157,7 @@ export interface BeforeHookHost {
   resolveActor: AuthManager['resolveActor'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
+  ssoDiscoveryTrustedOrigins: AuthManager['ssoDiscoveryTrustedOrigins'];
   validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
 
@@ -213,6 +214,16 @@ export async function globalBeforeHook(
   // read nothing, so they keep their place. `one-account-per-request.ts`
   // states the rule and how each credential is read.
   await refuseRequestNamingDifferentAccounts(ctx);
+
+  // ── ADR-0069 D2: what this request is, for the lock at session creation ──
+  // Its path, and the session of record it presents, read from the store
+  // before the endpoint runs (and before it can replace that row), so the
+  // lock's refusal at session creation tells a sign-in from a new session for
+  // an account the caller is already signed in as by the session of record,
+  // never by the request's own view of it, and judges the same request where
+  // the endpoint context does not reach the database hooks. Lockout on only;
+  // see `auth-manager-sign-in-lockout.ts`.
+  await recordLockoutRequest.call(this, ctx);
 
   // ── [#33203] Cloud-managed: no reset door sets a local password ──
   // A hosted environment sets no local password for anyone, a platform
@@ -544,11 +555,13 @@ export async function globalBeforeHook(
       // Ruling record 6866334319: the sign-out switch, as on update-provider.
       await this.assertSsoSignOutOfIdpSupported(ctx);
     }
-    // A known IdP's companion origins (Microsoft Entra ID's userinfo on
-    // graph.microsoft.com), trusted for this endpoint's discovery validation
-    // only: the router's origin check has already run, so the CSRF allow-list
-    // never carries them (`sso-discovery-companion-origins.ts`).
-    return ssoDiscoveryCompanionContext(ctx);
+    // The origins the body names (its issuer and any explicit `oidcConfig`
+    // endpoint) and a known IdP's companion origins (Microsoft Entra ID's
+    // userinfo on graph.microsoft.com), trusted for this endpoint's discovery
+    // fetch and validation only: the router's origin check has already run
+    // against the configured trusted origins alone, and never sees them
+    // (`sso-discovery-companion-origins.ts`).
+    return ssoDiscoveryCompanionContext(ctx, await this.ssoDiscoveryTrustedOrigins(ctx?.body));
   }
 
   // ── D5.1: cloud-as-IdP authorization gate ───────────────────
@@ -588,19 +601,27 @@ export async function globalBeforeHook(
       // D5.1 host contract is `(userId, clientId)` and the control plane
       // derives org membership / app assignment from the user itself.
       if (actor?.userId) {
-        let allowed = true;
+        // The first refusing answer, kept: a boolean `false`, or the host's
+        // refusal object with its reason and sentence.
+        let refusal: { answer: unknown } | undefined;
         for (const clientId of clientIds) {
-          allowed = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
-          if (!allowed) break;
+          const answer: unknown = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
+          if (gateAnswerRefuses(answer)) {
+            refusal = { answer };
+            break;
+          }
         }
-        if (!allowed) {
+        if (refusal) {
           // The refusal, delivered by who is asking (`oauth-authorize-refusal.ts`):
-          // the `403` envelope for a fetch or an API client, unchanged; for a
-          // browser navigating here, `access_denied` back to the client's
-          // REGISTERED `redirect_uri`, or a readable page when there is none.
+          // the `403` envelope for a fetch or an API client; for a browser
+          // navigating here, `access_denied` back to the client's REGISTERED
+          // `redirect_uri`, or a readable page when there is none. A boolean
+          // refusal is answered as it always was; a refusal object adds the
+          // host's validated reason and sentence (`refusalDetailOf`).
           return answerRefusedAuthorization(ctx, {
             userId: actor.userId,
             consoleUrl: this.getConsolePageUrl('/'),
+            detail: refusalDetailOf(refusal.answer),
           });
         }
       }
@@ -856,17 +877,18 @@ export async function globalBeforeHook(
   });
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
+  // On every password door (`/sign-in/email`, `/sign-in/phone-number`),
   // BEFORE better-auth checks the password: the attempt is stamped as a
   // failure (settled by the after-hook once the check answers), and a
   // locked identity is refused — a lock must hold even against the
-  // correct password. The refusal is the one a wrong password gets, made
-  // by better-auth's own credential check (`sign-in-lockout-refusal.ts`),
-  // unless the deployment opted into `403 ACCOUNT_LOCKED`. It is a
-  // refused sign-in, so it writes its `login_failed` row
-  // (`auth-session-audit.ts`, account events).
-  if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-    const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-    if (email) await this.admitSignInAttempt(email, ctx);
+  // correct password. The refusal is the one a wrong password gets at that
+  // door, made by better-auth's own credential check
+  // (`sign-in-lockout-refusal.ts`), unless the deployment opted into `403
+  // ACCOUNT_LOCKED`. It is a refused sign-in, so it writes its
+  // `login_failed` row (`auth-session-audit.ts`, account events).
+  const passwordDoor = passwordSignInDoorOf(ctx);
+  if (passwordDoor) {
+    if (passwordDoor.identifier) await this.admitSignInAttempt(passwordDoor.identifier, ctx, passwordDoor.door);
     return;
   }
 

@@ -21,7 +21,7 @@ import {
   deriveInlineGridSortField,
   deriveInlineRowFormFields,
 } from '@objectstack/spec/data';
-import type { BooleanValueLabel, GridColumn } from '@object-ui/fields';
+import { summaryDeclaresCurrency, type BooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 
 /**
@@ -89,6 +89,42 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
   }
 }
 
+/**
+ * The type a child field's VALUE is drawn as, for {@link fieldTypeToColumnType}
+ * (objectstack-ai/objectstack#34286).
+ *
+ * For every type but the two computed ones that is the field's own `type`. A
+ * `formula` or `summary` field holds a value of ANOTHER type, and a column over
+ * it used to map `type: 'formula'` itself, which no case names, so a formula
+ * declaring `returnType: 'currency'` hydrated to a `text` column and printed
+ * `157780` where its form face and its table cell print money.
+ *
+ * The reading is the formula cell's (`FormulaCellRenderer` in
+ * `@object-ui/fields`, objectui#11748 / objectui#12111), applied to the
+ * declaration alone because a column is typed before any value exists:
+ *   - a `summary` that declares its currency (`summaryDeclaresCurrency`, the
+ *     cell's own test, ADR-0144 D6 as amended) is money;
+ *   - otherwise the declared `returnType` decides, as declared;
+ *   - with neither, the field's own type, so the column hydrates as it always
+ *     has (`text`). The cell's last arm, a JS number drawn as a number, reads
+ *     the value, which a column does not have.
+ * ⛔ Nothing is inferred from the expression or from its inputs, as in the cell.
+ *
+ * The declared value type is then a field type like any other, so
+ * {@link fieldTypeToColumnType} maps it with no second table: `number` →
+ * `number`, `currency` → `currency`, `date` → `date`, `boolean` → `select`
+ * (with the two option labels {@link optionsFor} draws for a boolean field),
+ * `text` → `text`. A currency column's code is resolved where every currency
+ * column's is (`GridField`'s `columnCurrencies`, filled from the child field's
+ * own `currencyConfig` by `parentCurrencyFieldsOf`, whatever the field's type).
+ */
+function columnValueType(d: any): string | undefined {
+  const type = d?.type;
+  if (type !== 'formula' && type !== 'summary') return type;
+  if (type === 'summary' && summaryDeclaresCurrency(d)) return 'currency';
+  return typeof d?.returnType === 'string' ? d.returnType : type;
+}
+
 /** Image-flavoured field types whose picker should be restricted to images. */
 const IMAGE_TYPES = new Set(['image', 'avatar']);
 
@@ -127,7 +163,8 @@ function applyFileColumnProps(col: GridColumn, d: any): void {
  * options in a language the session is not in.
  */
 function optionsFor(def: any, booleanLabel: BooleanValueLabel): GridColumn['options'] | undefined {
-  if (def?.type === 'boolean' || def?.type === 'toggle') {
+  const valueType = columnValueType(def);
+  if (valueType === 'boolean' || valueType === 'toggle') {
     return [
       { label: booleanLabel(true), value: 'true' },
       { label: booleanLabel(false), value: 'false' },
@@ -211,7 +248,7 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
   const col: GridColumn = {
     name,
     label: d?.label || name,
-    type: fieldTypeToColumnType(d?.type),
+    type: fieldTypeToColumnType(columnValueType(d)),
     required: !!d?.required,
   };
   const options = optionsFor(d, booleanLabel);
@@ -343,7 +380,9 @@ export function hydrateColumns(
     }
     const d = (fields as any)[col.name];
     if (!d) return col; // unknown field — leave as-is (grid falls back to text)
-    const type = fieldTypeToColumnType(d?.type);
+    // A formula / summary column takes the type its VALUE is declared as
+    // (objectstack-ai/objectstack#34286), see `columnValueType`.
+    const type = fieldTypeToColumnType(columnValueType(d));
     if (type === 'currency') reportCurrencyColumnScale(col, childSchema?.name, true);
     const next: GridColumn = { ...col, type };
     if (next.label == null) next.label = d?.label || col.name;

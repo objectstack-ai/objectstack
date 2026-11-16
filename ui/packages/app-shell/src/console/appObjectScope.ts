@@ -8,8 +8,10 @@
  * (`MetadataContextValue.readObjectScope`): the package's objects, plus by
  * name the route's object and its lookup targets when the package does not
  * hold them (the lookup targets without views, objectstack#29551), the objects
- * the app's navigation and area entries require (`requiresObject`), and the
- * navigation's objects while the command palette is open.
+ * the app's navigation and area entries require (`requiresObject`) that this
+ * runtime registers (objectstack#34244: a presence read answers that first,
+ * {@link readObjectPresence}), and the navigation's objects while the command
+ * palette is open.
  *
  * A page (`page/:pageName`, objectui#12980) reads only the objects its page
  * definition binds ({@link pageObjectNames}), by name, beside the app's
@@ -289,7 +291,12 @@ export function readPageObjectScope(
   const ready = routeReadDone(boundRead);
   const names = [...new Set([...bound, ...extraNames])];
   const first = read(names);
-  const lookups = bound.flatMap((name) => lookupTargetNames(first.objects.find((o: any) => o?.name === name)));
+  const lookups = servedByName(
+    readObjectScope,
+    packageId,
+    names,
+    bound.flatMap((name) => lookupTargetNames(first.objects.find((o: any) => o?.name === name))),
+  );
   return {
     scope: lookups.length > 0 ? read([...new Set([...names, ...lookups])]) : first,
     ready,
@@ -455,6 +462,93 @@ function lookupTargetNames(def: any): string[] {
   return [...out];
 }
 
+/** What {@link readObjectPresence} answers: the presence read, and the names the package list holds. */
+export interface ObjectPresenceRead {
+  /**
+   * The `?names=` read's scope (`objects` the names it answered served,
+   * `missing` the ones it left out), or an empty settled one when nothing is
+   * asked. Its arrays keep one identity until a read lands, so a reader may
+   * key a memo on them.
+   */
+  presence: { objects: readonly unknown[]; missing: readonly string[]; settled: boolean };
+  /** The names the app's package list holds (none in an app with no package); `null` until that list has answered. */
+  held: ReadonlySet<string> | null;
+}
+
+const NO_NAMES_HELD: ReadonlySet<string> = new Set();
+const NO_PRESENCE = Object.freeze({ objects: Object.freeze([]) as readonly unknown[], missing: Object.freeze([]) as readonly string[], settled: true });
+
+/**
+ * objectstack#34188, objectstack#34244 — whether this runtime registers the
+ * objects in `names`, asked so that an object it does not register is never
+ * asked by name. A lookup may point at, and an app entry's `requiresObject`
+ * names, an object the host does not register at all (the control plane
+ * registers no `sys_business_unit`, a Free environment no
+ * `sys_approval_request`), and a by-name read answers such a name 404 on every
+ * open of the route.
+ *
+ * In an app whose served item names its package, the names the package list
+ * holds are registered and asked nothing more; the others wait for that list.
+ * The rest are asked in ONE `GET /meta/object?names=` read, which leaves an
+ * absent name out ({@link readDashboardWidgetObjects}'s read,
+ * objectstack#29444). One rule for both arms: every reader that asks these
+ * names (the route's scope, the sidebar's capability gate, the served view
+ * items, the `nav:menu` block) asks them here, so the same names share one
+ * request.
+ */
+export function readObjectPresence(
+  readObjectScope: ReadObjectScope,
+  packageId: string | undefined,
+  names: readonly string[],
+): ObjectPresenceRead {
+  let held: ReadonlySet<string> = NO_NAMES_HELD;
+  if (packageId) {
+    const own = (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false });
+    if (!own.settled) return { presence: { ...NO_PRESENCE, settled: false }, held: null };
+    held = new Set(own.served.map((o: any) => o?.name).filter((n: unknown): n is string => typeof n === 'string'));
+  }
+  const ask = [...new Set(names)].filter((name) => !!name && !held.has(name));
+  if (ask.length === 0) return { presence: NO_PRESENCE, held };
+  return { presence: (readObjectScope as unknown as ReadNamesInOneRequest)({ names: ask, views: false, batch: true }), held };
+}
+
+/**
+ * The `candidates` a route asks by name: those among its `known` names (asked
+ * by name anyway: its object, the objects its page binds), and of the rest
+ * only those {@link readObjectPresence} has answered registered. A name joins
+ * the by-name scope once that read has answered it served; until then, and
+ * when it is absent, it is not asked.
+ */
+function servedByName(
+  readObjectScope: ReadObjectScope,
+  packageId: string | undefined,
+  known: readonly string[],
+  candidates: readonly string[],
+): string[] {
+  if (candidates.length === 0) return [];
+  const asked = new Set(known);
+  const unknown = candidates.filter((name) => !asked.has(name));
+  if (unknown.length === 0) return [...candidates];
+  const { presence, held } = readObjectPresence(readObjectScope, packageId, unknown);
+  if (!held) return candidates.filter((name) => asked.has(name));
+  const served = new Set(presence.objects.map((o: any) => o?.name).filter((n: unknown): n is string => typeof n === 'string'));
+  return candidates.filter((name) => asked.has(name) || held.has(name) || served.has(name));
+}
+
+/**
+ * The objects an app's entries require ({@link appRequiredObjectNames}) that
+ * its route asks by name: only those this runtime registers
+ * ({@link readObjectPresence}). An entry whose object is absent is hidden by
+ * the sidebar's gate, which reads the same presence answer.
+ */
+export function servedRequiredObjectNames(
+  readObjectScope: ReadObjectScope,
+  app: Record<string, unknown> | undefined,
+): string[] {
+  const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+  return servedByName(readObjectScope, packageId, [], appRequiredObjectNames(app));
+}
+
 /** The names a navigation tree carries under `key` on its entries, at every group depth. */
 export function navigationNames(navigation: unknown, pick: (item: Record<string, unknown>) => unknown): string[] {
   const out: string[] = [];
@@ -473,16 +567,31 @@ export function navigationNames(navigation: unknown, pick: (item: Record<string,
 /**
  * The objects an app's entries require (`requiresObject`), in its `navigation`
  * and in every `areas[].navigation`: the sidebar draws and gates both
- * (objectui#12980), so an area entry requiring an object outside the package
- * is asked by name and answered exactly.
+ * (objectui#12980). objectstack#34244 — asked first in the presence read
+ * ({@link readObjectPresence}), so one this runtime does not register is never
+ * asked by name, and the gate hides its entry on that answer.
  */
-function appRequiredObjectNames(app: Record<string, unknown> | undefined): string[] {
+export function appRequiredObjectNames(app: Record<string, unknown> | undefined): string[] {
   const pick = (item: Record<string, unknown>) => item.requiresObject;
   const areas: unknown[] = Array.isArray(app?.areas) ? app.areas : [];
   return [
     ...navigationNames(app?.navigation, pick),
     ...areas.flatMap((area) => navigationNames(isRecord(area) ? area.navigation : undefined, pick)),
   ];
+}
+
+/**
+ * The objects the app's navigation opens, which the command palette reads
+ * while it is open. objectstack#34244 — an entry that requires the object it
+ * opens is gated on it, so that object is asked by name only once the presence
+ * read has answered it served ({@link servedRequiredObjectNames}).
+ */
+function paletteObjectNames(readObjectScope: ReadObjectScope, app: Record<string, unknown> | undefined): string[] {
+  const opened = navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined));
+  const required = new Set(appRequiredObjectNames(app));
+  if (!opened.some((name) => required.has(name))) return opened;
+  const served = new Set(servedRequiredObjectNames(readObjectScope, app));
+  return opened.filter((name) => !required.has(name) || served.has(name));
 }
 
 export interface AppObjectScopeRead {
@@ -552,9 +661,9 @@ export function readAppObjectScope(
       if (dashboardRead?.settled) return { candidate, scope: NO_OBJECT_SCOPE, ready: true, ...NOT_READ };
       return { candidate, scope: packageId ? readObjectScope({ packageId }) : PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     }
-    const extra = appRequiredObjectNames(app);
+    const extra = servedRequiredObjectNames(readObjectScope, app);
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readDashboardObjectScope(readObjectScope, app, dashboardRead.dashboard, extra), routeObjectRefusal: null };
   }
@@ -585,9 +694,9 @@ export function readAppObjectScope(
         ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId, referencing.value, true),
       };
     }
-    const extra = [route.objectName, ...appRequiredObjectNames(app)];
+    const extra = [route.objectName, ...servedRequiredObjectNames(readObjectScope, app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, page, extra), routeObjectRefusal: null };
   }
@@ -602,9 +711,9 @@ export function readAppObjectScope(
       if (pageRead?.settled) return { candidate, scope: NO_OBJECT_SCOPE, ready: true, ...NOT_READ };
       return { candidate, scope: packageId ? readObjectScope({ packageId }) : PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     }
-    const extra = appRequiredObjectNames(app);
+    const extra = servedRequiredObjectNames(readObjectScope, app);
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, pageRead.page, extra), routeObjectRefusal: null };
   }
@@ -670,16 +779,16 @@ function readObjectRouteNames(
     failedAnswer: failedAnswerOf(routeRead),
     routeObjectRefusal: refusalOf(routeRead, objectName),
   };
-  const names = appRequiredObjectNames(app);
+  const names = servedRequiredObjectNames(readObjectScope, app);
   if (objectName) names.push(objectName);
   names.push(...relatedNames);
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-    names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+    names.push(...paletteObjectNames(readObjectScope, app));
   }
   const asked = read(names);
   const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
-  const lookups = routeDef ? lookupTargetNames(routeDef) : [];
+  const lookups = routeDef ? servedByName(readObjectScope, packageId, names, lookupTargetNames(routeDef)) : [];
   const streamNames = synthesizedRecordPage && routeDef ? recordStreamObjectNames(routeDef) : [];
   if (lookups.length === 0 && streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
   // The lookup targets are asked without views, through the same scope as the

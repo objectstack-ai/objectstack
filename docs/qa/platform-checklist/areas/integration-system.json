@@ -1866,7 +1866,7 @@
       "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1878,7 +1878,8 @@
         "requires": [
           "MessagingServicePlugin installed (the showcase config requires the 'messaging' capability) — its emit() consults the PreferenceResolver before fan-out",
           "the shipped notify flow showcase_task_assigned_notify (notify node: topic 'task.assigned', channels ['inbox'] — examples/app-showcase/src/automation/flows/index.ts)",
-          "two personas with sessions: admin and the assignee"
+          "two personas with sessions: admin and the assignee",
+          "for acceptance[5]: a file-database boot (single posture, the Default Organization only), so a preference row can be written under another organization straight into the database, as data an earlier organization or an import left behind: the API stamps the caller's organization and cannot write it"
         ],
         "knownGaps": [
           "no shipped sys_notification_preference rows nor a sys_notification_template fixture — both authored in-run (both are writable system-data objects); the notify flow fixture itself is shipped. The spec's channel enum spells this 'in-app'; the implemented channel id is 'inbox' (the #3197 naming drift) — the preference row must name the IMPLEMENTED id 'inbox'",
@@ -1892,7 +1893,8 @@
         "read the messaging outbox / dead-letter surface and confirm there is no dead-letter row for the muted (recipient, 'inbox') — a deliberate mute is a DROP by the preference filter, not a dead-letter (dead-letter is reserved for unimplemented channels, #3197)",
         "flip the row enabled:true (or delete it); re-fire; confirm the inbox row is delivered again",
         "probe the resolution order: an admin-global default OFF (the row whose user_id is EMPTY: omit it — since ADR-0118 D1 user_id is a sys_user reference, a '*' answers 400 VALIDATION_FAILED reference_not_found, and legacy '*' rows are rewritten at boot by packages/services/service-messaging/src/preference-user-conversion.ts#convertWildcardPreferenceUsers) with a user-specific row ON delivers (user row overrides global); a mandatoryTopics-configured topic bypasses the matrix entirely (cannot be muted)",
-        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale. The template's holes read the notification's top-level title, body and topic plus payload.*: the notify node's message reaches a template as {{ body }}, never {{ message }}, which renders '' (an unknown path renders empty by design; packages/services/service-messaging/src/template-renderer.ts)"
+        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale. The template's holes read the notification's top-level title, body and topic plus payload.*: the notify node's message reaches a template as {{ body }}, never {{ message }}, which renders '' (an unknown path renders empty by design; packages/services/service-messaging/src/template-renderer.ts)",
+        "preferences are read in the emitting organization: with the file-database boot, INSERT a sys_notification_preference row for the assignee (topic 'task.assigned', channel 'inbox', enabled false) whose organization_id names an organization other than the Default Organization, then re-fire the flow and list the assignee's notifications; next, author through the API the assignee's opt-out in the Default Organization, change the other organization's row to enabled true, and re-fire"
       ],
       "acceptance": [
         {
@@ -1924,11 +1926,18 @@
           "oracle": "log",
           "verify": "the captured render carries the template's substituted subject/body (email/sms channel path; messaging-service-plugin 'renders sys_notification_template')",
           "evidence": "the captured render"
+        },
+        {
+          "clause": "preferences are read in the emitting organization: a flow that names no organization emits in the one stored on its event row, so a preference row stored under another organization neither mutes the recipient nor overrides their opt-out",
+          "oracle": "api",
+          "verify": "with only the other organization's enabled:false row, the fire delivers the inbox row; with the Default Organization's opt-out beside the other organization's enabled:true row, the fire delivers nothing (packages/services/service-messaging/src/messaging-service.ts, emit's preference filter reads organizationId from the event row's organization). Pinned by packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts (describe 'the event row's derived organization is the one role: and the preference read use'; run it with `pnpm --filter @objectstack/service-messaging exec vitest run --reporter=tree --maxWorkers=1 FILE`, ≥1 test and 0 failed). Released with 18.5.0 (2673f59, #33779; its changeset was not consumed by the version commit, #33903): a run on 18.4.x reads the other organization's row, which is that release's behaviour, not a FAIL; from 18.5.0 on, score the clause as written",
+          "evidence": "the two fires' notification listings, the two preference rows with their organization_id, and the pin's output"
         }
       ],
       "negative": [
         "a suppression row present and enabled:false but an inbox row STILL landing is a FAIL — the preference filter was bypassed (distinct from the by-design fail-OPEN, which applies only to a preference OUTAGE: no data engine / lookup error keeps all channels; a HEALTHY lookup ignoring an enabled:false row is the FAIL)",
-        "distinct from notify-inbox-delivery (the inbox happy path) — a run must not double-count the happy path here; this item's proof is the SUPPRESSION and its reversal"
+        "distinct from notify-inbox-delivery (the inbox happy path) — a run must not double-count the happy path here; this item's proof is the SUPPRESSION and its reversal",
+        "a row stored under another organization deciding the delivery (muting the recipient, or overriding the emitting organization's opt-out) on 18.5.0 or later is a FAIL: preferences are per organization"
       ],
       "traps": [
         "wrong-persona",
@@ -1941,7 +1950,8 @@
         "packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver (emit() consults the PreferenceResolver before fan-out)",
         "packages/services/service-messaging/src/messaging-service-plugin.ts#sys_notification_template (email/sms channels render sys_notification_template; shared retry/dead-letter substrate)",
         "packages/spec/src/system/notification.zod.ts (#3197 dead-letter for unimplemented channels; 'in-app' vs 'inbox' naming drift)",
-        "examples/app-showcase/src/automation/flows/index.ts#showcase_task_assigned_notify (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])"
+        "examples/app-showcase/src/automation/flows/index.ts#showcase_task_assigned_notify (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])",
+        "packages/services/service-messaging/src/preference-resolver.ts#PreferenceResolver (filter's organizationId scopes the preference read to the emitting organization; with none the read stays unscoped)"
       ],
       "history": [
         {
@@ -1973,6 +1983,12 @@
           "date": "2026-11-14",
           "change": "steps[5], acceptance[3] and source[0]: the admin-global default is the row whose user_id is EMPTY since ADR-0118 D1 (user_id is a sys_user reference; a '*' answers 400 reference_not_found, and packages/services/service-messaging/src/preference-user-conversion.ts#convertWildcardPreferenceUsers rewrites legacy '*' rows at boot), not user_id='*'. steps[6]: the notify message reaches a template as {{ body }} (template-renderer.ts RenderInput). The precedence the clause asserts is unchanged. Read from source at base 87330e89. Source record: QA record #33058 (comment 6846283471) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[5], steps[7], fixtures.requires[3], negative[2] and source[6] (new): the preference read follows the emitting organization (#33649, released with 18.5.0 in 2673f59, #33779; its changeset was left unconsumed by the version commit, #33903). No clause asked which organization's rows decide, so a row under another organization muting a recipient passed unseen. New coverage for ledger 6896511848 of #33761, rows 196 and 209. Read from source at main 159757ab. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2454,7 +2470,7 @@
       "title": "Inbound mail (new on v18): with requires:[\"mailbox\"] and an IMAP mailbox, a synced message is stored as sys_mail_message and associated with the record whose mailAssociation email field matches (inline forwards by an org member match on the original participants), attachments land as sys_file + sys_attachment, and an unmatched message is visible only to manage_mailboxes holders",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2480,7 +2496,7 @@
         {
           "clause": "mailbox ingest, association, inline-forward matching and attachments — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2530,6 +2546,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify and acceptance[2].verify name the HTTP read their api oracle needs, and automated.ref adds the engine-layer association pin — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: the run scored the attachment clause at in-process — the pin reads the stored rows through the real engine after a real ingest, and no HTTP read was made. a1: inline-forward.test.ts pins the parser's participant extraction, not the association; mail-ingest-service.test.ts pins the association on a real engine for all three client formats and was not in the ref. Read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2538,7 +2560,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2563,7 +2585,7 @@
         {
           "clause": "notification org stamping, recipient-only receipts, redeliver eligibility and MCP stdio cwd — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2625,6 +2647,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2]'s recipe said to create an ACTIVE webhook with POST /api/v1/data/sys_webhook and gave no body. QA run #27438 found the create needs method in lower case ('post') and definition_json, or it answers 400 VALIDATION_FAILED. sys-webhook.object.ts declares method a select with lower-case option values and definition_json a required textarea. The recipe now names both. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27438"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2844,7 +2872,7 @@
       "title": "An Oracle datasource reads its tables as objects, refuses an empty-string comparand (Oracle stores '' as NULL), writes only under the double opt-in, and refuses upsert as a capability gap",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2887,7 +2915,7 @@
         {
           "clause": "the pins pass at the run subject sha: upsert is refused NOT_IMPLEMENTED 501 before any statement, DDL is refused as federation-only, and the dialect binds dates and day values as it declares",
           "oracle": "test",
-          "verify": "run each file in automated.ref with the driver-sql vitest; the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
+          "verify": "run each file in automated.ref with the driver-sql vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
           "evidence": "the vitest summary lines, with the subject sha and whether OS_TEST_ORACLE_URL was set"
         }
       ],
@@ -2916,6 +2944,12 @@
           "date": "2026-11-10",
           "change": "initial — the Oracle federation dialect: reads, the empty-string refusal, gated writes and the upsert gap. Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2998,7 +3032,7 @@
       "title": "A SQL Server datasource reads its tables as objects, matches a uniqueidentifier column in text operators by the lower-case text every read answers, keeps case-exact matching exact, and writes only under the double opt-in",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3041,7 +3075,7 @@
         {
           "clause": "the pins pass at the run subject sha: the mssql dialect, the analytics text-match parity on mssql and oracle, and the SQL Server row window",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
           "evidence": "the vitest summary lines, with the subject sha"
         }
       ],
@@ -3073,6 +3107,12 @@
           "date": "2026-11-10",
           "change": "initial — the SQL Server federation dialect: uniqueidentifier text matching, case-exact parity and gated writes. Blocked(fixture): no credentialed SQL Server. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },

@@ -8,6 +8,7 @@ import type {
   SettingsListResponse,
   SettingsNamespacePayload,
 } from './types';
+import { isPlatformManagedRefusal } from './platformManaged';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const BASE = `${SERVER_URL}/api/settings`;
@@ -86,23 +87,50 @@ function assertShape<T>(value: unknown, keys: Array<keyof T & string>, what: str
   return value as T;
 }
 
+/** A failed call as the view reads it: the server's sentence, `status`, and the raw body on `payload`. */
+function failureOf(res: Response, detail: any): Error & { status?: number; payload?: any } {
+  const err = new Error(detail?.error?.message ?? res.statusText) as Error & { status?: number; payload?: any };
+  err.status = res.status;
+  // The raw body, NOT unwrapped: `err.payload.error` is what the view reads
+  // for the locked key and the per-field rejections (objectstack#4224).
+  err.payload = detail;
+  return err;
+}
+
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    const err = new Error(detail?.error?.message ?? res.statusText) as Error & { status?: number; payload?: any };
-    err.status = res.status;
-    // The raw body, NOT unwrapped: `err.payload.error` is what the view reads
-    // for the locked key and the per-field rejections (objectstack#4224).
-    err.payload = detail;
-    throw err;
+    throw failureOf(res, detail);
   }
   return unwrapEnvelope(await res.json()) as T;
 }
 
-const jsonHeaders = (): HeadersInit => ({
-  'Content-Type': 'application/json',
-  Accept: 'application/json',
-});
+/**
+ * Headers for every `/api/settings` call, carrying the session's UI language
+ * as `Accept-Language`.
+ *
+ * The server composes copy per request from that header (`requestLocaleOf` in
+ * `service-settings`' `settings-routes.ts` reads its top tag): the Localization
+ * page's currency-lock banner, write refusals, action verdicts. Left to the
+ * browser, that copy comes back in the browser's language instead of the one
+ * the rest of the page is in.
+ *
+ * The language is read from `<html lang>`, the one source the console's
+ * authenticated fetch (`createAuthenticatedFetch` in `@object-ui/auth`) reads
+ * for the metadata and data calls: the i18n provider keeps it in step with the
+ * language switcher, so a switch reaches the next settings call too. ⛔ Don't
+ * read the language any other way here; the two stamps must agree. When it is
+ * empty the header is left out and the browser's own goes, as before.
+ */
+const jsonHeaders = (): HeadersInit => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  const lang = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  if (lang) headers['Accept-Language'] = lang;
+  return headers;
+};
 
 /**
  * The env-locked key named by a `SETTINGS_LOCKED` error, read from whichever
@@ -205,6 +233,11 @@ export async function runSettingsAction(
   // and rendered "Bad Request" where the action had said why.
   const apiError = (body as { error?: { message?: unknown; details?: unknown } } | null)?.error;
   if (isActionResult(apiError?.details)) return apiError.details;
+
+  // The hosting platform manages what the action exercises (a page loaded
+  // before the environment became hosted): thrown like a failed read, so the
+  // view reads it by its shape and draws the managed text, not the sentence.
+  if (isPlatformManagedRefusal(res.status, body)) throw failureOf(res, body);
 
   // Neither: a crash (`INTERNAL_ERROR`), a 403, or a non-JSON body. Keep the
   // server's sentence when there is one.

@@ -107,6 +107,7 @@ import {
 import {
   ACTIVITY_SUMMARY_MESSAGE_KEY,
   composeStoredSummary,
+  englishBooleanWord,
   withEnglishMessages,
   type ActivitySummaryFieldChange,
   type ActivitySummaryLocale,
@@ -503,14 +504,30 @@ function activityTypeFor(action: 'create' | 'update' | 'delete'): 'created' | 'u
  * [#21081] Also answers WHICH field the label was read from (`null` for the id
  * floor), so the activity row can declare it: the label is a field value, and
  * the read side serves it only to a reader served that field.
+ *
+ * A title field that is a REFERENCE (an app's join object titled by its
+ * person: `nameField: 'person'`, a lookup to `sys_user`) stores a foreign key,
+ * which is no title. `titlesFor` is the pre-resolved id → title map of that
+ * field's target ({@link planLabelLookupRead} + `resolveLookupTitles`), so the
+ * label is the target record's own title, the one the record header shows. An
+ * id with no entry keeps the stored value it rendered before, so this can only
+ * replace an id with a title, never a title with an id; and the label is still
+ * a value of the reference field, which is the field it declares.
  */
 function recordLabel(
   record: any,
   titleField: string | undefined,
   id: string,
+  titlesFor?: Map<string, string>,
 ): { text: string; field: string | null } {
   if (!titleField || !record || typeof record !== 'object') return { text: id, field: null };
   const value = record[titleField];
+  if (titlesFor) {
+    const refs = referenceIdsOf(value);
+    if (refs.some((ref) => titlesFor.has(ref))) {
+      return { text: refs.map((ref) => titlesFor.get(ref) ?? ref).join(', '), field: titleField };
+    }
+  }
   // A structured value has no text face; it floors to the id rather than
   // rendering as a serialised object.
   if (value === null || value === undefined || typeof value === 'object') return { text: id, field: null };
@@ -700,7 +717,9 @@ type WarnSink = { warn?: (message: string) => void };
  * a tracked reference points at? Asked of the spec's one exposure decision
  * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
  * operation the data door's `$expand` and the dataset door's labels ask of the
- * same target. It takes no caller: the title is read under `api.sudo()`.
+ * same target. It takes no caller: it judges the target's declaration, and
+ * the read that follows is scoped by whichever reader `resolveLookupTitles` is
+ * handed (the system for a summary's titles, the writer for a record label).
  *
  * A refused target is not read, so the summary names its records by their
  * stored ids, the answer an unresolvable reference already gets. A declaration
@@ -789,6 +808,11 @@ function displayFieldValue(
   optionLabelFor?: (optionValue: string) => string | undefined,
 ): string {
   const shown = summaryValueOf(field, value, titlesFor);
+  // A milestone's sentence is the author's, in the author's language, and is
+  // never re-composed per reader (#7290): an English yes/no word interpolated
+  // into it would be the very mixed-language sentence the field-change wording
+  // removes, so a boolean token keeps rendering its stored value here.
+  if (shown.boolean !== undefined) return String(value);
   return shown.option !== undefined ? (optionLabelFor?.(shown.option) ?? shown.text) : shown.text;
 }
 
@@ -814,8 +838,19 @@ function summaryValueOf(field: any, value: any, titlesFor?: Map<string, string>)
       }
     }
   }
+  // A boolean the field declares no words for is a yes/no, never the literal
+  // `true` / `false`: the value rides in the code itself, and the composer
+  // words it in the locale it composes in (`activity-summary-message.ts`). The
+  // writer's text is the English catalogue's word, so a locale with none still
+  // reads a word.
+  if (typeof value === 'boolean' && typeof field?.type === 'string' && BOOLEAN_FIELD_TYPES.has(field.type)) {
+    return { text: englishBooleanWord(value), boolean: value };
+  }
   return { text: String(value) };
 }
+
+/** The field types whose value is a yes/no (`FieldType`: `boolean`, and its `toggle` face). */
+const BOOLEAN_FIELD_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
 
 /**
  * [#7230] Every tracked-change field of `fields` that is a reference, grouped
@@ -849,6 +884,27 @@ function planTrackedLookupReads(
     }
   }
   return byObject;
+}
+
+/**
+ * The read plan for a record's own LABEL when its title field is a reference:
+ * the ids the label names, keyed by the field's target object — the plan shape
+ * `resolveLookupTitles` reads. Empty (so no read at all) when the title field
+ * is not a reference, its target is unreadable from the declaration, or the
+ * record holds no id there: an object titled by a text field pays nothing.
+ */
+function planLabelLookupRead(
+  fields: Record<string, any> | undefined | null,
+  titleField: string | undefined,
+  record: Record<string, any> | null,
+): Map<string, Set<string>> {
+  const plan = new Map<string, Set<string>>();
+  const field = titleField ? fields?.[titleField] : undefined;
+  if (!field || !record || typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) return plan;
+  const target = referenceTargetForSummary(field);
+  const ids = referenceIdsOf(record[titleField!]);
+  if (target && ids.length > 0) plan.set(target, new Set(ids));
+  return plan;
 }
 
 /**
@@ -1727,13 +1783,24 @@ export function installAuditWriters(
    * raw id exactly as it did before this branch existed. [#22738] So does a
    * target whose declared exposure does not serve `get`
    * ({@link servesSummaryTitleTarget}): it is not read at all.
+   *
+   * ## Whose read it is
+   *
+   * `reader` scopes the read and is the caller's choice. The two summary
+   * branches hand it `api.sudo()`, as they always have. The record's own label
+   * ({@link planLabelLookupRead}, an object whose `nameField` is a reference)
+   * hands it the hook's own `api`, the WRITER's scope: the label is the title
+   * the record header shows a reader who may read the target, and a writer the
+   * security layer refuses the target, or serves it without its title column,
+   * gets no title it could not have read itself — the refusal throws into the
+   * catch below, the stripped column reads as no title, and the label keeps
+   * the stored value.
    */
   const resolveLookupTitles = async (
-    api: any,
+    reader: any,
     plan: Map<string, Set<string>>,
   ): Promise<Map<string, Map<string, string>> | undefined> => {
     if (plan.size === 0) return undefined;
-    const sys = api.sudo();
     const out = new Map<string, Map<string, string>>();
     for (const [objectName, idSet] of plan) {
       if (!servesSummaryTitleTarget(objectName, (name) => (engine as any).getSchema?.(name), (engine as any).logger)) continue;
@@ -1741,7 +1808,7 @@ export function installAuditWriters(
       if (!titleField) continue;
       const ids = Array.from(idSet);
       try {
-        const rows: any[] = await sys.object(objectName).find({
+        const rows: any[] = await reader.object(objectName).find({
           where: { id: { $in: ids } },
           fields: ['id', titleField],
           limit: ids.length,
@@ -2285,11 +2352,25 @@ export function installAuditWriters(
     // activity summary through the label.
     // [#21878] The title field is ADR-0079's answer for the object — the field
     // every renderer titles this record by — not a guess from a key list.
-    const { text: label, field: labelField } = recordLabel(
+    // A title field that is a reference is followed to the target record's own
+    // title, read as the WRITER (see `resolveLookupTitles`): one `$in` read of
+    // the target per write, and none at all for any other title field, nor for
+    // an object whose writes mirror no activity row (the label lives only there).
+    const labelView =
       ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType }) ??
-        ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType }),
-      titleFieldOf(ctx.object),
+      ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType });
+    const labelTitleField = titleFieldOf(ctx.object);
+    const labelTitles = await resolveLookupTitles(
+      api,
+      getObjectDef(ctx.object)?.enable?.activities === false
+        ? new Map()
+        : planLabelLookupRead(getFieldDefs(ctx.object), labelTitleField, labelView),
+    );
+    const { text: label, field: labelField } = recordLabel(
+      labelView,
+      labelTitleField,
       recordId ?? '',
+      labelTitles?.values().next().value,
     );
     // [#21081] Which parent fields each text column carries a value of — the
     // declaration the read side redacts by (`activity-field-redaction.ts`). The
@@ -2347,7 +2428,7 @@ export function installAuditWriters(
         // from, so a credential field can no more become a read key here than
         // it can reach the summary text.
         const lookupTitles = await resolveLookupTitles(
-          api,
+          api.sudo(),
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
         );
         const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
@@ -2363,7 +2444,7 @@ export function installAuditWriters(
         // renders, and only reached once a milestone has declined — a write
         // that changes no tracked reference field issues no read at all.
         const lookupTitles = await resolveLookupTitles(
-          api,
+          api.sudo(),
           planTrackedLookupReads(summaryFields, oldValue, newValue),
         );
         const tracked = renderTrackedChangeSummary(

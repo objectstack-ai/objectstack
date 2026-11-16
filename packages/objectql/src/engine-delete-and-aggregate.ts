@@ -75,7 +75,7 @@ import type { EngineDeleteDispatchInput } from './engine-delete-dispatch.js';
 import {
   ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_WHERE_SLOTS, declaredDatetimeLowering,
   describeNonFilterWhere, foldEngineOptionAliases, isWhereFilterObject, lowerWhereFilterArray, mergeReadContext,
-  organizationPredicateDeleteRefusal, rejectUnknownEngineOptions, resolveThenLowerWhere, whereResolvedTokenJudge,
+  CascadeBatchNarrowed, cascadeBatchIdsOf, organizationPredicateDeleteRefusal, rejectUnknownEngineOptions, resolveThenLowerWhere, whereResolvedTokenJudge,
   writeFailureLogMeta,
 } from './engine-top-level.js';
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
@@ -192,7 +192,9 @@ export class DeleteAndAggregateFacet {
     const permanent = readPermanentDelete(object, options, dispatch.kind);
     // [#23221] Is this the child delete a cascade issued? Decided here, once,
     // before any middleware or hook runs, so the claim is this call's alone.
-    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
+    // [ruling 6893661036, F1] A predicate delete hands its `where` instead: a
+    // cascade batch is claimed by the exact id set it names.
+    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id ?? options?.where);
 
     const opCtx: OperationContext = {
       object,
@@ -532,7 +534,11 @@ export class DeleteAndAggregateFacet {
         // bulk delete with none pays for no read.
         const perRowBeforeHooks = this.hasHooksFor('beforeDelete', object);
         const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
-        if (perRowBeforeHooks || perRowAfterHooks) {
+        // [ruling 6893661036, F1] A cascade batch (the walk's one predicate
+        // delete per chunk of children, claimed above) always reads its doomed
+        // rows: they are its scope check and its per-row realtime events.
+        const cascadeBatch = referentialCascadeDelete === true;
+        if (perRowBeforeHooks || perRowAfterHooks || cascadeBatch) {
           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
           // [#21613] Each doomed row is its per-row `previous`: declared set.
           const doomed = rowsWithDeclaredColumnsOnly(
@@ -540,11 +546,29 @@ export class DeleteAndAggregateFacet {
             declaredDeleteColumns,
           );
           predicateMatchedRows = doomed;
+          // [ruling 6893104201 point (2)] The read ran through the AST the
+          // middleware chain composed for this delete, so it is the caller's
+          // WRITE scope (the delete-class row filters). The READ scope is not
+          // on it: the security plugin composes that onto an addressed
+          // predicate write only, never a nested one, so the walk asked the
+          // read door for the chunk before issuing it (`readDoorReturnsChunk`).
+          // A child the walk asked for and this read did not return is one a
+          // by-id delete would REFUSE (403) where this predicate would skip it:
+          // before any hook and any write, hand the chunk back to the walk,
+          // which deletes it by id, so the refusal and the rollback are today's.
+          if (cascadeBatch) {
+            const found = new Set(doomed.map((row) => String(row?.id)));
+            if (!(cascadeBatchIdsOf(options?.where) ?? []).every((v) => found.has(v))) {
+              throw new CascadeBatchNarrowed(object);
+            }
+          }
           // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
           // and before the driver call.
-          this.assertBulkPerRowHookBudget(
-            object, perRowBeforeHooks ? 'beforeDelete' : 'afterDelete', doomed.length,
-          );
+          if (perRowBeforeHooks || perRowAfterHooks) {
+            this.assertBulkPerRowHookBudget(
+              object, perRowBeforeHooks ? 'beforeDelete' : 'afterDelete', doomed.length,
+            );
+          }
           if (perRowAfterHooks) bulkPerRowRows = doomed;
           // [D1] Zero matched rows is zero dispatches.
           if (perRowBeforeHooks && doomed.length > 0) {
@@ -815,7 +839,18 @@ export class DeleteAndAggregateFacet {
           // or the aggregate `data.records.deleted` when the delete was by
           // predicate (#4639).
           if (this.realtimeService) {
-            if (isPredicateWrite) {
+            if (isPredicateWrite && referentialCascadeDelete && predicateMatchedRows) {
+              // [ruling 6893104201 point (1)] A cascade batch keeps today's
+              // events: one `data.record.deleted` per child, each scoped by its
+              // own pre-image, read before the statement removed it.
+              for (const row of predicateMatchedRows) {
+                await this.publishDataEvent('deleted', object, {
+                  recordId: row.id,
+                  organizationRow: row,
+                  context: opCtx.context,
+                });
+              }
+            } else if (isPredicateWrite) {
               await this.publishBulkDataEvent('deleted', object, {
                 matched: result,
                 context: opCtx.context,
@@ -1289,7 +1324,11 @@ export class DeleteAndAggregateFacet {
         // [ADR-0139 D2] The executor boundary, once for BOTH driver paths below
         // (they are exclusive, and the rows path keeps this `where` by
         // reference): the AST is final once the chain has run.
-        const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context);
+        // One driver-options bag for the boundary and whichever driver call
+        // below runs: a planned relation leaf is composed only when these
+        // are the related read's own (`relation-semi-join.ts`).
+        const aggregateOptions = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
+        const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context, aggregateOptions);
 
         // Prefer driver.aggregate() when available — driver.find() in many
         // drivers (e.g. driver-sql) does not honor `groupBy` / `aggregations`
@@ -1353,7 +1392,7 @@ export class DeleteAndAggregateFacet {
             // natively today; one that grows native support must advertise a
             // capability flag, at which point this post-filter becomes the
             // fallback tier — the dateGranularity two-tier pattern.
-            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
+            const aggregated = await drv.aggregate(object, ast, aggregateOptions);
             return applyHaving(aggregated, ast.having, havingColumnClasses);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
@@ -1396,7 +1435,7 @@ export class DeleteAndAggregateFacet {
         delete rowsAst.groupBy;
         delete rowsAst.aggregations;
         delete rowsAst.having;
-        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
+        const raw = await driver.find(object, rowsAst, aggregateOptions);
         return applyHaving(applyInMemoryAggregation(raw, ast, tz, declaredFields), ast.having, havingColumnClasses);
       });
 

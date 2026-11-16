@@ -72,7 +72,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, permissionSetHoldersMeet, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, packageScopedRefusalMessage, permissionSetHoldersMeet, resolvePackageScopedHolders, type PackageScopedResolvableType, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -957,6 +957,45 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
     out.indexes = (indexes as unknown[]).filter((index) => !withheld.withheldIndexes.has(stableStringify(index))) as ServiceObject['indexes'];
   }
   return out;
+}
+
+/**
+ * [ADR-0029 D9.2a, #27559's rule-name principle carried to field names] The
+ * fields the CODE `extend` contributors of an object add — every field name
+ * the owner does not declare — in fold order, so a later extender's
+ * declaration of one name replaces an earlier one's, as
+ * {@link mergeObjectDefinitions} does. The same filter as
+ * `SchemaRegistry.packagedRules` (`ownership === 'extend'` and a code artifact
+ * body), so a tenant overlay and any extension of tenant provenance
+ * (`_provenance: 'org'`) contribute nothing, while a stored extension row
+ * of package provenance is a code layer and does. `contributors` is the
+ * caller's: {@link SchemaRegistry.getPackagedObjectBase} hands in the list
+ * without a disabled package's extensions, as the served fold withholds them
+ * ({@link SchemaRegistry.withholdDisabledExtensions}), so the base and the
+ * served field are the same extender's. `fieldPatches` are not read.
+ * `undefined` when no code extender adds a field, or the owner's `fields` is
+ * not the canonical record.
+ */
+function packagedAddedFields(
+  owner: ServiceObject,
+  contributors: readonly ObjectContributor[],
+): Record<string, unknown> | undefined {
+  const ownFields = owner.fields as unknown;
+  if (ownFields !== undefined && (ownFields === null || typeof ownFields !== 'object' || Array.isArray(ownFields))) {
+    return undefined;
+  }
+  const declared = (ownFields ?? {}) as Record<string, unknown>;
+  let added: Record<string, unknown> | undefined;
+  for (const contrib of contributors) {
+    if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+    const fields = contrib.definition.fields as unknown;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+      if (Object.prototype.hasOwnProperty.call(declared, name)) continue;
+      (added ??= {})[name] = def;
+    }
+  }
+  return added;
 }
 
 /**
@@ -5055,7 +5094,9 @@ export class SchemaRegistry {
    * {@link BUILT_IN_SECURITY_CATALOG_NAMES} for why the item seam does not ask);
    * the bare slot (an override a package bound to itself, else an
    * environment-authored item — the latter only when `environment`); every
-   * composite `<packageId>:<name>` slot; the package claims. A package that
+   * composite `<packageId>:<name>` slot; every package overlay slot (a stored
+   * item bound to a package is that package's holding, #32780); the package
+   * claims. A package that
    * holds the name more than one way is one holder. A disabled package is still
    * installed, and still holds its names.
    *
@@ -5090,6 +5131,11 @@ export class SchemaRegistry {
           kind: 'package',
           packageId: typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length),
         });
+      } else {
+        // [#32780] A package's overlay slot counts as a holder of its name:
+        // the stored set bound to that package is its holding.
+        const slot = parseOverlaySlotKey(key);
+        if (slot !== undefined && slot.bareKey === name) add({ kind: 'package', packageId: slot.packageId });
       }
     }
     for (const claimant of this.securityCatalogClaims.get(type)?.get(name) ?? []) add({ kind: 'package', packageId: claimant });
@@ -5201,6 +5247,13 @@ export class SchemaRegistry {
    *   boot hydration grafts the package's envelope onto the stored row (the
    *   protocol's artifact-protection merge), so the stamp names the very
    *   package the row collides with.
+   *   A stored row in a package overlay slot ({@link overlaySlotKey}; a stored
+   *   permission set bound to a package takes one, #32780) is the environment's
+   *   too where it is held against the declaring package: the declarer's own
+   *   slot, a slot whose item is served as the declarer's, or, for a permission
+   *   set, the slot of a package that meets the declarer under the one
+   *   predicate ({@link permissionSetHoldersMeet}). A slot of a package of
+   *   another namespace is that package's own set and holds nothing against it.
    * - **A package holds a name** through an item registered under it (its
    *   composite slot) or its install claim — never through the bare slot.
    * - **Built-in names are skipped**, as the item seam skips the environment
@@ -5225,11 +5278,26 @@ export class SchemaRegistry {
   private environmentHeldSecurityCatalogConflicts(): SecurityCatalogNameConflict[] {
     const conflicts: SecurityCatalogNameConflict[] = [];
     for (const { catalogType, name, packageIds } of this.packageHeldSecurityCatalogNames()) {
+      const collection = this.metadata.get(catalogType);
       // The environment's item: the bare slot, whatever `_packageId` it wears.
       // A held name never contains `:` and is never a built-in, so this is the
       // bare-slot reading the method header states.
-      if (!this.metadata.get(catalogType)?.has(name)) continue;
+      const bare = collection?.has(name) === true;
+      const stored = collection === undefined ? [] : overlaySlotEntriesOf(collection, name).map((entry) => ({
+        packageId: storedRowPackageOf(entry)!,
+        stamped: (entry.item as { _packageId?: unknown } | null | undefined)?._packageId,
+      }));
       for (const packageId of packageIds) {
+        // [ADR-0048 N.3, #32780] A stored row in a package overlay slot is the
+        // environment's too when it is held against the declaring package: the
+        // declarer's own slot, a slot whose item is served as the declarer's,
+        // or (a permission set) the slot of a package that meets the declarer
+        // under the one predicate; any slot for a type of one holder per name.
+        const heldAgainst = (slot: { packageId: string; stamped: unknown }) => slot.packageId === packageId
+          || slot.stamped === packageId
+          || catalogType !== 'permission'
+          || permissionSetHoldersMeet(this.bareNameHolderNamespace(packageId), this.bareNameHolderNamespace(slot.packageId), name);
+        if (!bare && !stored.some(heldAgainst)) continue;
         conflicts.push({ catalogType, name, incomingPackageId: packageId, existingHolder: { kind: 'environment' } });
       }
     }
@@ -8198,12 +8266,28 @@ export class SchemaRegistry {
    * `@objectstack/metadata-protocol`, `packagedRuleLookup` in this package),
    * so they cannot split again.
    *
-   * ⛔ ONLY `validations` widens. The scalars stay the owner's: an extension's
-   * `label` / `description` must keep reading as diverged from the packaged
-   * one, or the catalog takes back the case #8037 filed.
+   * The same sentence holds for a FIELD a code extender adds (a dependent
+   * package's `objectExtensions` field the owner does not declare): its
+   * packaged declaration is the extender's, because the catalog rows for it
+   * can only translate what that extender ships ({@link packagedAddedFields}).
+   * Read off the owner alone, such a field counted as authored after the fact,
+   * and `/meta` served its label and option labels untranslated in every
+   * locale while the extender's own pack carried them.
+   *
+   * ⛔ Exactly those two widen: rules by name, and field NAMES the owner does
+   * not declare. The scalars stay the owner's, and so does every field the
+   * owner declares, even one an extender redeclares; an extender's
+   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * the packaged one, or the catalog — which translates the owner's text under
+   * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
+   * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
+   * their fields stay authored after the fact. Nor does a disabled package's
+   * extension, which the served fold withholds. (The rule half, `packagedRules`,
+   * still reads every code extender, disabled ones included.)
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
-   * rule, and `undefined` exactly where {@link getPackagedObjectOwner} does.
+   * rule or adds a field, and `undefined` exactly where
+   * {@link getPackagedObjectOwner} does.
    */
   getPackagedObjectBase(name: string): ServiceObject | undefined {
     const owner = this.getPackagedObjectOwner(name);
@@ -8215,9 +8299,20 @@ export class SchemaRegistry {
     const extended = contributors.some((c) =>
       c.ownership === 'extend' && isCodeArtifactBody(c.definition)
       && Array.isArray(c.definition.validations) && c.definition.validations.length > 0);
-    if (!extended) return owner.definition;
-    const rules = this.packagedRules(contributors) ?? [];
-    return { ...owner.definition, validations: rules as ServiceObject['validations'] };
+    // A disabled package's extension is withheld from the served fold, so it
+    // adds nothing the served object carries; its field is no packaged one.
+    const addedFields = packagedAddedFields(
+      owner.definition,
+      contributors.filter((c) => !(c.ownership === 'extend' && this.isPackageDisabled(c.packageId))),
+    );
+    if (!extended && addedFields === undefined) return owner.definition;
+    return {
+      ...owner.definition,
+      ...(extended ? { validations: (this.packagedRules(contributors) ?? []) as ServiceObject['validations'] } : {}),
+      ...(addedFields !== undefined
+        ? { fields: { ...owner.definition.fields, ...addedFields } as ServiceObject['fields'] }
+        : {}),
+    };
   }
 
   /**
@@ -10096,8 +10191,52 @@ export class SchemaRegistry {
    *   caller may not reach.
    */
   resolveItem<T>(type: string, name: string, callerPackageId?: string | null, member?: string): T | undefined {
+    if (type === 'doc' && !callerPackageId) return this.readBareDoc<T>(name, member);
     if (!isPackageScopedReadType(type)) return this.getItem<T>(type, name, callerPackageId ?? undefined, member);
     return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
+  }
+
+  /**
+   * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The by-name read of a
+   * `doc` that names no package. `doc` keeps its literal global name and its
+   * addressing (bucket 1); what changes is the context-free read's answer
+   * when two or more ENABLED packages hold the name: a `409
+   * RESOURCE_CONFLICT` naming every holder (`ambiguous-in-environment`), in
+   * place of {@link getItem}'s first composite, which is a registration-order
+   * pick (ADR-0146 D8; the bare save, delete, publish and layered read refuse
+   * the same address already).
+   *
+   * Unchanged: one holder; a package-less bare-slot entry (the environment's
+   * own item) answers first, as {@link getItem} serves it; a disabled package
+   * holds no name ({@link packageScopedHoldersOf}), so beside one enabled
+   * holder the read serves that holder's item, never the disabled one's.
+   * `MetadataFacade.get` serves this answer; the protocol's by-name read asks
+   * it before any layer for its refusal only (`protocol-meta-item-reads.ts`).
+   *
+   * @throws {PackageScopedNameRefusedError} two or more enabled holders.
+   */
+  private readBareDoc<T>(name: string, member?: string): T | undefined {
+    const bare = this.metadata.get('doc')?.get(name) as { _packageId?: unknown } | undefined;
+    const stamp = bare?._packageId;
+    if (bare !== undefined && (typeof stamp !== 'string' || stamp === '' || stamp === 'sys_metadata')) {
+      return this.getItem<T>('doc', name, undefined, member);
+    }
+    const served = this.packageScopedHoldersOf('doc', name);
+    if (served.length >= 2) {
+      const base: Omit<PackageScopedRefusal, 'message'> = {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'doc' as PackageScopedResolvableType,
+        name,
+        callerPackageId: null,
+        candidates: served.map((packageId) => ({ kind: 'package' as const, packageId })),
+      };
+      throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+    }
+    if (served.length === 1 && this.packageScopedHoldersOf('doc', name, null, { includeDisabledPackages: true }).length > 1) {
+      return this.getPackageScopedItem<T>('doc', name, served[0], member);
+    }
+    return this.getItem<T>('doc', name, undefined, member);
   }
 
   /**

@@ -113,7 +113,16 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   (`OperationGrade.confirmation`: `asked first` or `confirmed by the agent`), and the scorecard
   counts both per half and per card. The switch is `AGENT_CONFIRMATION_MEETS_PENDING` and the
   rule is `agentConfirmationChecks`: set the switch to `false` to grade strictly again, or delete
-  both when the platform confirms for real.
+  both when the platform confirms for real. It stays as it is beside the confirmed write below:
+  an agent that wrote on the first turn gets no second one.
+  **The confirmed write** (`gradeConfirmedWrite`): a `pending_confirmation` operation the agent
+  met by asking first gets a second turn in which the person confirms, and that turn is graded on
+  its own against the operation's declared write — `confirmed-write:applied` (the door applied a
+  write on the object) and `confirmed-write:rows` (the rows the turn wrote there are exactly the
+  target, holding the declared `values`, or gone for a `delete`). The route it took (a business
+  action or a raw data door) is reported in the detail, never graded. The first turn's grade is
+  unchanged; the operation scores when both pass, and on the first alone when the second
+  measured nothing.
 - `scenario-guardrail-grade.ts` — the `injection_as_data` guardrail over one Run half's turns
   (`gradeInjectionAsData`; card-level `gradeCardInjection` in `./score/full`): a turn that read
   the planted cell fails it by a write on an object the card's `forbids.writes` lists (its own
@@ -200,15 +209,46 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # m
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-repeats 3           # ask each question turn 3 times, score k/3 (default 1; operations once)
+pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --ask-model haiku  # questions and operations only, on a build you supply
+pnpm --filter @objectstack/scenarios run-scenarios --modes scratch,ask --author-model opus --ask-model haiku   # ask mode on this run's scratch build
 pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # the effort every turn asks for (default: the CLI's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
+pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
 (git-ignored) and prints the scorecard.
+
+### Many runs in one table — `summary`
+
+```bash
+pnpm --filter @objectstack/scenarios run-scenarios summary "$PWD/runs/haiku" "$PWD/runs/opus"  # files or directories, at every depth; absolute: pnpm runs it in the package directory
+npx @objectstack/scenarios summary --card crm_account_with_contacts --mode ask runs/   # one card, one mode
+```
+
+`summary` (`src/runner/summary.ts`) reads run records back and prints markdown to stdout: one table per card and mode,
+rows the model the build's authoring turn was **served**, columns the models the question and operation turns were
+served (the asked-for name beside it when it is another, and the asked-for effort when the record has one). It reads
+files only: no model, no network, and no score of its own — every figure is the record's scorecard's.
+
+- **Cells**: the runs of that row and column, summed — Build, Run-问数 (with `--ask-repeats`, also the k/N spread of
+  the question turns: `3/3 ×7 · 2/3 ×1`), Run-operations, the Iterate halves when a run iterated, then ask cost and
+  ask time over every persona turn of the mode. A cost or time is summed only when every run of the cell states one.
+- **Template and ask modes** author no first build: the row is the build they were supplied. `run --template F`
+  writes the file's name and sha256 at the record's top level (`template`), so runs on one template share a row; a
+  record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
+  `this run’s from-scratch build` takes that run's scratch author.
+- **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
+  driver (a replay is its own driver). When they do not, that table is refused with a line naming each difference and
+  the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
+- **Older records**: a field a record predates (served models, ask cost and time, the package source) reads
+  `not recorded`, never a zero. An effort set only through `CLAUDE_CODE_EFFORT_LEVEL` was never recorded, so runs that
+  differ only in it share a row.
+- `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
+  on stderr; a file named directly that is not a run record fails the command.
 
 ### Running from npm
 
@@ -218,6 +258,7 @@ No checkout needed: the package's `objectstack-scenarios` command is the same ru
 npx @objectstack/scenarios run --only service_desk --modes scratch   # one card, scratch mode
 npx @objectstack/scenarios run                                       # every card, both modes
 npx @objectstack/scenarios run --cards ./my-cards                    # a directory of your own, loaded as the overlay
+npx @objectstack/scenarios summary scenario-runs/                    # one author × ask table per card and mode
 npx @objectstack/scenarios help                                      # the commands; `version` prints the package version
 ```
 
@@ -239,6 +280,23 @@ npx @objectstack/scenarios help                                      # the comma
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
+| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Off by default (`--modes ask`, or `--modes scratch,ask`) |
+
+- **Ask mode** (`orchestrate.ts`, `scorecard.ts`): `--modes ask` runs only the Run half — every question (with
+  `--ask-repeats`) and every operation — on a verified build: `--template F` when given, else this run's scratch build
+  when it passed, exactly the build template mode installs. Two ask models run this way on one build are graded on the
+  same app, so a difference in 问数 is theirs, not the build's. The driver is never asked to author. Without
+  `--template` and without `scratch` in the same run it is refused before any card runs; when it relies on the scratch
+  build and that build did not pass, it is skipped with the reason, as template mode is. Its turns key as
+  `card/ask/run/<step>/<persona>`, so `--driver recorded:F` replays it from a recording that holds them, with no
+  authoring turn. The record names the build's source (`template.source` on the mode: `supplied template` or `this
+  run’s from-scratch build`), its Build rows are `not-run` with that note, and its iterate rows `not-run: ask mode
+  authors no iterate`. The scorecard's `ask` column reads `supplied` in its Build cells (not scored), a line under the
+  table names the source, and its `Author cost` / `Author time` read `no authoring turns` (so do the card's lines when
+  ask is the only mode that ran); every Run row — 问数, operations, `Run · model`, guardrails, `Ask cost`, `Ask time`,
+  the k/N table — reads as for any Run half. On the same build and the same turns its grades equal scratch mode's
+  first Run half's. The gallery exporter reads such a record and passes over the ask mode: it is not judged and its
+  turns are not shown, and the transcript says why (`notShown`).
 
 - **Package source** (`packages.ts`, `--packages`): `published` (the default) scaffolds with `npx -y
   create-objectstack@<version>` and installs from npm, what a customer gets. `workspace` measures the next release before
@@ -313,6 +371,39 @@ npx @objectstack/scenarios help                                      # the comma
   without repeats still replays. `--ask-repeats` is not a live-only flag: with `--driver recorded:F` it decides how
   many recorded asks of each question turn are read (the first N), and an N larger than the recording holds of any
   question turn is refused before any card runs, naming the turn and the count found.
+- **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
+  operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
+  door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
+  and the agent's reply, then the person's answer, `Yes, I confirm. Go ahead.` (`是的，我确认，请执行。` when the ask
+  was sent in Chinese: under `--lang zh`, or on a card with no English ask), then whom the agent acts for. A first
+  turn that wrote, failed or measured nothing gets no second turn. The result is `confirmTurn` on the operation's
+  result, beside its own `grade`; the confirmation turn is a persona turn of the half (`Run · model`, `Ask cost`,
+  `Ask time`, the guardrail) and is never repeated by `--ask-repeats`. The first turn keeps its replay key; the second
+  adds a segment (`…/remove_ben/sdr/confirm`), so a recording made before it replays the first turn as before and
+  reads the second NOT MEASURED, never a fail. The `Run-operations` cell adds `confirmed write k/N` beside the
+  `asked first` count, and the card states the sum on its own line. A card with no `pending_confirmation` operation
+  runs, records and scores exactly as before.
+- **Language and build prompt** (`prompts.ts`, `orchestrate.ts`, `scorecard.ts`, `driver.ts`): `--lang zh|en` renders
+  every card-authored text a prompt carries in that language and no other — the build prompt (`prompt.short` or
+  `prompt.detailed`), the iterate change (`iterate.change`), and each question's and each operation's `ask` — in every
+  mode (scratch, template and ask) and at every ask of `--ask-repeats`. The runner's own text around it (the preamble,
+  the data contract, the naming rule, the answer instructions) stays in English, and so do the plain strings it quotes
+  from the card (a persona's role, an action's summary); a Chinese wrapper is not offered. **No silent fallback**: a
+  card that lacks one of the texts the run's modes render in that language (scratch: the build prompt `--prompt` names,
+  the iterate change, every question and operation; template: all but the build prompt; ask: the questions and
+  operations) is skipped before the first card runs, before any scaffold or boot, with a line naming each missing text
+  (``skipped some_card: … no zh text for `prompt.detailed`, `iterate.change`, …``; the open library's three controls carry every text in both), and the other cards
+  run; with none left the run exits 2. `--prompt short|detailed` picks the card prompt the build turn is given; the
+  iterate turn is given `iterate.change` either way. With neither flag nothing changes, byte for byte: each text in
+  English when the card has it, else in Chinese, the build turn given `prompt.detailed`, and the record, the scorecard
+  and the recording carry no trace of the choice. With either flag, the run's record states it (`promptChoice` on the
+  card's run and on the scorecard, only the flags given) and the scorecard says `prompts: language zh · build prompt
+  short`. A recording made under a choice carries it (`promptChoice`), and `--driver recorded:F` under another choice
+  is refused before any card runs, naming both and the flags to replay it with: the recorded answers answered the
+  recorded prompts, and a replay sends none. `--prompt detailed` is the default's own prompt, so it replays a recording
+  made without flags; `--lang en` is another choice than none, refused alike. The grader reads a reply in either
+  language (`来源：` and `Source:` lines, Chinese measure words and declines), so a Chinese turn grades as an English
+  one does.
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn
@@ -367,6 +458,18 @@ npx @objectstack/scenarios help                                      # the comma
   read relative to it (`account` → `democrm_account`), because a scaffolded project and the unmanaged install both
   refuse bare object names. Views, docs, positions and capabilities (`<ns>.<short>`) keep the prefix too (ADR-0150 bucket 1 and
   D7): the scorer reports each bare one as a failing Build check (`bare-name:<type>:<name>`); other items may be bare.
+- **Roll-ups over withheld data** (`rollupSourceCharges` in `orchestrate.ts`): every build that produces an artifact
+  (scratch and its iterate, template's iterate on what the app serves) is read by `@objectstack/lint`'s own
+  `security-rollup-source-unreadable` rule (`validateRollupSourceVisibility`), run on the artifact itself, never on
+  `os build`'s kept output. A finding is charged when its permission set is a persona's (`<namespace>_<persona id>`) and
+  the card's `hidden` for that persona withholds the roll-up's child object, or the child field the finding names (the
+  aggregated one, or the filtered one the set cannot read): the roll-up still shows that persona an aggregate of what
+  it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
+  in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
+  is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
+  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
+  charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
@@ -521,7 +624,7 @@ the directory you run from. For anything more, write a wrapper script.
 - **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
   `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
 - **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
-  the directory of `mcp.configFile`.
+  the directory of `mcp.configFile`. `step.mode` is `scratch`, `template` or `ask` (ask mode sends only `ask` calls).
   `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
 - **The answer** to `author` and `ask`, strict (an unknown key is refused):
   `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3,"reportedCostUsd":0.42,"inputTokens":18000,"outputTokens":2300}`.

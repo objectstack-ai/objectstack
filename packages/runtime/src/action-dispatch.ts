@@ -59,7 +59,7 @@ import {
 import { readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { actionsDoorAnswerOf, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
-import type { AIActionConfirmation } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation, ActionConfirmationPending } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import * as actionExec from './action-execution.js';
 import type { ActionExecutionDeps } from './action-execution.js';
@@ -150,6 +150,18 @@ export interface ResolvedActionCall {
     /** The AI-door confirmation member, read under the `ai` posture only. */
     confirmation?: AIActionConfirmation;
     /**
+     * [#33690] Present at an AI door that hands a declared-gated call to the
+     * person it runs as (the MCP `run_action` tool) instead of reading
+     * {@link confirmation}: under the amended contract the caller's `confirm`
+     * never counts there. An AI service account is refused as before; every
+     * other caller's gated call is handed off once every gate, the subject
+     * load and its verdict included, has passed ({@link ResolvedActionRun}'s
+     * `handedOff`), and nothing dispatches. `door` and `namespace` are the
+     * hand-off's own members (`ActionConfirmationHandOff`). A door without it
+     * (REST, a host's door) keeps the member gate.
+     */
+    confirmationHandOff?: { door: string; namespace?: string };
+    /**
      * [ADR-0106 D1] This door's answer for a name nothing declares, where it
      * is not the sequence's own undeclared `404` ({@link undeclaredActionRefusal}):
      * an addressed call's resolver refuses a miss by name in its scope
@@ -230,6 +242,8 @@ export interface AdmittedActionCall {
 /** What {@link runResolvedAction} answers. */
 export type ResolvedActionRun =
     | { refused: ActionRefusal }
+    /** [#33690] Handed to the person it runs as; nothing ran and no row is written. */
+    | { handedOff: ActionConfirmationPending }
     | { admitted: AdmittedActionCall; outcome: ActionDispatchOutcome };
 
 /**
@@ -263,6 +277,7 @@ export async function runResolvedAction(
 ): Promise<ResolvedActionRun> {
     const admission = await admitResolvedAction(deps, requestContext, call);
     if ('refused' in admission) return admission;
+    if (admission.handOff) return handOffAdmittedAction(deps, requestContext, call, admission);
     const outcome = await dispatchAdmittedAction(deps, requestContext, call, admission);
     return {
         admitted: { actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName, recordId: admission.recordId },
@@ -276,6 +291,55 @@ interface Admission {
     recordId: any;
     params: Record<string, unknown>;
     subject: actionExec.ActionSubjectRecordLoad;
+    /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
+    handOff: boolean;
+}
+
+/**
+ * [#33690] The hand-off of an admitted, declared-gated call at a door that
+ * hands off: the caller-scope subject verdict as the arm would read it, then
+ * the host's pending-confirmation service (or the `no_confirmation_service`
+ * refusal). Nothing dispatches, and no invocation row is written: the call
+ * did not run. A verdict refusal is the arm's own, rendered as a refusal.
+ */
+async function handOffAdmittedAction(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    call: ResolvedActionCall,
+    admission: Admission,
+): Promise<ResolvedActionRun> {
+    const { objectName, wiring } = call;
+    const { actionDef, recordId, params, subject } = admission;
+    const subjectRecordId = recordId === undefined || recordId === null || recordId === '' ? undefined : String(recordId);
+    try {
+        await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, actionDef, {
+            objectName, recordId: subjectRecordId, subject, ec: wiring.ec, envId: wiring.envId,
+        });
+    } catch (error) {
+        const thrown = error as Error & { code?: unknown; status?: unknown };
+        if (typeof thrown?.status !== 'number' || typeof thrown?.code !== 'string') throw error;
+        return { refused: { message: thrown.message, status: thrown.status, details: { code: thrown.code } } };
+    }
+    const handOff = call.confirmationHandOff!;
+    const answer = await actionExec.handOffActionConfirmation(deps, requestContext, wiring.envId, {
+        actionName: typeof actionDef?.name === 'string' && actionDef.name ? actionDef.name : call.actionName,
+        ...(actionExec.isObjectLessActionKey(objectName) ? {} : { objectName }),
+        ...(handOff.namespace !== undefined ? { namespace: handOff.namespace } : {}),
+        ...(subjectRecordId !== undefined ? { recordId: subjectRecordId } : {}),
+        params,
+        door: handOff.door,
+    }, wiring.ec);
+    if ('refused' in answer) {
+        const { refused } = answer;
+        return {
+            refused: {
+                message: refused.message,
+                status: refused.status,
+                details: { code: refused.code, ...(refused.details as unknown as Record<string, unknown>) },
+            },
+        };
+    }
+    return { handedOff: answer.pending };
 }
 
 async function admitResolvedAction(
@@ -457,7 +521,22 @@ async function admitResolvedAction(
     // rule 3] Asked under BOTH postures for an AI service account, which never
     // confirms an action for itself; under `ai` only for everyone else, so REST
     // stays outside the gate for a person and a delegated agent.
-    if (posture === 'ai' || actionExec.isAiServiceAccountCaller(wiring.ec)) {
+    //
+    // [#33690] At a door that hands off (MCP `run_action`) the member is not
+    // read: an account is refused here as before, and every other caller's
+    // gated call is handed to the person after the subject load below.
+    let handOff = false;
+    if (call.confirmationHandOff && posture === 'ai') {
+        const step = actionExec.aiDoorConfirmation(deps, actionDef, objectName, wiring.ec);
+        if (step.kind === 'refuse') {
+            return refuse({
+                message: step.refusal.message,
+                status: step.refusal.status,
+                details: { code: step.refusal.code, ...(step.refusal.details as unknown as Record<string, unknown>) },
+            });
+        }
+        handOff = step.kind === 'hand-off';
+    } else if (posture === 'ai' || actionExec.isAiServiceAccountCaller(wiring.ec)) {
         const confirmationRefusal = actionExec.actionConfirmationRefusal(
             deps, actionDef, call.confirmation ?? {}, objectName, wiring.ec,
         );
@@ -475,7 +554,7 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
-    return { actionDef, actionType, recordId, params, subject };
+    return { actionDef, actionType, recordId, params, subject, handOff };
 }
 
 /**
@@ -748,6 +827,10 @@ export async function runResolvedActionAsRest(
 ): Promise<HttpDispatcherResult> {
     const run = await runResolvedAction(deps, requestContext, call);
     if ('refused' in run) return { handled: true, response: restRefusalResponse(deps, run.refused) };
+    // [#33690] Only a door that sets `confirmationHandOff` (MCP `run_action`)
+    // hands off; a REST-rendered call never does. Answered as the success it
+    // is, should a door ever set it here, and like a refusal it writes no row.
+    if ('handedOff' in run) return { handled: true, response: deps.success(run.handedOff) };
     const { response } = restAnswerOf(deps, run.admitted, run.outcome);
     // [#27908] THE INVOCATION ROW: one row for every call that cleared the
     // gates, whatever the arm answered. A call a gate refused writes none.

@@ -366,14 +366,21 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
     + 'Absent means not wired',
   ),
   admin: z.boolean().optional().describe(
-    'Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; '
-    + 'the console shows those actions only when it is true. Absent means not wired',
+    'Admin plugin wired (forced on whenever SCIM is enabled), so creating and impersonating users is available; the console shows those actions only when it is true. '
+    + 'Banning, unbanning, unlocking and setting a password answer without it, and whether the console offers those actions does not depend on it. Absent means not wired',
   ),
   termsUrl: z.string().optional().describe(
     'Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link',
   ),
   privacyUrl: z.string().optional().describe(
     'Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link',
+  ),
+  publicBaseUrl: z.string().optional().describe(
+    'This deployment\'s public base URL, the one the auth layer builds every link it hands out on: the configured baseUrl '
+    + '(OS_AUTH_URL, then BETTER_AUTH_URL, then OS_BASE_URL) with any sub-path it carries, https:// prepended to a bare host, '
+    + 'and the loopback fallback when none is set. Served as an address only: scheme, host and path, with no trailing slash, '
+    + 'credentials, query or fragment. The console encodes it in the mobile-app connect code, and refuses to when it names a '
+    + 'loopback or private address or a public host on plain http. Absent when the configured value is not an absolute URL',
   ),
 }));
 

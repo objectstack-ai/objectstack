@@ -5126,6 +5126,18 @@ export class SecurityPlugin implements Plugin {
    * `DATABASE_ERROR` / 500 past ~32,800 masters (the dialect's bind limit), and
    * its CPU grew with the master table.
    *
+   * [#33696 · ruling record 6893666857] One reader class reads without it:
+   * a caller holding View All on the detail whose every master hop answers
+   * unrestricted, over a REQUIRED master. For that caller the engine drops the
+   * leaf instead of compiling it (`composeReadableIdsChain` step 5), and the
+   * read also returns detail rows whose master is missing or empty. The drop
+   * applies to reads only. While a write's middleware chain runs, every read
+   * made on its behalf keeps the chain, so write paths answer exactly as
+   * before: the predicate-write narrowing
+   * ({@link readableRowsScopeForPredicateWrite}), the 2.8 gate's predicate
+   * leg, the step-2.7 by-id read, and a hook's read. This method still writes
+   * the leaf for every caller.
+   *
    * [#5386] The master's scope is the SAME scope a direct find of the master
    * runs under, point for point: both halves above are the ones the engine
    * middleware chain ANDs into a direct read of the master, asked of the same

@@ -285,7 +285,17 @@ export const OrdersPullJob = defineJob({
   - A **`connectorSource`** run calls the connector's read action once and reads
     one response — see
     [Data sync is defined on the target](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/docs/SYNC_ARCHITECTURE.md#data-sync-is-defined-on-the-target)
-    for the watermark and the one-response limit.
+    for the watermark and the one-response limit. The input it sends is judged
+    against the action's `inputSchema` first, as a `connector_action` step's is:
+    a key the action does not declare is refused, never sent. That includes the
+    watermark parameter the run adds to `query` (`since`, say) once the target
+    holds a value, so an `openapi` connector's read operation that declares any
+    parameter or a body must declare it as an `in: query` parameter in the
+    OpenAPI document. An operation that declares neither has no `inputSchema`
+    and is not judged, until the day it gains its first parameter or a body;
+    from then on an undeclared watermark is refused. A scheduled run has no
+    `fault` edge: such a refusal fails every run until the mapping or the
+    document is fixed.
   - A **`datasourceSource`** run reads the federated object in windows cut on
     `watermark.field`. A built-in driver's windows are read whole, paged by the key
     the object's `external.columnMap` maps onto `id`. A plugin driver's windows go
