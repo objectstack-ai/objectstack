@@ -36,9 +36,11 @@
  *     (`.github/workflows/ci.yml`), so the live cell is red-capable and runs in
  *     CI.
  *
- * [#21630] A non-UTC `timezone` makes the engine bucket in memory on that
- * zone's calendar, on every driver, so no statement the database runs groups
- * by those keys. The echo refuses there on every dialect: `/analytics/sql`
+ * [#21630] A non-UTC `timezone` makes the engine bucket on that zone's
+ * calendar: in the database on a driver that declares zone-aware bucketing
+ * (PostgreSQL, ADR-0053 Phase 2 D2 as amended for #33697) and in memory on
+ * every other, while the `dateBucketSql` hook renders the UTC bucket only.
+ * The echo refuses there on every dialect: `/analytics/sql`
  * answers `NOT_IMPLEMENTED` / 501 as a declared refusal, and `/analytics/query`
  * serves the same rows with no `sql`. It used to print `date_trunc`, which
  * PostgreSQL 16.14 ran on the session zone's calendar (timestamp keys, and at
