@@ -637,16 +637,27 @@ interface RecordReferenceComparand {
  * - **A `$` key in a node position that is not `$and` / `$or` / `$not`**
  *   (`{ $record: 'x' }` at the root): it is not a field's comparand, and the
  *   drivers already refuse an undeclared node key.
- * - **An array where a node belongs** is walked as a list of nodes, so the
- *   legacy `[field, op, value]` tuple is never read as one: its third member is
- *   a node to this walk, and a `{ $record }` node names no field.
+ * - **A legacy `[field, op, value]` tuple** (an array whose first member is a
+ *   string other than `and` / `or`, the split `parseFilterAST` lowers by):
+ *   it is a comparison, not a list of nodes, and its third member is a
+ *   comparand — `['attachment', '=', { meta: { $record: 'x' } }]` is the same
+ *   deep-equality literal as the object spelling above, and comes back by
+ *   reference like it. An `['and' | 'or', …]` array is walked from its second
+ *   member, and any other array as a list of nodes.
  *
  * Allocation-free and shallow (it never enters a comparand), so it costs a
  * read whose filter holds no reference one walk of its node keys.
  */
 function findRecordReferenceComparand(node: unknown, at = 'filter'): RecordReferenceComparand | undefined {
   if (Array.isArray(node)) {
-    for (let i = 0; i < node.length; i++) {
+    let start = 0;
+    if (typeof node[0] === 'string') {
+      const head = node[0].toLowerCase();
+      // A `[field, op, value]` tuple: a comparison whose value is a comparand — not judged.
+      if (head !== 'and' && head !== 'or') return undefined;
+      start = 1;
+    }
+    for (let i = start; i < node.length; i++) {
       const hit = findRecordReferenceComparand(node[i], `${at}[${i}]`);
       if (hit) return hit;
     }
@@ -697,7 +708,7 @@ class UnresolvedRecordReferenceError extends Error {
 
   constructor({ reference, field, at }: RecordReferenceComparand) {
     super(
-      `A { "$record": ${JSON.stringify(reference.$record)} } comparand on field "${field}" at ${at} ` +
+      `A { "$record": ${previewReferencePath(reference.$record)} } comparand on field "${field}" at ${at} ` +
       'reached the server unresolved, and is refused rather than compared. { $record } reads the record ' +
       'being edited (a field of it, or one lookup hop such as "account.cb_market"), and only the record ' +
       'picker of the form editing that record can resolve it: the picker sends the referenced value in ' +
@@ -708,6 +719,21 @@ class UnresolvedRecordReferenceError extends Error {
     );
     this.name = 'UnresolvedRecordReferenceError';
   }
+}
+
+/**
+ * [#34199] The `$record` value as the refusal echoes it: JSON, bounded to 60
+ * characters like the sibling comparand doors' previews — a malformed
+ * reference came off the wire and can carry any JSON value.
+ */
+function previewReferencePath(path: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(path) ?? String(path);
+  } catch {
+    text = String(path);
+  }
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
 
 /** [#25808] The anchor with its instant pinned — see {@link isUnresolvedNowAnchor}. */

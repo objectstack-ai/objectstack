@@ -292,6 +292,21 @@ describe('[#34199] resolveFilterTokens — an unresolved { $record } comparand r
     expect(err.message).toContain(`on field "${field}" at ${at} reached the server unresolved`);
   });
 
+  it('walks an or-array from its second member: an object node there is still judged', () => {
+    const err = refusal(['or', ['stage', '=', 'won'], { cb_market: { $record: 'account.cb_market' } }]);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('on field "cb_market" at filter[2].cb_market reached');
+  });
+
+  it('bounds the echoed $record value, which came off the wire', () => {
+    const err = refusal({ cb_market: { $record: 'x'.repeat(500) } });
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).not.toContain('x'.repeat(60));
+    expect(err.message).toContain('on field "cb_market" at filter.cb_market reached');
+  });
+
   it('refuses a malformed reference by its key too', () => {
     const malformed = refusal({ cb_market: { $record: 'account.cb_market', addDays: 1 } });
     expect(malformed.code).toBe('INVALID_FILTER');
@@ -309,6 +324,12 @@ describe('[#34199] resolveFilterTokens — an unresolved { $record } comparand r
     ['as an $in list member', { region: { $in: ['NA', 'EU', { $record: 'account.region' }] } }],
     ['at the root, where no field names it', { $record: 'account.cb_market' }],
     ['as the third member of a [field, op, value] tuple', ['cb_market', '=', { $record: 'account.cb_market' }]],
+    // The tuple's value is a comparand: the array spelling of the deep-equality
+    // CONTROL above is the same literal, and the analytics service hands the
+    // unlowered array to this pass.
+    ['inside a deep-equality comparand in the array spelling', ['attachment', '=', { meta: { $record: 'x' } }]],
+    ['inside a tuple under an and-array', ['and', ['stage', '=', 'won'], ['attachment', '=', { meta: { $record: 'x' } }]]],
+    ['inside a tuple of a legacy list of tuples', [['stage', '=', 'won'], ['attachment', 'in', [{ meta: { $record: 'x' } }]]]],
   ])('control — %s: not a field\'s comparand, so it comes back by reference', (_label, filter) => {
     expect(resolveFilterTokens(filter, full)).toBe(filter);
   });

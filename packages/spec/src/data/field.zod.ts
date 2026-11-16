@@ -2271,8 +2271,8 @@ export const FieldSchema = lazySchema(() => {
     + 'empty, and on a picker with no single record being edited (a bulk-action bar, a filter panel), the entry is left '
     + 'out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
     + 'server unresolved is refused (INVALID_FILTER), never read as null: by name, naming the field and the path, when '
-    + 'it arrives as the eq shorthand on a column that is not a date or datetime; any other operator, and eq on a date '
-    + 'or datetime column, is refused earlier, in generic words. The '
+    + 'it arrives as the eq shorthand on a column other than a date, datetime or time column; any other operator, and '
+    + 'eq on a date, datetime or time column, is refused earlier, in generic words. The '
     + 'picker narrows the choice only: a rule the save must enforce belongs on the server too. [PLANNED — not '
     + 'enforced] The picker does not resolve { $record } or read orEmpty yet.',
   ),
