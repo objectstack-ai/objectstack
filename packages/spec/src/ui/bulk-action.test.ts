@@ -479,9 +479,27 @@ describe('BulkActionResultSchema — the per-row outcome an aggregate handler ma
       expect(paths({ succeeded: [], failed: [{ id: 'opp_2' }] })).toEqual(['failed.0.message:invalid_type']);
     });
 
-    it('a value missing either list', () => {
+    it('a value missing either list (the planned reader reports it as unreadable, never as full success)', () => {
       expect(paths({ succeeded: ['opp_1'] })).toEqual(['failed:invalid_type']);
       expect(paths({ failed: [] })).toEqual(['succeeded:invalid_type']);
+    });
+
+    it('the neighbouring shapes: the data plane\'s batch counts and the console\'s BulkWriteResult', () => {
+      // `BatchUpdateResponseSchema` spells `succeeded` / `failed` as COUNTS with
+      // the rows under `results`; `BulkWriteResult` names failures
+      // `errors[].error`. Neither is this shape, and neither may parse as it.
+      expect(paths({ success: false, total: 2, succeeded: 1, failed: 1, results: [{ id: 'opp_1', success: true, index: 0 }] }))
+        .toEqual(['succeeded:invalid_type', 'failed:invalid_type']);
+      expect(paths({ succeeded: 1, errors: [{ id: 'opp_2', error: 'locked' }] }))
+        .toEqual(['succeeded:invalid_type', 'failed:invalid_type']);
+      expect(paths({ succeeded: ['opp_1'], failed: [{ id: 'opp_2', error: 'locked' }] }))
+        .toEqual(['failed.0.message:invalid_type']);
+    });
+  });
+
+  describe('— the counting rules are the reader\'s, so the shape admits what they resolve', () => {
+    it('a duplicate id and an id in both lists parse; the planned reader counts the duplicate once and the overlap as failed', () => {
+      expect(parse({ succeeded: ['opp_1', 'opp_1', 'opp_2'], failed: [{ id: 'opp_2', message: 'locked' }] }).success).toBe(true);
     });
   });
 
@@ -501,7 +519,7 @@ describe('BulkActionResultSchema — the per-row outcome an aggregate handler ma
     });
   });
 
-  describe('— a rejection stays the one-outcome report', () => {
+  describe('— a rejection stays the one-outcome report (documents the ruling; not coverage: no reader exists yet)', () => {
     // The result travels as the RESOLVE value only. A rejection reaches the
     // console as the ADR-0112 refusal envelope, and the `/actions` door
     // carries no structured body on a script or flow arm's throw, so a
