@@ -15,7 +15,15 @@ import { normalizeMultiValuePatch, type MultiValueFieldDef } from './multiValueF
 
 export interface BulkRowError {
   id: string;
+  /** The failure's whole text — what the error CSV records for the row. */
   error: string;
+  /**
+   * The rejection's producer-marked `userMessage` (`declaredUserMessage`),
+   * set only when a promoted per-record action's refusal carried one: the
+   * words the handler wrote for the user. The result lists it for the row in
+   * place of `error`, which stays the whole text (objectstack#34215).
+   */
+  userMessage?: string;
 }
 
 export interface BulkProgress {
@@ -129,6 +137,8 @@ export interface BulkExecutorOptions {
    * MUST reject on failure: the executor attributes per-row errors from the
    * rejection reason, so resolving on a failed action would report it as a
    * success (the exact #2960 failure mode this whole path exists to kill).
+   * Reject with an error that carries the producer's `userMessage` when the
+   * failure has one — the row shows it, the error CSV keeps the message.
    *
    * When absent, `operation: 'custom'` keeps its historical meaning: no
    * mutation, the consumer wires `onComplete`.
@@ -261,6 +271,8 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
         ? Math.max(1, rows.length)
         : Math.max(1, def.batchSize ?? 200);
       const errors: BulkRowError[] = [];
+      // Record id → its per-record rejection's `userMessage` (custom runner only).
+      const userMessages = new Map<string, string>();
       let succeeded = 0;
       let failed = 0;
       let aggregateRejection: BulkResult['aggregateRejection'];
@@ -368,8 +380,15 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
                 // per record through the injected runner. Without one, this is
                 // the historical callout shape — no mutation, caller wires
                 // onComplete.
+                // A rejection's producer-marked `userMessage` is kept per row
+                // and attached to the row's error below; the rejection itself
+                // still settles the row as failed with its whole message.
                 return def.actionDef && runAction
-                  ? runAction(def, rowById.get(id) ?? { id }, { ...params })
+                  ? runAction(def, rowById.get(id) ?? { id }, { ...params }).catch((e: unknown) => {
+                    const userMessage = declaredUserMessage(e);
+                    if (userMessage !== null) userMessages.set(id, userMessage);
+                    throw e;
+                  })
                   : Promise.resolve();
               default:
                 return Promise.reject(new Error(`Unknown operation: ${def.operation}`));
@@ -382,7 +401,10 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
           );
           succeeded += outcome.succeeded;
           failed += outcome.failed;
-          errors.push(...outcome.errors);
+          errors.push(...outcome.errors.map((rowError) => {
+            const userMessage = userMessages.get(rowError.id);
+            return userMessage === undefined ? rowError : { ...rowError, userMessage };
+          }));
           setProgress({ total, done: succeeded, failed, inFlight: true });
         }
       });

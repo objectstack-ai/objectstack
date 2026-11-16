@@ -2010,6 +2010,9 @@ const zhHant = {
       fieldErrorsToast_one: '{{count}} 項設定需要處理：{{settings}}',
       fieldErrorsToast_other: '{{count}} 項設定需要處理：{{settings}}',
       cryptoRefusalTitle: '此部署無法加密機密資訊',
+      platformManagedTitle: '此項由平台託管',
+      platformManagedBody: '託管平台為此環境提供並配置此項，因此無需在此設定。',
+      aiProviderManaged: 'AI 提供商、模型與憑據由平台託管。',
       cryptoRefusalSubjectSuffix: '被宣告為加密欄位，因此未寫入任何內容。',
       cryptoRefusalNoSubject: '宣告為加密的值被拒絕，因此未寫入任何內容。',
       cryptoRefusalToast: '無法加密機密資訊：{{subject}}',
@@ -2108,6 +2111,8 @@ const zhHant = {
         done: '你已連線了 AI 助手或 API 金鑰。',
         action: '連線',
       },
+      firstApp: { title: '放進第一個應用', todo: '還沒有你自己的應用。從應用市場安裝一個或自己搭建一個，它會出現在首頁。', done: '你自己的應用已在首頁。' },
+      firstRecord: { title: '新增第一條記錄', todo: '還沒有人在你的應用裡建立記錄。', done: '你的應用裡已經有人建立了記錄。', action: '開啟應用' },
     },
     error: {
       connectionFailed: '無法連線到伺服器',
@@ -5150,6 +5155,25 @@ const zhHant = {
     sourceRequired: '{{kind}} 頁面需要非空的 {{source}}。',
     loading: '正在載入 React 執行環境…',
     error: 'React 頁面錯誤',
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "移動應用",
+    subtitle: "將 ObjectOS 移動應用連線到此伺服器",
+    scanHint: "開啟 ObjectOS 移動應用，掃描此二維碼即可連線到此伺服器。",
+    qrAlt: "用於將 ObjectOS 移動應用連線到此伺服器的二維碼",
+    linkLabel: "連線連結",
+    copy: "複製連結",
+    copied: "連結已複製",
+    privacy: "二維碼只包含此伺服器的地址，不包含你的賬號。",
+    loadFailed: "無法讀取此伺服器的公開地址。請重新整理頁面重試。",
+    unreachableTitle: "手機無法訪問此伺服器的地址",
+    unreachableBody: "此伺服器的地址是 {{address}}，這是手機無法開啟的本機或內網地址，因此不顯示二維碼。請在伺服器上將 {{setting}} 設為它的公開地址（例如 {{example}}），然後重啟伺服器。",
+    insecureTitle: "此伺服器的地址未使用 HTTPS",
+    insecureBody: "此伺服器的地址是 {{address}}。移動應用會通過它登入，因此它必須使用 HTTPS，此處不顯示二維碼。請讓此伺服器通過 HTTPS 提供服務，將 {{setting}} 設為它的 https:// 地址（例如 {{example}}），然後重啟伺服器。",
+    unpublishedTitle: "此伺服器未公佈其公開地址",
+    unpublishedBody: "不顯示二維碼：此伺服器尚未向移動應用提供其公開地址。請將伺服器升級到支援此功能的版本。",
   },
 } as const;
 
