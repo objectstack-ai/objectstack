@@ -5719,6 +5719,13 @@ export class ObjectStackProtocolImplementation implements
      * read, since the fork's own note says why), so a fallback insert could
      * only bury a real update failure under the duplicate-key error of
      * inserting a row the caller was just shown to read.
+     *
+     * [#33795] The `update` operation runs as ONE roll-up batch, inside the
+     * engine's optional `deferSummaryRecompute` when the engine has it (ruling
+     * 6922040858): the parents' `summary` fields recompute once, when the
+     * loop has settled, instead of after each row. During the batch a parent's
+     * summary holds its value from before the batch. The other operations
+     * keep their per-row recompute.
      */
     private runBatchDataLoop(args: {
         object: string;
@@ -5972,6 +5979,16 @@ export class ObjectStackProtocolImplementation implements
      * `continueOnError` — whose own contract text already scopes it to
      * `atomic=false`, and which has nothing to continue toward when every write
      * so far is about to be undone.
+     *
+     * [#33795] The loop is ONE roll-up batch, inside the engine's optional
+     * `deferSummaryRecompute` when the engine has it (ruling 6922040858): the
+     * parents' `summary` fields recompute once, when the loop has settled, on
+     * every way out of it — finished, stopped on a failed row, or thrown — over
+     * the rows that landed. During the batch a parent's summary holds its value
+     * from before the batch. Atomic: the recompute runs inside the transaction,
+     * before the commit, and its failure rolls the batch back with the same
+     * envelope a failed row answers. Non-atomic: its failure is logged and the
+     * rows stay written. An engine without the member recomputes per row.
      */
     private runUpdateManyLoop(args: {
         object: string;
