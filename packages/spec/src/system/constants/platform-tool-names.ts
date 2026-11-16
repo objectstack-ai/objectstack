@@ -88,9 +88,12 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
    * (cloud#3656), and the `ask` agent's read-only `get_record_history`, which
    * reads one record's change history the user may see so a chat can undo the
    * last edit — the restore itself still goes through a confirm card
-   * (cloud#4347), and the `ask` agent's `ask_which`, which writes nothing:
+   * (cloud#4347), the `ask` agent's `ask_which`, which writes nothing:
    * when a data question has 2–3 plausible readings it returns them to the
-   * user as a question and ends the turn (cloud#4773).
+   * user as a question and ends the turn (cloud#4773), and the build agent's
+   * read-only `list_flow_runs`, which reads one flow's recent runs as the
+   * caller so the agent can answer "did my automation work?" from a run's own
+   * outcome.
    */
   'service-ai-studio': [
     'add_field',
@@ -111,6 +114,7 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
     'get_metadata_schema',
     'get_package',
     'get_record_history',
+    'list_flow_runs',
     'list_metadata',
     'list_objects',
     'list_packages',
