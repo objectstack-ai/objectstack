@@ -764,6 +764,39 @@ refusals carry the REST door's status and code: a name nothing declares is
 **503**, a caller without the action's capability is **403**, and an object
 whose package is disabled is **404** `OBJECT_PACKAGE_DISABLED`.
 
+### Resume a handed-off run as the person who approved it
+
+When the MCP `resume_run` tool hands a resume to the person (an action that
+declares `ai.requiresConfirmation: true`, on a host with a pending-confirmation
+service), the hand-off carries the paused run: `run: { runId, values }`.
+Your approve door resumes that run with `dispatchActionResume`, as the person
+who approved it, instead of re-implementing the `resume_run` checks:
+
+```typescript
+import { dispatchActionResume } from '@objectstack/runtime';
+
+const answer = await dispatchActionResume(kernel, {
+  executionContext: approver,  // the person who approved, signed in to the app
+  environmentId,               // optional, placed as for dispatchAction
+  runId: handOff.run.runId,
+  values: handOff.run.values,
+  confirm: true,               // the person's confirmation
+});
+if (answer.status !== 200) throw answer.body.error;
+```
+
+It asks every `resume_run` check again, as that person: the run must still be
+paused and must have been started by them (otherwise **404**
+`RESOURCE_NOT_FOUND`, the same answer for an unknown run), the flow action
+that admits the run must pass every `run_action` check, the record is read
+again as them, and the run must be paused on a screen (otherwise **409**). The
+run then resumes once; it never starts a new run and is never handed off
+again. Without `confirm: true`, an action that declares
+`ai.requiresConfirmation: true` is refused **428** `ACTION_CONFIRMATION_REQUIRED`,
+and an AI service account is refused whatever it sends. The answer is the REST
+envelope, with `resume_run`'s `{ ok, action, objectName, recordId, result }` as
+`data`. Placement, and the three steps your door keeps, are `dispatchAction`'s.
+
 ## Troubleshooting
 
 | Symptom | Cause → fix |
