@@ -2576,10 +2576,11 @@ export function ChatPane({
 
   // objectstack#32984 — the change card names objects, fields and field types
   // by their labels (the producer sends machine names only: 「字段
-  // b6bl_quote_item · line_total · currency」). An object or field the change is
-  // about to create is not in metadata yet and answers undefined: the card
-  // then shows the name as given.
-  const { resolveObjectLabel, resolveFieldLabel } = useChangeCardLabels(metadata);
+  // b6bl_quote_item · line_total · currency」). A name the published registry
+  // does not know is read from the draft overlay (`useChangeCardLabels`); one
+  // the change is about to create answers undefined, and the card then shows
+  // the name as given.
+  const { resolveObjectLabel, resolveFieldLabel } = useChangeCardLabels(metadata, metadataClient);
   const metadataLocale = useMetadataLocale();
   const resolveFieldTypeLabel = useCallback(
     (type: string) => {
