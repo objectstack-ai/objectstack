@@ -1301,13 +1301,18 @@ sign-in through any other one leaves the person pending. Their positions, permis
 from the moment they are added, so seed data and approval flows can name them
 before they sign in. Off a managed environment both doors answer `409`.
 
-Membership and membership roles on a cloud-managed environment are managed in
-the organisation that hosts it, so `POST /api/v1/auth/organization/remove-member`
-and `POST /api/v1/auth/organization/update-member-role` (Make Owner included)
-answer `409 RESOURCE_CONFLICT` there and change nothing, and their row actions
-are hidden; the one exception is `POST /api/v1/auth/organization/add-member`,
-which stays open to a platform administrator to restore a membership the
-environment lost.
+On a cloud-managed environment the organisation that hosts it decides who is a
+member and at which membership tier, so the two doors that change an existing
+membership (below; Make Owner calls the second) answer `409 RESOURCE_CONFLICT`
+there and change nothing, and their row actions are hidden; the one exception
+is `POST /api/v1/auth/organization/add-member`, which stays open to a platform
+administrator to restore a membership the environment lost.
+
+{/* os:vendor-wire better-auth */}
+```http
+POST /api/v1/auth/organization/remove-member
+POST /api/v1/auth/organization/update-member-role
+```
 
 Signing in does not lock the manager: a platform administrator still changes
 it with **Set Manager** (`POST /api/v1/auth/admin/set-user-manager`). That
