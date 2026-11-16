@@ -25,7 +25,7 @@
 
 import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
-import { SysMetadataRepository, actionHeldOnlyOnOtherObjects, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
+import { SysMetadataRepository, actionHeldOnlyOnOtherObjects, actionRowsBindingObjectOf, isPackageBoundRow, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 import { ConflictError, itemDiscriminator, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { authoringClientOf } from './draft-changes.js';
@@ -818,17 +818,20 @@ export class ProtocolSaveFacet {
             // name binds it to an object other than the one this body binds,
             // no package holds this item, so the save writes the
             // environment's own row on this object and every package's item
-            // stays where it is ({@link packagelessActionSaveIsEnvironmentOwn}).
-            const environmentOwnAction = await packagelessActionSaveIsEnvironmentOwn(
+            // stays where it is ({@link packagelessActionKeyedAddress}).
+            const keyed = await packagelessActionKeyedAddress(
                 host, writeType, request.name, request.item, address,
             );
+            const environmentOwnAction = keyed === 'environment';
             // [#32605, epic ruling 6781691009] A name a disabled package also
             // holds is written where the read naming no package serves it
             // ({@link servedPackagelessSaveAddress}): never the disabled
             // package's row, never a new package-unbound row beside an
             // enabled holder, and a refusal names only the served holders.
+            // [ADR-0150 D4] For an action some holder binds to another object,
+            // judged over the holders at the body's object only.
             const served = environmentOwnAction ? undefined : await servedPackagelessSaveAddress(
-                host, writeType, request.name, itemDiscriminator(writeType, request.item), address,
+                host, writeType, request.name, itemDiscriminator(writeType, request.item), keyed ?? address, keyed !== undefined,
             );
             if (environmentOwnAction) {
                 // The package-unbound row: `packageId` stays empty.
@@ -2877,11 +2880,21 @@ async function servedPackagelessSaveAddress(
     host: Pick<ProtocolHost, 'engine' | 'packagelessAddress' | 'shippedArtifactsOf' | 'readItemActiveRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
     type: string, name: string, member: string | undefined,
     address: { readonly packageId: string | null; readonly candidates: readonly string[]; readonly unbound: boolean },
+    /**
+     * [ADR-0150 D4, ruling 6902014292] `address` is an action's address at
+     * the body's object ({@link packagelessActionKeyedAddress}): some holder
+     * binds the name to another object. The read's by-name judgment and the
+     * by-name content package are not asked (they key the name, not the
+     * item), and with only disabled holders at the object the address is
+     * theirs, as `packagelessAddress` answers a name only disabled packages
+     * hold.
+     */
+    atObject = false,
 ): Promise<{ packageId: string | null } | undefined> {
     const registry = host.engine?.registry as { isPackageDisabled?: (id: string) => boolean } | undefined;
     if (typeof registry?.isPackageDisabled !== 'function') return undefined;
     const disabled = (id: string): boolean => registry.isPackageDisabled?.(id) === true;
-    const judged = await servedAddressJudgment(host, type, name, member);
+    const judged = atObject ? undefined : await servedAddressJudgment(host, type, name, member);
     if (judged?.kind === 'served') return { packageId: judged.packageId };
     if (judged?.kind === 'refused') {
         const served = judged.error.refusal.candidates
@@ -2894,30 +2907,41 @@ async function servedPackagelessSaveAddress(
     if (enabled.length > 1) throw packagelessAddressAmbiguityRefusal('save', type, name, enabled);
     if (enabled.length === 1) return { packageId: enabled[0] ?? null };
     if (address.unbound) return { packageId: null };
+    if (atObject) {
+        if (address.candidates.length > 1) throw packagelessAddressAmbiguityRefusal('save', type, name, address.candidates);
+        return { packageId: address.candidates[0] ?? null };
+    }
     const shippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].filter((id) => !disabled(id));
     const content = packagelessContentPackage({ packageId: null, candidates: [] }, shippers.map((id) => ({ _packageId: id })));
     return typeof content === 'string' ? { packageId: content } : undefined;
 }
 
 /**
- * [ADR-0150 D4, ruling 6902014292] Whether a publish-mode save of an `action`
- * naming no package writes the ENVIRONMENT'S OWN item: the package-less
- * address has a holder (`address.candidates`, {@link packagelessAddress}) and
- * the one owner-key rule, {@link actionHeldOnlyOnOtherObjects}, reads the
- * item's active rows as holding the name only on objects other than the one
- * `item` binds. The draft save and the per-item publish read the same rule.
+ * [ADR-0150 D4, ruling 6902014292] The address of a publish-mode save of an
+ * `action` naming no package, keyed `(package, objectName, name)`:
  *
- * `false` — the address stands, as before — for every other type, for a
- * name no package's row holds, and as soon as one holder binds the name to
- * `item`'s object: the same-object save is still that package's
- * customization, and two such holders are still refused.
+ *  - `'environment'` — the ENVIRONMENT'S OWN item: the package-less address
+ *    has a holder (`address.candidates`, {@link packagelessAddress}) and the
+ *    one owner-key rule, {@link actionHeldOnlyOnOtherObjects}, reads the
+ *    item's active rows as holding the name only on objects other than the
+ *    one `item` binds. The draft save and the per-item publish read the same
+ *    rule. The save writes the package-unbound row; every package's row stays.
+ *  - the address over the rows at `item`'s object
+ *    ({@link actionRowsBindingObjectOf}) — some holder binds the name to
+ *    `item`'s object and another binds it to another object: the served
+ *    step ({@link servedPackagelessSaveAddress}) judges the holders at the
+ *    object only, so a disabled holder there is never answered by an enabled
+ *    holder's item on another object.
+ *  - `undefined` — the address stands, as before: every other type, a name
+ *    no package's row holds, and an action every holder binds to `item`'s
+ *    object.
  */
-async function packagelessActionSaveIsEnvironmentOwn(
-    host: Pick<ProtocolHost, 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+async function packagelessActionKeyedAddress(
+    host: Pick<ProtocolHost, 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
     type: string, name: string, item: unknown,
     address: { readonly candidates: readonly string[] },
-): Promise<boolean> {
-    if (type !== 'action' || address.candidates.length === 0) return false;
+): Promise<'environment' | Awaited<ReturnType<ProtocolHost['packagelessAddress']>> | undefined> {
+    if (type !== 'action' || address.candidates.length === 0) return undefined;
     let activeRows: readonly StoredOverlayRow[];
     try {
         activeRows = await host.readItemActiveRows(type, name);
@@ -2927,5 +2951,9 @@ async function packagelessActionSaveIsEnvironmentOwn(
         host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         activeRows = [];
     }
-    return actionHeldOnlyOnOtherObjects(type, item, activeRows);
+    if (actionHeldOnlyOnOtherObjects(type, item, activeRows)) return 'environment';
+    const atObject = actionRowsBindingObjectOf(item, activeRows);
+    const held = activeRows.filter(isPackageBoundRow);
+    if (actionRowsBindingObjectOf(item, held).length === held.length) return undefined;
+    return host.packagelessAddress(type, name, undefined, 'active', atObject);
 }

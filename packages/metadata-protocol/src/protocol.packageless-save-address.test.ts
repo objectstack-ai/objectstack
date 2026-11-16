@@ -407,6 +407,42 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q'], [null, 'task', 'env']]);
     });
 
+    it('a SOLE DISABLED holder on `invoice`: the save on `task` writes the environment\'s row (FROM: into the disabled package\'s row)', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        protocol.engine.registry.isPackageDisabled = (id: string) => id === WRITABLE;
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+        expect(saved.message).not.toContain('package=');
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'task', 'env']]);
+    });
+
+    it('a SOLE binding on `invoice` to a package that is NOT INSTALLED: the save on `task` writes the environment\'s row (FROM: 422 naming the package)', async () => {
+        const { protocol, rows, seedRow } = makeProtocol();
+        const GONE = 'com.qa.uninstalled';
+        seedRow({ type: 'action', name: NAME, package_id: GONE, metadata: JSON.stringify(action(NAME, 'gone', 'invoice')), checksum: 'sha-gone' });
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+        expect(saved.success).toBe(true);
+        expect(stored(rows('action', NAME))).toEqual([[GONE, 'invoice', 'gone'], [null, 'task', 'env']]);
+    });
+
+    it('an ENABLED holder on `invoice` beside a DISABLED holder on `task`: the save on `task` is the disabled holder\'s, never the enabled holder\'s item moved (FROM: into P, its action moved to `task`)', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'task'), packageId: OTHER_WRITABLE });
+        protocol.engine.registry.isPackageDisabled = (id: string) => id === OTHER_WRITABLE;
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'task') });
+
+        // The address at `task` holds only the disabled holder, and a name
+        // only disabled packages hold keeps naming that package.
+        expect(saved.message).toBe(`Saved action '${NAME}' (env-wide, package=${OTHER_WRITABLE}, state=active) [seq=${saved.seq}]`);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'task', 'edited']]);
+    });
+
     it('the DRAFT save on `task` writes the environment\'s draft (FROM: P\'s draft), and P\'s rows are untouched', async () => {
         const { protocol, rows } = makeProtocol();
         await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });

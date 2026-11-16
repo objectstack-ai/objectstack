@@ -734,10 +734,20 @@ export function actionHeldOnlyOnOtherObjects(
   activeRows: ReadonlyArray<{ package_id?: unknown; metadata?: unknown }>,
 ): boolean {
   if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'action') return false;
-  const held = activeRows.filter((row) => typeof row?.package_id === 'string' && row.package_id !== '');
-  if (held.length === 0) return false;
+  const held = activeRows.filter(isPackageBoundRow);
+  return held.length > 0 && actionRowsBindingObjectOf(item, held).length === 0;
+}
+
+/**
+ * [ADR-0150 D4] The rows of `rows` that bind the object `item` binds
+ * ({@link boundObjectOf}; object-less is its own key): the rows of the action
+ * item a body bound to that object addresses. A stored body that does not
+ * parse is read as binding `item`'s object, so it never drops a row from the
+ * key. The filter {@link actionHeldOnlyOnOtherObjects} reads.
+ */
+export function actionRowsBindingObjectOf<R extends { metadata?: unknown }>(item: unknown, rows: readonly R[]): R[] {
   const object = boundObjectOf(item);
-  return !held.some((row) => {
+  return rows.filter((row) => {
     let document: unknown;
     try {
       document = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
@@ -746,6 +756,11 @@ export function actionHeldOnlyOnOtherObjects(
     }
     return boundObjectOf(document) === object;
   });
+}
+
+/** A row bound to a package (a non-empty `package_id`). */
+export function isPackageBoundRow(row: { package_id?: unknown }): boolean {
+  return typeof row?.package_id === 'string' && row.package_id !== '';
 }
 
 /**
