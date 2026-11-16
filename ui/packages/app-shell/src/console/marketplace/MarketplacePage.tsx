@@ -469,8 +469,15 @@ function MarketplacePageBody() {
           (resp) => ({ resp, failure: null }),
           (e: unknown) => ({ resp: null, failure: toLoadFailure(e) }),
         ),
+        // Install-local is asked only where the runtime mounts it, the gate the
+        // package page reads too: elsewhere it is a 404 on every load and Refresh
+        // (objectstack#34187), and the ledger it would list is empty.
         withSideLoads
-          ? Promise.all([listLocalInstalls(), listOrgPackages(), listInstalledPackages()])
+          ? Promise.all([
+            getRuntimeConfig().features.installLocal ? listLocalInstalls() : Promise.resolve([]),
+            listOrgPackages(),
+            listInstalledPackages(),
+          ])
           : null,
       ]);
       if (!current()) return;

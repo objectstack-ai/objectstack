@@ -38,7 +38,7 @@ import {
   storedSecretReaderOverEngine,
 } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
-import { buildDeploymentNoticeDoor } from './deployment-notice.js';
+import { buildDeploymentNoticeDoor, DEPLOYMENT_NOTICE_SERVICE } from './deployment-notice.js';
 import { registerLocalizationCurrencyLock, type CurrencyUsageEngine } from './localization-currency-lock.js';
 import { registerLocalizationLocaleOptions, type LocaleListService } from './localization-locale-options.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
@@ -564,6 +564,10 @@ export class SettingsServicePlugin implements Plugin {
         contextFromRequest: verifiedContextFromRequest,
         deploymentNotice,
       });
+      // The door is composed on this host: say so where the runtime config
+      // reads it (`features.deploymentNotice`), so the Console asks the
+      // notice of this host and of no host without it.
+      ctx.registerService(DEPLOYMENT_NOTICE_SERVICE, deploymentNotice);
       ctx.logger?.info?.(
         'SettingsServicePlugin: REST routes registered at ' + (this.opts.basePath ?? '/api/settings'),
       );
