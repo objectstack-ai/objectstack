@@ -41,7 +41,7 @@ import {
 } from '@objectstack/core';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
-import { resolveBundleMemberSelector } from './protocol-bundle-members.js';
+import { bundleMemberDiscriminator, resolveBundleMemberSelector } from './protocol-bundle-members.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { pairsOf } from '@objectstack/metadata-core';
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
@@ -424,20 +424,30 @@ export function isAnotherHoldersCopy(registry: any, type: string, name: string, 
  * The rows are read through `host.readItemActiveRows`, so the read below takes
  * them instead of reading them again (#24371). The layered read naming no
  * package takes the same address for its layers (`getMetaItemLayered`).
+ *
+ * [#32849] The read that names no member addresses the CANONICAL member
+ * ({@link bundleMemberDiscriminator}), which is the same request as naming it
+ * (`?member=en-US`), so it is judged at that member here and takes the same
+ * address. Before, it was left as it was: with the addition Z shipping the
+ * canonical member and a pair row declaring Z for it, the read naming no
+ * member served Z's shipped member while `?member=en-US` served the override.
+ * A bundle with no shipped canonical member has no one shipper of it here, and
+ * is left as it was. A type with no members is never moved.
  */
 export async function declaredMemberOverrideAddressOf(
     host: ServedRowHost,
     type: string, name: string, member: string | undefined,
 ): Promise<string | undefined> {
-    if (member === undefined) return undefined;
+    const addressed = bundleMemberDiscriminator(type, member);
+    if (addressed === undefined) return undefined;
     const registry: any = host.engine?.registry;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size < 2) return undefined;
-    const memberShippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))];
+    const memberShippers = [...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, addressed))];
     if (memberShippers.length !== 1) return undefined;
     const [shipper] = memberShippers;
     if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(shipper) === true) return undefined;
-    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, addressed) !== undefined) {
         return undefined;
     }
     let activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>;
@@ -448,7 +458,7 @@ export async function declaredMemberOverrideAddressOf(
         activeRows = [];
     }
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    const where = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, member) };
+    const where = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, addressed) };
     const installed = installedManifestsOfEngine(host.engine);
     return activeRows.some((row) => rowMatchesOverlayWhere(row, where) && isServedOverrideRowOf(row, shipper, installed))
         ? shipper
