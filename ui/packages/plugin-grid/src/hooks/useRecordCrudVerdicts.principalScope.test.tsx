@@ -34,7 +34,10 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
-import { useRecordCrudVerdicts, __clearRecordCrudVerdictCache } from './useRecordCrudVerdicts';
+import { __clearRecordCrudVerdictCache } from './useRecordCrudVerdicts';
+// objectstack#34208 — the hook asks only once a row's actions are reached for;
+// these pins are about what it does once it asks.
+import { useAskedRecordCrudVerdicts } from '../__tests__/askedRecordCrudVerdicts';
 
 const OBJECT = 'note';
 
@@ -75,7 +78,7 @@ function explainAnswering(visible: boolean) {
 
 /** The kebab's question about one row: may this principal UPDATE `r1`? */
 const useR1UpdateVerdict = () => {
-  const lookup = useRecordCrudVerdicts({ objectName: OBJECT, recordIds: ['r1'], update: true });
+  const lookup = useAskedRecordCrudVerdicts({ objectName: OBJECT, recordIds: ['r1'], update: true });
   return lookup('r1', 'update');
 };
 
