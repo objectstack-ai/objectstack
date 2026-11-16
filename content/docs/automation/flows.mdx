@@ -622,9 +622,10 @@ the call, so a `durable` callout enqueues exactly the request the inline call
 would send.
 
 An `http` node's request, inline or `durable: true`, reaches only public
-addresses: loopback, private and link-local addresses and cloud metadata
-endpoints are refused by default, judged on the address the connection is
-actually made to and on every redirect hop. A deployment that needs an
+addresses: loopback, private, link-local and every other address that is not
+globally reachable, and cloud metadata endpoints, are refused by default,
+judged on the address the connection is actually made to and on every
+redirect hop. A deployment that needs an
 internal target lists it in `OS_EGRESS_ALLOWED_TARGETS`; a link-local or
 metadata address can never be listed. A refused inline call fails the node
 with an error starting `http: EGRESS_REFUSED` and sends nothing; a refused
