@@ -37,7 +37,8 @@
  *
  * A joined leaf that a NULL column satisfies (`notSet`, `empty`, `notContains`)
  * is evaluated on an existing parent: the native compile conjoins the last
- * hop's `"ALIAS"."id" IS NOT NULL` to it. Every other leaf is UNKNOWN on a NULL
+ * hop's `"ALIAS"."id" = "ALIAS"."id"` to it: TRUE for an existing parent and
+ * UNKNOWN for an orphan, so a `$not` cannot flip it. Every other leaf is UNKNOWN on a NULL
  * and its statement does not move. A parent that exists
  * with a NULL `status` still satisfies `$ne` (the #5298 ruling, unchanged), and
  * an author who wants the orphans says so on the base relation field
@@ -209,7 +210,7 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
     expect(sql).toContain('LEFT JOIN "os33792_order" "order" ON');
     // The lowering's NULL-safe escape is evaluated on an existing parent; the
     // comparison, UNKNOWN on a NULL, is left as it was.
-    expect(sql).toContain('(("order"."id" IS NOT NULL AND "order"."status" IS NULL) OR "order"."status" != $1)');
+    expect(sql).toContain('(("order"."status" IS NULL AND "order"."id" = "order"."id") OR "order"."status" != $1)');
     expect(Number((res.rows as Array<Record<string, unknown>>)[0]?.count)).toBe(4);
 
     // Two hops: the key of the last hop's join alias.
@@ -218,7 +219,7 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
       measures: ['count'],
       where: { 'order.customer.tier': { $ne: 'gold' } },
     } as never);
-    expect(twoHop.sql).toContain('"order__customer"."id" IS NOT NULL AND "order__customer"."tier" IS NULL');
+    expect(twoHop.sql).toContain('"order__customer"."tier" IS NULL AND "order__customer"."id" = "order__customer"."id"');
 
     // A positive leaf takes no conjunct: its statement is the one it always was.
     const positive = await services.native!.generateSql({ cube: LINE, measures: ['count'], where: { 'order.status': 'open' } } as never);
@@ -232,5 +233,35 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
     for (const face of ['native', 'objectql'] as const) {
       expect.soft(await totals(face, where), face).toEqual({ n: expected.length, total: sumOf(expected) });
     }
+  });
+
+  // Under `$not` the native answer is the one it was before the conjunct existed:
+  // the lowering hands a `$not` operand the same `notSet` / `empty` /
+  // `notContains` leaves, and a conjunct that were FALSE for an orphan would let
+  // the `NOT` select it. The engine path refuses a related-field condition under
+  // `$not` (`negated`), so this is the native face alone, held to its own answer
+  // on `origin/main` `5a755791a9`.
+  const NEGATED: Array<[string, Record<string, unknown>, string[]]> = [
+    ['$not $null true', { $not: { 'order.status': { $null: true } } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
+    ['$not $eq null', { $not: { 'order.status': { $eq: null } } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
+    ['$not $empty true', { $not: { 'order.status': { $empty: true } } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
+    ["$not $notContains 'pe'", { $not: { 'order.status': { $notContains: 'pe' } } }, ['l1', 'l2']],
+    ["$not $ne 'open'", { $not: { 'order.status': { $ne: 'open' } } }, ['l1', 'l2']],
+    // Inside a combinator under the `NOT`: an orphan's leaf never decides the branch.
+    ['$not $or [$null true, amount > 2000]', { $not: { $or: [{ 'order.status': { $null: true } }, { amount: { $gt: 2000 } }] } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
+    // …and where main's answer DOES select an orphan (`l8`: its `amount` sinks the `$and`), it still does.
+    ['$not $and [$null true, amount < 2000]', { $not: { $and: [{ 'order.status': { $null: true } }, { amount: { $lt: 2000 } }] } }, ['l1', 'l2', 'l3', 'l4', 'l5', 'l8']],
+    // Two hops, the last hop's key.
+    ['$not two-hop $null true', { $not: { 'order.customer.tier': { $null: true } } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
+  ];
+  for (const [label, where, expected] of NEGATED) {
+    it(`native, ${label}: the answer it gave before the conjunct`, async () => {
+      expect(await totals('native', where)).toEqual({ n: expected.length, total: sumOf(expected) });
+    });
+  }
+
+  it('native: `$not` over `$null: true` answers what `$null: false` answers', async () => {
+    expect(await totals('native', { $not: { 'order.status': { $null: true } } }))
+      .toEqual(await totals('native', { 'order.status': { $null: false } }));
   });
 });

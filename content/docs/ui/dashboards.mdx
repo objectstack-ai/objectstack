@@ -532,12 +532,16 @@ the base rows whose relationship points at a record it returned:
   condition under `$not` (write `$ne` / `$nin` inside the condition instead), and
   a related field compared with another field (`$field`).
 
-On the native SQL path, too, a row with no related record (an empty
-relationship, or one naming a record that no longer exists) is **not
-selected**, whatever the operator, `$ne`, `$nin`, `$notContains`, `$null: true`
-and `$empty: true` included, so the two paths agree on such rows.
-The same `$or` keeps such rows on both paths. A related record that exists with
-no value in the field still satisfies `$ne` and `$nin`.
+On the native SQL path, too, a related-field condition that is not under
+`$not` never selects a row with no related record (an empty relationship, or
+one naming a record that no longer exists), whatever the operator, `$ne`,
+`$nin`, `$notContains`, `$null: true` and `$empty: true` included, so the two
+paths agree on such rows. The same `$or` keeps such rows on both paths. A
+related record that exists with no value in the field still satisfies `$ne` and
+`$nin`. Under `$not`, which the engine path refuses, the native path still
+selects such a row when the negated condition is a comparison with a value
+(`{ $not: { 'order.status': 'open' } }`); write `$ne` / `$nin` inside the
+condition instead.
 
 A related field in a **dataset's own** `filter`, or in a **measure's** own
 `filter`, is still evaluated only on the native SQL path; the engine-aggregate

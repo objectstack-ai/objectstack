@@ -2255,10 +2255,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // UNKNOWN on a NULL and already leaves the orphan out. A parent that
       // exists with a NULL value still answers its own polarity (#5298). Added
       // only around a clause that bound, so `params` stays aligned.
+      //
+      // The conjunct is `key = key`, never `key IS NOT NULL`: it is TRUE for an
+      // existing parent and UNKNOWN (not FALSE) for an orphan, so the leaf is
+      // UNKNOWN there. A `$not` operand reaches this arm with the same leaves
+      // (the lowering leaves `$null` / `$empty` / a null `$eq` alone under
+      // `$not`, and escapes `$ne` / `$nin` / `$notContains`), and a FALSE leaf
+      // would let the `NOT` select the orphan. Under Kleene logic, turning TRUE
+      // into UNKNOWN can never turn a FALSE row TRUE, at any depth of `NOT`,
+      // `AND` or `OR`, so no row this compile left out before is selected now.
+      // Outside a `NOT`, UNKNOWN selects exactly what FALSE selects.
       const parentKey = clause !== null && NULL_SATISFIED_LEAF_OPERATORS.has(node.operator)
         ? this.joinedParentKey(cube, node.member, parentTable, joins)
         : null;
-      return parentKey ? `(${parentKey} IS NOT NULL AND ${clause})` : clause;
+      return parentKey ? `(${clause} AND ${parentKey} = ${parentKey})` : clause;
     }
 
     if (node.kind === 'not') {
