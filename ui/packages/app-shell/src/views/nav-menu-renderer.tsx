@@ -142,7 +142,8 @@ import { useNavigationContext } from '../context/NavigationContext.js';
 import { getIcon } from '../utils/getIcon.js';
 import { matchAppBySegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
-import { navigationNames } from '../console/appObjectScope.js';
+import { appRequiredObjectNames, readObjectPresence } from '../console/appObjectScope.js';
+import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
 
 /** Keep the designer's own data attributes on the wrapper, drop the rest. */
 const splitDesigner = (props: Record<string, any>) => {
@@ -216,18 +217,17 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   const evalVis = useNavVisibility(activeApp);
 
   // The runtime-capability gate for `requiresObject` entries. objectui#12980 —
-  // it reads the objects the app's entries require, by name (beside the app's
-  // package list when the app names one, the names-only scope when it does
-  // not), never the whole registry: an object the answer holds is registered,
-  // one the server answered without a definition is not, and one not yet
-  // answered shows, as every entry did while the whole list loaded. A
-  // hand-rolled metadata context has no scope, and its `objects` is read.
-  const requiredObjects = [
-    ...navigationNames(activeApp?.navigation, (item) => item.requiresObject),
-    ...((activeApp?.areas ?? []) as Array<{ navigation?: unknown } | undefined>).flatMap((area) =>
-      navigationNames(area?.navigation, (item) => item.requiresObject),
-    ),
-  ];
+  // it reads the objects the app's entries require, never the whole registry:
+  // an object the answer holds is registered, one the server answered without
+  // a definition is not, and one not yet answered shows, as every entry did
+  // while the whole list loaded. A hand-rolled metadata context has no scope,
+  // and its `objects` is read.
+  //
+  // objectstack#34244 — never by name: a `requiresObject` is by contract a
+  // name the host may not register, and a by-name read answered it 404. The
+  // app's package list answers its own objects; the other names are asked in
+  // the presence read the route and the sidebar ask them in
+  // (`readObjectPresence`, the same names, so one request).
   const appPackageId =
     typeof activeApp?._packageId === 'string' && activeApp._packageId ? (activeApp._packageId as string) : undefined;
   // An `action` entry reads its action from the app's package (ADR-0150 D5),
@@ -236,17 +236,24 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   const capabilityScope = !metadata.readObjectScope
     ? null
     : appPackageId
-      ? metadata.readObjectScope({ packageId: appPackageId, names: requiredObjects })
-      : requiredObjects.length > 0
-        ? metadata.readObjectScope({ names: requiredObjects })
-        : NO_CAPABILITY_SCOPE;
+      ? (metadata.readObjectScope as ReadNamesWithoutViews)({ packageId: appPackageId, views: false })
+      : NO_CAPABILITY_SCOPE;
+  const presence = metadata.readObjectScope
+    ? readObjectPresence(metadata.readObjectScope, appPackageId, appRequiredObjectNames(activeApp)).presence
+    : NO_CAPABILITY_SCOPE;
   const registeredObjects = capabilityScope ? capabilityScope.objects : metadata.objects;
   const registeredObjectNames = useMemo(
-    () => new Set<string>(((registeredObjects as any[]) || []).map((o: any) => o?.name).filter(Boolean)),
-    [registeredObjects],
+    () =>
+      new Set<string>(
+        [...(((registeredObjects as any[]) || [])), ...presence.objects].map((o: any) => o?.name).filter(Boolean),
+      ),
+    [registeredObjects, presence.objects],
   );
   const missingObjects = capabilityScope ? capabilityScope.missing : NO_MISSING_OBJECTS;
-  const missingObjectNames = useMemo(() => new Set<string>(missingObjects), [missingObjects]);
+  const missingObjectNames = useMemo(
+    () => new Set<string>([...missingObjects, ...presence.missing]),
+    [missingObjects, presence.missing],
+  );
   const scoped = capabilityScope !== null;
   const checkCap = useCallback(
     (kind: 'object' | 'service', name: string): boolean => {
