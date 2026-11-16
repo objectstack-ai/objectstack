@@ -520,10 +520,8 @@ dimensions: [
 ```
 
 Otherwise the widget's query is refused with `400 INVALID_FIELD`, and the message
-names this remedy: declare a date dimension named after the date-range field, or
-set the widget's `compareTo.dimension` to a declared date dimension. With the
-second, the widget compares only over a window its own filter states on that
-dimension. No author-time rule checks a compare widget's date key yet.
+names the remedy: declare a date dimension named after the date-range field.
+No author-time rule checks a compare widget's date key yet.
 
 ### Filtering on a Related Record's Field
 

@@ -94,17 +94,27 @@ export function undeclaredSelectionMembers(
  * when no undeclared member is one. A bare "not declared" does not tell a
  * dashboard author what to change: the key is the dashboard date-range field,
  * which the dashboard names against the object, not against the dataset.
+ *
+ * It names one remedy only, declaring a date dimension named after the key.
+ * Pointing the widget's `compareTo.dimension` at a declared dimension is not
+ * one: the renderer still lowers the dashboard's window on the undeclared
+ * field, so the comparison is either dropped or refused again.
  */
 export function compareWindowRemedy(undeclared: readonly UndeclaredSelectionMember[]): string {
   const keys = undeclared.filter((u) => u.compareWindow).map((u) => u.member);
   if (keys.length === 0) return '';
-  const quoted = keys.map((k) => `"${k}"`).join(', ');
-  return ` ${keys.length === 1 ? 'The dimension' : 'The dimensions'} ${quoted} ${keys.length === 1 ? 'is' : 'are'} the date key of `
-    + 'this query\'s comparison window (`compareTo`): a dashboard compare widget lowers its date window into '
-    + '`timeDimensions` under the filtered field\'s name, which is usually the dashboard date-range field. '
-    + `Declare a date dimension named ${quoted} on the dataset (over that field), or set the widget's `
-    + '`compareTo.dimension` to a declared date dimension (the widget then compares only over a window its '
-    + 'own filter states on that dimension).';
+  const quoted = keys.map((k) => `"${k}"`);
+  const list = quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+  const one = keys.length === 1;
+  return ` ${one ? `The dimension ${list} is the date key` : `The dimensions ${list} are the date keys`} of `
+    + `this query's comparison window (\`compareTo\`): a dashboard compare widget lowers `
+    + (one
+      ? 'its date window into `timeDimensions` under the filtered field\'s name, '
+      : 'every date window its filter states into `timeDimensions`, each under its filtered field\'s name, ')
+    + 'which is usually the dashboard date-range field. '
+    + (one
+      ? `Declare a date dimension named ${list} on the dataset (over that field).`
+      : `Declare a date dimension for each on the dataset, named ${list}, each over the field of the same name.`);
 }
 
 /** `measure "x", dimension "y"` — the members a refusal names, in request order. */

@@ -230,8 +230,63 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(messageOf(e)).toContain(
       'The dimension "closed_on" is the date key of this query\'s comparison window (`compareTo`)',
     );
-    expect(messageOf(e)).toContain('Declare a date dimension named "closed_on" on the dataset (over that field)');
-    expect(messageOf(e)).toContain("or set the widget's `compareTo.dimension` to a declared date dimension");
+    expect(messageOf(e)).toContain('Declare a date dimension named "closed_on" on the dataset (over that field).');
+    expect(messageOf(e)).not.toContain('compareTo.dimension');
+    expect(reads).toEqual([]);
+  });
+
+  it('a comparison whose compareTo.dimension names a declared dimension still refuses a second, undeclared dated key, with the one remedy', async () => {
+    // Setting `compareTo.dimension` is no remedy: the renderer still lowers the
+    // dashboard window on the undeclared field beside the declared one.
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        {
+          measures: ['revenue'],
+          timeDimensions: [
+            { dimension: 'close_month', dateRange: ['2026-01-01', '2026-03-31'] },
+            { dimension: 'closed_on', dateRange: ['2026-01-01', '2026-03-31'] },
+          ],
+          compareTo: { kind: 'previousPeriod', dimension: 'close_month' },
+        } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'closed_on', param: 'timeDimensions', cube: 'pipeline' });
+    expect(messageOf(e)).toContain('The dataset "pipeline" does not declare the dimension "closed_on".');
+    expect(messageOf(e)).toContain(
+      'The dimension "closed_on" is the date key of this query\'s comparison window (`compareTo`)',
+    );
+    expect(messageOf(e)).toContain('Declare a date dimension named "closed_on" on the dataset (over that field).');
+    expect(messageOf(e)).not.toContain('compareTo.dimension');
+    expect(reads).toEqual([]);
+  });
+
+  it('two undeclared comparison date keys are named together, in the plural, with one remedy', async () => {
+    const { service, reads } = await boot();
+    const e = await service
+      .queryDataset(
+        PIPELINE,
+        {
+          measures: ['revenue'],
+          timeDimensions: [
+            { dimension: 'closed_on', dateRange: ['2026-01-01', '2026-03-31'] },
+            { dimension: 'created_at', dateRange: ['2026-01-01', '2026-03-31'] },
+          ],
+          compareTo: { kind: 'previousYear' },
+        } as never,
+        ADMIN,
+      )
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'closed_on', param: 'timeDimensions', cube: 'pipeline' });
+    expect(messageOf(e)).toContain(
+      'The dimensions "closed_on" and "created_at" are the date keys of this query\'s comparison window (`compareTo`)',
+    );
+    expect(messageOf(e)).toContain(
+      'Declare a date dimension for each on the dataset, named "closed_on" and "created_at", each over the field of the same name.',
+    );
+    expect(messageOf(e)).not.toContain('compareTo.dimension');
     expect(reads).toEqual([]);
   });
 
