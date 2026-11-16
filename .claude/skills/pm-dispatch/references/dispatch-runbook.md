@@ -127,7 +127,7 @@
 ## 卡线程(`mode:thread`)
 
 - 席位会话是项目线程(载 coordinator 通道工具)⇒ M 及以上、p1、`security` 卡一卡一线程。
-- 大卡同上且先于下行,分区亦然,修复轮随卡;大卡 = L/XL,或欠全量验证(如 narrowing 臂 dogfood),
+- 大卡同上,先于下行,分区亦然,修复轮随卡;大卡 = L/XL,或欠全量验证(`!` 标题或 narrowing 臂),
   或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径。
 - S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。

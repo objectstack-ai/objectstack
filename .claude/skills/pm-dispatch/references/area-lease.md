@@ -29,7 +29,7 @@
 
 - 区会话署本席签名,签名第三位与 `Session:` 皆填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
 - 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `lease:*` ⇒ 不碰。
-- 认领前三查必过,各写认领评论一行;任一不过 ⇒ 不认领、不派 dev,当即交席位作决策:
+- 认领前三查必过,各写认领评论一行;任一不过或遇大卡 ⇒ 不认领、不派 dev,当即交席位:
   - `Pre-claim lane:` 修复所改路径属哪条车道,点名依据路径(碰他道路径照下文留道行)。
   - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」与热文件,逐个已合或空闲。
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
