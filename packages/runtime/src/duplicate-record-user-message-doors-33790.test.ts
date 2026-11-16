@@ -45,6 +45,9 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/metadata';
 
 const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
