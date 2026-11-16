@@ -10,9 +10,10 @@ import type { SemanticMigration } from '../../types.js';
 // or refused, and whether a gated action still needs a person is the author's
 // judgement. Written conditionally on purpose: the release that first carried
 // this entry (spec 18.5.0) still gated on `confirm: true`. The switch is keyed
-// on the hand-off, the step the MCP doors take (#33690), never on elicitation,
-// which a later release adds (review nit 2 on PR #34202); the same switch
-// retires the member from both tools' input (#34209, ruling 6909355256).
+// on the hand-off, the step every MCP door takes (#33690), never on
+// elicitation (review nit 2 on PR #34202), which only a door that can carry
+// the question takes (#33712: stdio first, ahead of the hand-off); the same
+// switch retires the member from both tools' input (#34209, ruling 6909355256).
 export const entry: SemanticMigration = {
   id: 'action-requires-confirmation-elicited',
   surface:
@@ -31,7 +32,8 @@ export const entry: SemanticMigration = {
     + '`resume_run` at all: a call that carries it is refused at the tool, on every action, so the caller '
     + 'resends without it. A runtime whose changelog also says the MCP doors confirm by elicitation asks the '
     + 'person in the MCP client instead (`elicitation/create`, form mode) when the client advertised the '
-    + '`elicitation` capability at `initialize`.',
+    + '`elicitation` capability at `initialize` and the connection can carry the question: accept runs the '
+    + 'call, and decline, dismissal or no answer in time refuses it.',
   reason:
     '`confirm: true` was the caller\'s own claim that a person approved, and nothing could check it: an agent '
     + 'could send it for an irreversible action on reading the person\'s instruction as consent, and measured '
@@ -43,8 +45,9 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'Now: for every action declaring `ai.requiresConfirmation: true`, decide again that a person must approve '
     + 'each AI call; if not, declare `false` knowingly. Once your runtime hands such a call to the person (its '
-    + 'changelog says so; a refusal then carries `details.reason`): any caller gets a pending answer and the '
-    + 'person decides in the app, provided the host runs a pending-confirmation service; a script or agent that '
+    + 'changelog says so; a refusal then carries `details.reason`): an MCP client that supports elicitation, on '
+    + 'a connection that can carry it, has the person asked in place; any other caller gets a pending answer and '
+    + 'the person decides in the app, provided the host runs a pending-confirmation service; a script or agent that '
     + 'ran such an action unattended on its own `confirm: true` no longer runs it, and a person does; and no '
     + 'client sends `confirm` to `run_action` or `resume_run`, which refuse it. Done when no caller sends '
     + '`confirm` to those two tools on a runtime that has switched.',

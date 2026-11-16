@@ -208,10 +208,14 @@ create/update payload.
   \`recordId\` for record-scoped actions and \`params\` for declared inputs;
   \`objectName\` only disambiguates a name shared by multiple objects. An
   action \`list_actions\` reports as \`requiresConfirmation\` may need a
-  person's approval, which you cannot give: when its author declared it, the
-  call does not run, and you are answered \`status: "pending_confirmation"\`
-  with a \`pendingId\` — the person approves or rejects it in the app, so
-  relay the message and do not retry. A server that cannot hand it off
+  person's approval, which you cannot give: when its author declared it and
+  your client supports elicitation on a connection that can carry it, the
+  person is asked in your client — accept runs the call once, and any other
+  answer refuses it (\`ACTION_CONFIRMATION_REQUIRED\`); do not retry unless
+  they ask. Otherwise the call does not run, and you are answered
+  \`status: "pending_confirmation"\` with a \`pendingId\` — the person
+  approves or rejects it in the app, so relay the message and do not retry.
+  A server that cannot hand it off
   refuses it (\`ACTION_CONFIRMATION_REQUIRED\`, \`details.reason\`
   \`no_confirmation_service\`) and nothing runs: the person performs it in the
   app. Never send \`confirm\`: the tool refuses a call that carries it, on
@@ -226,8 +230,8 @@ create/update payload.
   the names in \`screen.fields\`. The run completes, or pauses again on its next
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
-  (the hand-off to the person for an action its author declared
-  \`requiresConfirmation\`, the refusal of a call that sends \`confirm\`,
+  (the person's confirmation, in your client or in the app, for an action its
+  author declared \`requiresConfirmation\`, the refusal of a call that sends \`confirm\`,
   and its refusal under an AI service account's own key whatever the call sends).
 
 ## Conventions & gotchas

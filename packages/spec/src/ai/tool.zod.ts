@@ -103,10 +103,13 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '`action.ai.requiresConfirmation: true` — the flag the platform\'s confirmation ' +
     'CONTRACT is written against (`AI_ACTION_CONFIRMATION_CAPABILITY`, ' +
     '`@objectstack/spec/contracts`), and that contract is ENFORCED: a person confirms, ' +
-    'never the agent. An AI-facing call on an action declaring the flag does not run on ' +
-    'that call. The MCP `run_action` and `resume_run` tools hand it to the person the ' +
-    'caller acts for, who approves or rejects it in the app, and answer ' +
-    '`status: "pending_confirmation"` with a pending id; a server with no ' +
+    'never the agent. On the MCP `run_action` and `resume_run` tools a call on an action ' +
+    'declaring the flag runs only once the person the caller acts for confirms it: in ' +
+    'the client, when the client supports elicitation and the connection can carry the ' +
+    'question (accept runs the call; decline, dismissal or no answer in time refuses it ' +
+    'with `ACTION_CONFIRMATION_REQUIRED`), and in the app otherwise: the call does not ' +
+    'run, it is handed to the person, who approves or rejects it there, and the tool ' +
+    'answers `status: "pending_confirmation"` with a pending id; a server with no ' +
     'pending-confirmation service refuses it with `ACTION_CONFIRMATION_REQUIRED` (428), ' +
     'and the person performs the action in the app. The agent cannot confirm for the ' +
     'person: `confirm: true` is an unverifiable caller claim, and those two tools refuse ' +

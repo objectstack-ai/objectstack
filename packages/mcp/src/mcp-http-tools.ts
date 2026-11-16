@@ -2143,9 +2143,11 @@ function strictToolInput<T extends z.ZodRawShape>(
 const RETIRED_CONFIRMATION_MEMBER: Readonly<Record<string, string>> = {
   [AI_ACTION_CONFIRMATION_MEMBER]:
     `\`${AI_ACTION_CONFIRMATION_MEMBER}\` is not accepted here: you cannot confirm an action for the person. `
-    + 'Confirmation happens in the app, by the person you act for: an action its author declared '
-    + 'ai.requiresConfirmation: true is handed to them and answered status "pending_confirmation" (or, where the '
-    + 'server cannot hand it off, refused ACTION_CONFIRMATION_REQUIRED and performed in the app), and every other '
+    + 'Confirmation happens in the app, by the person you act for, or in your client when it supports '
+    + 'elicitation and this connection can carry the question: an action its author declared '
+    + 'ai.requiresConfirmation: true is asked of them there, or handed to them and answered status '
+    + '"pending_confirmation" (or, where the server cannot hand it off, refused ACTION_CONFIRMATION_REQUIRED and '
+    + 'performed in the app), and every other '
     + `action runs without it. Resend this call without \`${AI_ACTION_CONFIRMATION_MEMBER}\`.`,
 };
 

@@ -214,9 +214,12 @@ export interface AIToolDefinition {
  * and the runtime action door's own request object — the `input` argument of
  * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
  * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
- * that object from. Each grew the member in the change that enforced it, so
- * neither ever accepted-and-ignored it; the MCP tool input has since retired
- * it (below), and the runtime request keeps it for the host door. A third door
+ * that object from. Each grew the member in the change that enforced it. The
+ * MCP tool input has since retired it (below). The runtime request keeps it
+ * for the host door, which reads it; on the MCP bridge path the same request
+ * type still accepts it but nothing reads it there (the amended contract asks
+ * the person instead), and no MCP call can supply it, because the tool refuses
+ * the member before the bridge is called. A third door
  * carries the same member
  * at the top level of its input: the MCP `delete_record` tool (see
  * {@link AIActionConfirmation}, "The second gate"). Two placements were
