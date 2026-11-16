@@ -3386,9 +3386,24 @@ export class SecurityPlugin implements Plugin {
    * fields, which it is not served at all.
    */
   async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
-    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
+    return this.computeQueryableFields(object, context, { fallbackOnEmptySets: false });
+  }
+
+  /**
+   * The body of {@link getQueryableFields}: every schema field the query-guard
+   * derivation does not mark non-queryable — the fields this caller is served
+   * WHOLE (readable, and not masked). `hops: false` leaves out the computed
+   * fields withheld for what they read through a reference: the target-side
+   * ask of {@link resolveHopWithheldFields}, one hop and never two.
+   */
+  private async computeQueryableFields(
+    object: string,
+    context: any,
+    options: { fallbackOnEmptySets: boolean; hops?: boolean },
+  ): Promise<string[] | undefined> {
+    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: options.fallbackOnEmptySets });
     if (mask.kind === 'answer') return mask.fields;
-    const queryGuard = mask.readQueryGuardPerms(await mask.readHopWithheld());
+    const queryGuard = mask.readQueryGuardPerms(options.hops === false ? [] : await mask.readHopWithheld());
     return mask.allFields.filter((f) => queryGuard[f]?.readable !== false);
   }
 
@@ -6264,10 +6279,12 @@ export class SecurityPlugin implements Plugin {
    * read THROUGH a reference: field-level security covers what a value is
    * computed from, on the referenced record too. A computed field reading
    * `record.ref.leaf` is withheld when `leaf` is a field the object `ref`
-   * points at declares and the caller may not read there — judged by that object's own read projection
-   * ({@link computeReadableFields}, which folds that object's computed fields
-   * in turn), or not determinable there (fail closed). The engine serves one
-   * hop, so the target's projection is asked without hops of its own.
+   * points at declares and the caller is not served WHOLE there — it may not
+   * read it, or is served it masked — judged by that object's own query
+   * projection ({@link computeQueryableFields}: readable minus masked, that
+   * object's computed fields folded in turn), or not determinable there (fail
+   * closed). The engine serves one hop, so the target's projection is asked
+   * without hops of its own.
    *
    * Every reader of the field map takes this set beside the posture: the
    * result masker (step 4), the query guard (steps 2.5b and 2.9,
@@ -6282,7 +6299,7 @@ export class SecurityPlugin implements Plugin {
     if (!postureHasComputedHops(secMeta)) return Promise.resolve(new Set());
     return resolveHopWithheldFields.call(
       {
-        readLocalReadableFields: (object: string, ctx: unknown) => this.computeReadableFields(object, ctx, { ...options, hops: false }),
+        readServedWholeFields: (object: string, ctx: unknown) => this.computeQueryableFields(object, ctx, { ...options, hops: false }),
         readFieldNames: (object: string) => this.getObjectFieldNames(this.metadata, object, this.ql),
       },
       secMeta,

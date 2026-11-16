@@ -10,18 +10,26 @@ Skills-docs: none — `skills/objectstack-data` teaches a rate as a `formula` ov
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row changes: what moves is which computed fields the field-level security read mask and query guard withhold from a caller, so there is nothing for a migration to rewrite and no tombstone. -->
 
-**BREAKING** for a caller whose permission sets hide a field that a computed field reads. Field-level security now covers what a field's value is computed from: a caller who cannot read a field, or is served it only partially masked, cannot read any computed field — a `formula`, or a stored field declaring an `expression` — whose expression reads that field, on its own record, through another computed field, or on the record it reads through a reference. The computed field is withheld exactly as the field it reads is.
+**BREAKING** for a caller whose permission sets withhold a field that a computed field reads. Field-level security now covers what a field's value is computed from: a computed field — a `formula`, or a stored field declaring an `expression` — is withheld from a caller who is not served whole a field it reads:
 
-Who moves: a role that read such a computed field — a role whose set marks a field `readable: false`, or that fails a field's `requiredPermissions`, or is served a field under its `maskingRule`, and that read a computed field over that field.
+- a field of its own record the caller may not read (a permission set marks it `readable: false`, or the caller fails its `requiredPermissions`) or is served masked (its `maskingRule`), whether the expression names it directly, inside a function such as `label()`, or through another computed field;
+- a field the referenced object declares, on the record the expression reads through one reference, that the caller may not read or is served masked there, directly or through a formula of the referenced object.
 
-For that caller, after this release:
+Who moves:
 
-- `find` / `findOne`, and the record an `insert` / `update` echoes back, carry no key for the computed field, as they carry none for the field it reads. Before, the computed field was served with its value (or, read through a reference, with no value).
-- filtering, sorting, grouping or aggregating by a stored computed field over such a field is refused `403 PERMISSION_DENIED`, as it already was by the field it reads. Before, it was admitted.
-- the read projection (`getReadableFields`, and with it the export header, the object schema the metadata plane serves, and every redaction that reads it) and the query projection (`getQueryableFields`) no longer list the computed field; the explain `fls` layer reports it masked from responses.
-- a computed field over a field the caller is served partially masked carries no key: a mask written for the field it reads does not describe the value computed from it. Before, it was served in full.
-- a computed field whose expression reads the record in a way no field name describes (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL) is withheld whenever the caller may not read some other field of the object.
+- a holder of a permission set that withholds such a field, who read a computed field over it;
+- a delegate acting on behalf of a delegator whose permission sets withhold such a field;
+- every public-form submitter: the record echoed back to the submitter carries no computed field that reads through a reference, whatever the submitter could read there;
+- a caller who reads a computed field whose expression reads the record in a way no field name describes (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL), while some other field of the object is not served whole to that caller.
 
-The fix, when the role should read the computed field: grant the role read on every field the computed field reads (or the capability its `requiredPermissions` names). When it should not, nothing is owed.
+For that caller, after this release, the computed field is withheld exactly as the field it reads is:
 
-Unchanged: a computed field over fields the caller may read is served and listed as before; a system context and a View All / Modify All holder read every field and every computed field; a caller holding several sets reads a computed field when any set grants read on its inputs; the aggregate refusal of a field the caller cannot read is as before.
+- `find` / `findOne`, a projection naming it, and the record an `insert` / `update` echoes back carry no key for it. Before, it was served with its value.
+- filtering, sorting, grouping or aggregating by a stored computed field over such a field is refused `403 PERMISSION_DENIED`. Before, it was admitted. (A `formula` is refused in those positions for every caller, as before.)
+- the read projection (`getReadableFields`, and with it the export header and the object schema the metadata plane and `describe_object` serve) and the query projection (`getQueryableFields`) leave it out; the explain `fls` layer reports it masked from responses.
+
+A field the referenced object does not declare is no field to withhold: a formula naming one reads `null`, as before.
+
+The fix, when the caller should read the computed field: grant the caller's permission set read on every field the computed field reads, unmasked (the capability a field's `requiredPermissions` names, or the one that lifts its `maskingRule`). When it should not, nothing is owed.
+
+Unchanged: a computed field over fields the caller is served whole is served and listed as before; a system context and a View All / Modify All holder read every field and every computed field; a caller holding several permission sets reads a computed field when any set grants read on its inputs; the aggregate refusal of a field the caller cannot read is as before.

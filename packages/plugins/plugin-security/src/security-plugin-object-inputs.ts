@@ -642,7 +642,7 @@ export function extractTargetField(
  */
 export async function resolveHopWithheldFields(
   this: {
-    readLocalReadableFields: (object: string, context: unknown) => Promise<string[] | undefined>;
+    readServedWholeFields: (object: string, context: unknown) => Promise<string[] | undefined>;
     readFieldNames: (object: string) => Promise<ReadonlySet<string> | null>;
   },
   secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
@@ -651,17 +651,18 @@ export async function resolveHopWithheldFields(
   const out = new Set<string>();
   const inputs = secMeta.computedFieldInputs ?? {};
   const targets = secMeta.computedHopTargets ?? {};
-  // Per target: the fields it declares, and the ones this caller may read
-  // there. A leaf the target does not declare is no field to withhold — the
-  // engine answers it `null` with its own fault — so only a DECLARED leaf the
-  // caller may not read withholds; a target whose answer cannot be had
-  // withholds every computed field reading through it (fail closed).
-  const verdicts = new Map<string, Promise<{ declared: ReadonlySet<string>; readable: ReadonlySet<string> } | null>>();
+  // Per target: the fields it declares, and the ones this caller is served
+  // WHOLE there (readable and not masked). A leaf the target does not declare
+  // is no field to withhold — the engine answers it `null` with its own fault
+  // — so only a DECLARED leaf the caller is not served whole withholds; a
+  // target whose answer cannot be had withholds every computed field reading
+  // through it (fail closed).
+  const verdicts = new Map<string, Promise<{ declared: ReadonlySet<string>; whole: ReadonlySet<string> } | null>>();
   const verdictOn = (object: string) => {
     let hit = verdicts.get(object);
     if (!hit) {
-      hit = Promise.all([this.readFieldNames(object), this.readLocalReadableFields(object, context)]).then(
-        ([declared, fields]) => (declared && Array.isArray(fields) ? { declared, readable: new Set(fields) } : null),
+      hit = Promise.all([this.readFieldNames(object), this.readServedWholeFields(object, context)]).then(
+        ([declared, fields]) => (declared && Array.isArray(fields) ? { declared, whole: new Set(fields) } : null),
         () => null,
       );
       verdicts.set(object, hit);
@@ -673,7 +674,7 @@ export async function resolveHopWithheldFields(
       const target = targets[ref];
       if (!target) continue;
       const verdict = await verdictOn(target);
-      if (verdict === null || [...leaves].some((leaf) => verdict.declared.has(leaf) && !verdict.readable.has(leaf))) {
+      if (verdict === null || [...leaves].some((leaf) => verdict.declared.has(leaf) && !verdict.whole.has(leaf))) {
         out.add(field);
         break;
       }

@@ -124,21 +124,26 @@ request arrived (REST, SDK, raw ObjectQL call).
 **On read** — `find` / `findOne` results have non-readable fields
 stripped from every record before the response leaves the engine.
 
-**Computed fields follow their inputs** — a caller who cannot read a
-field cannot read any computed field (a `formula`, or a stored field
-with an `expression`) whose expression reads it: on its own record,
-through another computed field, or on the record it reads through a
-reference. Such a computed field is withheld exactly as the field it
-reads is: stripped from records, refused as a filter, sort, group or
-aggregate input, and left out of the fields served to that caller,
-including the object schema. Where that field is served partially
-masked, the computed field is stripped whole. A computed field whose
-expression reads the record in a way no field name describes (a
-computed key such as `record[record.k]`, a method or macro on `record`,
-or `record` passed whole to a function) is withheld whenever the caller
-may not read any other field of the object. To let a permission set's
-holders read a computed field, grant that set read on every field the
-expression reads.
+**Computed fields follow their inputs** — a computed field (a `formula`,
+or a stored field with an `expression`) is withheld from a caller who is
+not served whole a field it reads: a field of its own record the caller
+may not read (a permission set marks it `readable: false`, or the caller
+fails its `requiredPermissions`) or is served masked (its `maskingRule`),
+whether the expression names it directly, inside a function such as
+`label()`, or through another computed field; or a field the referenced
+object declares, on the record the expression reads through one
+reference, that the caller may not read or is served masked there. A
+withheld computed field is stripped from records, refused as a filter,
+sort, group or aggregate input (a stored one; a `formula` is refused there
+for every caller), and left out of the fields served to that caller,
+including the object schema. A computed field whose expression reads the
+record in a way no field name describes (a computed key such as
+`record[record.k]`, a method or macro on `record`, or `record` passed whole
+to a function) is withheld whenever some other field of the object is not
+served whole to that caller. A record echoed back to a public-form
+submitter carries no computed field that reads through a reference. To
+let a permission set's holders read a computed field, grant that set read
+on every field the expression reads, unmasked.
 
 **On write** — `insert` / `update` requests are checked **before** the
 operation reaches the driver. If the payload contains any field the
