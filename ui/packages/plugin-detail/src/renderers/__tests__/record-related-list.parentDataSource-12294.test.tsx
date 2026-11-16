@@ -32,6 +32,7 @@ import { RecordContextProvider, SchemaRenderer, SchemaRendererProvider, notifyDa
 import type { DataSource, DeclaredNode } from '@object-ui/types';
 import { I18nProvider } from '@object-ui/i18n';
 import '../../index';
+import { RelatedCountStore } from '@object-ui/components';
 
 /** `RelatedList` never reads over the network with an adapter; answered anyway, as the sibling suites do. */
 vi.stubGlobal('fetch', (async () => new Response(null, { status: 501 })) as unknown as typeof globalThis.fetch);
@@ -298,5 +299,112 @@ describe('record:related_list — the parent-read panel title reads the bundle (
     expect(panel.querySelector('p.font-medium')?.textContent).toBe('无法读取此相关列表的父记录');
     // The thrown message is still shown beneath it, as thrown.
     expect(panel).toHaveTextContent('upstream exploded');
+  });
+});
+
+/**
+ * objectstack#34250 — a `page:tabs` badge for a related list bound by
+ * `parentDataSource`. The strip derives a badge by probing each related list
+ * against the record context around it, and an app page has none, so such a
+ * list drew no badge: its count showed only once its tab was opened. The list
+ * now says the number it holds through its panel's count channel (the
+ * objectstack#26613 channel), and its tab is kept mounted while inactive so it
+ * can. Lists whose parent is the page's record are probed exactly as before.
+ *
+ * The REAL `page:tabs` (from `@object-ui/components`) around the REAL block, so
+ * the badge is read off the tab trigger the reader sees.
+ */
+describe('page:tabs badges a related list bound by `parentDataSource` (objectstack#34250)', () => {
+  /** Two members under the bound parent `env-1`, one under `env-2`, one under the page record. */
+  const TEAM: Row[] = [
+    { id: 'm-1', name: 'Alice', environment_id: 'env-1', environment_code: 'FIRST' },
+    { id: 'm-4', name: 'Dave', environment_id: 'env-1', environment_code: 'FIRST' },
+    { id: 'm-2', name: 'Bob', environment_id: 'env-2', environment_code: 'SECOND' },
+    { id: 'm-3', name: 'Carol', environment_id: 'env-page', environment_code: 'PAGE' },
+  ];
+  const BOUND = { object: PARENT_OBJECT, filter: PRODUCTION, sort: BY_RANK };
+
+  /** A strip whose FIRST tab is active and whose second holds the list under test. */
+  const tabs = (list: Row, membersItem: Row = {}) => ({
+    type: 'page:tabs',
+    id: 'team_tabs',
+    items: [
+      { label: 'Overview', value: 'overview', children: [] },
+      { label: 'Members', value: 'members', children: [list], ...membersItem },
+    ],
+  });
+
+  const triggerText = (value: string) =>
+    Array.from(document.querySelectorAll('[role="tab"]')).find((t) => t.textContent?.startsWith(value))?.textContent;
+
+  afterEach(() => {
+    RelatedCountStore._reset();
+  });
+
+  it('on an app page the Members tab is badged with the bound parent\'s rows before it is opened', async () => {
+    const adapter = makeAdapter({ parents: PARENTS, children: TEAM });
+    mountOnAppPage(tabs(node(BOUND)), adapter);
+
+    await waitFor(() => expect(triggerText('Members')).toBe('Members2'));
+    // Not opened: the first tab is still the active one.
+    expect(screen.getByRole('tab', { name: /Members/ })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('tab', { name: /Overview/ })).toHaveAttribute('aria-selected', 'true');
+    // Every child read is scoped to the bound parent; nothing was counted
+    // against a parent the page does not have.
+    const childReads = readsOf(adapter, CHILD_OBJECT);
+    expect(childReads.length).toBeGreaterThan(0);
+    for (const params of childReads) expect(params.$filter).toEqual({ environment_id: 'env-1' });
+  });
+
+  it('a create, then a delete, on the child object moves the badge', async () => {
+    const store = { parents: PARENTS, children: TEAM.map((r) => ({ ...r })) };
+    const adapter = makeAdapter(store);
+    mountOnAppPage(tabs(node(BOUND)), adapter);
+    await waitFor(() => expect(triggerText('Members')).toBe('Members2'));
+
+    // A create under the bound parent, announced the way every dataSource
+    // write is (the mutation bridge calls the same bus).
+    store.children.push({ id: 'm-5', name: 'Erin', environment_id: 'env-1', environment_code: 'FIRST' });
+    act(() => notifyDataChanged({ objectName: CHILD_OBJECT, recordId: 'm-5' }));
+    await waitFor(() => expect(triggerText('Members')).toBe('Members3'));
+
+    store.children = store.children.filter((r) => r.id !== 'm-1');
+    act(() => notifyDataChanged({ objectName: CHILD_OBJECT, recordId: 'm-1' }));
+    await waitFor(() => expect(triggerText('Members')).toBe('Members2'));
+  });
+
+  it('an authored `count` wins, and the tab is not mounted to count', async () => {
+    const adapter = makeAdapter({ parents: PARENTS, children: TEAM });
+    mountOnAppPage(tabs(node(BOUND), { count: 7 }), adapter);
+
+    await waitFor(() => expect(triggerText('Members')).toBe('Members7'));
+    // Settle a tick: nothing in the inactive tab reads anything.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(readsOf(adapter, PARENT_OBJECT)).toEqual([]);
+    expect(readsOf(adapter, CHILD_OBJECT)).toEqual([]);
+    expect(triggerText('Members')).toBe('Members7');
+  });
+
+  it('CONTROL — on a record page an unbound list is probed against the page record, and its tab is not mounted', async () => {
+    const adapter = makeAdapter({ parents: PARENTS, children: TEAM });
+    mountOnRecordPage(tabs(node()), adapter);
+
+    await waitFor(() => expect(triggerText('Members')).toBe('Members1'));
+    // The strip's own one-row count probe, keyed on the page's record.
+    const childReads = readsOf(adapter, CHILD_OBJECT);
+    expect(childReads).toHaveLength(1);
+    expect(childReads[0]).toMatchObject({ $top: 1, $filter: { environment_id: 'env-page' } });
+    // The list itself never mounted: its row is not drawn.
+    expect(screen.queryByText('Carol')).not.toBeInTheDocument();
+  });
+
+  it('on a record page a bound list is counted for ITS parent, never probed against the page record', async () => {
+    const adapter = makeAdapter({ parents: PARENTS, children: TEAM });
+    mountOnRecordPage(tabs(node(BOUND)), adapter);
+
+    await waitFor(() => expect(triggerText('Members')).toBe('Members2'));
+    for (const params of readsOf(adapter, CHILD_OBJECT)) expect(params.$filter).toEqual({ environment_id: 'env-1' });
   });
 });
