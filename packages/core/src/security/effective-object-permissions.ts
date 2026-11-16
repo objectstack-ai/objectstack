@@ -1038,20 +1038,54 @@ export function holdsSuperuserBypass(
  * narrowed by a declared mask as before. Applied to the fields the merge
  * already holds an entry for; an absent field is unrestricted anyway.
  *
- * Both merges apply it after their declared-entry votes —
+ * [ADR-0066 D2 ⑧ note of 2026-11-15] With `fieldName`, the vote is the one cast
+ * on that field: a set that holds View All on the object WITHOUT Modify All
+ * casts no read vote on a field its OWN row declares `readable: false`
+ * ({@link declaresOwnReadMask}), so a set can grant View All on an object and
+ * still hide a field of it from its holders. Every other vote stands:
+ * another set's View All or Modify All still reads the field (the admin case
+ * above), and a set holding Modify All votes on every field as before, its
+ * own rows included. View All never granted an edit, so an edit lock beside
+ * it binds as it always did. Without `fieldName` the answer is the object-wide
+ * one, for a reader that asks only whether an edit vote exists.
+ *
+ * Both merges apply it per field after their declared-entry votes —
  * `PermissionEvaluator.getFieldPermissions` per object and
  * {@link buildEffectiveFieldPermissions} for every object.
  */
 export function superuserFieldVote(
-  sets: ReadonlyArray<{ objects?: Record<string, unknown> | null } | null | undefined>,
+  sets: ReadonlyArray<
+    { objects?: Record<string, unknown> | null; fields?: Record<string, unknown> | null } | null | undefined
+  >,
   objectName: string,
+  fieldName?: string,
 ): { readable: true; editable: boolean } | null {
   let read = false;
   for (const ps of sets) {
     if (holdsSuperuserBypass(ps, objectName, 'modify')) return { readable: true, editable: true };
-    if (!read && holdsSuperuserBypass(ps, objectName, 'view')) read = true;
+    if (read || !holdsSuperuserBypass(ps, objectName, 'view')) continue;
+    if (fieldName !== undefined && declaresOwnReadMask(ps, objectName, fieldName)) continue;
+    read = true;
   }
   return read ? { readable: true, editable: false } : null;
+}
+
+/**
+ * [ADR-0066 D2 ⑧ note of 2026-11-15] Does `set`'s own field-permission row on
+ * `<objectName>.<fieldName>` spell `readable: false`? Explicit only: an
+ * omitted `readable` parses to `true`, so the default is never a mask. Read
+ * row-blind, as the read bit is everywhere (the spec refuses `readable: false`
+ * beside a `when`).
+ */
+function declaresOwnReadMask(
+  set: { fields?: Record<string, unknown> | null } | null | undefined,
+  objectName: string,
+  fieldName: string,
+): boolean {
+  const fields = set?.fields;
+  if (!fields || typeof fields !== 'object') return false;
+  const entry = fields[`${objectName}.${fieldName}`] as FieldPermissionEntryLike | null | undefined;
+  return !!entry && typeof entry === 'object' && entry.readable === false;
 }
 
 /** A resolved permission set, as far as the field merge reads it. */
@@ -1072,7 +1106,9 @@ export interface EffectiveFieldPermissionsInputSet {
  * admits on the rows the condition does not name.
  *
  * A set holding the super-user bypass on an object then votes on every field
- * of it ({@link superuserFieldVote}, ruling of record 6573563853).
+ * of it ({@link superuserFieldVote}, ruling of record 6573563853), except
+ * that a View All set casts no read vote on a field its own row declares
+ * `readable: false` (ADR-0066 D2 ⑧ note of 2026-11-15).
  *
  * Every entry is a FRESH object, as {@link buildEffectiveObjectPermissions}'s are.
  */
@@ -1092,15 +1128,13 @@ export function buildEffectiveFieldPermissions(
       fields[key] = acc;
     }
   }
-  // [Ruling of record 6573563853] The super-user vote, per object the map
-  // names — the same function `getFieldPermissions` applies per object.
-  const votes = new Map<string, ReturnType<typeof superuserFieldVote>>();
+  // [Ruling of record 6573563853; ADR-0066 D2 ⑧ note of 2026-11-15] The
+  // super-user vote, per field the map names — the same function
+  // `getFieldPermissions` applies per field of its object.
   for (const [key, acc] of Object.entries(fields)) {
     const dot = key.indexOf('.');
     if (dot <= 0) continue;
-    const objectName = key.slice(0, dot);
-    if (!votes.has(objectName)) votes.set(objectName, superuserFieldVote(sets, objectName));
-    const vote = votes.get(objectName);
+    const vote = superuserFieldVote(sets, key.slice(0, dot), key.slice(dot + 1));
     if (!vote) continue;
     acc.readable = true;
     if (vote.editable) acc.editable = true;
