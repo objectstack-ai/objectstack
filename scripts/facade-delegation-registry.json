@@ -183,6 +183,13 @@
       "baseCommit": "63db7240aa",
       "maxLines": 10071,
       "ruling": "6897467376"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "baseLines": 6326,
+      "baseCommit": "c27f4ab0d6",
+      "maxLines": 6426,
+      "ruling": "6897467376"
     }
   ]
 }
