@@ -84,6 +84,66 @@ export interface SignInAttempt {
 
 const signInAttemptState = defineRequestState<SignInAttempt | undefined>(() => undefined);
 
+/** The sentence the explicit `403 ACCOUNT_LOCKED` carries. */
+export const ACCOUNT_LOCKED_MESSAGE =
+  'This account is temporarily locked after too many failed sign-in ' +
+  'attempts. Try again later or ask an administrator to unlock it.';
+
+/**
+ * The answer password sign-in gives a locked account under the deployment's
+ * `lockoutRefusal`, as an error to throw: `'explicit'` is `403
+ * ACCOUNT_LOCKED`; anything else is the answer a wrong password gets at
+ * `/sign-in/email`, better-auth's own `401 INVALID_EMAIL_OR_PASSWORD`. Its
+ * sentence is read off the vendor's constant, and its code is the vendor's
+ * spelling, which `locked-account-every-sign-in-door.test.ts` holds equal to
+ * the answer `/sign-in/email` itself gives, so the two never part.
+ */
+export async function lockedAccountRefusal(lockoutRefusal: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  if (lockoutRefusal === 'explicit') {
+    return new APIError('FORBIDDEN', { message: ACCOUNT_LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' });
+  }
+  const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  return new APIError('UNAUTHORIZED', {
+    message: BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD.message,
+    code: 'INVALID_EMAIL_OR_PASSWORD',
+  });
+}
+
+/**
+ * What the running request is, as the global before-hook read it before the
+ * endpoint ran (`auth-manager-sign-in-lockout.ts`, `recordLockoutRequest`):
+ * its endpoint `path`, and `holder`, the account whose live session of record
+ * (its stored `sys_session` row, unexpired) the request presented, when it
+ * presented one that could be read. The session-creation refusal reads this
+ * record, so it judges the same request where the endpoint context does not
+ * reach the database hooks.
+ */
+export interface LockoutRequest {
+  readonly path: string;
+  readonly holder?: string;
+}
+
+const lockoutRequestState = defineRequestState<LockoutRequest | undefined>(() => undefined);
+
+/** Record what the running request is. Never throws. */
+export async function recordLockoutRequestState(request: LockoutRequest): Promise<void> {
+  try {
+    await lockoutRequestState.set(request);
+  } catch {
+    /* no request state is open: nothing is recorded, so nothing is exempted */
+  }
+}
+
+/** What the running request is, if the before-hook recorded it. Never throws. */
+export async function readLockoutRequestState(): Promise<LockoutRequest | undefined> {
+  try {
+    return await lockoutRequestState.get();
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Record the gate's verdict for the request that is running (`undefined`: this
  * attempt has none, whatever an earlier call recorded). `false` when no request

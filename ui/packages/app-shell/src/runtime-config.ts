@@ -39,6 +39,13 @@ export interface RuntimeFeatures {
   /** `/api/v1/marketplace/*` is reachable from this runtime. */
   marketplace: boolean;
   /**
+   * This host serves the deployment notice (`GET /api/settings/deployment/notice`).
+   * Observed by the server from its composition, never declared: a hosted
+   * environment mounts the settings routes without the notice and answers it
+   * `503`. A runtime that serves no key predates the flag and keeps the notice.
+   */
+  deploymentNotice: boolean;
+  /**
    * AI-driven metadata authoring ("online development") is offered by this
    * runtime. Default true; the capability is still gated server-side by the
    * presence of the metadata-authoring agent. When false, the SPA hides the
@@ -340,7 +347,7 @@ const defaults: AppShellRuntimeConfig = {
   singleEnvironment: false,
   defaultOrgId: null,
   defaultEnvironmentId: null,
-  features: { installLocal: false, marketplace: true, aiStudio: true, autoPublishAiBuilds: true, customDomain: false, sso: false, scim: false, storageUsage: false },
+  features: { installLocal: false, marketplace: true, deploymentNotice: true, aiStudio: true, autoPublishAiBuilds: true, customDomain: false, sso: false, scim: false, storageUsage: false },
   // `stage: 'preview'` while the whole platform is pre-GA, so the badge shows
   // out of the box on any runtime that hasn't sent an explicit stage yet.
   branding: { productName: 'ObjectOS', productShortName: 'ObjectOS', stage: 'preview', brandColor: '#4F46E5', pwaThemeColor: '#4f46e5' },
@@ -467,6 +474,9 @@ export async function initRuntimeConfig(baseUrl: string = ''): Promise<void> {
         ? {
           installLocal: !!body.features.installLocal,
           marketplace: body.features.marketplace !== false,
+          // Only an explicit `false` withdraws the notice: a runtime older
+          // than the key still serves it.
+          deploymentNotice: body.features.deploymentNotice !== false,
           aiStudio: body.features.aiStudio !== false,
           autoPublishAiBuilds: body.features.autoPublishAiBuilds !== false,
           // Commercial flags default OFF unless the server explicitly grants
@@ -678,6 +688,23 @@ export function isMarketplaceEnabled(): boolean {
  */
 export function isAiStudioEnabled(): boolean {
   return current.features?.aiStudio !== false;
+}
+
+/**
+ * Does this host serve the deployment notice? (objectstack#34186)
+ *
+ * Reads the server's OWN answer, `features.deploymentNotice`, which the runtime
+ * observes from its composition: true exactly when the settings plugin mounted
+ * the notice's door. A hosted environment mounts the settings routes without
+ * it, answers the notice `503`, and says `false`, so it is never asked.
+ *
+ * Fails OPEN (`!== false`), as {@link isMarketplaceEnabled} does: a self-hosted
+ * runtime older than the key serves the notice and sends no key, and its
+ * administrators keep the notice. ⛔ Never inferred from the notice's own
+ * failure: the flag is what spares the request.
+ */
+export function isDeploymentNoticeServed(): boolean {
+  return current.features?.deploymentNotice !== false;
 }
 
 /**

@@ -78,7 +78,7 @@ import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
+import { declaredMemberOverrideAddressOf, isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -216,6 +216,18 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         : await servedAddressJudgment(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
     const servedAddress = judged?.kind === 'served' ? judged.packageId : undefined;
     if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
+    // [#32849, ADR-0150 D4, ADR-0146 D8 item 2] …and, judged neither way, a
+    // member whose one shipper's declared override is stored is read at that
+    // shipper, as the plain read takes it ({@link declaredMemberOverrideAddressOf}):
+    // `effective` is then the override `?package=<shipper>` serves, never the
+    // shipper's own member beside it. The draft layer stays at the address the
+    // strict draft read takes, which this arm does not move (the plain read
+    // leaves its strict draft read where it was).
+    const declaredOverrideAt = request.packageId || judged !== undefined
+        ? undefined
+        : await declaredMemberOverrideAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
+    const draftPackageId = request.packageId;
+    if (declaredOverrideAt !== undefined) request = { ...request, packageId: declaredOverrideAt };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the
     // selector's or else the canonical one, read exactly as
@@ -647,7 +659,7 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     let draft: unknown | null | undefined;
     if (opts.withDraft === true) {
         draft = null;
-        const draftAddress = request.packageId
+        const draftAddress = draftPackageId
             ? undefined
             : await host.strictDraftReadAddress(request.type, request.name, member);
         try {
@@ -655,8 +667,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 type: request.type,
                 name: request.name,
                 state: 'draft',
-                ...(request.packageId
-                    ? { packageId: request.packageId }
+                ...(draftPackageId
+                    ? { packageId: draftPackageId }
                     : draftAddress ? { packageId: draftAddress.packageId } : {}),
                 ...memberOption(member),
             }))?.row;
@@ -680,7 +692,9 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 // package-less draft of a name two or more packages hold is
                 // refused naming every holder, and another holder's draft is
                 // no draft here. The layer itself stays the draft as stored.
-                if (exactAddress) {
+                // [#32849] A draft read at the address the strict draft read
+                // takes is no exact address's.
+                if (exactAddress && draftPackageId) {
                     const stamped = withRowBinding(draft, (draftRow as { package_id?: unknown }).package_id);
                     if ((isPackageLessRow(draftRow) && declinesPackageLessRowAt(host, request.type, request.name, draftRow as ServedOverrideRow))
                         || exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {

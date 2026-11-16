@@ -15982,6 +15982,21 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
 // census of one mailbox's recent off-table bells — nothing is stopped (`stall`)
 // and nothing on the board contradicts itself in a way a write repairs
 // (`state`); the repair is the next bell, spelled from the table.
+//
+// The SIGNATURE half, a second row on the same mailbox. The reader also checks a
+// relay knock's signature against the seat roster (`seatSessionRoster`,
+// `knockSignature`): a knock whose signed session the seat it names does not list
+// reads `unlisted`, and the seat the mailbox serves ⛔ does not act on it
+// (`untrusted-text.md`). Without this row nobody was told one arrived. The sweep
+// builds the roster ONCE, from the two listings it already holds — the open
+// `pm:seat` posts (`SEEN_LABEL_PAGES`) and the open pulls (H7's) — and hands it
+// to the same `mailboxEvents` call: ⛔ no second signature or roster parser here.
+// A roster that cannot be read — a listing truncated at the page ceiling, which
+// would make a seat whose post sat on an unread page look unlisted — makes every
+// knock read `unlisted` by the reader's fail-closed rule; this row reads that as
+// UNJUDGED, lists nothing, and the summary says NOT MEASURED. A `listed` knock is
+// a consistency reading inside the fleet's trust root, never proof of who rang,
+// so it is not listed as clean either: this row names only the refusals.
 // ---------------------------------------------------------------------------
 
 /** H72's window: a bell is listed while it is younger than this, then ages out. */
@@ -16051,6 +16066,69 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
     'is a skills-lane finding, ⛔ never an invented key. ⛔ Report-only: nothing is written from this script. ' +
     `Out of scope: a comment older than ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h (a bell is an event and ages out), a ` +
     'closed mailbox, a mailbox whose comment page could not be read (unjudged, counted in the summary).'
+  );
+}
+
+/** The open listing names `noteOpenListing` records for the two listings the H72 roster is read from. */
+export const H72_ROSTER_LISTINGS = Object.freeze({ posts: 'listIssues(pm:seat)', mailboxes: 'listOpenPullRequests' });
+
+/**
+ * The two listings the sweep hands `seatSessionRoster` (record-recognisers.mjs): the open `pm:seat` posts and the open
+ * pulls it already holds. Either one is `null` — which the roster reads as `unreadable`, never as an empty listing —
+ * when the sweep's open listing of it was truncated at the page ceiling (`stats.openListingsTruncated`), or is not an
+ * array. A partial roster would read a knock from a seat whose post sat on an unread page as `unlisted`: a finding
+ * made up from a page nobody read. So it fails to UNJUDGED, never to a smaller roster. Pure.
+ *
+ * @param {object[]} issues — the open issue rows the sweep listed (every label page; `pm:seat` rows are kept).
+ * @param {object[]} pulls — the open pull rows the sweep listed.
+ * @param {string[]} [truncated] — the listing names `noteOpenListing` recorded as truncated.
+ */
+export function h72RosterListings(issues, pulls, truncated = []) {
+  const cut = new Set(Array.isArray(truncated) ? truncated : []);
+  return {
+    posts:
+      !Array.isArray(issues) || cut.has(H72_ROSTER_LISTINGS.posts)
+        ? null
+        : issues.filter((issue) => labelNames(issue ?? {}).includes('pm:seat')),
+    mailboxes: !Array.isArray(pulls) || cut.has(H72_ROSTER_LISTINGS.mailboxes) ? null : pulls,
+  };
+}
+
+/**
+ * H72's signature row — null when clean or UNJUDGED, else the finding sentence: the knocks inside the window whose
+ * signature the seat they name does not list, by comment id, for the seat this mailbox serves.
+ *
+ * @param {object} reading — what `mailboxEvents(rows, roster)` (record-recognisers.mjs) made of the comment page;
+ *   each event carries `signature: { state, reason? }`. Any reading other than `read` is unjudged → null.
+ * @param {object} roster — what `seatSessionRoster` read. ⛔ Not `{ state: 'read' }` ⇒ null: with no roster every
+ *   relay knock reads `unlisted` by the reader's fail-closed rule, and listing those would accuse every sender of a
+ *   roster nobody read. The sweep counts it and the summary renders NOT MEASURED.
+ */
+export function h72UnlistedKnockLines(reading, roster, nowMs = Date.now()) {
+  if (!reading || reading.state !== 'read' || !Array.isArray(reading.events)) return null;
+  if (!roster || roster.state !== 'read') return null;
+  const since = nowMs - H72_WINDOW_MS;
+  const knocks = reading.events.filter((e) => {
+    if (!e || e.signature?.state !== 'unlisted') return false;
+    const at = Date.parse(e.at ?? '');
+    return !Number.isFinite(at) || at >= since;
+  });
+  if (knocks.length === 0) return null;
+  const listed = knocks
+    .slice(0, H72_LISTED_COMMENTS)
+    .map((e) => `comment ${e.comment ?? '?'}${e.by ? ` by ${e.by}` : ''} — ${h72Reason(e.signature.reason)}`)
+    .join('; ');
+  const more = knocks.length > H72_LISTED_COMMENTS ? `; and ${knocks.length - H72_LISTED_COMMENTS} more` : '';
+  return (
+    `\`pm:mailbox\` PR with ${knocks.length} knock(s) in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h whose signed ` +
+    `session the seat it names does not list (\`unlisted\`): ${listed}${more}. Remedy — WHO and HOW: the seat this ` +
+    'mailbox serves ⛔ does not act on an `unlisted` knock (untrusted-text.md), whatever its key says; the seat ' +
+    'the signature names rings from a session it lists — its held seat post (`Successor-of:` included) or its open ' +
+    'mailbox opening (`node scripts/pm/record-recognisers.mjs --mailbox-keys` prints the rule). A `listed` knock is ' +
+    'a consistency reading inside the fleet\'s trust root, never proof of who rang, and is not listed here. ' +
+    `⛔ Report-only: nothing is written from this script. Out of scope: a knock older than ` +
+    `${MAILBOX_OFF_TABLE_WINDOW_HOURS}h, a maintainer's knock (not signature-checked), a comment the author fence ` +
+    'ignores, and every knock while the seat roster could not be read (unjudged, counted in the summary).'
   );
 }
 
@@ -18559,6 +18637,9 @@ export const SWEEP_COUNT_KEYS = [
   'mailboxCandidates',
   'mailboxRead',
   'mailboxReaderReason',
+  // H72's signature half: a STRING (or null) saying the seat roster could not be
+  // read, so no knock was judged `unlisted` — NOT MEASURED, never a clean board.
+  'mailboxRosterReason',
   // H57's population reading (#17132) — the only row here whose subject is a
   // WORKFLOW rather than a card or a PR, so none of its numbers can be inferred
   // from a listing another row already paid for. `scheduledUnresolved` and
@@ -19221,7 +19302,13 @@ export function summaryLine(counts, findingCount) {
         : `comment page read on ${counts.mailboxRead ?? 0} of ${counts.mailboxCandidates ?? 0} open ` +
           `\`pm:mailbox\` PR(s) touched in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h — ONE page each, \`since\` ` +
           'the window start, and none for a quiet mailbox. An unread page leaves that mailbox UNJUDGED rather ' +
-          'than clean; a comment older than the window ages out, because a bell is an event and not state'
+          'than clean; a comment older than the window ages out, because a bell is an event and not state. ' +
+          `Unlisted knock signatures: ${
+            counts.mailboxRosterReason
+              ? `NOT MEASURED — ${counts.mailboxRosterReason}`
+              : 'judged on the same pages against the seat roster read off the open `pm:seat` posts and mailbox ' +
+                'openings this sweep already listed, at no fetch of its own'
+          }`
     }. ` +
     // H49's coverage pair (#16003). UNCONDITIONAL like every other window's,
     // and it carries the two disclosures this row owes: it fetches NOTHING (the
@@ -24150,15 +24237,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     const nowMs = Date.now();
     let reader = null;
     try {
-      const [{ mailboxEvents }, { MAILBOX_LABEL }] = await Promise.all([
+      const [{ mailboxEvents, seatSessionRoster }, { MAILBOX_LABEL }] = await Promise.all([
         import('./record-recognisers.mjs'),
         import('./mailbox-open.mjs'),
       ]);
-      reader = { mailboxEvents, MAILBOX_LABEL };
+      reader = { mailboxEvents, seatSessionRoster, MAILBOX_LABEL };
     } catch (err) {
       stats.mailboxReaderReason = `the doorbell reader did not load (${String(err?.message ?? err).split('\n')[0]})`;
     }
     if (reader) {
+      // The signature half's roster, ONCE per sweep, off the two listings held
+      // above; a truncated one reads `unreadable` and the row goes UNJUDGED.
+      const roster = reader.seatSessionRoster(h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated));
+      if (roster?.state !== 'read') stats.mailboxRosterReason = `the seat roster could not be read (${(roster?.gaps ?? ['no reading']).join(', ')})`;
       const since = new Date(nowMs - MAILBOX_OFF_TABLE_WINDOW_HOURS * 3_600_000).toISOString();
       for (const pr of seenPrs.values()) {
         if (!h72NeedsThread(pr, reader.MAILBOX_LABEL, nowMs)) continue;
@@ -24182,8 +24273,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
         }
         if (!complete) continue;
         stats.mailboxRead = (stats.mailboxRead ?? 0) + 1;
-        const offTable = h72OffTableMailboxLines(reader.mailboxEvents(rows), nowMs);
+        const reading = reader.mailboxEvents(rows, roster);
+        const offTable = h72OffTableMailboxLines(reading, nowMs);
         if (offTable) findings.push([pr, 'H72', offTable]);
+        const unlisted = h72UnlistedKnockLines(reading, roster, nowMs);
+        if (unlisted) findings.push([pr, 'H72', unlisted]);
       }
     }
   }
@@ -25727,8 +25821,11 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // band, the coverage clause in its three states, and the lazy one-reader import
   // read off this file's source. The end-to-end leg — the REAL reader's readings
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
-  // because this self-test cannot import that module (H62's banner).
-  'H72 mailbox off-table bells': 20,
+  // because this self-test cannot import that module (H62's banner). RAISED 20 → 33
+  // with the signature half (#34013): its predicate both ways, the unjudged roster,
+  // the window, the cap, the text, the roster listings and their truncation names,
+  // the wiring and the summary clause.
+  'H72 mailbox off-table bells': 33,
   // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
   // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
   'H76 unowned open PR': 11,
@@ -29076,6 +29173,31 @@ async function selfTest() {
   b(BATTERY28675, 'H72: the three count keys ride the enumerated forwarding contract', ['mailboxCandidates', 'mailboxRead', 'mailboxReaderReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   b(BATTERY28675, 'H72 summary: the coverage pair is reported, with the window', saidBy('h72Mailbox', summaryLine({ mailboxRead: 3, mailboxCandidates: 4 }, 0)).includes('comment page read on 3 of 4 open `pm:mailbox` PR(s) touched in the last 24h'), true);
   b(BATTERY28675, '⛔ H72 summary: a reader that did not load renders NOT MEASURED, never `0 of N`', (() => { const c = saidBy('h72Mailbox', summaryLine({ mailboxReaderReason: 'the doorbell reader did not load (x)', mailboxCandidates: 0 }, 0)); return c.includes('NOT MEASURED — the doorbell reader did not load (x)') && !c.includes('0 of 0'); })(), true);
+  // -- H72's signature half (#34013): an `unlisted` knock is listed for the seat the
+  //    mailbox serves; a roster nobody could read lists nothing. The readings carry
+  //    `mailboxEvents`' `signature` field; the real reader and the real roster drive
+  //    this predicate in record-recognisers.mjs's signature battery. ----
+  const UNV72 = 'unverified seat signature';
+  const KN72 = (comment, minutes, signature, state = 'read') => ev72(state, comment, minutes, { id: 'notify:landed', signature });
+  const UNL72 = (comment, minutes, why = 'session_01AAAAAAAAAAAAAAAAAAAAAAAA is not a session domain:skills lists') => KN72(comment, minutes, { state: 'unlisted', reason: `${UNV72} — ${why}` });
+  const ROSTER72 = { state: 'read', seats: new Map() };
+  const row72u = (...args) => String(h72UnlistedKnockLines(...args) ?? '');
+  // The source ABOVE the self-test: a wiring pin read off the whole file would match its own literal here.
+  const SRC72 = (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.slice(0, src.indexOf('\nasync function selfTest()')); })();
+  b(BATTERY28675, '⭐ H72 signature: an `unlisted` knock inside the window is listed by comment id, author and the reader\'s reason', ['1 knock(s)', 'comment 9 by objectstack-fleet[bot]', `${UNV72} — session_01AAAAAAAAAAAAAAAAAAAAAAAA is not a session`].every((x) => row72u(reading72(READ72(1, 60), UNL72(9, 30)), ROSTER72, NOW72).includes(x)), true);
+  b(BATTERY28675, '⛔ H72 signature: a `listed` knock, a maintainer\'s knock and a knock with no signature reading are not listed — clean is null', h72UnlistedKnockLines(reading72(KN72(1, 5, { state: 'listed', seat: 'domain:skills#2' }), KN72(2, 5, { state: 'maintainer' }), READ72(3, 5)), ROSTER72, NOW72), null);
+  b(BATTERY28675, '⛔ H72 signature: a roster that was not READ makes the row UNJUDGED — null, never every knock listed as unlisted (the reader fails closed, so all of them read unlisted)', [h72UnlistedKnockLines(reading72(UNL72(9, 30)), { state: 'unreadable', gaps: ['the open `pm:seat` posts'] }, NOW72), h72UnlistedKnockLines(reading72(UNL72(9, 30)), null, NOW72), h72UnlistedKnockLines(reading72(UNL72(9, 30)), { seats: new Map() }, NOW72)].every((v) => v === null), true);
+  b(BATTERY28675, '⛔ H72 signature: a reading that is not `read` is UNJUDGED too', [h72UnlistedKnockLines({ state: 'unreadable', gaps: ['x'] }, ROSTER72, NOW72), h72UnlistedKnockLines(null, ROSTER72, NOW72), h72UnlistedKnockLines({ state: 'read' }, ROSTER72, NOW72)].every((v) => v === null), true);
+  b(BATTERY28675, '⭐ H72 signature: the window boundary — 23h59m old fires, 24h01m has aged out, an unreadable `at` must not read as aged out', [typeof h72UnlistedKnockLines(reading72(UNL72(4, 24 * 60 - 1)), ROSTER72, NOW72), h72UnlistedKnockLines(reading72(UNL72(4, 24 * 60 + 1)), ROSTER72, NOW72), typeof h72UnlistedKnockLines(reading72({ ...UNL72(5, 10), at: 'not a date' }), ROSTER72, NOW72)].join(), 'string,,string');
+  b(BATTERY28675, 'H72 signature: an off-table knock that is ALSO unlisted is named by both rows — the vocabulary and the signature are two readings', (() => { const r = reading72(KN72(6, 10, { state: 'unlisted', reason: `${UNV72} — x` }, 'refused')); return row72(r, NOW72).includes('comment 6') && row72u(r, ROSTER72, NOW72).includes('comment 6'); })(), true);
+  b(BATTERY28675, `H72 signature: it names at most ${H72_LISTED_COMMENTS} knocks and counts the rest`, (() => { const r = row72u(reading72(...[1, 2, 3, 4, 5, 6, 7].map((c) => UNL72(c, 10))), ROSTER72, NOW72); return r.includes('7 knock(s)') && r.includes('comment 5 by') && !r.includes('comment 6 by') && r.includes('and 2 more'); })(), true);
+  b(BATTERY28675, 'H72 signature text: no angle-bracket fragment, names the rule file, the printout, that listed is no proof and the report-only boundary — and no tracker number', (() => { const r = row72u(reading72(UNL72(2, 9, '`<seat>` lists no session'), UNL72(3, 9, 'a<b')), ROSTER72, NOW72); const plain = row72u(reading72(UNL72(2, 9, 'no seat line')), ROSTER72, NOW72); return !/[<>]/.test(r) && r.includes('`SEAT` lists no session') && ['untrusted-text.md', '--mailbox-keys', 'never proof', 'Report-only', '⛔ does not act on'].every((x) => plain.includes(x)) && !/#[0-9]/.test(plain); })(), true);
+  b(BATTERY28675, 'H72 signature: not a loud finding — it never escalates a sweep', isLoudFinding(row72u(reading72(UNL72(2, 9)), ROSTER72, NOW72)), false);
+  b(BATTERY28675, '⭐ H72 roster listings: the open `pm:seat` rows and the open pulls the sweep holds, other cards dropped', (() => { const seat = { number: 1, labels: [{ name: 'pm:seat' }] }; const card = { number: 2, labels: [{ name: 'pm:queue' }] }; const pull = { number: 3 }; const l = h72RosterListings([seat, card, null], [pull]); return l.posts.length === 1 && l.posts[0] === seat && l.mailboxes.length === 1 && l.mailboxes[0] === pull; })(), true);
+  b(BATTERY28675, '⛔ H72 roster listings: a listing truncated at the page ceiling, or not an array, hands the roster NULL — read as unreadable, never as a smaller roster', (() => { const both = h72RosterListings([], [], [H72_ROSTER_LISTINGS.posts, H72_ROSTER_LISTINGS.mailboxes]); const other = h72RosterListings([], [], ['listIssues(pm:queue)']); const bad = h72RosterListings(undefined, 'x'); return both.posts === null && both.mailboxes === null && Array.isArray(other.posts) && Array.isArray(other.mailboxes) && bad.posts === null && bad.mailboxes === null; })(), true);
+  b(BATTERY28675, '⭐ H72 roster listings: the truncation names are the ones the two listings record — `listIssues(pm:seat)` off a label page this sweep lists, `listOpenPullRequests` off the pulls', (() => { const src = SRC72; return SRC72.length > 0 && SEEN_LABEL_PAGES.includes('pm:seat') && src.includes('noteOpenListing(stats, `listIssues(${label})`') && src.includes(`noteOpenListing(stats, '${H72_ROSTER_LISTINGS.mailboxes}'`) && H72_ROSTER_LISTINGS.posts === 'listIssues(pm:seat)'; })(), true);
+  b(BATTERY28675, '⭐ H72 wiring: the sweep reads the roster ONCE through the reader\'s `seatSessionRoster`, hands it to the same `mailboxEvents` call both rows judge, and parses no signature or roster of its own', (() => { const src = SRC72; return SRC72.length > 0 && src.includes('reader.seatSessionRoster(h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated))') && src.includes('const reading = reader.mailboxEvents(rows, roster);') && src.includes('h72OffTableMailboxLines(reading, nowMs)') && src.includes('h72UnlistedKnockLines(reading, roster, nowMs)') && !/function (?:seatSessionRoster|knockSignature|readMailboxComment)\b/u.test(src); })(), true);
+  b(BATTERY28675, '⛔ H72 summary: a roster that was not read renders NOT MEASURED for the signature half, a read one says it buys no fetch — and the key rides the forwarding contract', (() => { const no = saidBy('h72Mailbox', summaryLine({ mailboxRead: 1, mailboxCandidates: 1, mailboxRosterReason: 'the seat roster could not be read (x)' }, 0)); const yes = saidBy('h72Mailbox', summaryLine({ mailboxRead: 1, mailboxCandidates: 1 }, 0)); return no.includes('Unlisted knock signatures: NOT MEASURED — the seat roster could not be read (x)') && yes.includes('Unlisted knock signatures: judged on the same pages') && SWEEP_COUNT_KEYS.includes('mailboxRosterReason'); })(), true);
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
 
