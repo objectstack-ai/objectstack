@@ -160,11 +160,15 @@ describe('platform_admin approver: one slot the platform administrators decide u
 
   const open = async (key: string, flowName: string, approvers: any[], extra: Record<string, unknown> = {}) => {
     await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: ORG }, { context: SYSTEM } as any);
-    return svc.openNodeRequest({
+    const opened = await svc.openNodeRequest({
       object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName,
       config: { approvers, behavior: 'first_response', ...extra } as any,
       submitterId: 'u_sub', record: { id: `D_${key}`, title: key }, organizationId: ORG,
     }, as('u_sub'));
+    // A slate that reads as empty auto-approves instead of opening; no pin here
+    // expects that, so it is a failure of the scene, not a branch to handle.
+    if ('autoApproved' in opened) throw new Error(`node ${key} auto-approved instead of opening`);
+    return opened;
   };
   const PLATFORM = [{ type: 'platform_admin' }];
   const requestRows = async (key: string): Promise<any[]> => engine.find('sys_approval_request', {
