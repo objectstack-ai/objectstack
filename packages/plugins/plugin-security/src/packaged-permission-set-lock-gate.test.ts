@@ -106,6 +106,7 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
   ];
   return {
     rows,
+    historyRows,
     manifests: new Map<string, unknown>([[PKG, { id: PKG }]]),
     registry: {
       getPackage: () => undefined,
@@ -143,7 +144,9 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
         historyRows.push(h);
         return { id: h.id as string };
       }
-      const k = keyOf(data, table);
+      // A metadata row is keyed by its address; a row of any other table (a
+      // package commit) by its own id, so a second one never replaces the first.
+      const k = table === 'sys_metadata' ? keyOf(data, table) : `${table}|${String(data.id ?? rows.size + 1)}`;
       const row: Row = { id: `r_${rows.size + 1}`, __table: table, ...data };
       rows.set(k, row);
       return { id: row.id as string };
@@ -521,4 +524,151 @@ describe('[#34226] a permission set is (package, name): the seal and the lock ju
       }
     }, 30_000);
   }
+
+  // [#34401] A rollback, a commit revert and a package rollback of hr's own set N
+  // write the row bound to hr, so they judge it as hr's save does: a runtime item
+  // to hr, never an override of crm's shipped N. A delete of it says what it did.
+  describe('[#34401] restoring or deleting a package\'s own set N beside another namespace\'s shipped N', () => {
+    type Proto = {
+      saveMetaItem(req: Record<string, unknown>): Promise<unknown>;
+      rollbackMetaItem(req: Record<string, unknown>): Promise<unknown>;
+      publishPackageDrafts(req: Record<string, unknown>): Promise<{ commitId?: string; failed?: unknown[] }>;
+      revertCommit(req: Record<string, unknown>): Promise<{ success: boolean; failed: Array<{ name: string; code?: string }> }>;
+      rollbackToPackageCommit(req: Record<string, unknown>): Promise<{ success: boolean; failed: unknown[] }>;
+      deleteMetaItem(req: Record<string, unknown>): Promise<{ success: boolean; reset?: boolean; message?: string }>;
+    };
+    type Engine = Awaited<ReturnType<typeof composition>>['engine'];
+    const settle = <T>(p: Promise<T>) => p.then((v) => ({ ok: v, err: null as unknown }), (e: unknown) => ({ ok: undefined as T | undefined, err: e }));
+    const envelope = (err: unknown) => [(err as { code?: unknown } | null)?.code, (err as { status?: unknown } | null)?.status];
+    const activeCaps = (engine: Engine) => metaRowsOf(engine)
+      .filter((r) => r.state === 'active')
+      .map((r) => ({ package_id: r.package_id, caps: (JSON.parse(String(r.metadata)) as { systemPermissions?: string[] }).systemPermissions }));
+    /** Every stored row and history entry of N moved to `binding`, as a row stored before the seal would be bound. */
+    const rebind = (engine: Engine, binding: string | null) => {
+      for (const [key, row] of engine.rows) if (row.__table === 'sys_metadata') engine.rows.set(key, { ...row, package_id: binding });
+      for (const h of engine.historyRows) h.package_id = binding;
+    };
+
+    /** hr's own N saved at v1, then edited to v2, each a save addressed to hr. */
+    async function savedTwice(order: Order, shippers?: readonly string[]) {
+      const c = await composition(order, shippers);
+      const p = c.protocol as unknown as Proto;
+      expect(await save(p, { type: 'permission', name: N, item: setOf('cap_hr_v1'), packageId: HR })).toBeNull();
+      expect(await save(p, { type: 'permission', name: N, item: setOf('cap_hr_v2'), packageId: HR })).toBeNull();
+      expect(activeCaps(c.engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v2'] }]);
+      return { ...c, p };
+    }
+
+    /** hr's own N published at v1 (commit one), then edited and published at v2 (commit two). */
+    async function publishedTwice(order: Order, shippers?: readonly string[]) {
+      const c = await composition(order, shippers);
+      const p = c.protocol as unknown as Proto;
+      const commits: string[] = [];
+      for (const cap of ['cap_hr_v1', 'cap_hr_v2']) {
+        expect(await save(p, { type: 'permission', name: N, item: setOf(cap), packageId: HR, mode: 'draft' })).toBeNull();
+        const res = await p.publishPackageDrafts({ packageId: HR });
+        expect(res.commitId, JSON.stringify(res)).toEqual(expect.any(String));
+        commits.push(res.commitId!);
+      }
+      expect(activeCaps(c.engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v2'] }]);
+      return { ...c, p, commits };
+    }
+
+    for (const order of ORDERS) {
+      it(`${order}: rolling back hr's own N to v1 restores v1, and hr's grant confers it (FROM 403 NOT_OVERRIDABLE)`, async () => {
+        const { engine, registry, p } = await savedTwice(order);
+        const { err } = await settle(p.rollbackMetaItem({ type: 'permission', name: N, toVersion: 1, packageId: HR }));
+        expect(err).toBeNull();
+        expect(activeCaps(engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v1'] }]);
+        expect({ crm: await confers(registry, CRM), hr: await confers(registry, HR) }).toEqual({ crm: ['cap_crm_shipped'], hr: ['cap_hr_v1'] });
+      }, 30_000);
+
+      it(`${order}: reverting hr's commit that edited N restores v1 (FROM N in failed[] with NOT_OVERRIDABLE)`, async () => {
+        const { engine, registry, p, commits } = await publishedTwice(order);
+        const res = await p.revertCommit({ commitId: commits[1], packageId: HR });
+        expect(res.failed).toEqual([]);
+        expect(res.success).toBe(true);
+        expect(activeCaps(engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v1'] }]);
+        expect(await confers(registry, HR)).toEqual(['cap_hr_v1']);
+      }, 30_000);
+
+      it(`${order}: rolling hr back to its earlier commit restores v1 (FROM the revert failed)`, async () => {
+        const { engine, p, commits } = await publishedTwice(order);
+        const res = await p.rollbackToPackageCommit({ commitId: commits[0], packageId: HR });
+        expect(res.failed).toEqual([]);
+        expect(res.success).toBe(true);
+        expect(activeCaps(engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v1'] }]);
+      }, 30_000);
+
+      it(`${order}: with crm AND fin shipping N, the rollback and the commit revert still restore: every shipper is judged`, async () => {
+        const saved = await savedTwice(order, [CRM, FIN]);
+        expect((await settle(saved.p.rollbackMetaItem({ type: 'permission', name: N, toVersion: 1, packageId: HR }))).err).toBeNull();
+        expect(activeCaps(saved.engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v1'] }]);
+        const published = await publishedTwice(order, [FIN, CRM]);
+        expect((await published.p.revertCommit({ commitId: published.commits[1], packageId: HR })).failed).toEqual([]);
+        expect(activeCaps(published.engine)).toEqual([{ package_id: HR, caps: ['cap_hr_v1'] }]);
+      }, 30_000);
+
+      // Rows of N bound to an address that overrides crm's shipped set cannot be saved
+      // there; each case stores hr's rows, then rebinds them, as a row stored before
+      // the seal would be. The restore into each is refused as it was, nothing written.
+      // Each envelope is the one main answered, measured before this change: the
+      // restore's seal for crm and its pair, and a refusal judged ahead of it for
+      // the rest (the one-name-per-namespace rule, and a package-less address).
+      it.each([
+        ['bound to no package', null, [CRM], ['RESOURCE_CONFLICT', 409]],
+        ['bound to crm', CRM, [CRM], ['NOT_OVERRIDABLE', 403]],
+        ['bound to crm\'s customization pair (another namespace)', CRM_PAIR, [CRM], ['NOT_OVERRIDABLE', 403]],
+        ['bound to a co-owner of crm\'s namespace', CRM_TWO, [CRM], ['NAMESPACE_CONFLICT', 422]],
+        ['bound to a co-owner of fin\'s namespace, fin also shipping', CRM_TWO, [FIN, CRM], ['NAMESPACE_CONFLICT', 422]],
+      ] as const)(`${order}: CONTROL — a rollback of N %s is refused as before`, async (_how, binding, shippers, expected) => {
+        const { engine, p } = await savedTwice(order, shippers);
+        rebind(engine, binding);
+        const { err } = await settle(p.rollbackMetaItem({ type: 'permission', name: N, toVersion: 1, ...(binding ? { packageId: binding } : {}) }));
+        expect(envelope(err)).toEqual(expected);
+        expect(activeCaps(engine)).toEqual([{ package_id: binding, caps: ['cap_hr_v2'] }]);
+      }, 30_000);
+
+      it.each([
+        ['bound to no package', null, [CRM], 'NAMESPACE_CONFLICT'],
+        ['bound to crm', CRM, [CRM], 'NOT_OVERRIDABLE'],
+        ['bound to crm\'s customization pair (another namespace)', CRM_PAIR, [CRM], 'NOT_OVERRIDABLE'],
+        ['bound to a co-owner of crm\'s namespace', CRM_TWO, [CRM], 'NAMESPACE_CONFLICT'],
+        ['bound to a co-owner of fin\'s namespace, fin also shipping', CRM_TWO, [FIN, CRM], 'NAMESPACE_CONFLICT'],
+      ] as const)(`${order}: CONTROL — a revert of a commit of N %s fails N as before`, async (_how, binding, shippers, code) => {
+        const { engine, p, commits } = await publishedTwice(order, shippers);
+        rebind(engine, binding);
+        for (const row of engine.rows.values()) if (row.__table === 'sys_metadata_commit') row.package_id = binding;
+        const res = await p.revertCommit({ commitId: commits[1] });
+        expect(res.failed.map((f) => [f.name, f.code])).toEqual([[N, code]]);
+        expect(activeCaps(engine)).toEqual([{ package_id: binding, caps: ['cap_hr_v2'] }]);
+      }, 30_000);
+
+      it(`${order}: deleting hr's own N removes hr's set and says so, never "reset to artifact default" (FROM the reset receipt)`, async () => {
+        const { engine, registry, p } = await savedTwice(order);
+        const res = await p.deleteMetaItem({ type: 'permission', name: N, packageId: HR });
+        expect(res.success).toBe(true);
+        // `reset` is "a row was deleted" (DeleteMetaItemResponseSchema): one was.
+        expect(res.reset).toBe(true);
+        expect(res.message).toMatch(new RegExp(`^Deleted permission '${N}' \\(package=${HR.replace(/\./g, '\\.')}\\) — it no longer exists\\.`));
+        expect(metaRowsOf(engine)).toEqual([]);
+        expect(await confers(registry, CRM)).toEqual(['cap_crm_shipped']);
+      }, 30_000);
+
+      it(`${order}: a delete naming hr when hr holds no N answers that nothing was found, never "already at artifact default" (FROM the reset receipt)`, async () => {
+        const { protocol } = await composition(order);
+        const res = await (protocol as unknown as Proto).deleteMetaItem({ type: 'permission', name: N, packageId: HR });
+        expect([res.success, res.reset, res.message]).toEqual([true, false, `No permission '${N}' found — nothing to delete.`]);
+      }, 30_000);
+
+      it(`${order}: CONTROL — deleting the customization of crm's N stored for crm's pair still reads as a reset to the artifact default`, async () => {
+        const { engine, p } = await savedTwice(order);
+        rebind(engine, CRM_PAIR);
+        const res = await p.deleteMetaItem({ type: 'permission', name: N, packageId: CRM_PAIR });
+        expect(res.success).toBe(true);
+        expect(res.reset).toBe(true);
+        expect(res.message).toContain('reset to artifact default');
+      }, 30_000);
+    }
+  });
 });
