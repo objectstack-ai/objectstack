@@ -188,19 +188,28 @@
  * lands without that run is ejected by the queue's dogfood shards and takes its batch with it. So `--land` judges it
  * BEFORE anything else in the fold (`landDogfoodGate`), on step ①'s own read of the pull's title and body:
  *
- *   marker    the title's `!` (`titleBreakingMarker`), or a `(narrowing)` arm read by `clause2-line.mjs`'s ONE reader
- *             — a `malformed` line is unreadable, never an absent arm. No marker ⇒ not judged, zero extra reads.
+ *   marker    the title's `!` (`titleBreakingMarker`): everything before the title's FIRST colon, ending in `!`
+ *             (`fix(pm)!: …`, `feat!: …`) — on main's bang subjects it agrees with the changeset-side reader
+ *             (`check-adr-0087-registration.mjs`'s type, optional scope, `!:`) — measured equal on all 1331 bang subjects
+ *             among the 8521 commit subjects of objectstack-ai/objectstack `origin/main` at `22438726f`, 0 disagreeing;
+ *             or a `(narrowing)` arm read by `clause2-line.mjs`'s ONE reader — a `malformed` or a `near-miss` line is
+ *             unreadable and refuses, never an absent arm; a body with no `Clause-②:` line at all declares no arm and
+ *             is not judged, as Check Changeset reads it. No marker ⇒ not judged, zero extra reads.
  *   report    the NEWEST `os-dev-report` on the card the pull delivers (`deliveredCardNumber`) among comments by the
  *             relay's identity or a governed approver (`recordAuthorTrusted`) — newest-of, marker and payload
- *             candidates are the patrol's readers, called, ⛔ never a second parser.
+ *             candidates are the patrol's readers, called, ⛔ never a second parser. When that report's `pr` names
+ *             ANOTHER pull (siblings on one card), the newest trusted report whose `pr` names THIS pull, or none.
  *   sha       its `dogfood_battery` must open with a sha that is the pull's head, or that a first-parent walk from the
  *             head reaches over merges of the base alone: each step's commit has exactly two parents, the second one
  *             on the base branch (`GET /compare/{parent2}...{base}` answers `ahead` or `identical`).
  *
  * FAIL CLOSED: an unreadable marker, no card, no report, an unparsable one, an `n/a` battery, one naming no sha, a
  * truncated thread (`LAND_COMMENT_PAGE_CAP`), an unreadable commit or compare, or a walk past `LAND_MERGE_HOP_CAP` is a
- * refusal — exit 2, ⛔ zero writes, the line naming the marker, the report comment and its `dogfood_battery` text, and
- * what clears it (`landDogfoodRefusal`). NOT MEASURED is never a pass here.
+ * refusal — ⛔ zero writes, the line quoting the title and naming the marker, the report comment and its
+ * `dogfood_battery` text, and what clears it (`landDogfoodRefusal`). NOT MEASURED is never a pass here. A read the
+ * platform did not answer (`doCall`'s verdict other than `ok`: refused, failed, rate-limited) is exit 3, PREREQUISITE,
+ * like every other unread in this file; a judged refusal is exit 2. The ✓ line says the sha alone was judged: whether
+ * the battery was full and its reds fixed or reported stays the L1 checklist's.
  *
  * ## The read-back judge is HANDED to `sendFleetWrite`, never loaded by it
  *
@@ -243,7 +252,8 @@
  *      did not complete, within the ceiling. The run URL is printed. Go READ
  *      the card; ⛔ never re-run blind: a second dispatch is a second write.
  *
- *   Under `--land`, 2 is also the dogfood battery gate's refusal (header: that gate), ⛔ ZERO writes.
+ *   Under `--land`, 2 is also the dogfood battery gate's judged refusal and 3 a gate read the platform did not
+ *   answer (header: that gate), ⛔ ZERO writes on both.
  *
  *   Under `--release`, 2 is also every REFUSAL before the write — a knock too
  *   young (the remaining time is printed), a knock that is not the newest
@@ -342,7 +352,7 @@ import {
 } from './check-half-states.mjs';
 // The `--land` dogfood gate's readers (header: `--land` on a breaking or narrowing pull), each CALLED from its owner:
 // the one `Clause-②:` reader, the card a pull delivers, the relay's identity and the record leg's author trust.
-import { readClause2Line } from './clause2-line.mjs';
+import { quoteLine, readClause2Line } from './clause2-line.mjs';
 import { deliveredCardNumber } from './record-recognisers.mjs';
 import { RELAY_COMMENT_AUTHOR } from './fleet-write/ops.mjs';
 import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
@@ -1399,6 +1409,8 @@ export const LAND_DOGFOOD_REPORT_KEY = 'dogfood_battery';
 export const LAND_COMMENT_PAGE_CAP = 30;
 /** How many merge-of-base commits the first-parent walk from the head steps over before it stops and refuses. */
 export const LAND_MERGE_HOP_CAP = 20;
+/** How much of the title a refusal quotes, at `clause2-line.mjs`'s `quoteLine` cap. */
+export const LAND_TITLE_QUOTE_CAP = 160;
 /** The compare statuses that put a commit on the base branch: the base is ahead of it, or it IS the base's tip. */
 const ON_BASE_STATUSES = Object.freeze(['ahead', 'identical']);
 const FULL_SHA = /^[0-9a-f]{40}$/u;
@@ -1418,16 +1430,19 @@ export function titleBreakingMarker(title) {
 /**
  * The markers that put a pull under the gate, read off step ①'s own card read (the issues endpoint answers a pull's
  * `title` and `body`): the title's `!`, and a `(narrowing)` arm on the body's `Clause-②:` line through the ONE reader
- * of that line (`readClause2Line`). A `malformed` line is UNREADABLE, never an absent arm — `clause2-line.mjs`'s own
- * fail-closed direction; a body with no declaration declares no arm. Pure.
+ * of that line (`readClause2Line`). A `malformed` line and a `near-miss` one are UNREADABLE, never an absent arm —
+ * `clause2-line.mjs`'s own fail-closed direction; a body with no declaration at all declares no arm. Pure.
  *
- * @returns {{ markers: string[] } | { unreadable: string }}
+ * @returns {{ markers: string[] } | { unreadable: string, clear: string }}
  */
 export function landDogfoodMarkers({ title, body } = {}) {
   const bang = titleBreakingMarker(title);
-  if (bang === null) return { unreadable: 'its title did not read on step ①' };
+  if (bang === null) return { unreadable: 'its title did not read on step ①', clear: 'make the title read, then land again' };
   const clause2 = readClause2Line(body);
-  if (clause2?.kind === 'malformed') return { unreadable: `its \`Clause-②:\` line reads malformed (${clause2.line}), so whether it declares a \`(narrowing)\` arm is unknown` };
+  if (clause2?.kind === 'malformed' || clause2?.kind === 'near-miss') {
+    const how = clause2.kind === 'malformed' ? 'reads malformed' : `reads as a near miss (${clause2.reason})`;
+    return { unreadable: `its \`Clause-②:\` line ${how} (${clause2.line}), so whether it declares a \`(narrowing)\` arm is unknown`, clear: 'make the `Clause-②:` line read, then land again' };
+  }
   const markers = [];
   if (bang) markers.push('`!` before the colon of the title');
   if (clause2?.kind === 'declared' && clause2.arm === 'narrowing') markers.push(`the \`(narrowing)\` arm on the body's line ${clause2.line}`);
@@ -1441,6 +1456,11 @@ export function landDogfoodMarkers({ title, body } = {}) {
  * differs. Pure.
  */
 export function reportedDogfoodBattery(body) {
+  return reportedPayloadString(body, LAND_DOGFOOD_REPORT_KEY);
+}
+
+/** One string field of an `os-dev-report` payload, read the way `reportedDogfoodBattery` reads its own. Pure. */
+export function reportedPayloadString(body, key) {
   const text = String(body ?? '');
   if (!markerMatches(OS_DEV_REPORT_MARKER, text)) return null;
   for (const candidate of devReportPayloadCandidates(text)) {
@@ -1450,9 +1470,20 @@ export function reportedDogfoodBattery(body) {
     } catch {
       continue;
     }
-    if (doc && typeof doc === 'object' && !Array.isArray(doc) && typeof doc[LAND_DOGFOOD_REPORT_KEY] === 'string') return doc[LAND_DOGFOOD_REPORT_KEY];
+    if (doc && typeof doc === 'object' && !Array.isArray(doc) && typeof doc[key] === 'string') return doc[key];
   }
   return null;
+}
+
+/**
+ * Which pull a report's `pr` field names, against this one: `'this'`, `'other'`, or `null` when the field is absent or
+ * names no pull URL (os-dev.md's shape is a URL or null). Only `'other'` moves the gate off the newest report. Pure.
+ */
+export function reportNamesPull(body, { repo, number } = {}) {
+  const pr = reportedPayloadString(body, 'pr');
+  const m = /github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)(?![0-9])/u.exec(String(pr ?? ''));
+  if (!m) return null;
+  return m[1].toLowerCase() === String(repo ?? '').toLowerCase() && Number(m[2]) === Number(number) ? 'this' : 'other';
 }
 
 /**
@@ -1479,26 +1510,30 @@ export function readBatterySha(text) {
  *   `LAND_MERGE_HOP_CAP` hops is a refusal.
  *
  * FAIL CLOSED: an unreadable marker, no card, an unreadable pull or thread, a thread longer than
- * `LAND_COMMENT_PAGE_CAP` pages, no report, no readable `dogfood_battery`, an `n/a` one or one naming no sha all
- * refuse — NOT MEASURED is a refusal here, never a pass.
+ * `LAND_COMMENT_PAGE_CAP` pages, no report (or, when the newest names another pull in `pr`, none naming this one), no
+ * readable `dogfood_battery`, an `n/a` one or one naming no sha all refuse — NOT MEASURED is a refusal here, never a
+ * pass. A read the platform did not answer comes back `unread: true`, which the fold exits 3 on, not 2.
  *
- * @returns {Promise<{ judged: false } | { judged: true, ok: boolean, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number }>}
+ * @returns {Promise<{ judged: false } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true }>}
  */
 export async function landDogfoodGate({ repo, issue, card, doCall }) {
+  const title = typeof card?.title === 'string' ? quoteLine(card.title, LAND_TITLE_QUOTE_CAP) : null;
   const read = landDogfoodMarkers({ title: card?.title, body: card?.body });
   const rerun = (head) =>
     `run the full dogfood battery on head ${head ? `\`${head}\`` : '(the pull\'s current head)'} (${LAND_DOGFOOD_RULE_PATH}, Definition of done) and post the card an \`os-dev-report\` whose \`${LAND_DOGFOOD_REPORT_KEY}\` opens with that sha, then land again`;
   if (read.unreadable) {
-    return { judged: true, ok: false, marker: 'UNREAD', why: `whether this pull is breaking or narrowing cannot be read: ${read.unreadable}`, clear: 'make the title and the `Clause-②:` line read, then land again', report: null, battery: null };
+    return { judged: true, ok: false, title, marker: 'UNREAD', why: `whether this pull is breaking or narrowing cannot be read: ${read.unreadable}`, clear: read.clear, report: null, battery: null };
   }
   if (read.markers.length === 0) return { judged: false };
   const marker = read.markers.join(' and ');
   let report = null;
   let battery = null;
-  const refuse = (why, clear) => ({ judged: true, ok: false, marker, why, clear, report, battery });
+  const refuse = (why, clear) => ({ judged: true, ok: false, title, marker, why, clear, report, battery });
+  // A read the platform did not answer is PREREQUISITE (exit 3), never a judged refusal (header: that gate).
+  const unread = (what, r, clear) => ({ ...refuse(`${what} did not read (${r.call} -> HTTP ${r.status}, ${r.verdict}) — NOT MEASURED`, clear), unread: true });
 
   const pull = await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {});
-  if (pull.verdict !== 'ok') return refuse(`the pull did not read (${pull.call} -> HTTP ${pull.status})`, 'land again once the pull reads');
+  if (pull.verdict !== 'ok') return unread('the pull', pull, 'land again once the pull reads');
   const head = String(pull.json?.head?.sha ?? '').toLowerCase();
   const baseRef = pull.json?.base?.ref;
   if (!FULL_SHA.test(head) || typeof baseRef !== 'string' || baseRef === '') return refuse('the pull read carries no full head sha or no base branch', 'land again once the pull reads whole');
@@ -1508,49 +1543,65 @@ export async function landDogfoodGate({ repo, issue, card, doCall }) {
   const rows = [];
   for (let page = 1; ; page += 1) {
     if (page > LAND_COMMENT_PAGE_CAP) {
-      return refuse(`card #${delivered.card}'s thread is still full after ${LAND_COMMENT_PAGE_CAP} pages of 100 — a TRUNCATED listing, so its newest report is unknown`, 'land this pull by hand after reading the newest report yourself');
+      return refuse(
+        `card #${delivered.card}'s thread is still full after ${LAND_COMMENT_PAGE_CAP} pages of 100 — a TRUNCATED listing, so its newest report is unknown`,
+        'report it to the maintainer: this gate cannot read the newest report on a thread that long, and it lands nothing it has not read',
+      );
     }
     const listed = await doCall('comments-list', `/repos/${repo}/issues/${delivered.card}/comments?per_page=100&page=${page}`, {});
-    if (listed.verdict !== 'ok' || !Array.isArray(listed.json)) return refuse(`card #${delivered.card}'s thread did not read (${listed.call} -> HTTP ${listed.status})`, 'land again once the card reads');
+    if (listed.verdict !== 'ok') return unread(`card #${delivered.card}'s thread`, listed, 'land again once the card reads');
+    if (!Array.isArray(listed.json)) return refuse(`card #${delivered.card}'s thread answered no list on page ${page}`, 'land again once the card reads');
     rows.push(...listed.json);
     if (listed.json.length < 100) break;
   }
   const trusted = recordTrustedAuthors(RELAY_COMMENT_AUTHOR);
   const kept = rows.filter((row) => recordAuthorTrusted(row, trusted));
-  const latest = latestMarkedComment(kept, OS_DEV_REPORT_MARKER);
-  if (latest === null) return refuse(`card #${delivered.card} carries no \`os-dev-report\` by ${trusted.join(' / ')} (${rows.length} comment(s) read)`, rerun(head));
-  const row = kept[latest.index];
+  const newest = latestMarkedComment(kept, OS_DEV_REPORT_MARKER);
+  if (newest === null) return refuse(`card #${delivered.card} carries no \`os-dev-report\` by ${trusted.join(' / ')} (${rows.length} comment(s) read)`, rerun(head));
+  let row = kept[newest.index];
+  // Sibling pulls on one card: the newest report may be another pull's. Then the newest naming THIS pull, or none.
+  if (reportNamesPull(row?.body, { repo, number: issue }) === 'other') {
+    const own = kept.filter((r) => reportNamesPull(r?.body, { repo, number: issue }) === 'this');
+    const mine = latestMarkedComment(own, OS_DEV_REPORT_MARKER);
+    if (mine === null) {
+      report = row?.id ?? null;
+      battery = reportedDogfoodBattery(row?.body);
+      return refuse(`card #${delivered.card}'s newest trusted report names another pull in \`pr\`, and no trusted report names this one`, rerun(head));
+    }
+    row = own[mine.index];
+  }
   report = row?.id ?? null;
   battery = reportedDogfoodBattery(row?.body);
   if (battery === null) return refuse(`the newest report carries no readable \`${LAND_DOGFOOD_REPORT_KEY}\` string`, rerun(head));
   const ran = readBatterySha(battery);
   if (ran.ran === false) return refuse('the battery was not run (`n/a`)', rerun(head));
   if (ran.ran === null) return refuse(`\`${LAND_DOGFOOD_REPORT_KEY}\` names no sha it ran on`, rerun(head));
-  if (head.startsWith(ran.sha)) return { judged: true, ok: true, marker, report, battery, hops: 0 };
+  if (head.startsWith(ran.sha)) return { judged: true, ok: true, title, marker, report, battery, hops: 0 };
 
   let at = head;
   for (let hop = 1; hop <= LAND_MERGE_HOP_CAP; hop += 1) {
     const commit = await doCall('commit-read', `/repos/${repo}/commits/${at}`, {});
-    if (commit.verdict !== 'ok') return refuse(`commit \`${at}\` did not read (${commit.call} -> HTTP ${commit.status}), so the walk to the battery's \`${ran.sha}\` is NOT MEASURED`, rerun(head));
+    if (commit.verdict !== 'ok') return unread(`commit \`${at}\`, on the walk to the battery's \`${ran.sha}\`,`, commit, rerun(head));
     const parents = (Array.isArray(commit.json?.parents) ? commit.json.parents : []).map((p) => String(p?.sha ?? '').toLowerCase());
     if (parents.length !== 2 || !parents.every((p) => FULL_SHA.test(p))) {
       return refuse(`commit \`${at}\` lies after the battery's \`${ran.sha}\` and is not a merge (${parents.length} parent(s)) — the battery did not run on this code`, rerun(head));
     }
     const compared = await doCall('compare-read', `/repos/${repo}/compare/${parents[1]}...${enc(baseRef)}`, {});
-    if (compared.verdict !== 'ok') return refuse(`whether merge \`${at}\`'s second parent \`${parents[1]}\` is on \`${baseRef}\` did not read (${compared.call} -> HTTP ${compared.status})`, rerun(head));
+    if (compared.verdict !== 'ok') return unread(`whether merge \`${at}\`'s second parent \`${parents[1]}\` is on \`${baseRef}\``, compared, rerun(head));
     if (!ON_BASE_STATUSES.includes(compared.json?.status)) {
       return refuse(`merge \`${at}\` brings in \`${parents[1]}\`, which \`${baseRef}\` does not hold (compare status ${JSON.stringify(compared.json?.status ?? null)}) — not a merge of the base`, rerun(head));
     }
     at = parents[0];
-    if (at.startsWith(ran.sha)) return { judged: true, ok: true, marker, report, battery, hops: hop };
+    if (at.startsWith(ran.sha)) return { judged: true, ok: true, title, marker, report, battery, hops: hop };
   }
   return refuse(`the battery's \`${ran.sha}\` is not reached within ${LAND_MERGE_HOP_CAP} merges of \`${baseRef}\` on the head's first-parent line`, rerun(head));
 }
 
-/** The refusal line a failed gate prints: the marker, the report comment and its `dogfood_battery` text, why, and what clears it. */
+/** The refusal line a failed gate prints: the title, the marker, the report comment and its `dogfood_battery` text, why, and what clears it. */
 export function landDogfoodRefusal(gate) {
   return (
-    `--land REFUSED by the dogfood battery gate (${LAND_DOGFOOD_RULE_PATH}) — marker: ${gate.marker} · report: ${gate.report === null || gate.report === undefined ? 'none' : `comment ${gate.report}`} · ` +
+    `--land REFUSED by the dogfood battery gate (${LAND_DOGFOOD_RULE_PATH}) — title: ${gate.title === null || gate.title === undefined ? 'none read' : JSON.stringify(gate.title)} · marker: ${gate.marker} · ` +
+    `report: ${gate.report === null || gate.report === undefined ? 'none' : `comment ${gate.report}`} · ` +
     `${LAND_DOGFOOD_REPORT_KEY}: ${gate.battery === null || gate.battery === undefined ? 'none' : JSON.stringify(gate.battery)} · why: ${gate.why} · to clear: ${gate.clear}.`
   );
 }
@@ -1574,10 +1625,16 @@ async function foldStroke(c) {
   // The dogfood battery gate (header) — before the comment is judged, so a refusal sends nothing at all.
   if (options.land) {
     const gate = await landDogfoodGate({ repo, issue, card: c.card, doCall });
+    if (gate.judged && !gate.ok && gate.unread) {
+      // A gate read the platform did not answer: PREREQUISITE, exit 3, as every other unread here — never a verdict.
+      record(`[${stamp()}] ② PREREQUISITE NOT MET — ${landDogfoodRefusal(gate)}`);
+      nothing();
+      return done(EXIT_PREREQUISITE, { stoppedAt: 2, refusal: 'dogfood-gate-unread', gate });
+    }
     if (gate.judged && !gate.ok) return refuse(landDogfoodRefusal(gate), { gate });
     record(
       gate.judged
-        ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}`
+        ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · sha judged only · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}`
         : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
     );
   }
@@ -2377,7 +2434,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
-  [LAND_DOGFOOD_BATTERY]: 37,
+  [LAND_DOGFOOD_BATTERY]: 45,
 });
 const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -2946,11 +3003,11 @@ export async function selfTest() {
     const MAIN_SIDE = 'c'.repeat(40);
     const STRAY = 'd'.repeat(40);
     const FLEET = 'objectstack-fleet[bot]';
-    const report = (dogfood, { id = 501, at: when = '2026-11-08T14:00:00Z', login = FLEET, raw = null } = {}) => ({
+    const report = (dogfood, { id = 501, at: when = '2026-11-08T14:00:00Z', login = FLEET, raw = null, pr = 'https://github.com/objectstack-ai/objectstack/pull/7' } = {}) => ({
       id,
       created_at: when,
       user: { login },
-      body: raw ?? `${SIG}\nos-dev-report\n\n\`\`\`json\n${JSON.stringify({ issue: 8, status: 'done', dogfood_battery: dogfood })}\n\`\`\`\n`,
+      body: raw ?? `${SIG}\nos-dev-report\n\n\`\`\`json\n${JSON.stringify({ issue: 8, status: 'done', pr, dogfood_battery: dogfood })}\n\`\`\`\n`,
     });
     const RAN_HEAD = `${HEAD} · VERDICT command-exit 0 · Test Files 212/212 · Tests 1904/1904 · no failures`;
     const RAN_BELOW = `${BELOW} · VERDICT command-exit 0 · Test Files 212/212 · Tests 1904/1904 · no failures`;
@@ -2981,15 +3038,17 @@ export async function selfTest() {
       [reportedDogfoodBattery(report(NA).body), reportedDogfoodBattery(`os-dev-report\n{"dogfood_battery": "${HEAD}"}`), reportedDogfoodBattery('A comment quoting `os-dev-report`.\n```json\n{"dogfood_battery":"x"}\n```'), reportedDogfoodBattery('os-dev-report\n```json\n{"dogfood_battery": 5}\n```')],
       [NA, HEAD, null, null]);
     t('the markers: the title\'s `!`, a `(narrowing)` arm on the body\'s Clause-② line (either value), neither, and a malformed line UNREADABLE',
-      [landDogfoodMarkers({ title: 'fix!: x', body: 'Clause-②: no' }).markers.length, landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: yes (narrowing)' }).markers.length, landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: no (narrowing)' }).markers.length, landDogfoodMarkers({ title: 'fix!: x', body: 'Clause-②: no (narrowing)' }).markers.length, landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: yes (widening)' }).markers.length, typeof landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: maybe' }).unreadable],
-      [1, 1, 1, 2, 0, 'string']);
+      [landDogfoodMarkers({ title: 'fix!: x', body: 'Clause-②: no' }).markers.length, landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: yes (narrowing)' }).markers.length, landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: no (narrowing)' }).markers.length, landDogfoodMarkers({ title: 'fix!: x', body: 'Clause-②: no (narrowing)' }).markers.length, landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: yes (widening)' }).markers.length, typeof landDogfoodMarkers({ title: 'fix: x', body: 'Clause-②: maybe' }).unreadable, typeof landDogfoodMarkers({ title: 'fix: x', body: 'Clause-2: no (narrowing)' }).unreadable, landDogfoodMarkers({ title: 'fix: x', body: 'No declaration here.' }).markers.length],
+      [1, 1, 1, 2, 0, 'string', 'string', 0]);
 
     // ⭐ The card's both-ways rows.
     const na = await land(pull({ cards: { 8: [report(NA)] } }));
     t('⭐ REFUSED: a `!` title whose newest report says `n/a` — exit 2, ZERO sends, no pr_ready, nothing written', refused(na), REFUSED, na.text.slice(-600));
-    t('…and the refusal names the title marker, the report comment id, its dogfood_battery text, why, and what clears it', ['`!` before the colon of the title', 'report: comment 501', JSON.stringify(NA), 'why: the battery was not run', 'to clear: run the full dogfood battery on head', HEAD].map((w) => na.text.includes(w)), [true, true, true, true, true, true]);
+    t('…and the refusal quotes the title and names the marker, the report comment id, its dogfood_battery text, why, and what clears it', ['title: "fix(pm)!: a breaking fixture"', '`!` before the colon of the title', 'report: comment 501', JSON.stringify(NA), 'why: the battery was not run', 'to clear: run the full dogfood battery on head', HEAD].map((w) => na.text.includes(w)), [true, true, true, true, true, true, true]);
+    const longTitle = await land(pull({ title: `fix(pm)!: ${'x'.repeat(400)}`, cards: { 8: [report(NA)] } }));
+    t('…a long title is quoted capped at quoteLine\'s cap, with its ellipsis', [longTitle.exit, longTitle.text.includes(`title: "fix(pm)!: ${'x'.repeat(LAND_TITLE_QUOTE_CAP - 10)}…"`), longTitle.text.includes('x'.repeat(LAND_TITLE_QUOTE_CAP))], [EXIT_USAGE, true, false]);
     const onHead = await land(pull());
-    t('⭐ PASSES: a `!` title whose newest report ran on the head — ONE dispatch, comment → pr_ready → automerge_enable, ready and armed, exit 0', [onHead.exit, onHead.sent[0]?.actions.map((a) => a.op), onHead.fake.board.draft, onHead.text.includes('② dogfood gate ✓'), onHead.text.includes('ran on the head')], [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], false, true, true], onHead.text.slice(-600));
+    t('⭐ PASSES: a `!` title whose newest report ran on the head — ONE dispatch, comment → pr_ready → automerge_enable, ready and armed, exit 0', [onHead.exit, onHead.sent[0]?.actions.map((a) => a.op), onHead.fake.board.draft, onHead.text.includes('② dogfood gate ✓'), onHead.text.includes('sha judged only · ran on the head')], [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], false, true, true], onHead.text.slice(-600));
     t('…from the pull and the card thread alone — no commit walk when the battery names the head', onHead.fake.calls.map((c) => c.op), ['card-read', 'pull-read', 'comments-list', 'card-read', 'comments-list', 'pull-read']);
     const short = await land(pull({ cards: { 8: [report(`\`${HEAD.slice(0, 7)}\` · VERDICT command-exit 0`)] } }));
     t('…an abbreviated sha (7 hex) naming the head passes the same way', short.exit, EXIT_OK);
@@ -3012,17 +3071,20 @@ export async function selfTest() {
     const cases = {
       'an UNREADABLE title': [pull({ title: '' }), 'its title did not read'],
       'a MALFORMED `Clause-②:` line on an unmarked title': [pull({ title: 'fix: x', body: 'Fixes #8\n\nClause-②: maybe\n' }), 'reads malformed'],
-      'a pull that does not read': [{ ...pull(), hooks: { 'pull-read': [{ status: 404 }] } }, 'the pull did not read'],
+      'a NEAR-MISS `Clause-②:` line on an unmarked title': [pull({ title: 'fix: x', body: 'Fixes #8\n\nClause-2: no (narrowing)\n' }), 'reads as a near miss (spelling)'],
+      'a pull that does not read': [{ ...pull(), hooks: { 'pull-read': [{ status: 404 }] } }, 'the pull did not read', EXIT_PREREQUISITE],
       'a pull read with no full head sha': [pull({ head: 'abc' }), 'no full head sha'],
       'NO CARD — no closing keyword, no `Part of`, no dev branch': [pull({ body: 'A body naming nothing.\n', ref: 'feature/x' }), 'why: no card'],
-      'a card thread that does not read': [pull({ cards: {} }), "card #8's thread did not read"],
+      'a card thread that does not read': [pull({ cards: {} }), "card #8's thread did not read", EXIT_PREREQUISITE],
+      'a RATE-LIMITED card thread read': [{ ...pull(), hooks: { 'comments-list': [{ status: 403, rateRemaining: 0, json: { message: 'API rate limit exceeded' } }] } }, 'ratelimit) — NOT MEASURED', EXIT_PREREQUISITE],
       'NO REPORT on the card': [pull({ cards: { 8: [{ id: 9, created_at: '2026-11-08T14:00:00Z', user: { login: FLEET }, body: 'Claim: PM loop round 1' }] } }), 'carries no `os-dev-report` by'],
       'an UNPARSABLE report': [pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{ "dogfood_battery": \n\`\`\`\n` })] } }), 'no readable `dogfood_battery`'],
       'a report with no `dogfood_battery`': [pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{"issue": 8, "status": "done"}\n\`\`\`\n` })] } }), 'no readable `dogfood_battery`'],
       'a battery naming NO sha': [pull({ cards: { 8: [report('ran the battery · VERDICT command-exit 0')] } }), 'names no sha it ran on'],
       'a TRUNCATED listing': [pull({ cards: { 8: [...Array.from({ length: LAND_COMMENT_PAGE_CAP * 100 }, (_, i) => ({ id: 1000 + i, created_at: '2026-11-08T10:00:00Z', user: { login: FLEET }, body: 'note' }))] } }), 'TRUNCATED listing'],
-      'a walk commit that does not read': [pull({ cards: { 8: [report(RAN_BELOW)] } }), 'is NOT MEASURED'],
-      'a compare that does not read': [pull({ cards: { 8: [report(RAN_BELOW)] }, commits: { [HEAD]: [BELOW, MAIN_SIDE] }, onBase: [MAIN_SIDE] }), 'did not read (GET'],
+      'a walk commit that does not read': [pull({ cards: { 8: [report(RAN_BELOW)] } }), 'on the walk to the battery', EXIT_PREREQUISITE],
+      'a compare that does not read': [pull({ cards: { 8: [report(RAN_BELOW)] }, commits: { [HEAD]: [BELOW, MAIN_SIDE] }, onBase: [MAIN_SIDE] }), 'is on `main` did not read (GET', EXIT_PREREQUISITE],
+      'a newest report naming ANOTHER pull, with none naming this one': [pull({ cards: { 8: [report(RAN_HEAD, { pr: 'https://github.com/objectstack-ai/objectstack/pull/9' })] } }), 'names another pull in `pr`'],
       [`a battery more than ${LAND_MERGE_HOP_CAP} merges below the head`]: [
         pull({
           head: 'f'.repeat(40),
@@ -3034,9 +3096,9 @@ export async function selfTest() {
       ],
     };
     cases['a compare that does not read'][0].hooks = { 'compare-read': [{ status: 404 }] };
-    for (const [name, [board, why]] of Object.entries(cases)) {
+    for (const [name, [board, why, exit = EXIT_USAGE]] of Object.entries(cases)) {
       const run = await land(board);
-      t(`⛔ FAIL CLOSED: ${name} refuses — exit 2, zero sends, nothing written, its own reason printed`, [...refused(run), run.text.includes(why)], [...REFUSED, true], run.text.slice(-400));
+      t(`⛔ FAIL CLOSED: ${name} refuses — exit ${exit} (${exit === EXIT_USAGE ? 'judged' : 'a read the platform did not answer'}), zero sends, nothing written, its own reason printed`, [...refused(run), run.text.includes(why)], [exit, 0, [], true, true], run.text.slice(-400));
     }
     const atCap = cases[`a battery more than ${LAND_MERGE_HOP_CAP} merges below the head`][0];
     const oneShorter = await land({ ...atCap, commits: { ...atCap.commits, [(LAND_MERGE_HOP_CAP).toString(16).padStart(2, '0').repeat(20)]: undefined, [(LAND_MERGE_HOP_CAP - 1).toString(16).padStart(2, '0').repeat(20)]: [BELOW, MAIN_SIDE] } });
@@ -3052,6 +3114,13 @@ export async function selfTest() {
     const newerNa = await land(pull({ cards: { 8: [report(RAN_HEAD, { id: 700, at: '2026-11-08T12:00:00Z' }), report(NA, { id: 701, at: '2026-11-08T13:00:00Z' })] } }));
     const newerRan = await land(pull({ cards: { 8: [report(NA, { id: 700, at: '2026-11-08T12:00:00Z' }), report(RAN_HEAD, { id: 701, at: '2026-11-08T13:00:00Z' })] } }));
     t('the NEWEST trusted report decides, both ways: a later `n/a` refuses over an earlier run, a later run passes over an earlier `n/a`', [newerNa.exit, newerNa.text.includes('comment 701'), newerRan.exit], [EXIT_USAGE, true, EXIT_OK]);
+    const sibling = await land(pull({ cards: { 8: [report(RAN_HEAD, { id: 800, at: '2026-11-08T12:00:00Z' }), report(NA, { id: 801, at: '2026-11-08T13:00:00Z', pr: 'https://github.com/objectstack-ai/objectstack/pull/9' })] } }));
+    t('sibling pulls on one card: a newer report whose `pr` names ANOTHER pull is passed over for the newest naming THIS pull', [sibling.exit, sibling.text.includes('report comment 800')], [EXIT_OK, true], sibling.text.slice(-400));
+    const noPr = await land(pull({ cards: { 8: [report(RAN_HEAD, { id: 810, at: '2026-11-08T12:00:00Z', pr: 'https://github.com/objectstack-ai/objectstack/pull/9' }), report(NA, { id: 811, at: '2026-11-08T13:00:00Z', pr: null })] } }));
+    t('…while a newest report whose `pr` is null stays the newest — only a report naming another pull moves the gate', [noPr.exit, noPr.text.includes('comment 811')], [EXIT_USAGE, true]);
+    t('the `pr` reading: this pull, another pull (number or repo), and null for no URL', [reportNamesPull(report(NA).body, { repo: 'objectstack-ai/objectstack', number: 7 }), reportNamesPull(report(NA, { pr: 'https://github.com/objectstack-ai/objectstack/pull/70' }).body, { repo: 'objectstack-ai/objectstack', number: 7 }), reportNamesPull(report(NA, { pr: 'https://github.com/objectstack-ai/cloud/pull/7' }).body, { repo: 'objectstack-ai/objectstack', number: 7 }), reportNamesPull(report(NA, { pr: null }).body, { repo: 'objectstack-ai/objectstack', number: 7 })], ['this', 'other', 'other', null]);
+    const absent = await land(pull({ title: 'fix(pm): no declaration', body: 'Fixes #8\n\nNo declaration line at all.\n', cards: {} }));
+    t('an ABSENT `Clause-②:` line on an unmarked title is not judged — as Check Changeset reads it', [absent.exit, absent.text.includes('not judged')], [EXIT_OK, true]);
     const approver = await land(pull({ cards: { 8: [report(RAN_HEAD, { login: GOVERNED_APPROVERS[0] })] } }));
     t('…a report written by a governed approver is trusted, as the record leg trusts it', approver.exit, EXIT_OK);
 
