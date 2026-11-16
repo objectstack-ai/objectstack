@@ -27,6 +27,7 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
 import { ENGINE_FUNCTION_TYPE, NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { MetadataTypeSchema } from '@objectstack/spec/kernel';
 
 /** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
 const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
@@ -746,6 +747,90 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
 });
 
 /**
+ * [#34040, ADR-0150 D3, red line 2] The same read for every type the registry
+ * does not read by package. The MetadataService keeps such a type by name alone
+ * (the package registered last), and its copy answers before the registry. A
+ * covered type's copy of another package is replaced by the exact qualifier
+ * after the layers. A type outside the covered set has no exact qualifier, so
+ * step 2 declines that copy and the registry answers X's own item.
+ *
+ * BASE (measured before the fix on the composed artifact rig and here):
+ * `?package=alpha` of a `doc` two packages ship answered beta's body, the
+ * service's copy, in the order that registered beta last.
+ */
+describe('[#34040] the exact read never serves the service\'s copy of another package, for every type the registry does not read by package', () => {
+  /**
+   * The enumeration: every declared metadata type the registry does not read by
+   * package, as the exact qualifier sees it. A new type lands in one of these
+   * lists or this pin goes red.
+   */
+  const NOT_READ_BY_PACKAGE = MetadataTypeSchema.options.filter((type) => !(PACKAGE_SCOPED_READ_TYPES as readonly string[]).includes(type));
+  /** Judged by the exact qualifier after the layers (ADR-0150 D5). */
+  const COVERED = NOT_READ_BY_PACKAGE.filter((type) => (PACKAGE_SCOPED_TYPES as readonly string[]).includes(type));
+  /** Not judged by it: step 2 declines another package's copy. */
+  const OUTSIDE = NOT_READ_BY_PACKAGE.filter((type) => !(PACKAGE_SCOPED_TYPES as readonly string[]).includes(type));
+  /** Of them, the types the registry keeps one package holder of (the security catalog). */
+  const ONE_HOLDER = ['position', 'capability'];
+  /** `object`: one package owns the name, and the registry's read (`getObject`) does not read by package. */
+  const NOT_JUDGED = ['object'];
+
+  it('the enumeration: the types outside the exact qualifier, each one pinned below or named as one-holder or not judged', () => {
+    expect([...COVERED].sort()).toEqual([...UNWIRED_COVERED_TYPES].sort());
+    expect([...OUTSIDE].sort()).toEqual(
+      ['capability', 'datasource', 'doc', 'external_catalog', 'field', 'object', 'object_extension', 'position', 'seed', 'translation', 'view'],
+    );
+  });
+
+  /** Ship an item that parses: a shipped action is stored as its schema parse, which wants a target. */
+  const shipParsed = (type: string, name: string, packageId: string) => registry.registerItem(
+    type,
+    { name, label: `${packageId.split('.').pop()} ${type}`, ...(type === 'action' ? { type: 'url', target: 'https://example.com' } : {}) },
+    'name' as never,
+    packageId,
+  );
+
+  const servedWith = (wrongBody: Record<string, unknown>) => {
+    const metadata = {
+      get: vi.fn(async () => wrongBody),
+      getDiagnosed: vi.fn(async () => ({ data: wrongBody, degraded: false, errors: [] })),
+    };
+    const served = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', metadata]]));
+    return { served, metadata };
+  };
+
+  it.each([...NOT_READ_BY_PACKAGE].filter((type) => !ONE_HOLDER.includes(type) && !NOT_JUDGED.includes(type)))(
+    '%s: `?package=` of each holder serves that holder\'s body, whichever holder\'s copy the service keeps',
+    async (type) => {
+      shipParsed(type, 'shared', A);
+      shipParsed(type, 'shared', B);
+      for (const kept of [A, B]) {
+        const { served, metadata } = servedWith({ name: 'shared', label: `${kept.split('.').pop()} ${type}`, _packageId: kept });
+        for (const [packageId, label] of [[A, `alpha ${type}`], [B, `beta ${type}`]] as const) {
+          const answer = await served.getMetaItem({ type, name: 'shared', packageId });
+          expect(labelOf(answer), `${type} at ${packageId}, the service keeping ${kept}'s`).toBe(label);
+        }
+        expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it.each(OUTSIDE.filter((type) => !NOT_JUDGED.includes(type)))('CONTROL — %s: the service\'s copy is served at its own holder\'s address, and a copy bound to no package at any address', async (type) => {
+    shipParsed(type, 'shared', A);
+    const own = servedWith({ name: 'shared', label: 'service copy', _packageId: A });
+    expect(labelOf(await own.served.getMetaItem({ type, name: 'shared', packageId: A })), `${type} at its holder`).toBe('service copy');
+    const unbound = servedWith({ name: 'shared', label: 'service copy' });
+    for (const packageId of [A, B]) {
+      expect(labelOf(await unbound.served.getMetaItem({ type, name: 'shared', packageId })), `${type} at ${packageId}`).toBe('service copy');
+    }
+  });
+
+  it.each(ONE_HOLDER)('%s keeps one package holder: a second package\'s registration of the name is refused', (type) => {
+    ship(type, 'shared', A);
+    expect(() => ship(type, 'shared', B)).toThrow();
+  });
+});
+
+/**
  * [#31699 F2, the epic's ruling on the contract review] Two packages of one
  * App share the App's customization pair, so a locale Studio added there with
  * no `overrides` cannot say whose template it extends. Serving it on both
@@ -1273,6 +1358,97 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     try { served = labelOf(await read(Y, 'fr-FR')); } catch (e) { served = (e as { code?: string }).code; }
     expect(served, 'Y shares the pair but holds no template of the name').toBe('RESOURCE_CONFLICT');
     expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
+});
+
+/**
+ * [#32849, ADR-0146 D8 item 2, ADR-0150 D4] The bare LAYERED read of an
+ * addition's own member whose declared override the App's pair stores. X
+ * ships `welcome` (`en-US`), the addition Z on X ships its `fr-FR`, and a row
+ * of the App's pair declares `overrides.package` Z for `fr-FR`. The plain read
+ * naming no package serves that override since the bare member read's fix
+ * (`declaredMemberOverrideAddressOf`); the layered read is "what `getMetaItem`
+ * would return" as `effective`, so it reads the member at Z too.
+ *
+ * BASE (measured on `claude/area-E1-32622` e516f353, this fixture, before the
+ * change): bare `getMetaItemLayered({ member: 'fr-FR' })` answered `code`
+ * and `effective` `zeta fr-FR` with `overlay` null in both install orders,
+ * while `?package=Z` answered `effective` `pair fr-FR` and the plain bare read
+ * `pair fr-FR`; the door's step 1c (`packagelessLayeredReadRefusal`) refused
+ * nothing.
+ */
+describe('[#32849] the bare layered read serves the pair\'s declared override of an addition Z\'s own locale as `effective`, as `?package=Z` does', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Z = 'com.acme.zeta';
+  const PAIR = `${APP}.custom`;
+  const moduleOf = (id: string, dependencies: Record<string, string>) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies,
+  }) as never;
+  const installZ = () => registry.installPackage(moduleOf(Z, { [APP]: '^1.0.0', [X]: '^1.0.0' }), 'code');
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  /** A row of the App's pair for `fr-FR`; an active one is hydrated as the boot lays it. */
+  const pairRow = (over: Record<string, unknown> = {}, state: 'active' | 'draft' = 'active') => {
+    const body = { name: 'welcome', label: state === 'draft' ? 'pair fr-FR draft' : 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', ...over };
+    rows.push({ id: `row_fr_${state}`, type: 'email_template', name: 'welcome', state, package_id: PAIR, bundle_member: 'fr-FR', metadata: JSON.stringify(body) });
+    if (state === 'active') registry.registerItem('email_template', { ...body, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+  };
+  type Layers = { code?: { label?: string } | null; overlay?: { label?: string } | null; effective?: { label?: string; _packageId?: string } | null; draft?: { label?: string } | null; packageId?: string };
+  const layered = (member: string, packageId?: string, withDraft = false) => protocol.getMetaItemLayered({
+    type: 'email_template', name: 'welcome', member, ...(packageId ? { packageId } : {}),
+  } as never, { withDraft } as never) as Promise<Layers>;
+  const layersOf = (a: Layers) => [a.code?.label ?? null, a.overlay?.label ?? null, a.effective?.label ?? null, a.packageId];
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(moduleOf(X, { [APP]: '^1.0.0' }), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  it.each([
+    ['addition installed first', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); pairRow({ overrides: { package: Z } }); }],
+    ['row stored first', () => { tpl('en-US', X); pairRow({ overrides: { package: Z } }); installZ(); tpl('fr-FR', Z); }],
+  ] as const)('the bare layered read of `fr-FR` answers Z\'s layers with the override as `effective` (%s; BASE: `effective` `zeta fr-FR`, no overlay)', async (_order, arrange) => {
+    arrange();
+    const atZ = await layered('fr-FR', Z);
+    expect(layersOf(atZ), 'CONTROL: `?package=Z&member=fr-FR&layers=true` (UNCHANGED)').toEqual(['zeta fr-FR', 'pair fr-FR', 'pair fr-FR', Z]);
+    expect(await protocol.packagelessLayeredReadRefusal({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never), 'the door\'s step 1c refuses nothing').toBeUndefined();
+    const bare = await layered('fr-FR');
+    expect(layersOf(bare), 'bare `?member=fr-FR&layers=true`').toEqual(['zeta fr-FR', 'pair fr-FR', 'pair fr-FR', Z]);
+    expect(bare.effective, '`effective` is the document `?package=Z` serves').toEqual(atZ.effective);
+    expect(labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never)), '`effective` is what the plain bare read serves').toBe('pair fr-FR');
+    // CONTROL: X's own member is untouched by the override of Z's.
+    expect(layersOf(await layered('en-US')), 'bare `?member=en-US` (UNCHANGED)').toEqual(['suitex en-US', null, 'suitex en-US', X]);
+  });
+
+  it('the draft layer stays the strict draft read\'s, which the arm does not move: the pair\'s pending draft of `fr-FR` (UNCHANGED; at Z\'s address it is no draft)', async () => {
+    installZ(); tpl('en-US', X); tpl('fr-FR', Z);
+    pairRow({ overrides: { package: Z } });
+    pairRow({ overrides: { package: Z } }, 'draft');
+    const strictDraft = labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR', state: 'draft' } as never));
+    expect(strictDraft, 'the plain bare strict draft read').toBe('pair fr-FR draft');
+    const bare = await layered('fr-FR', undefined, true);
+    expect([bare.effective?.label, bare.draft?.label ?? null], 'bare `?member=fr-FR&layers=true` with drafts').toEqual(['pair fr-FR', strictDraft]);
+    expect((await layered('fr-FR', Z, true)).draft ?? null, 'CONTROL: `?package=Z` reads no draft there (UNCHANGED)').toBeNull();
+  });
+
+  it.each([
+    ['no row stored', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); }],
+    ['an undeclared pair row of the locale', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); pairRow(); }],
+  ] as const)('CONTROL — no override of Z declared (%s): the bare layered read answers Z\'s own `fr-FR` and no overlay (UNCHANGED)', async (_order, arrange) => {
+    arrange();
+    expect(layersOf(await layered('fr-FR'))).toEqual(['zeta fr-FR', null, 'zeta fr-FR', Z]);
+  });
+
+  it('CONTROL — the row declares X (the #32606 shape): the bare layered read is not moved to Z, and keeps its refusal naming both (UNCHANGED)', async () => {
+    installZ(); tpl('en-US', X); tpl('fr-FR', Z);
+    pairRow({ overrides: { package: X } });
+    const err = await refusalOf(() => layered('fr-FR'));
+    expect([err.code, err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()])
+      .toEqual(['RESOURCE_CONFLICT', 409, [X, Z].sort()]);
   });
 });
 

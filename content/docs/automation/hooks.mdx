@@ -304,7 +304,10 @@ An `after*` hook does **not** mean "the write happened". It means **the write
 has been requested and will happen unless this unit of work is undone**.
 `afterInsert`, `afterUpdate` and `afterDelete` are dispatched *before* the
 enclosing transaction commits, so a later refusal in the same unit can roll the
-row back after your handler has already run.
+row back after your handler has already run. That is true of a **blocking**
+hook, the default. An `async: true` hook is dispatched there too, but does not
+run there: see [`async: true` after hooks run after the
+commit](#async-true-after-hooks-run-after-the-commit).
 
 Four ordinary operations put a write inside such a unit:
 
@@ -315,7 +318,7 @@ Four ordinary operations put a write inside such a unit:
 | `batchData` / `deleteManyData` with `atomic: true` | Every member's `after*` — the batch aborts and rolls back on the first failure |
 | Any write you wrapped yourself in `ctx.api.transaction(...)` or `engine.transaction(...)` | Everything in the callback |
 
-What this means when you write a handler:
+What this means when you write a blocking handler:
 
 - **Effects that go back through the engine are safe.** Writes made with
   `ctx.api.object('x')` join the same transaction and roll back with
@@ -332,11 +335,35 @@ Before hooks carry no such caveat: they run before the write is issued, and
 throwing from one refuses the operation outright.
 
 <Callout type="info">
-This is a deliberate, ruled semantics ([#7477](https://github.com/objectstack-ai/objectstack/issues/7477)),
-not an implementation detail awaiting a fix. Deferring `after*` to commit time
-would move a handler's own `ctx.api` writes *outside* the transaction the write
-ran in, which is a worse guarantee than the one documented here.
+For a blocking hook this is a deliberate, ruled semantics ([#7477](https://github.com/objectstack-ai/objectstack/issues/7477)),
+not an implementation detail awaiting a fix. Deferring a blocking `after*` to
+commit time would move its own `ctx.api` writes *outside* the transaction the
+write ran in, which is a worse guarantee than the one documented here. An
+`async: true` hook has no such writes to keep: nothing awaits it, so its writes
+never joined the unit, and it is the one that waits for the commit (below).
 </Callout>
+
+### `async: true` after hooks run after the commit
+
+An `async: true` hook on `afterInsert`, `afterUpdate` or `afterDelete` is not
+awaited: the write returns without waiting for it, and the hook can neither
+abort the write nor have its writes rolled back with it. Inside a unit of work
+(any row of the table above) it therefore waits for that unit's outcome:
+
+- **The unit commits:** the hook starts once the **outermost** unit has
+  committed, so its `ctx.api` reads see the triggering write. A nested
+  `transaction()` joins the outer unit, so its return is no commit.
+- **The unit rolls back:** the hook **never runs**. It does not announce a
+  write that did not survive, so an `async` hook is the one to give an effect
+  outside the engine. To react to a write that was refused, use a blocking
+  hook, or record the refusal where the write is made.
+- **Outside any unit**, or on a driver with no transactions: the hook starts
+  at once, as the write is dispatched.
+
+Either way its own `ctx.api` writes run outside the triggering unit, on their
+own; a `ctx.api.transaction(...)` it opens is its own unit. An `async`
+`afterFind` hook does not wait: a rollback does not undo a read, so it starts
+when the read is dispatched, outside any unit, whatever the unit does next.
 
 ## Refusing in the user's language — `refusals`
 
@@ -524,9 +551,10 @@ ctx = {
 - Trigger unbounded cascades of writes
 - Perform heavy/long-running work inline in a hook
 - Mutate `ctx.result` in before hooks (it is only populated for after hooks)
-- Treat an `after*` hook as proof the write committed — it fires inside the
-  unit of work, so an un-retractable external effect there can outlive a
-  rollback (see [above](#after-hooks-run-inside-the-unit-of-work))
+- Treat a blocking `after*` hook as proof the write committed — it fires inside
+  the unit of work, so an un-retractable external effect there can outlive a
+  rollback (see [above](#after-hooks-run-inside-the-unit-of-work)); an
+  `async: true` one runs only after the commit
 
 ## Related business logic
 

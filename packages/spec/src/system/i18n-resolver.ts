@@ -382,7 +382,12 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * (ADR-0029 D9.2) and before any tenant `sys_metadata` overlay. For an
    * object, its `validations` also carry the rules each code extender ships
    * (#27559), since a rule's packaged message is the message of whichever code
-   * layer shipped that rule name; its scalars stay the owner's.
+   * layer shipped that rule name, and its `fields` also carry each field a
+   * code extender ADDS under a name the owner does not declare, as that
+   * extender ships it — the catalog rows for such a field can only translate
+   * what its extender ships. Its scalars and every field the owner declares
+   * stay the owner's: an extension's `fieldPatches` are never folded in, so a
+   * patched owner field still reads as diverged.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the
@@ -2240,8 +2245,10 @@ function packagedPart(
  * The packaged counterpart of one served FIELD of an object, with the same
  * three answers as {@link packagedPart}: `undefined` when no packaged base was
  * supplied, `{}` when the base is known but declares no such field (a field
- * authored after the fact — an `objectExtensions` field is folded on after the
- * owner's declaration the base carries), and the packaged field otherwise.
+ * authored after the fact — a tenant overlay's, or one of tenant provenance;
+ * a field a code extender adds is carried by the base the serving layer
+ * supplies, see {@link TranslateDocumentOptions.packagedBase}), and the
+ * packaged field otherwise.
  *
  * A separate finder only because a field map is a record keyed by field name
  * (the canonical shape) where {@link packagedPart} walks an array; the array
@@ -4926,7 +4933,10 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * field's options are the list's, resolved on every read and absent from the
  * packaged field, so they have no field-level baseline and the catalog
  * (field-level, then `picklists.<name>`) applies to them as before. A field the
- * base does not declare counts as diverged on every slot, as below; the
+ * base does not declare counts as diverged on every slot, as below (the base
+ * carries the fields a code extender adds — see
+ * {@link TranslateDocumentOptions.packagedBase} — so this is a field a tenant
+ * overlay or a tenant-provenance extension authored); the
  * built-in system-field labels apply only where the catalog may.
  * The embedded `listViews` follow the VIEW translator's
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
