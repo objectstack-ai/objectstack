@@ -24,7 +24,16 @@
  *   parent never contributes its attribute, another tenant's parent never
  *   joins;
  * - the bind limit: 33,000 distinct FKs answered `DATABASE_ERROR` / 500 on the
- *   FK-expand (`too many SQL variables`) and answer 200 joined.
+ *   FK-expand (`too many SQL variables`) and answer 200 joined;
+ * - the base relation field's field-level read: a caller who may not read
+ *   `line.opportunity` is refused the same 403 with the join wired as without
+ *   it, and the engine itself refuses that caller a relation group request
+ *   handed to it directly, past the analytics door, as it refuses the
+ *   FK-expand's base read grouped by the field;
+ * - the related object's API exposure: a related object whose `enable` block
+ *   denies the aggregate operation is refused with the data door's code on
+ *   the joined path exactly as on the FK-expand, before the engine is handed
+ *   any relation group request (#22661).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -122,7 +131,12 @@ const getReadScope = (object: string, context?: ExecutionContext) =>
  * FK-expand reference. `outcomes` records what the engine did with each
  * relation group request it was handed.
  */
-async function pluginService(engine: ObjectQL, joined: boolean, outcomes: unknown[] = []): Promise<AnalyticsService> {
+async function pluginService(
+  engine: ObjectQL,
+  joined: boolean,
+  outcomes: unknown[] = [],
+  services: Record<string, unknown> = {},
+): Promise<AnalyticsService> {
   const data = new Proxy(engine, {
     get(target, prop) {
       if (prop === 'aggregate') {
@@ -138,7 +152,7 @@ async function pluginService(engine: ObjectQL, joined: boolean, outcomes: unknow
       return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
     },
   });
-  const { ctx, registered } = pluginContext({ data });
+  const { ctx, registered } = pluginContext({ ...services, data });
   await new AnalyticsServicePlugin({
     queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
     getReadScope,
@@ -297,4 +311,155 @@ describe('the bind limit: a lookup dimension over more distinct FKs than the dia
       won: N / 3, lost: N / 3, open: N / 3,
     });
   });
+});
+
+/** A refusal's envelope: what a client branches on. */
+const envelopeOf = (e: unknown) => ({ code: (e as { code?: unknown })?.code, status: (e as { status?: unknown })?.status });
+
+async function seeded(): Promise<{ engine: ObjectQL; driver: SqliteWasmDriver }> {
+  const booted = await bootEngine();
+  for (const row of OPPS) await booted.driver.create(OPP, { ...row }, { bypassTenantAudit: true } as never);
+  for (const row of LINES) await booted.driver.create(LINE, { ...row }, { bypassTenantAudit: true } as never);
+  return booted;
+}
+
+describe('the base relation field\'s field-level read is judged on the joined path as on the FK-expand', () => {
+  /** A caller whose field permissions hide `line.opportunity`, and nothing else. */
+  const FLS_HIDDEN = { userId: 'u_fls', tenantId: 'org_A' } as ExecutionContext;
+  const HIDDEN = new Set(['opportunity']);
+  let driver: SqliteWasmDriver;
+  let engine: ObjectQL;
+
+  /**
+   * The security service's field answers, as the analytics door asks them:
+   * `u_fls` reads every field of the line but `opportunity`; every other
+   * answer is "no answer" (nothing judged).
+   */
+  const security = {
+    canReadObject: async () => true,
+    getReadableFields: async (object: string, context?: ExecutionContext) =>
+      object === LINE && context?.userId === 'u_fls'
+        ? ['id', 'organization_id', ...Object.keys(LINE_FIELDS)].filter((f) => !HIDDEN.has(f))
+        : undefined,
+    getQueryableFields: async (object: string, context?: ExecutionContext) =>
+      object === LINE && context?.userId === 'u_fls'
+        ? ['id', 'organization_id', ...Object.keys(LINE_FIELDS)].filter((f) => !HIDDEN.has(f))
+        : undefined,
+  };
+
+  beforeAll(async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    ({ engine, driver } = await seeded());
+    // The field-level read gate on an aggregate's inputs, as plugin-security's
+    // step 2.5b judges them: every `groupBy` / `aggregations` field of the AST
+    // the chain sees, a hidden one refused 403 PERMISSION_DENIED.
+    engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+      if (op.operation === 'aggregate' && op.object === LINE && op.context?.userId === 'u_fls') {
+        const referenced = [
+          ...(op.ast?.groupBy ?? []).map((g: unknown) => (typeof g === 'string' ? g : (g as { field?: string })?.field)),
+          ...(op.ast?.aggregations ?? []).map((a: { field?: string }) => a?.field),
+        ];
+        const forbidden = referenced.filter((f) => typeof f === 'string' && HIDDEN.has(f));
+        if (forbidden.length > 0) {
+          throw Object.assign(new Error(`[Security] Field read denied: not permitted to aggregate [${forbidden.join(', ')}] on '${LINE}'`), {
+            code: 'PERMISSION_DENIED', status: 403,
+          });
+        }
+      }
+      await next();
+    });
+  });
+
+  afterAll(async () => {
+    await driver?.disconnect?.();
+    if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = OLD_POSTURE;
+  });
+
+  const QUERY = { cube: dataset.name, dimensions: ['stage'], measures: ['line_count', 'amount_sum'] } as AnalyticsQuery;
+
+  it('through the analytics door: the same 403 with the join wired as without it, and the engine is handed no relation group request', async () => {
+    const outcomes: unknown[] = [];
+    const joined = await pluginService(engine, true, outcomes, { security });
+    const expanded = await pluginService(engine, false, [], { security });
+    const viaJoin = await joined.query(QUERY, FLS_HIDDEN).then(() => null, (e: unknown) => e);
+    const viaExpand = await expanded.query(QUERY, FLS_HIDDEN).then(() => null, (e: unknown) => e);
+    expect(envelopeOf(viaJoin)).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(envelopeOf(viaJoin)).toEqual(envelopeOf(viaExpand));
+    expect(outcomes).toEqual([]);
+    // Control: the same composition joins for a caller who may read the field.
+    await joined.query(QUERY, ADMIN_A);
+    expect(outcomes).toEqual([{ kind: 'joined' }]);
+  });
+
+  /** The engine-internal request the plugin bridge hands, built by hand: no analytics door in front. */
+  const request = () => ({
+    relations: [{ field: 'opportunity', object: OPP, attrs: [{ attr: 'stage', alias: 'opp_stage' }], resolvedAlias: 'opp_resolved' }],
+  }) as { relations: unknown[]; outcome?: unknown };
+  const AGGREGATIONS = [{ function: 'count', field: 'id', alias: 'n' }];
+
+  it('at the engine, past the analytics door: the relation group request is refused for that caller as the FK-expand\'s base read is', async () => {
+    const handed = request();
+    const viaJoin = await engine.aggregate(
+      LINE,
+      { groupBy: ['region'], aggregations: AGGREGATIONS, context: FLS_HIDDEN } as never,
+      { [RELATION_GROUP_BY]: handed } as never,
+    ).then(() => null, (e: unknown) => e);
+    expect(envelopeOf(viaJoin)).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(handed.outcome, 'nothing was joined').toBeUndefined();
+    // The FK-expand's base read of the same dimension: grouped by the field itself.
+    const viaExpand = await engine.aggregate(
+      LINE,
+      { groupBy: ['region', 'opportunity'], aggregations: AGGREGATIONS, context: FLS_HIDDEN } as never,
+    ).then(() => null, (e: unknown) => e);
+    expect(envelopeOf(viaExpand)).toEqual(envelopeOf(viaJoin));
+  });
+
+  it('control: a caller who may read the field is joined, and the statement is grouped by the join, not by the field', async () => {
+    const handed = request();
+    const rows = await engine.aggregate(
+      LINE,
+      { groupBy: ['region'], aggregations: AGGREGATIONS, context: ADMIN_A } as never,
+      { [RELATION_GROUP_BY]: handed } as never,
+    ) as Record<string, unknown>[];
+    expect(handed.outcome).toEqual({ kind: 'joined' });
+    expect(rows.every((r) => !('opportunity' in r))).toBe(true);
+    const lines = rows.reduce((n, r) => n + Number(r.n), 0);
+    expect(lines).toBe(LINES.filter((l) => l.organization_id === 'org_A').length);
+  });
+});
+
+describe('[#22661] the related object\'s API exposure: the joined path answers it as the FK-expand does', () => {
+  const ENABLES: ReadonlyArray<readonly [string, Record<string, unknown>, { code: string; status: number }]> = [
+    ['apiEnabled: false', { apiEnabled: false }, { code: 'OBJECT_API_DISABLED', status: 404 }],
+    ['an apiMethods whitelist that does not grant the aggregate read', { apiMethods: ['get'] }, { code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405 }],
+  ];
+
+  for (const [declared, enable, refusal] of ENABLES) {
+    it(`a related object declaring ${declared}: ${refusal.status} ${refusal.code} on both paths, and the engine is handed no relation group request`, async () => {
+      process.env.OS_TENANCY_POSTURE = 'isolated';
+      const { engine, driver } = await seeded();
+      try {
+        const outcomes: unknown[] = [];
+        // Registered while the related object is served, then re-declared: the
+        // query face asks the declaration at every query.
+        const joined = await pluginService(engine, true, outcomes);
+        const expanded = await pluginService(engine, false);
+        const QUERY = { cube: dataset.name, dimensions: ['stage'], measures: ['line_count'] } as AnalyticsQuery;
+        await joined.query(QUERY, ADMIN_A);
+        expect(outcomes, 'control: served while the related object is exposed').toEqual([{ kind: 'joined' }]);
+        outcomes.length = 0;
+        engine.registerObject({ name: OPP, label: 'Opportunity', fields: OPP_FIELDS, enable } as never);
+        const viaJoin = await joined.query(QUERY, ADMIN_A).then(() => null, (e: unknown) => e);
+        const viaExpand = await expanded.query(QUERY, ADMIN_A).then(() => null, (e: unknown) => e);
+        expect(envelopeOf(viaJoin)).toEqual(refusal);
+        expect(envelopeOf(viaJoin)).toEqual(envelopeOf(viaExpand));
+        expect(outcomes, 'the related object was never read through the join').toEqual([]);
+      } finally {
+        await driver.disconnect?.();
+        if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
+        else process.env.OS_TENANCY_POSTURE = OLD_POSTURE;
+      }
+    });
+  }
 });
