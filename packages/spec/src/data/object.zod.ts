@@ -54,6 +54,11 @@ import { aiReadExposureRefusal } from './ai-read-exposure';
 // roster object's declarative membership keys. No cycle: `security/rls.zod`
 // imports only zod, `shared/` and the resolver contract's constants.
 import { DefaultRowScopeSchema, MembershipKeysSchema } from '../security/rls.zod';
+// [ADR-0154 D10] The registry's injected-column plan, read by the
+// `lifecycle.seal.chainField` refusal. A deliberate cycle: that module imports
+// `isTenancyDisabled` from here, and each side calls the other only at parse
+// time (see `refuseUnknownSealChainField`).
+import { resolveInjectedSystemColumns } from './injected-system-columns';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -1113,6 +1118,11 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       'Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never ' +
       'carries their values; every other declared column enters in clear. Each must name a declared field ' +
       'other than `id` and `created_at`, which order the leaves.',
+    ),
+    chainField: z.string().optional().describe(
+      'The column whose value names the organization chain each sealed row joins (default `tenant_id`); a row ' +
+      'whose value is empty seals into the deployment chain. It must name a declared field or a column the ' +
+      'platform injects, such as the tenant column `organization_id`.',
     ),
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
@@ -3005,6 +3015,47 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
 }
 
 /**
+ * [ADR-0154 D10, note on `chainField`] A `lifecycle.seal.chainField` the
+ * author names is a field the object has: one it declares, or a column the
+ * registry injects into it ({@link resolveInjectedSystemColumns} — above all
+ * ADR-0131's tenant column `organization_id`). The sealer chains each row by
+ * that column's value, so a name the object does not have would put every
+ * row into the deployment chain, where no organization's check finds it. One
+ * located issue, at `['lifecycle', 'seal', 'chainField']`.
+ *
+ * Only a NAMED chain column is judged here. An object that names none chains
+ * by `tenant_id`, as before the key existed, and one without that column is
+ * reported by the sealer at `error`, as before. The injected plan is read with
+ * no deployment, as every author-time caller reads it; a deployment that
+ * declares the object platform-global withholds the tenant column, and the
+ * sealer reports that object the same way.
+ *
+ * `injected-system-columns` imports this module (for `isTenancyDisabled`), so
+ * the two form an import cycle. Each side calls the other only from inside a
+ * function — here, at parse time — never while a module evaluates, so both
+ * bindings are initialized by the time either is called.
+ */
+function refuseUnknownSealChainField(object: { lifecycle?: unknown; fields?: unknown }, ctx: z.RefinementCtx): void {
+  const lifecycle = object.lifecycle;
+  if (lifecycle === null || typeof lifecycle !== 'object') return;
+  const seal = (lifecycle as { seal?: { chainField?: unknown } }).seal;
+  if (!seal || typeof seal.chainField !== 'string') return;
+  const name = seal.chainField;
+  const declared = object.fields !== null && typeof object.fields === 'object' ? object.fields : {};
+  if (Object.prototype.hasOwnProperty.call(declared, name)) return;
+  if (resolveInjectedSystemColumns(object).names.has(name)) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['lifecycle', 'seal', 'chainField'],
+    message:
+      `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
+      + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
+      + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
+      + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).',
+  });
+}
+
+/**
  * [#27069] A field group that carries `relatedList` stands for a body table,
  * not a section of fields, so no field may join it. One located issue per
  * field whose `group` names such a group, at `['fields', <name>, 'group']`.
@@ -4625,6 +4676,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
+  // [ADR-0154 D10, note on `chainField`] A named chain column is a field the
+  // object has, injected ones included. See the helper's docblock.
+  refuseUnknownSealChainField(object, ctx);
   // [ruling A on the read half of #32442] `enable.aiReadable` only on a `sys_*`
   // object, never on the stored-metadata family — the same door: only the
   // object knows its name. See the helper's docblock.
