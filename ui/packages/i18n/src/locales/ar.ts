@@ -589,6 +589,7 @@ const ar = {
       succeeded: "نجح {{count}} / {{total}}",
       resultFailed: " · فشل {{count}}",
       succeededRecords: "السجلات الناجحة",
+      aggregateNotCompleted: "لم يكتمل الإجراء للسجلات المحددة. تحتفظ السجلات التي تم تغييرها قبل التوقف بتغييراتها.",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
       cancel: "إلغاء",

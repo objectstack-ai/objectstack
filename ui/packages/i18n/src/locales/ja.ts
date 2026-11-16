@@ -543,6 +543,7 @@ const ja = {
       succeeded: "成功 {{count}} / {{total}}",
       resultFailed: " · 失敗 {{count}}",
       succeededRecords: "成功したレコード",
+      aggregateNotCompleted: "選択したレコードに対する操作は完了しませんでした。停止前に変更されたレコードは変更が保持されます。",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
       cancel: "キャンセル",

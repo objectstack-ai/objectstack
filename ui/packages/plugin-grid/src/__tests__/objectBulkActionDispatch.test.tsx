@@ -44,6 +44,7 @@ import { ObjectGrid } from '../ObjectGrid';
 import { resetUndeclaredActionNamesWarnings } from '../undeclaredActionNames';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
+import { createServerActionHandler } from '@object-ui/core';
 
 registerAllFields();
 
@@ -392,7 +393,7 @@ describe('aggregate bulk actions (objectui#3139)', () => {
     await waitFor(() => expect(screen.getByText(/Succeeded 2 \/ 2/)).toBeInTheDocument());
   });
 
-  it('attributes a failed aggregate call to every record, with no per-row Retry', async () => {
+  it('reports a failed aggregate call once for the selection, with no per-row list and no Retry', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 500,
@@ -410,15 +411,16 @@ describe('aggregate bulk actions (objectui#3139)', () => {
 
     // ONE call — a failed aggregate run must not fan out per-record dispatches
     // against an endpoint written for a single `_selectedIds` call.
-    await waitFor(() => expect(screen.getByText(/Succeeded 0 \/ 2/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('bulk-aggregate-rejection')).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // Each record shows the one real error (the builtin api executor
-    // formats a non-2xx response as `HTTP <status>`, same as the
-    // per-record pin above)…
-    expect(screen.getByTestId('bulk-error-row-r1')).toHaveTextContent('HTTP 500');
-    expect(screen.getByTestId('bulk-error-row-r2')).toHaveTextContent('HTTP 500');
-    // …but there is no per-row slice to re-attempt: the whole-run re-run is
-    // the retry (a total failure keeps the selection for exactly that).
+    // The one real error (the builtin api executor formats a non-2xx response
+    // as `HTTP <status>`), once — not attributed to each record
+    // (objectstack#34173): the one call cannot say which records it wrote.
+    expect(screen.getByTestId('bulk-aggregate-rejection-message')).toHaveTextContent('HTTP 500');
+    expect(screen.queryByTestId('bulk-error-row-r1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-row-r2')).not.toBeInTheDocument();
+    // There is no per-row slice to re-attempt: the whole-run re-run is the
+    // retry (a failed run keeps the selection for exactly that).
     expect(screen.queryByTestId('bulk-error-retry-r1')).not.toBeInTheDocument();
   });
 
@@ -498,5 +500,95 @@ describe('per-record `visible` on a bulk action (objectui#3067)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+});
+
+/**
+ * An aggregate action that REJECTS (objectstack#34173). The handler is one
+ * call for the whole selection; a non-transactional body can move some rows
+ * and then reject once, and nothing in the rejection says which rows moved.
+ * So the result is ONE outcome for the selection — the rejection's
+ * producer-marked `userMessage`, once, with no per-row count and no per-row
+ * list — and the grid re-reads its rows when the dialog closes, whether the
+ * call resolved or rejected. Driven through the console's real `script`
+ * dispatch (`createServerActionHandler`) and the `/actions` door's refusal
+ * envelope, which carries `userMessage` beside `message` on `error` for a
+ * script body and a server action's handler alike.
+ */
+describe('an aggregate rejection is one outcome for the selection (objectstack#34173)', () => {
+  const MOVE = { name: 'mass_update_stage', label: 'Update Stage', type: 'script' };
+  const AGGREGATE = { bulkActionDefs: [{ name: 'mass_update_stage', operation: 'custom', execution: 'aggregate' }] };
+  const USER_TEXT = 'Plan B is Closed Won and was not moved.';
+  const PLATFORM_TEXT = 'mass_update_stage: plan_b stage is closed_won';
+  const refusal = (error: Record<string, unknown>) => ({
+    ok: false,
+    status: 400,
+    json: async () => ({ success: false, error: { code: 'HOOK_ABORTED', httpStatus: 400, message: PLATFORM_TEXT, ...error } }),
+  });
+  const accepted = () => ({ ok: true, status: 200, json: async () => ({ success: true, data: { moved: 2 } }) });
+
+  async function runAndClose(actionsFetch: ReturnType<typeof vi.fn>, schema: Record<string, unknown> = AGGREGATE) {
+    const script = createServerActionHandler({ fetch: actionsFetch as any, baseUrl: '' });
+    const ds = await renderAndSelectAll({ objectActions: [MOVE], schema, handlers: { script } });
+    fireEvent.click(await screen.findByTestId('bulk-action-mass_update_stage'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    await screen.findByRole('button', { name: 'Done' });
+    return ds;
+  }
+
+  /** Close the result and count the grid's re-reads: the refresh is exactly one. */
+  async function refreshesOnClose(ds: any): Promise<number> {
+    const before = ds.find.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(before));
+    await new Promise(r => setTimeout(r, 50));
+    return ds.find.mock.calls.length - before;
+  }
+
+  it('shows the rejection’s userMessage once, with no per-row list and no "0 / N" count', async () => {
+    const actionsFetch = vi.fn(async () => refusal({ userMessage: USER_TEXT }));
+    await runAndClose(actionsFetch);
+
+    expect(actionsFetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('bulk-aggregate-rejection')).toHaveTextContent(
+      'The action did not complete for the selected records.',
+    );
+    expect(screen.getAllByText(USER_TEXT)).toHaveLength(1);
+    expect(screen.queryByText(PLATFORM_TEXT, { exact: false })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-testid^="bulk-error-row-"]')).toHaveLength(0);
+    expect(screen.queryByText(/Succeeded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/0 \/ 2/)).not.toBeInTheDocument();
+  });
+
+  it('falls back to the rejection’s message when it carries no userMessage', async () => {
+    await runAndClose(vi.fn(async () => refusal({})));
+
+    expect(screen.getByTestId('bulk-aggregate-rejection-message')).toHaveTextContent(PLATFORM_TEXT);
+    expect(screen.getAllByText(PLATFORM_TEXT)).toHaveLength(1);
+  });
+
+  it('re-reads the grid once when the dialog closes after a rejection', async () => {
+    const ds = await runAndClose(vi.fn(async () => refusal({ userMessage: USER_TEXT })));
+    expect(await refreshesOnClose(ds)).toBe(1);
+  });
+
+  it('re-reads the grid once when the dialog closes after the call resolved', async () => {
+    const ds = await runAndClose(vi.fn(async () => accepted()));
+    expect(screen.getByText(/Succeeded 2 \/ 2/)).toBeInTheDocument();
+    expect(await refreshesOnClose(ds)).toBe(1);
+  });
+
+  // CONTROL: the per-record dispatch keeps its per-row display exactly as it
+  // was — a failing row is listed under its record, with the run's count.
+  it('CONTROL: a per-record dispatch with one failing row still lists that row', async () => {
+    const actionsFetch = vi.fn(async (_url: string, init: { body: string }) =>
+      JSON.parse(init.body).recordId === 'r2' ? refusal({ userMessage: USER_TEXT }) : accepted());
+    await runAndClose(actionsFetch, { bulkActions: ['mass_update_stage'] });
+
+    expect(actionsFetch).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('bulk-aggregate-rejection')).not.toBeInTheDocument();
+    expect(screen.getByText(/Succeeded 1 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-error-row-r2')).toHaveTextContent(PLATFORM_TEXT);
+    expect(screen.queryByTestId('bulk-error-row-r1')).not.toBeInTheDocument();
   });
 });

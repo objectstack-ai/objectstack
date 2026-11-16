@@ -543,6 +543,7 @@ const de = {
       succeeded: "Erfolgreich {{count}} / {{total}}",
       resultFailed: " · Fehlgeschlagen {{count}}",
       succeededRecords: "Erfolgreiche Datensätze",
+      aggregateNotCompleted: "Die Aktion wurde für die ausgewählten Datensätze nicht abgeschlossen. Datensätze, die sie vor dem Abbruch geändert hat, behalten ihre Änderungen.",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
       cancel: "Abbrechen",

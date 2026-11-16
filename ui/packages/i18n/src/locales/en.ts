@@ -1039,6 +1039,7 @@ const en = {
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
       succeededRecords: 'Records that succeeded',
+      aggregateNotCompleted: 'The action did not complete for the selected records. Records it changed before stopping keep their changes.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',

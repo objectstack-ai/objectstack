@@ -553,6 +553,7 @@ const fr = {
       succeeded: "Réussis {{count}} / {{total}}",
       resultFailed: " · Échecs {{count}}",
       succeededRecords: "Enregistrements réussis",
+      aggregateNotCompleted: "L’action ne s’est pas terminée pour les enregistrements sélectionnés. Les enregistrements modifiés avant l’arrêt conservent leurs modifications.",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",
       cancel: "Annuler",

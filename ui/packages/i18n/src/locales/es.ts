@@ -558,6 +558,7 @@ const es = {
       succeeded: "Correctos {{count}} / {{total}}",
       resultFailed: " · Fallidos {{count}}",
       succeededRecords: "Registros correctos",
+      aggregateNotCompleted: "La acción no se completó para los registros seleccionados. Los registros que modificó antes de detenerse conservan sus cambios.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",

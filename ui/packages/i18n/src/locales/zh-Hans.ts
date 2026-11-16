@@ -785,6 +785,7 @@ const zh = {
       succeeded: '成功 {{count}} / {{total}}',
       resultFailed: ' · 失败 {{count}}',
       succeededRecords: '成功的记录',
+      aggregateNotCompleted: '操作未对所选记录全部完成。操作中止前已修改的记录会保留修改。',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
       cancel: '取消',
