@@ -300,6 +300,32 @@ under class 2, ahead of the allowlist, so it is judged as this door and not as c
 infrastructure. The same ruling's Q2 B leaves the verification posture as it was: an
 invitation-link sign-up still owes the verification mail.
 
+**Amended 2026-11-16 — the one-step invitation acceptance, a class-2-shaped door.** Card
+[#34257](https://github.com/objectstack-ai/objectstack/issues/34257), on the owning seat's rulings in
+claim amendment
+[`6906424686`](https://github.com/objectstack-ai/objectstack/issues/34257#issuecomment-6906424686),
+admits one more door of class 2's shape, not a seventh class:
+`POST /api/v1/auth/organization/accept-invitation-with-proof`. What admits the request: the mailbox
+proof the invitation mail carries, a capability token minted per send. The invitation id alone, which
+the copied link and the invitation row carry, admits nothing. What it runs as: after validation, the
+creation of the invited address's account (or the replacement of the password of an unverified
+account with no linked provider account, revoking its sessions), the address marked verified, the
+invitation accepted through the vendor's own accept route, and a session for that account. The proof
+is never at rest in clear, the stored mail row never holds it, and it is single-use and bound to the
+invitation, its address and its expiry; a resend retires the old one. Every proof that does not admit
+gets one refusal that does not say which check failed. An address whose account is verified, is
+linked to a provider, or otherwise takes no password from this door is answered "sign in", with the
+proof unspent. It carries a per-address and per-invitation rate limit, as ADR-0121 D6 requires.
+Enforced by `packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`,
+ledgered in `packages/plugins/plugin-auth/src/auth-route-ledger.ts`; it sits in the `/auth`
+namespace and is classified under class 2 the way the preview above is.
+
+This refines ruling [`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861)
+Q2 B, recorded above as "an invitation-link sign-up still owes the verification mail". A
+proof-carrying invitation link proves the mailbox, so a sign-up through it owes no verification mail.
+A copied link, which carries no proof, still owes the verification mail, as Q2 B states. The vendor
+accept route is unchanged by this note.
+
 **Outside the guest model by construction**, and not on the list:
 
 - the control-plane allowlist (`packages/core/src/security/auth-gate.ts#isAuthGateAllowlisted`:
