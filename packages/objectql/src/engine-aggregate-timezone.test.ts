@@ -11,6 +11,7 @@
 // last describe block pins that dispatch, spelling by spelling.
 
 import { describe, it, expect } from 'vitest';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 /**
@@ -112,6 +113,12 @@ describe('engine.aggregate timezone routing (ADR-0053 Phase 2)', () => {
 // request's string to, and only an area/location name; review items (d) and
 // (e) on the card name the spellings.
 describe('engine.aggregate zoned-bucket pushdown (#33697, D2 as amended)', () => {
+  const zonedDayBucket = (timezone: string): EngineAggregateOptions => ({
+    groupBy: [{ field: 'closed_at', dateGranularity: 'day' }],
+    aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+    timezone,
+  });
+
   async function makeZonedEngine(zoned: boolean | undefined) {
     const received: any[] = [];
     let findCalls = 0;
@@ -153,7 +160,7 @@ describe('engine.aggregate zoned-bucket pushdown (#33697, D2 as amended)', () =>
     ['Etc/GMT+5', 'Etc/GMT+5'],
   ])('pushes %s down as the resolved name %s', async (asked, sent) => {
     const { engine, received, finds } = await makeZonedEngine(true);
-    await engine.aggregate('deal', { ...dayBucket, timezone: asked } as any);
+    await engine.aggregate('deal', zonedDayBucket(asked));
     expect(finds()).toBe(0);
     expect(received).toHaveLength(1);
     expect(received[0].timezone).toBe(sent);
@@ -161,7 +168,7 @@ describe('engine.aggregate zoned-bucket pushdown (#33697, D2 as amended)', () =>
 
   it.each(['UTC', 'Etc/UTC', 'GMT', 'Zulu'])('reads %s as the UTC bucket: native, no zone sent', async (asked) => {
     const { engine, received, finds } = await makeZonedEngine(true);
-    await engine.aggregate('deal', { ...dayBucket, timezone: asked } as any);
+    await engine.aggregate('deal', zonedDayBucket(asked));
     expect(finds()).toBe(0);
     expect(received).toHaveLength(1);
     expect('timezone' in received[0]).toBe(false);
@@ -169,14 +176,14 @@ describe('engine.aggregate zoned-bucket pushdown (#33697, D2 as amended)', () =>
 
   it.each(['EST5EDT', '+08:00', 'Bogus/Zone'])('keeps %s in memory: it resolves to no area/location name', async (asked) => {
     const { engine, received, finds } = await makeZonedEngine(true);
-    await engine.aggregate('deal', { ...dayBucket, timezone: asked } as any);
+    await engine.aggregate('deal', zonedDayBucket(asked));
     expect(received).toHaveLength(0);
     expect(finds()).toBe(1);
   });
 
   it.each([false, undefined])('keeps a non-UTC zone in memory on a driver whose bit is %s', async (bit) => {
     const { engine, received, finds } = await makeZonedEngine(bit);
-    await engine.aggregate('deal', { ...dayBucket, timezone: 'Asia/Taipei' } as any);
+    await engine.aggregate('deal', zonedDayBucket('Asia/Taipei'));
     expect(received).toHaveLength(0);
     expect(finds()).toBe(1);
   });
@@ -187,7 +194,7 @@ describe('engine.aggregate zoned-bucket pushdown (#33697, D2 as amended)', () =>
       groupBy: ['closed_at'],
       aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
       timezone: 'Asia/Taipei',
-    } as any);
+    } satisfies EngineAggregateOptions);
     expect(received).toHaveLength(1);
     expect('timezone' in received[0]).toBe(false);
   });
