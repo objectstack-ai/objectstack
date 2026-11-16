@@ -1171,6 +1171,31 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
       expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
     });
 
+    it('(iii) a declared bound on a stored computed field of the parent calculated from its summary', async () => {
+      invWith({ fields: { room: { type: 'number', expression: '1000000 - record.line_total', min: -1000000000000 } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a declared bound on the summary itself', async () => {
+      invWith({ fields: { line_count: { type: 'summary', max: 1000, summaryOperations: { object: 'inv_line', function: 'count' } } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a stored computed field of the parent with no bound and no rule reading it keeps the deferral', async () => {
+      invWith({ fields: { doubled: { type: 'number', expression: 'record.line_total * 2' } } });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a stored computed field of the CHILD reading the parent summary one hop: each row recomputes at once', async () => {
+      lineWith({ fields: { seen: { type: 'number', expression: 'record.inv.line_count' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a formula (not stored) of the child reading the parent summary keeps the deferral: it is computed on read', async () => {
+      lineWith({ fields: { seen: { type: 'formula', returnType: 'number', expression: 'record.inv.line_count' } } });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
     it('a rule reading a formula that reads no summary keeps the deferral', async () => {
       invWith({ fields: { shout: { type: 'formula', returnType: 'text', expression: 'record.name.upperAscii()' } } });
       lineWith({ validations: [{ name: 'shout', type: 'script', severity: 'error', message: 'shout', condition: "record.inv.shout == 'NEVER'" }] });

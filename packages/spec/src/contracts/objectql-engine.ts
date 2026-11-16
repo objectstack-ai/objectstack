@@ -662,14 +662,18 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      *
      * It defers the roll-up recompute ONLY. Each write's hooks, validation,
      * audit and realtime run where they run outside a scope. A summary field a
-     * rule reads is not deferred (ruling 6928862195): a validation rule of any
+     * rule reads is not deferred (ruling 6928862195). A validation rule of any
      * object reading it one hop through a reference, a detail object's
-     * `requiredWhen` / `readonlyWhen` reading it on `parent`, or a rule of the
-     * summary's own object reading it on its own row (directly, through a
-     * formula or stored computed field calculated from it, or up a chain of
-     * summaries), makes the recompute of every roll-up of the child object
-     * written run after each row, so a rule's answer during the batch is the
-     * answer one-by-one writes give. A hook or flow step that reads a
+     * `requiredWhen` / `readonlyWhen` reading it on `parent`, a rule of the
+     * summary's own object reading it on its own row, or a declared bound
+     * (`min`, `max`, `unique`, …) on the summary or on a stored computed field
+     * of that object calculated from it, each counts, whether it reads the
+     * summary directly, through a formula or stored computed field calculated
+     * from it, or up a chain of summaries; so does a stored computed field of
+     * any object that reads it one hop, since it stores what it read. Any of
+     * them makes the recompute of every roll-up of the child object written
+     * run after each row, so a rule's answer, and a stored value, during the
+     * batch is what one-by-one writes give. A hook or flow step that reads a
      * parent's summary during the batch reads the value from before the
      * batch, as it does during a multi-row insert.
      * The scope is ambient: it covers every write made while the callback

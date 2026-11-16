@@ -412,10 +412,14 @@ recomputes the parents' summaries once, when the batch ends, unless a rule
 reads one of the summaries that child object rolls up: a validation rule of any
 object reading it one hop through a reference, a detail object's
 `requiredWhen` / `readonlyWhen` reading it on `parent`, or a rule of the parent
-object itself reading its own summary (a cap such as `record.line_count <= 5`).
-A rule that reads a formula or a stored computed field calculated from the
-summary reads the summary too, and so does a rule on a summary that a chain of
-summaries rolls the first one up into. Then every roll-up of that child object
+object itself reading its own summary (a cap such as `record.line_count <= 5`,
+or a declared bound such as `min` / `max` / `unique` on the summary or on a
+stored computed field of the parent calculated from it). A rule that reads a
+formula or a stored computed field calculated from the summary reads the
+summary too, and so does a rule on a summary that a chain of summaries rolls
+the first one up into. A stored computed field of any object that reads the
+summary one hop (`record.invoice.line_count`) counts as well, since it stores
+what it reads at its own write. Then every roll-up of that child object
 recomputes after each row, so each row's rules, and the parent's own rules
 judging each recompute, read it as one-by-one updates would, for every summary
 function, `avg` included. A `parent.` predicate that reads a field that is not a

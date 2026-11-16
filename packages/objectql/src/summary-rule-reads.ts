@@ -30,7 +30,15 @@
  *   `requiredWhen` / `readonlyWhen`. The recompute's own write is an update of
  *   that row, judged by those rules: one by one they judge every intermediate
  *   value (an atomic move A→B then B→A over a cap refuses the first), so
- *   deferred they would judge only the last.
+ *   deferred they would judge only the last. A declared bound (`min`, `max`,
+ *   `minLength`, `maxLength`, `pattern`, `unique`, `required`) on a value that
+ *   write stores, the summary itself or a stored computed field, is judged the
+ *   same way and counts as a rule reading that value.
+ *
+ * A stored computed field (an `expression` on a field that is not a
+ * `formula`) that reads another row one hop is stored from what it read at its
+ * own write, so what it reads counts as read too: one by one each row stores a
+ * value over the recompute of the rows before it.
  *
  * Then the set is closed over what the fields read are computed from: a
  * formula or stored computed field a rule reads reads what its expression
@@ -54,6 +62,13 @@ const PARENT_ROOT = 'parent';
 
 /** The field-level predicates that may read `parent` (#4889, #4977). */
 const PARENT_PREDICATE_SLOTS = ['requiredWhen', 'readonlyWhen'] as const;
+
+/**
+ * The declared bounds a write judges on a stored value (`validateRecord`'s
+ * `min_value` / `max_value` / `min_length` / `max_length` / pattern and
+ * `required` checks, and a unique index).
+ */
+const WRITE_BOUND_KEYS = ['min', 'max', 'minLength', 'maxLength', 'pattern', 'regex', 'unique', 'required'] as const;
 
 /** The CEL roots a rule reads its own row under: the row, and the row before the write. */
 const OWN_ROW_ROOTS = ['record', 'previous'] as const;
@@ -174,7 +189,32 @@ export function summaryFieldsReadByRules(objects: Iterable<unknown>, links: Iter
         for (const root of OWN_ROW_ROOTS) for (const field of fieldsReadOn(source, root)) own.add(field);
       }
     }
+    // (iii) A declared bound on a field the recompute's own write stores: the
+    // summary itself, or a stored computed field (an `expression` on a field
+    // that is not a `formula`). The write computes it onto the payload and
+    // judges it (`validateRecord`, a unique index), so one by one every
+    // intermediate value is judged; the closure below adds what it reads.
+    for (const [field, def] of Object.entries(fields)) {
+      if (!def || typeof def !== 'object') continue;
+      const stored = def.type === 'summary' || (def.type !== 'formula' && celSource(def.expression) !== undefined);
+      if (stored && WRITE_BOUND_KEYS.some((key) => def[key] !== undefined && def[key] !== null && def[key] !== false)) own.add(field);
+    }
     if (name) for (const field of own) out.add(ruleReadKey(name, field));
+    // A stored computed field reading another row one hop (`record.inv.line_total`)
+    // stores what it read at its own write: one by one each row reads the
+    // recompute of the rows before it, so what it reads counts as read.
+    if (name) {
+      for (const def of Object.values(fields)) {
+        if (!def || typeof def !== 'object' || def.type === 'formula') continue;
+        const source = celSource(def.expression);
+        if (!source) continue;
+        const analysis = analyzeRelationshipTraversals(source, 'record');
+        for (const [reference, related] of analysis?.traversals ?? []) {
+          const target = referenceTargetOf(fields[reference] as never);
+          if (target) for (const field of related) out.add(ruleReadKey(target, field));
+        }
+      }
+    }
     // (i) A validation rule reading through a reference, one hop.
     for (const [reference, related] of collectPredicateRelationships(schema as never)) {
       const target = referenceTargetOf(fields[reference] as never);

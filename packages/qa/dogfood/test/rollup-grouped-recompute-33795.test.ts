@@ -162,28 +162,30 @@ const RULE_OBJECTS = [
  */
 const CAP_TEXT = 'An invoice holds at most two lines.';
 /**
- * The capped invoice and its lines; `viaComputed` caps a stored computed field
- * over the count (`room = 2 - line_count`, recomputed on the recompute's own
- * write) instead of the count itself.
+ * The capped invoice and its lines. `rule` caps the count with a validation
+ * rule; `computed` caps a stored computed field over it (`room = 2 -
+ * line_count`, recomputed on the recompute's own write) with a rule; `bound`
+ * declares `min: 0` on that field and has no rule at all.
  */
-function capObjects(parent: string, line: string, viaComputed: boolean) {
+function capObjects(parent: string, line: string, mode: 'rule' | 'computed' | 'bound') {
+  const viaComputed = mode !== 'rule';
   return [
     {
       name: parent,
-      label: viaComputed ? 'Capped invoice (computed)' : 'Capped invoice',
+      label: `Capped invoice (${mode})`,
       fields: {
         name: { type: 'text', label: 'Name' },
         line_count: { type: 'summary', label: 'Lines', summaryOperations: { object: line, function: 'count' } },
-        ...(viaComputed ? { room: { type: 'number', label: 'Room', expression: '2 - record.line_count' } } : {}),
+        ...(viaComputed ? { room: { type: 'number', label: 'Room', expression: '2 - record.line_count', ...(mode === 'bound' ? { min: 0 } : {}) } } : {}),
       },
-      validations: [{
+      validations: mode === 'bound' ? [] : [{
         name: 'cap_lines', type: 'script', severity: 'error', message: CAP_TEXT,
         condition: viaComputed ? 'record.room != null && record.room < 0' : 'record.line_count != null && record.line_count > 2',
       }],
     },
     {
       name: line,
-      label: viaComputed ? 'Capped invoice line (computed)' : 'Capped invoice line',
+      label: `Capped invoice line (${mode})`,
       fields: {
         name: { type: 'text', label: 'Name' },
         invoice: { type: 'lookup', label: 'Invoice', reference: parent },
@@ -193,6 +195,35 @@ function capObjects(parent: string, line: string, viaComputed: boolean) {
 }
 const CAP = { parent: 'r33795_cap', line: 'r33795_cap_line' };
 const CCAP = { parent: 'r33795_ccap', line: 'r33795_ccap_line' };
+const BCAP = { parent: 'r33795_bcap', line: 'r33795_bcap_line' };
+
+/**
+ * [#33795] A stored computed field of the CHILD that reads the parent's
+ * summary one hop: `rank = owner.flagged_count`, stored at the line's own
+ * write. One by one the second line stores the first line's recompute.
+ */
+const SEEN = 'r33795_seen';
+const SEEN_LINE = 'r33795_seen_line';
+const SEEN_OBJECTS = [
+  {
+    name: SEEN,
+    label: 'Ranked owner',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      flagged_count: { type: 'summary', label: 'Flagged', summaryOperations: { object: SEEN_LINE, function: 'count', filter: { flag: true } } },
+    },
+  },
+  {
+    name: SEEN_LINE,
+    label: 'Ranked line',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      owner: { type: 'lookup', label: 'Owner', reference: SEEN },
+      flag: { type: 'boolean', label: 'Flag' },
+      rank: { type: 'number', label: 'Rank', expression: 'record.owner.flagged_count' },
+    },
+  },
+];
 
 /**
  * [#33795, ruling 6928862195 B, through a computed field] (i) a contact's rule
@@ -249,7 +280,8 @@ const FORMULA_OBJECTS = [
 
 const OBJECTS = [
   ...rollupPair(0), ...rollupPair(1), ...rollupPair(2), ...KIND_OBJECTS, ...RULE_OBJECTS,
-  ...capObjects(CAP.parent, CAP.line, false), ...capObjects(CCAP.parent, CCAP.line, true), ...FORMULA_OBJECTS,
+  ...capObjects(CAP.parent, CAP.line, 'rule'), ...capObjects(CCAP.parent, CCAP.line, 'computed'), ...capObjects(BCAP.parent, BCAP.line, 'bound'),
+  ...FORMULA_OBJECTS, ...SEEN_OBJECTS,
 ];
 
 const engines: ObjectQL[] = [];
@@ -623,6 +655,20 @@ const roomCase: ParityCase = async (engine, tag) => {
   };
 };
 
+/** Two lines of one owner flagged: each stores `rank` from the owner's count at its own write. */
+const rankCase: ParityCase = async (engine, tag) => {
+  const [owner] = await engine.insert(SEEN, [{ name: `${tag}O` }], SYSTEM) as Array<{ id: string }>;
+  const lines = await engine.insert(SEEN_LINE, [0, 1].map((k) => ({ name: `${tag}${k}`, owner: owner.id, flag: false })), SYSTEM) as Array<{ id: string }>;
+  return {
+    object: SEEN_LINE,
+    records: lines.map((l) => ({ id: l.id, data: { flag: true } })),
+    state: async () => ({
+      flagged: num((await engine.findOne(SEEN, { where: { id: owner.id } }, SYSTEM) as any).flagged_count),
+      ranks: (await engine.find(SEEN_LINE, { where: { owner: owner.id }, orderBy: [{ field: 'name', order: 'asc' }] }, SYSTEM) as any[]).map((l) => num(l.rank)),
+    }),
+  };
+};
+
 /**
  * [#33795, ruling 6928862195 B] The classes a rule reads a roll-up through that
  * the supplier describe above does not cover: (iii) a rule of the parent on its
@@ -635,14 +681,19 @@ const roomCase: ParityCase = async (engine, tag) => {
  * stored rows alike, atomic and `continueOnError`.
  */
 const refused = (answer: any): boolean => answer.success === false;
-const PARITY_CASES: Array<{ name: string; make: ParityCase; live: (answer: any, state: any) => boolean }> = [
+/** `live` says the per-row path shows what a deferral would change; `coeLive` says it also does so under `continueOnError` (else that run is a parity pin only). */
+const PARITY_CASES: Array<{ name: string; make: ParityCase; live: (answer: any, state: any) => boolean; coeLive?: boolean }> = [
   // Invoice A holds one line, B two (the cap). Moving A's line onto B makes
   // B hold 3, and B's own rule refuses that recompute; moving one of B's
   // lines back leaves B at 2, so deferred the rule would see only B = 2.
   { name: '(iii) the parent caps its own count', make: capCase(CAP), live: refused },
   { name: '(iii) the parent caps a stored computed field over its own count', make: capCase(CCAP), live: refused },
-  { name: '(i) a contact rule reads the supplier formula over its count, one hop', make: slotsCase, live: refused },
-  { name: '(ii) a line readonlyWhen reads the header computed field over its count on parent', make: roomCase, live: (_answer, state) => state.lines[1].note === null },
+  { name: '(i) a contact rule reads the supplier formula over its count, one hop', make: slotsCase, live: refused, coeLive: true },
+  { name: '(ii) a line readonlyWhen reads the header computed field over its count on parent', make: roomCase, live: (_answer, state) => state.lines[1].note === null, coeLive: true },
+  // The same cap spelled as a declared bound (`min: 0` on the stored `room`), no rule.
+  { name: '(iii) a declared bound on the parent stored computed field over its count', make: capCase(BCAP), live: refused },
+  // Not a rule: a child's stored field computed from the parent's summary.
+  { name: 'a child stored computed field reads the owner count one hop', make: rankCase, live: (_answer, state) => state.ranks[0] !== state.ranks[1], coeLive: true },
 ];
 
 describe.each(CELLS)('a roll-up a rule reads through its own row or a formula is not deferred (#33795 B): $name', ({ url, make }) => {
@@ -659,8 +710,10 @@ describe.each(CELLS)('a roll-up a rule reads through its own row or a formula is
         const expected = await withoutBatchScope(engine, () => protocol.updateManyData({ object: today.object, records: today.records, options, context: SYSTEM.context } as never)) as any;
         const batch = await parity.make(engine, 'batch');
         const answer = await protocol.updateManyData({ object: batch.object, records: batch.records, options, context: SYSTEM.context } as never) as any;
-        // The case is live: one by one, the batch is refused, or (a lock) drops the second note.
-        if ('atomic' in options) expect(parity.live(expected, await today.state())).toBe(true);
+        // The case is live: one by one the batch is refused, a lock drops the second note, or the
+        // second row stores the first row's recompute. Under continueOnError the cap cases end in
+        // the same rows either way (the refused recompute is logged), so there they pin parity only.
+        if ('atomic' in options || parity.coeLive) expect(parity.live(expected, await today.state())).toBe(true);
         expect({ success: answer.success, rows: rows(answer) }).toEqual({ success: expected.success, rows: rows(expected) });
         expect(await batch.state()).toEqual(await today.state());
       });
