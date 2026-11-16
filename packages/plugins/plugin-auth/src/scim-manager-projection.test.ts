@@ -253,6 +253,24 @@ describe('SCIM manager projection: the directory sets, changes and clears sys_us
     expect(await managerOf(h, emp.userId)).toBeNull();
   });
 
+  it('an unchanged manager is not judged again: a PATCH elsewhere is served though the chain above grew past the cap', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const emp = await provision(h, 'emp', { value: boss.scimId });
+    let below = boss.userId;
+    for (let i = 0; i < MAX_MANAGER_CHAIN_DEPTH; i += 1) {
+      const id = `usr_above_${i}`;
+      await h.engine.insert('sys_user', { id, email: `above${i}@acme.com`, name: `Above ${i}`, email_verified: true }, SYSTEM);
+      await h.engine.update('sys_user', { id: below, manager_id: id }, SYSTEM);
+      below = id;
+    }
+    const renamed = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: 'displayName', value: 'Emp Renamed' },
+    ])));
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+  });
+
   it('a deprovision is never refused over a manager reference that no longer resolves', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss');
