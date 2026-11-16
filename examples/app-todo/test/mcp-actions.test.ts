@@ -241,19 +241,29 @@ describe('app-todo business actions over MCP (CE runtime, no service-ai)', () =>
 
     const gatedId = await seedTask('Needs a human');
 
-    // 7a/7b — [#33690] WITH the member and WITHOUT it alike: this app registers
-    // no pending-confirmation service, so the call is refused with the
-    // declared code and `details.reason: 'no_confirmation_service'`, and
-    // NOTHING ran. Before the amended contract 7b (with `confirm: true`) ran
-    // the handler; the member now travels the whole path and confers nothing.
-    for (const [id, extra] of [[12, {}], [13, { confirm: true }]] as const) {
-      const refused = await callMcp(confirmBridge, toolsCall(id, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId, ...extra }));
-      expect(refused.result?.isError).toBe(true);
-      const refusedEnvelope = JSON.parse(refused.result?.content?.[0]?.text ?? '{}');
-      expect(refusedEnvelope?.error?.code).toBe('ACTION_CONFIRMATION_REQUIRED');
-      expect(refusedEnvelope?.error?.status).toBe(428);
-      expect(refusedEnvelope?.error?.details?.actionName).toBe('todo_complete_task');
-      expect(refusedEnvelope?.error?.details?.reason).toBe('no_confirmation_service');
+    // 7a — [#33690] Without the member: this app registers no
+    // pending-confirmation service, so the call is refused with the declared
+    // code and `details.reason: 'no_confirmation_service'`, and NOTHING ran.
+    const refused = await callMcp(confirmBridge, toolsCall(12, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId }));
+    expect(refused.result?.isError).toBe(true);
+    const refusedEnvelope = JSON.parse(refused.result?.content?.[0]?.text ?? '{}');
+    expect(refusedEnvelope?.error?.code).toBe('ACTION_CONFIRMATION_REQUIRED');
+    expect(refusedEnvelope?.error?.status).toBe(428);
+    expect(refusedEnvelope?.error?.details?.actionName).toBe('todo_complete_task');
+    expect(refusedEnvelope?.error?.details?.reason).toBe('no_confirmation_service');
+    expect(await statusOf(gatedId)).toBe('not_started');
+
+    // 7b — [#34209] WITH the member: the member is retired, so the tool's
+    // closed input refuses the call before the runtime is reached — on the
+    // gated action and on an ungated one alike — and NOTHING ran. Before the
+    // amended contract this call ran the handler; under #33690 it reached the
+    // gate and conferred nothing; now it never gets past the input.
+    for (const [id, actionName] of [[13, 'todo_complete_task'], [15, 'todo_delete_completed']] as const) {
+      const withMember = await callMcp(confirmBridge, toolsCall(id, 'run_action', { actionName, recordId: gatedId, confirm: true }));
+      expect(withMember.result?.isError, actionName).toBe(true);
+      const text = withMember.result?.content?.[0]?.text ?? '';
+      expect(text, actionName).toContain('`confirm`');
+      expect(text, actionName).not.toContain('"ACTION_CONFIRMATION_REQUIRED"');
       expect(await statusOf(gatedId)).toBe('not_started');
     }
 

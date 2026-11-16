@@ -94,12 +94,21 @@ describe('renderSkillMarkdown', () => {
   it('teaches action preference — run a matching business action instead of hand-editing records', () => {
     const md = renderSkillMarkdown();
     expect(md).toContain('Prefer actions over hand-edits');
-    expect(md).toContain('run_action({ actionName, objectName?, recordId?, params?, confirm? })');
-    // [#15942] The signature owes `confirm`, and the skill owes the sentence
-    // that makes it usable: an agent that learns the member exists but not that
-    // the server REFUSES without it has learned nothing it can act on.
-    expect(md).toContain('ACTION_CONFIRMATION_REQUIRED');
-    expect(md).toContain('requiresConfirmation');
+    // [#34209] The member is retired from both action tools: the signatures
+    // carry no `confirm`, the skill teaches no `confirm: true` retry on them,
+    // and it says what does happen instead: the hand-off and the refusal.
+    expect(md).toContain('run_action({ actionName, objectName?, recordId?, params? })');
+    expect(md).toContain('resume_run({ runId, values? })');
+    const start = md.indexOf('- **run_action(');
+    const end = md.indexOf('whatever the call sends).', md.indexOf('- **resume_run('));
+    expect(start > -1 && end > start, 'the run_action / resume_run lines moved: re-anchor this pin').toBe(true);
+    const actionTools = md.slice(start, end);
+    expect(actionTools, 'the skill teaches a confirm: true retry on an action tool again').not.toContain('confirm: true');
+    expect(actionTools).toContain('pending_confirmation');
+    expect(actionTools).toContain('ACTION_CONFIRMATION_REQUIRED');
+    expect(actionTools).toContain('requiresConfirmation');
+    // Control: the delete tools keep the member, and the skill still teaches it there.
+    expect(md).toContain('delete_record({ objectName, recordId, confirm })');
     // [ADR-0151 D3 rule 3] The retry is a person's or a delegated agent's; an
     // AI service account is refused whatever it sends, and is told so.
     expect(md).toContain("Under an AI service\n  account's own key");

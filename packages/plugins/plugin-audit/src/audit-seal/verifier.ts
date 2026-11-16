@@ -4,7 +4,7 @@ import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import { parseLifecycleDuration } from '@objectstack/objectql';
 import type { IAuditCheckpointSigner, ICryptoProvider } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/types';
-import { canonicalDatetime, leafHash, leafInput, rowIdOf, type SealedFieldTypes } from './canonical.js';
+import { canonicalDatetime, chainValueOf, leafHash, leafInput, rowIdOf, sealChainFieldOf, type SealedFieldTypes } from './canonical.js';
 import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT, AUDIT_SIGNING_KEY_OBJECT, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed } from './seed.js';
 import { AUDIT_SEAL_WINDOW_MS } from './sealer.js';
 import {
@@ -250,7 +250,6 @@ interface BundleDraft {
 const PAGE_SIZE = 500;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const windowOf = (ms: number): number => Math.floor(ms / AUDIT_SEAL_WINDOW_MS) * AUDIT_SEAL_WINDOW_MS;
-const tenantOf = (row: Row): string | null => (typeof row.tenant_id === 'string' && row.tenant_id !== '' ? row.tenant_id : null);
 const zero = (): AuditVerdictCounts => ({ unmodified: 0, modified: 0, missing: 0, late: 0, redacted: 0, expired: 0, unsealed: 0 });
 const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
 
@@ -861,6 +860,8 @@ function jsonColumn(value: unknown): unknown {
 /** One sealed object's chains and rows, read live. */
 class ObjectCheck extends ChainCheck<LedgerCheck> {
   private readonly types: SealedFieldTypes;
+  /** The column a row's chain is read from, as the sealer reads it ({@link chainValueOf}). */
+  private readonly chainField: string;
   private readonly hot: SealStorageDriver;
   private readonly archive: SealStorageDriver | undefined;
   /** The object's highest trusted `sealed_through`, and the windows a trusted `window` checkpoint names. */
@@ -881,6 +882,7 @@ class ObjectCheck extends ChainCheck<LedgerCheck> {
   ) {
     super(check, object.name);
     this.types = (object.fields ?? {}) as SealedFieldTypes;
+    this.chainField = sealChainFieldOf(object.lifecycle);
     const { engine } = check;
     const hot = engine.getDriverForObject(object.name);
     if (!hot) throw new Error(`no driver resolves for '${object.name}'`);
@@ -1077,7 +1079,7 @@ class ObjectCheck extends ChainCheck<LedgerCheck> {
     for (const { row, head } of ordered) await this.judgeCheckpoint(row, head, (body) => this.readLeaves(body, head, rows));
     const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark || this.sealedWindows.has(start);
     for (const [id, row] of rows) {
-      const chain = chainKeyOf(tenantOf(row));
+      const chain = chainKeyOf(chainValueOf(row, this.chainField));
       if (!this.check.inScope(chain) || this.held.has(id)) continue;
       if (sealedWindow || this.listedByFaulted.has(id)) this.unheld.set(id, { chain, windowStart: start });
     }

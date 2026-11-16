@@ -1935,6 +1935,10 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
         className={cn('max-w-full min-w-0', colorClasses)}
         style={hexBadge?.style}
         title={label}
+        // A print page's stylesheet prints this badge as plain text
+        // (`PRINT_PLAIN_BADGE_ATTRIBUTE` in `@object-ui/components`'s
+        // `page-print.ts`, objectstack#34228). Nothing reads it on screen.
+        data-select-badge=""
       >
         <span className="truncate">{label}</span>
       </Badge>
