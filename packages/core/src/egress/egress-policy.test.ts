@@ -150,7 +150,10 @@ describe('a malformed or over-broad allowlist refuses to build', () => {
         'fd00:ec2::23',
         'fd20:ce::254',
         'fd00:c1::a9fe:a9fe',
+        'fd00:a9fe:a9fe::1',
         '::ffff:168.63.129.16',
+        '64:ff9b:1::a9fe:a9fe',
+        '64:ff9b:1:a9fe:a9:fe00::',
         '::ffff:0:0/96',
         '[::1]',
     ];
@@ -192,6 +195,7 @@ describe('every cloud metadata address is refused by default and under a coverin
         ['fd00:ec2::23', 'fd00::/8', 'fd00:ec2::22'],
         ['fd20:ce::254', 'fd20::/16', 'fd20:ce::253'],
         ['fd00:c1::a9fe:a9fe', 'fd00::/8', 'fd00:c1::a9fe:a9fd'],
+        ['fd00:a9fe:a9fe::1', 'fd00::/8', 'fd00:a9fe:a9fe::2'],
         ['100.100.100.200', '100.64.0.0/10', '100.100.100.201'],
         ['192.0.0.192', '192.0.0.0/24', '192.0.0.193'],
         ['168.63.129.16', '168.63.0.0/16', '168.63.129.17'],
@@ -247,6 +251,12 @@ describe('an address under the local-use NAT64 prefix that carries a never-allow
 
     it("CONTROL: a private IPv4 address under the prefix is opened by '64:ff9b:1::/48'", () => {
         expect(verdict('64:ff9b:1::a00:1', '64:ff9b:1::/48')).toMatchObject({ allow: true, allowlisted: true });
+    });
+
+    it('an allowlist entry naming one such address refuses to build; CONTROL: one carrying a private address parses', () => {
+        expect(() => parseEgressAllowlist('64:ff9b:1::a9fe:a9fe')).toThrow(EgressAllowlistError);
+        expect(() => parseEgressAllowlist('64:ff9b:1::a83f:8110')).toThrow(EgressAllowlistError);
+        expect(parseEgressAllowlist('64:ff9b:1::a00:1')).toHaveLength(1);
     });
 });
 

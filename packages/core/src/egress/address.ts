@@ -53,6 +53,7 @@ export const NEVER_ALLOWLISTABLE_CLASSES: ReadonlySet<EgressDenyClass> = new Set
  * - `fd00:ec2::23` — the AWS EKS Pod Identity agent over IPv6.
  * - `fd20:ce::254` — the Google Cloud metadata server over IPv6.
  * - `fd00:c1::a9fe:a9fe` — the Oracle Cloud instance metadata service over IPv6.
+ * - `fd00:a9fe:a9fe::1` — the Akamai (Linode) metadata service over IPv6.
  * - `100.100.100.200` — the Alibaba Cloud metadata service (inside CGNAT space).
  * - `192.0.0.192` — the Oracle Cloud legacy metadata address.
  * - `168.63.129.16` — the Azure host-platform endpoint (inside public space).
@@ -66,6 +67,7 @@ export const METADATA_ADDRESSES: readonly string[] = Object.freeze([
     'fd00:ec2::23',
     'fd20:ce::254',
     'fd00:c1::a9fe:a9fe',
+    'fd00:a9fe:a9fe::1',
     '100.100.100.200',
     '192.0.0.192',
     '168.63.129.16',

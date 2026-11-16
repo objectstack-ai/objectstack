@@ -165,7 +165,10 @@ function parseEntry(text: string, problems: string[]): EgressAllowEntry | null {
             problems.push(`'${text}' is over-broad (it covers an IPv4 range under /${EGRESS_ALLOWLIST_MIN_PREFIX})`);
             return null;
         }
-        if (NEVER_ALLOWLISTABLE_BLOCKS.some((never) => cidrWithin(effectiveBlock, never))) {
+        // A single address is refused when the connect would refuse it as
+        // never-allowlistable in any form it carries (a local-use NAT64 layout included).
+        const single = prefix === full && isNeverAllowlistable(effective);
+        if (single || NEVER_ALLOWLISTABLE_BLOCKS.some((never) => cidrWithin(effectiveBlock, never))) {
             problems.push(`'${text}' is a link-local or cloud metadata address, which no allowlist can open`);
             return null;
         }
