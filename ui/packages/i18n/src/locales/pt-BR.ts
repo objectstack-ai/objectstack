@@ -2315,6 +2315,9 @@ const pt = {
       fieldErrorsToast_many: "{{count}} de configurações precisam de atenção: {{settings}}",
       fieldErrorsToast_other: "{{count}} configurações precisam de atenção: {{settings}}",
       cryptoRefusalTitle: "Esta implantação não consegue criptografar segredos",
+      platformManagedTitle: "Gerenciado pela plataforma",
+      platformManagedBody: "A plataforma de hospedagem fornece e configura isso para este ambiente, por isso não é definido aqui.",
+      aiProviderManaged: "O provedor de IA, seu modelo e suas credenciais são gerenciados pela plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como criptografado, portanto nada foi gravado.",
       cryptoRefusalNoSubject: "O valor declarado como criptografado foi recusado, portanto nada foi gravado.",
       cryptoRefusalToast: "Não é possível criptografar segredos: {{subject}}",
@@ -2413,6 +2416,8 @@ const pt = {
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Adicione seu primeiro aplicativo', todo: 'Ainda não há um aplicativo seu. Instale um pelo marketplace ou crie um, e ele aparecerá no Início.', done: 'Um aplicativo seu está no Início.' },
+      firstRecord: { title: 'Adicione seu primeiro registro', todo: 'Ninguém criou um registro nos seus aplicativos ainda.', done: 'Um registro foi criado nos seus aplicativos.', action: 'Abrir aplicativo' },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",

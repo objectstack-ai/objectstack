@@ -2254,6 +2254,9 @@ const de = {
       fieldErrorsToast_one: "{{count}} Einstellung muss überprüft werden: {{settings}}",
       fieldErrorsToast_other: "{{count}} Einstellungen müssen überprüft werden: {{settings}}",
       cryptoRefusalTitle: "Diese Installation kann keine Geheimnisse verschlüsseln",
+      platformManagedTitle: "Von der Plattform verwaltet",
+      platformManagedBody: "Die Hosting-Plattform stellt dies für diese Umgebung bereit und konfiguriert es, daher wird es hier nicht eingestellt.",
+      aiProviderManaged: "Der KI-Anbieter, sein Modell und seine Zugangsdaten werden von der Plattform verwaltet.",
       cryptoRefusalSubjectSuffix: "ist als verschlüsselt deklariert, daher wurde nichts geschrieben.",
       cryptoRefusalNoSubject: "Der als verschlüsselt deklarierte Wert wurde abgelehnt, daher wurde nichts geschrieben.",
       cryptoRefusalToast: "Geheimnisse können nicht verschlüsselt werden: {{subject}}",
@@ -2352,6 +2355,8 @@ const de = {
         done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
         action: 'Verbinden',
       },
+      firstApp: { title: 'Erste App hinzufügen', todo: 'Noch keine eigene App. Installieren Sie eine aus dem Marktplatz oder erstellen Sie eine; sie erscheint auf der Startseite.', done: 'Eine eigene App ist auf der Startseite.' },
+      firstRecord: { title: 'Ersten Datensatz anlegen', todo: 'In Ihren Apps hat noch niemand einen Datensatz angelegt.', done: 'In Ihren Apps wurde ein Datensatz angelegt.', action: 'App öffnen' },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",

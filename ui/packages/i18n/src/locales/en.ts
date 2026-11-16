@@ -2390,6 +2390,9 @@ const en = {
       // would have left a single translated string among a dozen hardcoded
       // ones — and deferred them to this card, which converts the screen whole.
       cryptoRefusalTitle: 'This deployment cannot encrypt secrets',
+      platformManagedTitle: 'Managed by the platform',
+      platformManagedBody: 'The hosting platform provides and configures this for this environment, so it is not set here.',
+      aiProviderManaged: 'The AI provider, its model and credentials are managed by the platform.',
       // `{{subject}}` is rendered as a `< code >` element by the view, so the
       // sentence is split around it rather than interpolated.
       cryptoRefusalSubjectSuffix: 'is declared encrypted, so nothing was written.',
@@ -2533,6 +2536,8 @@ const en = {
         done: 'An AI assistant or API key of yours is connected.',
         action: 'Connect',
       },
+      firstApp: { title: 'Put your first app in', todo: 'No app of your own yet. Install one from the marketplace or build one, and it shows on Home.', done: 'An app of your own is on Home.' },
+      firstRecord: { title: 'Add your first record', todo: 'Nobody has created a record in your apps yet.', done: 'A record was created in your apps.', action: 'Open app' },
     },
     error: {
       connectionFailed: 'Cannot connect to server',

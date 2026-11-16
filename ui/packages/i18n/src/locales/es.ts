@@ -2320,6 +2320,9 @@ const es = {
       fieldErrorsToast_many: "{{count}} de ajustes requieren atención: {{settings}}",
       fieldErrorsToast_other: "{{count}} ajustes requieren atención: {{settings}}",
       cryptoRefusalTitle: "Esta instalación no puede cifrar secretos",
+      platformManagedTitle: "Gestionado por la plataforma",
+      platformManagedBody: "La plataforma de alojamiento proporciona y configura esto para este entorno, por lo que no se ajusta aquí.",
+      aiProviderManaged: "El proveedor de IA, su modelo y sus credenciales los gestiona la plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como cifrado, por lo que no se escribió nada.",
       cryptoRefusalNoSubject: "El valor declarado como cifrado fue rechazado, por lo que no se escribió nada.",
       cryptoRefusalToast: "No se pueden cifrar los secretos: {{subject}}",
@@ -2418,6 +2421,8 @@ const es = {
         done: 'Tienes conectado un asistente de IA o una clave de API.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Añade tu primera aplicación', todo: 'Aún no tienes una aplicación propia. Instala una desde el marketplace o crea una, y aparecerá en Inicio.', done: 'Ya tienes una aplicación propia en Inicio.' },
+      firstRecord: { title: 'Añade tu primer registro', todo: 'Nadie ha creado todavía un registro en tus aplicaciones.', done: 'Se ha creado un registro en tus aplicaciones.', action: 'Abrir aplicación' },
     },
     error: {
       connectionFailed: "No se puede conectar al servidor",

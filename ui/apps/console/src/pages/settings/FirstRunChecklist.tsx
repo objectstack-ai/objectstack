@@ -53,6 +53,24 @@
  *      drawn and not done it claims the `connect_assistant` item, and Home's
  *      Connect an AI Assistant card stands aside.
  *
+ * ## What the host adds: the profile
+ *
+ * The rows above are the platform's. A host can add rows, hide rows that do
+ * not apply to it, and leave rows optional, through the checklist's PROFILE
+ * (`firstRunChecklistProfile.ts`), which the served auth config selects
+ * (`features.cloudManaged`). This component reads the profile's lists and
+ * never which host it runs on. On a self-hosted deployment the profile is
+ * empty and the checklist is exactly the rows above. On a managed one:
+ *
+ *   9. Put your first app in: the launcher lists an app that is not a platform
+ *      built-in (the launcher's own `/me/apps` answer, no request of its own).
+ *  10. Add your first record, OPTIONAL there: a person created a record on an
+ *      object those apps list (one `sys_activity` read; the feed keeps 14 days,
+ *      which is why the row is optional). Links to the first of those apps.
+ *
+ * and the mail row is drawn only once it reads done. Until the auth config
+ * answers, nothing is drawn; a config that cannot be read is self-hosted.
+ *
  * Language and country are named in the page's language (`Intl.DisplayNames`),
  * not by the setting's option label: the language options are autonyms, so a
  * zh-CN page read 「当前为English、美国 (US)」.
@@ -95,10 +113,13 @@ import { toast } from 'sonner';
 import { CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import {
+  appRouteSegment,
   connectAssistantPath,
   resolveSetupAppPath,
+  useAdapter,
   useConnectedAccess,
   useHomeItemClaim,
+  useLauncherApps,
   useMetadata,
 } from '@object-ui/app-shell';
 import { useAuth } from '@object-ui/auth';
@@ -122,7 +143,6 @@ import {
   deviceStorage,
   dismissRecordKey,
   hasInvitedColleagues,
-  isOptionalRow,
   isOrganizationNamed,
   localizationRows,
   markDismissed,
@@ -133,6 +153,19 @@ import {
   type ChecklistSettingsRow,
   type ChecklistSettingsState,
 } from './firstRunChecklistLogic';
+import {
+  SELF_HOSTED_PROFILE,
+  appObjectNames,
+  checklistProfileFor,
+  hasOwnApp,
+  isProfileOptionalRow,
+  ownApps,
+  profileDrawsRow,
+  readFirstRecordCreated,
+  type ChecklistApp,
+  type FirstRecordSource,
+  type FirstRunChecklistProfile,
+} from './firstRunChecklistProfile';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -184,6 +217,7 @@ function currentValue(resolved: ResolvedSettingValue): string {
 function ChecklistRow({
   id,
   done,
+  optional = false,
   title,
   detail,
   action,
@@ -191,13 +225,14 @@ function ChecklistRow({
 }: {
   id: string;
   done: boolean;
+  /** The row may be left undone: the profile's answer (`isProfileOptionalRow`). */
+  optional?: boolean;
   title: string;
   detail?: string;
   action?: ReactNode;
   children?: ReactNode;
 }) {
   const { t } = useObjectTranslation();
-  const optional = isOptionalRow(id);
   return (
     <li
       className="flex items-start gap-3 py-3"
@@ -411,9 +446,13 @@ function SettingsRowEditor({
 
 export function FirstRunChecklist() {
   const { t, language } = useObjectTranslation();
-  const { user, activeOrganization, getMembers, listInvitations } = useAuth();
+  const { user, activeOrganization, getMembers, listInvitations, getAuthConfig } = useAuth();
   const { systemPermissions } = usePermissions();
   const { apps } = useMetadata();
+  const dataSource = useAdapter();
+  // The apps the launcher offers this user: the `/meta/app` list narrowed by
+  // the console's one `/me/apps` read. "Put your first app in" reads it.
+  const launcher = useLauncherApps((apps ?? []) as Array<ChecklistApp & Record<string, unknown>>);
   const labels = useSettingsLabel(LOCALIZATION_NAMESPACE);
   const aiLabels = useSettingsLabel(AI_NAMESPACE);
 
@@ -440,6 +479,29 @@ export function FirstRunChecklist() {
   // Hidden in this mount by the close button; a record from an earlier visit is
   // read from the device below.
   const [hiddenKey, setHiddenKey] = useState<string | null>(null);
+  // The host's profile, from the served auth config (`firstRunChecklistProfile.ts`).
+  // `null` until the config answers: drawing the self-hosted rows first and
+  // the host's a moment later would move the list under the reader.
+  const [profile, setProfile] = useState<FirstRunChecklistProfile | null>(null);
+  // Whether a person created a record, read for one identity and object list.
+  const [firstRecord, setFirstRecord] = useState<{ key: string; created: boolean } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The auth client holds one config answer per signed-in stretch, which
+    // sign-in already read: this asks no new request.
+    Promise.resolve(getAuthConfig?.())
+      .then((config) => {
+        if (!cancelled) setProfile(checklistProfileFor(config?.features));
+      })
+      .catch(() => {
+        // Unreadable: the checklist is what it is without a host.
+        if (!cancelled) setProfile(SELF_HOSTED_PROFILE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthConfig]);
 
   useEffect(() => {
     if (!identity || !userId || !orgId || heldKey === null) return;
@@ -488,10 +550,39 @@ export function FirstRunChecklist() {
       assistant.state === 'ready' && !assistant.connected,
   );
   useHomeItemClaim('connect_assistant', drawsAssistantRow);
+  // Add your first record: read once the checklist is going to draw, the
+  // profile adds the row and the launcher has answered, for the objects the
+  // environment's own apps list. Keyed on that list's content, never on the
+  // array's identity (AGENTS.md #10).
+  const own = ownApps(launcher.apps);
+  const recordObjects = appObjectNames(own);
+  const firstRecordKey =
+    settings && !dismissed && identity && profile?.addedRows.includes('first_record') && !launcher.pending && dataSource
+      ? [identity, recordObjects.join(',')].join('\u0001')
+      : null;
+  useEffect(() => {
+    if (!firstRecordKey || !dataSource) return;
+    let cancelled = false;
+    readFirstRecordCreated(dataSource as unknown as FirstRecordSource, recordObjects)
+      .then((created) => {
+        if (!cancelled) setFirstRecord({ key: firstRecordKey, created });
+      })
+      .catch(() => {
+        // Unreadable (no activity feed, or a refused read): the row is left out.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `recordObjects` and `dataSource` are carried by the key's content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRecordKey]);
+  const recordCreated = firstRecord && firstRecord.key === firstRecordKey ? firstRecord.created : undefined;
+
   const setSettings = (update: (prev: ChecklistSettingsState) => ChecklistSettingsState) =>
     setLoaded((prev) => (prev ? { identity: prev.identity, settings: update(prev.settings) } : prev));
 
-  if (!settings || dismissed || !orgId || !userId || !recordKey) return null;
+  if (!settings || !profile || dismissed || !orgId || !userId || !recordKey) return null;
+  const optionalRow = (id: string) => isProfileOptionalRow(profile, id);
 
   const setupPath = resolveSetupAppPath(apps);
   const localization = localizationRows(settings.localization.manifest, settings.localization.values, browser);
@@ -506,6 +597,7 @@ export function FirstRunChecklist() {
       <ChecklistRow
         key="organization_name"
         id="organization_name"
+        optional={optionalRow('organization_name')}
         done={organizationNamed}
         title={t('console.firstRunChecklist.organizationName.title')}
         detail={
@@ -533,6 +625,7 @@ export function FirstRunChecklist() {
         <ChecklistRow
           key={row.id}
           id={row.id}
+          optional={optionalRow(row.id)}
           done={row.done}
           title={settingsRowTitle(row, t)}
           detail={settingsRowDetail(row, labels, language, t)}
@@ -593,6 +686,7 @@ export function FirstRunChecklist() {
         <ChecklistRow
           key="mail"
           id="mail"
+          optional={optionalRow('mail')}
           done={done}
           title={t('console.firstRunChecklist.mail.title')}
           detail={done ? t('console.firstRunChecklist.mail.done') : t('console.firstRunChecklist.mail.todo')}
@@ -616,6 +710,7 @@ export function FirstRunChecklist() {
         <ChecklistRow
           key="invite"
           id="invite"
+          optional={optionalRow('invite')}
           done={colleagues}
           title={t('console.firstRunChecklist.invite.title')}
           detail={colleagues ? t('console.firstRunChecklist.invite.done') : t('console.firstRunChecklist.invite.todo')}
@@ -641,6 +736,7 @@ export function FirstRunChecklist() {
         <ChecklistRow
           key="ai_provider"
           id="ai_provider"
+          optional={optionalRow('ai_provider')}
           done={ai.done}
           title={t('console.firstRunChecklist.aiProvider.title')}
           detail={
@@ -671,6 +767,7 @@ export function FirstRunChecklist() {
         <ChecklistRow
           key="connect_assistant"
           id="connect_assistant"
+          optional={optionalRow('connect_assistant')}
           done={done}
           title={t('console.firstRunChecklist.connectAssistant.title')}
           detail={
@@ -690,10 +787,59 @@ export function FirstRunChecklist() {
     });
   }
 
+  for (const added of profile.addedRows) {
+    if (added === 'first_app' && !launcher.pending) {
+      const done = hasOwnApp(launcher.apps);
+      rows.push({
+        id: 'first_app',
+        done,
+        node: (
+          <ChecklistRow
+            key="first_app"
+            id="first_app"
+            optional={optionalRow('first_app')}
+            done={done}
+            title={t('console.firstRunChecklist.firstApp.title')}
+            detail={done ? t('console.firstRunChecklist.firstApp.done') : t('console.firstRunChecklist.firstApp.todo')}
+          />
+        ),
+      });
+    }
+    if (added === 'first_record' && recordCreated !== undefined) {
+      const done = recordCreated;
+      const firstOwn = own[0];
+      rows.push({
+        id: 'first_record',
+        done,
+        node: (
+          <ChecklistRow
+            key="first_record"
+            id="first_record"
+            optional={optionalRow('first_record')}
+            done={done}
+            title={t('console.firstRunChecklist.firstRecord.title')}
+            detail={done ? t('console.firstRunChecklist.firstRecord.done') : t('console.firstRunChecklist.firstRecord.todo')}
+            action={
+              firstOwn ? (
+                <RowLink
+                  to={`/apps/${appRouteSegment(firstOwn)}`}
+                  label={t('console.firstRunChecklist.firstRecord.action')}
+                  testId="first-run-checklist-link-first_record"
+                />
+              ) : undefined
+            }
+          />
+        ),
+      });
+    }
+  }
+
+  // The host hides the rows that do not apply to it while they read not done.
+  const drawn = rows.filter((row) => profileDrawsRow(profile, row.id, row.done));
   // Done rows are folded away, the optional ones included; only the required
   // ones decide whether the checklist is still drawn and what its progress says.
-  const doneCount = rows.filter((row) => row.done).length;
-  const completion = checklistCompletion(rows);
+  const doneCount = drawn.filter((row) => row.done).length;
+  const completion = checklistCompletion(drawn, optionalRow);
   if (completion.complete) return null;
 
   const hide = () => {
@@ -732,7 +878,7 @@ export function FirstRunChecklist() {
           </div>
         </div>
         <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
-          {rows.filter((row) => showDone || !row.done).map((row) => row.node)}
+          {drawn.filter((row) => showDone || !row.done).map((row) => row.node)}
         </ol>
         {doneCount > 0 ? (
           <div className="border-t border-border py-2">

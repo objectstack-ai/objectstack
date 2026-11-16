@@ -2254,6 +2254,9 @@ const ko = {
       fieldErrorsToast_one: "확인이 필요한 설정 {{count}}개: {{settings}}",
       fieldErrorsToast_other: "확인이 필요한 설정 {{count}}개: {{settings}}",
       cryptoRefusalTitle: "이 배포는 시크릿을 암호화할 수 없습니다",
+      platformManagedTitle: "플랫폼에서 관리합니다",
+      platformManagedBody: "호스팅 플랫폼이 이 환경을 위해 제공하고 구성하므로 여기에서 설정하지 않습니다.",
+      aiProviderManaged: "AI 공급자, 모델 및 자격 증명은 플랫폼에서 관리합니다.",
       cryptoRefusalSubjectSuffix: "은(는) 암호화 대상으로 선언되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalNoSubject: "암호화 대상으로 선언된 값이 거부되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalToast: "시크릿을 암호화할 수 없습니다: {{subject}}",
@@ -2352,6 +2355,8 @@ const ko = {
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
+      firstApp: { title: '첫 번째 앱 추가', todo: '아직 자체 앱이 없습니다. 마켓플레이스에서 설치하거나 직접 만들면 홈에 표시됩니다.', done: '자체 앱이 홈에 있습니다.' },
+      firstRecord: { title: '첫 번째 레코드 추가', todo: '아직 앱에서 레코드를 만든 사람이 없습니다.', done: '앱에서 레코드가 만들어졌습니다.', action: '앱 열기' },
     },
     error: {
       connectionFailed: "서버에 연결할 수 없습니다",

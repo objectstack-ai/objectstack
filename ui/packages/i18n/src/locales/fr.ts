@@ -2316,6 +2316,9 @@ const fr = {
       fieldErrorsToast_many: "{{count}} de paramètres nécessitent votre attention : {{settings}}",
       fieldErrorsToast_other: "{{count}} paramètres nécessitent votre attention : {{settings}}",
       cryptoRefusalTitle: "Ce déploiement ne peut pas chiffrer les secrets",
+      platformManagedTitle: "Géré par la plateforme",
+      platformManagedBody: "La plateforme d'hébergement fournit et configure ceci pour cet environnement ; il n'est donc pas réglé ici.",
+      aiProviderManaged: "Le fournisseur d'IA, son modèle et ses identifiants sont gérés par la plateforme.",
       cryptoRefusalSubjectSuffix: "est déclaré chiffré, aucune écriture n'a donc eu lieu.",
       cryptoRefusalNoSubject: "La valeur déclarée chiffrée a été refusée, aucune écriture n'a donc eu lieu.",
       cryptoRefusalToast: "Impossible de chiffrer les secrets : {{subject}}",
@@ -2414,6 +2417,8 @@ const fr = {
         done: "Un assistant IA ou une clé d'API à vous est connecté.",
         action: 'Connecter',
       },
+      firstApp: { title: 'Ajouter votre première application', todo: 'Aucune application à vous pour l’instant. Installez-en une depuis la place de marché ou créez-la : elle apparaîtra sur l’accueil.', done: 'Une application à vous figure sur l’accueil.' },
+      firstRecord: { title: 'Ajouter votre premier enregistrement', todo: 'Personne n’a encore créé d’enregistrement dans vos applications.', done: 'Un enregistrement a été créé dans vos applications.', action: 'Ouvrir l’application' },
     },
     error: {
       connectionFailed: "Impossible de se connecter au serveur",

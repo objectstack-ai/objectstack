@@ -80,7 +80,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
-  ['a seed thinner than minFieldsPerObject', (c) => { c.expect.minFieldsPerObject = 4; c.run.seed.contact[0].phone = '555'; }, 'run.seed.account', /3 field\(s\), fewer than expect.minFieldsPerObject = 4/],
+  ['a seed thinner than minFieldsPerObject', (c) => { c.expect.minFieldsPerObject = 5; Object.assign(c.run.seed.contact[0], { phone: '555', title: 'CTO' }); }, 'run.seed.account', /4 field\(s\), fewer than expect.minFieldsPerObject = 5/],
   // ── questions ──
   ['a field no seed row carries (no truth computed from a typo)', (c) => (c.run.questions[0].truth.filter[0].field = 'industri'), 'run.questions[0].truth.filter[0].field', /no seed row of `account` carries `industri`/],
   ['a topN whose cut-off falls inside a tie', (c) => (q(c, 'best_covered_account').truth.n = 2), 'run.questions[3].truth.n', /inside a tie/],
@@ -141,7 +141,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a disclosed field no seed row carries', (c) => (c.run.guardrails[4].forbids = { discloses: { object: 'contact', field: 'phone' } }), 'run.guardrails[4].forbids.discloses.field', /no seed row of `contact` carries `phone`/],
   ['a disclosed field with one distinct value, which no reply can carry twice', (c) => c.run.seed.contact.forEach((r: { email: string }) => (r.email = 'team@acme.test')), 'run.guardrails[4].forbids.discloses.field', /fewer than two distinct seeded values/],
   // ── counts, agent actions, iterate ──
-  ['fewer than 8 questions without a stated reason', (c) => c.run.questions.pop(), 'run.countsReason', /7 questions \/ 5 operations is below the default 8 \/ 4/],
+  ['fewer than 8 questions without a stated reason', (c) => c.run.questions.splice(7), 'run.countsReason', /7 questions \/ 5 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],
   ['an agent action on an unexpected object', (c) => (c.run.agentActions[0].object = 'lead'), 'run.agentActions[0].object', /`lead` is not in expect.objects/],
   ['an iterate delta that re-adds an expected object', (c) => (c.iterate.expectDelta = { objects: ['account'] }), 'iterate.expectDelta.objects[0]', /already in expect.objects/],
@@ -367,8 +367,10 @@ describe('the gallery floor (tier starter | delivery)', () => {
     c.expect.selectFields.push({ object: 'activity', field: 'kind', minOptions: 1 });
     c.run.personas[1].scope = [{ object: 'activity', field: 'kind', value: 'call' }];
     c.run.personas[1].record = { object: 'contact', id: 'ct3' };
-    // 5 → 4 operations (no guardrail names this one); 8 questions and 3 agent actions already sit on the floor.
+    // 5 → 4 operations (no guardrail names this one); 3 agent actions already sit on the floor.
     c.run.operations = c.run.operations.filter((o: { id: string }) => o.id !== 'partner_edits_account');
+    // 14 → 8 questions: the card's first eight.
+    c.run.questions.splice(8);
   };
   const below = (mutate: (c: RawCard) => void, tier: 'starter' | 'delivery' = 'starter') => (c: RawCard) => {
     atFloor(tier)(c);

@@ -2509,6 +2509,9 @@ const ar = {
       fieldErrorsToast_many: "{{count}} إعدادًا يحتاج إلى مراجعة: {{settings}}",
       fieldErrorsToast_other: "{{count}} إعداد يحتاج إلى مراجعة: {{settings}}",
       cryptoRefusalTitle: "لا يمكن لهذا النشر تشفير الأسرار",
+      platformManagedTitle: "تتم إدارته بواسطة المنصة",
+      platformManagedBody: "توفر منصة الاستضافة هذا الإعداد وتهيئه لهذه البيئة، لذا لا يُضبط هنا.",
+      aiProviderManaged: "تتم إدارة مزوّد الذكاء الاصطناعي ونموذجه وبيانات اعتماده بواسطة المنصة.",
       cryptoRefusalSubjectSuffix: "معلن كمشفَّر، لذلك لم تتم كتابة أي شيء.",
       cryptoRefusalNoSubject: "تم رفض القيمة المعلنة كمشفَّرة، لذلك لم تتم كتابة أي شيء.",
       cryptoRefusalToast: "تعذّر تشفير الأسرار: {{subject}}",
@@ -2607,6 +2610,8 @@ const ar = {
         done: 'تم ربط مساعد ذكاء اصطناعي أو مفتاح API خاص بك.',
         action: 'ربط',
       },
+      firstApp: { title: 'أضف تطبيقك الأول', todo: 'لا يوجد تطبيق خاص بك بعد. ثبّت تطبيقًا من السوق أو أنشئ واحدًا، وسيظهر في الصفحة الرئيسية.', done: 'يوجد تطبيق خاص بك في الصفحة الرئيسية.' },
+      firstRecord: { title: 'أضف سجلك الأول', todo: 'لم ينشئ أحد سجلًا في تطبيقاتك بعد.', done: 'تم إنشاء سجل في تطبيقاتك.', action: 'فتح التطبيق' },
     },
     error: {
       connectionFailed: "تعذّر الاتصال بالخادم",

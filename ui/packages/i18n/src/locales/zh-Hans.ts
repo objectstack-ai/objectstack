@@ -2010,6 +2010,9 @@ const zh = {
       fieldErrorsToast_one: '{{count}} 项设置需要处理：{{settings}}',
       fieldErrorsToast_other: '{{count}} 项设置需要处理：{{settings}}',
       cryptoRefusalTitle: '此部署无法加密机密信息',
+      platformManagedTitle: '此项由平台托管',
+      platformManagedBody: '托管平台为此环境提供并配置此项，因此无需在此设置。',
+      aiProviderManaged: 'AI 提供商、模型与凭据由平台托管。',
       cryptoRefusalSubjectSuffix: '被声明为加密字段，因此未写入任何内容。',
       cryptoRefusalNoSubject: '声明为加密的值被拒绝，因此未写入任何内容。',
       cryptoRefusalToast: '无法加密机密信息：{{subject}}',
@@ -2108,6 +2111,8 @@ const zh = {
         done: '你已连接了 AI 助手或 API 密钥。',
         action: '连接',
       },
+      firstApp: { title: '放进第一个应用', todo: '还没有你自己的应用。从应用市场安装一个或自己搭建一个，它会出现在首页。', done: '你自己的应用已在首页。' },
+      firstRecord: { title: '添加第一条记录', todo: '还没有人在你的应用里创建记录。', done: '你的应用里已经有人创建了记录。', action: '打开应用' },
     },
     error: {
       connectionFailed: '无法连接到服务器',

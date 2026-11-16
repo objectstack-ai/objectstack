@@ -1046,6 +1046,7 @@
     "matchesLikePattern (function)",
     "materializeTreeSelfReferences (function)",
     "missingFieldValues (function)",
+    "multiDeclarableFieldTypes (function)",
     "nextUtcCalendarDay (function)",
     "normalizeFilterComparandTypes (function)",
     "numberComparandDoorVerdict (function)",

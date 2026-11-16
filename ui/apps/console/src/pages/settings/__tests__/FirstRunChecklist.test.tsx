@@ -36,6 +36,8 @@ const { AUTH, toastError, toastSuccess, SHELL } = vi.hoisted(() => ({
     activeOrganization: { id: 'org_1', name: 'Default Organization' } as { id: string; name: string },
     getMembers: vi.fn(),
     listInvitations: vi.fn(),
+    // The served auth config: its `features.cloudManaged` selects the host profile.
+    getAuthConfig: vi.fn(),
   },
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -247,6 +249,7 @@ beforeEach(() => {
   SHELL.adapter = null;
   AUTH.getMembers.mockReset().mockResolvedValue([{ id: 'm_1' }]);
   AUTH.listInvitations.mockReset().mockResolvedValue([]);
+  AUTH.getAuthConfig.mockReset().mockResolvedValue({ features: { cloudManaged: false } });
   browserZone = 'Asia/Shanghai';
   browserLanguages = ['zh-CN'];
   vi.stubGlobal('fetch', fetchMock);
@@ -879,4 +882,162 @@ describe('email delivery is optional: shown, marked so, and never what keeps the
       .getAllByRole('listitem')
       .map((li) => li.getAttribute('data-testid')?.replace('first-run-checklist-row-', ''));
   }
+});
+
+describe('the host profile: a managed environment adds the first-app and first-record rows (objectstack#34251)', () => {
+  // An environment the cloud's control plane runs serves `features.cloudManaged: true`.
+  const MANAGED = () => AUTH.getAuthConfig.mockResolvedValue({ features: { cloudManaged: true } });
+  const SETUP_APP = { name: 'setup', _packageId: 'com.objectstack.setup', navigation: [] };
+  const STUDIO_APP = { name: 'studio', _packageId: 'com.objectstack.studio', navigation: [] };
+  const OWN_APP = {
+    name: 'crm',
+    _packageId: 'app.crm',
+    navigation: [
+      { id: 'g', type: 'group', label: 'Sales', children: [{ id: 'n_account', type: 'object', objectName: 'account' }] },
+      { id: 'n_deal', type: 'object', objectName: 'deal' },
+    ],
+  };
+  const DELIVERING = () => ({
+    provider: resolved('smtp', 'global'),
+    smtp_host: resolved('mx', 'global'),
+    from_email: resolved('a@b.co', 'global'),
+  });
+  /** An adapter whose `sys_activity` read answers `rows`; every other read answers nothing. */
+  function activityAdapter(rows: unknown[]) {
+    const find = vi.fn(async (object: string) => ({ data: object === 'sys_activity' ? rows : [] }));
+    SHELL.adapter = { find };
+    return find;
+  }
+  const activityReads = (find: ReturnType<typeof vi.fn>) => find.mock.calls.filter(([object]) => object === 'sys_activity');
+  function drawnRowIds() {
+    return within(screen.getByTestId('first-run-checklist'))
+      .getAllByRole('listitem')
+      .map((li) => li.getAttribute('data-testid')?.replace('first-run-checklist-row-', ''));
+  }
+
+  it('self-hosted: exactly the platform rows, and no activity read', async () => {
+    SHELL.apps = [SETUP_APP, OWN_APP];
+    const find = activityAdapter([{ id: 'act_1' }]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(drawnRowIds()).toEqual(['organization_name', 'language_country', 'timezone', 'currency', 'mail', 'invite']);
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
+    expect(activityReads(find)).toHaveLength(0);
+  });
+
+  it('an auth config that cannot be read is self-hosted', async () => {
+    AUTH.getAuthConfig.mockRejectedValue(new Error('offline'));
+    SHELL.apps = [SETUP_APP, OWN_APP];
+    activityAdapter([{ id: 'act_1' }]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist-row-first_app')).toBeNull();
+    expect(screen.queryByTestId('first-run-checklist-row-first_record')).toBeNull();
+  });
+
+  it('managed, an app of its own and a record a person created: both rows draw and tick from the reads', async () => {
+    MANAGED();
+    SHELL.apps = [SETUP_APP, STUDIO_APP, OWN_APP];
+    const find = activityAdapter([{ id: 'act_1' }]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    await showDone();
+    expect(row('first_app').getAttribute('data-done')).toBe('true');
+    expect(row('first_record').getAttribute('data-done')).toBe('true');
+    // One read: a person's `created` row on an object the environment's own app lists.
+    expect(activityReads(find)).toEqual([
+      [
+        'sys_activity',
+        {
+          $filter: { type: 'created', actor_id: { $ne: null }, object_name: { $in: ['account', 'deal'] } },
+          $top: 1,
+        },
+      ],
+    ]);
+    expect(screen.getByTestId('first-run-checklist-link-first_record').getAttribute('href')).toBe('/apps/app.crm');
+  });
+
+  it('CONTROL: the activity read finds no created row, so the record row is drawn not done', async () => {
+    MANAGED();
+    SHELL.apps = [SETUP_APP, OWN_APP];
+    const find = activityAdapter([]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-first_record');
+    expect(row('first_record').getAttribute('data-done')).toBe('false');
+    expect(activityReads(find)).toHaveLength(1);
+  });
+
+  it('CONTROL: only the platform built-ins on the launcher, so the app row is not done and no activity is read', async () => {
+    MANAGED();
+    SHELL.apps = [SETUP_APP, STUDIO_APP];
+    const find = activityAdapter([{ id: 'act_1' }]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-first_record');
+    expect(row('first_app').getAttribute('data-done')).toBe('false');
+    expect(row('first_record').getAttribute('data-done')).toBe('false');
+    expect(activityReads(find)).toHaveLength(0);
+  });
+
+  it('managed: the record row is optional, the app row is required, and the mail row that does not deliver is absent', async () => {
+    MANAGED();
+    SHELL.apps = [SETUP_APP];
+    activityAdapter([]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-first_record');
+    expect(drawnRowIds()).toEqual([
+      'organization_name',
+      'language_country',
+      'timezone',
+      'currency',
+      'invite',
+      'first_app',
+      'first_record',
+    ]);
+    expect(row('first_record').getAttribute('data-optional')).toBe('true');
+    expect(row('first_app').getAttribute('data-optional')).toBeNull();
+    // Six required rows: the five platform ones and the app row.
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
+  });
+
+  it('CONTROL: managed, mail that delivers is drawn, done', async () => {
+    MANAGED();
+    mailValues = DELIVERING();
+    SHELL.apps = [SETUP_APP];
+    activityAdapter([]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-first_record');
+    await showDone();
+    expect(row('mail').getAttribute('data-done')).toBe('true');
+  });
+
+  it('managed, every required row done and no record yet: the checklist draws nothing', async () => {
+    MANAGED();
+    localizationValues = {
+      locale: resolved('zh-CN', 'tenant'),
+      default_country: resolved('CN', 'tenant'),
+      timezone: resolved('Asia/Shanghai', 'tenant'),
+      currency: resolved('CNY', 'tenant'),
+    };
+    AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
+    AUTH.getMembers.mockResolvedValue([{ id: 'm_1' }, { id: 'm_2' }]);
+    SHELL.apps = [SETUP_APP, OWN_APP];
+    const find = activityAdapter([]);
+    renderChecklist(ADMIN);
+    await settle();
+    await waitFor(() => expect(activityReads(find)).toHaveLength(1));
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('zh: the two rows read in the reader language', async () => {
+    MANAGED();
+    SHELL.apps = [SETUP_APP];
+    activityAdapter([]);
+    renderChecklist(ADMIN, 'zh');
+    expect(within(await screen.findByTestId('first-run-checklist-row-first_app')).getByText('放进第一个应用')).toBeTruthy();
+    expect(within(await screen.findByTestId('first-run-checklist-row-first_record')).getByText('添加第一条记录')).toBeTruthy();
+  });
 });

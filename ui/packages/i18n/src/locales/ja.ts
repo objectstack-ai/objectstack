@@ -2256,6 +2256,9 @@ const ja = {
       fieldErrorsToast_one: "{{count}} 件の設定を確認してください：{{settings}}",
       fieldErrorsToast_other: "{{count}} 件の設定を確認してください：{{settings}}",
       cryptoRefusalTitle: "このデプロイメントはシークレットを暗号化できません",
+      platformManagedTitle: "プラットフォームが管理しています",
+      platformManagedBody: "ホスティングプラットフォームがこの環境向けに提供・設定しているため、ここでは設定しません。",
+      aiProviderManaged: "AI プロバイダー、モデル、認証情報はプラットフォームが管理しています。",
       cryptoRefusalSubjectSuffix: "は暗号化対象として宣言されているため、何も書き込まれませんでした。",
       cryptoRefusalNoSubject: "暗号化対象として宣言された値は拒否され、何も書き込まれませんでした。",
       cryptoRefusalToast: "シークレットを暗号化できません: {{subject}}",
@@ -2354,6 +2357,8 @@ const ja = {
         done: 'あなたの AI アシスタントまたは API キーが接続されています。',
         action: '接続',
       },
+      firstApp: { title: '最初のアプリを追加', todo: 'まだ独自のアプリがありません。マーケットプレイスからインストールするか作成すると、ホームに表示されます。', done: '独自のアプリがホームにあります。' },
+      firstRecord: { title: '最初のレコードを追加', todo: 'アプリでまだ誰もレコードを作成していません。', done: 'アプリでレコードが作成されました。', action: 'アプリを開く' },
     },
     error: {
       connectionFailed: "サーバーに接続できません",

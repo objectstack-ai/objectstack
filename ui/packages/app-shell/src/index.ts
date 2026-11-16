@@ -98,6 +98,9 @@ export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './util
 // the record, or to a page about it, opens under), as opposed to which app
 // hosts an app-independent page. `./utils/objectHostApp` is the contract.
 export { objectHostAppSegment } from './utils/objectHostApp.js';
+// Which apps are the platform's own code-loaded built-ins (`com.objectstack.*`),
+// one criterion for the AI switcher and the console's first-run checklist.
+export { isPlatformBuiltinApp } from './utils/platformApp.js';
 // objectstack#29750 — the inbox's notification-link resolver, and the table of
 // console routes served outside an app. The console's native-shell navigate
 // listener and its unmatched-route guard host an app-relative push route
