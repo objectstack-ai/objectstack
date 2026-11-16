@@ -376,7 +376,7 @@ describe('[#34145] booted kernel: a package-less write onto a flow name an enabl
         execute: vi.fn(async () => ({ success: true, output: {} })),
     };
     const rows = async (): Promise<Record<string, { label: string; bytes: string }>> => {
-        const found = (await engine.find('sys_metadata', { where: { type: 'flow', name: NAME, state: 'active' }, context: { isSystem: true } } as any)) as any[];
+        const found = await engine.find('sys_metadata', { where: { type: 'flow', name: NAME, state: 'active' } }, { context: { isSystem: true } });
         return Object.fromEntries(found.map((row) => [String(row.package_id ?? null), {
             label: JSON.parse(String(row.metadata)).label,
             bytes: JSON.stringify([row.metadata, row.version, row.checksum ?? null]),
