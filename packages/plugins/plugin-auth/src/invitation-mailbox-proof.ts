@@ -36,7 +36,8 @@
  * ## The door — `POST /organization/accept-invitation-with-proof`
  *
  * Body `{ invitationId, proof, name, password }`, or `{ invitationId }` alone
- * from a signed-in session (the social return). Answers:
+ * from a signed-in session (the social return). Answers in the envelope,
+ * `{ success: true, data }`, with `data` one of:
  *
  * - `{ outcome: 'accepted', organizationId }` — the invitation is accepted and
  *   the caller is signed in.
@@ -256,9 +257,9 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         if (!session) throw new APIError('UNAUTHORIZED', { code: 'UNAUTHENTICATED', message: 'Sign in to accept the invitation.' });
         if (!pending) return refuseProof();
         const sameAddress = String(session.user.email).toLowerCase() === invitation.email.toLowerCase();
-        if (!sameAddress || session.user.emailVerified !== true) return ctx.json({ outcome: 'verify_email' });
+        if (!sameAddress || session.user.emailVerified !== true) return ctx.json({ success: true, data: { outcome: 'verify_email' } });
         await acceptAs(session.session.token, invitationId);
-        return ctx.json({ outcome: 'accepted', organizationId: invitation.organizationId });
+        return ctx.json({ success: true, data: { outcome: 'accepted', organizationId: invitation.organizationId } });
       }
 
       // ── Proof mode ─────────────────────────────────────────────────────
@@ -283,7 +284,7 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
           host.isSsoOnlyMode() ||
           !ctx.context.options.emailAndPassword?.enabled
         ) {
-          return ctx.json({ outcome: 'sign_in' });
+          return ctx.json({ success: true, data: { outcome: 'sign_in' } });
         }
       }
 
@@ -341,7 +342,7 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       if (!session) throw new APIError('INTERNAL_SERVER_ERROR', { code: 'INTERNAL_ERROR', message: 'Failed to create a session.' });
       await setSessionCookie(ctx, { session, user });
       await acceptAs(session.token, invitationId);
-      return ctx.json({ outcome: 'accepted', organizationId: invitation.organizationId });
+      return ctx.json({ success: true, data: { outcome: 'accepted', organizationId: invitation.organizationId } });
     },
   );
 

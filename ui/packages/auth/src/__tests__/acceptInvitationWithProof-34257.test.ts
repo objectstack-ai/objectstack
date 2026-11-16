@@ -21,7 +21,7 @@ function clientAnswering(status: number, body: unknown) {
 
 describe('acceptInvitationWithProof (#34257)', () => {
   it('posts the input to the one-step door and answers the accepted outcome', async () => {
-    const { client, calls } = clientAnswering(200, { outcome: 'accepted', organizationId: 'org_1' });
+    const { client, calls } = clientAnswering(200, { success: true, data: { outcome: 'accepted', organizationId: 'org_1' } });
     const input = { invitationId: 'inv_1', proof: 'p1', name: 'Ada', password: 'S3cure!pass' };
 
     await expect(client.acceptInvitationWithProof(input)).resolves.toEqual({
@@ -35,10 +35,10 @@ describe('acceptInvitationWithProof (#34257)', () => {
 
   it('answers the sign-in and verify-email outcomes as they are', async () => {
     await expect(
-      clientAnswering(200, { outcome: 'sign_in' }).client.acceptInvitationWithProof({ invitationId: 'inv_1', proof: 'p' }),
+      clientAnswering(200, { success: true, data: { outcome: 'sign_in' } }).client.acceptInvitationWithProof({ invitationId: 'inv_1', proof: 'p' }),
     ).resolves.toEqual({ outcome: 'sign_in' });
     await expect(
-      clientAnswering(200, { outcome: 'verify_email' }).client.acceptInvitationWithProof({ invitationId: 'inv_1' }),
+      clientAnswering(200, { success: true, data: { outcome: 'verify_email' } }).client.acceptInvitationWithProof({ invitationId: 'inv_1' }),
     ).resolves.toEqual({ outcome: 'verify_email' });
   });
 
@@ -51,7 +51,7 @@ describe('acceptInvitationWithProof (#34257)', () => {
   });
 
   it('an answer outside the outcome vocabulary rejects', async () => {
-    const { client } = clientAnswering(200, { outcome: 'something_else' });
+    const { client } = clientAnswering(200, { success: true, data: { outcome: 'something_else' } });
     await expect(client.acceptInvitationWithProof({ invitationId: 'inv_1', proof: 'p' })).rejects.toThrow(
       /unexpected response body/,
     );

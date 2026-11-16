@@ -1393,7 +1393,12 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         body: JSON.stringify(input),
       });
       const body = (await response.json().catch(() => null)) as
-        | { outcome?: unknown; organizationId?: unknown; code?: string; message?: string; error?: { code?: string; message?: string } }
+        | {
+            data?: { outcome?: unknown; organizationId?: unknown };
+            code?: string;
+            message?: string;
+            error?: { code?: string; message?: string };
+          }
         | null;
       if (!response.ok) {
         const code = body?.code ?? body?.error?.code;
@@ -1404,10 +1409,12 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         err.status = response.status;
         throw err;
       }
-      if (body?.outcome === 'accepted' && typeof body.organizationId === 'string') {
-        return { outcome: 'accepted', organizationId: body.organizationId };
+      // A success answers in the envelope, `{ success: true, data }`.
+      const data = body?.data;
+      if (data?.outcome === 'accepted' && typeof data.organizationId === 'string') {
+        return { outcome: 'accepted', organizationId: data.organizationId };
       }
-      if (body?.outcome === 'sign_in' || body?.outcome === 'verify_email') return { outcome: body.outcome };
+      if (data?.outcome === 'sign_in' || data?.outcome === 'verify_email') return { outcome: data.outcome };
       throw new Error('acceptInvitationWithProof: unexpected response body');
     },
 

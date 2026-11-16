@@ -260,7 +260,7 @@ describe('#34257 — accepting with the proof', () => {
     const res = await door(manager, { invitationId: invitation.id, proof, name: 'Newcomer', password: PASSWORD });
     const text = await res.clone().text();
     expect(res.status, text).toBe(200);
-    expect(JSON.parse(text)).toMatchObject({ outcome: 'accepted', organizationId: PARTNER_ORG });
+    expect(JSON.parse(text)).toEqual({ success: true, data: { outcome: 'accepted', organizationId: PARTNER_ORG } });
 
     const user = userRow(engine, 'newcomer@example.com');
     expect(user?.email_verified).toBeTruthy();
@@ -279,7 +279,7 @@ describe('#34257 — accepting with the proof', () => {
 
     const res = await door(manager, { invitationId: invitation.id }, holder.cookie);
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(await res.json()).toEqual({ outcome: 'verify_email' });
+    expect((await res.json()).data).toEqual({ outcome: 'verify_email' });
 
     const anonymous = await door(manager, { invitationId: invitation.id, name: 'X', password: PASSWORD });
     expect(anonymous.status).toBe(401);
@@ -346,7 +346,7 @@ describe('#34257 — accepting with the proof', () => {
 
     const res = await door(manager, { invitationId: invitation.id, proof, name: 'Owner', password: NEW_PASSWORD });
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(await res.json()).toMatchObject({ outcome: 'accepted' });
+    expect((await res.json()).data).toMatchObject({ outcome: 'accepted' });
 
     expect(await sessionUser(manager, earlier.cookie)).toBeNull();
     expect(userRow(engine, 'squatted@example.com')?.email_verified).toBeTruthy();
@@ -369,7 +369,7 @@ describe('#34257 — accepting with the proof', () => {
 
     const res = await door(manager, { invitationId: invitation.id, proof, name: 'L', password: NEW_PASSWORD });
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(await res.json()).toEqual({ outcome: 'sign_in' });
+    expect((await res.json()).data).toEqual({ outcome: 'sign_in' });
 
     expect(await sessionUser(manager, holder.cookie)).not.toBeNull();
     expect(invitationOf(engine, 'linked@example.com')?.status).toBe('pending');
@@ -377,7 +377,7 @@ describe('#34257 — accepting with the proof', () => {
     expect(samePassword.status, await samePassword.clone().text()).toBe(200);
     // Unspent: the same proof answers again.
     const again = await door(manager, { invitationId: invitation.id, proof, name: 'L', password: NEW_PASSWORD });
-    expect(await again.json()).toEqual({ outcome: 'sign_in' });
+    expect((await again.json()).data).toEqual({ outcome: 'sign_in' });
   });
 
   it('the door is rate-limited per invitation', async () => {
@@ -398,9 +398,9 @@ describe('#34257 — accepting with the proof', () => {
     userRow(engine, 'verified@example.com')!.email_verified = true;
 
     const res = await door(manager, { invitationId: invitation.id, proof, name: 'V', password: NEW_PASSWORD });
-    expect(await res.json()).toEqual({ outcome: 'sign_in' });
+    expect((await res.json()).data).toEqual({ outcome: 'sign_in' });
     const again = await door(manager, { invitationId: invitation.id, proof, name: 'V', password: NEW_PASSWORD });
-    expect(await again.json()).toEqual({ outcome: 'sign_in' });
+    expect((await again.json()).data).toEqual({ outcome: 'sign_in' });
     expect(invitationOf(engine, 'verified@example.com')?.status).toBe('pending');
   });
 });
@@ -420,7 +420,7 @@ describe('#34257 — a signed-in return accepts only a verified address', () => 
 
     const res = await door(manager, { invitationId: invitation.id }, person.cookie);
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(await res.json()).toMatchObject({ outcome: 'accepted', organizationId: PARTNER_ORG });
+    expect((await res.json()).data).toMatchObject({ outcome: 'accepted', organizationId: PARTNER_ORG });
     expect(membersOf(engine, PARTNER_ORG, person.userId)).toHaveLength(1);
   });
 
@@ -430,7 +430,7 @@ describe('#34257 — a signed-in return accepts only a verified address', () => 
     const person = await signUp(manager, engine, 'unsure@example.com');
 
     const res = await door(manager, { invitationId: invitation.id }, person.cookie);
-    expect(await res.json()).toEqual({ outcome: 'verify_email' });
+    expect((await res.json()).data).toEqual({ outcome: 'verify_email' });
     expect(membersOf(engine, PARTNER_ORG, person.userId)).toHaveLength(0);
     expect(invitationOf(engine, 'unsure@example.com')?.status).toBe('pending');
   });

@@ -1471,6 +1471,12 @@ const PLUGIN_ROUTE_MODULES = {
   // nothing this file BUILDS departs from the envelope.
   'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts': {},
 
+  // [#34257] FIRST AUDIT — the one-step invitation acceptance, a better-auth
+  // endpoint this repo defines (`POST /organization/accept-invitation-with-proof`).
+  // Every body it BUILDS is the envelope, `{ success: true, data: { outcome, … } }`;
+  // its refusals are `throw APIError.*`, raised rather than written.
+  'packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts': {},
+
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //
   // Measured by #9267 when this surface was added, not chosen. Each entry names
