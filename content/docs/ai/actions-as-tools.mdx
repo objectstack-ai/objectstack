@@ -128,11 +128,14 @@ through the API. Destructive actions (`confirmText`, `mode: 'delete'`,
 `requiresConfirmation: true` so the client can ask the human before calling. To
 assert that a destructive-looking action is safe for autonomous execution, set
 `ai.requiresConfirmation: false`.
-An action whose author declared `ai.requiresConfirmation: true` never runs on an
-agent's `run_action` call: the call is handed to the person the agent acts for,
-who approves or rejects it in the app (`status: "pending_confirmation"`), or it is
-refused `428` `ACTION_CONFIRMATION_REQUIRED` on a server with no
-pending-confirmation service. The agent cannot confirm for the person: `run_action`
+An action whose author declared `ai.requiresConfirmation: true` runs on an
+agent's `run_action` call only once the person the agent acts for confirms it:
+in the client, when the client supports elicitation and the connection can carry
+the question (accept runs the call once; decline, dismissal or no answer in time
+refuses it `ACTION_CONFIRMATION_REQUIRED`), and in the app otherwise: the call
+does not run, it is handed to the person, who approves or rejects it there
+(`status: "pending_confirmation"`), or it is refused `428`
+`ACTION_CONFIRMATION_REQUIRED` on a server with no pending-confirmation service. The agent cannot confirm for the person: `run_action`
 and `resume_run` refuse a call that carries `confirm`, on every action.
 An AI service account does not confirm an action for itself: an action declaring
 `ai.requiresConfirmation: true` refuses it at every door, REST `/actions` included,
@@ -212,9 +215,12 @@ on the same record for this caller:
 - **The same gates as `run_action`.** A flow action exposed to AI
   (`ai.exposed`) must target the run's flow on the run's object, and the caller
   must pass its `requiredPermissions` and its activation switch. When the
-  action's author declared `ai.requiresConfirmation: true`, the resume is
-  handed to the person as well, because the flow's writes happen after the
-  screen: the run stays paused until they approve it in the app. `resume_run`
+  action's author declared `ai.requiresConfirmation: true`, the resume needs
+  the person as well, because the flow's writes happen after the screen: they
+  are asked in the client when it supports elicitation and the connection can
+  carry the question (accept continues the run; any other answer refuses the
+  call and the run stays paused), and otherwise the run stays paused until they
+  approve it in the app. `resume_run`
   takes no `confirm`; a call that carries it is refused.
 - **The record is read again as you.** A subject record you can no longer read
   is refused `RECORD_NOT_FOUND` (`404`), as `run_action` refuses it.

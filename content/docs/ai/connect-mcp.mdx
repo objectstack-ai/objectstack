@@ -418,9 +418,11 @@ can reach is the **default exposure policy (v1)**:
   an organization, re-enabling an OAuth application) are exposed. Destructive
   lifecycle acts (banning a user, revoking a session or an API key, removing a
   member, deleting a team, leaving an organization) are exposed with
-  `ai.requiresConfirmation: true`, so `run_action` never runs them on the
-  agent's call: it hands each one to the person in the app, or refuses it
-  (`428`) on a server with no pending-confirmation service. Acts that mint a credential or a session, change
+  `ai.requiresConfirmation: true`, so `run_action` runs them only once the
+  person confirms: in the client when it supports elicitation and the
+  connection can carry the question, and otherwise it hands each one to the
+  person in the app, or refuses it (`428`) on a server with no
+  pending-confirmation service. Acts that mint a credential or a session, change
   ownership or a sign-in factor, or destroy an account or an organization
   (impersonating a user, setting a password, creating an API key, transferring
   ownership, deleting an organization) declare nothing and are not listed. The
@@ -602,11 +604,17 @@ drive this MCP server. Same word, different layer.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
   actions (`confirmText`, danger variants) are listed with
   `requiresConfirmation: true` by default, so a client asks its human first.
-- **A person confirms a declared-gated action, in the app.** When the author
-  declared `ai.requiresConfirmation: true`, `run_action` and `resume_run` do
-  not run the action on the agent's call. They hand it to the person the agent
-  acts for and answer `status: "pending_confirmation"` with a `pendingId`; the
-  person approves or rejects it in the app. A server with no
+- **A person confirms a declared-gated action, in the client or in the app.**
+  When the author declared `ai.requiresConfirmation: true`, the agent's call
+  on `run_action` or `resume_run` runs only once the person the agent acts for
+  confirms it. When the client supports elicitation and the connection can
+  carry the question (a stdio connection, today), the person is asked in the
+  client: accept runs the call once; decline, dismissal or no answer in time
+  refuses it (`ACTION_CONFIRMATION_REQUIRED`, `details.reason` `declined`,
+  `cancelled` or `timed_out`). Otherwise the tools do not run the action on
+  the call: they hand it to the person and answer
+  `status: "pending_confirmation"` with a `pendingId`, and the person approves
+  or rejects it in the app. A server with no
   pending-confirmation service refuses the call (`428`
   `ACTION_CONFIRMATION_REQUIRED`, `details.reason: "no_confirmation_service"`),
   and the person performs the action in the app. Neither tool takes `confirm`:

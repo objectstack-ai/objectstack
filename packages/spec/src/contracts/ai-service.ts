@@ -419,7 +419,8 @@ export interface ActionConfirmationRequiredDetails {
      *   the action; `reason` says what the caller can do. At the MCP
      *   `run_action` and `resume_run` tools the echo names the member those
      *   tools REFUSE at their input: the caller never sends it there, since
-     *   confirmation happens in the app, by the person.
+     *   the person confirms, in the client when it can be asked there and in
+     *   the app otherwise.
      *
      * An AI service account's refusal carries it too, but no retry of that
      * account's succeeds: a person runs the action (ADR-0151 D3 rule 3).
@@ -547,8 +548,9 @@ export interface ActionConfirmationRequiredDetails {
  *    an elicitation, not in place of one, not in place of a hand-off, and not
  *    when the host has no service. The MCP `run_action` and `resume_run`
  *    tools do not accept it at all: a call carrying it is refused at the
- *    tool's input, on every action, gated or not, because confirmation
- *    happens in the app, by the person; the caller resends without it.
+ *    tool's input, on every action, gated or not, because the person
+ *    confirms (elicited in the client where it can be asked, in the app
+ *    otherwise); the caller resends without it.
  * 6. **An AI service account: unchanged** (ADR-0151 D3 rule 3). An agent
  *    principal acting for itself, with no `onBehalfOf`, is refused whatever it
  *    sends, reason `service_account`. It is neither elicited (no person stands
