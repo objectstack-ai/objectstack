@@ -2710,6 +2710,7 @@ const ko = {
         retry: "싱글 사인온으로 계속",
       },
       ssoHandoff: "{{target}}(으)로 계속",
+      ssoHandoffClient: "{{clientName}}(으)로 계속하려면 로그인하세요",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
         signIn: "개발용 관리자로 로그인",
@@ -2739,6 +2740,8 @@ const ko = {
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
         networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
+        ssoAccessDeniedNotMember: "로그인한 계정은 이 환경 조직의 멤버가 아닙니다. 멤버인 계정으로 로그인하거나, 조직 관리자에게 초대를 요청하세요.",
+        ssoAccessDeniedInvitationPending: "이 환경 조직에 초대되었지만 아직 초대를 수락하지 않았습니다. 이메일에서 초대를 수락한 후 다시 로그인하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",

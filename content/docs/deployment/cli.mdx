@@ -1679,6 +1679,29 @@ name that is not a roll-up this run walks — a typo, a plain field, or an objec
 `sum` is accepted and changes nothing, so a caller can pass every column it
 just declared.
 
+**A package install or upgrade does this for you.** When a running deployment
+installs or upgrades a package through an install door (the marketplace
+install, for example), the door's schema sync computes every roll-up the
+package added, on each stored row still holding `NULL`. It uses the aggregate
+the child-write recompute uses and a system-context write that covers every
+organization's rows, and it writes no child row. Like the door's own seed
+writes, it runs with automations off: no metadata-bound hook or record-change
+flow fires on a backfilled parent. A roll-up over that parent is still
+recomputed. This command, run by hand, keeps running them. `min` / `max` / `avg` are
+included, because the door knows those columns are new. Roll-ups the deployment
+already served when it booted are not walked again, so an upgrade that adds no
+roll-up costs nothing here. Two cases still need this command:
+
+- **The walk did not complete.** A row failed, an object could not be read, or
+  the per-object bound was reached. The server logs it at `error`, naming each
+  roll-up, and gives the exact
+  `os migrate summary-nulls --apply --recompute-undefined-on-empty …` line.
+  The next install in the same process also walks those roll-ups again.
+- **The roll-up arrived with a restart, not through an install door.** This
+  covers a code-defined app's new version and a marketplace install whose hot
+  register failed and loaded at the next restart. A boot records what it serves
+  and computes nothing.
+
 Idempotent — every write turns a `NULL` into a number, so a second run finds
 nothing and writes nothing. Re-running until the report says zero *is* the
 verification, which is why this command records no flag: it repairs values and

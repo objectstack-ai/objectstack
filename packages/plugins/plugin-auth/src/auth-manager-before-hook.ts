@@ -69,7 +69,7 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
-import { answerRefusedAuthorization } from './oauth-authorize-refusal.js';
+import { answerRefusedAuthorization, gateAnswerRefuses, refusalDetailOf } from './oauth-authorize-refusal.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import {
   SSO_ONLY_RESET_UNREADABLE_MESSAGE,
@@ -601,19 +601,27 @@ export async function globalBeforeHook(
       // D5.1 host contract is `(userId, clientId)` and the control plane
       // derives org membership / app assignment from the user itself.
       if (actor?.userId) {
-        let allowed = true;
+        // The first refusing answer, kept: a boolean `false`, or the host's
+        // refusal object with its reason and sentence.
+        let refusal: { answer: unknown } | undefined;
         for (const clientId of clientIds) {
-          allowed = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
-          if (!allowed) break;
+          const answer: unknown = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
+          if (gateAnswerRefuses(answer)) {
+            refusal = { answer };
+            break;
+          }
         }
-        if (!allowed) {
+        if (refusal) {
           // The refusal, delivered by who is asking (`oauth-authorize-refusal.ts`):
-          // the `403` envelope for a fetch or an API client, unchanged; for a
-          // browser navigating here, `access_denied` back to the client's
-          // REGISTERED `redirect_uri`, or a readable page when there is none.
+          // the `403` envelope for a fetch or an API client; for a browser
+          // navigating here, `access_denied` back to the client's REGISTERED
+          // `redirect_uri`, or a readable page when there is none. A boolean
+          // refusal is answered as it always was; a refusal object adds the
+          // host's validated reason and sentence (`refusalDetailOf`).
           return answerRefusedAuthorization(ctx, {
             userId: actor.userId,
             consoleUrl: this.getConsolePageUrl('/'),
+            detail: refusalDetailOf(refusal.answer),
           });
         }
       }
