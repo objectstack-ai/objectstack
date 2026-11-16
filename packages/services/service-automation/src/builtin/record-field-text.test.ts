@@ -247,6 +247,37 @@ describe.each(NODE_TYPES)('%s — a field value marked as text is written in the
     expect(writes).toEqual([]);
   });
 
+  it.each(['SETTINGS_UNKNOWN_NAMESPACE', 'SETTINGS_UNKNOWN_KEY'])(
+    'a host that registers no Localization setting (%s) has none set: the app default answers and the run completes',
+    async (code) => {
+      const unregistered = Object.assign(new Error(`localization.locale is not registered (${code})`), { code });
+      const { automation, writes } = await makeStack({
+        defaultLocale: 'zh-CN', bundles: { 'zh-CN': ZH_BUNDLE }, settings: () => { throw unregistered; },
+      });
+      automation.registerFlow('case_escalation', escalationFlow(nodeType, MARKED));
+
+      const result = await automation.execute('case_escalation', recordChange());
+
+      expect(result.success, result.error).toBe(true);
+      expect(writes).toHaveLength(1);
+      expect(writes[0].data.escalation_reason).toBe('自动升级：High 优先级');
+    },
+  );
+
+  it('CONTROL — any other settings failure with a code is still a failed read: the node fails and writes nothing', async () => {
+    const locked = Object.assign(new Error('settings store down'), { code: 'SETTINGS_STORE_UNAVAILABLE' });
+    const { automation, writes } = await makeStack({
+      defaultLocale: 'zh-CN', bundles: { 'zh-CN': ZH_BUNDLE }, settings: () => { throw locked; },
+    });
+    automation.registerFlow('case_escalation', escalationFlow(nodeType, MARKED));
+
+    const result = await automation.execute('case_escalation', recordChange());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(`${nodeType}: the organization's language could not be read (settings store down)`);
+    expect(writes).toEqual([]);
+  });
+
   it('CONTROL — a write that marks no text never reads the organization\'s language', async () => {
     const { automation, writes, settings } = await makeStack({
       defaultLocale: 'zh-CN', settings: () => { throw new Error('settings store down'); },
