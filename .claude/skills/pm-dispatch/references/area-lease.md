@@ -23,7 +23,6 @@
    - 授权行只解 auto mode 的拦截,⛔ 不改 AGENTS.md 第 14 条的落地档;区线程无授权行。
 4. W0:各区首小时交席位一份关/并/改级/呈裁清单,同时即开首张 p1。
    - 清单经维护者过目后落笔:定级照 SKILL.md 域车道(自分诊例外住 `triage-duties.md`)。
-   - 关卡照 `execution-duties.md`:⛔ 不凭本区读数自关。
 
 ## 区内规则
 
@@ -31,13 +30,15 @@
 - 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `lease:*` ⇒ 不碰。
 - 认领前三查必过,各写认领评论一行;任一不过或遇大卡 ⇒ 不认领、不派 dev,当即交席位:
   - `Pre-claim lane:` 修复所改路径属哪条车道,点名依据路径(碰他道路径照下文留道行)。
-  - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」与热文件,逐个已合或空闲。
+  - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」逐个已合;热文件照下文重叠检查。
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
     测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
+- 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;只 exit 1 才排队,3 补前提重跑。
 - 认领照 `execution-duties.md` 派发原子对,同笔加 `lease:<区>`;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
-- dev 开 PR 前自查申报:os-dev.md〈Definition of done〉,BREAKING/ADR-0087 照 AGENTS.md Post-Task 第 3 条。
+- 同系列卡可从前卡分支起步(AGENTS.md §2 主干形,⛔ 不叠 PR);新测试建按卡命名的新文件,
+  AGENTS.md 共享 harness 规则适用时除外,由重叠检查定排队。
 - 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
   所落 PR 欠的红检查读日志(`platform-readings.md`)派子代理读,一读兼守本条与该文。
 - 每区恒 2 dev,空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
@@ -68,4 +69,3 @@
 - 用量近 80% 即交接:停派任何级;在途推完,每条分支留 draft PR;余照 `seat-post-protocol.md` 清单。
 - 交接与各区现状落座位贴评论:所有权、open PR、下一步、待批、坑;⛔ 不只留项目或记忆。
 - 新旧账号重叠时座位贴写所有权切分:旧号持有的 PR 清单与新号可取集;新号只取后者。
-- 旧号移座照 `seat-lifecycle.md` 移座行。
