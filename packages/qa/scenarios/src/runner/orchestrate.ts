@@ -119,6 +119,29 @@ export interface ProjectOps {
   namespace?(dir: string): string | undefined;
 }
 
+/**
+ * Another copy of the app a Run half runs on: booted anew from the same
+ * project, with the same build installed the same way, holding no rows of
+ * the card's yet ({@link runHalf} seeds it). `release` stops it. A half that
+ * has one starts an operation an earlier turn's write would otherwise meet on
+ * a copy of its own instead of writing the rows back
+ * ({@link restoreSeededRows}).
+ */
+export type FreshCopy = () => Promise<{ app: AppHarness; release(): Promise<void> }>;
+
+/** A {@link FreshCopy} of the project in `dir`: `ops.boot` again, and nothing installed (the project is the build). */
+function freshBoot(ops: Pick<ProjectOps, 'boot' | 'harness'>, dir: string): FreshCopy {
+  return async () => {
+    const booted = await ops.boot(dir);
+    try {
+      return { app: ops.harness(booted.url), release: () => booted.stop() };
+    } catch (e) {
+      await booted.stop();
+      throw e;
+    }
+  };
+}
+
 export interface RunOptions {
   modes: ReadonlyArray<'scratch' | 'template' | 'ask'>;
   /** Re-run the Run half after the iterate (scratch mode). Default true. */
@@ -272,16 +295,18 @@ export interface OperationResult {
    * persona the write the card gives it, `buildDeniesWrite`); or it was
    * replayed and the app did not answer its re-sent writes as it answered the
    * recorded run (`ReplayNotFaithfulError`); or it was not run, because the
-   * rows an earlier turn moved could not be restored to the seeded state
-   * (`restore: …`, {@link restoreSeededRows}). Never a fail.
+   * rows an earlier turn moved could not be restored to the seeded state, or
+   * no fresh copy of the app could be seeded for it (`restore: …`,
+   * {@link runHalf}). Never a fail.
    */
   notMeasured?: string;
   /**
-   * The rows the runner set back to the seeded state before this operation
-   * ran, because an earlier turn had moved them ({@link restoreSeededRows}):
-   * the operation started from the card's own rows, as if it ran first.
-   * Absent when nothing had moved, so a run with no earlier write records
-   * exactly what it recorded before restores.
+   * How this operation started from the seeded state although an earlier
+   * turn had moved its rows: on a fresh copy of the app, seeded anew
+   * (`freshCopy`, {@link FreshCopy}), or with the rows set back through the
+   * app's doors ({@link restoreSeededRows}). Either way it started from the
+   * card's own rows, as if it ran first. Absent when nothing had moved, so a
+   * run with no earlier write records exactly what it recorded before restores.
    */
   restored?: RowRestore;
   /**
@@ -340,6 +365,14 @@ export interface RowRestore {
   reinserted?: string[];
   /** Rows of the seeded state an earlier turn changed: `object/id` → the columns set back. */
   setBack?: Record<string, string[]>;
+  /**
+   * The rows an earlier turn had moved (`object/id`: added, removed or
+   * changed), when the operation ran on a fresh copy of the app, seeded anew
+   * ({@link FreshCopy}), instead: nothing was written to the app to undo them,
+   * so no rule, hook or flow of the app judged or followed a restore. The
+   * other three lists are then absent.
+   */
+  freshCopy?: string[];
 }
 
 /** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
@@ -1089,6 +1122,23 @@ export async function seedApp(
 }
 
 /**
+ * How a fresh copy's seed differs from the half's own ({@link FreshCopy}): the
+ * rows it loaded and refused (each refusal as `object/id` with its code and
+ * the fields a second pass could not set), and whose permission set was not
+ * assigned alike. `undefined` when it loaded alike, so an operation on the
+ * copy meets the rows and the access the questions met.
+ */
+function seedDifference(half: Pick<RunHalf, 'seed' | 'personas'>, accounts: readonly PersonaAccount[], seed: RunHalf['seed']): string | undefined {
+  const refusals = (s: RunHalf['seed']) => s.refused.map((r) => `${r.object}/${r.id}${r.code ? ` ${r.code}` : ''}${r.fields ? ` [${r.fields.join(', ')}]` : ''}`).sort().join('; ');
+  const access = (list: ReadonlyArray<Pick<PersonaAccount, 'persona' | 'permissionSet'>>) => list.map((a) => `${a.persona}: ${a.permissionSet.assigned ? 'assigned' : 'not assigned'}`).join(', ');
+  const out: string[] = [];
+  if (seed.inserted !== half.seed.inserted) out.push(`it loaded ${seed.inserted} rows, the run ${half.seed.inserted}`);
+  if (refusals(seed) !== refusals(half.seed)) out.push(`it refused ${refusals(seed) || 'nothing'}, the run ${refusals(half.seed) || 'nothing'}`);
+  if (access(accounts) !== access(half.personas)) out.push(`its permission sets read ${access(accounts)}, the run's ${access(half.personas)}`);
+  return out.length ? `the copy's seed did not load as the run's did: ${out.join('; ')}` : undefined;
+}
+
+/**
  * The objects whose rows a restore keeps at the seeded state: every seeded
  * object, then every object an operation writes or its outcome reads that the
  * seed does not name (a row an earlier turn added there is deleted again), in
@@ -1124,6 +1174,30 @@ export async function seededRows(app: AppHarness, objects: readonly string[]): P
 /** How many rounds of writes a restore takes before it gives up: a cascade (a delete that takes a child, a reference set back) can need a second. */
 const RESTORE_ROUNDS = 3;
 
+/** The order a restore reads and writes the objects of `seeded` in: the seed's load order, then the objects the seed does not name. */
+const restoreOrder = (card: Card, seeded: SeededRows): string[] => [...seedPlan(card).order, ...[...seeded.keys()].filter((o) => !(o in card.run.seed))];
+
+/**
+ * How far the rows of `seeded` ({@link seededRows}) have moved in `app` now,
+ * each object read as the admin and compared by {@link rowDrift} (every
+ * column but the clock, the last writer and the fields the build computes,
+ * {@link derivedFields}). Only reads: nothing is written. `failed` names the
+ * first object the app would not list.
+ */
+async function seedDrift(card: Card, app: AppHarness, seeded: SeededRows, built?: unknown): Promise<{ drifts: RowDrift[]; failed?: undefined } | { failed: string }> {
+  const derived = derivedFields(built);
+  const drifts: RowDrift[] = [];
+  for (const object of restoreOrder(card, seeded)) {
+    const was = seeded.get(object);
+    if (!was) continue;
+    const now = await app.listRows(object);
+    if (!now.ok) return { failed: `the rows of ${object} could not be read to restore them: ${now.status}${now.code ? ` ${now.code}` : ''}` };
+    const d = rowDrift(object, was, now.rows, new Set([...RESTORE_UNCOMPARED, ...(derived.get(object) ?? [])]));
+    if (d) drifts.push(d);
+  }
+  return { drifts };
+}
+
 /**
  * Put the rows an earlier turn moved back to the seeded state `seeded`
  * ({@link seededRows}), as the admin, before an operation runs, so every
@@ -1158,10 +1232,9 @@ export async function restoreSeededRows(
 ): Promise<{ restored?: RowRestore; failed?: string }> {
   const { card } = scenario;
   const derived = derivedFields(built);
-  const uncompared = (object: string) => new Set([...RESTORE_UNCOMPARED, ...(derived.get(object) ?? [])]);
   const unwritten = (object: string) => new Set([...RESTORE_UNWRITTEN, ...(derived.get(object) ?? [])]);
   const lookups = seedLookups(card);
-  const order = [...seedPlan(card).order, ...[...seeded.keys()].filter((o) => !(o in card.run.seed))];
+  const order = restoreOrder(card, seeded);
   const deleted = new Set<string>();
   const reinserted = new Set<string>();
   const setBack = new Map<string, Set<string>>();
@@ -1179,18 +1252,12 @@ export async function restoreSeededRows(
       : undefined;
 
   for (let round = 0; ; round++) {
-    const drifts: RowDrift[] = [];
-    for (const object of order) {
-      const was = seeded.get(object);
-      if (!was) continue;
-      const now = await app.listRows(object);
-      if (!now.ok) {
-        const restored = record();
-        return { ...(restored ? { restored } : {}), failed: `the rows of ${object} could not be read to restore them: ${now.status}${now.code ? ` ${now.code}` : ''}` };
-      }
-      const d = rowDrift(object, was, now.rows, uncompared(object));
-      if (d) drifts.push(d);
+    const read = await seedDrift(card, app, seeded, built);
+    if (read.failed !== undefined) {
+      const restored = record();
+      return { ...(restored ? { restored } : {}), failed: read.failed };
     }
+    const { drifts } = read;
     if (!drifts.length) {
       const restored = record();
       return restored ? { restored } : {};
@@ -1262,23 +1329,37 @@ export async function restoreSeededRows(
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
  * once; a `pending_confirmation` one the agent met by asking first is followed
  * by its confirmation turn ({@link OperationResult.confirmTurn}). Before
- * each operation, the rows an earlier turn moved are restored to the state
- * the seed left ({@link restoreSeededRows}), read once right after the seed
- * loaded; the restore runs before an operation's first turn, never between
- * its ask and its confirmation. The guardrails are graded over every turn
- * that ran, each ask and each confirmation turn included.
+ * each operation the rows of the seeded state, read once right after the seed
+ * loaded, are read again; when an earlier turn moved one, the operation starts
+ * from the seeded rows all the same, never between its ask and its
+ * confirmation:
+ *
+ *   - with `fresh` ({@link FreshCopy}), on a fresh copy of the app, seeded
+ *     anew with the same personas, and every later turn of the half runs
+ *     there. Nothing is written to undo the move, so no validation rule, hook
+ *     or flow of the app judges a restore or runs on one: a one-way state rule
+ *     (approved never goes back to submitted) cannot refuse it. The copy's
+ *     seed must load as the run's did ({@link seedDifference}), or the
+ *     operation is not measured. Each copy costs one boot, sign-ins and a
+ *     seed load, paid only before an operation an earlier write would meet;
+ *   - without, the rows are written back through the app's own doors
+ *     ({@link restoreSeededRows}), which the app's rules judge.
+ *
+ * The guardrails are graded over every turn that ran, each ask and each
+ * confirmation turn included.
  * Every question and operation turn is sent in the prompt choice `choice`
  * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
 export async function runHalf(
   scenario: LoadedScenario,
-  app: AppHarness,
+  firstApp: AppHarness,
   driver: AgentDriver,
   ref: Pick<StepRef, 'card' | 'mode' | 'phase'>,
   objectLabels?: Record<string, string[]>,
   built?: unknown,
   askRepeats = 1,
   choice?: PromptChoice,
+  fresh?: FreshCopy,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -1286,6 +1367,10 @@ export async function runHalf(
   const accounts: PersonaAccount[] = [];
   // Every turn the agent answered, for the guardrails graded over the half (a replay that was not faithful measures nothing).
   const turns: CardTurn[] = [];
+  // The app the next turn runs on: the one booted for the half, until an operation moves to a fresh copy.
+  let app = firstApp;
+  /** Stops the fresh copy the half runs on now, if it runs on one. */
+  let releaseCopy: (() => Promise<void>) | undefined;
   try {
     await app.signInAdmin();
     for (const p of card.run.personas) {
@@ -1294,11 +1379,40 @@ export async function runHalf(
       const { apiKey: _k, ...shown } = acct;
       half.personas.push(shown);
     }
-    const adminKey = await app.adminApiKey();
+    let adminKey = await app.adminApiKey();
 
     await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
     // The state every operation starts from: the rows as the seed left them.
-    const seeded = await seededRows(app, restoreObjects(card));
+    let seeded = await seededRows(app, restoreObjects(card));
+
+    /**
+     * Move the half to a fresh copy of the app, seeded anew: the personas again,
+     * the admin's key, the seed, and the seeded state read from it. The copy
+     * is taken only when its seed loaded as the run's did; the copy it
+     * replaces is released then. Answers why not, or `undefined`.
+     */
+    const moveToFreshCopy = async (copyOf: FreshCopy): Promise<string | undefined> => {
+      let copy: Awaited<ReturnType<FreshCopy>> | undefined;
+      try {
+        copy = await copyOf();
+        await copy.app.signInAdmin();
+        const copyAccounts: PersonaAccount[] = [];
+        for (const p of card.run.personas) copyAccounts.push(await copy.app.createPersona(p.id, permissionSetName(card, p.id)));
+        const copyKey = await copy.app.adminApiKey();
+        const copySeed = await seedApp(scenario, copy.app, copyAccounts, { inserted: 0, refused: [] }, requiredLookups(built));
+        const differs = seedDifference(half, copyAccounts, copySeed);
+        if (differs !== undefined) throw new Error(differs);
+        const copySeeded = await seededRows(copy.app, restoreObjects(card));
+        const previous = releaseCopy;
+        [app, adminKey, seeded, releaseCopy] = [copy.app, copyKey, copySeeded, copy.release];
+        accounts.splice(0, accounts.length, ...copyAccounts);
+        await previous?.();
+        return undefined;
+      } catch (e) {
+        await copy?.release().catch(() => undefined);
+        return errText(e);
+      }
+    };
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
     // The door a turn is given: the app's MCP endpoint as the persona, and the
@@ -1350,12 +1464,29 @@ export async function runHalf(
       }
       try {
         // An earlier turn's write (the agent's, a probe's, a confirmed one) is
-        // undone first, so this operation is graded on its own turn alone.
-        const { restored, failed } = await restoreSeededRows(scenario, app, accounts, seeded, built);
-        if (restored) res.restored = restored;
-        if (failed !== undefined) {
-          half.operations.push({ ...res, notMeasured: `restore: ${failed}` });
-          continue;
+        // left behind first — on a fresh copy, or undone through the app's
+        // doors — so this operation is graded on its own turn alone.
+        if (fresh) {
+          const moved = await seedDrift(card, app, seeded, built);
+          if (moved.failed !== undefined) {
+            half.operations.push({ ...res, notMeasured: `restore: ${moved.failed}` });
+            continue;
+          }
+          if (moved.drifts.length) {
+            const why = await moveToFreshCopy(fresh);
+            if (why !== undefined) {
+              half.operations.push({ ...res, notMeasured: `restore: no fresh copy of the app could be seeded for it (${why}); what had moved: ${moved.drifts.map(driftText).join('; ')}` });
+              continue;
+            }
+            res.restored = { freshCopy: moved.drifts.flatMap((d) => [...d.added, ...d.missing, ...d.changed.map((c) => c.id)].map((id) => `${d.object}/${id}`)) };
+          }
+        } else {
+          const { restored, failed } = await restoreSeededRows(scenario, app, accounts, seeded, built);
+          if (restored) res.restored = restored;
+          if (failed !== undefined) {
+            half.operations.push({ ...res, notMeasured: `restore: ${failed}` });
+            continue;
+          }
         }
         const before = (await app.listRows(op.object)).rows as Row[];
         const started = new Date();
@@ -1460,6 +1591,8 @@ export async function runHalf(
     }
   } catch (e) {
     half.error = errText(e);
+  } finally {
+    await releaseCopy?.().catch(() => undefined);
   }
   try {
     half.guardrails = [gradeCardInjection(scenario, turns, half.seed)];
@@ -1523,7 +1656,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
 
   const iterated = iteratedScenario(scenario);
   const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
@@ -1534,7 +1667,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -1555,14 +1688,16 @@ interface VerifiedBuild {
  * installed, and the mode is skipped with the reason, when there is no
  * verified build or it declares another namespace than the card's; a refused
  * install is a finding, recorded and never worked around, and `use` is not
- * called.
+ * called. `fresh` boots another blank host from the same directory and installs
+ * the same build into it, the same way ({@link FreshCopy}); a refused install
+ * there is that copy's failure.
  */
 async function withInstalledBuild(
   original: LoadedScenario,
   ops: ProjectOps,
   mode: ModeRun,
   verified: VerifiedBuild | undefined,
-  use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]> }) => Promise<void>,
+  use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; fresh: FreshCopy }) => Promise<void>,
 ): Promise<void> {
   // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
   const ns = scenarioNamespace(original.card);
@@ -1597,7 +1732,19 @@ async function withInstalledBuild(
       mode.findings.push(`unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim());
       return;
     }
-    await use(app, { dir, url: booted.url, collections, baseline });
+    const fresh: FreshCopy = async () => {
+      const copy = await freshBoot(ops, dir)();
+      try {
+        await copy.app.signInAdmin();
+        const again = await copy.app.installUnmanaged(manifest);
+        if (!again.ok) throw new Error(`unmanaged install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+        return copy;
+      } catch (e) {
+        await copy.release();
+        throw e;
+      }
+    };
+    await use(app, { dir, url: booted.url, collections, baseline, fresh });
   });
 }
 
@@ -1619,6 +1766,8 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
+    // No fresh copy here: the app holds the agent's iterate, made live through its doors, which a host booted
+    // again would not hold; an earlier write is undone through those doors instead (`restoreSeededRows`).
     mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
   });
   return mode;
@@ -1639,8 +1788,8 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
   const scenario = namespacedScenario(original);
   const labels = citationLabels(original);
   const mode: ModeRun = { mode: 'ask', findings: [] };
-  await withInstalledBuild(original, ops, mode, verified, async (app) => {
-    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice);
+  await withInstalledBuild(original, ops, mode, verified, async (app, { fresh }) => {
+    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
   });
   return mode;
 }

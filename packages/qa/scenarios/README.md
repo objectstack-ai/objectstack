@@ -391,12 +391,25 @@ npx @objectstack/scenarios help                                      # the comma
   outcome reads (`restoreObjects`), as the admin. Before each operation it reads them again and compares
   (`rowDrift`: every column but `created_at`, `updated_at`, `updated_by` and the fields the build computes — formula,
   summary, autonumber). When an earlier turn moved them (the agent's write, a probe's, a confirmed one, or a question
-  turn that wrote), it puts them back (`restoreSeededRows`): a row a turn added is deleted, a seeded row a turn removed
-  is inserted again with the body the seed sent, and a changed column is set back to the value the seed left, in up to
-  three rounds so a cascade settles. The operation's result then carries `restored` (`deleted`, `reinserted`,
-  `setBack`, each `object/id`), and the `Run-operations` cell adds `N started from restored rows`. Rows that still
-  differ after the rounds make the operation NOT MEASURED (`restore: the rows could not be restored …`, naming what
-  differs and the first refusals), never a pass or a fail on rows the card did not declare. The restore runs before an
+  turn that wrote), the operation starts from the seeded rows all the same, in one of two ways:
+  - **Scratch and ask modes run it on a fresh copy** (`FreshCopy`, `runHalf`'s `fresh`): the runner boots the same
+    app again (scratch: the same project; ask: the same blank host with the same build installed the same way), signs
+    the personas in, loads the seed and reads the seeded state there, and that operation and every later turn of the
+    half run on the copy; the copy it replaces is stopped. Nothing is written to undo the move, so no validation rule,
+    hook or flow of the app judges a restore or runs on one: a one-way state rule (a request approved never goes back
+    to submitted) cannot refuse it. The result carries `restored: { freshCopy }` (the rows that had moved, each
+    `object/id`). A copy that does not boot, or whose seed does not load as the run's did (other rows loaded or
+    refused, a permission set not assigned alike), makes the operation NOT MEASURED (`restore: no fresh copy of the
+    app could be seeded for it (…)`, naming what had moved). Each copy costs one boot, the sign-ins and a seed load.
+  - **Template mode writes the rows back** (`restoreSeededRows`), because its app holds the agent's iterate, made live,
+    which a host booted again would not: a row a turn added is deleted, a seeded row a turn removed is inserted again
+    with the body the seed sent, and a changed column is set back to the value the seed left, in up to three rounds so
+    a cascade settles, all through the app's own doors, which its rules judge. The result carries `restored`
+    (`deleted`, `reinserted`, `setBack`). Rows that still differ after the rounds make the operation NOT MEASURED
+    (`restore: the rows could not be restored …`, naming what differs and the first refusals).
+
+  Either way the `Run-operations` cell adds `N started from restored rows`, and an operation is never a pass or a fail
+  on rows the card did not declare. The move or the restore runs before an
   operation's first turn, never between its ask and its confirmation; questions are untouched (they all run before any
   operation). A run where no earlier turn moved a row writes nothing and records and scores exactly as before. A
   replay re-sends each operation's recorded writes against the restored rows, so a recording made before restores
