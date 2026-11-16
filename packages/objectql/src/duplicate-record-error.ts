@@ -107,12 +107,17 @@ import { resolveFieldLabel, type ValidationMessageContext } from './validation/r
  *    sentence there, so a `zh-CN` writer read English beside a Chinese
  *    object label. It names the conflicting field by label (one field), the
  *    fields of a composite unique index by their labels (see `uniqueFields`
- *    below), or nothing. ⛔ It is deliberately NOT spelled `userMessage`:
- *    that name is the ApiError contract's producer-marked channel, which every
- *    boundary promotes to a wire key of its own (`withDeclaredUserMessage`),
- *    and whether this refusal joins that channel is a contract decision this
- *    sentence does not make. The wire shape is unchanged: only the text of
- *    `error` moves.
+ *    below), or nothing. It names labels only and quotes no record value.
+ *  - **`userMessage`** — the same sentence, declared on the ApiError
+ *    contract's producer-marked channel (`declaredUserMessage` in
+ *    `@objectstack/types` is the one read), so every boundary that forwards a
+ *    declared `userMessage` carries it in the writer's locale: the action door,
+ *    a sandboxed body's relay, a flow's inner refusal, the batch and bulk rows,
+ *    and the flat `/data` 409, where it rides beside `error` with the same text
+ *    (`withDeclaredUserMessage`). Seat ruling B′ (record 6895764754), on
+ *    maintainer ruling C (record 6819749037: end-user text in the request's
+ *    language, composed where it is produced). `message` stays the diagnostic
+ *    sentence below: every door that relays `message` as thrown keeps it.
  *  - **The fields of a composite unique index** — named in `endUserMessage`
  *    and in `message` ONLY when the columns the store named
  *    (`uniqueViolationColumns`, organization part set aside) match, as a set,
@@ -183,9 +188,14 @@ export class DuplicateRecordError extends Error {
   /**
    * The end user's sentence, in the writer's locale, from the platform's
    * operation catalog — what the HTTP doors ship as the 409 body's `error`.
-   * See the module header, and on why it is not `userMessage`.
+   * The same text is declared as {@link userMessage}; see the module header.
    */
   readonly endUserMessage: string;
+  /**
+   * {@link endUserMessage}, declared on the producer-marked channel every
+   * boundary forwards. See the module header.
+   */
+  readonly userMessage: string;
 
   constructor(
     /** The object the refused write targeted. */
@@ -207,6 +217,7 @@ export class DuplicateRecordError extends Error {
     this.cause = cause;
     if (field && labels?.field) this.fieldLabel = labels.field;
     this.endUserMessage = buildEndUserMessage(field ? labels?.field : undefined, uniqueFields, labels?.messages);
+    this.userMessage = this.endUserMessage;
     this.developerMessage =
       `Duplicate record refused on object '${object}'` +
       (field ? `, field '${field}'` : '') +
