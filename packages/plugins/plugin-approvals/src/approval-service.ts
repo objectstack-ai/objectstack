@@ -7230,8 +7230,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
       // The platform's place on a request stays the platform's: it moves for
       // a caller in platform-administrator standing now, the platform
-      // override, or the system.
-      if (isPlatformAdminAddress(from) && !context.isSystem && !isOverride
+      // override, or the system (which `isOverrideActor` admits).
+      if (isPlatformAdminAddress(from) && !isOverride
         && !(await this.platformAdminStanding(context, context.userId != null ? String(context.userId) : ''))) {
         throw new Error(
           `FORBIDDEN: actor '${actorId}' may not move the platform administrators' slot: it moves only for a `
