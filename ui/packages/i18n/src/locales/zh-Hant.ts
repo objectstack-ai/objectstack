@@ -2789,6 +2789,7 @@ const zhHant = {
         retry: "繼續單點登入",
       },
       ssoHandoff: '繼續前往 {{target}}',
+      ssoHandoffClient: "登入以繼續前往 {{clientName}}",
       devAdminHint: {
         title: '本地開發實例',
         signIn: '以開發管理員登入',
@@ -2811,6 +2812,8 @@ const zhHant = {
         directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
         networkNotAllowed: "本系統不允許從你當前的網路登入。請從允許的網路（例如組織的辦公網路或 VPN）連線，或聯絡管理員。",
         ssoAccessDenied: "你登入所用的賬號無權訪問本系統。請使用有權訪問的賬號登入，或請本系統所屬組織的管理員將你新增為成員。",
+        ssoAccessDeniedNotMember: "你登入所用的賬號不是本系統所屬組織的成員。請使用該組織成員的賬號登入，或請該組織的管理員邀請你。",
+        ssoAccessDeniedInvitationPending: "你已受邀加入本系統所屬組織，但尚未接受邀請。請先在郵件中接受邀請，然後重新登入。",
         ssoSwitchAccount: "切換賬號",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切換賬號”會在新標籤頁中開啟你的登入服務並在那裡退出登入。之後請在此處使用有權訪問的賬號重新登入。",

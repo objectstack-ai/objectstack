@@ -70,6 +70,30 @@ const ACCESS_DENIED: RefusalCopy = {
     "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
 };
 
+/**
+ * `access_denied` with the host's reason (plugin-auth
+ * `oauth-authorize-refusal.ts`, carried across this environment's callback by
+ * `oauth-callback-refusal-reason.ts`): the reasons this page has a sentence for.
+ * Any other reason, or none, keeps {@link ACCESS_DENIED}. The organization's
+ * name is not on the URL as a field; it is only inside the host's own
+ * sentence, which stays under the technical details.
+ */
+const ACCESS_DENIED_BY_REASON: Readonly<Record<string, RefusalCopy>> = {
+  not_member: {
+    key: 'auth.login.errors.ssoAccessDeniedNotMember',
+    defaultValue:
+      "The account you signed in with is not a member of this environment's organization. Sign in with an account that is, or ask an administrator of the organization to invite you.",
+  },
+  invitation_pending: {
+    key: 'auth.login.errors.ssoAccessDeniedInvitationPending',
+    defaultValue:
+      "You have been invited to this environment's organization, but the invitation has not been accepted yet. Accept the invitation from your email, then sign in again.",
+  },
+};
+
+/** The parameter the host's reason arrives on, beside `error=access_denied`. */
+export const REFUSAL_REASON_PARAM = 'objectstack_error_reason';
+
 const EMAIL_DOMAIN_NOT_ALLOWED: RefusalCopy = {
   key: 'auth.login.errors.ssoEmailDomainNotAllowed',
   defaultValue:
@@ -158,10 +182,13 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
  * are written for administrators); the page shows those behind a details
  * toggle instead.
  */
-export function ssoCallbackRefusalMessage(t: TranslateFn, code: string): string {
-  const copy = Object.prototype.hasOwnProperty.call(SSO_CALLBACK_REFUSALS, code)
-    ? SSO_CALLBACK_REFUSALS[code]
-    : GENERIC;
+export function ssoCallbackRefusalMessage(t: TranslateFn, code: string, reason?: string | null): string {
+  const byReason =
+    code === ACCESS_DENIED_CODE && typeof reason === 'string' && Object.prototype.hasOwnProperty.call(ACCESS_DENIED_BY_REASON, reason)
+      ? ACCESS_DENIED_BY_REASON[reason]
+      : undefined;
+  const copy = byReason
+    ?? (Object.prototype.hasOwnProperty.call(SSO_CALLBACK_REFUSALS, code) ? SSO_CALLBACK_REFUSALS[code] : GENERIC);
   return t(copy.key, { defaultValue: copy.defaultValue });
 }
 
