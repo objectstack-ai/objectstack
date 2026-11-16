@@ -19,7 +19,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
+import { ObjectQLPlugin } from './plugin.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -288,5 +290,34 @@ describe('#34096 — a roll-up an upgrade adds is materialised on the rows store
     // Only the row the first run could not write is written again.
     const rewritten = new Set(d.writes.slice(writesBefore).filter((w) => w.object === CONTRACT).map((w) => w.id));
     expect([...rewritten]).toEqual([acme.id]);
+  });
+});
+
+describe('#34096 — the ObjectQL plugin records the boot\'s roll-ups, so an install door after it materialises', () => {
+  it('an upgrade after a real kernel boot fills the pre-upgrade parents', async () => {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    const d = makeDriver();
+    await kernel.use({
+      name: 'qx-store-plugin', type: 'driver', version: '1.0.0',
+      init: async (ctx: any) => { ctx.registerService('driver.memory', d.driver); },
+    } as any);
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.bootstrap();
+    try {
+      const engine = kernel.getService<ObjectQL>('objectql');
+      engine.registerApp(v1);
+      await engine.syncSchemas();
+      const SYS = { context: { isSystem: true } } as const;
+      const acme = await engine.insert(CONTRACT, { title: 'acme' }, SYS);
+      await engine.insert(INVOICE, { contract: acme.id, amount: 36000 }, SYS);
+
+      engine.registerApp(v2);
+      await engine.syncSchemas();
+
+      const row = await engine.findOne(CONTRACT, { where: { id: acme.id }, ...SYS });
+      expect(row).toMatchObject({ [INVOICED]: 36000, [INVOICE_COUNT]: 1, [LAST_INVOICE]: 36000 });
+    } finally {
+      await kernel.shutdown();
+    }
   });
 });
