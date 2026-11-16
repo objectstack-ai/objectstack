@@ -2108,6 +2108,8 @@ const zhHant = {
         done: '你已連線了 AI 助手或 API 金鑰。',
         action: '連線',
       },
+      firstApp: { title: '放進第一個應用', todo: '還沒有你自己的應用。從應用市場安裝一個或自己搭建一個，它會出現在首頁。', done: '你自己的應用已在首頁。' },
+      firstRecord: { title: '新增第一條記錄', todo: '還沒有人在你的應用裡建立記錄。', done: '你的應用裡已經有人建立了記錄。', action: '開啟應用' },
     },
     error: {
       connectionFailed: '無法連線到伺服器',

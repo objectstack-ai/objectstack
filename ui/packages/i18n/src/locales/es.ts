@@ -2418,6 +2418,8 @@ const es = {
         done: 'Tienes conectado un asistente de IA o una clave de API.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Añade tu primera aplicación', todo: 'Aún no tienes una aplicación propia. Instala una desde el marketplace o crea una, y aparecerá en Inicio.', done: 'Ya tienes una aplicación propia en Inicio.' },
+      firstRecord: { title: 'Añade tu primer registro', todo: 'Nadie ha creado todavía un registro en tus aplicaciones.', done: 'Se ha creado un registro en tus aplicaciones.', action: 'Abrir aplicación' },
     },
     error: {
       connectionFailed: "No se puede conectar al servidor",
