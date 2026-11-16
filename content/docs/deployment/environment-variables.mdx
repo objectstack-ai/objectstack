@@ -147,10 +147,8 @@ unique-local, multicast, broadcast, unspecified, documentation and benchmarking
 addresses, every other special-purpose range that is not globally reachable, and any
 IPv6 address outside global unicast (`2000::/3`) are refused — judged after DNS
 resolution, on the connected socket and on every redirect — unless the target is
-listed below. Cloud metadata addresses are never reachable: the link-local ranges,
-the IPv6 metadata endpoints (`fd00:ec2::254`, `fd00:ec2::23`, `fd20:ce::254`,
-`fd00:c1::a9fe:a9fe`) and `100.100.100.200`, `192.0.0.192` and `168.63.129.16`, in
-any IPv6 form that carries them. A refused
+listed below. Link-local and cloud metadata addresses are never reachable, in any
+IPv6 form that carries them. A refused
 webhook delivery dead-letters at once as `EGRESS_REFUSED`; a refused `http` call
 fails its node with `EGRESS_REFUSED`. The boot logs one line saying the guard is
 active and how many targets are allowlisted, and the webhook plugin logs once how

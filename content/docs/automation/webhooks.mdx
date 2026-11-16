@@ -660,10 +660,7 @@ and `durable: true`.
   — no scheme, port, path or wildcard. A malformed or over-broad list fails
   the boot, naming every bad entry. Link-local and cloud metadata addresses
   can never be allowlisted: they are refused even when a listed host name or
-  block covers them, in any IPv6 form that carries them. The metadata
-  addresses outside link-local space are `fd00:ec2::254`, `fd00:ec2::23`,
-  `fd20:ce::254`, `fd00:c1::a9fe:a9fe`, `100.100.100.200`, `192.0.0.192` and
-  `168.63.129.16`. See
+  block covers them, in any IPv6 form that carries them. See
   [Environment variables](/docs/deployment/environment-variables#outbound-requests).
 - **A refusal.** A refused delivery dead-letters on its first attempt with an
   error starting `EGRESS_REFUSED`; it does not walk the retry schedule
