@@ -105,7 +105,7 @@
  *  - **`lookupFilters[].field`** — the picker's base filter.
  *  - **`lookupFilters[].value.$record`** (#34200) — a comparand read from the
  *    RECORD BEING EDITED (`LookupFilterRecordReferenceSchema`, #34009): a
- *    field of the object that owns the picker field, or one lookup hop from
+ *    field of the object that owns the picker field, or one relationship hop from
  *    it (`account.cb_market`). The parse judges its SHAPE (snake_case names,
  *    at most one dot, the whole value, a scalar operator); only the object
  *    graph can say whether `account` is a relationship of the edited object
@@ -542,7 +542,7 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
   },
   {
     // [#34200] `{ $record: 'path' }` reads the RECORD BEING EDITED — the record
-    // of the object that owns this field — and at most one lookup hop from it
+    // of the object that owns this field — and at most one relationship hop from it
     // (`account.cb_market`). Its reader is the picker, which swaps the value in
     // before the query leaves the browser.
     key: 'lookupFilters',
@@ -553,8 +553,8 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     ownFinding: true,
     read: readRecordReference,
     prescription:
-      'Fix the path — `$record` reads the record being edited: a field of this object, or one lookup '
-      + 'field of it and then a field of the object that lookup references (`account.cb_market`).',
+      'Fix the path — `$record` reads the record being edited: a field of this object, or one '
+      + 'relationship field of it and then a field of the object it references (`account.cb_market`).',
   },
   {
     key: 'dependsOn',
@@ -958,7 +958,7 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
             const past = segments[slot.maxHops];
             refuseKey(
               { where, path },
-              `${subject} "${read.name}" takes a second hop at "${past}"; it reads at most one lookup hop `
+              `${subject} "${read.name}" takes a second hop at "${past}"; it reads at most one relationship hop `
                 + `from the record being edited.`,
               slot.prescription,
             );

@@ -4483,7 +4483,8 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
     'On those picker fields a `lookupFilters[].value.$record` path is judged too, against the record ' +
-      'being edited: a field of the object that owns the picker field, or at most one hop from it (a ' +
+      'being edited: a field of the object that owns the picker field, or at most one relationship hop ' +
+      'from it (a ' +
       'relationship field of that object, then a field of the object it references, as in ' +
       '`account.cb_market`). The picker is declared to swap that value into its query and to leave ' +
       'an entry out while the value is empty, so a path the record does not have would drop the filter ' +

@@ -709,7 +709,7 @@ describe('validateObjectFieldRefs — lookupFilters[].field (addresses the REFER
 describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD BEING EDITED, one hop, #34200)', () => {
   // A quote's Price Book picker (the `LookupFilterRecordReference` example):
   // `$record` reads the quote — the object that OWNS the picker field — or one
-  // lookup hop from it, never the price book the filter runs on.
+  // relationship hop from it, never the price book the filter runs on.
   const quote = (filters: unknown[], over: Record<string, unknown> = {}) => ({
     objects: [
       {
@@ -719,6 +719,8 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
           notes: { type: 'text' },
           account: { type: 'lookup', reference: 'crm_account' },
           partner: { type: 'lookup', reference: 'elsewhere_partner' },
+          parent_quote: { type: 'tree', reference: 'sales_quote' },
+          approver_user: { type: 'user' },
           price_book: { type: 'lookup', reference: 'sales_price_book', lookupFilters: filters },
           ...over,
         },
@@ -769,7 +771,7 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
     expect(findings.map((f) => f.path)).toEqual([at(0)]);
     expect(findings[0]!.message).toBe(
       'fields.price_book.lookupFilters[0].value.$record "account.parent.cb_market" takes a second hop at '
-        + '"parent"; it reads at most one lookup hop from the record being edited.',
+        + '"parent"; it reads at most one relationship hop from the record being edited.',
     );
   });
 
@@ -790,6 +792,22 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
 
   it('passes a single hop to a field of the referenced object', () => {
     expect(validateObjectFieldRefs(quote([entry('account.cb_market')]))).toEqual([]);
+  });
+
+  // [review S1] The hop set is the family's `RELATIONSHIP_FIELD_TYPES`, not
+  // lookup / master_detail alone: a `user` field is a lookup to `sys_user`
+  // and a `tree` a self-lookup, each one stored foreign key the picker
+  // resolves the same way. An injected relationship column is unjudged.
+  it('passes a hop through a `tree` field (a self-lookup)', () => {
+    expect(validateObjectFieldRefs(quote([entry('parent_quote.quote_date', 'valid_from')]))).toEqual([]);
+  });
+
+  it('passes a hop through a `user` field (a lookup to `sys_user`, unjudged past the hop here)', () => {
+    expect(validateObjectFieldRefs(quote([entry('approver_user.department')]))).toEqual([]);
+  });
+
+  it('passes a hop through an injected column (`owner_id.NAME`): the graph cannot judge it', () => {
+    expect(validateObjectFieldRefs(quote([entry('owner_id.anything')]))).toEqual([]);
   });
 
   it('stays silent on a hop whose referenced object is not in this stack, as `dependsOn` does', () => {
@@ -1165,7 +1183,7 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '`relatedListColumns` against the object that owns the field',
       '`lookupColumns` and `lookupFilters[].field` against the REFERENCED object',
       '`lookupFilters[].value.$record`',
-      'at most one hop',
+      'at most one relationship hop',
       '`lookup`, `master_detail` and `user`',
       'reported once, there',
       'read verbatim',
