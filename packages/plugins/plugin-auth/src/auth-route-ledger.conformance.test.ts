@@ -248,6 +248,12 @@ describe('auth route ledger hygiene', () => {
       // it to the same proof — better-auth serves no address read.
       'GET /api/v1/auth/client-address',
       'GET /api/v1/auth/config',
+      // The sign-in hand-off's application name, on this pin's own terms:
+      // `auth-plugin.ts` mounts it itself (a `rawApp.get` on the
+      // `${basePath}/oauth2/client-name` template, ahead of the catch-all),
+      // and the `live.has(route)` loop below holds it to the same proof —
+      // the vendor serves no route on that path.
+      'GET /api/v1/auth/oauth2/client-name',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.get` on the `${basePath}/one-time-token/handoff`
       // template, ahead of the catch-all), and the `live.has(route)` loop

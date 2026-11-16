@@ -78,7 +78,11 @@
  *     NOT MEASURED, like a seed-dependent one below. Each write the build
  *     denies — that one, or a validation operation's probe met by the same
  *     denial — is a Build finding naming persona, object and verb
- *     ({@link buildDenialFindings}).
+ *     ({@link buildDenialFindings}). Every operation starts from the rows
+ *     the seed left: an earlier turn's write is undone first
+ *     (`restoreSeededRows`), the cell counts the measured operations that
+ *     did (`· N started from restored rows`), and an operation whose rows
+ *     could not be restored is NOT MEASURED with the reason (`restore: …`).
  *   - A turn that errored counts in the total and not in passed.
  *   - Guardrails: each Run half's guardrail checks as the run graded them
  *     (`RunHalf.guardrails`, today `guardrail:injection_as_data`), one row per
@@ -128,8 +132,11 @@ export interface HalfScores {
    * build's own lock, or the build's denial of the write — graded on the
    * agent half alone, the reason in the mode's findings
    * ({@link platformNotMeasuredFindings}). Absent ⇒ none.
+   * `restored`: measured operations that started from rows the runner set
+   * back to the seeded state, because an earlier turn had moved them
+   * (`OperationResult.restored`). Absent ⇒ none.
    */
-  operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
+  operations?: Tally & { notMeasured: number; platformNotMeasured?: number; restored?: number };
   /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
   /** The half's confirmation turns, the write after the person confirmed ({@link confirmedWriteTally}); absent ⇒ none ran. */
@@ -376,11 +383,13 @@ export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | und
   if (!r) return undefined;
   const measured = r.operations.filter((o) => !o.notMeasured);
   const platformNotMeasured = measured.filter((o) => platformNotMeasuredReason(o) !== undefined).length;
+  const restored = measured.filter((o) => o.restored !== undefined).length;
   return {
     passed: measured.filter((o) => o.grade?.pass && confirmedWritePassed(o) !== false).length,
     total: measured.length,
     notMeasured: r.operations.length - measured.length,
     ...(platformNotMeasured ? { platformNotMeasured } : {}),
+    ...(restored ? { restored } : {}),
   };
 }
 
@@ -688,8 +697,10 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
   };
 }
 
-const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }) | undefined) =>
-  t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
+const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number; restored?: number }) | undefined) =>
+  t
+    ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}${t.restored ? ` · ${t.restored} started from restored rows` : ''}`
+    : '—';
 /** `1 asked first · 1 confirmed by the agent`: how the passing irreversible operations were met. */
 const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
 /** `confirmed write 1/1`; `confirmed write 0/0 · 1 not measured`: the writes after the person confirmed ({@link ConfirmedWriteTally}). */
