@@ -1683,6 +1683,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
+   *   flows.<flow_name>.records.<node_id>.fields.<field_name>   (text a record write keeps)
    *
    * Every user-read string slot of the flow schemas is either one of these
    * keys or recorded, with its reason, in the family pin
@@ -1824,6 +1825,32 @@ const appTranslationDataShape = () => ({
    * `objectstack validate` refuses a key over an unknown flow, an unknown
    * node, or a node that is not a `save_notice`.
    *
+   * ## `records` — the text a record write keeps (ruling 6913660232)
+   *
+   *   flows.<flow_name>.records.<node_id>.fields.<field_name>
+   *
+   * A `create_record` / `update_record` node's `fields` value MARKED as text —
+   * a text envelope, `{ dialect: 'template', source }`
+   * (`FlowRecordFieldValueSchema`) — is a sentence the record keeps for people
+   * to read ("Auto-escalated: critical priority"). Under the maintainer's
+   * ruling on objectstack#34062 (letter B, 「B 平台按组织语言挑译文」) it is
+   * translated where it is written: the engine reads
+   * `flowRecordFieldTextKey(flow, node, field)` (`system/i18n-resolver.ts`)
+   * through the `i18n` service in the ORGANIZATION's language — its
+   * Localization setting when somebody set it, else the app's declared
+   * `i18n.defaultLocale` — and only then fills the holes. Never the language
+   * of the person who started the run: stored text is data the whole
+   * organization reads. With no entry, or no language to pick, the authored
+   * text is written and the run goes on. A bare string in `fields` is a
+   * literal value and has no key.
+   *
+   * Addressed by `Flow.name`, the record node's `FlowNode.id` (at any depth,
+   * an ADR-0031 region included) and the field name, the `fields` map's own
+   * key. Judged as the text slot it translates (`flowTextSlotTranslation`).
+   * `objectstack validate` refuses a key over an unknown flow, an unknown
+   * node, a node that is not a record write, or a field the node does not
+   * mark as text.
+   *
    * ## `successMessage` / `errorMessage` — the terminal toasts (#22507)
    *
    *   flows.<flow_name>.successMessage
@@ -1907,6 +1934,7 @@ const appTranslationDataShape = () => ({
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
       notice: 'notices', saveNotices: 'notices',
+      record: 'records',
       // The spellings the toast pair arrives in from an action translation,
       // which spells its own success toast `successMessage` with these aliases.
       success: 'successMessage', successText: 'successMessage',
@@ -2041,6 +2069,28 @@ const appTranslationDataShape = () => ({
           + "by the engine in the triggering writer's locale in place of the authored one",
         ),
     })).optional().describe('Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node'),
+    // [ruling 6913660232] The text a record write keeps, picked by the ENGINE
+    // in the ORGANIZATION's language before its holes are filled — addressed
+    // by `FlowNode.id` like `notices`, then by the field name.
+    records: z.record(z.string(), strictObject({
+      surface: 'this flow record-write translation',
+      history: TRANSLATION_HISTORY,
+      // The map's own name on the node is `fields`; the spellings an author
+      // holding a neighbouring surface's word arrives with.
+      aliases: { values: 'fields', fieldValues: 'fields' },
+    }, {
+      // The one text-slot judge, applied to each translation exactly as
+      // `FlowRecordFieldValueSchema` applies it to the text envelope's
+      // `source`; an empty string is the untranslated skeleton slot (the
+      // authored text is written).
+      fields: z.record(z.string(), flowTextSlotTranslation()).optional().describe(
+        'Translated text keyed by field name — each a `{{ }}` template like the text envelope it translates, picked by '
+        + "the engine in the organization's language and written in its place; only a field the node marks as text "
+        + 'is translated',
+      ),
+    })).optional().describe(
+      'Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node',
+    ),
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**

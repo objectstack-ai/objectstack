@@ -23,7 +23,7 @@
  * | `security-private-no-readscope` | `permissionSet`, `object` |
  * | `security-master-detail-ungranted` | `object`, `master` (`''` when the runtime's parent names none) |
  * | `security-book-audience-unknown-set` | `book`, `permissionSet` |
- * | `security-superuser-field-mask-inert` | `permissionSet`, `field`, `object`, `bypass` (`view` · `modify`), `inert` (`read` · `edit` · `both`) |
+ * | `security-superuser-field-mask-inert` | `permissionSet`, `field`, `object`, `inert` (`read` · `edit` · `both`) |
  * | `security-controlled-by-parent-master-reference-hidden` | `permissionSet`, `field` |
  * | `security-update-policy-no-check` | `permissionSet`, `policy` |
  * | `security-controlled-by-parent-owner-policy-without-opt-in` | `permissionSet`, `policy`, `object`, `remedy` (`allow-owner-edit` · `key-owner-id` · `add-owner-id`) |
@@ -49,23 +49,26 @@ import {
   SECURITY_UPDATE_POLICY_NO_CHECK,
 } from './validate-security-posture.js';
 
-/** `bypass` → the console's own label for that permission, per locale. */
-const BYPASS_LABEL = {
-  en: { view: 'View All Records', modify: 'Modify All Records' },
-  'zh-Hans': { view: '查看所有记录', modify: '修改所有记录' },
-  'zh-Hant': { view: '查看所有記錄', modify: '修改所有記錄' },
-  es: { view: 'View All Records', modify: 'Modify All Records' },
-  ar: { view: 'View All Records', modify: 'Modify All Records' },
-  fr: { view: 'View All Records', modify: 'Modify All Records' },
-  'pt-BR': { view: 'View All Records', modify: 'Modify All Records' },
-  ru: { view: 'View All Records', modify: 'Modify All Records' },
-  de: { view: 'View All Records', modify: 'Modify All Records' },
-  ja: { view: 'View All Records', modify: 'Modify All Records' },
-  ko: { view: 'View All Records', modify: 'Modify All Records' },
+/**
+ * The console's own label for Modify All, per locale. The one bypass
+ * `security-superuser-field-mask-inert` reports: beside View All alone the
+ * set's own `readable: false` binds (ADR-0066 D2 ⑧ note of 2026-11-15).
+ */
+const MODIFY_ALL_LABEL = {
+  en: 'Modify All Records',
+  'zh-Hans': '修改所有记录',
+  'zh-Hant': '修改所有記錄',
+  es: 'Modify All Records',
+  ar: 'Modify All Records',
+  fr: 'Modify All Records',
+  'pt-BR': 'Modify All Records',
+  ru: 'Modify All Records',
+  de: 'Modify All Records',
+  ja: 'Modify All Records',
+  ko: 'Modify All Records',
 } as const;
 
-const bypassLabel = (locale: keyof typeof BYPASS_LABEL, p: UserTextParams): string =>
-  BYPASS_LABEL[locale][p.bypass === 'modify' ? 'modify' : 'view'];
+const modifyAllLabel = (locale: keyof typeof MODIFY_ALL_LABEL): string => MODIFY_ALL_LABEL[locale];
 
 export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
   [SECURITY_PRIVATE_NO_READSCOPE]: {
@@ -234,7 +237,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
   },
   [SECURITY_SUPERUSER_FIELD_MASK_INERT]: {
     en: (p) => {
-      const b = bypassLabel('en', p);
+      const b = modifyAllLabel('en');
       return fieldMaskSentence(p, {
         read:
           `In permission set "${p.permissionSet}", hiding field "${p.field}" has no effect: the set's ${b} on ` +
@@ -252,7 +255,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     'zh-Hans': (p) => {
-      const b = bypassLabel('zh-Hans', p);
+      const b = modifyAllLabel('zh-Hans');
       return fieldMaskSentence(p, {
         read:
           `在权限集“${p.permissionSet}”中，隐藏字段“${p.field}”不起作用：该权限集对“${p.object}”拥有“${b}”，` +
@@ -269,7 +272,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     'zh-Hant': (p) => {
-      const b = bypassLabel('zh-Hant', p);
+      const b = modifyAllLabel('zh-Hant');
       return fieldMaskSentence(p, {
         read:
           `在權限集「${p.permissionSet}」中，隱藏欄位「${p.field}」不起作用：該權限集對「${p.object}」擁有「${b}」，` +
@@ -286,7 +289,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     es: (p) => {
-      const b = bypassLabel('es', p);
+      const b = modifyAllLabel('es');
       return fieldMaskSentence(p, {
         read:
           `En el conjunto de permisos "${p.permissionSet}", ocultar el campo "${p.field}" no tiene efecto: el ` +
@@ -306,7 +309,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     ar: (p) => {
-      const b = bypassLabel('ar', p);
+      const b = modifyAllLabel('ar');
       return fieldMaskSentence(p, {
         read:
           `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لإخفاء الحقل "${p.field}" أي أثر: إذن "${b}" الذي ` +
@@ -323,7 +326,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     fr: (p) => {
-      const b = bypassLabel('fr', p);
+      const b = modifyAllLabel('fr');
       return fieldMaskSentence(p, {
         read:
           `Dans l’ensemble d’autorisations « ${p.permissionSet} », masquer le champ « ${p.field} » n’a aucun effet : ` +
@@ -344,7 +347,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     'pt-BR': (p) => {
-      const b = bypassLabel('pt-BR', p);
+      const b = modifyAllLabel('pt-BR');
       return fieldMaskSentence(p, {
         read:
           `No conjunto de permissões "${p.permissionSet}", ocultar o campo "${p.field}" não tem efeito: a permissão ` +
@@ -364,7 +367,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     ru: (p) => {
-      const b = bypassLabel('ru', p);
+      const b = modifyAllLabel('ru');
       return fieldMaskSentence(p, {
         read:
           `В наборе разрешений «${p.permissionSet}» скрытие поля «${p.field}» не действует: право «${b}» этого ` +
@@ -384,7 +387,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     de: (p) => {
-      const b = bypassLabel('de', p);
+      const b = modifyAllLabel('de');
       return fieldMaskSentence(p, {
         read:
           `Im Berechtigungssatz „${p.permissionSet}“ ist das Ausblenden des Felds „${p.field}“ wirkungslos: Die ` +
@@ -405,7 +408,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     ja: (p) => {
-      const b = bypassLabel('ja', p);
+      const b = modifyAllLabel('ja');
       return fieldMaskSentence(p, {
         read:
           `権限セット「${p.permissionSet}」では、項目「${p.field}」を非表示にする設定が効いていません。この権限セットは` +
@@ -425,7 +428,7 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       });
     },
     ko: (p) => {
-      const b = bypassLabel('ko', p);
+      const b = modifyAllLabel('ko');
       return fieldMaskSentence(p, {
         read:
           `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기는 설정은 효과가 없습니다. 이 권한 세트는 ` +
@@ -684,16 +687,16 @@ function ownerPolicyRemedy(p: UserTextParams, sentences: Readonly<Record<OwnerPo
 
 /**
  * The sentence of `security-superuser-field-mask-inert`, by the `inert` param
- * its push site sets: the half of the field restriction the set's bypass
- * unbinds. Beside View All only the read mask is inert (`read`) and the edit
- * lock still binds, so that sentence never calls the whole restriction
- * ineffective nor prescribes deleting it; beside Modify All the edit lock is
- * inert (`edit`), or both halves are (`both`). An `inert` the push site did not
- * set is read from `bypass`: View All can only unbind the read mask.
+ * its push site sets: the half of the field restriction the set's Modify All
+ * unbinds. A row that hides the field and leaves it editable has an inert
+ * read mask only (`read`), so that sentence never prescribes deleting the
+ * restriction; a readable row has an inert edit lock (`edit`); a row that
+ * hides and locks has both (`both`). An `inert` the push site did not set
+ * reads as `both`, which is what Modify All unbinds.
  */
 type FieldMaskInert = 'read' | 'edit' | 'both';
 
 function fieldMaskSentence(p: UserTextParams, sentences: Readonly<Record<FieldMaskInert, string>>): string {
   if (p.inert === 'read' || p.inert === 'edit' || p.inert === 'both') return sentences[p.inert];
-  return p.bypass === 'modify' ? sentences.both : sentences.read;
+  return sentences.both;
 }

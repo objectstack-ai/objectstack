@@ -502,7 +502,9 @@ function typeSoundnessIssue(
     const bareCelTypes = shadowed
       ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
       : celFieldTypes;
-    return dateTextIssue(source, bareCelTypes, scope, role, dateArm(scope, faultOutcome, bareNamesUnproven));
+    // [#34363] The `date` fields (never `datetime`) by name: `timestamp()` faults on their text.
+    const dateOnly = new Set(Object.keys(bareCelTypes).filter((name) => fieldTypes[name] === 'date'));
+    return dateTextIssue(source, bareCelTypes, scope, role, dateArm(scope, faultOutcome, bareNamesUnproven), dateOnly);
   }
   const reference = mismatch.field
     ? (mismatch.root !== undefined
@@ -674,12 +676,13 @@ function dateTextIssue(
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
   flowArm: DateArm | null,
+  dateOnlyFields: ReadonlySet<string>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
   const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
   // [#32595] A call the date text cannot take faults that typing too, so it is
   // asked only where the date-text check faulted on something but arithmetic.
-  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm);
+  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm, dateOnlyFields);
   const reference = verdict.field
     ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
     : undefined;
@@ -732,22 +735,36 @@ function dateTextIssue(
  * verdicts' grade and outcome sentence (`flowArm`): `date-text-call`, or its
  * `-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` arm. The
  * prescription is the call with the field parsed by `date(…)`, which the check
- * proved clean.
+ * proved clean. [#34363] `timestamp(<date field>)` — the string overload,
+ * which checks clean on the text and faults on a `YYYY-MM-DD` one on every
+ * row — is the same verdict: its prescription is `date(…)` in place of the
+ * call, plus the optional `shift` clause naming the whole-day shift that keeps
+ * the result a date, `isoDate(addDays(<field>, N))`.
  */
 function dateTextCallIssue(
   source: string,
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
   flowArm: DateArm | null,
+  dateOnlyFields: ReadonlySet<string>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  const found = firstDateTextCall(source, celFieldTypes, scope);
+  const found = firstDateTextCall(source, celFieldTypes, scope, dateOnlyFields);
   if (!found) return null;
-  const params = { call: found.call, reference: found.reference, rewrite: found.rewrite };
+  const params = {
+    call: found.call,
+    reference: found.reference,
+    rewrite: found.rewrite,
+    ...(found.shift !== undefined ? { shift: found.shift } : {}),
+  };
   const ref = `\`${found.reference}\``;
   const head =
     `\`${found.call}\` — ${ref} is a date field, and the runtime holds a date field as its text ` +
     `(\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which this call does not accept: `;
-  const use = `Parse the text into a timestamp first: \`${found.rewrite}\`.`;
+  const use =
+    `Parse the text into a timestamp first: \`${found.rewrite}\`.` +
+    (found.shift !== undefined
+      ? ` To shift it by N whole days and keep it a date, write \`${found.shift}\`.`
+      : '');
   return {
     severity: 'error',
     issue: flowArm
@@ -1730,18 +1747,18 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  *
  * ## This is a CURATED SUBSET of what the environment resolves — by construction
  *
- * The evaluation `Environment` resolves **77** distinct function names. This list
- * carries 38 of them, and the 39-name gap is NOT staleness. Measured decomposition
+ * The evaluation `Environment` resolves **78** distinct function names. This list
+ * carries 39 of them, and the 39-name gap is NOT staleness. Measured decomposition
  * (`cel-stdlib-drift.test.ts` re-measures all four numbers on every run):
  *
- *   77 registered names
- *    = 42 callable BARE, as `fn(x)`            -> the only shape this list may carry
+ *   78 registered names
+ *    = 43 callable BARE, as `fn(x)`            -> the only shape this list may carry
  *    + 35 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
  *                                                 (cel-js's 33, plus our `can`
  *                                                 and `hasCapability`)
  *
- *   42 bare-callable
- *    = 30 added by `registerStdLib`   -> ALL advertised (one per registration site)
+ *   43 bare-callable
+ *    = 31 added by `registerStdLib`   -> ALL advertised (one per registration site)
  *    +  8 cel-js built-ins            -> advertised: has size int string bool double
  *                                        timestamp duration
  *    +  4 cel-js built-ins WITHHELD   -> bytes dyn type uint
@@ -1773,7 +1790,7 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'now', 'today', 'daysFromNow', 'daysAgo', 'daysBetween', 'addDays', 'addMonths', 'date', 'datetime',
   'isoDate', 'isoDatetime',
   // Numbers (registered stdlib)
-  'abs', 'round', 'floor', 'ceil', 'min', 'max',
+  'abs', 'round', 'floor', 'ceil', 'min', 'max', 'rmbUpper',
   // Strings (registered stdlib)
   'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches', 'joinNonEmpty',
   // Collections / null-ish (registered stdlib)
