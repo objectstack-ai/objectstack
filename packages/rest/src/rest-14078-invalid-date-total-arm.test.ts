@@ -198,7 +198,8 @@ describe('[#14078] §B formatCsvCell — the export writer emits the cell an ope
 
         // `formatDate` -> `toDate` rejects an Invalid `Date` and returns the
         // value UNCHANGED, so this path reaches the same arm.
-        const lines = csv.split('\r\n').filter((l) => l.length > 0);
+        // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+        const lines = csv.replace(/^\uFEFF/, '').split('\r\n').filter((l) => l.length > 0);
         expect(lines[0]).toBe('ID,截止');
         expect(lines[1]).toBe(`1,${INVALID_TEXT}`);
     });

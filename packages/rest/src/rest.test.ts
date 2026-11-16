@@ -1076,7 +1076,8 @@ describe('RestServer', () => {
 
       expect(headers['Content-Type']).toBe('text/csv; charset=utf-8');
       expect(headers['Content-Disposition']).toMatch(/attachment; filename="account-\d{8}-\d{6}\.csv"; filename\*=UTF-8''/);
-      const text = chunks.join('');
+      // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+      const text = chunks.join('').replace(/^\uFEFF/, '');
       expect(text.startsWith('id,name,note\r\n')).toBe(true);
       expect(text).toContain('1,"Acme, Inc.","line1\nline2"');
       expect(text).toContain('2,"Beta ""Co""",');
@@ -1228,7 +1229,7 @@ describe('RestServer', () => {
       await route!.handler({ params: { object: 'task' }, query: { format: 'csv' }, headers: { 'accept-language': 'zh-CN' } } as any, res);
 
       expect(headers['Content-Type']).toBe('text/csv; charset=utf-8');
-      const lines = chunks.join('').split('\r\n');
+      const lines = chunks.join('').replace(/^\uFEFF/, '').split('\r\n');
       // Header row uses schema labels, columns derived from the schema order.
       expect(lines[0]).toBe('ID,标题,完成,优先级,截止,负责人');
       // boolean→是, select→label, date→YYYY-MM-DD, lookup→displayField name.
@@ -1245,7 +1246,7 @@ describe('RestServer', () => {
       const { res, chunks } = makeRes();
       await route!.handler({ params: { object: 'task' }, query: { format: 'csv', header: 'false' }, headers: { 'accept-language': 'zh-CN' } } as any, res);
 
-      const lines = chunks.join('').split('\r\n').filter(Boolean);
+      const lines = chunks.join('').replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
       // No label header — the first line is the data row.
       expect(lines[0]).toBe('1,写代码,是,高,2026-06-30,张三');
     });
@@ -1388,7 +1389,7 @@ describe('RestServer', () => {
         query: { format: 'csv', fields: 'id,title,done', locale: 'zh' },
         headers: {},
       } as any, zh.res);
-      expect(zh.chunks.join('').split('\r\n')[0]).toBe('ID,标题,完成');
+      expect(zh.chunks.join('').replace(/^\uFEFF/, '').split('\r\n')[0]).toBe('ID,标题,完成');
 
       // Default locale (en, no ?locale=) → English header from the bundle,
       // i.e. 'Title'/'Done', never the raw 'RawTitle'/'RawDone'.
@@ -1398,7 +1399,7 @@ describe('RestServer', () => {
         query: { format: 'csv', fields: 'id,title,done' },
         headers: {},
       } as any, en.res);
-      expect(en.chunks.join('').split('\r\n')[0]).toBe('ID,Title,Done');
+      expect(en.chunks.join('').replace(/^\uFEFF/, '').split('\r\n')[0]).toBe('ID,Title,Done');
     });
   });
 

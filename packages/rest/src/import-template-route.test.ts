@@ -671,6 +671,13 @@ const headersFor = (ext: string, contentType: string, limit: string, styles?: st
 const CSV = 'text/csv; charset=utf-8';
 const JSON_TYPE = 'application/json; charset=utf-8';
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+/**
+ * [#34163] A csv export with content opens with one UTF-8 byte-order mark
+ * (EF BB BF). The csv bodies below are the pre-change capture with that mark
+ * in front: `bytes` is the capture's count + 3 and `sha256` covers the marked
+ * body. The empty csv writes nothing, so it carries no mark and is unchanged.
+ */
+const CSV_MARK = '\uFEFF';
 
 const PRE_CHANGE: Record<string, {
   query: Record<string, string>;
@@ -682,9 +689,9 @@ const PRE_CHANGE: Record<string, {
   csvDefault: {
     query: {},
     headers: headersFor('csv', CSV, '10000'),
-    sha256: '26d251901ffc998b0c8b6b8bcc866cb5fbfa3a187c80eb396151fa5eb1ffe31e',
-    bytes: 123,
-    text: 'ID,标题,完成,优先级,截止,负责人\r\n1,写代码,是,高,2026-06-30,张三\r\n2,写文档,否,低,2026-07-01,李四\r\n',
+    sha256: 'f5287f81628967bd16e3dda468e3ff457fbbf7526432d3dc1fc5b8e63e7050fd',
+    bytes: 126,
+    text: CSV_MARK + 'ID,标题,完成,优先级,截止,负责人\r\n1,写代码,是,高,2026-06-30,张三\r\n2,写文档,否,低,2026-07-01,李四\r\n',
   },
   json: {
     query: { format: 'json' },
@@ -708,16 +715,16 @@ const PRE_CHANGE: Record<string, {
   csvFields: {
     query: { format: 'csv', fields: 'title,owner' },
     headers: headersFor('csv', CSV, '10000'),
-    sha256: '62cd186863bc41e298199695f8d9405a52c974b4b49bce5776ca3176c7ae5321',
-    bytes: 54,
-    text: '标题,负责人\r\n写代码,张三\r\n写文档,李四\r\n',
+    sha256: 'af30704ae43a9fe7e9acd573263506e0106c90533180381ac22e3fa15b277fdc',
+    bytes: 57,
+    text: CSV_MARK + '标题,负责人\r\n写代码,张三\r\n写文档,李四\r\n',
   },
   csvNoHeader: {
     query: { format: 'csv', header: 'false' },
     headers: headersFor('csv', CSV, '10000'),
-    sha256: '7f8f78c0d4847c0dfe9e09bdb48fe6985bcd8d10468119c257fe36b2c996793b',
-    bytes: 78,
-    text: '1,写代码,是,高,2026-06-30,张三\r\n2,写文档,否,低,2026-07-01,李四\r\n',
+    sha256: '696b5d73315034609fdcdead91aee26f538cce8b953d6ee3cc3dc96947bc40d9',
+    bytes: 81,
+    text: CSV_MARK + '1,写代码,是,高,2026-06-30,张三\r\n2,写文档,否,低,2026-07-01,李四\r\n',
   },
   csvEmptyNoProjection: {
     query: { format: 'csv', filter: '{"title":"nope"}' },
