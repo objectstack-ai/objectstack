@@ -3272,12 +3272,14 @@ export function translationBundleOf(i18n: unknown): any | undefined {
 }
 
 /**
- * [#14882 · #15711] The `ResolveOptions` every metadata-document translation
- * hands `@objectstack/spec/system`: the request's locale, the deployment's
- * DECLARED fallback chain (`getFallbackLocale()`) and its DEFAULT locale
- * (`getDefaultLocale()`). Both are feature-detected (optional on
- * `II18nService`): a service that declares neither gets neither — the
- * serving layer threads a declaration, it never invents one.
+ * [#14882 · #15711 · #33634] The `ResolveOptions` every metadata-document
+ * translation hands `@objectstack/spec/system`: the request's locale, the
+ * deployment's DECLARED fallback chain (`getFallbackLocale()`) and the
+ * language its labels are authored in — the declared `sourceLocale`
+ * (`getSourceLocale()`), else its DEFAULT locale (`getDefaultLocale()`), as
+ * `ResolveOptions.defaultLocale`. All three are feature-detected (optional on
+ * `II18nService`): a service that declares none gets none — the serving
+ * layer threads a declaration, it never invents one.
  * `RestServer.translateOptionsFor`, whose docblock carries the history,
  * delegates here.
  */
@@ -3287,7 +3289,10 @@ export function metaTranslateOptions(
 ): { locale: string; fallbackChain?: string[]; defaultLocale?: string } {
     const service: any = i18n;
     const fallback = service && typeof service.getFallbackLocale === 'function' ? service.getFallbackLocale() : undefined;
-    const def = service && typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
+    const source = service && typeof service.getSourceLocale === 'function' ? service.getSourceLocale() : undefined;
+    const def = typeof source === 'string' && source.length > 0
+        ? source
+        : service && typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
     const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
     if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
     if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;

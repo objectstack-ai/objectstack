@@ -9,7 +9,12 @@
  *                        any other directory is loaded as the private overlay,
  *                        where a `generic` card is refused (`libraryOf`)
  *   --only ID[,ID]       run only these cards
- *   --modes M[,M]        scratch, template (default: both)
+ *   --modes M[,M]        scratch, template, ask (default: scratch,template);
+ *                        ask runs only the questions and operations on a
+ *                        verified build — --template F, else this run's
+ *                        scratch build when it passed — and authors nothing,
+ *                        so ask without --template and without scratch is
+ *                        refused before any card runs
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver codex       the local OpenAI Codex CLI on your own ChatGPT plan
  *                        login (`drivers/codex.ts`); it has no turn cap and no
@@ -55,7 +60,8 @@
  *   --ask-effort L       the effort for question and operation turns, in place
  *                        of --effort; the record and the scorecard state the
  *                        effort each turn asked for beside its served model
- *   --template F         a verified build (dist/objectstack.json) for template mode
+ *   --template F         a verified build (dist/objectstack.json) for template
+ *                        and ask modes
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored;
  *                        ./scenario-runs when run from the published package)
@@ -83,7 +89,7 @@ import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } f
 import { CodexDriver } from './drivers/codex.js';
 import { ExternalDriver } from './drivers/external.js';
 import { CAPABILITY_AREAS_DIR, locateLibraryRoot } from './library.js';
-import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
+import { askModeRefusal, minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { rebaseScenario } from './run-date.js';
@@ -105,7 +111,7 @@ export function findUp(start: string, test: (dir: string) => boolean): string {
 export interface CliArgs {
   cards?: string;
   only?: string[];
-  modes: Array<'scratch' | 'template'>;
+  modes: Array<'scratch' | 'template' | 'ask'>;
   driver: string;
   record?: string;
   template?: string;
@@ -166,7 +172,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--only') a.only = val().split(',');
     else if (flag === '--modes') {
       const modes = val().split(',');
-      for (const m of modes) if (m !== 'scratch' && m !== 'template') throw new Error(`unknown mode \`${m}\` (scratch, template)`);
+      for (const m of modes) if (m !== 'scratch' && m !== 'template' && m !== 'ask') throw new Error(`unknown mode \`${m}\` (scratch, template, ask)`);
       a.modes = modes as CliArgs['modes'];
     } else if (flag === '--driver') a.driver = val();
     else if (flag === '--record') a.record = val();
@@ -201,6 +207,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       a.packages = p as PackagesMode;
     } else throw new Error(`unknown flag \`${flag}\``);
   }
+  const askRefusal = askModeRefusal(a.modes, a.template !== undefined);
+  if (askRefusal) throw new Error(askRefusal);
   if (a.packages === 'workspace' && a.createVersion !== undefined) {
     throw new Error('--create-version names a published create-objectstack; --packages workspace scaffolds with the one this checkout builds');
   }

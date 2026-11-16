@@ -179,6 +179,8 @@ describe('a unique index its rows violate: a limit of the entry, declared on bot
   async function seedDuplicates(file: string): Promise<void> {
     const setup = createClient({ url: `file:${file}` });
     await setup.execute('CREATE TABLE "quote" ("id" TEXT PRIMARY KEY, "created_at" TEXT, "updated_at" TEXT, "code" TEXT)');
+    // [#33695] The implicit default-order index, so the one create_index left is the unique's.
+    await setup.execute('CREATE INDEX "idx_quote_created_at_id" ON "quote" ("created_at", "id")');
     await setup.execute(`INSERT INTO "quote" ("id", "code") VALUES ('q1', 'Q-1'), ('q2', 'Q-1')`);
     setup.close();
   }
