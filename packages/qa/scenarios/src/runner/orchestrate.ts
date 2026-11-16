@@ -5,7 +5,9 @@
  *
  *   scratch   scaffold → the agent builds from the card prompt → `os validate`,
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
- *             artifact → boot, seed, one user + key per persona → the Run half
+ *             artifact (with a failed check per roll-up it leaves readable
+ *             over child data the card withholds, `rollupSourceCharges`)
+ *             → boot, seed, one user + key per persona → the Run half
  *             (every question as every persona it names, `askRepeats` times
  *             each, every operation once as its persona, each over the app's
  *             own MCP, and a probed
@@ -39,6 +41,9 @@
  * else; this module only gathers what the graders take.
  */
 
+import { resolveStackCollection } from '@objectstack/core';
+import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
+
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
@@ -63,7 +68,21 @@ import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTa
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
-import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
+import {
+  buildPrompt,
+  iteratePrompt,
+  operationPrompt,
+  personaHandles,
+  personaRecords,
+  promptLanguageRefusal,
+  statedPromptChoice,
+  questionPrompt,
+  rowOwner,
+  templateIteratePrompt,
+  userHandleFields,
+  verifyArgs,
+  type PromptChoice,
+} from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
@@ -109,6 +128,16 @@ export interface RunOptions {
    * the rows the first one changed.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice (`--lang`, `--prompt`, {@link PromptChoice}), sent in
+   * every mode: the build turn, the iterate turn (scratch and template), and
+   * every question and operation turn, each ask of a repeated one included.
+   * Absent ⇒ today's prompts, byte for byte. A card that lacks a text the
+   * run would render in the chosen language is refused before any mode
+   * runs ({@link promptLanguageRefusal}); the CLI skips it before the first
+   * card instead.
+   */
+  promptChoice?: PromptChoice;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -175,7 +204,32 @@ export interface BuildHalf {
   score: ScenarioArtifactScore | null;
   /** The card's reference cycles this build made required on every side: its seed cannot load them (a Build finding). */
   requiredCycles?: SeedLookup[][];
+  /**
+   * Each roll-up the build leaves readable to a persona over child data the
+   * card withholds from that persona ({@link rollupSourceCharges}): a failed
+   * Build check apiece, out of passed and in total, and a Build finding.
+   * Absent when there is none.
+   */
+  rollupSourceUnreadable?: RollupSourceCharge[];
   error?: string;
+}
+
+/**
+ * One standing `security-rollup-source-unreadable` finding charged to the
+ * build ({@link rollupSourceCharges}): the persona whose permission set reads
+ * the roll-up, the roll-up column, and what of its child the card withholds
+ * from that persona. `finding` is the rule's own report, carried verbatim.
+ */
+export interface RollupSourceCharge {
+  persona: string;
+  permissionSet: string;
+  /** The roll-up column, `parent.field`. */
+  rollup: string;
+  /** The roll-up's child object. */
+  child: string;
+  /** What the card withholds from the persona: the child object, or one child field (`child.field`). */
+  withheld: { object: string } | { field: string };
+  finding: Pick<RollupSourceVisibilityFinding, 'rule' | 'where' | 'path' | 'message'>;
 }
 
 export interface QuestionResult {
@@ -294,6 +348,12 @@ export interface CardRun {
    * reader may hold exact.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice the run was given ({@link RunOptions.promptChoice}),
+   * when a flag set one; absent ⇒ the default prompts. Outside `counts`, like
+   * `askRepeats`, so a default record keeps its bytes.
+   */
+  promptChoice?: PromptChoice;
   modes: ModeRun[];
 }
 
@@ -411,6 +471,105 @@ export function seedOrder(scenario: LoadedScenario, required?: ReadonlySet<strin
 export function requiredCyclesOf(scenario: LoadedScenario, artifact: unknown): SeedLookup[][] {
   const required = requiredLookups(artifact);
   return required ? seedPlan(scenario.card, required).unseedable : [];
+}
+
+/** An object or field machine name, as the spec spells one (snake_case). */
+const ITEM = '[a-z_][a-z0-9_]*';
+
+/**
+ * `security-rollup-source-unreadable`'s report, read against the rule's own
+ * wording (`validate-rollup-source-visibility.ts` in `@objectstack/lint`):
+ * `where` names the set and the roll-up column; the message's first clause
+ * names the roll-up's child, and which of it the set cannot read — the child
+ * object (`… cannot read object "C"`), the aggregated child field (`… summarizes
+ * "C.f", which permission set "S" cannot read`) or a child field the roll-up's
+ * filter tests (`… filtered on "C.f", which …`). The suite runs the rule
+ * itself on each arm, so a change of wording fails there.
+ */
+const ROLLUP_WHERE = new RegExp(`^permission set "([^"]+)" · summary field "(${ITEM}\\.${ITEM})"$`);
+const ROLLUP_OBJECT_GATE = new RegExp(`^"${ITEM}\\.${ITEM}" (?:summarizes "(${ITEM})\\.(${ITEM})"|counts "(${ITEM})" records), and permission set "[^"]+" cannot read object "(${ITEM})"`);
+const ROLLUP_FIELD_GATE = new RegExp(
+  `^"${ITEM}\\.${ITEM}" (?:summarizes "(${ITEM})\\.(${ITEM})"(?: over rows filtered on "(${ITEM})\\.(${ITEM})")?|counts "(${ITEM})" records filtered on "(${ITEM})\\.(${ITEM})"), which permission set "[^"]+" cannot read`,
+);
+
+/** One `security-rollup-source-unreadable` finding, read: the set, the roll-up, its child, and what of the child the set cannot read. */
+export interface RollupSourceReading {
+  permissionSet: string;
+  rollup: string;
+  child: string;
+  /** The child fields the finding names the roll-up reading: the aggregated one, and the filtered one the set cannot read. */
+  childFields: string[];
+  /** The child object, or the one child field, the set cannot read. */
+  unreadable: { object: string } | { field: string };
+}
+
+/**
+ * Read a `security-rollup-source-unreadable` finding against the rule's
+ * wording; throws, naming the finding, when it does not read — a finding the
+ * runner cannot read is never silently left uncharged.
+ */
+export function readRollupSourceFinding(f: Pick<RollupSourceVisibilityFinding, 'where' | 'message'>): RollupSourceReading {
+  const where = ROLLUP_WHERE.exec(f.where);
+  const object = ROLLUP_OBJECT_GATE.exec(f.message);
+  if (where && object) {
+    const child = object[4]!;
+    const aggregated = object[1] === child ? object[2] : undefined;
+    return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: aggregated ? [aggregated] : [], unreadable: { object: child } };
+  }
+  const field = ROLLUP_FIELD_GATE.exec(f.message);
+  if (where && field) {
+    if (field[5] !== undefined) {
+      // A filtered count: the set cannot read the filtered field.
+      return { permissionSet: where[1]!, rollup: where[2]!, child: field[6]!, childFields: [field[7]!], unreadable: { field: field[7]! } };
+    }
+    const [child, aggregated, filteredChild, filtered] = [field[1]!, field[2]!, field[3], field[4]];
+    // `… over rows filtered on "C.g", which …`: the set reads the aggregated field and cannot read the filtered one.
+    if (filteredChild !== undefined && filtered !== undefined) {
+      return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: [aggregated, filtered], unreadable: { field: filtered } };
+    }
+    return { permissionSet: where[1]!, rollup: where[2]!, child, childFields: [aggregated], unreadable: { field: aggregated } };
+  }
+  throw new Error(`a ${SECURITY_ROLLUP_SOURCE_UNREADABLE} finding the runner cannot read (the rule's wording moved?): ${f.where}: ${f.message}`);
+}
+
+/**
+ * The standing `security-rollup-source-unreadable` findings a build is charged
+ * for (the maintainer's ruling on #33818: the build's fault, charged on the
+ * Build side). The rule (`@objectstack/lint` `validateRollupSourceVisibility`)
+ * runs on the built artifact itself — its `objects`, `objectExtensions` and
+ * `permissions`, read through `resolveStackCollection` as the scorer reads
+ * them — so nothing depends on how much of `os build`'s output was kept, and
+ * no model or network is consulted (cloud#3600). Deterministic.
+ *
+ * A finding is charged when the set it names is a card persona's own
+ * (`permissionSetName`) and that persona's `hidden` withholds the roll-up's
+ * child object, or a child field the finding names the roll-up reading and the
+ * set not reading: the aggregated field when the set cannot read the child
+ * object or that field, the filtered field when it cannot read that one. Any
+ * other finding — a set no persona holds, a child the card lets the persona
+ * read, the `info` row-scope arm — is not charged.
+ */
+export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown): RollupSourceCharge[] {
+  const card = scenario.card;
+  const personas = new Map(card.run.personas.map((p) => [permissionSetName(card, p.id), p] as const));
+  const stack = {
+    objects: resolveStackCollection(artifact, 'objects'),
+    objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
+    permissions: resolveStackCollection(artifact, 'permissions'),
+  };
+  const out: RollupSourceCharge[] = [];
+  for (const f of validateRollupSourceVisibility(stack)) {
+    if (f.rule !== SECURITY_ROLLUP_SOURCE_UNREADABLE) continue;
+    const r = readRollupSourceFinding(f);
+    const persona = personas.get(r.permissionSet);
+    if (!persona) continue;
+    const named = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
+    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && named.includes(h.field));
+    const withheld = (persona.hidden.objects ?? []).includes(r.child) ? { object: r.child } : hiddenField ? { field: `${hiddenField.object}.${hiddenField.field}` } : undefined;
+    if (!withheld) continue;
+    out.push({ persona: persona.id, permissionSet: r.permissionSet, rollup: r.rollup, child: r.child, withheld, finding: { rule: f.rule, where: f.where, path: f.path, message: f.message } });
+  }
+  return out;
 }
 
 /**
@@ -654,7 +813,11 @@ async function authorInto(half: BuildHalf, author: () => Promise<ParsedTurn>): P
   }
 }
 
-/** Score `artifact` against `scoreAgainst`, and name the card's reference cycles it made required on every side. */
+/**
+ * Score `artifact` against `scoreAgainst`, name the card's reference cycles it
+ * made required on every side, and charge each roll-up it leaves readable over
+ * child data the card withholds ({@link rollupSourceCharges}).
+ */
 function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: LoadedScenario, artifact: unknown): void {
   try {
     half.score = scoreCardArtifact(scoreAgainst, artifact);
@@ -663,6 +826,12 @@ function scoreInto(half: BuildHalf, seeded: LoadedScenario, scoreAgainst: Loaded
   }
   const cycles = requiredCyclesOf(seeded, artifact);
   if (cycles.length) half.requiredCycles = cycles;
+  try {
+    const charges = rollupSourceCharges(scoreAgainst, artifact);
+    if (charges.length) half.rollupSourceUnreadable = charges;
+  } catch (e) {
+    half.error = half.error ?? `rollup-source: ${errText(e)}`;
+  }
 }
 
 async function buildHalf(
@@ -792,6 +961,8 @@ export async function seedApp(
  * operation writes, so each ask reads the same rows. A turn the seed takes out
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
  * once. The guardrails are graded over every turn that ran, each ask included.
+ * Every question and operation turn is sent in the prompt choice `choice`
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -801,6 +972,7 @@ export async function runHalf(
   objectLabels?: Record<string, string[]>,
   built?: unknown,
   askRepeats = 1,
+  choice?: PromptChoice,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -841,7 +1013,7 @@ export async function runHalf(
             continue;
           }
           try {
-            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id, choice), ...doorOf(persona) });
             turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
             res.turn = summarize(turn);
             res.grade = gradeCardAnswer(scenario, {
@@ -873,7 +1045,7 @@ export async function runHalf(
         const started = new Date();
         let turn: ParsedTurn;
         try {
-          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), ...doorOf(op.actingAs) });
+          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id, choice), ...doorOf(op.actingAs) });
         } catch (e) {
           if (!(e instanceof ReplayNotFaithfulError)) throw e;
           half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
@@ -966,9 +1138,13 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
  */
 export const modeDir = (card: { id: string }, mode: ModeRun['mode']): string => `${card.id.replace(/_/g, '-')}-${mode}`;
 
-/** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
+/**
+ * Did the build pass — every counted check of the card's `expect`, no bare
+ * item name, and no roll-up left readable over child data the card withholds
+ * ({@link BuildHalf.rollupSourceUnreadable})?
+ */
 export const buildPassed = (b: BuildHalf | undefined): boolean =>
-  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass);
+  !!b?.score && b.score.expect.checks.length > 0 && [...b.score.expect.checks, ...b.score.naming].every((c) => c.pass) && !b.rollupSourceUnreadable?.length;
 
 async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<{ mode: ModeRun; verified?: unknown }> {
   const mode: ModeRun = { mode: 'scratch', findings: [] };
@@ -988,14 +1164,14 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
-  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card), tier: card.tier })).turn, scenario);
+  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card, opts.promptChoice), tier: card.tier })).turn, scenario);
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice));
 
   const iterated = iteratedScenario(scenario);
-  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
+  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
   if (build.notMeasured) {
     mode.iterate = { build };
     return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -1003,7 +1179,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -1079,7 +1255,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
   await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline }) => {
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
-    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }), tier: card.tier })).turn);
+    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }, opts.promptChoice), tier: card.tier })).turn);
     if (build.notMeasured) {
       mode.iterate = { build };
       return;
@@ -1088,7 +1264,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
   });
   return mode;
 }
@@ -1109,7 +1285,7 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
   const labels = citationLabels(original);
   const mode: ModeRun = { mode: 'ask', findings: [] };
   await withInstalledBuild(original, ops, mode, verified, async (app) => {
-    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats);
+    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice);
   });
   return mode;
 }
@@ -1130,6 +1306,9 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
   const { card } = scenario;
   const askRepeats = opts.askRepeats ?? 1;
   assertAskRepeats(askRepeats);
+  const languageRefusal = promptLanguageRefusal(card, opts.promptChoice, opts.modes);
+  if (languageRefusal) throw new Error(`${card.id}: ${languageRefusal}`);
+  const stated = statedPromptChoice(opts.promptChoice);
   const questionTurns = card.run.questions.reduce((n, q) => n + (q.personas?.length ? q.personas.length : 1), 0);
   const out: CardRun = {
     card: card.id,
@@ -1137,6 +1316,7 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
     capabilities: card.capabilities,
     counts: { questions: card.run.questions.length, questionTurns, operations: card.run.operations.length, personas: card.run.personas.length },
     ...(askRepeats > 1 ? { askRepeats } : {}),
+    ...(stated !== undefined ? { promptChoice: stated } : {}),
     modes: [],
   };
   const refusal = askModeRefusal(opts.modes, opts.templateArtifact !== undefined);

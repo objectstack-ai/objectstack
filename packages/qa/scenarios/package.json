@@ -72,6 +72,7 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/lint": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/spec": "workspace:*",

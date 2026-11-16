@@ -295,6 +295,10 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // pass: the extension walk over the written entry's fields. It resolves
   // `record.FIELD` into `objects`, which every snapshot already carries, so the
   // row still needs no context collection of its own.
+  //
+  // [#33644] `lintDuplicateFieldLabels` crosses too: it folds the written
+  // entry onto its target in `objects` (as served, without the written
+  // package's own extension), so it needs no context collection either.
   object_extension: 'objectExtensions',
 };
 
