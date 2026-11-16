@@ -438,7 +438,9 @@ export const SkillSchema = lazySchema(() => strictObject({
    * on every MCP connection and whatever its `tools` binding — even on a
    * connection that serves every tool it binds (`@objectstack/mcp`
    * `projectSkillPrompt`, which both the per-request HTTP prompt surface and the
-   * long-lived stdio server read).
+   * long-lived stdio server read). The stdio server lists its prompts once, at
+   * boot: a skill saved with `false` while it runs stays on that list until
+   * restart, but its `prompts/get` answers it as unknown at once.
    *
    * Absent or `true`: offered as before, where the server serves the tools the
    * skill binds (see `tools`). The key changes nothing else: the in-product

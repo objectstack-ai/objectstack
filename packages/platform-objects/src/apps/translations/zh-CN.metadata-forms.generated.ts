@@ -2829,10 +2829,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "工具",
         helpText: "工具名（支持通配符：action_*）"
       },
-      mcpPrompt: {
-        label: "作为 MCP 提示词提供",
-        helpText: "将此技能作为 MCP 提示词提供。若剧本只为产品内智能体编写（依赖它们的工具和审批卡片），请关闭：此后无论绑定哪些工具，都不会向 MCP 客户端列出。未设置 = 提供。"
-      },
       triggerConditions: {
         label: "触发条件",
         helpText: "程序化条件（如 objectName == \"case\"）"

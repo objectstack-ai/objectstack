@@ -66,8 +66,6 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.report.fields.dataset.label": "19647dcb84ce82d3",
   "metadataForms.report.fields.drilldown.label": "25ae77d240ced5f5",
   "metadataForms.report.fields.name.label": "5274417ff1ccaf01",
-  "metadataForms.skill.fields.mcpPrompt.helpText": "23d70850b9794ec7",
-  "metadataForms.skill.fields.mcpPrompt.label": "52a386069c5cc374",
   "metadataForms.skill.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.tool.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.tool.sections.schemas.label": "e288a14c24f0afe7",

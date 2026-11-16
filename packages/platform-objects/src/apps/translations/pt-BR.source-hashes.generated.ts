@@ -38,8 +38,6 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.permission.fields.objects.helpText": "e2512cfb3b501aae",
   "metadataForms.permission.fields.tabPermissions.helpText": "8942e2aebe59897c",
   "metadataForms.position.fields.name.helpText": "3594bba7cc2a3c8a",
-  "metadataForms.skill.fields.mcpPrompt.helpText": "23d70850b9794ec7",
-  "metadataForms.skill.fields.mcpPrompt.label": "52a386069c5cc374",
   "metadataForms.view.fields.gantt.label": "57ffc6ef520edfc5",
   "metadataForms.view.fields.kanban.label": "dd95c452aa71459e",
   "metadataForms.view.sections.gantt.label": "57ffc6ef520edfc5",

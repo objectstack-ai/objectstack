@@ -174,6 +174,25 @@ export function projectSkillPrompt(
 }
 
 /**
+ * [#34167] Whether `rows` hold `prompt`'s skill (same name, same holder) as a
+ * row its owner has WITHDRAWN from MCP: `mcpPrompt: false` (in-product only).
+ * A long-lived server that registered the prompt from an
+ * earlier read asks this when a re-read no longer finds it, so a skill opted
+ * out after boot is answered as unknown rather than served from the snapshot.
+ * A skill that is simply gone is not withdrawn: the snapshot keeps it, as
+ * does one deactivated after boot (`active: false`), whose get is unchanged.
+ */
+export function skillPromptWithdrawn(rows: readonly unknown[], prompt: SkillPrompt): boolean {
+  return rows.some((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+    const record = raw as Record<string, unknown>;
+    if (readString(record, 'name') !== prompt.name) return false;
+    if ((readString(record, '_packageId') ?? undefined) !== prompt.packageId) return false;
+    return record.mcpPrompt === false;
+  });
+}
+
+/**
  * Project every skill the bridge can see. Rows that carry no instructions half
  * are dropped. [ADR-0150] Two packages may each hold a skill of one name, and
  * both are kept: each is listed under its own face ({@link skillPromptFaces}).

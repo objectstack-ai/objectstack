@@ -275,7 +275,10 @@ connection unless a host registers that tool.
 the in-product approval card even when every tool it binds is one MCP serves
 too. With `mcpPrompt: false` the skill is never listed by `prompts/list` and is
 unknown to `prompts/get`, on every MCP connection, stdio included, whatever its
-`tools`. Absent or `true`, it is offered as described above. ObjectOS reads the
+`tools`. The stdio server takes its list once, at boot: a skill switched to
+`false` while it runs stays listed until restart, but `prompts/get` answers it
+as unknown at once.
+Absent or `true`, it is offered as described above. ObjectOS reads the
 skill exactly as before: the key decides MCP projection and nothing else
 ([Connect an MCP client](/docs/ai/connect-mcp#prompts-your-skills-served-to-the-client)).
 

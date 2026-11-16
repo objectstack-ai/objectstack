@@ -506,8 +506,11 @@ for MCP: a skill can bind tools MCP serves under the same names
 call in-product tools or wait for the in-product approval card. Set
 `mcpPrompt: false` on such a skill and it is never offered as a prompt:
 `prompts/list` leaves it out and `prompts/get` answers it as an unknown prompt
-name, on every connection (HTTP and stdio) and whatever its `tools`. Leave the
-key out, or set `true`, and the skill is offered as above. The key changes
+name, on every connection (HTTP and stdio) and whatever its `tools`. (The
+stdio server lists its prompts once, at boot, so a skill switched to
+`mcpPrompt: false` while it runs stays listed until restart; its `prompts/get`
+answers unknown at once.) Leave the key out, or set `true`, and the skill is
+offered as above. The key changes
 nothing on the in-product runtime: the `ask` / `build` agents resolve, bind
 and activate the skill exactly as before.
 

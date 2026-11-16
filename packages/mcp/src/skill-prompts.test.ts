@@ -530,8 +530,10 @@ describe('a skill its owner declares in-product only is never an MCP prompt (#34
       tools: ['open_record'],
     };
 
-    const stdioPrompts = async (rows: unknown[]) => {
-      const metadataService = { list: async (type: string) => (type === 'skill' ? rows : []) };
+    // `store.rows` is what the metadata service answers NOW: a test swaps it
+    // after boot to model a skill saved while the server runs.
+    const stdioPrompts = async (rows: unknown[], store: { rows: unknown[] } = { rows }) => {
+      const metadataService = { list: async (type: string) => (type === 'skill' ? store.rows : []) };
       const runtime = new MCPServerRuntime({ name: 'skill-prompts-stdio', version: '0.0.0' });
       await runtime.bridgePrompts(metadataService as never);
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -550,6 +552,31 @@ describe('a skill its owner declares in-product only is never an MCP prompt (#34
     it('CONTROL: undeclared, a skill binding a tool nothing serves is still listed and got', async () => {
       const stdio = await stdioPrompts([OPEN_RECORD]);
       expect(stdio.names).toEqual(['record_opening']);
+      const got = await stdio.client.getPrompt({ name: 'record_opening' });
+      expect(got.messages[0].content).toEqual({ type: 'text', text: OPEN_RECORD.instructions });
+      await stdio.close();
+    });
+
+    it('a skill saved in-product only while the server runs is answered as unknown at once', async () => {
+      const sibling = { ...OPEN_RECORD, name: 'mcp_opening' };
+      const store = { rows: [OPEN_RECORD, sibling] as unknown[] };
+      const stdio = await stdioPrompts(store.rows, store);
+      expect(stdio.names).toEqual(['record_opening', 'mcp_opening']);
+
+      store.rows = [inProductOnly(OPEN_RECORD), sibling];
+      const optedOut = await stdio.client.getPrompt({ name: 'record_opening' }).catch((e) => e);
+      const unknown = await stdio.client.getPrompt({ name: 'no_such_skill' }).catch((e) => e);
+      expect(optedOut.code).toBe(-32602);
+      expect(optedOut.message).toBe(unknown.message.replace('no_such_skill', 'record_opening'));
+      // The sibling still serves; the list is the boot snapshot until restart.
+      expect((await stdio.client.getPrompt({ name: 'mcp_opening' })).messages).toHaveLength(1);
+      await stdio.close();
+    });
+
+    it('CONTROL: a skill gone from the store since boot is still served from the snapshot, as before', async () => {
+      const store = { rows: [OPEN_RECORD] as unknown[] };
+      const stdio = await stdioPrompts(store.rows, store);
+      store.rows = [];
       const got = await stdio.client.getPrompt({ name: 'record_opening' });
       expect(got.messages[0].content).toEqual({ type: 'text', text: OPEN_RECORD.instructions });
       await stdio.close();

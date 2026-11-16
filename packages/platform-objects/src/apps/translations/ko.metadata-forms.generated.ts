@@ -2829,10 +2829,6 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "도구",
         helpText: "도구 이름(와일드카드 지원: action_*)"
       },
-      mcpPrompt: {
-        label: "Offer as MCP prompt",
-        helpText: "Offer this skill as an MCP prompt. Turn off for a playbook written only for the in-product agents (their tools, their approval card): it is then never listed to MCP clients, whatever its tools. Unset = offered."
-      },
       triggerConditions: {
         label: "트리거 조건",
         helpText: "프로그래밍 방식 조건(예: objectName == \"case\")"
