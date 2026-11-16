@@ -36,7 +36,7 @@ import { AiUnavailable } from './ai/AiUnavailable.js';
 import { PreviewModeProvider } from '../preview/PreviewModeContext.js';
 import { NavigationProvider } from '../context/NavigationContext.js';
 import { FavoritesProvider } from '../context/FavoritesProvider.js';
-import { RecentItemsProvider } from '../context/RecentItemsProvider.js';
+import { RecentItemsProvider, useDropDeletedRecordsFromRecents } from '../context/RecentItemsProvider.js';
 import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvider.js';
 import {
   UserStateAdaptersProvider,
@@ -339,6 +339,7 @@ function ConnectedShellInner({ children }: { children: ReactNode }) {
             switch of language reads again. */}
         <ConsoleElementApiOpen>
           <UserStateBridge />
+          <DeletedRecordsLeaveRecents />
           <GlobalActionRuntimeProvider dataSource={adapter}>
             {children}
           </GlobalActionRuntimeProvider>
@@ -433,6 +434,17 @@ function UserStateBridge() {
     };
   }, [user?.id, dataSource, attach, attachListState, attachRecordState]);
 
+  return null;
+}
+
+/**
+ * DeletedRecordsLeaveRecents — a record this session deletes leaves the
+ * recently-accessed list at once, whichever page deleted it, so the command
+ * palette and Home never offer a record that is gone. The one subscriber, to
+ * the connected adapter's mutation events. Renders nothing.
+ */
+function DeletedRecordsLeaveRecents() {
+  useDropDeletedRecordsFromRecents(useAdapter());
   return null;
 }
 

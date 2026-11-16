@@ -967,7 +967,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       refusals: {
         label: "拒絕目錄",
-        helpText: "拒絕目錄，以內文丟擲的 SCREAMING_SNAKE 錯誤碼為鍵（例如 CLEAN_VERSION_REQUIRED）。呼叫方讀到宣告的提示語（依其語言翻譯）和宣告的狀態碼。僅適用於 JavaScript（L2）內文"
+        helpText: "拒絕目錄，以掛鉤丟擲的 SCREAMING_SNAKE 錯誤碼為鍵（例如 CLEAN_VERSION_REQUIRED）。呼叫方讀到宣告的提示語（依其語言翻譯）和宣告的狀態碼。適用於 JavaScript（L2）內文或處理器；運算式內文宣告會被拒絕"
       },
       "refusals.message": {
         label: "提示語",

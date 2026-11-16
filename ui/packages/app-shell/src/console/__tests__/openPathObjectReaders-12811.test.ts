@@ -131,6 +131,10 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
     kind: 'off',
     why: "Studio: the Data pillar's Form tab asks selectRecordFormView which form view the app opens, over the served objects (objectstack#30057)",
   },
+  'packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.tsx': {
+    kind: 'byName',
+    why: "Studio's record-sharing table: a controlled-by-parent row's master outside the package, its label by name (objectstack#33864)",
+  },
   'packages/app-shell/src/views/studio-design/relatedListVocabulary.ts': {
     kind: 'off',
     why: "Studio: an object's inbound relationships, read while its Settings relatedLists editor or a field group's related-table picker is mounted",
