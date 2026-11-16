@@ -7891,6 +7891,12 @@ export class ObjectStackProtocolImplementation implements
      * The address is the draft save's, read from the item's ACTIVE rows
      * ({@link packagelessAddress}):
      *
+     *  - [ADR-0150 D4] an `action` whose body (the saved body, else the
+     *    stored package-unbound draft's) binds an object none of those rows
+     *    binds: the environment's own package-unbound draft, promoted into
+     *    the package-unbound row, whatever the number of bindings, except
+     *    that a package-unbound draft is judged only where no package's own
+     *    draft is the address (the cases below);
      *  - bound to one package `P`: `P`'s draft, else the package-unbound draft,
      *    which the draft save adopts into `P` on its next write and the read
      *    serves in `P`'s place (ADR-0048 prefer-local). A publish promotes such

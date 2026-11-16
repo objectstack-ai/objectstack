@@ -755,7 +755,9 @@ export function unboundItemDraftAddress(
  * One rule for every door that writes an action naming no package: the
  * publish-mode save (`protocol-save.ts`), the draft save
  * ({@link SysMetadataRepository.put}, through `resolveWriteHead`), and the
- * per-item publish of the draft that save wrote (`protocol-history-and-publish.ts`).
+ * draft address the save's draft gates, the per-item publish, the draft
+ * discard and the draft read take (`packagelessDraftAddress`,
+ * `protocol-lock-version-gates.ts`).
  *
  * Deliberately NOT exported from the package entry.
  */
@@ -792,6 +794,24 @@ export function actionRowsBindingObjectOf<R extends { metadata?: unknown }>(item
 /** A row bound to a package (a non-empty `package_id`). */
 export function isPackageBoundRow(row: { package_id?: unknown }): boolean {
   return typeof row?.package_id === 'string' && row.package_id !== '';
+}
+
+/**
+ * [ADR-0150 D4] The packages a stored package-unbound action row or draft is
+ * the customization of: those whose rows in `activeRows` (the item's active
+ * rows, every binding) bind the object `storedBody` binds
+ * ({@link actionRowsBindingObjectOf}). Empty when it binds an object no
+ * package's row binds: then it is the environment's own item. A stored body
+ * that does not parse (`undefined`) counts every package's row, so it never
+ * drops a holder. Sorted, each package once.
+ */
+export function actionCustomizationHoldersOf(
+  storedBody: unknown,
+  activeRows: ReadonlyArray<{ package_id?: unknown; metadata?: unknown }>,
+): string[] {
+  const held = activeRows.filter(isPackageBoundRow);
+  const at = storedBody === undefined ? held : actionRowsBindingObjectOf(storedBody, held);
+  return [...new Set(at.map((row) => String(row.package_id)))].sort();
 }
 
 /**
@@ -1019,6 +1039,10 @@ export class SysMetadataRepository implements MetadataRepository {
    *  - bound to one package (a package-less row beside it is not a second
    *    package, #23165's rule for the direct save): the draft inherits it,
    *    whatever order the store returns the rows in;
+   *  - [ADR-0150 D4] an action draft whose body (`body`, when the caller
+   *    hands it) binds an object none of those rows binds: the environment's
+   *    own draft, inheriting no package, whatever the number of bindings
+   *    ({@link actionHeldOnlyOnOtherObjects}); the cases below are the rest;
    *  - bound to two or more: the draft has no single package to go into, so
    *    the resolution names no package and reports the bindings in
    *    `ambiguousPackages`. {@link put} refuses the write

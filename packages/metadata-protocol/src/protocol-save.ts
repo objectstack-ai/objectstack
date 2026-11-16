@@ -25,7 +25,8 @@
 
 import { MetadataAuthoringSurfaceSchema } from '@objectstack/spec/api';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
-import { SysMetadataRepository, actionHeldOnlyOnOtherObjects, actionRowsBindingObjectOf, isPackageBoundRow, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
+import { SysMetadataRepository, actionCustomizationHoldersOf, actionHeldOnlyOnOtherObjects, actionRowsBindingObjectOf, isPackageBoundRow, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
+import { boundObjectOf } from '@objectstack/metadata/stored-item-package';
 import { ConflictError, itemDiscriminator, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { authoringClientOf } from './draft-changes.js';
@@ -876,6 +877,15 @@ export class ProtocolSaveFacet {
                 singularType, request.name, itemDiscriminator(singularType, request.item), request.item,
             )
             : undefined;
+        // [ADR-0150 D4] The environment's own action draft is one slot per
+        // name: a holder's customization stored there is refused, never
+        // moved ({@link environmentActionDraftSlotRefusal}).
+        if (draftAddress !== undefined && draftAddress.kind === 'draft' && draftAddress.key === null && draftAddress.into === null) {
+            const slotRefusal = await environmentActionDraftSlotRefusal(
+                host, singularType, request.name, itemDiscriminator(singularType, request.item), request.item,
+            );
+            if (slotRefusal) throw slotRefusal;
+        }
         // [ADR-0150 D3/D5, red line 2, ruling A] The draft save naming no
         // package answers the holders as the publish-mode save above does
         // ({@link packagelessHolderRefusal}), judged over the item's active rows
@@ -2967,6 +2977,10 @@ async function servedPackagelessSaveAddress(
  *    item's active rows as holding the name only on objects other than the
  *    one `item` binds. The draft save and the per-item publish read the same
  *    rule. The save writes the package-unbound row; every package's row stays.
+ *    That row is one slot per name: the environment's own row bound to
+ *    another object is rewritten onto `item`'s, and a holder's customization
+ *    stored there is refused ({@link environmentActionSlotRefusal}), never
+ *    moved.
  *  - the address over the rows at `item`'s object
  *    ({@link actionRowsBindingObjectOf}) — some holder binds the name to
  *    `item`'s object and another binds it to another object: the served
@@ -2992,11 +3006,92 @@ async function packagelessActionKeyedAddress(
         host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         activeRows = [];
     }
-    if (actionHeldOnlyOnOtherObjects(type, item, activeRows)) return 'environment';
+    if (actionHeldOnlyOnOtherObjects(type, item, activeRows)) {
+        // The one package-unbound row is the slot this save writes: a
+        // holder's customization there is refused, never moved.
+        const slot = activeRows.filter((row) => !isPackageBoundRow(row));
+        for (const row of slot) {
+            const refusal = environmentActionSlotRefusal('active', type, name, item, storedBodyOf(row.metadata), activeRows);
+            if (refusal) throw refusal;
+        }
+        return 'environment';
+    }
     const atObject = actionRowsBindingObjectOf(item, activeRows);
     const held = activeRows.filter(isPackageBoundRow);
     if (actionRowsBindingObjectOf(item, held).length === held.length) return undefined;
     return host.packagelessAddress(type, name, undefined, 'active', atObject);
+}
+
+/** A stored row's `metadata` as a body: parsed when a string, `undefined` when it does not parse. */
+function storedBodyOf(metadata: unknown): unknown {
+    if (typeof metadata !== 'string') return metadata ?? undefined;
+    try {
+        return JSON.parse(metadata) as unknown;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * [ADR-0150 D4, ruling 6902014292] The refusal of a write of the
+ * environment's own action ({@link actionHeldOnlyOnOtherObjects}) over the one
+ * package-unbound row (`active`) or draft (`draft`) of the name when that
+ * stored row or draft is a holder's customization: it binds an object a
+ * package's active row binds ({@link actionCustomizationHoldersOf}). The
+ * environment keeps one package-unbound row and one draft per action name, so
+ * the write would move that customization off the holder's object, which the
+ * ruling forbids ("P's item on A is untouched"). `409 RESOURCE_CONFLICT`,
+ * with no new code. `undefined` when the stored row or draft is the
+ * environment's own (bound to an object no holder binds): the write rewrites
+ * it onto the body's object, as a save of a name no package holds does.
+ */
+export function environmentActionSlotRefusal(
+    state: 'active' | 'draft',
+    type: string,
+    name: string,
+    item: unknown,
+    storedBody: unknown,
+    activeRows: ReadonlyArray<{ package_id?: unknown; metadata?: unknown }>,
+): (Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined {
+    const holders = actionCustomizationHoldersOf(storedBody, activeRows);
+    if (holders.length === 0) return undefined;
+    const where = (object: string | undefined): string => (object === undefined ? 'bound to no object' : `on object '${object}'`);
+    const stored = storedBody === undefined ? 'unreadable' : where(boundObjectOf(storedBody));
+    const slot = state === 'draft' ? 'draft' : 'row';
+    const err = new Error(
+        `Cannot save ${type} '${name}' naming no package ${where(boundObjectOf(item))}: the environment keeps one `
+        + `package-less ${slot} of this name, and the stored one (${stored}) is the customization of `
+        + `${holders.map((id) => `'${id}'`).join(', ')}, so this save would move it. Nothing was written. `
+        + `To edit that customization, save it ${stored === 'unreadable' ? 'naming the package' : stored}; for the `
+        + `environment's own ${type} ${where(boundObjectOf(item))}, use another name.`,
+    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+    err.code = 'RESOURCE_CONFLICT';
+    err.status = 409;
+    return err;
+}
+
+/**
+ * [ADR-0150 D4] {@link environmentActionSlotRefusal} for a DRAFT save naming
+ * no package whose draft address is the environment's own package-unbound
+ * draft (`key` and `into` both `null`): the stored package-unbound draft it
+ * would rewrite, judged against the item's active rows. `undefined` for every
+ * other type, when the body is not the environment's own, and when no
+ * package-unbound draft is stored.
+ */
+async function environmentActionDraftSlotRefusal(
+    host: Pick<ProtocolHost, 'getOverlayRepo' | 'readItemActiveRows'>,
+    type: string, name: string, member: string | undefined, item: unknown,
+): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+    if (type !== 'action') return undefined;
+    const activeRows = await host.readItemActiveRows(type, name);
+    if (!actionHeldOnlyOnOtherObjects(type, item, activeRows)) return undefined;
+    const repo = host.getOverlayRepo();
+    const stored = await repo.get(
+        { type, name, org: 'env' } as Parameters<typeof repo.get>[0],
+        { state: 'draft', packageId: null, ...(member !== undefined ? { member } : {}) },
+    );
+    if (!stored) return undefined;
+    return environmentActionSlotRefusal('draft', type, name, item, stored.body, activeRows);
 }
 
 /**

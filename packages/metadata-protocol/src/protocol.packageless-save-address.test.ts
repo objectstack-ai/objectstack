@@ -547,6 +547,139 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'task', 'edited'], [THIRD, 'task', 'r']]);
     });
 
+    describe('the one package-unbound slot per name: an environment-own write over a holder\'s customization is refused, over the environment\'s own item on another object it moves it', () => {
+        it('P on `invoice` and a package-unbound row on `invoice` (P\'s customization): the save on `task` is refused 409, and nothing is written (FROM: that row rewritten onto `task`)', async () => {
+            const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            seedRow({ type: 'action', name: NAME, package_id: null, metadata: JSON.stringify(action(NAME, 'custom', 'invoice')), checksum: 'sha-custom' });
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') }));
+
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(err.message)).toContain(`'${WRITABLE}'`);
+            expect(metadataWrites()).toHaveLength(before);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);
+        });
+
+        it('P on `invoice` and a package-unbound DRAFT on `invoice` (P\'s pending change): the draft save on `task` is refused 409, and nothing is written (FROM: that draft rewritten onto `task`)', async () => {
+            const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            seedRow({ type: 'action', name: NAME, state: 'draft', package_id: null, metadata: JSON.stringify(action(NAME, 'pending', 'invoice')), checksum: 'sha-pending' });
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' }));
+
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(err.message)).toContain(`'${WRITABLE}'`);
+            expect(metadataWrites()).toHaveLength(before);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'invoice', 'pending']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
+        });
+
+        it('the environment\'s own row on `task`: a package-less save on `product` rewrites it onto `product` (one row per name, as for a name no package holds); P\'s row is untouched', async () => {
+            const { protocol, rows } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+
+            const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env2', 'product') });
+
+            expect(saved.message).not.toContain('package=');
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'product', 'env2']]);
+        });
+
+        it('the environment\'s own draft on `task`: a package-less draft save on `product` rewrites it onto `product`; P\'s row is untouched', async () => {
+            const { protocol, rows } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+            const drafted = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env2', 'product'), mode: 'draft' });
+
+            expect(drafted.message).toBe(`Saved action '${NAME}' (env-wide, state=draft) [seq=${drafted.seq}]`);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'product', 'env2']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
+        });
+    });
+
+    describe('P\'s own draft and the environment\'s draft both stored: the per-item publish and the draft discard naming no package act on P\'s draft (not moved)', () => {
+        async function bothDrafts() {
+            const fixture = makeProtocol();
+            await fixture.protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await fixture.protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p-draft', 'invoice'), packageId: WRITABLE, mode: 'draft' });
+            await fixture.protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+            expect(stored(fixture.rows('action', NAME, 'draft'))).toEqual([[WRITABLE, 'invoice', 'p-draft'], [null, 'task', 'env']]);
+            return fixture;
+        }
+
+        it('the per-item publish promotes P\'s draft into P\'s row; the environment\'s draft stays', async () => {
+            const { protocol, rows } = await bothDrafts();
+
+            const published = await protocol.publishMetaItem({ type: 'action', name: NAME });
+
+            expect(published.success).toBe(true);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p-draft']]);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+        });
+
+        it('the draft discard removes P\'s draft; the environment\'s draft stays', async () => {
+            const { protocol, rows } = await bothDrafts();
+
+            const receipt = await protocol.deleteMetaItem({ type: 'action', name: NAME, state: 'draft' });
+
+            expect(receipt.success).toBe(true);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
+        });
+
+        it('with two holders on two other objects, the publish acts on the environment\'s draft, and P\'s draft stays', async () => {
+            const { protocol, rows } = await bothDrafts();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'product'), packageId: OTHER_WRITABLE });
+
+            await protocol.publishMetaItem({ type: 'action', name: NAME });
+
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [OTHER_WRITABLE, 'product', 'q'], [null, 'task', 'env']]);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[WRITABLE, 'invoice', 'p-draft']]);
+        });
+    });
+
+    it('FROM (the read half): the version the read naming no package serves is P\'s item\'s, so a save on `task` carrying it as the parent is refused as a version conflict, before and after the environment\'s row exists', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+        const atPackage = await protocol.getMetaItem({ type: 'action', name: NAME, packageId: WRITABLE });
+
+        const before = await protocol.getMetaItem({ type: 'action', name: NAME });
+        expect(before.version).toEqual(expect.any(String));
+        expect(before.version).toBe(atPackage.version);
+        const first = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
+            type: 'action', name: NAME, item: action(NAME, 'env', 'task'), parentVersion: before.version,
+        })));
+        expect([first.status, first.code]).toEqual([409, 'METADATA_CONFLICT']);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
+
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task') });
+        const after = await protocol.getMetaItem({ type: 'action', name: NAME });
+        expect(after.version).toBe(atPackage.version);
+        const again = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
+            type: 'action', name: NAME, item: action(NAME, 'env2', 'task'), parentVersion: after.version,
+        })));
+        expect([again.status, again.code]).toEqual([409, 'METADATA_CONFLICT']);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'task', 'env']]);
+    });
+
+    it('PROBE: an ENABLED holder on `task` beside a DISABLED holder on `invoice`: the save on `task` is the enabled holder\'s', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'task'), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'invoice'), packageId: OTHER_WRITABLE });
+        protocol.engine.registry.isPackageDisabled = (id: string) => id === OTHER_WRITABLE;
+
+        const saved = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'edited', 'task') });
+
+        expect(saved.message).toBe(`Saved action '${NAME}' (env-wide, package=${WRITABLE}, state=active) [seq=${saved.seq}]`);
+        expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'task', 'edited'], [OTHER_WRITABLE, 'invoice', 'q']]);
+    });
+
     describe('CONTROLs (unchanged)', () => {
         it('the draft save on `invoice`, the object P binds: P\'s draft, and its publish is P\'s row', async () => {
             const { protocol, rows } = makeProtocol();
