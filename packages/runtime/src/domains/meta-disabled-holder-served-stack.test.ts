@@ -439,6 +439,73 @@ describe.each([
             await down(booted);
         }
     }, 120_000);
+
+    // [#33210, ADR-0150 D3 red line 2] A package-less row beside the two
+    // packages' rows: three rows and no one holder. The bare doors refuse
+    // naming both packages in every save order, before and after a reboot,
+    // and never serve the package-less row in their place. FROM (`main`
+    // 5a755791a9): the plain read, `/published` and the execution face served
+    // a row by store order, while `/layers` refused naming both.
+    it.each([
+        { saveOrder: 'package-less, E, F', saved: [null, ROW_E, ROW_F] },
+        { saveOrder: 'F, package-less, E', saved: [ROW_F, null, ROW_E] },
+        { saveOrder: 'E, F, package-less', saved: [ROW_E, ROW_F, null] },
+    ])('[#33210] saved $saveOrder: a package-less row beside them leaves every bare door refusing naming both, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const expectRefused = async (b: Booted) => {
+            await expectRefusedNamingBoth(b, 'three_rows_dash');
+            for (const door of ['', '/layers', '/published']) {
+                const answer = await get(b.kernel, `/meta/dashboard/three_rows_dash${door}`);
+                expect(JSON.stringify(answer.body ?? null), door).not.toContain('package-less row');
+            }
+        };
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'three_rows_dash', id, id === null ? 'package-less row' : `${rowTag(id)} row`);
+            await expectRefused(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectRefused(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#33210] CONTROL: one package's row beside a package-less row has one
+    // holder, and every bare door serves that package's row in both save
+    // orders, before and after a reboot, as on `main`.
+    it.each([
+        { saveOrder: 'package-less row first', saved: [null, ROW_E] },
+        { saveOrder: 'E\'s row first', saved: [ROW_E, null] },
+    ])('[#33210] CONTROL, $saveOrder: one row holder beside a package-less row is served on every bare door as before, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const expectServed = async (b: Booted) => {
+            const read = await get(b.kernel, '/meta/dashboard/one_holder_dash');
+            expect([read.status, unwrap(read.body)?.item?.label, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'enabled row', ROW_E]);
+            const layers = await get(b.kernel, '/meta/dashboard/one_holder_dash/layers');
+            expect([layers.status, unwrap(layers.body)?.effective?.label], JSON.stringify(layers.body)).toEqual([200, 'enabled row']);
+            const published = await get(b.kernel, '/meta/dashboard/one_holder_dash/published');
+            expect([published.status, unwrap(published.body)?.label], JSON.stringify(published.body)).toEqual([200, 'enabled row']);
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'dashboard', name: 'one_holder_dash' });
+            expect(executed?.item?.label).toBe('enabled row');
+        };
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'one_holder_dash', id, id === null ? 'package-less row' : 'enabled row');
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -574,6 +641,36 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
             await observe(booted);
         } finally {
             await down(booted);
+        }
+    }, 240_000);
+
+    it.each([{ base: 'row-held' }, { base: 'shipped' }])('PROBE33210 $base', async ({ base }) => {
+        const file = freshFile();
+        const manifests = [appManifest(A, base === 'shipped' ? { emailTemplates: [{ name: 'rowmail', ...template('en-US', 'base en') }] } : {}), appManifest(D, { dependencies: { [A]: '*' } })];
+        for (const leg of ['before', 'after']) {
+            const b = await bootManifests(manifests, file);
+            try {
+                if (leg === 'before') {
+                    if (base === 'row-held') await layRow(b.engine, 'email_template', 'rowmail', A, template('en-US', 'base en'));
+                    await layRow(b.engine, 'email_template', 'rowmail', D, template('fr-FR', 'addon fr'));
+                }
+                const cell = async (path: string, q: Record<string, string>) => { const r = await get(b.kernel, path, q); const u = unwrap(r.body); return [r.status, u?.item?.subject ?? u?.effective?.subject ?? codeOf(r.body) ?? null, u?.packageId ?? null]; };
+                let exec: unknown;
+                try { exec = (await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'rowmail', member: 'fr-FR' }))?.item?.subject ?? 'no item'; } catch (e) { exec = (e as any)?.code; }
+                const reg: any = b.engine.registry;
+                console.log('PROBE33210', base, leg, JSON.stringify({
+                    plain: await cell('/meta/email_template/rowmail', { member: 'fr-FR' }),
+                    layers: await cell('/meta/email_template/rowmail/layers', { member: 'fr-FR' }),
+                    atA: await cell('/meta/email_template/rowmail', { member: 'fr-FR', package: A }),
+                    atD: await cell('/meta/email_template/rowmail', { member: 'fr-FR', package: D }),
+                    en: await cell('/meta/email_template/rowmail', { member: 'en-US' }),
+                    exec,
+                    holders: reg.packageScopedHoldersOf('email_template', 'rowmail', null),
+                    holdersAll: reg.packageScopedHoldersOf('email_template', 'rowmail', null, { includeDisabledPackages: true }),
+                }));
+            } finally {
+                await down(b);
+            }
         }
     }, 240_000);
 });
