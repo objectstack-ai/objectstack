@@ -165,10 +165,12 @@ action and returns `{ status: 'pending_approval', pendingActionId }`. The queue
 is listed in Studio's **AI Pending Actions** inbox (or via
 `GET /api/v1/ai/pending-actions`), but deciding is the person's own act: only the
 person the call ran as approves or rejects the item, in the app on their
-signed-in session. Another user's `ai:approve` does not decide it, and an API
-key or token is refused, even the person's own, so an operator script lists
-items and never decides them; a second approver goes through the approvals
-engine (the `held` outcome). Whether *your* action is held is
+signed-in session. Another user's `ai:approve` does not decide it; an API key
+or token (even the person's own) is refused, and so is an AI identity and any
+call that arrives through an AI door. Neither the model's own confirmation nor
+the caller's `confirm` counts. So an operator script lists items and never
+decides them; a second approver goes through the approvals engine (the `held`
+outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.

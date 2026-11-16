@@ -7717,9 +7717,9 @@ export class ObjectStackClient {
      *
      * Deciding (approve or reject) is the person's own act: only the person
      * the call ran as decides their item, and only on their signed-in session
-     * to the app. Another user is refused whatever they hold, and so is a
-     * client on an API key or token, even the person's own: such a client can
-     * list and get, never decide.
+     * to the app. Another user's `ai:approve` does not decide it; a client on
+     * an API key or token (even the person's own) is refused, and so is an AI
+     * identity: such a client can list and get, never decide.
      */
     pendingActions: {
       /** Queued actions, newest first. */
@@ -7751,7 +7751,7 @@ export class ObjectStackClient {
        * happened" reports a failed write as a success.
        *
        * Only the person the call ran as approves, on their own signed-in
-       * session; a client on an API key or token is refused.
+       * session; an API key, a token or an AI identity is refused.
        */
       approve: async (id: string): Promise<ApproveAiPendingActionResponse> => {
         const route = this.getRoute('ai');
@@ -7764,8 +7764,8 @@ export class ObjectStackClient {
 
       /**
        * Reject with an optional reason. Executes nothing. Only the person the
-       * call ran as rejects, on their own signed-in session; a client on an
-       * API key or token is refused.
+       * call ran as rejects, on their own signed-in session; an API key, a
+       * token or an AI identity is refused.
        */
       reject: async (id: string, reason?: string): Promise<RejectAiPendingActionResponse> => {
         const route = this.getRoute('ai');
