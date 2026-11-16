@@ -77,7 +77,7 @@ describe('decimal text is judged against the number range before it is scaled', 
   it('below the smallest number it is zero, as that number is', () => {
     for (const text of ['1e-400', '-1e-400', '2e-324', '+.5e-400', `0.${'0'.repeat(400)}1`]) {
       expect(toScaledDecimal(text), text).toEqual(ZERO);
-      expect(Number(text), text).toBe(0);
+      expect(Number(text) === 0, text).toBe(true);
     }
     expect(toScaledDecimal(Number('1e-400'))).toEqual(ZERO);
     expect(formatScaledDecimal(divideToPlaces(toScaledDecimal('1e-400')!, { digits: 1n, scale: 0 }, 2))).toBe('0.00');
