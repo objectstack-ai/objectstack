@@ -2352,6 +2352,8 @@ const de = {
         done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
         action: 'Verbinden',
       },
+      firstApp: { title: 'Erste App hinzufügen', todo: 'Noch keine eigene App. Installieren Sie eine aus dem Marktplatz oder erstellen Sie eine; sie erscheint auf der Startseite.', done: 'Eine eigene App ist auf der Startseite.' },
+      firstRecord: { title: 'Ersten Datensatz anlegen', todo: 'In Ihren Apps hat noch niemand einen Datensatz angelegt.', done: 'In Ihren Apps wurde ein Datensatz angelegt.', action: 'App öffnen' },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",
@@ -5102,6 +5104,25 @@ const de = {
     sourceRequired: "Eine Seite vom Typ {{kind}} benötigt einen nicht leeren Wert für {{source}}.",
     loading: "React-Laufzeit wird geladen…",
     error: "Fehler auf der React-Seite",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Mobile-App",
+    subtitle: "Die ObjectOS-Mobile-App mit diesem Server verbinden",
+    scanHint: "Öffnen Sie die ObjectOS-Mobile-App und scannen Sie diesen Code, um sie mit diesem Server zu verbinden.",
+    qrAlt: "QR-Code, der die ObjectOS-Mobile-App mit diesem Server verbindet",
+    linkLabel: "Verbindungslink",
+    copy: "Link kopieren",
+    copied: "Link kopiert",
+    privacy: "Der Code enthält nur die Adresse dieses Servers, niemals Ihr Konto.",
+    loadFailed: "Die öffentliche Adresse dieses Servers konnte nicht gelesen werden. Laden Sie die Seite neu, um es erneut zu versuchen.",
+    unreachableTitle: "Ein Telefon kann die Adresse dieses Servers nicht erreichen",
+    unreachableBody: "Die Adresse dieses Servers ist {{address}}, eine lokale oder private Adresse, die ein Telefon nicht öffnen kann, daher wird kein Code angezeigt. Setzen Sie {{setting}} auf dem Server auf seine öffentliche Adresse, zum Beispiel {{example}}, und starten Sie ihn neu.",
+    insecureTitle: "Die Adresse dieses Servers verwendet kein HTTPS",
+    insecureBody: "Die Adresse dieses Servers ist {{address}}. Die mobile App meldet sich darüber an, daher muss sie HTTPS verwenden, und es wird kein Code angezeigt. Stellen Sie den Server über HTTPS bereit, setzen Sie {{setting}} auf seine https://-Adresse, zum Beispiel {{example}}, und starten Sie ihn neu.",
+    unpublishedTitle: "Dieser Server veröffentlicht keine öffentliche Adresse",
+    unpublishedBody: "Es wird kein Code angezeigt: Dieser Server stellt der mobilen App seine öffentliche Adresse noch nicht bereit. Aktualisieren Sie den Server auf eine Version, die das unterstützt.",
   },
 };
 

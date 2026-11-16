@@ -95,6 +95,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   };
 });
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider, useMetadata } from '../../providers/MetadataProvider';
 
@@ -176,7 +180,13 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all: Doc[] =
             type === 'object' ? OBJECTS : type === 'view' ? VIEWS : type === 'page' ? PAGES : type === 'app' ? [NOTES_APP, CRM_APP, LINKS_APP, HOME_FIRST_APP] : [];

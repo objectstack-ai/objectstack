@@ -320,6 +320,7 @@ import {
 // with it.
 import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
+import { publicBaseUrlOf } from './public-base-url.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
 import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
 import type { OrganizationBoundaryJudge } from './scim-group-projection.js';
@@ -5871,6 +5872,7 @@ export class AuthManager {
     };
     const termsUrl = resolveLegalUrl(rawTermsUrl, DEFAULT_TERMS_URL);
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
+    const publicBaseUrl = publicBaseUrlOf(this.getCanonicalOrigin());
 
     const turnstileKeys = resolveTurnstileKeys();
     const organizationEditions = this.resolveOrganizationEditions(request);
@@ -5961,6 +5963,11 @@ export class AuthManager {
       ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
+      // The public base URL every emailed / OAuth link is built on
+      // (`getCanonicalOrigin`), reduced to its address, so the console's
+      // mobile-app connect code never reads `window.location` for it
+      // (registered in PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(publicBaseUrl ? { publicBaseUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge
       // is wired (both keys set; the resolver `buildPluginList()` mounts the
       // plugin from). The secret is never part of this payload.
