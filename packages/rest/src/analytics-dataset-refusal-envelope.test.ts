@@ -59,6 +59,10 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 // ── harness (the shape `analytics-filter-refusal-envelope.test.ts` uses) ──────
 
