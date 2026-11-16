@@ -7,7 +7,7 @@ feat(runtime,mcp)!: an action declaring `ai.requiresConfirmation: true` never ru
 
 Clause-②: no (narrowing)
 Metadata-protocol: semantic
-Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md, skills/objectstack-platform/SKILL.md (the area files the card and rewrites it to #N)
+Skills-docs: follow-up #34210
 
 <!-- adr-0087: not-required (already-registered action-requires-confirmation-elicited) The semantic entry registered with the contract already carries this move to the upgrade guide and os migrate meta: no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
 
