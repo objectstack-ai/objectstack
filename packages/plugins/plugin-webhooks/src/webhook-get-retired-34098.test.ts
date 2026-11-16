@@ -212,7 +212,7 @@ describe('webhook method GET retired — a stored GET row is parked, never conve
             expect(row.signature ?? undefined).toBeUndefined();
             expect(row.method).toBe('GET');
             // The reason names the method and the fix.
-            expect(row.error).toContain('[VALIDATION_FAILED/400]');
+            expect(row.error).toContain('[VALIDATION_ERROR/400]');
             expect(row.error).toContain("webhook 'legacy_get_hook' is stored with HTTP method GET");
             expect(row.error).toContain('set its method to POST, PUT, PATCH or DELETE');
             expect(JSON.parse(row.payload_json)).toMatchObject({ object: 'probe_task', action: 'created' });
@@ -229,7 +229,7 @@ describe('webhook method GET retired — a stored GET row is parked, never conve
             expect((await deliveries()).map((r) => r.status)).toEqual(['dead', 'dead']);
             const parkedReports = errors.filter((e) => e.message.includes("webhook 'legacy_get_hook' is PARKED"));
             expect(parkedReports).toHaveLength(1);
-            expect(parkedReports[0].meta).toMatchObject({ code: 'VALIDATION_FAILED', status: 400, method: 'GET' });
+            expect(parkedReports[0].meta).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, method: 'GET' });
 
             // No conversion: the method reads exactly as stored.
             const raw: any = await driver.findOne('sys_webhook', { where: { id } } as any);

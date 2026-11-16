@@ -133,12 +133,13 @@ const CUSTOM_HEADERS_CREDENTIAL: DropReason = {
 const RETIRED_WEBHOOK_METHODS: ReadonlySet<string> = new Set(['GET']);
 
 /**
- * The ADR-0112 pair a retired-method park carries: the save door's own verdict
- * on the same row content (the `method` select refuses `get` with
- * `VALIDATION_FAILED`/400), judged later — the pairing
- * `webhook-legacy-cleartext.ts` makes for its delivery door.
+ * The ADR-0112 pair a retired-method park carries: the standard-catalog
+ * member for "this row content is not acceptable", judged at delivery — the
+ * pair `webhook-legacy-cleartext.ts` carries on its own delivery door. (The
+ * save door refusing the same value is the engine's record validator, which
+ * answers with its own code.) A standard-catalog code needs no ledger row.
  */
-const RETIRED_METHOD_PARK_CODE = 'VALIDATION_FAILED';
+const RETIRED_METHOD_PARK_CODE = 'VALIDATION_ERROR';
 const RETIRED_METHOD_PARK_STATUS = 400;
 
 /**
