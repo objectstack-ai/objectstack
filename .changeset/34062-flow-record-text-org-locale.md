@@ -16,7 +16,8 @@ A `create_record` / `update_record` field value can now be marked as text: `{ di
 
 - A missing translation, or no language to pick, writes the authored text, and the run goes on.
 - A bare string is still a literal and is written as spelled. Only the `fields` map of these two nodes takes the text envelope; every other value slot still refuses it. The source is judged as a text slot: a single-brace `{token}` is refused with its `{{ }}` spelling.
-- A Localization setting that cannot be read fails the node and writes nothing, so another language is never stored over a choice that may exist. A `fault` edge routes the failure.
+- A Localization setting that cannot be read fails the node and writes nothing, so another language is never stored over a choice that may exist. A `fault` edge routes the failure. A host that registers no `localization` setting has none set, so the app's declared default answers.
+- The Studio flow inspector still marks a text envelope in a record node's `fields` as invalid; the row is kept on save. That inspector half is carried by #34445.
 - `os i18n extract` scaffolds the key, and the existing coverage check reports it missing against `supportedLocales`. `objectstack validate` refuses a key over an unknown node, over a node that is not a record write, or over a field the node does not mark as text.
 - Text is picked when it is written. Records already written are not changed.
 
