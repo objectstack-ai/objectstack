@@ -23,6 +23,6 @@
 - 阻塞卡未认领或停车改敲 `triage#1`;每张阻塞卡一次,轮记列明敲了谁;不限级(维护者令)。
 - 兜底:分诊日对账见 cloud 卡无状态逾 4 h ⇒ 写信本车道各席;分诊 ⛔ 不代打标签。
 - 发版板(窗内升 `priority:p0`)在 cloud 仓的生产者是本车道(`seat-post-protocol.md` 发版板节)。
-- CI 分钟(维护者令,入派发令与 Go 词):`pr_ready` 前容器跑类型检查与受影响测试,结果入报告
-- ready 后评审修改并一次 push;⛔ 不为追 main 合 main,只冲突拒入队列或席位点名理由才合。
-- `ci:full` 只给 pin 轮次(`.objectstack-sha` 变)与改 `.github/workflows/**` 的 PR,余走受影响档。
+- CI 分钟三条入派发令与 Go 词(维护者令):① `pr_ready` 前容器跑类型检查与受影响测试,命令
+  与结果入报告;② ready 后的修改并一次 push;合 main 照 cloud `AGENTS.md` 第 7 条(先于通用纪律);
+  ③ `ci:full` 只给 pin 轮次(`.objectstack-sha` 变)与改 `.github/workflows/**` 的 PR,余走受影响档。
