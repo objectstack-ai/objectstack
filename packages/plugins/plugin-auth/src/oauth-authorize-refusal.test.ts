@@ -15,6 +15,7 @@
  * the allowing control mints a code on the very same request.
  */
 
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
@@ -25,6 +26,8 @@ import {
   ENV_ACCESS_DENIED_MESSAGE,
   OAUTH_ACCESS_DENIED_ERROR,
   OAUTH_END_SESSION_PATH,
+  OAUTH_REFUSAL_REASON_PARAM,
+  REFUSAL_MESSAGE_MAX_LENGTH,
 } from './oauth-authorize-refusal';
 
 const SECRET = 'test-secret-at-least-32-chars-long-authorize-refusal';
@@ -68,14 +71,16 @@ interface GateCall {
 
 const arrange = async () => {
   const engine = createMemoryEngine();
-  // `allow` admits every client; `admitted` admits the clients it names.
-  const gate = { allow: false, admitted: new Set<string>(), calls: [] as GateCall[] };
+  // `allow` admits every client; `admitted` admits the clients it names;
+  // `answer`, when set, is what the gate answers for every client instead.
+  const gate = { allow: false, admitted: new Set<string>(), calls: [] as GateCall[], answer: undefined as unknown };
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: ORIGIN,
     dataEngine: engine,
     oidcAuthorizeGate: (params: GateCall) => {
       gate.calls.push({ userId: params.userId, clientId: params.clientId });
+      if (gate.answer !== undefined) return gate.answer;
       return gate.allow || gate.admitted.has(params.clientId);
     },
   } as any);
@@ -599,4 +604,238 @@ describe('the environment-access gate judges every pass that resumes an authoriz
       expect(await codeIn(res), await res.clone().text()).toBeTruthy();
     });
   }
+});
+
+describe("a refused /oauth2/authorize carries the host's reason when the gate answers a refusal object", () => {
+  /** The cloud control plane's answer for a signed-in account that is not a member of the organization. */
+  const NOT_MEMBER = {
+    allowed: false,
+    reason: 'not_member',
+    message: 'You are not a member of Acme Corp. Ask an administrator of Acme Corp to invite you.',
+  } as const;
+
+  type Rig = Awaited<ReturnType<typeof arrange>>;
+  type Door = 'envelope' | 'redirect' | 'page';
+
+  /** The same refused request, delivered through one door. */
+  const refuse = async (rig: Rig, door: Door): Promise<Response> => {
+    const clientId = await rig.register(ENV_CALLBACK, 'web');
+    const res = door === 'envelope'
+      ? await rig.authorize(codeRequest(clientId, ENV_CALLBACK), CONSOLE_FETCH)
+      : door === 'redirect'
+        ? await rig.authorize(codeRequest(clientId, ENV_CALLBACK), NAVIGATION)
+        : await rig.authorize(codeRequest(clientId, 'https://attacker.example/cb'), NAVIGATION);
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId }]);
+    return res;
+  };
+
+  /** Every byte a door answers with: status, the headers a refusal sets, and the body (or the redirect target). */
+  const bytesOf = async (res: Response) => ({
+    status: res.status,
+    contentType: res.headers.get('content-type'),
+    location: res.headers.get('location'),
+    body: await res.text(),
+  });
+
+  describe('CONTROL: a boolean gate answers byte for byte as before', () => {
+    // The literals below were read off this suite at the merge base, before
+    // the gate could answer anything but a boolean; they hold there and here.
+    const PAGE_SHA256_AT_MERGE_BASE = '60b2309f3a19756c308cd06e4277a3c1c22595c738ed42f15f26c93c1a410c70';
+    const PAGE_SENTENCE = `<p data-refusal-code="${ENV_ACCESS_DENIED_CODE}">You are signed in as <strong>${EMAIL}</strong>, and this account does not have access to this environment.</p>`;
+
+    it('the envelope', async () => {
+      const rig = await arrange();
+      const res = await bytesOf(await refuse(rig, 'envelope'));
+      expect(res.status).toBe(403);
+      expect(res.location).toBeNull();
+      expect(JSON.parse(res.body)).toEqual({ code: ENV_ACCESS_DENIED_CODE, message: ENV_ACCESS_DENIED_MESSAGE });
+    });
+
+    it('the redirect', async () => {
+      const rig = await arrange();
+      const res = await bytesOf(await refuse(rig, 'redirect'));
+      expect(res.status).toBe(302);
+      expect(res.body).toBe('');
+      const location = new URL(res.location ?? '');
+      expect(`${location.origin}${location.pathname}`).toBe(ENV_CALLBACK);
+      expect([...location.searchParams]).toEqual([
+        ['error', OAUTH_ACCESS_DENIED_ERROR],
+        ['error_description', ENV_ACCESS_DENIED_MESSAGE],
+        ['state', STATE],
+        ['iss', ISSUER],
+      ]);
+    });
+
+    it('the page', async () => {
+      const rig = await arrange();
+      const res = await bytesOf(await refuse(rig, 'page'));
+      expect(res.status).toBe(403);
+      expect(res.contentType).toBe('text/html; charset=utf-8');
+      expect(res.body).toContain(PAGE_SENTENCE);
+      expect(createHash('sha256').update(res.body).digest('hex')).toBe(PAGE_SHA256_AT_MERGE_BASE);
+    });
+
+  });
+
+  it('a refusal object whose reason and sentence are both refused answers the same bytes as `false`, on every door', async () => {
+    for (const door of ['envelope', 'redirect', 'page'] as const) {
+      const boolean = await arrange();
+      const object = await arrange();
+      object.gate.answer = { allowed: false, reason: 'Not-A-Code', message: '<b>no</b>' };
+      expect(await bytesOf(await refuse(object, door)), door).toEqual(await bytesOf(await refuse(boolean, door)));
+    }
+  });
+
+  it('the envelope keeps code ENV_ACCESS_DENIED and gains the reason; the message is the host\'s sentence', async () => {
+    const rig = await arrange();
+    rig.gate.answer = NOT_MEMBER;
+
+    const res = await refuse(rig, 'envelope');
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ code: ENV_ACCESS_DENIED_CODE, message: NOT_MEMBER.message, reason: 'not_member' });
+  });
+
+  it('the redirect keeps error=access_denied, sends the host\'s sentence as error_description and the reason as its own parameter', async () => {
+    const rig = await arrange();
+    rig.gate.answer = NOT_MEMBER;
+
+    const res = await refuse(rig, 'redirect');
+
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location') ?? '');
+    expect(`${location.origin}${location.pathname}`).toBe(ENV_CALLBACK);
+    expect([...location.searchParams]).toEqual([
+      ['error', OAUTH_ACCESS_DENIED_ERROR],
+      ['error_description', NOT_MEMBER.message],
+      [OAUTH_REFUSAL_REASON_PARAM, 'not_member'],
+      ['state', STATE],
+      ['iss', ISSUER],
+    ]);
+    expect(location.searchParams.has('code')).toBe(false);
+  });
+
+  it('the page shows the host\'s sentence, escaped, beside the signed-in account', async () => {
+    const rig = await arrange();
+    rig.gate.answer = { ...NOT_MEMBER, message: 'You are not a member of "Smith & Sons". Ask them to invite you.' };
+
+    const res = await refuse(rig, 'page');
+
+    expect(res.status).toBe(403);
+    const html = await res.text();
+    expect(html).toContain(
+      `<p data-refusal-code="${ENV_ACCESS_DENIED_CODE}">You are signed in as <strong>${EMAIL}</strong>. You are not a member of &#34;Smith &#38; Sons&#34;. Ask them to invite you.</p>`,
+    );
+    expect(html).not.toContain('does not have access to this environment.</p>');
+  });
+
+  const refusedReasons: ReadonlyArray<[string, unknown]> = [
+    ['upper case', 'NOT_MEMBER'],
+    ['a digit', 'not_member2'],
+    ['a hyphen', 'not-member'],
+    ['markup', '<script>'],
+    ['a URL fragment', 'x&error=other'],
+    ['longer than 40', 'a'.repeat(41)],
+    ['empty', ''],
+    ['not a string', 7],
+  ];
+  for (const [name, reason] of refusedReasons) {
+    it(`a reason outside [a-z_]{1,40} (${name}) is dropped on every door; the refusal and the host's sentence stand`, async () => {
+      const envelope = await arrange();
+      envelope.gate.answer = { ...NOT_MEMBER, reason };
+      const body: any = await (await refuse(envelope, 'envelope')).json();
+      expect(body).toEqual({ code: ENV_ACCESS_DENIED_CODE, message: NOT_MEMBER.message });
+
+      const redirect = await arrange();
+      redirect.gate.answer = { ...NOT_MEMBER, reason };
+      const location = new URL((await refuse(redirect, 'redirect')).headers.get('location') ?? '');
+      expect(location.searchParams.get('error')).toBe(OAUTH_ACCESS_DENIED_ERROR);
+      expect(location.searchParams.has(OAUTH_REFUSAL_REASON_PARAM)).toBe(false);
+      expect(location.searchParams.get('error_description')).toBe(NOT_MEMBER.message);
+    });
+  }
+
+  it('a reason of exactly 40 characters travels', async () => {
+    const rig = await arrange();
+    rig.gate.answer = { ...NOT_MEMBER, reason: 'a'.repeat(40) };
+    const location = new URL((await refuse(rig, 'redirect')).headers.get('location') ?? '');
+    expect(location.searchParams.get(OAUTH_REFUSAL_REASON_PARAM)).toBe('a'.repeat(40));
+  });
+
+  const refusedMessages: ReadonlyArray<[string, unknown]> = [
+    ['markup', 'You are not a member of <b>Acme</b>.'],
+    ['a control character', 'Line one.\nLine two.'],
+    ['longer than the bound', 'x'.repeat(REFUSAL_MESSAGE_MAX_LENGTH + 1)],
+    ['blank', '   '],
+    ['not a string', { text: 'no' }],
+  ];
+  for (const [name, message] of refusedMessages) {
+    it(`a sentence that is not plain text within the bound (${name}) is replaced by the fixed sentence; the reason still travels`, async () => {
+      const envelope = await arrange();
+      envelope.gate.answer = { ...NOT_MEMBER, message };
+      expect(await (await refuse(envelope, 'envelope')).json()).toEqual({
+        code: ENV_ACCESS_DENIED_CODE,
+        message: ENV_ACCESS_DENIED_MESSAGE,
+        reason: 'not_member',
+      });
+
+      const page = await arrange();
+      page.gate.answer = { ...NOT_MEMBER, message };
+      const html = await (await refuse(page, 'page')).text();
+      expect(html).toContain('this account does not have access to this environment.</p>');
+      if (typeof message === 'string' && message.includes('<b>')) expect(html).not.toContain('<b>Acme</b>');
+    });
+  }
+
+  it('a plain sentence outside the RFC 6749 error_description character set reaches the envelope and the page, and the redirect sends the fixed sentence', async () => {
+    const message = 'Vous n’êtes pas membre de Société Générale.';
+
+    const envelope = await arrange();
+    envelope.gate.answer = { ...NOT_MEMBER, message };
+    expect((await (await refuse(envelope, 'envelope')).json()).message).toBe(message);
+
+    const redirect = await arrange();
+    redirect.gate.answer = { ...NOT_MEMBER, message };
+    const location = new URL((await refuse(redirect, 'redirect')).headers.get('location') ?? '');
+    expect(location.searchParams.get('error_description')).toBe(ENV_ACCESS_DENIED_MESSAGE);
+    expect(location.searchParams.get(OAUTH_REFUSAL_REASON_PARAM)).toBe('not_member');
+
+    const page = await arrange();
+    page.gate.answer = { ...NOT_MEMBER, message };
+    expect(await (await refuse(page, 'page')).text()).toContain('Société Générale.');
+  });
+
+  it('nothing changes who is admitted: an object that does not say allowed: false admits, as any truthy answer always has', async () => {
+    const rig = await arrange();
+    const clientId = await rig.register(ENV_CALLBACK, 'web');
+    rig.clientRow(clientId).skip_consent = true;
+    rig.gate.answer = { allowed: true, reason: 'not_member', message: 'ignored' };
+
+    const res = await rig.authorize(codeRequest(clientId, ENV_CALLBACK), NAVIGATION);
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId }]);
+    const location = new URL(res.headers.get('location') ?? '');
+    expect(location.searchParams.get('code')).toBeTruthy();
+    expect(location.searchParams.has('error')).toBe(false);
+  });
+
+  it('a refusal object refuses on a resume pass too, with the reason on the envelope', async () => {
+    const rig = await arrange();
+    const clientId = await rig.register(ENV_CALLBACK, 'web');
+    rig.clientRow(clientId).skip_consent = true;
+    rig.gate.allow = true;
+    const first = await rig.authorize(codeRequest(clientId, ENV_CALLBACK), NAVIGATION, 'anonymous');
+    const location = first.headers.get('location') ?? '';
+    rig.gate.calls.length = 0;
+    rig.gate.answer = NOT_MEMBER;
+
+    const res = await rig.call('/sign-in/email', {
+      body: { email: EMAIL, password: PASSWORD, oauth_query: location.slice(location.indexOf('?')) },
+      headers: CONSOLE_FETCH,
+    });
+
+    expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId }]);
+    await expectRefusalEnvelope(res);
+    expect((await res.json()).reason).toBe('not_member');
+  });
 });
