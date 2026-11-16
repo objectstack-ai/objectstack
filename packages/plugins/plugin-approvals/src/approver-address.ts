@@ -81,6 +81,16 @@ export function isPlatformAdminAddress(address: string): boolean {
 }
 
 /**
+ * [#34218] Does the slate hold the platform administrators' slot? Read by the
+ * override admissions (`isOverrideActor`'s `pendingSlate`): such a slate is
+ * the platform's to decide, so the tenant-admin override arm is withheld from
+ * the whole request, a mixed slate included.
+ */
+export function slateHoldsPlatformAdminAddress(slate: readonly string[]): boolean {
+  return slate.some(isPlatformAdminAddress);
+}
+
+/**
  * The prefixes under which a slot address names a position: `position:` alone
  * (ADR-0090 D3 — the retired `role:` is no alias of it). Kept a list so every
  * reader below reads the one set the acting path admits.

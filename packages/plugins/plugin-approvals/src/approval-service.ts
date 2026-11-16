@@ -103,6 +103,7 @@ import {
   equivalentApproverAddresses,
   heldSlot,
   isPlatformAdminAddress,
+  slateHoldsPlatformAdminAddress,
   PLATFORM_ADMIN_ADDRESS,
   positionAddresses,
   slateNamesAPerson,
@@ -2502,7 +2503,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const isTenantAdmin = posture === 'TENANT_ADMIN'
       || holdsTenantAdminRung(this.engine, held);
     if (!isTenantAdmin) return false;
-    if (pendingSlate !== undefined && pendingSlate.some(isPlatformAdminAddress)) return false;
+    if (pendingSlate !== undefined && slateHoldsPlatformAdminAddress(pendingSlate)) return false;
     // A tenant admin's authority stops at their own org. [ADR-0131 D1] NULL is
     // not a state and names no owner, so a request with no organization is no
     // organization administrator's to act on: under a walled posture it is the
