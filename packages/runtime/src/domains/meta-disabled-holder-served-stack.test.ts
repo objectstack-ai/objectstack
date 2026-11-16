@@ -723,11 +723,12 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
     const AUTH_F = 'com.qa.save_authored_gamma';
     const BOTH_SHIP = ['ship_none_dash', 'ship_drow_dash', 'ship_de_dash', 'ship_ed_dash'];
     const E_SHIPS = ['e_only_dash', 'e_authored_drow_dash', 'e_unbound_drow_dash', 'e_two_authored_dash'];
-    // [#34144] Names only D ships.
+    // [#33955] Names two ENABLED packages ship (neither disabled), and [#34144] names only D ships.
+    const TWO_SHIP = ['two_none_dash', 'two_erow_dash', 'two_drow_dash', 'two_rows_dash', 'two_unbound_dash', 'two_draft_dash', 'two_del_dash'];
     const D_SHIPS = ['d_none_dash', 'd_drow_dash', 'd_unbound_dash', 'd_draft_dash', 'd_del_dash'];
     const savePackageOf = (id: string) => ({
         id, name: id.split('.').pop(), namespace: id.split('.').pop(), version: '1.0.0', type: 'app', objects: [],
-        dashboards: [...BOTH_SHIP, ...(id === CODE_E ? E_SHIPS : D_SHIPS)].map((name) => ({ name, label: `${id} code`, widgets: [] })),
+        dashboards: [...BOTH_SHIP, ...TWO_SHIP, ...(id === CODE_E ? E_SHIPS : D_SHIPS)].map((name) => ({ name, label: `${id} code`, widgets: [] })),
     });
 
     interface SaveBooted extends Booted { put(name: string, label: string, query?: Record<string, string>): Promise<{ status: number | undefined; body: any }> }
@@ -1041,6 +1042,49 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
                     expect([Object.keys(rows), rows.null?.label]).toEqual([['null'], 'edited']);
                 }
             });
+        });
+
+        // [#33955, ADR-0150 D3/D5, red line 2] Two ENABLED packages ship the
+        // name: the bare read refuses 409 naming both, so the bare save does
+        // too, never a guess. It answered 200, writing a package-unbound row
+        // over no stored row and updating the one package's row over one.
+        it.each([
+            { rows: 'no stored row', name: 'two_none_dash', laid: [] as string[] },
+            { rows: 'E\'s row', name: 'two_erow_dash', laid: [CODE_E] },
+            { rows: 'D\'s row', name: 'two_drow_dash', laid: [CODE_D] },
+            { rows: 'a row of each (CONTROL: refused before too)', name: 'two_rows_dash', laid: [CODE_E, CODE_D] },
+        ])('two enabled packages ship it, $rows: the bare save refuses 409 naming both, as the bare read does, and nothing is written', async ({ name, laid }) => {
+            for (const id of laid) await layRow(booted!.engine, name, id, `${id} row`);
+            const before = await everyRow(booted!.engine, name);
+            expectRefusedNamingBoth(await get(booted!.kernel, `/meta/dashboard/${name}`), CODE_E, CODE_D);
+            expectRefusedNamingBoth(await booted!.put(name, 'edited'), CODE_E, CODE_D);
+            expect(await everyRow(booted!.engine, name)).toEqual(before);
+        });
+
+        it('two enabled packages ship it, aligned: the bare draft save and the bare delete refuse naming both and nothing moves; ?package=E saves and deletes E\'s row as before (CONTROL)', async () => {
+            await layRow(booted!.engine, 'two_del_dash', CODE_E, 'E row');
+            const protocol = booted!.kernel.getService<any>('protocol');
+            const before = { draft: await everyRow(booted!.engine, 'two_draft_dash'), del: await everyRow(booted!.engine, 'two_del_dash') };
+            expectRefusedNamingBoth(await booted!.put('two_draft_dash', 'drafted', { mode: 'draft' }), CODE_E, CODE_D);
+            let refusal: any;
+            try { await protocol.deleteMetaItem({ type: 'dashboard', name: 'two_del_dash' }); } catch (error) { refusal = error; }
+            expect([refusal?.code, refusal?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+            for (const id of [CODE_E, CODE_D]) expect(String(refusal?.message)).toContain(id);
+            expect({ draft: await everyRow(booted!.engine, 'two_draft_dash'), del: await everyRow(booted!.engine, 'two_del_dash') }).toEqual(before);
+            const named = await booted!.put('two_draft_dash', 'named', { package: CODE_E });
+            expect(named.status, JSON.stringify(named.body)).toBe(200);
+            expect(await everyRow(booted!.engine, 'two_draft_dash')).toEqual([`active:${CODE_E}:named`]);
+            expect(await protocol.deleteMetaItem({ type: 'dashboard', name: 'two_del_dash', packageId: CODE_E })).toMatchObject({ success: true });
+            expect(await everyRow(booted!.engine, 'two_del_dash')).toEqual([]);
+        });
+
+        it('CONTROL: two enabled packages ship it and the environment\'s package-unbound row is stored: the bare save edits that row and the bare delete removes it, as before', async () => {
+            await layRow(booted!.engine, 'two_unbound_dash', null, 'environment row');
+            const saved = await booted!.put('two_unbound_dash', 'edited');
+            expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+            expect(await everyRow(booted!.engine, 'two_unbound_dash')).toEqual(['active:null:edited']);
+            expect(await booted!.kernel.getService<any>('protocol').deleteMetaItem({ type: 'dashboard', name: 'two_unbound_dash' })).toMatchObject({ success: true });
+            expect(await everyRow(booted!.engine, 'two_unbound_dash')).toEqual([]);
         });
     });
 });

@@ -674,11 +674,11 @@ export class ProtocolDiffDeleteLoadFacet {
                     );
                     throw addressRefusal;
                 }
-                // [ADR-0150 D3, ruling A] …and the holders the read naming no
-                // package counts, as the save door asks them
-                // ({@link packagelessHolderRefusal}): a name only disabled
-                // packages hold is refused naming none, never the disabled
-                // package's row removed. A package-unbound row at the address is
+                // [ADR-0150 D3/D5, red line 2, ruling A] …and the holders the
+                // read naming no package counts, as the save door asks them
+                // ({@link packagelessHolderRefusal}): two or more enabled holders
+                // are refused naming them, and a name only disabled packages hold
+                // is refused naming none, never one row removed. A package-unbound row at the address is
                 // the environment's own, and its removal is left as it was.
                 if (request.packageId == null) {
                     const holderRefusal = packagelessHolderRefusal(
