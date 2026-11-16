@@ -1437,6 +1437,9 @@ export class CascadePlanningFacet {
  *   - the batch's caller-scoped WRITE read misses a child it was asked for
  *     (`CascadeBatchNarrowed`, thrown before any hook or write): a by-id
  *     delete of that child refuses where a predicate one would skip it.
+ * And a dependent the collect phase never held (not in `cascadeSet.members`)
+ * always goes by id, whatever its chunk does: it is the root of its own
+ * cascade, with its own recycle-bin entry, as before.
  * In each case the by-id path gives today's answer, and a refusal rolls the
  * whole cascade back (ruling 6893104201 point 2). So one cascade can show
  * both shapes.
@@ -1450,17 +1453,22 @@ async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIs
     // [#22305] An earlier chunk's own cascade may have entered a member.
     const chunk = dependents.slice(i, i + batchSize).filter((depId) => !cascadeSetHas(cascadeSet.entered, childName, depId));
     if (chunk.length === 0) continue;
-    if (batchable && await readDoorReturnsChunk(host, childName, chunk, context)) {
+    // Only the set's collected MEMBERS are batched. A dependent the probe
+    // found that the collect phase never held (a row a hook of this cascade
+    // wrote after the set was collected) is deleted by id below, as the root
+    // of its own cascade, so it keeps its own recycle-bin entry: a predicate
+    // delete opens none, and the root's entry snapshotted only the members.
+    const members = chunk.filter((depId) => cascadeSetHas(cascadeSet.members, childName, depId));
+    if (batchable && members.length > 0 && await readDoorReturnsChunk(host, childName, members, context)) {
       try {
         await host.cascadeIssuedDeletes.run(
-          { object: childName, ids: new Set(chunk.map((depId) => String(depId))), claimed: false },
-          () => host.delete(childName, { where: { id: { $in: chunk } }, multi: true, context } as any),
+          { object: childName, ids: new Set(members.map((depId) => String(depId))), claimed: false },
+          () => host.delete(childName, { where: { id: { $in: members } }, multi: true, context } as any),
         );
         // The predicate arm walks a child's own relations only when one
         // points at it; entered either way, so a second path to the same row
         // never deletes it again.
-        for (const depId of chunk) cascadeSetAdd(cascadeSet.entered, childName, depId);
-        continue;
+        for (const depId of members) cascadeSetAdd(cascadeSet.entered, childName, depId);
       } catch (e) {
         if (!(e instanceof CascadeBatchNarrowed)) throw e;
       }
