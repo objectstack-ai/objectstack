@@ -553,6 +553,7 @@ const fr = {
       succeeded: "Réussis {{count}} / {{total}}",
       resultFailed: " · Échecs {{count}}",
       succeededRecords: "Enregistrements réussis",
+      aggregateNotCompleted: "L’action ne s’est pas terminée pour les enregistrements sélectionnés. Certains enregistrements ont peut-être déjà été modifiés. À la fermeture, la liste affiche leurs valeurs actuelles.",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",
       cancel: "Annuler",
@@ -2413,6 +2414,8 @@ const fr = {
         done: "Un assistant IA ou une clé d'API à vous est connecté.",
         action: 'Connecter',
       },
+      firstApp: { title: 'Ajouter votre première application', todo: 'Aucune application à vous pour l’instant. Installez-en une depuis la place de marché ou créez-la : elle apparaîtra sur l’accueil.', done: 'Une application à vous figure sur l’accueil.' },
+      firstRecord: { title: 'Ajouter votre premier enregistrement', todo: 'Personne n’a encore créé d’enregistrement dans vos applications.', done: 'Un enregistrement a été créé dans vos applications.', action: 'Ouvrir l’application' },
     },
     error: {
       connectionFailed: "Impossible de se connecter au serveur",
@@ -5228,6 +5231,25 @@ const fr = {
     sourceRequired: "Une page {{kind}} nécessite un {{source}} non vide.",
     loading: "Chargement de l'environnement d'exécution React…",
     error: "Erreur de la page React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Application mobile",
+    subtitle: "Connecter l'application mobile ObjectOS à ce serveur",
+    scanHint: "Ouvrez l'application mobile ObjectOS et scannez ce code pour la connecter à ce serveur.",
+    qrAlt: "Code QR qui connecte l'application mobile ObjectOS à ce serveur",
+    linkLabel: "Lien de connexion",
+    copy: "Copier le lien",
+    copied: "Lien copié",
+    privacy: "Le code ne contient que l'adresse de ce serveur, jamais votre compte.",
+    loadFailed: "Impossible de lire l'adresse publique de ce serveur. Rechargez la page pour réessayer.",
+    unreachableTitle: "Un téléphone ne peut pas joindre l'adresse de ce serveur",
+    unreachableBody: "L'adresse de ce serveur est {{address}}, une adresse locale ou privée qu'un téléphone ne peut pas ouvrir : aucun code n'est donc affiché. Définissez {{setting}} sur le serveur avec son adresse publique, par exemple {{example}}, puis redémarrez-le.",
+    insecureTitle: "L'adresse de ce serveur n'utilise pas HTTPS",
+    insecureBody: "L'adresse de ce serveur est {{address}}. L'application mobile s'y connecte pour l'authentification : elle doit donc utiliser HTTPS, et aucun code n'est affiché. Servez ce serveur en HTTPS, définissez {{setting}} avec son adresse https://, par exemple {{example}}, puis redémarrez-le.",
+    unpublishedTitle: "Ce serveur ne publie pas son adresse publique",
+    unpublishedBody: "Aucun code n'est affiché : ce serveur ne fournit pas encore son adresse publique à l'application mobile. Mettez le serveur à jour vers une version qui le prend en charge.",
   },
 };
 
