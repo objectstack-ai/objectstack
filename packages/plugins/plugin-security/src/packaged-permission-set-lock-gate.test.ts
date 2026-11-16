@@ -51,6 +51,8 @@ import {
   ObjectStackProtocolImplementation,
   resetEnvWritableMetadataTypes,
 } from '@objectstack/metadata-protocol';
+import { bindSecurityCatalogReader, createSecurityCatalogReader, resolveUserAuthzGrants } from '@objectstack/core';
+import { SchemaRegistry } from '@objectstack/objectql';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
 import {
   PackagedPermissionSetLockedError,
@@ -96,6 +98,8 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
     const r = rows.get(k);
     return r ? { key: k, row: r } : null;
   };
+  const meetsScalars = (r: Row, where?: Record<string, unknown>) => Object.entries(where ?? {})
+    .every(([k, v]) => (v !== null && typeof v === 'object') || (r[k] ?? null) === v);
   const declaredItems = [
     { name: PACKAGED_SET, label: 'Support Agent', _packageId: PKG, objects: {} },
     { name: SHADOW_SET, label: 'Drafted', _packageId: 'sys_metadata', objects: {} },
@@ -117,13 +121,19 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
           ? { name, _packageId: PKG }
           : undefined,
     },
-    async find(table: string, _opts: { where: Record<string, unknown> }) {
-      if (table === 'sys_metadata_history') return historyRows;
-      return Array.from(rows.values());
+    async find(table: string, opts2?: { where?: Record<string, unknown>; limit?: number }) {
+      // The table's own rows, narrowed by the where's scalar equalities (a batch
+      // publish lists a package's drafts with one); operator clauses are not read.
+      // The caller's bound applies after the filter, as ObjectQL applies it.
+      const found = table === 'sys_metadata_history'
+        ? historyRows
+        : Array.from(rows.values()).filter((r) => (r.__table ?? 'sys_metadata') === table && meetsScalars(r, opts2?.where));
+      return typeof opts2?.limit === 'number' ? found.slice(0, opts2.limit) : found;
     },
     async findOne(table: string, opts2: { where: Record<string, unknown> }) {
       assertEngineFindOnePredicate(table, opts2);
-      if (table === 'sys_metadata_history') return null;
+      // A version's history row, as a restore reads it back.
+      if (table === 'sys_metadata_history') return historyRows.find((h) => meetsScalars(h, opts2.where)) ?? null;
       return findRow(opts2.where)?.row ?? null;
     },
     async insert(table: string, data: Record<string, unknown>) {
@@ -298,4 +308,217 @@ describe('#11843 — the lock answers at the metadata door', () => {
     expect(registerPackagedPermissionSetLockGate({}, {})).toBe(false);
     expect(registerPackagedPermissionSetLockGate(undefined, {})).toBe(false);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [ADR-0150 D2, #34226] The seal and the lock judge a save by (package, name)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A permission set is `(package, name)` (ADR-0150 D2), one set per namespace
+ * (D9). Package `crm` ships the set N. Package `hr`, of another namespace, then
+ * saves its OWN set N through the metadata door.
+ *
+ * FROM: the save was refused `NOT_OVERRIDABLE` / 403, "provided by a managed
+ * package and is sealed". The protocol's seal judged the name alone, and so
+ * did the lock behind it. TO: the save lands, and hr's grant confers hr's set.
+ *
+ * Every save that overrides crm's shipped set stays sealed exactly as before
+ * (ADR-0126 / ADR-0131 D6): one naming no package, one addressed to crm, one
+ * addressed to crm's customization pair (whose namespace differs from crm's),
+ * and one addressed to a co-owner of crm's namespace. Those saves are asserted
+ * to be refused by the SEAL, not by the lock. The lock's own arms are asserted
+ * at the gate, which the same composition registers on the same registry.
+ *
+ * The composition is the real protocol and the real `SchemaRegistry`, both read
+ * from source (`vitest.config.ts`), over this file's fake engine. Each case
+ * runs in both registration orders: crm's set registered before the other
+ * packages install, and after.
+ */
+describe('[#34226] a permission set is (package, name): the seal and the lock judge a save by the package it addresses', () => {
+  const CRM = 'com.qa.crm';
+  const HR = 'com.qa.hr';
+  const FIN = 'com.qa.fin';
+  /** A second package of the `crm` namespace: it shares crm's set of a name. */
+  const CRM_TWO = 'com.qa.crm_two';
+  /** crm's customization pair, with a namespace of its own. */
+  const CRM_PAIR = `${CRM}.custom`;
+  const NS: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr', [FIN]: 'fin', [CRM_TWO]: 'crm', [CRM_PAIR]: 'crmx' };
+  const N = 'qa_shared_reader';
+  const setOf = (cap: string) => ({ name: N, label: cap, objects: {}, systemPermissions: [cap] });
+
+  type Order = 'shipped first' | 'shipped last';
+  const ORDERS: readonly Order[] = ['shipped first', 'shipped last'];
+
+  /** The composition: `shippers` ship N, every package of {@link NS} installed, in `order`. */
+  async function composition(order: Order, shippers: readonly string[] = [CRM]) {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    const install = (id: string) => registry.installPackage(
+      { id, name: id, version: '1.0.0', type: 'app', namespace: NS[id], ...(id === CRM_TWO ? { dependencies: { [CRM]: '^1.0.0' } } : {}) } as never,
+      'authored',
+    );
+    const ship = () => { for (const id of shippers) registry.registerItem('permission', setOf(`cap_${NS[id]}_shipped`) as never, 'name' as never, id); };
+    if (order === 'shipped first') {
+      for (const id of shippers) install(id);
+      ship();
+      for (const id of Object.keys(NS)) if (!shippers.includes(id)) install(id);
+    } else {
+      for (const id of Object.keys(NS)) install(id);
+      ship();
+    }
+    const engine = makeFakeEngine();
+    (engine as { registry: unknown }).registry = registry;
+    const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined) as unknown as {
+      saveMetaItem(req: Record<string, unknown>): Promise<unknown>;
+    };
+    expect(registerPackagedPermissionSetLockGate(protocol, engine)).toBe(true);
+    // The lock gate alone, on the same registry, for the arms the seal answers first.
+    let gate: ((ctx: Record<string, unknown>) => Promise<void>) | undefined;
+    registerPackagedPermissionSetLockGate({ registerAuthoringGate: (_t: string, g: typeof gate) => { gate = g; } }, engine);
+    return { engine, protocol, registry, gate: (packageId?: string) => gate!({ type: 'permission', name: N, body: setOf('cap'), ...(packageId ? { packageId } : {}) }).then(() => null, (e: unknown) => e) };
+  }
+
+  /** What one grant of N with this package column confers, read by the authorization resolver. */
+  async function confers(registry: unknown, column: string | null): Promise<unknown> {
+    const rows: Record<string, unknown[]> = {
+      sys_user: [{ id: 'u1', email: 'u1@example.com' }],
+      sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set: N, permission_set_package: column, organization_id: 'org_a' }],
+    };
+    const ql = {
+      registry,
+      find: async (object: string) => rows[object] ?? [],
+      findOne: async (object: string, query?: unknown) => { assertEngineFindOnePredicate(object, query as never); return rows[object]?.[0]; },
+      count: async () => 0,
+    };
+    bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: registry as never, metadata: { get: () => undefined, list: () => [] } as never }));
+    return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
+  }
+
+  const sealed = (err: unknown) => {
+    expect(err, 'refused by the seal, not by the lock').not.toBeInstanceOf(PackagedPermissionSetLockedError);
+    expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(String((err as Error).message)).toContain('provided by a managed package and is sealed');
+  };
+
+  for (const order of ORDERS) {
+    it(`${order}: hr saves its own set N beside crm's shipped N; it lands, and hr's grant confers hr's set while crm's confers crm's (FROM sealed)`, async () => {
+      const { engine, protocol, registry } = await composition(order);
+      const err = await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr'), packageId: HR });
+      expect(err).toBeNull();
+      expect(metaRowsOf(engine).map((r) => ({ name: r.name, package_id: r.package_id }))).toEqual([{ name: N, package_id: HR }]);
+      expect({ crm: await confers(registry, CRM), hr: await confers(registry, HR) }).toEqual({ crm: ['cap_crm_shipped'], hr: ['cap_hr'] });
+    }, 30_000);
+
+    it(`${order}: with crm AND fin shipping N, hr's own save still lands: every shipper is judged, not the first found`, async () => {
+      const { engine, protocol } = await composition(order, [CRM, FIN]);
+      expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr'), packageId: HR })).toBeNull();
+      expect(metaRowsOf(engine)).toHaveLength(1);
+    }, 30_000);
+
+    it.each([
+      ['naming no package', undefined],
+      ['addressed to crm', CRM],
+      ['addressed to crm\'s customization pair (another namespace)', CRM_PAIR],
+      ['addressed to a co-owner of crm\'s namespace', CRM_TWO],
+    ] as const)(`${order}: CONTROL — a save of N %s overrides crm's shipped set and is sealed as before, nothing written`, async (_how, packageId) => {
+      const { engine, protocol } = await composition(order);
+      sealed(await save(protocol, { type: 'permission', name: N, item: setOf('cap_x'), ...(packageId ? { packageId } : {}) }));
+      expect(metaRowsOf(engine)).toEqual([]);
+    }, 30_000);
+
+    it(`${order}: CONTROL — with fin ALSO shipping N, a save addressed to fin's namespace co-owner is still sealed`, async () => {
+      const { engine, protocol } = await composition(order, [FIN, CRM]);
+      sealed(await save(protocol, { type: 'permission', name: N, item: setOf('cap_x'), packageId: CRM_TWO }));
+      expect(metaRowsOf(engine)).toEqual([]);
+    }, 30_000);
+
+    it(`${order}: hr's own set saved as a draft then published: the draft lands, the publish promotes it, and hr's grant confers it (FROM the publish sealed)`, async () => {
+      const { engine, protocol, registry } = await composition(order);
+      expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr'), packageId: HR, mode: 'draft' })).toBeNull();
+      const published = await (protocol as unknown as { publishMetaItem(req: Record<string, unknown>): Promise<unknown> })
+        .publishMetaItem({ type: 'permission', name: N, packageId: HR }).then(() => null, (e: unknown) => e);
+      expect(published).toBeNull();
+      expect(metaRowsOf(engine).map((r) => ({ package_id: r.package_id, state: r.state }))).toEqual([{ package_id: HR, state: 'active' }]);
+      expect({ crm: await confers(registry, CRM), hr: await confers(registry, HR) }).toEqual({ crm: ['cap_crm_shipped'], hr: ['cap_hr'] });
+    }, 30_000);
+
+    // The refusal each answers: the managed seal at the store for crm and its pair, and the
+    // one-name-per-namespace rule, which the publish judges first, for the environment and crm's co-owner.
+    it.each([
+      ['naming no package', null, ['NAMESPACE_CONFLICT', 422]],
+      ['addressed to crm', CRM, ['NOT_OVERRIDABLE', 403]],
+      ['addressed to crm\'s customization pair (another namespace)', CRM_PAIR, ['NOT_OVERRIDABLE', 403]],
+      ['addressed to a co-owner of crm\'s namespace', CRM_TWO, ['NAMESPACE_CONFLICT', 422]],
+    ] as const)(`${order}: CONTROL — the publish door: a stored draft of N %s is not promoted over crm's shipped set`, async (_how, binding, envelope) => {
+      const { engine, protocol } = await composition(order);
+      // The draft is hr's, then rebound to the address under test, as a draft stored before this change would be.
+      expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_x'), packageId: HR, mode: 'draft' })).toBeNull();
+      for (const [key, row] of engine.rows) if (row.__table === 'sys_metadata') engine.rows.set(key, { ...row, package_id: binding });
+      const err = await (protocol as unknown as { publishMetaItem(req: Record<string, unknown>): Promise<unknown> })
+        .publishMetaItem({ type: 'permission', name: N, ...(binding ? { packageId: binding } : {}) }).then(() => null, (e: unknown) => e);
+      expect([(err as { code?: unknown } | null)?.code, (err as { status?: unknown } | null)?.status]).toEqual(envelope);
+      expect(metaRowsOf(engine).map((r) => r.state)).toEqual(['draft']);
+    }, 30_000);
+
+    // [#32396] On a runtime that cannot roll back, a refused package publish undoes
+    // each promotion it made by hand. The undo addresses the same package the
+    // promotion did, so it judges hr's own set N as the promotion did.
+    // Created: the undo removes the active row. Edited (hr's N live at v1): the undo
+    // restores v1, a write the store judges by its intent.
+    it.each(['created', 'edited'] as const)(`${order}: a refused batch publish on a runtime that cannot roll back undoes hr's own set N (%s) and puts its draft back (FROM left live)`, async (shape) => {
+      const { engine, protocol } = await composition(order);
+      Object.assign(engine, {
+        getDefaultDriverName: () => 'remote',
+        getDriverByName: () => ({ supports: { transactionsUnsupported: true } }),
+      });
+      const LATER = 'qa_zz_refused_later';
+      const publishOne = (protocol as unknown as { publishMetaItem(req: Record<string, unknown>): Promise<unknown> }).publishMetaItem;
+      if (shape === 'edited') {
+        expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr_v1'), packageId: HR, mode: 'draft' })).toBeNull();
+        expect(await publishOne.call(protocol, { type: 'permission', name: N, packageId: HR }).then(() => null, (e: unknown) => e)).toBeNull();
+      }
+      const activeBefore = metaRowsOf(engine).filter((r) => r.state === 'active').map((r) => r.metadata);
+      expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr'), packageId: HR, mode: 'draft' })).toBeNull();
+      expect(await save(protocol, { type: 'permission', name: LATER, item: { ...setOf('cap_later'), name: LATER }, packageId: HR, mode: 'draft' })).toBeNull();
+      const draftOf = (name: string) => metaRowsOf(engine).find((r) => r.name === name && r.state === 'draft');
+      const draftBefore = { metadata: draftOf(N)?.metadata, checksum: draftOf(N)?.checksum };
+      expect(draftBefore.metadata).toBeDefined();
+
+      // The later promotion's write is refused after hr's N was promoted.
+      const host = protocol as unknown as {
+        promoteDraftForPublish(req: { name: string; judgeOnly?: boolean }): Promise<unknown>;
+        publishPackageDrafts(req: { packageId: string }): Promise<{ outcome: string; failed: Array<{ name: string; code?: string }> }>;
+      };
+      const real = host.promoteDraftForPublish.bind(host);
+      const promoted: string[] = [];
+      host.promoteDraftForPublish = async (req) => {
+        if (!req.judgeOnly) {
+          if (req.name === LATER) throw Object.assign(new Error('conflict'), { code: 'METADATA_CONFLICT', status: 409 });
+          promoted.push(req.name);
+        }
+        return real(req);
+      };
+
+      const res = await host.publishPackageDrafts({ packageId: HR });
+
+      expect(promoted, 'hr\'s N is promoted before the refused write').toEqual([N]);
+      expect(res.outcome).toBe('refused');
+      expect(res.failed.find((f) => f.name === N)?.code, 'undone, not reported live').toBe('BATCH_ABORTED');
+      expect(metaRowsOf(engine).filter((r) => r.state === 'active').map((r) => r.metadata), 'the active row is as before the publish').toEqual(activeBefore);
+      expect(metaRowsOf(engine).filter((r) => r.state === 'draft').map((r) => String(r.name)).sort()).toEqual([N, LATER]);
+      expect({ metadata: draftOf(N)?.metadata, checksum: draftOf(N)?.checksum }).toEqual(draftBefore);
+    }, 30_000);
+
+    it(`${order}: the lock gate judges the same relations: hr's own set passes, every override of crm's set is locked`, async () => {
+      const { gate } = await composition(order);
+      expect(await gate(HR)).toBeNull();
+      for (const packageId of [undefined, CRM, CRM_PAIR, CRM_TWO]) {
+        const err = await gate(packageId);
+        expect(err, `the lock for ${packageId ?? 'no package'}`).toBeInstanceOf(PackagedPermissionSetLockedError);
+        expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      }
+    }, 30_000);
+  }
 });
