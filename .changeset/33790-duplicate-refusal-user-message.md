@@ -5,7 +5,7 @@
 
 fix(objectql): the duplicate-record refusal reaches the writer's locale on the action door and on bulk rows
 
-Clause-②: yes (widening). The /data 409 and the row errors gain a `userMessage` key, with the same text as the end-user sentence. `message` keeps its diagnostic text. The dev re-measures this before the PR.
+Clause-②: yes (widening). The /data 409 and the row errors gain a `userMessage` key, with the same text as the end-user sentence. `message` keeps its diagnostic text.
 Metadata-protocol: none
 
 The engine's duplicate-record refusal already composed its end-user sentence in the writer's locale, and `/api/v1/data` answered it as the 409 body's `error`. Other doors read the user-facing sentence from `userMessage` and keep `message` as the diagnostic. The refusal did not declare that key, so an action button or a bulk edit showed the English diagnostic, for example `Duplicate record refused on '周成本': …`, where the form save showed `已存在「工厂」、「牌号」、「成本周次」均相同的记录`.
