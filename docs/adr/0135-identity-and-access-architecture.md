@@ -298,8 +298,7 @@ An environment that has adopted SSO still needs a user-management surface, and t
 > organization owner or admin holds `admin_full_access` in the environment while that role lasts
 > (ruling 9). Every other position and permission set is assigned in the environment, and nothing
 > is projected upward, from the environment to the cloud. What gives and withdraws it as the
-> cloud role changes is cloud-side, not in this repo; D5's derivation is unchanged and reads the
-> standing from the environment's own tables
+> cloud role changes is cloud-side, not in this repo, and D5's derivation is not changed for it
 > (`packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding`).
 >
 > The same amendment's ruling 10, no local break-glass administrator on a hosted environment, is
