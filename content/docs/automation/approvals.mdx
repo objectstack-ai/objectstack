@@ -98,13 +98,17 @@ file exists, through the same refusals as the endpoint above, and reports each o
 row's `manager` result: a link it cannot make never fails the user it imported.
 
 The column is also written by a seed, or by any other system-context write, which bypasses the
-managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
-through a provisioning path your own deployment supplies: this platform declares the SCIM
-`manager` attribute without projecting it onto the column. Where a SCIM directory holds an
-identity (it carries `source: 'idp_provisioned'` and the directory has provisioned or linked it)
-the admin operation **refuses**, the import's `manager_id` column included, so that directory
-stays the one surface that authors its manager; for such a user the column is written only by that
-deployment-supplied path, and a value the column already holds stays as it is. A person who only
+managed-update whitelist. SCIM provisioning populates it too: the Enterprise User `manager`
+attribute, whose `value` is the manager's SCIM resource `id`, is written onto the column on a SCIM
+create, replace or patch that names the attribute, through the same refusals (each answered as a
+SCIM `400 invalidValue`). It is written only for an active user the directory holds, and only from
+the connection that provisioned that user's profile. A write that does not name the attribute
+leaves the column as it is; removing the attribute, or a replace without it, clears the column. An
+id that names no user the connection provisioned does not fail the write: the user is saved, the
+column stays as it was, and the server logs a warning for the operator. Where a SCIM directory holds an identity (it carries `source: 'idp_provisioned'` and
+the directory has provisioned or linked it) the admin operation **refuses**, the import's
+`manager_id` column included, so that directory stays the one surface that authors its manager.
+Any other directory sync writes it only through a path your own deployment supplies. A person who only
 signs in through SSO also carries `source: 'idp_provisioned'`, but no directory holds them: their
 manager is set with **Set Manager** or the import like anyone else's.
 

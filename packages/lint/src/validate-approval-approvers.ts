@@ -159,13 +159,19 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  *     here, 0 projection sites") went stale when the projection landed.
  *     plugin-auth `scim-manager-projection.ts` carries the Enterprise User
  *     `manager.value` — the manager's SCIM resource id among the Users the
- *     same connection provisioned (RFC 7643 §4.3) — onto the column on every
- *     SCIM create, replace and patch, inside the SCIM transaction, through
- *     the endpoint's own refusals (`screenUserManagerLink`: self-assignment,
- *     cycle, depth cap, cross-organization); a reference naming no User is a
- *     SCIM 400 `invalidValue`, never dropped, and a cleared or absent
- *     attribute clears the column. Measured by
- *     `scim-manager-projection.test.ts`, end to end through the vendor.
+ *     same connection provisioned (RFC 7643 §4.3) — onto the column, inside
+ *     the SCIM transaction, through the endpoint's own refusals
+ *     (`screenUserManagerLink`: self-assignment, cycle, depth cap,
+ *     cross-organization, each a SCIM 400 `invalidValue`). It runs only for
+ *     an ACTIVE user whose manager the directory owns (the one predicate the
+ *     endpoint's directory refusal reads), only from the connection that
+ *     holds that user's profile source, and only on a create, replace or
+ *     patch that NAMES the attribute: a write that does not name it leaves
+ *     the column as it is, and an explicit remove (or a replace without it)
+ *     clears it. A reference naming no User is served with the column left
+ *     unchanged and a bounded operator warn (maintainer ruling record
+ *     6909383114). Measured by `scim-manager-projection.test.ts`, end to end
+ *     through the vendor.
  *   - Admin bulk import — AVAILABLE HERE, and the grade this block used to
  *     give it ("NOT here") went stale when the import tier admitted the column.
  *     `POST /api/v1/auth/admin/import-users` (`admin-import-users.ts`) reads a

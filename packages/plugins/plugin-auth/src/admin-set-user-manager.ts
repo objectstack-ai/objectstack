@@ -292,6 +292,25 @@ async function heldByScimDirectory(engine: SetUserManagerEngine, userId: string)
 }
 
 /**
+ * WHO OWNS `sys_user.manager_id` for this identity — the one predicate both
+ * doors read (seat ruling 6907953084 on the L2 review, item b): a SCIM
+ * directory owns it when the identity reads `source: 'idp_provisioned'` AND
+ * a SCIM directory holds it ({@link isHeldByScimDirectory}). There the admin
+ * endpoint refuses (refusal 5) and the SCIM manager projection writes;
+ * everywhere else the admin endpoint writes and the projection writes
+ * nothing. One predicate, so neither door overwrites the other.
+ */
+async function directoryOwnsManagerOf(engine: SetUserManagerEngine, user: UserRow): Promise<boolean> {
+  return String(user.source ?? '') === 'idp_provisioned' && await heldByScimDirectory(engine, String(user.id));
+}
+
+/** {@link directoryOwnsManagerOf}, by id: `false` for a user that does not exist. */
+export async function directoryOwnsUserManager(engine: SetUserManagerEngine, userId: string): Promise<boolean> {
+  const user = await findUser(engine, userId);
+  return user ? directoryOwnsManagerOf(engine, user) : false;
+}
+
+/**
  * The organization ids an identity PROVABLY holds membership in. An empty
  * array means "no tenancy fact recorded", which is not the same as "member of
  * nothing" — see {@link screenCrossOrganization}.
@@ -449,8 +468,8 @@ async function deepestSubordinateChain(
 }
 
 /**
- * Refusals 1 to 4 — self-assignment, the proposed manager's existence,
- * cross-organization, cycle and depth — judged for ONE proposed link
+ * Refusals 1 to 4 — self-assignment, cross-organization, cycle and depth,
+ * plus the proposed manager's existence — judged for ONE proposed link
  * `userId -> managerId`, without writing anything.
  *
  * Split out of {@link applyUserManagerLink} for the one caller that must not
@@ -639,7 +658,7 @@ export async function applyUserManagerLink(
   // well as the set: both are writes that directory owns. The `source` mark
   // is read first and alone is NOT enough (see refusal 5 above): an identity
   // that only signs in through SSO carries it too, with no directory behind it.
-  if (String(user.source ?? '') === 'idp_provisioned' && await heldByScimDirectory(engine, userId)) {
+  if (await directoryOwnsManagerOf(engine, user)) {
     return deny(
       403,
       'PERMISSION_DENIED',

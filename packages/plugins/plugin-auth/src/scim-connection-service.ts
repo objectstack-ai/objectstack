@@ -119,6 +119,16 @@ export interface ScimRequestScope {
    * none or the row names no organization.
    */
   organizationId?: string;
+  /**
+   * Whether this request NAMES the Enterprise User `manager` attribute, read
+   * off the request before the vendor runs (`scimUserManagerIntent`,
+   * `scim-manager-projection.ts`): `named` for a create or PATCH that carries
+   * or removes it and for every replace (a replace without it is a clear),
+   * `silent` for any other user write. The projection writes nothing on a
+   * silent one (seat ruling 6907953084 on the L2 review, item a). Absent
+   * outside a user create, replace or patch.
+   */
+  userManagerIntent?: 'named' | 'silent';
 }
 
 /** Is the current async chain inside an authenticated SCIM protocol request? */

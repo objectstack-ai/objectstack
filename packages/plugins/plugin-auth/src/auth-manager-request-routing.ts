@@ -286,6 +286,13 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
         const scope: ScimRequestScope = { scim: true };
+        // Whether this user write names the Enterprise `manager` attribute,
+        // read off a clone before the vendor consumes the body: the manager
+        // projection writes only on a write that names it
+        // (`scim-manager-projection.ts`).
+        const { scimUserManagerIntentOf } = await import('./scim-manager-projection.js');
+        const userManagerIntent = await scimUserManagerIntentOf(request, endpointPath);
+        if (userManagerIntent) scope.userManagerIntent = userManagerIntent;
         let scimResponse = await scimRequestScope.run(scope, runHandler);
         if (scimResponse.status === 409) {
           const { translateScimConflictDetail } = await import('./scim-conflict-detail.js');

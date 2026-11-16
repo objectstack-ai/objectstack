@@ -30,21 +30,33 @@
  * (`scimRequestScope`), so a refusal rolls the whole SCIM mutation back and
  * the identity provider reads a SCIM error with nothing written.
  *
- * ## When it projects, and when it does not
+ * ## When it writes, and why each other case writes nothing
  *
- * - Only inside an authenticated SCIM protocol request, and only for the
- *   connection that request verified as. The vendor also calls this callback
- *   while it decommissions a connection or replays a provisioning domain; a
- *   decommission must never be refused over an org-chart reference, so those
- *   runs project nothing.
+ * - Only on a write that NAMES the attribute ({@link scimUserManagerIntentOf},
+ *   read off the request before the vendor runs): a create or PATCH that
+ *   carries or removes it, and every replace, since a replace without it is a
+ *   clear. A write that does not name it leaves `manager_id` as it is: silence
+ *   is not a clear (seat ruling 6907953084, item a).
+ * - Only on an identity the directory OWNS the manager of — the exact set the
+ *   admin endpoint refuses, read through the one predicate both doors share,
+ *   `directoryOwnsUserManager` (seat ruling 6907953084, item b). On any other
+ *   identity the admin endpoint owns the column and the projection writes
+ *   nothing, so neither door overwrites the other.
+ * - Only inside an authenticated SCIM protocol request, for the connection it
+ *   verified as. The vendor also calls this callback while it decommissions a
+ *   connection or replays a provisioning domain; neither is a write the
+ *   directory made, and a decommission must never be refused over an
+ *   org-chart reference.
  * - Only from the user's PROFILE source (the vendor's `profileSourceId`, the
  *   same rule that decides whose name and email the user carries), and only
- *   when that source belongs to the request's connection.
- * - Only on an active state. A deprovision is never refused over the manager;
- *   a user re-activated later projects the manager its source then holds.
- * - Only when the manager CHANGES. A stored reference that resolves to the
- *   manager the user already has is not judged again, so an unrelated PATCH is
- *   never refused over a chain other links have since reshaped.
+ *   when it belongs to the request's connection: another connection's request
+ *   does not author this user's profile, so its manager is not this user's.
+ * - Only on an active state: a deprovision is never refused over the org
+ *   chart. A manager named while the user is inactive stays in the
+ *   directory's resource and lands on the next active write that names it.
+ * - Only when the manager CHANGES: a reference that resolves to the manager
+ *   the user already has is not judged again, so a write is never refused
+ *   over a chain other links have since reshaped.
  *
  * ## What `manager.value` is matched against
  *
@@ -52,26 +64,37 @@
  * "the id of the SCIM resource representing the User's manager" — among the
  * Users the SAME connection provisioned (a resource id means something only to
  * the connection that issued it, which is also how `GET /Users/{id}` scopes
- * it). A `$ref` alone is read the same way, by its final `/Users/{id}` path
- * segment. ⛔ Never the `externalId`, the `userName` or an email as a second
- * dialect: one reading, so a reference either names a User or is refused.
+ * it). A `$ref` alone is read by its final `/Users/{id}` path segment. ⛔ Never
+ * the `externalId`, the `userName` or an email as a second dialect.
  *
- * ## The refusals
+ * ## A reference that names no User is served; a structural one is refused
  *
- * A reference that names no User this connection provisioned is refused —
- * never dropped, so the directory learns its reference did not land. Every
- * other refusal is the admin endpoint's own, from
- * {@link screenUserManagerLink} (self-assignment, cycle, depth cap,
- * cross-organization), imported: one derivation, never a copy. Each is a SCIM
- * error in RFC 7644 §3.12 shape: status 400, `scimType: invalidValue` — the
- * vendor's own answer to a value it refuses — the refusal's sentence as
- * `detail`, and the admin endpoint's ADR-0112 `code` for the same refusal. The refusal ledger (`scim-refusal-audit.ts`) records it like any
- * other SCIM refusal. A cleared or absent attribute clears the column.
+ * Maintainer ruling record 6909383114: a reference that cannot be resolved —
+ * an unknown id, an `externalId`-style value, another connection's id, a
+ * `$ref` with no readable `/Users/{id}` segment — does not refuse the user
+ * write. The write lands, `manager_id` stays as it was, and an operator warn
+ * names the connection, bounded per connection
+ * ({@link SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW} per window, with the count
+ * it dropped). The check runs after the unchanged-manager short-circuit, and a
+ * write that does not name the attribute never reaches it, so a report whose
+ * manager was deleted keeps working. The four structural refusals are the
+ * admin endpoint's own, from {@link screenUserManagerLink} (self-assignment,
+ * cycle, depth cap, cross-organization), imported: one derivation, never a
+ * copy. Each is a SCIM error in RFC 7644 §3.12 shape: status 400,
+ * `scimType: invalidValue`, the refusal's sentence as `detail`, and the admin
+ * endpoint's ADR-0112 `code` for the same refusal. The refusal ledger
+ * (`scim-refusal-audit.ts`) records it like any other SCIM refusal.
  */
 
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
-import { screenUserManagerLink, writeUserManagerLink, type SetUserManagerDeps } from './admin-set-user-manager.js';
-import { scimRequestConnectionId } from './scim-connection-service.js';
+import {
+  directoryOwnsUserManager,
+  screenUserManagerLink,
+  writeUserManagerLink,
+  type SetUserManagerDeps,
+} from './admin-set-user-manager.js';
+import { scimRequestScope } from './scim-connection-service.js';
+import { ScimRefusalAuditBound } from './scim-refusal-audit.js';
 
 /** The SCIM Enterprise User extension the attribute lives in. */
 export const SCIM_ENTERPRISE_USER_SCHEMA = 'urn:ietf:params:scim:schemas:extension:enterprise:2.0:User';
@@ -79,6 +102,9 @@ export const SCIM_ENTERPRISE_USER_SCHEMA = 'urn:ietf:params:scim:schemas:extensi
 const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error';
 
 const SYSTEM_READ_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/** Operator warns one connection gets per 10-minute window for unresolvable references. */
+export const SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW = 1;
 
 /** The vendor-side `scimUser` row fields this module reads. */
 interface ScimUserRow {
@@ -88,17 +114,108 @@ interface ScimUserRow {
   serializedAttributes?: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Does the request NAME the attribute? Read before the vendor runs.
+// ---------------------------------------------------------------------------
+
+const ENTERPRISE_LOWER = SCIM_ENTERPRISE_USER_SCHEMA.toLowerCase();
+const MANAGER_PATH_LOWER = `${ENTERPRISE_LOWER}:manager`;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** The value under `key` in `obj`, matched case-insensitively (SCIM attribute names are). */
+function keyed(obj: Record<string, unknown>, key: string): { found: boolean; value?: unknown } {
+  for (const [k, v] of Object.entries(obj)) if (k.toLowerCase() === key) return { found: true, value: v };
+  return { found: false };
+}
+
+/** Does a resource-shaped object (a create body, a pathless PATCH value) carry the attribute? */
+function objectNamesManager(obj: Record<string, unknown>): boolean {
+  if (keyed(obj, MANAGER_PATH_LOWER).found || keyed(obj, 'manager').found) return true;
+  const extension = keyed(obj, ENTERPRISE_LOWER);
+  return extension.found && isRecord(extension.value) && keyed(extension.value, 'manager').found;
+}
+
+/** Does one PATCH path address the attribute (or the extension holding it)? */
+function pathNamesManager(path: string, op: string, value: unknown): boolean {
+  const p = path.trim().toLowerCase();
+  if (p === 'manager' || p.startsWith('manager.') || p === MANAGER_PATH_LOWER || p.startsWith(`${MANAGER_PATH_LOWER}.`)) {
+    return true;
+  }
+  // The whole extension: removing it removes the manager; replacing it names
+  // the manager only when the new value carries one.
+  if (p === ENTERPRISE_LOWER) return op === 'remove' || (isRecord(value) && keyed(value, 'manager').found);
+  return false;
+}
+
+/**
+ * Whether a SCIM user write NAMES the Enterprise `manager` attribute, from its
+ * kind and parsed body: a create that carries it, a PATCH with an operation
+ * that addresses or carries it, and every replace (a replace without it is a
+ * clear).
+ */
+export function scimBodyNamesManager(kind: 'create' | 'replace' | 'patch', body: unknown): boolean {
+  if (kind === 'replace') return true;
+  if (!isRecord(body)) return false;
+  if (kind === 'create') return objectNamesManager(body);
+  const operations = keyed(body, 'operations').value;
+  if (!Array.isArray(operations)) return false;
+  return operations.some((operation) => {
+    if (!isRecord(operation)) return false;
+    const op = String(keyed(operation, 'op').value ?? '').toLowerCase();
+    const path = keyed(operation, 'path').value;
+    const value = keyed(operation, 'value').value;
+    if (typeof path === 'string' && path.trim() !== '') return pathNamesManager(path, op, value);
+    return isRecord(value) && objectNamesManager(value);
+  });
+}
+
+/**
+ * The manager intent of one SCIM request, for `ScimRequestScope.userManagerIntent`:
+ * `named` / `silent` for a user create, replace or patch, `undefined` for any
+ * other request. The body is read from a clone, so the vendor still reads its
+ * own; a body that does not parse is `silent`, and the vendor refuses it.
+ */
+export async function scimUserManagerIntentOf(
+  request: Request,
+  endpointPath: string | undefined,
+): Promise<'named' | 'silent' | undefined> {
+  const path = endpointPath ?? '';
+  const method = request.method.toUpperCase();
+  const kind = method === 'POST' && /^\/scim\/v2\/Users\/?$/.test(path)
+    ? 'create'
+    : method === 'PUT' && /^\/scim\/v2\/Users\/[^/]+$/.test(path)
+      ? 'replace'
+      : method === 'PATCH' && /^\/scim\/v2\/Users\/[^/]+$/.test(path)
+        ? 'patch'
+        : undefined;
+  if (!kind) return undefined;
+  if (kind === 'replace') return 'named';
+  let body: unknown;
+  try {
+    body = JSON.parse(await request.clone().text());
+  } catch {
+    return 'silent';
+  }
+  return scimBodyNamesManager(kind, body) ? 'named' : 'silent';
+}
+
+// ---------------------------------------------------------------------------
+// The reference the stored attributes carry
+// ---------------------------------------------------------------------------
+
 /** What the stored attributes say about the manager. */
 export type ScimManagerReference =
   | { kind: 'none' }
   | { kind: 'id'; id: string }
-  | { kind: 'unreadable'; ref: string };
+  | { kind: 'unreadable' };
 
 /**
  * The manager reference in a `scimUser` row's stored canonical attributes:
  * `enterprise.manager.value`, else the final `/Users/{id}` segment of
  * `enterprise.manager.$ref`. A row stored before the vendor kept attributes,
- * or one with no manager, names none.
+ * or one with no manager, names none; a `$ref` with no readable segment
+ * (none, or one that does not decode) is unreadable.
  */
 export function readScimManagerReference(serializedAttributes: unknown): ScimManagerReference {
   if (typeof serializedAttributes !== 'string' || serializedAttributes === '') return { kind: 'none' };
@@ -111,7 +228,12 @@ export function readScimManagerReference(serializedAttributes: unknown): ScimMan
   if (typeof manager.value === 'string' && manager.value !== '') return { kind: 'id', id: manager.value };
   if (typeof manager.$ref === 'string' && manager.$ref !== '') {
     const match = /\/Users\/([^/?#]+)\/?$/.exec(manager.$ref);
-    return match ? { kind: 'id', id: decodeURIComponent(match[1]) } : { kind: 'unreadable', ref: manager.$ref };
+    if (!match) return { kind: 'unreadable' };
+    try {
+      return { kind: 'id', id: decodeURIComponent(match[1]) };
+    } catch {
+      return { kind: 'unreadable' };
+    }
   }
   return { kind: 'none' };
 }
@@ -138,81 +260,92 @@ async function scimInvalidValue(code: string, detail: string): Promise<Error> {
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
-/** The admin endpoint's own dependencies: the engine, and its degradation channel. */
-export type ScimManagerProjectionDeps = SetUserManagerDeps;
+/** The admin endpoint's own dependencies (the engine), plus the operator channel. */
+export interface ScimManagerProjectionDeps extends SetUserManagerDeps {
+  /** Overrides the warn bound's clock and window, for tests. */
+  warnBound?: ScimRefusalAuditBound;
+}
+
+/** The `identity.reconcileUser` half that projects the manager. */
+export type ScimManagerProjection = (state: SCIMIdentityState, context: SCIMTransactionContext) => Promise<void>;
 
 /**
- * Project the profile source's `manager` onto `sys_user.manager_id` for the
- * user in `state`, inside the SCIM transaction `context` belongs to. Resolves
- * when the column already agrees or was written; throws the SCIM error the
- * identity provider reads when the reference is refused.
+ * Build the projection, with its own per-connection bound on the operator
+ * warn for an unresolvable reference.
  */
-export async function projectScimManager(
-  deps: ScimManagerProjectionDeps,
-  state: SCIMIdentityState,
-  context: SCIMTransactionContext,
-): Promise<void> {
-  const connectionId = scimRequestConnectionId();
-  if (!connectionId || !state.active || !state.profileSourceId) return;
+export function createScimManagerProjection(deps: ScimManagerProjectionDeps): ScimManagerProjection {
+  const bound = deps.warnBound ?? new ScimRefusalAuditBound({ rowsPerKey: SCIM_MANAGER_UNRESOLVED_WARNS_PER_WINDOW });
 
-  const db = context.database;
-  const source = await db.findOne<ScimUserRow>({
-    model: 'scimUser',
-    where: [{ field: 'id', value: state.profileSourceId }],
-  });
-  if (!source || text(source.connectionId) !== connectionId) return;
-
-  const reference = readScimManagerReference(source.serializedAttributes);
-  if (reference.kind === 'unreadable') {
-    throw await scimInvalidValue(
-      'INVALID_REFERENCE',
-      `${SCIM_ENTERPRISE_USER_SCHEMA}:manager names no User: its $ref '${reference.ref}' does not end in `
-        + `/Users/{id}, and it carries no value. Send the manager's SCIM resource id as manager.value.`,
+  const warnUnresolved = (connectionId: string, userId: string): void => {
+    const admitted = bound.admit(connectionId);
+    if (!admitted) return;
+    deps.logger?.warn(
+      `[auth] SCIM connection '${connectionId}' sent an Enterprise User manager reference that names no User `
+        + `it provisioned (user '${userId}'): the user write was served and sys_user.manager_id was left as it `
+        + 'was. manager.value must be the manager\'s SCIM resource id, the id this service returned when the '
+        + 'manager was created. Fix the identity provider\'s manager mapping, or provision the manager first. '
+        + `Said once per connection per window${admitted.suppressed > 0 ? `; ${admitted.suppressed} more since the last notice` : ''}.`,
+      { connectionId, userId, suppressed: admitted.suppressed },
     );
-  }
+  };
 
-  let managerId: string | null = null;
-  if (reference.kind === 'id') {
-    const managerSource = await db.findOne<ScimUserRow>({
+  return async (state, context) => {
+    const scope = scimRequestScope.getStore();
+    const connectionId = scope?.scim === true ? scope.connectionId : undefined;
+    if (!connectionId || scope?.userManagerIntent !== 'named') return;
+    if (!state.active || !state.profileSourceId) return;
+
+    const db = context.database;
+    const source = await db.findOne<ScimUserRow>({
       model: 'scimUser',
-      where: [
-        { field: 'id', value: reference.id },
-        { field: 'connectionId', value: connectionId },
-      ],
+      where: [{ field: 'id', value: state.profileSourceId }],
     });
-    if (!managerSource || !text(managerSource.userId)) {
-      throw await scimInvalidValue(
-        'INVALID_REFERENCE',
-        `${SCIM_ENTERPRISE_USER_SCHEMA}:manager.value '${reference.id}' names no User this connection `
-          + `provisioned. manager.value is the manager's SCIM resource id (the id this service returned when `
-          + `the manager was created), not an externalId, userName or email. Provision the manager first, or `
-          + `send the right id; nothing of this request was written.`,
+    if (!source || text(source.connectionId) !== connectionId) return;
+
+    const engine = deps.getDataEngine();
+    if (!engine) {
+      throw new Error(
+        `[auth] SCIM manager projection: no data engine to write sys_user.manager_id for user '${state.userId}'`,
       );
     }
-    managerId = text(managerSource.userId);
-  }
+    // The one ownership predicate the admin endpoint's refusal 5 reads.
+    if (!(await directoryOwnsUserManager(engine, state.userId))) return;
 
-  const engine = deps.getDataEngine();
-  if (!engine) {
-    throw new Error(
-      `[auth] SCIM manager projection: no data engine to write sys_user.manager_id for user '${state.userId}'`,
-    );
-  }
-  const rows = await engine.find('sys_user', {
-    where: { id: state.userId },
-    fields: ['id', 'manager_id'],
-    limit: 1,
-    context: SYSTEM_READ_CTX,
-  });
-  const current = text((Array.isArray(rows) ? (rows[0] as { manager_id?: unknown } | undefined) : undefined)?.manager_id);
-  if (current === (managerId ?? '')) return;
+    const reference = readScimManagerReference(source.serializedAttributes);
+    let managerId: string | null | undefined = null; // `undefined` = unresolvable
+    if (reference.kind === 'unreadable') {
+      managerId = undefined;
+    } else if (reference.kind === 'id') {
+      const managerSource = await db.findOne<ScimUserRow>({
+        model: 'scimUser',
+        where: [
+          { field: 'id', value: reference.id },
+          { field: 'connectionId', value: connectionId },
+        ],
+      });
+      managerId = managerSource && text(managerSource.userId) ? text(managerSource.userId) : undefined;
+    }
 
-  if (managerId !== null) {
-    const refusal = await screenUserManagerLink(deps, engine, state.userId, managerId);
-    if (refusal) throw await scimInvalidValue(refusal.code, refusal.message);
-  }
+    const rows = await engine.find('sys_user', {
+      where: { id: state.userId },
+      fields: ['id', 'manager_id'],
+      limit: 1,
+      context: SYSTEM_READ_CTX,
+    });
+    const current = text((Array.isArray(rows) ? (rows[0] as { manager_id?: unknown } | undefined) : undefined)?.manager_id);
+    if (managerId !== undefined && current === (managerId ?? '')) return;
+    if (managerId === undefined) {
+      warnUnresolved(connectionId, state.userId);
+      return;
+    }
 
-  // Attributed to the connection (`svc:scim:CONNECTION_ID`) inside a SCIM
-  // request, and joined to its transaction.
-  await writeUserManagerLink(engine, state.userId, managerId);
+    if (managerId !== null) {
+      const refusal = await screenUserManagerLink(deps, engine, state.userId, managerId);
+      if (refusal) throw await scimInvalidValue(refusal.code, refusal.message);
+    }
+
+    // Attributed to the connection (`svc:scim:CONNECTION_ID`) inside a SCIM
+    // request, and joined to its transaction.
+    await writeUserManagerLink(engine, state.userId, managerId);
+  };
 }

@@ -9,10 +9,14 @@
  * only half the behaviour: the vendor's transaction decides whether a refused
  * reference leaves anything behind, and its after-hook decides the error body
  * the identity provider reads. Each refusal is a single-cause fixture, and
- * each asserts the SCIM error AND that nothing changed.
+ * each asserts the SCIM error AND that nothing changed. An unresolvable
+ * reference is served (maintainer ruling record 6909383114): each shape
+ * asserts the write landed, the column did not move, and the operator warn.
+ * The two doors (this projection and the admin endpoint) read one ownership
+ * predicate (seat ruling record 6907953084), pinned from both sides.
  */
 
-import { describe, it, expect, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
@@ -23,8 +27,14 @@ import { mintScimConnectionCredential } from './scim-connection-service.js';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
-import { MAX_MANAGER_CHAIN_DEPTH } from './admin-set-user-manager.js';
-import { readScimManagerReference, SCIM_ENTERPRISE_USER_SCHEMA } from './scim-manager-projection.js';
+import { MAX_MANAGER_CHAIN_DEPTH, applyUserManagerLink, directoryOwnsUserManager } from './admin-set-user-manager.js';
+import {
+  createScimManagerProjection,
+  readScimManagerReference,
+  scimBodyNamesManager,
+  SCIM_ENTERPRISE_USER_SCHEMA,
+} from './scim-manager-projection.js';
+import { scimRequestScope } from './scim-connection-service.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
 // Clocked windows measure behaviour, never loading (AGENTS.md, Build & Test).
@@ -113,14 +123,18 @@ interface Harness {
   token: string;
   otherToken: string;
   send: (request: Request) => Promise<Response>;
+  /** The operator warns the projection said about an unresolvable reference. */
+  unresolvedWarns: () => string[];
 }
 
 async function boot(): Promise<Harness> {
   const engine = await enginePool.take();
+  const warn = vi.fn();
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine as never,
+    logger: { info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() },
     getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
     plugins: { scim: true, organization: true },
   } as never);
@@ -132,7 +146,10 @@ async function boot(): Promise<Harness> {
     connectionId: OTHER_CONNECTION,
     organizationId: ORG,
   });
-  return { engine, token, otherToken, send: (request) => manager.handleRequest(request) };
+  const unresolvedWarns = () => warn.mock.calls
+    .map(([message]) => String(message))
+    .filter((message) => message.includes('manager reference that names no User'));
+  return { engine, token, otherToken, send: (request) => manager.handleRequest(request), unresolvedWarns };
 }
 
 function scimRequest(token: string, method: string, path: string, body?: unknown): Request {
@@ -187,6 +204,19 @@ async function managerOf(h: Harness, userId: string): Promise<string | null> {
     manager_id?: string | null;
   };
   return row?.manager_id ?? null;
+}
+
+/** The admin endpoint's door, on the harness engine. */
+function adminSetManager(h: Harness, userId: string, managerId: string | null) {
+  return applyUserManagerLink({ getDataEngine: () => h.engine as never }, userId, managerId);
+}
+
+/** A local password: D4 keeps the user `env_native`, so no directory holds its manager. */
+async function giveLocalPassword(h: Harness, userId: string): Promise<void> {
+  await h.engine.insert('sys_account', {
+    id: `acc_cred_${userId}`, provider_id: 'credential', account_id: userId, user_id: userId,
+  }, SYSTEM);
+  await h.engine.update('sys_user', { id: userId, source: 'env_native' }, SYSTEM);
 }
 
 function patch(operations: unknown[]) {
@@ -286,38 +316,219 @@ describe('SCIM manager projection: the directory sets, changes and clears sys_us
   });
 });
 
-describe('SCIM manager projection: a reference that names no known User is refused, never dropped', () => {
-  it('an unknown manager.value refuses the create, and nothing of it is written', async () => {
+describe('SCIM manager projection: a reference that names no User is served, and the column stays', () => {
+  it('an unknown manager.value: the create lands, manager_id stays empty, and the operator is told', async () => {
     const h = await boot();
-    const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: 'no-such-scim-id' })));
-    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
-    expect(await h.engine.find('sys_user', { where: { email: 'emp@acme.com' }, fields: ['id'] }, SYSTEM)).toEqual([]);
-    expect(await h.engine.find('sys_scim_user', { where: { user_name: 'emp@acme.com' }, fields: ['id'] }, SYSTEM)).toEqual([]);
+    const emp = await provision(h, 'emp', { value: 'no-such-scim-id' });
+    expect(await managerOf(h, emp.userId)).toBeNull();
+    const warns = h.unresolvedWarns();
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain(`'${CONNECTION}'`);
   });
 
-  it('the manager\'s externalId is not a SCIM resource id, so it is refused too', async () => {
+  it('the manager\'s externalId is not a SCIM resource id: served, nothing linked', async () => {
     const h = await boot();
     await provision(h, 'boss');
-    const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: 'ext-boss' })));
-    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
+    const emp = await provision(h, 'emp', { value: 'ext-boss' });
+    expect(await managerOf(h, emp.userId)).toBeNull();
+    expect(h.unresolvedWarns()).toHaveLength(1);
   });
 
-  it('another connection\'s resource id is refused: an id means something only to the connection that issued it', async () => {
+  it('another connection\'s resource id means nothing to this one: served, nothing linked', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss', undefined, h.otherToken);
-    const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: boss.scimId })));
-    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
+    const emp = await provision(h, 'emp', { value: boss.scimId });
+    expect(await managerOf(h, emp.userId)).toBeNull();
+    expect(h.unresolvedWarns()).toHaveLength(1);
   });
 
-  it('a PATCH to an unknown manager keeps the manager the user had', async () => {
+  it('a $ref with no /Users/{id} segment, or one that does not decode, is served (not a 500)', async () => {
+    const h = await boot();
+    const a = await provision(h, 'a', { $ref: 'https://idp.example/people/r1' });
+    const b = await provision(h, 'b', { $ref: `${AUTH}/scim/v2/Users/%E0%A4%A` });
+    expect(await managerOf(h, a.userId)).toBeNull();
+    expect(await managerOf(h, b.userId)).toBeNull();
+  });
+
+  it('a PATCH to an unknown manager is served and keeps the manager the user had', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss');
     const emp = await provision(h, 'emp', { value: boss.scimId });
     const res = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
       { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: 'no-such-scim-id' } },
+      { op: 'replace', path: 'displayName', value: 'Emp Renamed' },
     ])));
-    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
+    expect(res.status, await res.clone().text()).toBe(200);
     expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+    const rows = (await h.engine.find('sys_user', { where: { id: emp.userId }, fields: ['name'] }, SYSTEM)) as Array<{ name?: string }>;
+    expect(rows[0]?.name).toBe('Emp Renamed');
+  });
+
+  it('the operator warn is bounded per connection: a second unresolvable write in the window says nothing', async () => {
+    const h = await boot();
+    await provision(h, 'a', { value: 'no-such-1' });
+    await provision(h, 'b', { value: 'no-such-2' });
+    await provision(h, 'c', { value: 'no-such-3' });
+    expect(h.unresolvedWarns()).toHaveLength(1);
+  });
+
+  it('a report whose manager was deleted keeps working: a write that names no manager, and a replace re-sending the dangling one', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const emp = await provision(h, 'emp', { value: boss.scimId });
+    const gone = await h.send(scimRequest(h.token, 'DELETE', `/Users/${boss.scimId}`));
+    expect(gone.status, await gone.clone().text()).toBe(204);
+    const before = await managerOf(h, emp.userId);
+
+    const renamed = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: 'displayName', value: 'Emp Renamed' },
+    ])));
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(before);
+    expect(h.unresolvedWarns()).toHaveLength(0);
+
+    const replaced = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp.scimId}`, userBody('emp', { value: boss.scimId })));
+    expect(replaced.status, await replaced.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(before);
+    expect(h.unresolvedWarns()).toHaveLength(1);
+  });
+});
+
+describe('SCIM manager projection: silence is not a clear, and one predicate decides which door owns the column', () => {
+  it('a write that does not name manager keeps a value the admin route set; an explicit remove clears it', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const emp = await provision(h, 'emp');
+    // Set through the admin route while the user held a local password …
+    await giveLocalPassword(h, emp.userId);
+    expect(await adminSetManager(h, emp.userId, boss.userId)).toBeNull();
+    // … then the password went and the directory holds the identity again.
+    await h.engine.delete('sys_account', { where: { id: `acc_cred_${emp.userId}` }, ...SYSTEM });
+    await h.engine.update('sys_user', { id: emp.userId, source: 'idp_provisioned' }, SYSTEM);
+    expect(await directoryOwnsUserManager(h.engine as never, emp.userId)).toBe(true);
+
+    const renamed = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: 'displayName', value: 'Emp Renamed' },
+    ])));
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+
+    const removed = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'remove', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager` },
+    ])));
+    expect(removed.status, await removed.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBeNull();
+  });
+
+  it('on an identity the directory does not hold, the projection writes nothing and the admin route owns the column', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const other = await provision(h, 'other');
+    const emp = await provision(h, 'emp');
+    await giveLocalPassword(h, emp.userId);
+    expect(await directoryOwnsUserManager(h.engine as never, emp.userId)).toBe(false);
+
+    const named = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: boss.scimId } },
+    ])));
+    expect(named.status, await named.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBeNull();
+
+    expect(await adminSetManager(h, emp.userId, other.userId)).toBeNull();
+    const replaced = await h.send(scimRequest(h.token, 'PUT', `/Users/${emp.scimId}`, userBody('emp')));
+    expect(replaced.status, await replaced.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(other.userId);
+  });
+
+  it('on an identity the directory holds, the admin route refuses and the projection writes', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const emp = await provision(h, 'emp');
+    expect(await directoryOwnsUserManager(h.engine as never, emp.userId)).toBe(true);
+
+    const refused = await adminSetManager(h, emp.userId, boss.userId);
+    expect(refused?.status).toBe(403);
+    expect(refused?.body.error?.details?.reason).toBe('idp_provisioned');
+    expect(await managerOf(h, emp.userId)).toBeNull();
+
+    const named = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: boss.scimId } },
+    ])));
+    expect(named.status, await named.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+  });
+});
+
+describe('SCIM manager projection: the cases it does not project', () => {
+  it('an inactive user: a manager named while inactive is not written, re-activation alone does not apply it, the next naming write does', async () => {
+    const h = await boot();
+    const boss = await provision(h, 'boss');
+    const emp = await provision(h, 'emp');
+    const deactivated = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: 'active', value: false },
+      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: boss.scimId } },
+    ])));
+    expect(deactivated.status, await deactivated.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBeNull();
+
+    const reactivated = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: 'active', value: true },
+    ])));
+    expect(reactivated.status, await reactivated.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBeNull();
+
+    const named = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
+      { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: boss.scimId } },
+    ])));
+    expect(named.status, await named.clone().text()).toBe(200);
+    expect(await managerOf(h, emp.userId)).toBe(boss.userId);
+  });
+
+  // The two branches below have no public door that reaches them in one
+  // request (a connection decommission, a provisioning-domain replay, a user
+  // two connections share), so they drive the callback itself; each carries
+  // its control leg, where the same call goes on to read the engine.
+  const state = { userId: 'usr_emp', active: true, profileSourceId: 'src_emp', sources: [] } as never;
+  const contextFor = (connectionId: string) => {
+    const findOne = vi.fn(async () => ({ id: 'src_emp', userId: 'usr_emp', connectionId, serializedAttributes: '' }));
+    return { findOne, context: { database: { findOne } } as never };
+  };
+  const noEngine = () => {
+    const getDataEngine = vi.fn(() => undefined);
+    return { getDataEngine, project: createScimManagerProjection({ getDataEngine }) };
+  };
+
+  it('outside a SCIM request (a decommission or a domain replay): nothing is read or written', async () => {
+    const { getDataEngine, project } = noEngine();
+    const { findOne, context } = contextFor(CONNECTION);
+    await expect(project(state, context)).resolves.toBeUndefined();
+    expect(findOne).not.toHaveBeenCalled();
+    expect(getDataEngine).not.toHaveBeenCalled();
+
+    // Control: the same call inside a SCIM request that names the manager reaches the engine.
+    await expect(scimRequestScope.run(
+      { scim: true, connectionId: CONNECTION, userManagerIntent: 'named' },
+      () => project(state, context),
+    )).rejects.toThrow(/no data engine/);
+    expect(getDataEngine).toHaveBeenCalledTimes(1);
+  });
+
+  it('a profile source another connection owns: that connection authors this user\'s profile, so nothing is written', async () => {
+    const { getDataEngine, project } = noEngine();
+    const { findOne, context } = contextFor(OTHER_CONNECTION);
+    await expect(scimRequestScope.run(
+      { scim: true, connectionId: CONNECTION, userManagerIntent: 'named' },
+      () => project(state, context),
+    )).resolves.toBeUndefined();
+    expect(findOne).toHaveBeenCalledTimes(1);
+    expect(getDataEngine).not.toHaveBeenCalled();
+
+    // Control: the profile source's own connection reaches the engine.
+    await expect(scimRequestScope.run(
+      { scim: true, connectionId: OTHER_CONNECTION, userManagerIntent: 'named' },
+      () => project(state, context),
+    )).rejects.toThrow(/no data engine/);
+    expect(getDataEngine).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -375,12 +586,39 @@ describe('SCIM manager projection: the admin endpoint\'s four refusals, answered
 });
 
 describe('readScimManagerReference', () => {
-  it('reads value first, then the $ref segment, and names an unreadable $ref', () => {
+  it('reads value first, then the $ref segment; a $ref with no segment, or one that does not decode, is unreadable', () => {
     const attrs = (manager: unknown) => JSON.stringify({ enterprise: { manager } });
     expect(readScimManagerReference(undefined)).toEqual({ kind: 'none' });
     expect(readScimManagerReference(JSON.stringify({ schemas: [USER_SCHEMA] }))).toEqual({ kind: 'none' });
     expect(readScimManagerReference(attrs({ value: 'v1', $ref: 'https://x/Users/r1' }))).toEqual({ kind: 'id', id: 'v1' });
     expect(readScimManagerReference(attrs({ $ref: 'https://x/scim/v2/Users/r%201' }))).toEqual({ kind: 'id', id: 'r 1' });
-    expect(readScimManagerReference(attrs({ $ref: 'https://x/people/r1' }))).toEqual({ kind: 'unreadable', ref: 'https://x/people/r1' });
+    expect(readScimManagerReference(attrs({ $ref: 'https://x/people/r1' }))).toEqual({ kind: 'unreadable' });
+    expect(readScimManagerReference(attrs({ $ref: 'https://x/scim/v2/Users/%E0%A4%A' }))).toEqual({ kind: 'unreadable' });
+  });
+});
+
+describe('scimBodyNamesManager', () => {
+  const ENT = SCIM_ENTERPRISE_USER_SCHEMA;
+  const ops = (...operations: unknown[]) => ({ schemas: [PATCH_SCHEMA], Operations: operations });
+
+  it('a replace always names it, since a replace without the attribute is a clear', () => {
+    expect(scimBodyNamesManager('replace', {})).toBe(true);
+  });
+
+  it('a create names it only when it carries it', () => {
+    expect(scimBodyNamesManager('create', userBody('emp'))).toBe(false);
+    expect(scimBodyNamesManager('create', userBody('emp', { value: 'm1' }))).toBe(true);
+  });
+
+  it('a PATCH names it when an operation addresses or carries it, matched case-insensitively', () => {
+    expect(scimBodyNamesManager('patch', ops({ op: 'replace', path: 'displayName', value: 'x' }))).toBe(false);
+    expect(scimBodyNamesManager('patch', ops({ op: 'replace', path: 'active', value: false }))).toBe(false);
+    expect(scimBodyNamesManager('patch', ops({ op: 'remove', path: `${ENT}:manager` }))).toBe(true);
+    expect(scimBodyNamesManager('patch', ops({ op: 'Replace', path: `${ENT.toUpperCase()}:Manager.value`, value: 'm1' }))).toBe(true);
+    expect(scimBodyNamesManager('patch', ops({ op: 'replace', path: 'manager', value: { value: 'm1' } }))).toBe(true);
+    expect(scimBodyNamesManager('patch', ops({ op: 'remove', path: ENT }))).toBe(true);
+    expect(scimBodyNamesManager('patch', ops({ op: 'replace', path: ENT, value: { department: 'x' } }))).toBe(false);
+    expect(scimBodyNamesManager('patch', ops({ op: 'replace', value: { [ENT]: { manager: { value: 'm1' } } } }))).toBe(true);
+    expect(scimBodyNamesManager('patch', ops({ op: 'replace', value: { displayName: 'x' } }))).toBe(false);
   });
 });

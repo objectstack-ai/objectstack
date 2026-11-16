@@ -382,7 +382,7 @@ describe('unset-manager dead-end (#16748)', () => {
     // so does the import's `manager_id` column, which runs the same derivation —
     // so the hint must not read as "use the endpoint instead of your directory".
     expect(remedy).toContain('SCIM provisioning populates it too');
-    expect(remedy).toContain('where a SCIM directory holds an identity the admin operation refuses');
+    expect(remedy).toContain('Where a SCIM directory holds an identity, the admin operation refuses it');
     expect(remedy).toContain("the import's manager_id column included");
     // ⛔ But only where a directory exists: the `idp_provisioned` mark alone
     // also covers a person who only signs in through SSO, whose manager the
