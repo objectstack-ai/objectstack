@@ -633,6 +633,9 @@ export type {
     SummaryBackfillLogger,
     SummaryBackfillOptions,
 } from './summary-backfill.js';
+// [#34096] What `ObjectQL.materialiseAddedSummaries` (run by every install
+// door's `syncSchemas`) did with the roll-ups an install or upgrade added.
+export type { SummaryMaterialiseOutcome } from './summary-install-materialise.js';
 // [#29961] The backfill behind `os migrate stored-expressions`: stored computed
 // fields over rows no write has computed since the field was declared, and the
 // boot advisory naming it. Same split as the roll-up backfill above.
@@ -915,3 +918,12 @@ export {
   SCHEMA_MIGRATION_PG_LOCK_KEY,
 } from './schema-migration-lock.js';
 export type { SchemaMigrationLock } from './schema-migration-lock.js';
+// [ADR-0154 D3 amended] The database session lock both named locks ride on:
+// `@objectstack/plugin-audit`'s audit seal lock takes it under its own name,
+// so a sealer pass and an `os migrate audit-* --apply` run exclude each other.
+export {
+  acquireDatabaseSessionLock,
+  databaseSessionLockPgKey,
+  tryDatabaseSessionLock,
+} from './database-session-lock.js';
+export type { DatabaseSessionLock, DatabaseSessionLockRunOptions, DatabaseSessionLockWait } from './database-session-lock.js';
