@@ -3435,7 +3435,7 @@ function viaHostParameter(call) {
  * [#30147] The catch side's cross-file hop through the `sql-driver.ts` facade.
  *
  * `collectLoggedLevels` follows a catch's log helper to its body by NAME, in
- * the same file. The sql-driver codemod (`scripts/codemod-split-sql-driver.mjs`,
+ * the same file. The sql-driver codemod (split by #30139;
  * #30105) moves a `SqlDriver` method's body into a stateless facet class in a
  * `sql-driver-*.ts` section module and leaves a one-call stub behind, so that
  * lookup met the move twice, and both times read a loud catch as silent:

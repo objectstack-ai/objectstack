@@ -847,6 +847,11 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         await import('./scim-connection-service.js');
       const { createScimGroupProjection } = await import('./scim-group-projection.js');
       const { createScimSsoAdoptionResolver } = await import('./scim-sso-adoption.js');
+      const { createScimManagerProjection } = await import('./scim-manager-projection.js');
+      const projectScimManager = createScimManagerProjection({
+        getDataEngine: () => this.getDataEngine() as never,
+        logger: this.config.logger as never,
+      });
       const secret = this.resolveAuthSecret();
       // [#32120] One stamper for this manager's SCIM plugin, so its
       // per-credential minute claims are shared by every request it verifies.
@@ -912,7 +917,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
             getEngine: () => this.getDataEngine() as never,
             readConnection: () => scimRequestScope.getStore(),
           }),
-          reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
+          // The Enterprise `manager` attribute onto `sys_user.manager_id`,
+          // after the lifecycle reconcile and in the same transaction, through
+          // the admin endpoint's own refusals. See `scim-manager-projection.ts`.
+          reconcileUser: async (state, context) => {
+            await this.reconcileScimUserLifecycle(state, context);
+            await projectScimManager(state, context);
+          },
         },
         // [ADR-0134 D4, filled for permission sets] A pushed group grants the
         // permission sets its `sys_idp_group_mapping` rows name, inside the

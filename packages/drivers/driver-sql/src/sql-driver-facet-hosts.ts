@@ -11,7 +11,7 @@
  * when a body assigns it), so a body reads and writes the driver exactly as
  * the per-call literal let it.
  *
- * Written by `scripts/codemod-split-sql-driver.mjs`; it imports types only, so it forms no
+ * Written by the sql-driver codemod (split by #30139); it imports types only, so it forms no
  * evaluation cycle and is evaluated before the class whichever module loads
  * first. `index.ts` re-exports nothing from this module.
  */

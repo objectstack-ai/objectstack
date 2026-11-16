@@ -66,16 +66,17 @@
  * one still in flight under the old language: the in-flight key includes the
  * headers.
  *
- * ## With no choice, state the app's declared default (objectstack#33231)
+ * ## With no choice, state a supported browser language, else the app default (objectstack#33985)
  *
  * The browser's header answered the `Accept-Language` rung for a user with no
- * `sys_user.locale`, so both the dates here and the language seed this read
- * refreshes followed the browser, never the app's declared default (discovery
- * `locale.default`). With no explicit choice on the device, this read states
- * that default instead, the same value `seedTenantLanguage()` states, so the
- * two still share one request on a first visit. Only when no default is
- * served (discovery failed, or never asked, as outside the console's boot)
- * does the browser's own header go out.
+ * `sys_user.locale`, whatever the app ships. With no explicit choice on the
+ * device, this read states the language the maintainer's ruling (letter B,
+ * record 6915665005) names for that user: the browser's language when the app
+ * lists it in discovery `locale.supported`, else the app's declared default
+ * (`locale.default`). It is the same value `seedTenantLanguage()` states
+ * (`loadPreferredLocale`), so the two still share one request on a first
+ * visit. Only when discovery answers neither (it failed, or was never asked,
+ * as outside the console's boot) does the browser's own header go out.
  */
 import { useEffect, useState } from 'react';
 import {
@@ -86,7 +87,7 @@ import {
   type LocalizationValue,
 } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
-import { startedAppDefaultLocale } from './languageSeed';
+import { startedPreferredLocale } from './languageSeed';
 import { useDataInvalidation } from '@object-ui/react';
 import {
   HttpFetchError,
@@ -126,8 +127,8 @@ export function LocalizationFetchProvider({
   // Bumps on every write to the signed-in user's own row (objectstack#27498).
   const userRowWrites = useDataInvalidation(userId ? 'sys_user' : undefined, userId);
   // The device's chosen UI language, stated as this read's `Accept-Language`
-  // (objectstack#27625); none chosen, the app's declared default is stated
-  // inside the effect (objectstack#33231).
+  // (objectstack#27625); none chosen, a supported browser language, else the
+  // app's declared default, is stated inside the effect (objectstack#33985).
   const { language } = useObjectTranslation();
   const statedLanguage = readStoredLanguage() ? language : undefined;
 
@@ -140,12 +141,13 @@ export function LocalizationFetchProvider({
 
     // Read when the effect runs, not at render: `seedTenantLanguage()` starts it
     // before the app mounts, and nothing in it is React state.
-    const appDefaultRead = statedLanguage ? null : startedAppDefaultLocale();
+    const preferredRead = statedLanguage ? null : startedPreferredLocale();
 
     void (async () => {
-      // No explicit choice ⇒ the app's declared default decides the rung below
-      // the user's own locale; none served, the browser's own header goes out.
-      const preference = statedLanguage ?? (appDefaultRead ? await appDefaultRead : undefined);
+      // No explicit choice ⇒ a supported browser language, else the app's
+      // declared default, decides the rung below the user's own locale;
+      // discovery answering neither, the browser's own header goes out.
+      const preference = statedLanguage ?? (preferredRead ? await preferredRead : undefined);
       if (cancelled) return;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         // Whose answer this attempt will be (objectui#10193). The request
