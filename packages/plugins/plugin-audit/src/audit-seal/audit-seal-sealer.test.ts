@@ -3,7 +3,8 @@
 import type { IAuditCheckpointSigner, IClusterService, LockHandle } from '@objectstack/spec/contracts';
 import { describe, expect, it } from 'vitest';
 import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes, verifyAuditLedger, type CheckpointSignedBody } from './index.js';
-import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
+import { bindingCrypto, lockableStore, memoryEngine, recordingLogger, sessionLockDatabase } from './seal-store.testkit.js';
+import { AUDIT_SEAL_PG_LOCK_KEY } from './seal-lock.js';
 import { AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS, AUDIT_SEAL_MAX_LEAVES, AUDIT_SEALER_LOCK, AuditSealer } from './sealer.js';
 import { LocalCheckpointSigner } from './signer.js';
 
@@ -859,5 +860,89 @@ describe('when it cannot seal it says so at error, again each hour while it last
     s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
     expect(await s.sealer.runPass()).toBe(0);
     expect(s.logger.lines).toEqual([]);
+  });
+});
+
+describe('the audit seal lock: each pass try-locks it beside audit.sealer, and skips while it is held (D3 amended, seat ruling 6885005594)', () => {
+  /** A setup whose hot store is a datasource of a database that keeps session locks. */
+  const lockable = (options: Parameters<typeof setup>[0] = {}) => {
+    const s = setup(options);
+    const db = sessionLockDatabase();
+    lockableStore(s.hot, db);
+    return { ...s, db };
+  };
+  const tries = (db: ReturnType<typeof sessionLockDatabase>) =>
+    db.statements.filter((st) => st.sql === 'select pg_try_advisory_lock(?::bigint) as locked');
+
+  it('takes it on the sealed object\'s hot store for the whole pass, under its own name, and lets it go when the pass ends', async () => {
+    const s = lockable();
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(9, 10)));
+    const heldAtWrite: Array<number | undefined> = [];
+    const insert = s.engine.insert.bind(s.engine);
+    s.engine.insert = async (...args: Parameters<typeof insert>) => {
+      if (args[0] === 'sys_audit_checkpoint') heldAtWrite.push(s.db.holder(AUDIT_SEAL_PG_LOCK_KEY));
+      return insert(...args);
+    };
+    expect(await s.sealer.runPass()).toBe(2);
+    expect(tries(s.db).map((st) => st.bindings)).toEqual([[AUDIT_SEAL_PG_LOCK_KEY]]);
+    const session = tries(s.db)[0].session;
+    expect(heldAtWrite).toEqual([session, session]);
+    expect(s.db.holder(AUDIT_SEAL_PG_LOCK_KEY)).toBeUndefined();
+    expect(s.db.open()).toEqual([]);
+  });
+
+  it('takes it on the datasource that holds the audit rows: the hot store, where it differs from the primary', async () => {
+    const s = setup();
+    const hotDb = sessionLockDatabase();
+    const primaryDb = sessionLockDatabase();
+    lockableStore(s.hot, hotDb);
+    // The checkpoints, the seeds and the signing key are on the primary: one more datasource, of another database.
+    const primary = lockableStore({
+      find: (object: string, query: Record<string, unknown>) => s.hot.find(object, query),
+      count: (object: string, query?: Record<string, unknown>) => s.hot.count(object, query),
+      create: (object: string, data: Record<string, unknown>) => s.hot.create(object, data),
+      delete: (object: string, id: string) => s.hot.delete(object, id),
+    }, primaryDb);
+    s.engine.getDriverForObject = (object: string) => (object === 'ledger_probe' ? s.hot : primary);
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(tries(hotDb)).toHaveLength(1);
+    expect(primaryDb.statements).toEqual([]);
+  });
+
+  it('skips the pass while another session holds it — an os migrate audit-* run — says so once, and seals on the first pass after', async () => {
+    const s = lockable();
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    const migration = await s.db.hold(AUDIT_SEAL_PG_LOCK_KEY);
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(s.hot.table('sys_audit_checkpoint')).toEqual([]);
+    expect(s.hot.table('sys_secret')).toEqual([]);
+    expect(s.db.open()).toEqual([migration.session]);
+    const skipped = s.logger.lines.filter((l) => /audit seal lock/.test(l.message));
+    expect(skipped.map((l) => l.level)).toEqual(['info']);
+    expect(skipped[0].message).toMatch(/'ledger_probe'.*held by another session.*skipped/);
+    migration.release();
+    // The skipped passes let audit.sealer go as well: the next pass takes both.
+    expect(await s.sealer.runPass()).toBe(1);
+  });
+
+  it('stores nothing once its session ends mid-pass, drops the seed it sealed, and fails the object\'s pass at error (a lock lapse)', async () => {
+    const s = lockable();
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    betweenReads(s, () => s.db.kill(s.db.holder(AUDIT_SEAL_PG_LOCK_KEY)!));
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(s.hot.table('sys_audit_checkpoint')).toEqual([]);
+    expect(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe')).toEqual([]);
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message))
+      .toEqual([expect.stringMatching(/sealing 'ledger_probe' FAILED \(the audit seal lock .*lapsed/)]);
+  });
+
+  it('on a datasource that offers no session lock, takes none and seals as before: B is the migrations\' to enforce', async () => {
+    const s = setup();
+    lockableStore(s.hot, { ...sessionLockDatabase(), face: { dialectName: 'sqlite', getKnex: () => { throw new Error('never asked'); } } });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(s.logger.lines.filter((l) => /audit seal lock/.test(l.message))).toEqual([]);
   });
 });
