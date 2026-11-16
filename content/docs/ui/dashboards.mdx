@@ -534,14 +534,18 @@ the base rows whose relationship points at a record it returned:
 
 On the native SQL path, too, a related-field condition that is not under
 `$not` never selects a row with no related record (an empty relationship, or
-one naming a record that no longer exists), whatever the operator, `$ne`,
-`$nin`, `$notContains`, `$null: true` and `$empty: true` included, so the two
-paths agree on such rows. The same `$or` keeps such rows on both paths. A
-related record that exists with no value in the field still satisfies `$ne` and
-`$nin`. Under `$not`, which the engine path refuses, the native path still
+one naming a record that no longer exists), whether it sits in the query's
+filter, a measure's own `filter` or the dataset's own `filter`: `$ne`, `$nin`,
+`$notContains`, `$null: true`, `$eq: null`, `$exists: false` and `$empty: true`
+included, so the two paths agree on such rows. The same `$or` brings back the
+rows with an empty relationship on both paths; a row naming a record that no
+longer exists is not brought back by it. A related record that exists with no
+value in the field still satisfies `$ne` and `$nin`. Two native-path exceptions
+remain: under `$not`, which the engine path refuses, the native path still
 selects such a row when the negated condition is a comparison with a value
-(`{ $not: { 'order.status': 'open' } }`); write `$ne` / `$nin` inside the
-condition instead.
+(`{ $not: { 'order.status': 'open' } }`), so write `$ne` / `$nin` inside the
+condition instead; and `$nin: []` (an empty list) selects every row on the
+native path, such rows included, where the engine path leaves them out.
 
 A related field in a **dataset's own** `filter`, or in a **measure's** own
 `filter`, is still evaluated only on the native SQL path; the engine-aggregate

@@ -3,7 +3,10 @@
 /**
  * A cross-object leaf (`'order.status'`, and through two hops) never selects a
  * detail row that has no parent — on the native SQL strategy as on the engine path and
- * the `/data` nested-relation filter — whatever the operator.
+ * the `/data` nested-relation filter — outside `$not`, for every operator pinned
+ * below. Two native answers still select one and are not pinned here: a
+ * positive comparison under `$not` (the engine refuses the shape) and
+ * `$nin: []`, which folds to the constant TRUE.
  *
  * ## What was wrong
  *
