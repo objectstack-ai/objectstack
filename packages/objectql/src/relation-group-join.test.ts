@@ -132,6 +132,32 @@ describe('relation group join — served as one driver statement whose related h
     });
   });
 
+  it('the base read is grouped by the relation field for every middleware, and only the driver\'s statement drops it', async () => {
+    // What the base read's chain sees, as a group-key guard reads it.
+    const seen: unknown[] = [];
+    engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+      if (op.object === LINE) seen.push(op.ast.groupBy);
+      await next();
+    });
+    rec.answer([{ region: 'emea', __rg0_a0: 'won', __rg0_resolved: 1, total: 10 }]);
+    const cases: Array<[unknown, unknown, unknown]> = [
+      // [the request's groupBy, what the chain sees, what the driver is handed]
+      [['region'], ['region', 'opportunity'], ['region']],
+      [undefined, ['opportunity'], undefined],
+      // A base dimension naming the FK column itself keeps its one entry.
+      [['opportunity'], ['opportunity'], ['opportunity']],
+    ];
+    for (const [groupBy, chain, statement] of cases) {
+      seen.length = 0;
+      rec.calls.length = 0;
+      const req = request();
+      await engine.aggregate(LINE, { ...BASE_QUERY, groupBy } as never, { [RELATION_GROUP_BY]: req } as never);
+      expect(req.outcome).toEqual({ kind: 'joined' });
+      expect(seen).toEqual([chain]);
+      expect(rec.calls.map((c) => c.ast.groupBy)).toEqual([statement]);
+    }
+  });
+
   it('a related read whose planned scope is the deny sentinel hands a null parent: nothing of the related object is readable', async () => {
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
       if (op.object === OPP) op.ast.where = RLS_DENY_FILTER;
