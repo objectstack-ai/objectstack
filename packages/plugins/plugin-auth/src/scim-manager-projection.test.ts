@@ -448,7 +448,8 @@ describe('SCIM manager projection: silence is not a clear, and one predicate dec
 
     const refused = await adminSetManager(h, emp.userId, boss.userId);
     expect(refused?.status).toBe(403);
-    expect(refused?.body.error?.details?.reason).toBe('idp_provisioned');
+    expect(refused?.code).toBe('PERMISSION_DENIED');
+    expect(refused?.reason).toBe('idp_provisioned');
     expect(await managerOf(h, emp.userId)).toBeNull();
 
     const named = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
