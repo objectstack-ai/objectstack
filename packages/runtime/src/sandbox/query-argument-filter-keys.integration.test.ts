@@ -28,6 +28,7 @@ import { ObjectQL, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
 import type { ScriptContext, ScriptOrigin } from './script-runner.js';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 const DEAL = {
   name: 'filter_key_deal',
@@ -93,7 +94,8 @@ describe('a sandboxed data call reaches the engine with every filter key it was 
   }
 
   async function rows(): Promise<Array<{ owner_id: string; stage: string }>> {
-    const all = (await engine.find('filter_key_deal', { ...SYSTEM, orderBy: [{ field: 'owner_id', order: 'asc' }] } as any)) as any[];
+    const byOwner: EngineQueryOptions = { ...SYSTEM, orderBy: [{ field: 'owner_id', order: 'asc' }] };
+    const all = (await engine.find('filter_key_deal', byOwner)) as any[];
     return all.map((r) => ({ owner_id: r.owner_id, stage: r.stage }));
   }
 
@@ -186,13 +188,15 @@ describe('a sandboxed data call reaches the engine with every filter key it was 
     });
 
     it('a data payload crosses as before: the write lands and a field it does not set keeps its value', async () => {
-      const [first] = (await engine.find('filter_key_deal', { ...SYSTEM, where: { owner_id: 'u1' } } as any)) as any[];
+      const ownedByU1: EngineQueryOptions = { ...SYSTEM, where: { owner_id: 'u1' } };
+      const [first] = (await engine.find('filter_key_deal', ownedByU1)) as any[];
       const outcome = await run(
         `return await ctx.api.object('filter_key_deal').update({ id: ctx.input.id, stage: ctx.input.missing, amount: 11 });`,
         { input: { id: first.id } },
       );
       expect(outcome.ok).toBe(true);
-      const after = (await engine.findOne('filter_key_deal', { ...SYSTEM, where: { id: first.id } } as any)) as any;
+      const byId: EngineQueryOptions = { ...SYSTEM, where: { id: first.id } };
+      const after = (await engine.findOne('filter_key_deal', byId)) as any;
       expect(after).toMatchObject({ stage: 'won', amount: 11 });
     });
   });
