@@ -209,7 +209,7 @@ interface EnumeratedDriver {
   readonly name: string;
   readonly supports?: unknown;
   readonly dialectName?: unknown;
-  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
   connect(): Promise<void>;
   aggregate(...args: unknown[]): Promise<unknown>;
   find(...args: unknown[]): Promise<unknown>;
