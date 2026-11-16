@@ -65,6 +65,8 @@ What is cached is a result that every caller of the environment would receive be
 
 When an entry's time bound passes, the cache first confirms that nothing it depends on moved: every in-process counter at its stamped value, and one read that observes the out-of-process writers the bound exists for (the stored rows). If nothing moved, the entry is kept for another bound. Only a moved counter or a moved store reading recompiles.
 
+The confirmation must observe every out-of-process change D1 (b) names for the sources the entry read. ⛔ An entry that read a source the confirmation cannot observe (a loader reading files a deployment can edit under a running process, with no watcher telling this process) is recompiled at its bound and never renewed; or that source makes the cache decline. A renewal is a claim that nothing moved, and it may be made only about what was looked at.
+
 The confirmation must be strictly cheaper than the compile it avoids; if it is not, the cache has no reason to exist. This clause is what makes the cache serve the customer's usual path (a reload after the bound) and not only a warm repeat.
 
 ### D6 — The knob is deployment config, and `0` is a real path
@@ -80,7 +82,8 @@ Per ADR-0127 D9, the implementing change carries, at least:
 - the registry populated after a hit (D4);
 - a source with its counter hidden makes the cache decline (D2);
 - at `0`, the uncached read sequence (D6);
-- on expiry with nothing moved, no recompile; with the store moved, a recompile (D5).
+- on expiry with nothing moved, no recompile; with the store moved, a recompile (D5);
+- an entry that read a source the confirmation cannot observe is recompiled at its bound, not renewed (D5).
 
 A revocation-shaped pin asserts the end of the chain: the changed metadata is in the next answer, not merely that an entry was cleared.
 
