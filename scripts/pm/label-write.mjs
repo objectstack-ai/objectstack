@@ -1551,8 +1551,8 @@ export async function landDogfoodGate({ repo, issue, card, doCall }) {
     }
     const listed = await doCall('comments-list', `/repos/${repo}/issues/${delivered.card}/comments?per_page=100&page=${page}`, {});
     if (listed.verdict !== 'ok') {
-      // A 404 is as likely the body naming the wrong card as the platform failing to answer: name both remedies.
-      return unread(`card #${delivered.card}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card the body names (#${delivered.card})` : ''}`);
+      // A 404 is as likely the pull delivering the wrong card (its body or its branch) as the platform failing to answer.
+      return unread(`card #${delivered.card}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card this pull delivers (#${delivered.card})` : ''}`);
     }
     if (!Array.isArray(listed.json)) return refuse(`card #${delivered.card}'s thread answered no list on page ${page}`, 'land again once the card reads');
     rows.push(...listed.json);
@@ -3112,7 +3112,7 @@ export async function selfTest() {
     const pageCount = (await land(cases['a TRUNCATED listing'][0])).fake.calls.filter((c) => c.op === 'comments-list').length;
     const card404 = await land(cases['a card thread that does not read'][0]);
     const cardLimited = await land(cases['a RATE-LIMITED card thread read'][0]);
-    t('…a card thread answering 404 also names the body\'s card as the thing to correct; a rate-limited read does not', [card404.text.includes('HTTP 404'), card404.text.includes('or correct the card the body names (#8)'), cardLimited.text.includes('or correct the card the body names')], [true, true, false], card404.text.slice(-400));
+    t('…a card thread answering 404 also names the body\'s card as the thing to correct; a rate-limited read does not', [card404.text.includes('HTTP 404'), card404.text.includes('or correct the card this pull delivers (#8)'), cardLimited.text.includes('or correct the card this pull delivers')], [true, true, false], card404.text.slice(-400));
     t('…the truncated listing read exactly the page cap and stopped', pageCount, LAND_COMMENT_PAGE_CAP);
 
     // Whose report, and which one.
@@ -3137,10 +3137,10 @@ export async function selfTest() {
     // ↔ the rules text names this gate where `--land` is taught, and the gate's rule path is still the file that holds the rule.
     const landingText = readFileSync(new URL('.claude/skills/pm-dispatch/references/landing-operations.md', REPO_ROOT), 'utf8');
     const gateLine = landingText.split('\n').find((l) => l.includes('`--land`') && l.includes('`(narrowing)`')) ?? '';
-    const ruleText = readFileSync(new URL(LAND_DOGFOOD_RULE_PATH, REPO_ROOT), 'utf8');
-    t('↔ landing-operations.md names the gate on a `--land` line (`!`, `(narrowing)`, dogfood, os-dev.md); the gate\'s rule path is os-dev.md and holds the `!`/`(narrowing)` rule and its report key',
-      [gateLine.includes('`!`'), gateLine.includes('dogfood'), gateLine.includes('`os-dev.md`'), LAND_DOGFOOD_RULE_PATH, ruleText.includes('(narrowing)') && ruleText.includes(`"${LAND_DOGFOOD_REPORT_KEY}"`)],
-      [true, true, true, '.claude/agents/os-dev.md', true]);
+    const ruleLine = readFileSync(new URL(LAND_DOGFOOD_RULE_PATH, REPO_ROOT), 'utf8').split('\n').find((l) => l.includes('dogfood') && l.includes('`!`') && l.includes('`(narrowing)`')) ?? '';
+    t('↔ both ends name the same rule, one line each: landing-operations.md\'s `--land` line carries `!`, `(narrowing)`, dogfood and `os-dev.md`, and the gate\'s rule path (os-dev.md) has ONE line carrying dogfood, `!` and `(narrowing)` together',
+      [gateLine.includes('`!`'), gateLine.includes('dogfood'), gateLine.includes('`os-dev.md`'), LAND_DOGFOOD_RULE_PATH, ruleLine !== ''],
+      [true, true, true, '.claude/agents/os-dev.md', true], `rule line: ${JSON.stringify(ruleLine)}`);
 
     // Ordering and shape.
     const early = await land(pull({ cards: { 8: [report(NA)] } }));
