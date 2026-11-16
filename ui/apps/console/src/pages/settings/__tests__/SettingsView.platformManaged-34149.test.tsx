@@ -209,6 +209,16 @@ describe('the hosted AI page (objectstack#34149)', () => {
     expect(screen.queryByTestId('settings-ai-provider-managed')).toBeNull();
   });
 
+  it('CONTROL: a page served without a provider on a self-hosted environment draws no line', async () => {
+    authFeatures = { cloudManaged: false };
+    getSettingsNamespace.mockResolvedValue(AI_PROJECTED);
+    renderView('ai');
+
+    expect(await screen.findByText('Generate titles')).toBeTruthy();
+    await waitFor(() => expect(getAuthConfig).toHaveBeenCalled());
+    expect(screen.queryByTestId('settings-ai-provider-managed')).toBeNull();
+  });
+
   it('CONTROL: a hosted server that still serves the provider draws its form and no line', async () => {
     authFeatures = { cloudManaged: true };
     getSettingsNamespace.mockResolvedValue(AI_FULL);
