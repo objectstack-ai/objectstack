@@ -27,7 +27,6 @@ import { tmpdir } from 'node:os';
 // clocked `it` (`scripts/check-test-source-alias.mjs`): the plugin reaches the
 // seed loader through a dynamic `import()`.
 import '@objectstack/runtime';
-import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { INSTALLER_ORGANIZATION, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
@@ -53,7 +52,13 @@ function rowMatches(row: Row, where: Record<string, unknown> = {}): boolean {
     });
 }
 
-/** A faithful in-memory engine: `where` filters, ids minted on insert. `store` outlives a boot. */
+/**
+ * A faithful in-memory engine: `where` filters, ids minted on insert. `store`
+ * outlives a boot. Reads and inserts only: every dataset here is `ignore`
+ * (create-only), and a person's deletion is a direct edit of `store`, so no
+ * load here writes anything but an insert (the owner stamp asks `update` and
+ * skips an engine without one; the rows have no owner column anyway).
+ */
 function createEngine(store: Record<string, Row[]>) {
     let next = 0;
     const engine: any = {
@@ -63,21 +68,11 @@ function createEngine(store: Record<string, Row[]>) {
             if (typeof query?.limit === 'number') rows = rows.slice(0, query.limit);
             return rows.map((r) => ({ ...r }));
         },
-        async findOne(object: string, query?: any) {
-            assertEngineFindOnePredicate(object, query);
-            return (await engine.find(object, { ...query, limit: 1 }))[0] ?? null;
-        },
         async insert(object: string, data: any) {
             const mint = (d: Row) => ({ id: d.id ?? `gen_${object}_${++next}`, ...d });
             const rows = Array.isArray(data) ? data.map(mint) : [mint(data)];
             (store[object] ??= []).push(...rows);
             return Array.isArray(data) ? rows.map((r) => ({ ...r })) : { ...rows[0] };
-        },
-        async update(object: string, data: any, options?: any) {
-            assertEngineUpdateDispatch(data, options);
-            const row = (store[object] ?? []).find((r) => r.id === data.id);
-            if (row) Object.assign(row, data);
-            return row ? { ...row } : null;
         },
         async count(object: string, query?: any) {
             return (await engine.find(object, query)).length;
