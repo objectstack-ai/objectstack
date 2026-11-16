@@ -25,6 +25,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The read gate loads `@objectstack/spec/ui` with a dynamic import; pay that load at collection.
+import '@objectstack/spec/ui';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { translateMetaDocument, translateMetaList, type MetaListTranslationSources } from './meta-item-read-gate.js';
 
@@ -156,5 +158,113 @@ describe('a published fieldPatches label survives the served /meta exit', () => 
         const out: any = await translateMetaDocument(sources(reg, 'zh-CN'), 'object', served(reg));
         expect(titleOf(out).label).toBe('标题');
         expect(todoOf(out).label).toBe('待办');
+    });
+});
+
+describe('a field a dependent package adds through objectExtensions is translated from its own pack rows', () => {
+    // The dependent ships `cb_market` (a select) on the base's object and the
+    // zh-CN rows for it; the deployment catalog deep-merges every package's
+    // rows, so they sit beside the owner's. Measured before the fix: the item
+    // and list reads served `Market` / `Domestic` / `Export` under zh-CN,
+    // because the packaged base (the owner alone) did not declare the field
+    // and every slot of it counted as authored after the fact.
+    const DEP_PKG = 'com.example.carbon';
+    const MARKET = {
+        name: 'cb_market',
+        type: 'select',
+        label: 'Market',
+        options: [
+            { value: 'domestic', label: 'Domestic' },
+            { value: 'export', label: 'Export' },
+        ],
+    };
+    const DEP_ROWS: Record<string, any> = {
+        en: { cb_market: { label: 'Market', options: { domestic: 'Domestic', export: 'Export' } } },
+        'zh-CN': {
+            cb_market: { label: '市场', options: { domestic: '内销', export: '出口' } },
+            tenant_note: { label: '备注' },
+        },
+    };
+    const merged: Record<string, any> = structuredClone(BUNDLE);
+    for (const locale of Object.keys(DEP_ROWS)) Object.assign(merged[locale].objects[OBJ].fields, DEP_ROWS[locale]);
+    const mergedI18n = { ...i18nService, getTranslations: (locale: string) => merged[locale] };
+
+    function withDependent(extensionFields: Record<string, unknown> = { cb_market: MARKET }): SchemaRegistry {
+        const reg = registry(false);
+        reg.registerObject({ name: OBJ, fields: extensionFields } as any, DEP_PKG, undefined, 'extend', 200);
+        return reg;
+    }
+
+    function mergedSources(reg: SchemaRegistry, locale: string): MetaListTranslationSources {
+        return { ...sources(reg, locale), resolveI18nService: async () => mergedI18n };
+    }
+
+    const marketOf = (doc: any) => doc.fields.cb_market;
+
+    it('the item read serves the added field\'s label and option labels translated (zh-CN)', async () => {
+        const reg = withDependent();
+        const out: any = await translateMetaDocument(mergedSources(reg, 'zh-CN'), 'object', served(reg));
+        expect(marketOf(out).label).toBe('市场');
+        expect(marketOf(out).options.map((o: any) => o.label)).toEqual(['内销', '出口']);
+    });
+
+    it('the list read serves them translated too (zh-CN), and the source text in en', async () => {
+        const reg = withDependent();
+        const zh: any = await translateMetaList(mergedSources(reg, 'zh-CN'), 'object', [served(reg)]);
+        expect(marketOf(zh[0]).label).toBe('市场');
+        expect(marketOf(zh[0]).options.map((o: any) => o.label)).toEqual(['内销', '出口']);
+        const en: any = await translateMetaList(mergedSources(reg, 'en'), 'object', [served(reg)]);
+        expect(marketOf(en[0]).label).toBe('Market');
+    });
+
+    it('the base package\'s own fields are translated as before', async () => {
+        const reg = withDependent();
+        const out: any = await translateMetaDocument(mergedSources(reg, 'zh-CN'), 'object', served(reg));
+        expect(out.label).toBe('任务');
+        expect(titleOf(out).label).toBe('标题');
+        expect(out.fields.status.options.map((o: any) => o.label)).toEqual(['待办', '已完成']);
+    });
+
+    it('a dependent that redeclares an OWNER field keeps its label: the owner stays that field\'s packaged base', async () => {
+        const reg = withDependent({ cb_market: MARKET, title: { name: 'title', type: 'text', label: 'Headline' } });
+        const out: any = await translateMetaDocument(mergedSources(reg, 'zh-CN'), 'object', served(reg));
+        expect(titleOf(out).label).toBe('Headline');
+        expect(marketOf(out).label).toBe('市场');
+    });
+
+    it('a later extender that adds the same name and is DISABLED is withheld from the base as from the fold: the enabled one\'s field is translated', async () => {
+        const reg = withDependent();
+        reg.installPackage({ id: 'com.example.later', name: 'later', version: '1.0.0' } as any, 'code');
+        reg.registerObject(
+            { name: OBJ, fields: { cb_market: { ...MARKET, label: 'Sales Market' } } } as any,
+            'com.example.later',
+            undefined,
+            'extend',
+            300,
+        );
+        reg.disablePackage('com.example.later');
+        // The premise: the fold serves the enabled extender's declaration.
+        expect(marketOf(served(reg)).label).toBe('Market');
+        expect((reg.getPackagedObjectBase(OBJ) as any).fields.cb_market.label).toBe('Market');
+        const out: any = await translateMetaDocument(mergedSources(reg, 'zh-CN'), 'object', served(reg));
+        expect(marketOf(out).label).toBe('市场');
+        expect(marketOf(out).options.map((o: any) => o.label)).toEqual(['内销', '出口']);
+    });
+
+    it('a field a tenant overlay adds stays authored after the fact and keeps its text', async () => {
+        const reg = withDependent();
+        reg.registerObject(
+            {
+                ...owner(),
+                fields: { ...owner().fields, tenant_note: { name: 'tenant_note', type: 'text', label: 'Note' } },
+                _packageId: 'sys_metadata', _provenance: 'org',
+            } as any,
+            'sys_metadata',
+            undefined,
+            'overlay',
+        );
+        const out: any = await translateMetaDocument(mergedSources(reg, 'zh-CN'), 'object', served(reg));
+        expect(out.fields.tenant_note.label).toBe('Note');
+        expect(marketOf(out).label).toBe('市场');
     });
 });
