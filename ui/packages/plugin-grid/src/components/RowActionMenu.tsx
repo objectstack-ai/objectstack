@@ -694,13 +694,12 @@ export const RowActionMenuItems: React.FC<{
     row, editPredicates, deletePredicates, objectFields, onEdit, onDelete, onAction, onActionDef, crudVerdictPending,
   } = props;
   // [objectstack#34208] A menu showing this row's items is the row's actions
-  // in use — whichever menu hosts them. Read through a ref so the call is made
-  // once per mount, whatever identity the callback arrives with.
-  const demandRef = React.useRef(props.onActionsDemand);
-  demandRef.current = props.onActionsDemand;
+  // in use — whichever menu hosts them. A repeat call is free, so a new
+  // callback identity re-running this costs nothing.
+  const { onActionsDemand } = props;
   React.useEffect(() => {
-    demandRef.current?.();
-  }, []);
+    onActionsDemand?.();
+  }, [onActionsDemand]);
   return (
     <>
       {/* Rendered off the PLAN, the same object the trigger's existence
