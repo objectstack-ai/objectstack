@@ -664,6 +664,9 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * audit and realtime run where they run outside a scope, so a rule or hook
      * that reads a parent's summary during the batch reads the value from
      * before the batch, as during a predicate update.
+     * The scope is ambient: it covers every write made while the callback
+     * runs, including writes a hook issues on another object (a hook's own
+     * insert, update or delete), whose roll-ups are deferred to the end too.
      * A summary over a summary still recomputes in dependency order.
      *
      * Every way out of the callback recomputes. Resolved: the callback's

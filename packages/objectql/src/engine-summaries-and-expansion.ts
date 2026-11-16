@@ -107,7 +107,10 @@ export interface SummaryBatchScope {
  * (`isSystem`), so what still tells two callers apart is the tenant it is
  * scoped to and the user the parent's hooks are told triggered it. Identity
  * of the context object would not do: the security middleware hands every
- * operation its own copy of the caller's context.
+ * operation its own copy of the caller's context. Two writes under the same
+ * user and tenant but a different transaction handle share one entry, and the
+ * first recorded row's context (and its transaction handle) is the one the
+ * recompute runs under.
  */
 function summaryBatchKey(childObject: string, execCtx: ExecutionContext | undefined): string {
   const ctx = execCtx as { tenantId?: unknown; userId?: unknown } | undefined;

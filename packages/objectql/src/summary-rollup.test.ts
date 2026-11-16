@@ -977,6 +977,44 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
     expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 4 });
   });
 
+  it('the scope is ambient: a hook-issued insert into a second child of the same parent is deferred to the end too', async () => {
+    // A second child object of `inv`, counted by a summary the recompute of
+    // `inv_line` does not touch, and a hook on each line that inserts a note.
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        note_count: { type: 'summary', summaryOperations: { object: 'inv_note', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_note',
+      fields: { text: { type: 'text' }, inv: { type: 'master_detail', reference: 'inv' } },
+    } as any);
+    const { a, b, c, lines } = await seed();
+    engine.registerHook('afterUpdate', async (ctx: any) => {
+      const row = await engine.findOne('inv_line', { where: { id: ctx.id ?? ctx.input?.id } });
+      await engine.insert('inv_note', { text: 'changed', inv: (row as any).inv });
+    }, { object: 'inv_line' });
+    const before = log.length;
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+      // Six notes are stored, and no parent was recomputed for them yet.
+      expect(storeFor('inv_note').size).toBe(6);
+      expect(parentWrites).toHaveLength(0);
+      expect(storeFor('inv').get(a.id)).not.toHaveProperty('note_count', 2);
+    });
+    // One recompute per child object for the batch, each one write per parent:
+    // 3 parents x 2 child objects, where a per-row loop pays 6 rows x 2.
+    expect(parentWrites).toHaveLength(6);
+    expect(log.slice(before).filter((e) => e.op === 'find' && e.object === 'inv_note').length).toBe(1);
+    for (const p of [a, b, c]) expect(storeFor('inv').get(p.id)).toMatchObject({ line_count: 2, note_count: 2 });
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50 });
+  });
+
   it('a scope with no roll-up write runs nothing', async () => {
     const before = log.length;
     await engine.deferSummaryRecompute(async () => { await engine.insert('region', { name: 'R' }); });
