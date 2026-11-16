@@ -1027,11 +1027,21 @@ describe('runCard — a standing security-rollup-source-unreadable on a child th
           [`${p('project')}.total_estimate`]: { readable: false },
           ...(opts.actualHours ? { [`${p('task')}.actual_hours`]: { readable: false } } : {}),
         },
+        // The contractor reads its own tasks only: the rule's `info` arm on task_count.
+        rowLevelSecurity: [{ name: 'contractor_own_tasks', object: p('task'), operation: 'select', using: "assignee == current_user.id" }],
       },
       {
         name: p('client_viewer'),
         objects: { [p('project')]: { allowRead: true } },
-        ...(opts.masked ? { fields: { [`${p('project')}.task_count`]: { readable: false }, [`${p('project')}.total_estimate`]: { readable: false } } } : {}),
+        ...(opts.masked
+          ? {
+              fields: {
+                [`${p('project')}.task_count`]: { readable: false },
+                [`${p('project')}.total_estimate`]: { readable: false },
+                ...(opts.actualHours ? { [`${p('project')}.total_actual`]: { readable: false } } : {}),
+              },
+            }
+          : {}),
       },
     ],
   });
@@ -1107,8 +1117,11 @@ describe('runCard — a standing security-rollup-source-unreadable on a child th
   it('not charged: a standing warning over a child field the card does not withhold, and the info row-scope arm', () => {
     const built = projectArtifact({ masked: true, actualHours: true });
     const standing = validateRollupSourceVisibility({ objects: built.objects, permissions: built.permissions });
-    // The rule does stand on the contractor's set: it cannot read task.actual_hours under project.total_actual.
-    expect(standing.map((f) => [f.rule, f.where])).toContainEqual(['security-rollup-source-unreadable', 'permission set "demoproject_contractor" · summary field "demoproject_project.total_actual"']);
+    // The rule does stand on the contractor's set: it cannot read task.actual_hours under project.total_actual; and its row policy scopes task_count.
+    expect(standing.map((f) => [f.rule, f.where])).toEqual([
+      ['security-rollup-source-row-scoped', 'permission set "demoproject_contractor" · summary field "demoproject_project.task_count"'],
+      ['security-rollup-source-unreadable', 'permission set "demoproject_contractor" · summary field "demoproject_project.total_actual"'],
+    ]);
     expect(rollupSourceCharges(scenario, built)).toEqual([]);
   });
 
@@ -1131,9 +1144,33 @@ describe('runCard — a standing security-rollup-source-unreadable on a child th
     ]);
   });
 
+  it('template mode: the iterate build it scores (what the app serves after the change) is charged the same way; ask mode authors nothing and has no Build half to charge', async () => {
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => undefined,
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => new FakeApp(),
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    const r = await runCard(original, quiet, ops, { modes: ['template', 'ask'], admin: ADMIN, templateArtifact: projectArtifact() });
+    const [template, ask] = r.modes;
+    expect(template!.template?.install.ok).toBe(true);
+    expect(template!.iterate!.build.rollupSourceUnreadable?.map((c) => c.rollup)).toEqual(['demoproject_project.task_count', 'demoproject_project.total_estimate']);
+    expect(cardScorecard(r).modes[0]!.findings.filter((f) => f.startsWith('iterate build: the roll-up '))).toHaveLength(2);
+    expect(ask!.build).toBeUndefined();
+    expect(cardScorecard(r).modes[1]!.findings.filter((f) => f.includes('roll-up'))).toEqual([]);
+  });
+
   it('reads the build’s artifact as the scorer does: collections under packages[] count too', () => {
     const { manifest, ...body } = projectArtifact();
-    const multi = { manifest, packages: [{ manifest: { ...manifest, ...body } }] };
+    const multi = { manifest, packages: [{ manifest: { ...manifest, name: 'demoproject', version: '1.0.0', type: 'app', ...body } }] };
     expect(rollupSourceCharges(scenario, multi).map((c) => c.rollup)).toEqual(['demoproject_project.task_count', 'demoproject_project.total_estimate']);
   });
 
