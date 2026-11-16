@@ -2,6 +2,7 @@
 '@objectstack/spec': minor
 '@objectstack/metadata-protocol': minor
 '@objectstack/runtime': minor
+'@objectstack/cli': minor
 ---
 
 feat(spec, metadata-protocol): a seed dataset can declare `dependsOn`, the objects it loads after, for an order no lookup field gives
