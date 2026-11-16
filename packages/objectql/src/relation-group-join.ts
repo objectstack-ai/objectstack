@@ -19,7 +19,22 @@
  * (`ObjectQLStrategy`), through its plugin's engine bridge; it is a
  * `Symbol.for` key because that package does not depend on this one at
  * runtime. Holding the key grants nothing: the engine plans the related read
- * itself, as the caller, below.
+ * itself, as the caller, below, and judges the base read as grouped by each
+ * relation field.
+ *
+ * ## The base relation field is a group key to every door
+ *
+ * The FK-expand groups the base read by the relation field (`opportunity`),
+ * so every guard that judges a group key — the field-level read gate on an
+ * aggregate's inputs first among them — judges that field for the caller.
+ * The join replaces that group key, but not that verdict: the AST the
+ * middleware chain sees is grouped by each relation field `groupBy` does not
+ * already name ({@link relationFieldsJudgedAsGroupKeys}), and only after
+ * the chain has run does the engine take those keys back out of the
+ * statement it hands the driver ({@link withoutJudgedRelationFields}), the
+ * join taking their place. So a caller who may not read the relation field
+ * is refused on this path by the same gate, in the same words, as on the
+ * FK-expand — ⛔ no second copy of any field gate lives here.
  *
  * ## How the related half is built: the related object's own read, planned
  *
@@ -226,6 +241,42 @@ export function assertRelationGroupRequestShape(
     }
     claim(relation.resolvedAlias, `the resolved column of '${relation.field}'`);
   }
+}
+
+/** The field a `groupBy` entry names: a plain string, or a structured `{ field }` item. */
+function groupKeyField(entry: unknown): string | undefined {
+  if (typeof entry === 'string') return entry;
+  const field = (entry as { field?: unknown } | null | undefined)?.field;
+  return typeof field === 'string' ? field : undefined;
+}
+
+/**
+ * The relation fields the base read is judged as grouped by: each relation
+ * field of the request that `groupBy` does not already name (a base
+ * dimension that names the FK column itself keeps its own entry). The engine
+ * adds them to the AST the middleware chain sees, so every guard that judges
+ * a group key judges them as it does on the FK-expand's base read.
+ */
+export function relationFieldsJudgedAsGroupKeys(request: RelationGroupByRequest, groupBy: unknown): string[] {
+  const named = new Set((Array.isArray(groupBy) ? groupBy : []).map(groupKeyField));
+  return [...new Set(request.relations.map((r) => r.field))].filter((field) => !named.has(field));
+}
+
+/**
+ * The statement the driver is handed: the chain's final AST without the
+ * relation fields {@link relationFieldsJudgedAsGroupKeys} added for it — the
+ * join replaces them as group keys. An AST whose own `groupBy` was absent
+ * stays absent when nothing else is left in it.
+ */
+export function withoutJudgedRelationFields<T extends { groupBy?: unknown }>(
+  ast: T,
+  judged: readonly string[],
+  ownGroupBy: unknown,
+): T {
+  if (judged.length === 0 || !Array.isArray(ast.groupBy)) return ast;
+  const drop = new Set(judged);
+  const kept = (ast.groupBy as unknown[]).filter((entry) => !(typeof entry === 'string' && drop.has(entry)));
+  return { ...ast, groupBy: kept.length === 0 && !Array.isArray(ownGroupBy) ? undefined : kept };
 }
 
 /** What {@link relationGroupRegistryDecline} reads off the engine. */

@@ -82,8 +82,8 @@ import type { EngineReadOptions, OperationContext } from './engine-top-level.js'
 import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
 import {
   assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
-  RELATION_GROUP_JOINS, relationGroupByRequestOf, relationGroupJoinsAtBoundary, relationGroupRegistryDecline,
-  type PlannedRelationGroup,
+  RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
+  relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
 } from './relation-group-join.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
@@ -1292,6 +1292,14 @@ export class DeleteAndAggregateFacet {
           );
           if (plannedRelationGroups === null) return [];
       }
+      // [relation group join] The base read is judged as grouped by each
+      // relation field the join replaces, exactly as the FK-expand's base read
+      // is: those keys ride the AST every middleware sees (the field-level
+      // gate on an aggregate's group keys among them) and leave it only at the
+      // driver call below, where the join takes their place.
+      const judgedRelationFields = relationGroup === undefined
+          ? []
+          : relationFieldsJudgedAsGroupKeys(relationGroup, query.groupBy);
 
       const opCtx: OperationContext = {
         object,
@@ -1302,7 +1310,7 @@ export class DeleteAndAggregateFacet {
         ast: {
             object,
             where: query.where,
-            groupBy: query.groupBy,
+            groupBy: judgedRelationFields.length > 0 ? [...(query.groupBy ?? []), ...judgedRelationFields] : query.groupBy,
             aggregations: query.aggregations,
             // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
             // guard walks its references (predicate-guard.ts) and a future
@@ -1445,7 +1453,8 @@ export class DeleteAndAggregateFacet {
             }
             const joins = relationGroupJoinsAtBoundary(relationGroup, plannedRelationGroups, aggregateOptions);
             if (joins === null) return [];
-            const joined = await drv.aggregate(object, { ...ast, [RELATION_GROUP_JOINS]: joins }, aggregateOptions);
+            const statement = withoutJudgedRelationFields(ast, judgedRelationFields, query.groupBy);
+            const joined = await drv.aggregate(object, { ...statement, [RELATION_GROUP_JOINS]: joins }, aggregateOptions);
             assertRelationGroupRowsJoined(object, drv.name, joined, joins);
             relationGroup.outcome = { kind: 'joined' };
             return applyHaving(joined, ast.having, havingColumnClasses);
