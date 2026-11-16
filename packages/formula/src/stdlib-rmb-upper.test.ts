@@ -193,6 +193,24 @@ describe('rmbUpper — an exponent spelling is judged before it is converted', (
     },
   );
 
+  it.each(['9999999999999999.995', '-9999999999999999.995', '9.9999999999999999995e15'])(
+    '%s rounds up to 10^16 yuan and is refused as too large, never written as 亿亿',
+    (amount) => {
+      const { r } = timed(amount);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toContain('too large');
+    },
+  );
+
+  it('CONTROL — one 0.001 below that rounds down and is written', () => {
+    expect(upper('9999999999999999.994')).toBe(
+      '玖仟玖佰玖拾玖万玖仟玖佰玖拾玖亿玖仟玖佰玖拾玖万玖仟玖佰玖拾玖元玖角玖分',
+    );
+    expect(upper('-9999999999999999.994')).toBe(
+      '负玖仟玖佰玖拾玖万玖仟玖佰玖拾玖亿玖仟玖佰玖拾玖万玖仟玖佰玖拾玖元玖角玖分',
+    );
+  });
+
   it('digits below the 0.001 place never move the rounding', () => {
     expect(upper('1.0049' + '9'.repeat(1000))).toBe('壹元整');
     expect(upper('1.005' + '0'.repeat(1000))).toBe('壹元零壹分');

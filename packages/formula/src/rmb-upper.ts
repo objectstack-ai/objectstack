@@ -38,7 +38,8 @@
  *
  * The spelling is judged before any conversion ({@link spelledFen}): its
  * magnitude is read off its digits and exponent, an amount of 10^16 yuan or
- * more is refused there, an amount below 0.001 is zero there, and only the
+ * more is refused there (and again after rounding, which can carry
+ * 9999999999999999.995 up to 10^16), an amount below 0.001 is zero there, and only the
  * digits down to the 0.001 place — the place half-away-from-zero rounding to
  * 分 reads — are converted. So the work is bounded by the length of the text,
  * whatever its exponent says.
@@ -64,6 +65,9 @@ const DECIMAL_SPELLING = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
  * (一亿亿, which the 万/亿 scheme would have to write as 亿亿) is refused.
  */
 const TOP_PLACE = 15;
+
+/** 10^16 yuan in 分: the smallest amount refused once rounded. */
+const LIMIT_FEN = 10n ** 18n;
 
 /** The lowest place rounding to 分 reads: 0.001. */
 const BOTTOM_PLACE = -3;
@@ -157,7 +161,11 @@ function spelledFen(amount: unknown): bigint {
   if (place < BOTTOM_PLACE) return 0n;
   const kept = digits.slice(lead, lead + place - BOTTOM_PLACE + 1).padEnd(place - BOTTOM_PLACE + 1, '0');
   const thousandths = BigInt(sign === '-' ? `-${kept}` : kept);
-  return divideToPlaces({ digits: thousandths, scale: -BOTTOM_PLACE }, { digits: 1n, scale: 0 }, 2).digits;
+  const fen = divideToPlaces({ digits: thousandths, scale: -BOTTOM_PLACE }, { digits: 1n, scale: 0 }, 2).digits;
+  // Rounding can carry an amount at the top place up to 10^16 itself
+  // (9999999999999999.995 → 10^16): refused like any other amount that large.
+  if ((fen < 0n ? -fen : fen) >= LIMIT_FEN) throw new Error(TOO_LARGE);
+  return fen;
 }
 
 /** A short, value-free description of a refused argument for the error text. */
