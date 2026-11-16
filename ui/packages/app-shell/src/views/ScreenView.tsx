@@ -110,7 +110,7 @@ import {
   SelectItem,
   cn,
 } from '@object-ui/components';
-import { ObjectForm } from '@object-ui/plugin-form';
+import { LazyObjectForm } from './lazyFormSurfaces.js';
 import { evalFieldPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { fileIdOf, getLazyFieldWidget } from '@object-ui/fields';
@@ -436,7 +436,7 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
     return (
       <div className={cn('py-2', className)}>
         {dataSource ? (
-          <ObjectForm
+          <LazyObjectForm
             key={screen.nodeId}
             schema={{
               type: 'object-form',

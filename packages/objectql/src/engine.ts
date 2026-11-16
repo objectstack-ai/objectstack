@@ -51,6 +51,7 @@ import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext }
 // [#25522 cut 2] The datasource-routing bodies; the methods of the same names
 // below hand each body the members it reads (`DatasourceRoutingHost`).
 import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
+import { relationSemiJoinServes } from './relation-semi-join.js';
 // [#25522 cut 3] The lifecycle health bodies; the methods of the same names
 // below hand each body the members it reads (`LifecycleHealthHost`).
 import { checkDriversHealth, resolvePrimaryDatasource } from './engine-lifecycle-health.js';
@@ -244,7 +245,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
-import { DETACHED_HOOK_RUN } from './unit-detach.js';
+import { DETACHED_HOOK_RUN, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
@@ -417,6 +418,12 @@ export class ObjectQL implements IObjectQLEngine {
      * caller populated, so every reader must treat it as optional.
      */
     scope?: TransactionScope;
+    /**
+     * [#33760] The `async: true` after-hook runs waiting for this unit's
+     * commit, when its owner opened one (`unit-detach.ts`). Absent where the
+     * entry's unit has no owner here to settle it, as `scope` is.
+     */
+    commitQueue?: UnitCommitQueue;
   }>();
 
   /**
@@ -427,7 +434,7 @@ export class ObjectQL implements IObjectQLEngine {
    * here ({@link isClosedUnitHandle}). Weak, so a finished unit's handle stays
    * collectable.
    */
-  private readonly openedUnits = new WeakMap<object, { transaction: unknown }>();
+  private readonly openedUnits = new WeakMap<object, { transaction: unknown; commitQueue?: UnitCommitQueue }>();
 
   /**
    * [#22305] The {@link CascadeDeleteSet} of the by-id cascade delete in
@@ -621,6 +628,7 @@ export class ObjectQL implements IObjectQLEngine {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
@@ -1543,9 +1551,10 @@ export class ObjectQL implements IObjectQLEngine {
     operation: 'find' | 'findOne' | 'count' | 'aggregate',
     ast: A,
     context: ExecutionContext | undefined,
+    driverOptions?: unknown,
   ): Promise<A> {
     // [#29986 codemod] The body moved to `engine-security-resolvers.ts`, its docblock with it (see `SecurityResolversHost`).
-    return (SecurityResolversFacet.composeReadableIdsAtBoundary<A>).call(securityResolversHost.of(this), object, operation, ast, context);
+    return (SecurityResolversFacet.composeReadableIdsAtBoundary<A>).call(securityResolversHost.of(this), object, operation, ast, context, driverOptions);
   }
 
   private async composeReadableIdsChain<N>(
@@ -2544,6 +2553,7 @@ export class ObjectQL implements IObjectQLEngine {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   }): void {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
     return ReferencesAndMasterDetailFacet.setI18nService.call(referencesAndMasterDetailHost.of(this), service);
@@ -4264,8 +4274,21 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return readRegistry(); },
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
+      relationSemiJoinServes: (...a) => this.relationSemiJoinServes(...a),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
+  }
+
+  /** Whether a read of `object` may plan its relation condition on `target` as a semi-join (`relation-semi-join.ts`). */
+  private relationSemiJoinServes(object: string, target: string): boolean {
+    const host: ThisParameterType<typeof relationSemiJoinServes> = {
+      uncomposableReadableIdsParent: (...a) => this.uncomposableReadableIdsParent(...a),
+      hasHooksFor: (...a) => this.hasHooksFor(...a),
+      getDriver: (...a) => this.getDriver(...a),
+      getObjectSchema: (name) => this._registry.getObject(name),
+      resolveEnginePosture: () => this.resolveEnginePosture(),
+    };
+    return relationSemiJoinServes.call(host, object, target);
   }
 
   private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
@@ -5369,9 +5392,9 @@ export class ObjectQL implements IObjectQLEngine {
     return (TransactionsSectionFacet.transaction<T>).call(transactionsSectionHost.of(this), callback, baseContext, opts);
   }
 
-  private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>): Promise<T> {
+  private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>, commitQueue?: UnitCommitQueue): Promise<T> {
     // [#29986 codemod] The body moved to `engine-transactions-section.ts`, its docblock with it (see `TransactionsSectionHost`).
-    return (TransactionsSectionFacet.runOpenedUnit<T>).call(transactionsSectionHost.of(this), trx, owner, body);
+    return (TransactionsSectionFacet.runOpenedUnit<T>).call(transactionsSectionHost.of(this), trx, owner, body, commitQueue);
   }
 
   private isClosedUnitHandle(handle: unknown): boolean {
@@ -6536,13 +6559,17 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * and the one this api carries treated as closed for the run
    * (`runOutsideOpenUnits`, `unit-detach.ts`). Called by `wrapDeclarativeHook`
    * when such a hook detaches, so its writes never enrol in a unit that
-   * commits under them.
+   * commits under them. [#33760] With `waitForCommit` (a write event's run,
+   * `waitsForUnitCommit`), started once the unit it was dispatched in
+   * commits, and answering `UNIT_ROLLED_BACK` without running when that unit
+   * rolls back (`runOutsideOpenUnitsOnCommit`); at once outside any unit, and
+   * at once for any other event (`afterFind`).
    *
    * Keyed on {@link DETACHED_HOOK_RUN}, a symbol the package entry does not
    * export, so it is no nameable member of this class's published face.
    */
-  [DETACHED_HOOK_RUN]<T>(body: () => T): T {
-    return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body);
+  [DETACHED_HOOK_RUN]<T>(body: () => Promise<T>, waitForCommit: boolean): Promise<T | typeof UNIT_ROLLED_BACK> {
+    return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body, waitForCommit);
   }
 
   /**

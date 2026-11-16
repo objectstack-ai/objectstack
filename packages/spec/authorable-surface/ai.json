@@ -376,6 +376,7 @@
     "ai/Skill:description",
     "ai/Skill:instructions",
     "ai/Skill:label",
+    "ai/Skill:mcpPrompt",
     "ai/Skill:name",
     "ai/Skill:protection",
     "ai/Skill:surface",

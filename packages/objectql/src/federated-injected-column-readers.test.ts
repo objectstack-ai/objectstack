@@ -224,6 +224,14 @@ const READERS: Record<string, Row> = {
     disposition: 'exempt',
     why: 'resolves the wall column only after the federated exemption',
   },
+  'engine-driver-options.ts#isDriverTenantScopedSchema :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: "the tenancy class a read's driver options follow: a federated object is handed no organization wall; it reads no row",
+  },
+  'relation-semi-join.ts#relationSemiJoinServes :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated related object keeps the id read, so no subquery is compiled against it; it reads no row',
+  },
   // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
   // validation predicates and formula fields share it; a formula's hop is read
   // as the caller outright, so its federated answer is the caller's own read.

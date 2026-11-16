@@ -287,9 +287,10 @@ export function readChannelRoute(svc: unknown): string | undefined {
  */
 export const AuthFamiliesSchema = lazySchema(() => z.object({
   admin: z.boolean().describe(
-    'Whether the better-auth admin family ({routes.auth}/admin/*: list-users, set-role, update-user, ban-user, …) '
+    'Whether the better-auth admin family ({routes.auth}/admin/*: list-users, set-role, update-user, impersonate-user, …) '
     + 'is mounted. Same value as features.admin on GET {routes.auth}/config, read from the same source; '
-    + 'false means those routes answer a plain 404 on this deployment.'
+    + 'false means those routes answer a plain 404 on this deployment. ban-user and unban-user are not in the family: '
+    + 'they are ObjectStack mounts, served whatever this says.'
   ),
 }).describe('Which optional better-auth route families are mounted under routes.auth'));
 

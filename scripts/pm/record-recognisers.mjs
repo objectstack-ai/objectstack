@@ -86,6 +86,8 @@ import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CONTRACT_REVIEW_HEADING_MARKER,
+  CONTRACT_REVIEW_SECURITY_TOUCHING_KEY,
+  CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES,
   H51_SHA_MIN_HEX,
   branchNameTarget,
   closingKeywordTargets,
@@ -99,6 +101,7 @@ import {
   directiveValues,
   labelNames,
   readSignatureLine,
+  refsTargets,
   SEAT_SIGNATURE_SESSION_SOURCE,
   seatOnDuty,
   stripSignatureLine,
@@ -108,6 +111,10 @@ import {
 // (#33501 for the low-risk skills arm, #33541 for every other leg), and, through the whole
 // reading, no FAIL spelled elsewhere and no open must-fix or should-fix (#33604). ⛔ Never a second parser.
 export { contractReviewRecordReading, contractReviewVerdictLines };
+// The record's `Security-touching:` line — the low-risk skills arm's machine line, read through the same
+// reading (`securityTouching`). Its key and its two values are re-exported so the template below prints
+// exactly what that reader takes, ⛔ never a second spelling.
+export { CONTRACT_REVIEW_SECURITY_TOUCHING_KEY, CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES };
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
@@ -135,7 +142,7 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
 // A mailbox message's `To:` line names a SEAT, spelled as the mailbox opener spells a seat — its
 // `seatKey`, imported, ⛔ never a second seat shape. That file imports nothing of this graph's
 // top-level-await half (only the relay validator and `gh-pages.mjs`), so the edge adds no cycle.
-import { MAILBOX_LABEL, mailboxBody, mailboxOwner, seatKey } from './mailbox-open.mjs';
+import { MAILBOX_LABEL, isL2ReviewLane, L2_REVIEW_LANE_WORDS, mailboxBody, mailboxOwner, seatKey } from './mailbox-open.mjs';
 // Who may ring a mailbox: the relay's identity (`RELAY_COMMENT_AUTHOR`, the op table's — that file is already
 // in this graph through `mailbox-open.mjs`) and the maintainers (`GOVERNED_APPROVERS`), judged by the queue
 // guard's own author predicate, ⛔ never a second list of logins. The guard imports nothing of this graph at
@@ -847,20 +854,20 @@ export function localRunsStand(reading) {
 
 /**
  * The `Contract-review-handoff:` key line -- the ONE way a dispatching seat
- * hands its contract review to a review seat or a sibling seat of its lane,
+ * hands its contract review to an L2 seat or a sibling seat of its lane,
  * read with `Reviewed-by:`'s own key discipline.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the seat that dispatched the work runs the review in
+ * 〈L2 归属与资格〉): the seat that dispatched the work runs the review in
  * its own seat at the contract-review tier. ONLY when that tier's call is
  * quota-refused does the seat hand the review over -- it never reviews at a
  * lower tier -- and the hand-off is one PR comment carrying this line beside
  * the existing `needs:contract-review` label:
  *
- *   Contract-review-handoff: review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
+ *   Contract-review-handoff: l2-review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
  *
- * Three facts, each required: the TARGET (a review seat `review#N`, or a
- * sibling seat of the lane `domain:<lane>#N` while no review seat is seated --
+ * Three facts, each required: the TARGET (an L2 seat `l2-review#N` -- old spelling `review#N`, still read -- or a
+ * sibling seat of the lane `domain:<lane>#N` while no L2 seat is seated --
  * the closed set of two shapes; ⛔ never `triage`, which takes no contract
  * review, so a line naming it is unreadable), the TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
  * spells it, ⛔ never a model id -- with its reason and UTC time in the
@@ -878,15 +885,15 @@ export const CONTRACT_REVIEW_HANDOFF_KEY = 'Contract-review-handoff';
  * The line exactly as the rule text prints it, placeholders included. This file's self-test pins it
  * VERBATIM in `references/contract-review.md`, so the text and `HANDOFF_TARGET` cannot drift apart.
  */
-export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
+export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <l2-review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
 const CONTRACT_REVIEW_HANDOFF_LINE = keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY);
 /** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
 const CONTRACT_REVIEW_HANDOFF_MARKER = new RegExp(CONTRACT_REVIEW_HANDOFF_LINE.source, 'm');
 /**
- * The target -- `review#N` or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
+ * The target -- `l2-review#N` (or its old spelling `review#N`: the opener's two L2 lane words) or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
  * hyphen pair, a hyphen or a colon), then the rest. `triage` and every other seat word match nothing.
  */
-const HANDOFF_TARGET = /^(review#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
+const HANDOFF_TARGET = new RegExp(`^((?:${L2_REVIEW_LANE_WORDS.join('|')})#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \\t]*(?:—|--|-|:)?[ \\t]*(.*)$`, 'i');
 /** `(reason, UTC time)` then ` · head SHA` -- the time is the LAST comma-separated item in the parentheses. */
 const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t]+`?([0-9a-fA-F]{7,40})`?[ \t]*$/;
 
@@ -896,7 +903,7 @@ const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t
  * @returns {{ state: 'missing' }
  *          | { state: 'unreadable', line: string }
  *          | { state: 'read', to: string, tier: string, reason: string, at: string, head: string }}
- *          `to` is the target seat, lower-cased (`review#1`, `domain:ui#2`).
+ *          `to` is the target seat, lower-cased (`l2-review#1`, `review#1`, `domain:ui#2`).
  */
 export function readContractReviewHandoff(text) {
   for (const line of String(text ?? '').split(/\r?\n/)) {
@@ -960,10 +967,10 @@ export function contractReviewHandoff(rows, headSha) {
 
 /**
  * The `Contract-review-claim:` key line -- who has STARTED the contract review
- * of one head, posted by that reviewer before it starts, lane seat or review seat.
+ * of one head, posted by that reviewer before it starts, lane seat or L2 seat.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the lane reviews its own; a review seat, or a sibling
+ * 〈L2 归属与资格〉): the lane reviews its own; an L2 seat, or a sibling
  * lane seat, takes one only when it is handed over or nobody is doing it. Before starting, every reviewer reads the PR:
  * a record or a LIVE claim on the current head means do not start. Otherwise it
  * posts ONE comment carrying this line first, then reviews:
@@ -1060,8 +1067,8 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  * Who holds this pull request's current head, read off its comment thread:
  *
  *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
- *               posted, a review seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
- *               keeps two review seats off one head), except that a legacy `triage#N` claim yields to
+ *               posted, an L2 seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
+ *               keeps two L2 seats off one head), except that a legacy `triage#N` claim yields to
  *               any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
@@ -1069,7 +1076,7 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  *
  * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
  * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
- * one signed `review#N · …` is the `review` side (`lanes/review.md`), and every other claim -- a
+ * one signed `l2-review#N · …` (or the old spelling `review#N · …`) is the `review` side (the L2 seat's, `lanes/l2-review.md`), and every other claim -- a
  * lane seat's, a sibling lane seat's, an unsigned one -- is the `lane` side. Between the review
  * and lane sides there is no precedence: the earliest posted holds. Unreadable claim lines are
  * returned by comment id and hold nothing.
@@ -1097,7 +1104,7 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
     const stamped = Date.parse(row?.created_at ?? '');
     const postedAt = Number.isFinite(stamped) ? stamped : line.at;
     const signedLane = readSignatureLine(row?.body)?.lane ?? null;
-    const side = signedLane === 'triage' ? 'triage' : signedLane === 'review' ? 'review' : 'lane';
+    const side = signedLane === 'triage' ? 'triage' : isL2ReviewLane(signedLane) ? 'review' : 'lane';
     const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
     claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
   }
@@ -1119,7 +1126,7 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
  * the triage seat claimed under gap rule (b) and then had to withdraw.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉, beside the claim line): the holding lane posts ONE comment
+ * 〈L2 归属与资格〉, beside the claim line): the holding lane posts ONE comment
  * carrying this line --
  *
  *   Contract-review-hold: session_01QSeKYmhU5KEj1nukYhp1Tg · head 3beee64f · the stack still lands under it · until the last sibling merges
@@ -1340,13 +1347,13 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * or a patrol takes; nothing here changes an exit.
  */
 export const MAILBOX_KEYS = Object.freeze([
-  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'a review seat (`review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
+  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'an L2 seat (`l2-review#N`; a seat seated under the old spelling keeps `review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
   { id: 'request:triage', kind: 'Request', key: 'triage', from: 'lane', to: 'triage', when: 'a question about a card\'s fate, route or grade', template: 'Request: triage · #n · ONE-LINE-QUESTION' },
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
   { id: 'notify:main-green', kind: 'Notify', key: 'main-green', from: 'triage, or the director when triage is absent', to: 'the seat of each open PR whose body carries a line-leading `Waits-on: main-red #n` naming the closed anchor', when: 'the main-red anchor card closes: one knock per held PR, all in the same round, the count in the round record; the seat merges `origin/main`, drops the line and resumes its landing', template: 'Notify: main-green · anchor #n · PR #m' },
-  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
+  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the L2 seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'the release-board producer (the director seat in this repository; the whole-repository seat in cloud)', to: 'the lane the card sits in', when: 'a card is raised to `priority:p0` as a release blocker inside the release window (the only release-blocker mark; ⛔ never a `target:` label)', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
   { id: 'notify:ruling', kind: 'Notify', key: 'ruling', from: 'the seat that recorded a maintainer ruling', to: 'the seat whose card or draft it changes', when: 'the ruling is recorded', template: 'Notify: ruling · #n · LETTER · record ID' },
@@ -1923,6 +1930,28 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
 });
 
 /**
+ * Does the record printed for this face carry the `Security-touching:` line — the ONE machine line the
+ * low-risk skills arm stands on (`lowRiskArmVerdict`, `check-governed-merges.mjs`)? With the `hits`
+ * known (`--paths`), exactly when one sits under a low-risk row (`lowRiskRowHit`, the register's own
+ * test); with none known, on every at-tier face a governed path can sit on — the bare template, the
+ * rules face and the schema face — since a record printed blind must not drop a line an arm PR lands
+ * on. ⛔ Not on the narrowing or the declaration face: neither holds a governed path. The brief hands
+ * the reviewer the duty on the same predicate, so the two printed shapes cannot disagree. Pure.
+ */
+export function recordCarriesSecurityTouching(face, tierName, scopeHits) {
+  if (tierName !== CONTRACT_REVIEW_TIER_NAME) return false;
+  if (scopeHits !== undefined) return lowRiskRowHit(scopeHits);
+  return face?.id !== 'narrowing';
+}
+
+/**
+ * The value the printed record ships on its `Security-touching:` line: `yes`. Like every placeholder
+ * above it PARSES through the reader that judges the real thing, and it fails closed — a record pasted
+ * with it left in keeps the pull request at Tier H, so `no` is only ever a reviewer's own statement.
+ */
+export const RECORD_SECURITY_TOUCHING_DEFAULT = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES[1];
+
+/**
  * The record itself — the lines a seat copies, and nothing else.
  *
  * ⭐ Rendered from the same constants the readers compare against
@@ -1962,6 +1991,11 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
  * The heading is prose to every reader in this file: the locator, the `Served-tier:` and head
  * readers are unchanged by it, which the self-test drives.
  *
+ * ⭐ `Security-touching:` rides the header block, after `Scope:`, where `recordCarriesSecurityTouching`
+ * says the record carries it: the low-risk skills arm reads it through `contractReviewRecordReading`
+ * and keeps the pull request at Tier H unless it reads `no`. It ships `yes`
+ * (`RECORD_SECURITY_TOUCHING_DEFAULT`), so an unedited paste fails closed.
+ *
  * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[], faceId?: string}} values
  * @returns {string[]}
  */
@@ -1984,6 +2018,7 @@ export function contractReviewRecordLines(values = {}) {
     `Head-sha: \`${headSha}\``,
     'Local-runs: none',
     ...(tierName === CONTRACT_REVIEW_TIER_NAME ? [`Scope: ${scopeHits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}`] : []),
+    ...(recordCarriesSecurityTouching(face, tierName, values.scopeHits) ? [`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}: ${RECORD_SECURITY_TOUCHING_DEFAULT}`] : []),
     '',
     '### ① Derived judgments',
     '',
@@ -2012,9 +2047,9 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
  * paraphrased because it IS the operative criterion, and untranslated because
  * rewriting a quoted ruling rewrites the ruling:
  *
- *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *   > L2 记录 = 一条评论落 PR 或卡,席内与各子代理同形
  *
- * — `references/contract-review.md` 〈复核归属与资格〉, with SKILL.md
+ * — `references/contract-review.md` 〈L2 归属与资格〉, with SKILL.md
  * 〈入队与落地〉 saying the same in the same words
  * (「记录 = 同形评论落 PR 或卡」) and the landing check's own ① repeating it
  * (「即 PR 或卡上同形的复核记录」). Two carriers, one record.
@@ -2123,6 +2158,37 @@ export function deliveredCardNumber(pr) {
 }
 
 /**
+ * EVERY card a pull request NAMES through a channel the card relations read, as numbers in ascending
+ * order: each closing keyword's target, each `Part of` target (at the declaration position or inline),
+ * each `Refs` target, and the card a protocol dev branch is named for — the branch whether or not the
+ * body declares another card.
+ *
+ * ⭐ WIDER than `deliveredCardNumber` on purpose, and for ONE reader: the low-risk skills arm's card
+ * conjunct (`readCardLabels`, the queue guard), which lands no pull request while ANY card it names
+ * carries the `security` label. `deliveredCardNumber` answers which ONE thread may hold the record — the
+ * strongest evidence — so beside a `Fixes #A`, a `Part of #B` or a branch named for #B leaves #B unread
+ * there. A label is not a thread: one card read too many costs two reads and fails closed, one read too
+ * few lands security teaching with no human approval.
+ *
+ * ⛔ NOT a delivery relation: nothing here says the pull request delivers these cards (`deliveryEvidence`
+ * rejects a branch name once the body speaks, and never reads `Refs`), and no reader may search these
+ * threads for a record. A number mentioned in prose with none of the four spellings is not named.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the branch
+ * @returns {number[]}
+ */
+export function namedCardNumbers(pr) {
+  const body = String(pr?.body ?? '');
+  const named = new Set([
+    ...closingKeywordTargets(body).keys(),
+    ...partOfTargets(body),
+    ...refsTargets(body).keys(),
+    ...[branchNameTarget(pr?.head?.ref)].filter((n) => n !== null && n !== undefined),
+  ]);
+  return [...named].map(Number).filter((n) => Number.isInteger(n) && n > 0).sort((a, b) => a - b);
+}
+
+/**
  * ③'s SQL push-down check, the one wording both printed shapes carry (the brief's ③ line and the
  * `--template` legend's ③ entry), read from `references/contract-review.md`'s ③ line and AGENTS.md
  * Prime Directive 5 (SQL first, ruling record 6888468549). It is face-neutral: an engine or driver PR
@@ -2207,6 +2273,15 @@ export function contractReviewTemplateLines(values = {}) {
     '                    named there; Tier H approval and the queue guard stay whole-PR. On the narrowing',
     '                    face the floor is every path of the diff outside the prose faces: no path is a remainder,',
     '                    and `+` names every file those hunks make a claim about, read in the cited code.',
+    ...(recordCarriesSecurityTouching(face, tierName, scopeHits) ? [
+      `  · ${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}  read by the low-risk skills arm alone (skill wording, add-only ADR notes): that arm`,
+      '                    lands a PR on this record with no human approval, and only when this line reads `no`.',
+      '                    Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,',
+      '                    authentication or other security behaviour, whatever the path is called; else `yes`. A missing',
+      '                    line, `yes`, a second line, the key inside a code span, a quoted, fenced or code-indented line,',
+      `                    or anything after the value keeps the PR at Tier H. The template ships \`${RECORD_SECURITY_TOUCHING_DEFAULT}\`, so an unedited paste`,
+      '                    never lands on the arm: the seat adds the `security` label only once the reviewer confirms a `yes` was meant.',
+    ] : []),
     '  · ③ Boundary flags  every dev flag and every `open_questions` entry answered, or escalated; and on',
     '                    every face the SQL push-down check:',
     ...TEMPLATE_PUSH_DOWN_LINES,
@@ -2396,15 +2471,24 @@ export function contractReviewBriefLines(values = {}) {
   // `--paths` the brief cannot know the hits, and the skill teaches the bare `--brief-template`, so every
   // at-tier brief over unknown paths carries the duty in its conditional form.
   const securityDuty = "  behaviour the path name doesn't show, the record says so and the seat adopting the record adds the `security` label.";
-  const lowRiskLines = scopeHits !== undefined ? (lowRiskRowHit(scopeHits) ? [
+  // WHERE the record says so: its `Security-touching:` line, which the arm reads and stands on at `no` alone.
+  // Printed on the predicate the record template prints the line on, so the brief never asks for a line the
+  // record does not carry.
+  const securityLine = [
+    `  The record says so on its \`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}:\` line, and the arm lands on \`no\` alone: write \`no\` ONLY when no changed`,
+    '  hunk teaches permission, sharing, credential, token, authentication or other security behaviour, else `yes`.',
+  ];
+  const lowRiskLines = !recordCarriesSecurityTouching(face, tierName, scopeHits) ? [] : scopeHits !== undefined ? [
     'Security — a `hits` path sits on the low-risk skills arm: when the change teaches security, auth or permission',
     securityDuty,
+    ...securityLine,
     '',
-  ] : []) : atTier && face?.id !== 'narrowing' ? [
+  ] : [
     'Security — if a `hits` path is under `skills/**` or `ui/skills/**` and the change teaches security, auth or permission',
     securityDuty,
+    ...securityLine,
     '',
-  ] : [];
+  ];
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
@@ -2605,16 +2689,21 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 24,
   // Raised 30 → 32 with ③'s SQL push-down check in the legend on every face, and its faceless-PR carrier: two pins.
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 32,
+  // Raised 32 → 38 with the `Security-touching:` line the low-risk skills arm reads: the record line and its
+  // shipped `yes`, the whole template read through the record reader, the `no` reading, the faces and hits it
+  // prints on, the one predicate, and the legend — six pins.
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 38,
   // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
   // posted by an untrusted author not read — two pins, two cases.
-  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 19,
+  // Raised 19 → 22 with `namedCardNumbers`, every card a pull names: the low-risk arm reads the label on each.
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 22,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   // Raised 23 → 24 with ③'s SQL push-down check on every face's brief: one pin.
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 24,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
-  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 22,
+  // Raised 22 → 24 with the brief's `Security-touching:` duty: where the record says so, and never on a brief whose record lacks the line.
+  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 24,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
@@ -2933,6 +3022,9 @@ export async function selfTest() {
   t('⭐ the brief over a low-risk skills path hands the `security` label duty, unconditionally, on either catalog row and through the CLI — the record says so, the adopting seat labels', (() => { const own = ['skills/objectstack-data/SKILL.md', 'ui/skills/objectui-forms/SKILL.md']; return own.every((p) => { const b = contractReviewBriefLines({ paths: [p, ...DECL_PATHS] }).join('\n'); return says(b, SECURITY_DUTY) && says(b, 'sits on the low-risk skills arm') && !says(b, SECURITY_IF); }) && says(faceCli(['--brief-template', '--paths', own[0]]).stdout, "behaviour the path name doesn't show, the record says so") && !says(contractReviewBriefLines({ paths: [own[0]] }).join('\n'), 'reviewer adds'); })());
   t('⭐ SF5: the bare `--brief-template` and `--face rules` brief — the spelling the skill teaches — carry the duty in its CONDITIONAL form', (() => { const forms = [contractReviewBriefLines(), contractReviewBriefLines({ face: 'rules' }), contractReviewBriefLines({ face: 'schema' })].map((b) => b.join('\n')); return forms.every((b) => says(b, SECURITY_IF) && says(b, SECURITY_DUTY)) && says(faceCli(['--brief-template']).stdout, SECURITY_IF) && says(faceCli(['--brief-template', '--face', 'rules']).stdout, SECURITY_IF); })());
   t('⛔ …and a brief whose `hits` are known and off the arm carries none, nor does the declaration or the narrowing face', [contractReviewBriefLines({ paths: MIXED }), contractReviewBriefLines({ face: 'declaration' }), contractReviewBriefLines({ face: 'narrowing' })].every((b) => !says(b.join('\n'), SECURITY_DUTY)));
+  const SECURITY_LINE_DUTY = 'The record says so on its `Security-touching:` line, and the arm lands on `no` alone: write `no` ONLY when no changed';
+  t('⭐ the brief names WHERE the record says so — its `Security-touching:` line, `no` only when no changed hunk teaches security behaviour — on every brief that hands the duty, the CLI included', [contractReviewBriefLines({ paths: ['skills/objectstack-data/SKILL.md'] }), contractReviewBriefLines(), contractReviewBriefLines({ face: 'rules' }), contractReviewBriefLines({ face: 'schema' })].every((b) => says(b.join('\n'), SECURITY_LINE_DUTY) && says(b.join('\n'), 'hunk teaches permission, sharing, credential, token, authentication or other security behaviour, else `yes`.')) && says(faceCli(['--brief-template', '--paths', 'skills/objectstack-data/SKILL.md']).stdout, SECURITY_LINE_DUTY));
+  t('⛔ …and a brief never asks for a line its record does not carry: off the arm, on the narrowing face and on the declaration face neither names `Security-touching`', [{ paths: MIXED }, { face: 'declaration' }, { face: 'narrowing' }].every((v) => !says(contractReviewBriefLines(v).join('\n'), 'Security-touching') && !says(contractReviewTemplateLines(v).join('\n'), 'Security-touching')) && [{}, { face: 'rules' }, { paths: ['skills/objectstack-data/SKILL.md'] }].every((v) => says(contractReviewBriefLines(v).join('\n'), 'Security-touching') && says(fenced(contractReviewTemplateLines(v)), 'Security-touching: yes')));
   t('⭐ `--template --paths` and `--brief-template --paths` print exactly the function output and exit 0', (() => { const a = faceCli(['--template', '--paths', ...MIXED]); const b = faceCli(['--brief-template', '--paths', ...MIXED]); return a.status === 0 && a.stdout === `${contractReviewTemplateLines({ paths: MIXED }).join('\n')}\n` && b.status === 0 && b.stdout === `${contractReviewBriefLines({ paths: MIXED }).join('\n')}\n`; })());
   t('⛔ `--paths` naming no path, or beside `--face` in either order, is REFUSED with the usage, exit 1', [['--template', '--paths'], ['--template', '--paths', RULES_PATH, '--face', 'rules'], ['--brief-template', '--face', 'rules', '--paths', RULES_PATH], ['--template', '--paths', '']].every((args) => { const r = faceCli(args); return r.status === 1 && says(r.stderr, 'usage:'); }));
   t('…and the usage names the flag, the face it reads and the line it fills', ['--paths PATH...', '`reviewFace`', '`Scope:`'].every((s) => usageLines().join('\n').includes(s)));
@@ -3123,7 +3215,8 @@ export async function selfTest() {
   t('⛔ the target is the closed set of two shapes and the tier is the constant\'s NAME — `triage`, `director`, a seat with no number, the default tier or a model id is unreadable', [`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: director — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: domain:ui — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${TIER_DEFAULT_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
   t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`) — the template and `HANDOFF_TARGET` cannot drift apart', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_HANDOFF_TEMPLATE}\``) && CONTRACT_REVIEW_HANDOFF_TEMPLATE.startsWith(`${CONTRACT_REVIEW_HANDOFF_KEY}: `); })());
   t('⛔ the TEMPLATE sent verbatim is unreadable — a placeholder names no seat and no head', readContractReviewHandoff(CONTRACT_REVIEW_HANDOFF_TEMPLATE).state === 'unreadable' && contractReviewHandoff([HO_ROW(CONTRACT_REVIEW_HANDOFF_TEMPLATE, 4407)], HO_HEAD).state === 'unreadable');
-  t('⭐ a sibling seat of the lane is a target while no review seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
+  t('⭐ the L2 seat is a target under its new word and under the old one: `l2-review#N` reads, lower-cased, and hands the head to it; `review#N` still reads; `l2-review` with no number, `l2#1` and `l1-review#1` are unreadable', (() => { const line = (to) => `${CONTRACT_REVIEW_HANDOFF_KEY}: ${to} — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line('L2-Review#2'))], HO_HEAD); return r.state === 'handed' && r.to === 'l2-review#2' && readContractReviewHandoff(line('l2-review#12')).to === 'l2-review#12' && readContractReviewHandoff(line('review#1')).to === 'review#1' && ['l2-review', 'l2#1', 'l1-review#1'].every((to) => readContractReviewHandoff(line(to)).state === 'unreadable'); })());
+  t('⭐ a sibling seat of the lane is a target while no L2 seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
   t('⛔ a line still naming `triage` hands the review to NOBODY: newest on the thread it is unreadable, never handed — triage takes no contract review', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, 4406)], HO_HEAD); return r.state === 'unreadable' && r.gaps[0].includes('4406'); })());
   t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
   t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');
@@ -3169,9 +3262,10 @@ export async function selfTest() {
   const CL_REVIEW2_SESSION = 'session_01ReviewSeatTwoFixt9Zz';
   const CL_REVIEW_SIG = `review#1 · os-zhuang · ${CL_REVIEW_SESSION}`;
   const CL_REVIEW2_SIG = `review#2 · os-tesla · ${CL_REVIEW2_SESSION}`;
-  t('⭐ a `review#N`-signed claim is the review side, and between a review seat and a lane seat the EARLIEST posted holds with no tie — the review seat first ⇒ the review seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
-  t('…and the lane seat first ⇒ the lane seat holds: a review seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
-  t('⭐ two review seats on one head: the EARLIEST posted holds, the later withdraws — the rule the review seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
+  t('⭐ an `l2-review#N`-signed claim is the review side exactly as a `review#N`-signed one is — the L2 seat under either lane word — and it holds against a later lane claim with no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(`l2-review#1 · os-zhuang · ${CL_REVIEW_SESSION}`, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('⭐ a `review#N`-signed claim is the review side, and between an L2 seat and a lane seat the EARLIEST posted holds with no tie — the L2 seat first ⇒ the L2 seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('…and the lane seat first ⇒ the lane seat holds: an L2 seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
+  t('⭐ two L2 seats on one head: the EARLIEST posted holds, the later withdraws — the rule the L2 seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
   t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
   t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');
@@ -3403,6 +3497,12 @@ export async function selfTest() {
     t('⛔ RESIDUAL, pinned: a fleet session that COPIES a seat\'s whole public signature line reads `listed` — byte-identical to that seat\'s own knock — so `listed` is a consistency reading inside the fleet\'s trust root, never proof of who rang', (() => { const line = posts[0].body.split('\n')[0]; const forged = DB_ROW(`${line}\n${MSG('Notify: landed · #28562', 'domain:skills#2')}`, 9001); const own = KNOCK('domain:skills#1', S1); return line === SIG('domain:skills#1', S1) && forged.body === own.body && SAME(read(forged), read(own)) && read(forged).signature.state === 'listed'; })());
     t('⛔ a row lists only when its `state` READS `open` — a seat post or a mailbox with no `state` at all lists nobody, failing closed', (() => { const { state: _p, ...noStatePost } = posts[1]; const { state: _m, ...noStateBox } = mailboxes[1]; const r = seatSessionRoster({ posts: [noStatePost], mailboxes: [noStateBox] }); return r.state === 'read' && r.seats.size === 0 && read(KNOCK('domain:skills#2', S2), r).signature.state === 'unlisted' && read(KNOCK('triage#1', TRI), r).signature.state === 'unlisted'; })());
     t('`--mailbox-keys` tells a sender the signature rule, naming the unlisted reading and that a listed one is no proof', mailboxKeyLines().some((l) => l.includes('Successor-of:') && l.includes(MAILBOX_UNVERIFIED_SIGNATURE) && l.includes('not proof')));
+    // H72's signature row (check-half-states.mjs), driven end-to-end: the REAL roster read off the listings the sweep
+    // hands it (`h72RosterListings`), the REAL reader, and the patrol's predicate over what they made.
+    const NOW_H72 = Date.parse('2026-10-28T08:00:00Z');
+    const ROWS_H72 = [{ ...KNOCK('domain:skills#1', S1), id: 8201 }, { ...KNOCK('domain:skills#1', STRAY), id: 8202 }, DB_ROW(DB.ut, 8203, '2026-10-28T07:00:00Z', GOVERNED_APPROVERS[0]), DB_ROW(DRIVE_BY, 8204, '2026-10-28T07:00:00Z', 'drive-by-commenter')];
+    t('⭐ H72 lists the REAL reader\'s `unlisted` knock for the seat the mailbox serves — by comment id, naming the stray session — and not the listed knock, the maintainer\'s or the drive-by', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, { number: 1, state: 'open', labels: [{ name: 'pm:queue' }] }], [...mailboxes, { number: 2, state: 'open', labels: [] }])); const row = String(hs.h72UnlistedKnockLines(mailboxEvents(ROWS_H72, r), r, NOW_H72) ?? ''); return r.state === 'read' && row.includes('1 knock(s)') && row.includes('comment 8202') && row.includes(`${STRAY} is not a session domain:skills#1 lists`) && !['comment 8201', 'comment 8203', 'comment 8204'].some((c) => row.includes(c)); })());
+    t('⛔ …and a TRUNCATED `pm:seat` listing makes the real roster unreadable, so the reader reads every relay knock `unlisted` (fail closed) while H72 lists NONE of them — unjudged, never a finding against a roster nobody read', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings(posts, mailboxes, [hs.H72_ROSTER_LISTINGS.posts])); const reading = mailboxEvents(ROWS_H72, r); return r.state === 'unreadable' && SAME(reading.unlisted, [8201, 8202]) && hs.h72UnlistedKnockLines(reading, r, NOW_H72) === null; })());
   }
 
   // -- the signature line (#27113) ----------------------------------------------
@@ -3507,6 +3607,17 @@ export async function selfTest() {
   t('⭐ the record carries `Local-runs: none` — the read-only shape, declared where the reader reads it', TPL_RECORD.includes('Local-runs: none') && readLocalRuns(TPL_RECORD).value === 'none' && localRunsStand(readLocalRuns(TPL_TEXT)));
   t('…and the notes explain both values and that an absent line is not re-judged', says(TPL_TEXT, 'probe — REASON') && says(TPL_TEXT, 'not re-judged'));
   t('the printed location is the ONE thread set\'s own words', says(TPL_TEXT, `ONE comment on ${REVIEW_OF_RECORD_LOCATION};`));
+  // -- the `Security-touching:` line: the low-risk skills arm's machine line, printed where an arm PR can sit --
+  const ST_LINE = (value) => `Security-touching: ${value}`;
+  const stOf = (text) => contractReviewRecordReading(text)?.securityTouching;
+  const ARM_PATHS = [['skills', 'objectstack-data', 'SKILL.md'].join('/'), ['ui', 'skills', 'objectui-forms', 'SKILL.md'].join('/'), ['docs', 'adr', '0001-x.md'].join('/')];
+  const OFF_ARM_PATH = ['.claude', 'agents', 'os-dev.md'].join('/');
+  t('⭐ the bare record carries ONE `Security-touching:` line, right after `Scope:`, and it ships `yes` — read by the fleet\'s record reader as `yes`, never as `no`', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(ST_LINE('yes')); return i > 0 && rec[i - 1].startsWith('Scope: ') && rec[i + 1] === '' && rec.filter((l) => l.startsWith('Security-touching')).length === 1 && JSON.stringify(stOf(TPL_RECORD)) === '{"state":"read","value":"yes"}' && RECORD_SECURITY_TOUCHING_DEFAULT === 'yes'; })());
+  t('⭐ the WHOLE printed template reads that one line too — the legend around the fence carries no second declaration, on any face that prints it', [{}, { face: 'rules' }, { face: 'schema' }, ...ARM_PATHS.map((path) => ({ paths: [path] }))].every((v) => JSON.stringify(stOf(contractReviewTemplateLines(v).join('\n'))) === '{"state":"read","value":"yes"}'));
+  t('…and a reviewer who writes `no` over it is read as `no` — the one value the arm stands on', JSON.stringify(stOf(TPL_RECORD.replace(ST_LINE('yes'), ST_LINE('no')))) === '{"state":"read","value":"no"}' && TPL_RECORD.includes(`\n${ST_LINE('yes')}\n`));
+  t('⛔ the line prints exactly where an arm PR can sit: with the `hits` known, under a low-risk row (skills, ui/skills, an ADR) and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face', ARM_PATHS.every((path) => fenced(contractReviewTemplateLines({ paths: [path] })).includes(`\n${ST_LINE('yes')}\n`)) && !contractReviewTemplateLines({ paths: [OFF_ARM_PATH] }).join('\n').includes('Security-touching') && !contractReviewTemplateLines({ paths: MIXED }).join('\n').includes('Security-touching') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(ST_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Security-touching')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Security-touching'));
+  t('the predicate is ONE function over face, tier and hits — below tier never, a narrowing never, known hits by the register\'s own low-risk row test', recordCarriesSecurityTouching(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, undefined) && !recordCarriesSecurityTouching(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined) && recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [ARM_PATHS[0]]) && !recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [OFF_ARM_PATH]) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, [ARM_PATHS[0]]));
+  t('the notes explain the line where the record carries it — who reads it, when `no` may be written, what keeps Tier H — and the key and values are the reader\'s own constants', ['· Security-touching  read by the low-risk skills arm alone', 'only when this line reads `no`', 'Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,', 'the key inside a code span', 'keeps the PR at Tier H', 'The template ships `yes`', 'adds the `security` label only once the reviewer confirms a `yes` was meant'].every((frag) => says(TPL_TEXT, frag)) && CONTRACT_REVIEW_SECURITY_TOUCHING_KEY === 'Security-touching' && CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join() === 'no,yes');
   // -- item ④: the owner's full-review order rides THIS record as a fourth section ------------
   const DJ = '### ④ Design judgment';
   const headings = (lines) => lines.filter((line) => line.startsWith('### '));
@@ -3677,6 +3788,15 @@ export async function selfTest() {
   t('⛔ a body naming NO card yields no card and a reason, never a guess', (() => { const r = deliveredCardNumber(PIN_PULL('nothing here')); return r.card === null && r.reason.includes('names no card'); })());
   t('⛔ two cards at the SAME strength yield NEITHER, and the reason names both', (() => { const r = deliveredCardNumber(PIN_PULL('Fixes #4444\nFixes #5555')); return r.card === null && r.reason.includes('#4444') && r.reason.includes('#5555'); })());
   t('…while a STRONGER grade still decides, so a stray `Part of` beside a keyword is not a tie', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}\n\npart of #4444 already landed`)).card === PIN_CARD);
+  // `namedCardNumbers` -- every card the pull names, for the low-risk arm's label read: wider than the one
+  // card above, because a `security` label on ANY of them keeps the arm at Tier H.
+  t('⭐ namedCardNumbers lists EVERY card a pull names -- a closing keyword, a `Part of` (declared or inline), a `Refs`, and its branch -- ascending, once each', namedCardNumbers(PIN_PULL('Fixes #4444\n\nPart of #5555\nRefs #3333 (item 2)\nthis is part of #2222 too\ncloses #4444', 'claude/issue-6666-x')).join() === '2222,3333,4444,5555,6666');
+  t('⛔ namedCardNumbers keeps the card the WEAKER evidence names: a `Part of` beside a keyword, and a branch named for another card once the body speaks -- the two `deliveredCardNumber` drops', (() => {
+    const partOf = PIN_PULL('Fixes #4444\nPart of #5555');
+    const branch = PIN_PULL('Fixes #4444', 'claude/issue-5555-x');
+    return deliveredCardNumber(partOf).card === 4444 && namedCardNumbers(partOf).join() === '4444,5555' && deliveredCardNumber(branch).card === 4444 && deliveryEvidence(branch, 5555) === null && namedCardNumbers(branch).join() === '4444,5555';
+  })());
+  t('namedCardNumbers names nothing a relation spelling does not: a bare mention, a spelling in a code span or a fence, and a branch outside the protocol shape name no card', namedCardNumbers(PIN_PULL('see #4444 and `Fixes #5555`\n```\nPart of #6666\n```\nRefs: #7777', 'feat/8888-x')).join() === '7777' && namedCardNumbers(PIN_PULL('nothing here')).length === 0 && namedCardNumbers(null).length === 0);
   t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
   t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
 

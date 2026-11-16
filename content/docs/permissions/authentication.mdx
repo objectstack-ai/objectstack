@@ -633,6 +633,13 @@ credential check resolves the address to. So every refused sign-in on that accou
 counts toward its one lock, whichever spelling of the address it used. A lock refuses
 every sign-in that resolves to the account, the correct password included, and a
 successful sign-in under any spelling clears the counter.
+Every password sign-in door (email and password, phone number and password) counts
+toward that one lock and checks it before the password, and a locked account is
+refused, with the answer password sign-in gives, on every door that ends in a session
+for it: one-time codes, sign-in links, an address-change confirmation opened without a
+session, the second-factor step, sign-in through an identity provider (social, generic
+OAuth, enterprise SSO) and the device grant, so the lock also reaches an account that
+has no password.
 
 Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
 Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,
@@ -1158,9 +1165,10 @@ new AuthPlugin({
 
 ### Admin User Management
 
-With `plugins: { admin: true }` (forced on when SCIM is enabled), platform
-admins get email-independent account management on the Users list — the
-`create_user` / `set_user_password` actions there drive these endpoints. All
+Platform admins get email-independent account management on the Users list
+— the `create_user` / `set_user_password` actions there drive these
+endpoints. Creating a user needs `plugins: { admin: true }` (forced on when
+SCIM is enabled); setting a password works with or without it. All
 three routes are gated server-side on the session's `isPlatformAdmin` — the
 `PLATFORM_ADMIN` standing of ADR-0095 D3 — with the legacy better-auth `role`
 scalar of `admin` still accepted as a back-compat fallback; the
@@ -1585,7 +1593,7 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/phone-number/request-password-reset` - Request an OTP-based password reset (requires an SMS service)
 - `POST /api/v1/auth/phone-number/reset-password` - Complete an OTP-based password reset
 
-#### Admin User Management (requires `plugins.admin`; platform-admin gated)
+#### Admin User Management (platform-admin gated)
 
 - `POST /api/v1/auth/admin/create-user` - Create a login-capable account (optional one-time temporary password + forced change)
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
@@ -1596,7 +1604,7 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/add-sso-user` - Add one pending person who signs in only through the hosting organisation's identity provider (cloud-managed environments only)
 - `POST /api/v1/auth/admin/import-sso-users` - Add pending people from a CSV or JSON rows (cloud-managed environments only; ≤500 rows, per-row results)
 
-`ban-user`, `unban-user`, `add-sso-user` and `import-sso-users` answer without `plugins.admin` too.
+`create-user` and `import-users` need `plugins.admin` (without it they answer `501 NOT_IMPLEMENTED`). `set-user-password`, `unlock-user`, `ban-user`, `unban-user`, `add-sso-user` and `import-sso-users` answer with or without it.
 
 #### Organization Membership (requires `plugins.organization`; platform-admin gated)
 
