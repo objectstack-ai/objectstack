@@ -194,13 +194,15 @@ type BucketEchoRefusalCause = { zone: string } | { dialect: AnalyticsSqlDialect 
  * at a UTC or unset `timezone`. Everything else refuses here, and the
  * refusal names its cause:
  *
- * - [#21630] **A non-UTC `timezone`, on every driver.** The engine then
- *   buckets on that zone's calendar (ADR-0053 Phase 2 D2 as amended for
- *   #33697; `judgeBucketZone` and `tzRequiresInMemory` in objectql's
- *   `engine-delete-and-aggregate.ts`): in the database, with the zone bound, on
- *   a driver that declares `supports.zonedDateBucketing` (PostgreSQL), and in
- *   memory everywhere else. The `dateBucketSql` hook renders the UTC bucket
- *   only, so this echo has no expression for either road and refuses. The
+ * - [#21630] **A non-UTC `timezone` the engine buckets in memory.** The
+ *   engine buckets it on that zone's calendar in JS (ADR-0053 Phase 2 D2;
+ *   `tzRequiresInMemory` in objectql's `engine-delete-and-aggregate.ts`): the
+ *   driver only fetches the rows, and no statement the database runs groups by
+ *   those keys. [#33697] Since D2's amendment that is every driver but one
+ *   declaring `supports.zonedDateBucketing` (PostgreSQL), and on that one a
+ *   zone the runtime resolves to no IANA area/location name (`+08:00`,
+ *   `EST5EDT`); for a resolved area/location zone there, the hook answers the
+ *   zoned expression the database groups by and the echo prints it. The
  *   `date_trunc('<granularity>', col)` this used to print groups on the
  *   database SESSION's calendar where it runs at all. Measured on PostgreSQL
  *   16.14 with the server at `Asia/Shanghai`, it answered timestamp keys such
@@ -234,12 +236,13 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
   const err = new Error(
     `[analytics] cannot render display SQL for the "${granularity}" bucket of "${dimension}"` +
       ('zone' in cause
-        ? ` with timezone "${cause.zone}". The query itself is SERVED: the engine buckets it on that zone's ` +
-          `calendar, in the database where the driver declares zone-aware bucketing and in memory otherwise, ` +
-          `while this dry run renders only the UTC bucket expression. Refusing rather than printing one that ` +
-          `groups on another calendar. Run the query itself (/analytics/query) to get its rows; with timezone ` +
-          `"UTC" or none, this dry run renders the expression the driver groups the bucket by, where the driver ` +
-          `has one.`
+        ? ` with timezone "${cause.zone}". The query itself is SERVED: the engine buckets it in memory on that ` +
+          `zone's calendar, because this datasource's driver does not bucket that zone in the database, so no ` +
+          `statement the database runs groups by those bucket keys. (A driver that declares zone-aware ` +
+          `bucketing, such as PostgreSQL, does, for a zone the runtime resolves to an IANA area/location name, ` +
+          `and this dry run then prints its expression.) Refusing rather than printing one that groups on ` +
+          `another calendar. Run the query itself (/analytics/query) to get its rows; with timezone "UTC" or ` +
+          `none, this dry run renders the expression the driver groups the bucket by, where the driver has one.`
         : (cause.dialect === 'unknown'
             ? `: the driver behind this datasource names no SQL dialect and renders no expression for it. A ` +
               `driver that runs no SQL, such as the in-memory or MongoDB driver, buckets it without one: the ` +
@@ -256,6 +259,34 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
   err.status = 501;
   err.refusal = true;
   return err;
+}
+
+/**
+ * [#33697] How the echo reads a query's `timezone` for its date buckets: the
+ * way `engine.aggregate` reads it (objectql `judgeBucketZone`,
+ * `engine-delete-and-aggregate.ts`; ADR-0053 Phase 2 D2 as amended), through
+ * the runtime's own resolution. Restated here because the engine's predicate
+ * is not reachable from this package; `objectql-echo-bucket-enumeration.test.ts`
+ * holds the two together.
+ *
+ * - `utc` — unset, empty, or a name that resolves to `UTC`.
+ * - `area` — resolves to an IANA area/location name (contains `/`), `zone`
+ *   being that resolved name: pushed down to a driver declaring
+ *   `supports.zonedDateBucketing`, in memory on every other.
+ * - `memory` — the runtime cannot resolve it, or it resolves to an offset or
+ *   an abbreviation with no `/`: in memory on every driver.
+ */
+function echoBucketZone(timezone: string | undefined):
+  { kind: 'utc' } | { kind: 'area'; zone: string } | { kind: 'memory' } {
+  if (timezone === undefined || timezone === '' || timezone === 'UTC') return { kind: 'utc' };
+  let resolved: string;
+  try {
+    resolved = new Intl.DateTimeFormat('en-US', { timeZone: timezone }).resolvedOptions().timeZone;
+  } catch {
+    return { kind: 'memory' };
+  }
+  if (resolved === 'UTC') return { kind: 'utc' };
+  return resolved.includes('/') ? { kind: 'area', zone: resolved } : { kind: 'memory' };
 }
 
 /** One `engine.aggregate` group key: a column, or a column bucketed by a granularity. */
@@ -799,10 +830,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * and answers the face's bucket keys. [#21647] That expression is the only
    * thing a bucket is ever printed as. Where there is none, the echo refuses
    * ({@link bucketEchoRefused}), on every driver and every dialect: a non-UTC
-   * `timezone`, which the engine buckets on that zone's calendar, in the
-   * database on a driver declaring zone-aware bucketing and in memory
-   * otherwise, while the hook renders the UTC bucket only (#21630, #33697),
-   * and a hook that answers nothing at UTC, which is a driver that
+   * `timezone` the engine buckets in memory on that zone's calendar (#21630;
+   * since #33697 a driver declaring zone-aware bucketing answers the zoned
+   * expression for a resolved area/location zone, and it is printed), and a hook that answers nothing at UTC, which is a driver that
    * runs no SQL, a granularity the driver leaves to the engine, or a host that
    * wires no hook (#21595 was SQLite's case of it). No bucket expression is
    * written here.
@@ -953,15 +983,17 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // (`no such function`), and PostgreSQL answers a timestamp where the face
     // answers `2026-01`.
     //
-    // Asked only for a UTC or unset `timezone`. The hook's expression is the
-    // UTC bucket. [#21630] A non-UTC zone makes the engine bucket on that
-    // zone's calendar instead (ADR-0053 Phase 2 D2 as amended for #33697): in
-    // the database with the zone bound on a driver that declares
-    // `supports.zonedDateBucketing`, in memory on every other. The hook renders
-    // neither, so the echo refuses on every dialect before the hook is asked
-    // ({@link bucketEchoRefused}). The test here is the raw string against
-    // `'UTC'`; the engine reads the runtime-resolved name, so a UTC alias such
-    // as `Etc/UTC` is served natively there and still refused here.
+    // [#33697] The zone is read as the engine reads it (`echoBucketZone`,
+    // ADR-0053 Phase 2 D2 as amended): a UTC or unset `timezone`, or a name
+    // the runtime resolves to `UTC` (`Etc/UTC`, `GMT`), asks the hook for the
+    // UTC bucket. [#21630] A zone that resolves to an IANA area/location name
+    // asks the hook WITH the resolved name: a driver declaring
+    // `supports.zonedDateBucketing` answers the zoned expression the database
+    // groups by, and every other driver answers nothing, because the engine
+    // buckets that zone in memory there — so the echo refuses, naming the
+    // zone. A zone that resolves to no area/location name is bucketed in
+    // memory on every driver, and the echo refuses it before the hook is asked
+    // ({@link bucketEchoRefused}).
     //
     // [#21647] Where the hook answers nothing at UTC, the echo refuses too, on
     // every dialect. That is the engine's other in-memory condition, read off
@@ -980,9 +1012,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `driver-turso`'s remote face (it advertises no granularity, and inherits
     // the SQLite expression, which libSQL runs).
     const zone = query.timezone;
-    const inMemoryZone = zone && zone !== 'UTC' ? zone : undefined;
+    const bucketZone = echoBucketZone(zone);
+    const hook = (ctx as DatasetScopedStrategyContext).dateBucketSql;
     const driverBucketSql = (col: string, granularity: string): string | undefined => {
-      const answered = (ctx as DatasetScopedStrategyContext).dateBucketSql?.(tableName, col, granularity);
+      const answered = bucketZone.kind === 'area'
+        ? hook?.(tableName, col, granularity, bucketZone.zone)
+        : hook?.(tableName, col, granularity);
       return typeof answered === 'string' && answered !== '' ? answered : undefined;
     };
     const dimExpr = (dim: string): string => {
@@ -996,9 +1031,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = gransByDim.get(dim)?.[0];
       if (!gran) return col;
-      if (inMemoryZone !== undefined) throw bucketEchoRefused(dim, gran, { zone: inMemoryZone });
+      if (bucketZone.kind === 'memory') throw bucketEchoRefused(dim, gran, { zone: zone! });
       const bucket = driverBucketSql(col, gran);
-      if (bucket === undefined) throw bucketEchoRefused(dim, gran, { dialect: sqlDialectFor(ctx, tableName) });
+      if (bucket === undefined) {
+        throw bucketZone.kind === 'area' && typeof hook === 'function'
+          ? bucketEchoRefused(dim, gran, { zone: zone! })
+          : bucketEchoRefused(dim, gran, { dialect: sqlDialectFor(ctx, tableName) });
+      }
       return bucket;
     };
 

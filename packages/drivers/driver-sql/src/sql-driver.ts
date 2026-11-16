@@ -1287,18 +1287,26 @@ export class SqlDriver implements IDataDriver {
    * Reading the expression from here keeps this driver the one source of its
    * bucketing. The text is `buildDateBucketExpr`'s, unchanged, with each `??`
    * rendered by knex (`Raw.toQuery`) through this dialect's own identifier
-   * quoting. The expression binds identifiers only, so the text carries no
+   * quoting. The UTC expression binds identifiers only, so the text carries no
    * value placeholder. `objectName` goes in as the coercion key, as
    * `aggregate` passes it, so a SQLite `Field.datetime` column that may still
    * hold pre-canonical values renders the repair the GROUP BY runs (#3773),
    * and a `Field.date` renders its calendar day on every dialect (#21485).
    *
+   * [#33697] `timezone`, when given, is the resolved IANA area/location name
+   * the engine pushes a zoned bucket down with (ADR-0053 Phase 2 D2 as
+   * amended): the text is then the zoned expression {@link aggregate} groups
+   * by, with the zone rendered as a quoted literal (a zone name is not tenant
+   * data), and `null` on every dialect that does not declare
+   * `supports.zonedDateBucketing` — exactly where the engine buckets that zone
+   * in memory instead.
+   *
    * Read structurally by its caller, like {@link dialectName}. It is not a
    * member of the `IDataDriver` contract.
    */
-  public dateBucketSql(objectName: string, field: string, granularity: DateGranularityValue): string | null {
+  public dateBucketSql(objectName: string, field: string, granularity: DateGranularityValue, timezone?: string): string | null {
     // [#29520 codemod] The body moved to `sql-driver-class-head.ts` (see `ClassHeadHost`).
-    return ClassHeadFacet.dateBucketSql.call(classHeadHost.of(this), objectName, field, granularity);
+    return ClassHeadFacet.dateBucketSql.call(classHeadHost.of(this), objectName, field, granularity, timezone);
   }
 
   /**

@@ -215,8 +215,12 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * on the spec's {@link StrategyContext} for the reason `declaredFieldType`
    * is: nothing about it is an authorable surface, and a strategy that does
    * not know the hook keeps the behaviour it had.
+   *
+   * [#33697] With `timezone` (a resolved IANA area/location name), the zoned
+   * expression a driver declaring `supports.zonedDateBucketing` groups by, or
+   * `undefined` where the driver buckets no zone.
    */
-  dateBucketSql?(objectName: string, field: string, granularity: string): string | undefined;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): string | undefined;
   /**
    * [#19995] The ENGINE's own `where` admission verdict for `objectName`,
    * `IObjectQLEngine.judgeFilter` (#20157), or `undefined` when the host
