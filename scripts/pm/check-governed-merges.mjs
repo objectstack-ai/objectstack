@@ -5291,12 +5291,13 @@ const ARM_FAVOURABLE_CHANGESET = "---\n'@objectstack/skills': patch\n---\n\nClau
 
 /**
  * The answer to one of the arm's git reads that gives the arm no reason (#33765 N-a): a clean changeset for the
- * guard's `show SHA:PATH`, and every path a modified regular file for its `diff-tree`; null for any other read,
- * which then cannot be answered the arm's way. Pure.
+ * guard's `show SHA:PATH`, and every path a modified regular file for its `diff-tree --raw` status read; null for
+ * any other read — the ADR leg's `diff-tree -p` patch read included (#33539: a status listing is no patch, and
+ * no stand-in patch is favourable) — which then cannot be answered the arm's way. Pure.
  */
 export function favourableArmGitRead(argv, paths) {
   if (argv?.[0] === 'show' && ARM_CHANGESET_SHOW.test(String(argv[1] ?? ''))) return ARM_FAVOURABLE_CHANGESET;
-  if (argv?.[0] === 'diff-tree') return (Array.isArray(paths) ? paths : []).map((p) => `:100644 100644 ${'0'.repeat(40)} ${'0'.repeat(40)} M\0${p}\0`).join('');
+  if (argv?.[0] === 'diff-tree' && argv.includes('--raw') && !argv.includes('-p')) return (Array.isArray(paths) ? paths : []).map((p) => `:100644 100644 ${'0'.repeat(40)} ${'0'.repeat(40)} M\0${p}\0`).join('');
   return null;
 }
 
@@ -10912,7 +10913,18 @@ async function selfTest() {
       await unmeasured({ git: diffTreeThrows }, /could not read `git diff-tree/) === true &&
       await unmeasured({ git: gitWith((a) => { if (a[0] === 'diff-tree') throw new Error('fatal: bad object'); if (a[0] === 'show') throw new Error('fatal: unable to read'); if (a[0] === 'ls-tree') return `${CS}\0`; }) }, /could not read `git show.*`git diff-tree/) === true);
     assert('⛔ #33765-N-a-an-unread-read-the-arm-has-no-favourable-answer-for-stays-NOT-MEASURED', favourableArmGitRead(['rev-parse', 'x'], [SK]) === null &&
-      favourableArmGitRead(['show', `${LANDED}:${CS}`], [SK]) !== null && favourableArmGitRead(['diff-tree', LANDED], [SK]).includes(`M\0${SK}\0`));
+      favourableArmGitRead(['show', `${LANDED}:${CS}`], [SK]) !== null && favourableArmGitRead(['diff-tree', '--raw', LANDED], [SK]).includes(`M\0${SK}\0`));
+    // #33539 S7: the ADR leg's patch read has no favourable answer; one that fails alone leaves the landing NOT MEASURED.
+    const ADRP = 'docs/adr/0097-upstream-availability.md';
+    const adrPatchThrows = (args) => {
+      if (args[0] === 'diff-tree' && args.includes('-p')) throw new Error('fatal: bad object');
+      if (args[0] === 'diff-tree') return `:100644 100644 ${'1'.repeat(40)} ${'2'.repeat(40)} M\0${ADRP}\0`;
+      return runGit(args);
+    };
+    assert('⛔ #33539-S7-an-ADR-landing-whose-patch-read-alone-fails-stays-NOT-MEASURED-only-the-raw-read-has-a-favourable-answer',
+      await unmeasured({ paths: [ADRP], git: adrPatchThrows }, /could not read `git diff-tree/) === true &&
+      favourableArmGitRead(addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], [LANDED], ADRP), [ADRP]) === null &&
+      favourableArmGitRead(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--raw', '-z', '-m', '--first-parent', LANDED], [ADRP]) !== null);
     // #33765 N-b: an unread labels list is an unread input, though no git read failed.
     assert('⛔ #33765-N-b-an-unread-labels-list-alone-is-NOT-MEASURED-not-tier-h', await unmeasured({ pull: { labels: null } }, /could not read its labels/) === true &&
       armReadsNotMeasured([], { measured: true }, runGit, null).includes('its labels') && armReadsNotMeasured([], { measured: true }, runGit).length === 0);
