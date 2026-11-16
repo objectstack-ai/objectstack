@@ -2207,3 +2207,101 @@ describe('[#6084] reverse verification: one unguarded write takes the admins AND
     expect(await bannedFlag(engine, 'usr_platform')).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// [ruling 6893661036, F1] A cascade deletes a relation's children as ONE
+// predicate delete per chunk: every child's `beforeDelete` runs before any
+// child row is gone, on the per-row shape (`dispatch.mode: 'per-row'`,
+// `options.multi`). The membership half reads `options.multi` and judges the
+// whole chunk together, so it reaches the verdict the per-child walk reached.
+// Each case runs twice on the same fixture: the batch, and the walk's by-id
+// path (the driver's `deleteMany` hidden, which is the walk's own fallback).
+// ---------------------------------------------------------------------------
+
+const grp = {
+  name: 'test_grp',
+  label: 'Group',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+  },
+};
+const sysMemberInGroup = {
+  ...sysMember,
+  fields: {
+    ...sysMember.fields,
+    grp: { name: 'grp', type: 'master_detail' as const, reference: 'test_grp' },
+  },
+};
+
+describe('[F1] the membership standing half reaches the same verdict on a batched cascade', () => {
+  async function bootGrouped(shape: 'batch' | 'by-id'): Promise<{ engine: ObjectQL; modes: unknown[] }> {
+    const engine = new ObjectQL();
+    engines.push(engine);
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    // The control leg: no `deleteMany`, so the walk deletes each child by id.
+    if (shape === 'by-id') (driver as unknown as { deleteMany?: unknown }).deleteMany = undefined;
+    engine.registerDriver(driver, true);
+    await engine.init();
+    for (const o of [sysUser, sysMemberInGroup, grp, sysOrganization, sysPermissionSet, sysUserPermissionSet, sysAccount, sysMetadataActivation]) {
+      engine.registry.registerObject(o as never);
+    }
+    await engine.syncSchemas();
+    await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
+    const names = new Set<string>();
+    catalogs.set(engine, names);
+    const catalog = () => ({ permissions: [...names].map((name) => ({ name })) });
+    bindTestSecurityCatalog(engine, catalog);
+    registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
+    const modes: unknown[] = [];
+    engine.registerHook('beforeDelete', (ctx: any) => { modes.push(ctx.dispatch?.mode); }, {
+      object: 'sys_member', priority: 1, packageId: 'test.shape-probe',
+    });
+    await seedAdminPermissionSet(engine);
+    return { engine, modes };
+  }
+
+  async function join(engine: ObjectQL, userId: string, group: string): Promise<void> {
+    await engine.insert('test_grp', { id: group, name: group }, SYSTEM).catch(() => undefined);
+    await engine.update('sys_member', { id: `mem_${userId}`, grp: group }, SYSTEM);
+  }
+
+  for (const shape of ['batch', 'by-id'] as const) {
+    it(`[${shape}] a group whose cascade removes BOTH administrative memberships is refused, and nothing is deleted`, async () => {
+      const { engine, modes } = await bootGrouped(shape);
+      await seedUser(engine, 'usr_owner', { role: 'owner' });
+      await seedUser(engine, 'usr_admin', { role: 'admin' });
+      await join(engine, 'usr_owner', 'g1');
+      await join(engine, 'usr_admin', 'g1');
+
+      await expect(engine.delete('test_grp', { where: { id: 'g1' }, ...SYSTEM })).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        status: 403,
+        object: 'sys_member',
+      });
+      expect(await rowExists(engine, 'sys_member', 'mem_usr_owner')).toBe(true);
+      expect(await rowExists(engine, 'sys_member', 'mem_usr_admin')).toBe(true);
+      expect(await rowExists(engine, 'test_grp', 'g1')).toBe(true);
+      // The shape this leg really ran: the batch is refused at its first
+      // per-row dispatch, judging the whole chunk before any delete; the by-id
+      // walk deletes the first membership and is refused at the second.
+      expect(modes).toEqual(shape === 'batch' ? ['per-row'] : ['record', 'record']);
+    });
+
+    it(`[${shape}] a group whose cascade spares another administrator is allowed`, async () => {
+      const { engine, modes } = await bootGrouped(shape);
+      await seedUser(engine, 'usr_owner', { role: 'owner' });
+      await seedUser(engine, 'usr_member', { role: 'member' });
+      await seedUser(engine, 'usr_admin', { role: 'admin' });
+      await join(engine, 'usr_owner', 'g1');
+      await join(engine, 'usr_member', 'g1');
+      await join(engine, 'usr_admin', 'g2');
+
+      await expect(engine.delete('test_grp', { where: { id: 'g1' }, ...SYSTEM })).resolves.toBeDefined();
+      expect(await rowExists(engine, 'sys_member', 'mem_usr_owner')).toBe(false);
+      expect(await rowExists(engine, 'sys_member', 'mem_usr_member')).toBe(false);
+      expect(await rowExists(engine, 'sys_member', 'mem_usr_admin')).toBe(true);
+      expect(modes).toEqual(shape === 'batch' ? ['per-row', 'per-row'] : ['record', 'record']);
+    });
+  }
+});

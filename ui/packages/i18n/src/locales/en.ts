@@ -2390,6 +2390,9 @@ const en = {
       // would have left a single translated string among a dozen hardcoded
       // ones — and deferred them to this card, which converts the screen whole.
       cryptoRefusalTitle: 'This deployment cannot encrypt secrets',
+      platformManagedTitle: 'Managed by the platform',
+      platformManagedBody: 'The hosting platform provides and configures this for this environment, so it is not set here.',
+      aiProviderManaged: 'The AI provider, its model and credentials are managed by the platform.',
       // `{{subject}}` is rendered as a `< code >` element by the view, so the
       // sentence is split around it rather than interpolated.
       cryptoRefusalSubjectSuffix: 'is declared encrypted, so nothing was written.',
