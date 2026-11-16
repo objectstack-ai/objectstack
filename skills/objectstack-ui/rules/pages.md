@@ -227,8 +227,9 @@ function Page() {
 });
 ```
 
-**Safety / availability.** `kind:'react'` is gated by the host capability
-`react-pages` — **OFF by default**: a react page's source is code every viewer runs. A deployment that trusts its authors turns it on server-side
+**Safety / availability.** `kind:'react'` executes author code in the app, so it is gated
+by the host capability `react-pages` — **OFF by default**: a react page's source is code
+every viewer runs. A deployment that trusts its authors turns it on server-side
 with `OS_PAGE_REACT_ENABLED=true`; while off, the page shows a "disabled" notice instead.
 `os build` does NOT lint react source — errors surface
 at render behind an error boundary, so always test a react page in the browser.
@@ -347,7 +348,7 @@ behind the screen is not.
 ### Routing model — platform-level viewer, opt-in entry
 
 The viewer is **platform-level**: one global `/docs/<name>` route
-resolves any doc regardless of which app you came from. The URL is
+resolves any doc. The URL is
 **single-coordinate** — no package or app prefix — so a doc has exactly
 one URL. Do **not** design per-app or per-package doc URLs.
 
