@@ -3070,7 +3070,7 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     const ask = driver.ask.bind(driver);
     driver.ask = async (task) => {
       if (task.step === 'add_contact') {
-        const app = apps.at(-1)!;
+        const app = apps[apps.length - 1]!;
         app.rows.democrm_contact = app.rows.democrm_contact!.filter((r) => r.id !== 'ct5');
       }
       return ask(task);

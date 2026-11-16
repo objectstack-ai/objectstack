@@ -110,7 +110,7 @@ describe('HttpApp.updateRow — the seed’s second pass, through the data door'
 
   it('deleteRow (a restore) sends DELETE /api/v1/data/OBJECT/ID with no body, and reads a refusal’s code', async () => {
     expect(await app.deleteRow('demopurchase_department', 'dep_sales')).toMatchObject({ ok: true, status: 200 });
-    expect(seen.at(-1)).toEqual({ method: 'DELETE', path: '/api/v1/data/demopurchase_department/dep_sales', body: undefined });
+    expect(seen[seen.length - 1]).toEqual({ method: 'DELETE', path: '/api/v1/data/demopurchase_department/dep_sales', body: undefined });
     expect(await app.deleteRow('demopurchase_department', 'dep_fin')).toMatchObject({ ok: false, status: 400, code: 'VALIDATION_FAILED' });
   });
 });
