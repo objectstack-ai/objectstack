@@ -110,8 +110,8 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
       const res = await stack.apiAs(admin, 'GET', `/meta/action/${name}`);
       const body: any = await res.json();
       expect(res.status, JSON.stringify(body).slice(0, 300)).toBe(200);
-      const version = body?.data?.version ?? body?.version;
-      expect(typeof version).toBe('string');
+      const version = body?.data?.version ?? body?.version ?? res.headers.get('etag');
+      expect(typeof version, `${JSON.stringify(Object.keys(body?.data ?? body ?? {}))} etag=${res.headers.get('etag')}`).toBe('string');
       return version as string;
     };
     const putIfMatch = async (version: string) => {

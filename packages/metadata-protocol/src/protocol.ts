@@ -7941,7 +7941,7 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessDraftAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
-            getOverlayRepo: () => this.getOverlayRepo(),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             readItemActiveRows: (...a) => this.readItemActiveRows(...a),
         };
         return packagelessDraftAddress.call(host, type, name, member, body);
