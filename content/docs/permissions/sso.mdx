@@ -165,7 +165,18 @@ Register SSO Provider bridge, `POST /api/v1/auth/admin/sso/register`, and the
 registration trusts it. **Setup → SSO Providers → Register SSO Provider** offers
 each of them as a field: **Authorization URL** fills `authorizationEndpoint`,
 **Token URL** `tokenEndpoint`, **JWKS URL** `jwksEndpoint` and **Userinfo URL**
-`userInfoEndpoint`.
+`userInfoEndpoint`. An origin a registration or an update names, its issuer
+included, is trusted only for that provider's discovery and validation: a
+registration's discovery and endpoint checks read it, and so does the check of
+the provider's logout endpoint when a registration or an update turns **Sign
+Out of the Company Sign-In Too** (`signOutOfIdp`) on (the discovery document
+that check reads is fetched under the configured trusted origins only). It
+never becomes an accepted `Origin` for the request itself, whose origin check
+reads the deployment's configured trusted origins alone, as on any other POST.
+So turning **Sign Out of the Company Sign-In Too** on for an OpenID Connect
+identity provider on an internal or private network is refused **400
+`VALIDATION_FAILED`** on `signOutOfIdp` until the provider's origin is listed in
+`OS_TRUSTED_ORIGINS`.
 
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google
@@ -777,16 +788,21 @@ OAuth client's hand-off and when no provider can be started. It changes the
 form only: `POST /api/v1/auth/sign-in/email` still accepts a password, and the
 `/register` and `/forgot-password` pages are not changed by it.
 
-Because the form then offers no email and password and no phone sign-in, two
-checks that keep a way to sign in do not count them under `off`, even while
-they are switched on: Setup's **Delete SSO Provider** on the last identity
-provider is refused `409 DELETE_RESTRICTED` with nothing deleted, and a boot
-with no identity provider reports at **error** under the grep token
-`no_sign_in_method_at_boot`. Recover by setting
-`OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden`, and
+Because the form then offers no email and password and no phone sign-in, the
+three checks that keep a way to sign in do not count them under `off`, even
+while they are switched on. Saving the auth settings refuses a Google change
+that removes the last way in (Google switched off, or a client credential
+cleared that no environment variable backs) with `400 SETTINGS_VALIDATION`,
+and turning email and password on in that save does not help. The email and
+password switch itself is never refused under `off`, because the form draws it
+neither way. Setup's **Delete SSO Provider** on the last identity provider is
+refused `409 DELETE_RESTRICTED` with nothing deleted. A boot with no identity
+provider reports at **error** under the grep token
+`no_sign_in_method_at_boot`. Another identity provider, a social or OIDC
+provider with a client ID and secret, or a host sign-in handoff still counts.
+Recover by setting `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden`, and
 `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` too when email and password sign-in is
-off, then restarting. The auth settings save still counts email and password
-under `off`; that check is still open.
+off, then restarting.
 
 **What a visit does.** The Console sign-in page reads `features.directSignIn`
 from `GET /api/v1/auth/config`. That is `true` only while a provider can be
@@ -821,6 +837,13 @@ button (and the reason, where there is one), instead of starting again when:
   starts from one address in a few seconds). It redirects to
   `/login?error=direct_sign_in_rate_limited`, the page asks the visitor to
   wait a few seconds and try again, and the `warn` line names `rate_limited`;
+- the [IP allow-list](/docs/permissions/authentication) refuses the
+  visitor's network. The door is not exempt from the allow-list: a browser
+  `GET` of the door from a refused address starts nothing and is redirected
+  to `/login?error=IP_NOT_ALLOWED` (keeping a same-origin `?redirect=`)
+  instead of the `403` body, the page says sign-in is not allowed from this
+  network, and every other auth request from that address is still refused
+  `403 IP_NOT_ALLOWED`;
 - the person just signed out in that tab. Often the identity provider's
   session outlives the platform's, so starting again would sign them straight
   back in. When the provider ends its own session too (an OIDC provider whose

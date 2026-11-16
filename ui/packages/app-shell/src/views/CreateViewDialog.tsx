@@ -61,7 +61,7 @@ import {
   PRIMARY_DATE_PREFERRED,
   END_DATE_PREFERRED,
   type FieldOption,
-} from '@object-ui/plugin-view';
+} from '@object-ui/plugin-view/core';
 import {
   LayoutGrid,
   KanbanSquare,

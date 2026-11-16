@@ -872,8 +872,10 @@ describe('#32183 × #32310 — the caller arm judges the served holders', () => 
  * two packages register answers the read's `409 RESOURCE_CONFLICT` naming both
  * holders as `details.candidates`, as the item read does. The refusal leaves
  * through `errorFromThrown`, which composes `details` from
- * `resolveThrownHttpError`. Only this cell of #32622 is covered here: a stored
- * row's layered refusal, and the REST `/layers` door, are not.
+ * `resolveThrownHttpError`. This is the dispatcher's registry-holder cell; the
+ * stored-row cells and the REST `/layers` door are pinned beside the #28337
+ * and #32354 pins (`meta-layers-ambiguous-package.test.ts`,
+ * `meta-disabled-holder-served-stack.test.ts` and their REST twins).
  */
 describe('#32250 — the dispatcher /layers 409 names the holders', () => {
     it('a name two packages register: 409 RESOURCE_CONFLICT with both as details.candidates', async () => {
@@ -1131,4 +1133,102 @@ describe('#32501 — a pair address reads the package it names, never the first 
             expect([layers?.code?.label, layers?.packageId]).toEqual([`alpha ${type}`, A]);
         });
     }
+});
+
+/**
+ * [#33456, ADR-0150 D4] The bare action read's envelope names a package only
+ * for the item that package holds at its own `(object, name)`. An action is
+ * keyed `(package, object, name)`, so the environment's own item bound to an
+ * object no package binds the name to is served as the environment's, with no
+ * package's `_packageId` / `_provenance` grafted from a holder on another
+ * object. Both registration orders.
+ *
+ * On the runtime dispatcher, the transport `RestServer`'s pin beside this one
+ * drives. BASE (main 1e65a389e1, the owner-key rule ablated in
+ * `lookupArtifactItem` and rebuilt): the mirror shape and the single-holder cell served the
+ * environment's item under the holder's `_packageId` and `_provenance:
+ * 'package'`. The CONTROLs read the same before and after.
+ */
+describe('#33456 — the bare action read grafts a holder\'s envelope only at its own (object, name)', () => {
+    let storedRows: any[] = [];
+    /** A fresh composition whose store answers `storedRows` for `sys_metadata`. */
+    const compose = () => {
+        registry = new SchemaRegistry({ multiTenant: false });
+        for (const id of [A, B]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
+        }
+        storedRows = [];
+        const engine = {
+            registry,
+            find: vi.fn(async (object: string) => (object === 'sys_metadata' ? storedRows.map((row) => ({ ...row })) : [])),
+            findOne: vi.fn().mockResolvedValue(null),
+            insert: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+        const services: Record<string, unknown> = { protocol, objectql: engine };
+        const resolve = (name: string) => services[name] ?? null;
+        dispatcher = new HttpDispatcher({
+            getService: resolve,
+            getServiceAsync: async (name: string) => resolve(name),
+            context: { getService: resolve },
+        } as never);
+    };
+    beforeEach(compose);
+    const body = (label: string, objectName: string | undefined) => ({
+        name: 'approve', label, type: 'script', ...(objectName ? { objectName } : {}), target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    });
+    const shipAction = (packageId: string, objectName: string) =>
+        registry.registerItem('action', body(packageId.split('.').pop()!, objectName), 'name' as never, packageId);
+    /** The environment's own item: the bare slot, and its active package-less row in the store. */
+    const environmentAction = (objectName: string | undefined) => {
+        registry.registerItem('action', body('env', objectName), 'name' as never);
+        storedRows.push({ id: 'r-env', type: 'action', name: 'approve', package_id: null, state: 'active', metadata: JSON.stringify(body('env', objectName)) });
+    };
+    const bothOrders = (steps: Array<() => void>) => [steps, [...steps].reverse()];
+    const envelopeOf = async (query: Record<string, unknown> = {}) => {
+        const answer = await read('/action/approve', query);
+        const item = answer.body?.data?.item ?? answer.body?.item;
+        return [answer.status, item?.label, item?.objectName, item?._packageId, item?._provenance === 'package'];
+    };
+
+    for (const [shape, holder, held, other] of [
+        ['mirror shape: A on `account`, the environment\'s item on `contact`', A, 'account', 'contact'],
+        ['single-holder cell: B on `contact`, the environment\'s item on `account`', B, 'contact', 'account'],
+        ['object-less: A on `account`, the environment\'s item object-less', A, 'account', undefined],
+    ] as const) {
+        it(`${shape}: the environment's item with no package's envelope (BASE: the holder's), and \`?package=\` the holder's own`, async () => {
+            for (const steps of bothOrders([() => shipAction(holder, held), () => environmentAction(other)])) {
+                compose();
+                steps.forEach((step) => step());
+                expect(await envelopeOf()).toEqual([200, 'env', other, undefined, false]);
+                expect(await envelopeOf({ package: holder })).toEqual([200, holder.split('.').pop(), held, holder, true]);
+            }
+        });
+    }
+
+    describe('CONTROLs (unchanged)', () => {
+        it('one package on one object with the environment\'s item on that object: its customization, under the package\'s envelope', async () => {
+            shipAction(A, 'account');
+            environmentAction('account');
+            expect(await envelopeOf()).toEqual([200, 'env', 'account', A, true]);
+        });
+
+        it('two packages on one object: refused, naming both', async () => {
+            shipAction(A, 'account');
+            shipAction(B, 'account');
+            const answer = await read('/action/approve');
+            expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(answer.body?.error?.details?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+        });
+
+        it('no package-less row: the one holder\'s own item, under its envelope', async () => {
+            shipAction(A, 'account');
+            expect(await envelopeOf()).toEqual([200, 'alpha', 'account', A, true]);
+        });
+    });
 });

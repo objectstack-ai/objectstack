@@ -158,7 +158,7 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -170,10 +170,10 @@
       },
       "steps": [
         "after a clean fresh boot, derive the expected per-object row counts from the app's own seed module (examples/app-showcase/src/data/seed/index.ts — count the records arrays; re-derive rather than trusting a stale list if seeds changed)",
-        "baseline for cross-checking the derivation — all 20 datasets of ShowcaseSeedData, 138 rows, counted at 8523ef9a by importing the module (QA run #32135's boot banner read the same 138 at ff04ad81): showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_inquiry=3, showcase_product=4, showcase_project=5, showcase_task=10, showcase_category=4, showcase_business_unit=9, sys_business_unit=5, showcase_team=2, showcase_project_membership=3, showcase_field_zoo=2, sys_exchange_rate=4 (two rates each for EUR and JPY), showcase_invoice=12, showcase_invoice_line=7, showcase_expense_report=4, showcase_expense_line=13, showcase_preference=1, showcase_announcement=2, showcase_client_brief=2",
+        "baseline for cross-checking the derivation — all 20 datasets of ShowcaseSeedData, 141 rows, counted at 0ac112fc by importing the module (QA runs #33784 at a557fa38 and #33909 at b914e724 derived the same 141): showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_inquiry=3, showcase_product=4, showcase_project=5, showcase_task=10, showcase_category=4, showcase_business_unit=9, sys_business_unit=5, showcase_team=2, showcase_project_membership=3, showcase_field_zoo=2, sys_exchange_rate=4 (two rates each for EUR and JPY), showcase_invoice=12, showcase_invoice_line=10, showcase_expense_report=4, showcase_expense_line=13, showcase_preference=1, showcase_announcement=2, showcase_client_brief=2",
         "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
         "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact, f_time in its canonical stored form — authored '14:30', served '14:30:00', which is equal and not a drift; packages/core/src/utils/temporal-storage-form.ts#canonicalTimeOfDay)",
-        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 138 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
+        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 141 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
         "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep. Every dataset replays create-only: no dataset declares mode 'upsert', so each takes the seed default `ignore` (the seed module's own comment says why), and a replay matches each row by its externalId and leaves it as it is — no row is added, none is rewritten"
       ],
       "acceptance": [
@@ -252,6 +252,12 @@
           "date": "2026-11-10",
           "change": "steps[1], steps[4] and steps[5], acceptance[3].clause and negative[1] corrected. Checklist-accuracy findings of QA run #32135 (the maintainer-named full-platform run at ff04ad81; card #32168). (1) steps[1]'s baseline said 19 datasets and 132 rows, and the run's boot read 138: ShowcaseSeedData now carries 20 datasets and 138 rows, because sys_exchange_rate (4 rows) was added and showcase_invoice_line authors 7 lines, not 5. Counted at base 8523ef9a by importing ShowcaseSeedData (examples/app-showcase/src/data/seed/index.ts) and summing each records array; steps[4]'s banner example follows. (2) steps[5], acceptance[3] and negative[1] called the replay an upsert, but no dataset declares mode 'upsert': each takes the seed default `ignore` (create-only), as the seed module's comment says. The assertion is unchanged: a restart changes no count",
           "ref": "#32168"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "steps[1]'s baseline re-counted and steps[4]'s banner example follows (rows 1 and 183 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724 derived 10 invoice lines and 141 rows, as the step tells a run to). ShowcaseSeedData still carries 20 datasets; showcase_invoice_line now authors 10 lines, not 7, so the total is 141, not 138. Counted at base 0ac112fc by importing examples/app-showcase/src/data/seed/index.ts and summing each records array. No clause changed",
+          "ref": "#34004"
         }
       ]
     },
@@ -634,7 +640,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -657,7 +663,7 @@
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
         "as admin, hand-walk each destination in each app. At a window narrower than 1416 px (1280 px included) the console folds the sidebar to its icon rail, and Setup and Account open that way (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, objectstack#27593; QA run #29877 met it at 1280 px): press the sidebar toggle at the app bar's left edge (Ctrl/⌘+B) to unfold it before expanding any group. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
-        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 11 namespaces of a stock single-posture boot, localization/company/branding/auth/access_policy/mail/sms/storage/ai/knowledge/lifecycle: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user from Users and confirm the user page's Preferences and Linked Accounts tabs render that user's rows",
+        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 11 namespaces of a stock single-posture boot, localization/company/branding/auth/access_policy/mail/sms/storage/ai/knowledge/lifecycle: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user's record page, /_console/apps/setup/sys_user/record/ID (a row click on the Users list opens a side panel at ?recordId=, which is not that page: take the id from the row or the panel), and confirm the user page's Preferences and Linked Accounts tabs (packages/platform-objects/src/pages/sys-user.page.ts#SysUserDetailPage) render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
         "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 48 Setup destinations for the admin on a stock single-org showcase boot, as QA runs #32953 (at 5fb79bc0) and #33087 (at 8e3d4a54) read them (GET /api/v1/meta/app leaves, which match the nav source minus its gates). QA run #29877 read 46 at 589049b0, before Access policy (nav_settings_access_policy, the access_policy namespace) joined the Configuration group. Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
@@ -798,6 +804,12 @@
           "date": "2026-11-14",
           "change": "steps[3] and steps[5] recounted (stale count, card #33330, row 16 of the #32908 close-out ledger). steps[3]: a stock single-posture boot serves 11 settings namespaces, not 10: access_policy (nav_settings_access_policy, 'Access policy', ADR-0069 TL;DR 6) sits in packages/platform-objects/src/apps/setup-nav.contributions.ts's group_configuration beside Authentication with no requiredPermissions. steps[5]: Setup serves 48 destinations, not 46, as QA run #32953 (body section 1) and QA run #33087 (comment 6850382730 on #32908) read them; 46 is kept as #29877's older reading. The step still says recount from the payload each run, and no clause changed. Read from source at base 87330e89; the 48 is the two runs' live reading, not re-driven",
           "ref": "#33330"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-15",
+          "change": "steps[3] names the user record URL (row 8 of ledger 6896511848 on #33761; QA run #33784 at a557fa38): a row click on the Setup Users list opens a side panel (?recordId=), and the Preferences and Linked Accounts tabs live on the record page (/apps/setup/sys_user/record/ID, the sys_user_detail page). No clause changed. Read from source at base 0ac112fc",
+          "ref": "#34004"
         }
       ]
     },
@@ -1097,14 +1109,14 @@
       "title": "Notification center (bell / InboxPopover): badge counts distinct unread topics + pending approvals, repeats coalesce, per-group and global mark-read drop the badge",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a recurring notification that produces many identical rows, so the topic-coalescing is exercised rather than assumed. The showcase_scheduled_digest flow (once a minute — the exact flood inboxGrouping.ts was written for) fires only on a boot that exports OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1: by default a stock boot leaves packaged schedules unbound by deployment policy, so without the switch no digest row ever lands. Boot with it exported, or coalesce on the repeated rows the stock seed already delivers (QA run #23939 used the three seeded approval.requested rows) and record which",
+          "a recurring notification that produces many identical rows, so the topic-coalescing is exercised rather than assumed. The showcase_scheduled_digest flow (once a minute — the exact flood inboxGrouping.ts was written for) fires only on a boot that exports OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1: by default a stock boot leaves packaged schedules unbound by deployment policy, so without the switch no digest row ever lands. Boot with it exported, or coalesce on the repeated rows the stock seed already delivers (QA run #23939 used the three seeded approval.requested rows) and record which. ⚠️ The stock seed alone cannot drive acceptance[4]: it holds one topic, so once steps[5] marks that group read nothing unread is left and 'Mark all read' is hidden. Mark the seeded group per steps[5] and take acceptance[4] on the digest rows (QA run #33853 did both on one boot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1); a run without the digest records acceptance[4] blocked(fixture), never pass",
           "at least one pending approval request (a sys_approval_request row in status pending whose approvers include the admin) so the approvals portion of the badge and the Approvals tab have something to show"
         ],
         "knownGaps": [
@@ -1177,7 +1189,7 @@
         "objectui packages/app-shell/src/layout/inboxGrouping.ts (groupNotifications — (topic,title) coalescing, #2765)",
         "objectui packages/app-shell/src/layout/AppHeader.tsx (postMarkRead → POST /api/v1/notifications/read[/all]; poll GET /notifications?view=mine)",
         "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
-        "packages/runtime/src/domains/notifications.ts#handleNotificationRequest (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400 — re-pointed #18104: markRead is a PROVIDER METHOD this file only calls off the inbox capability, a member access; the POST /notifications/read branch that validates the body and issues it is in handleNotificationRequest)",
+        "packages/runtime/src/domains/notifications.ts#handleNotificationRequest (markRead upserts sys_notification_receipt; a body without an `ids` string array (no ids, ids: 'n1', or the key misspelled) → 400 against MarkNotificationsReadRequestSchema (packages/spec/src/api/protocol.zod.ts), while an EMPTY ids array is valid and answers 200 readCount 0 (QA run #33853) — re-pointed #18104: markRead is a PROVIDER METHOD this file only calls off the inbox capability, a member access; the POST /notifications/read branch that validates the body and issues it is in handleNotificationRequest)",
         "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)",
         "cross-ref: this is distinct from i18n.notification-localized-and-clears (single-entry localization + clear) and approvals.notification-deep-link (deep-link) — do not double-count their coverage here"
       ],
@@ -1207,6 +1219,12 @@
           "date": "2026-11-14",
           "change": "steps[0], steps[5], fixtures.requires[1] and acceptance[5] name the approvals count's real read (card #33330, row 260 of the #32908 close-out ledger; QA run #33094 comment 6851700388 on #32908). The bell's approvals addend is the `total` of GET /api/v1/approvals/requests?status=pending&approverId=… (ui/packages/app-shell/src/hooks/sharedUserFeeds.ts#useSharedPendingApprovalRequests, approverIdentities), not a sys_approval_request my_pending read, and the run found no door that serves the my_pending count (meta view read 404, ?view= on the list door 400). acceptance[5] keeps its meaning, that the tab's count equals the pending approvals waiting on the user, and its verify now compares against that read, cross-checked with the view's filter over the data API. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "source[4] and fixtures.requires[0] re-pointed (rows 124 and 125 of ledger 6896511848 on #33761; QA run #33853 at a557fa38). source[4] said empty ids answer 400: POST /notifications/read {\"ids\":[]} answers 200 readCount 0, since MarkNotificationsReadRequestSchema takes any string array; a body without ids is the 400. requires[0] offered the stock seed alone as a coalescing fixture, but with one topic nothing is left for mark-all-read after the per-group mark, so acceptance[4] needs the digest flood. No clause changed. Read from source at base 0ac112fc",
+          "ref": "#34004"
         }
       ]
     },
@@ -1629,7 +1647,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1669,7 +1687,7 @@
           "evidence": "the refusal body, plus the GET /packages/:id and GET /packages reads taken after it"
         },
         {
-          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the protocol version it was judged against (`protocolVersion`, the protocol major padded to a semver such as '18.0.0' — never the runtime's package version; packages/metadata-core/src/protocol-handshake.ts ProtocolIncompatibleDiagnostic), and the remedy, which depends on the direction: a declared target major AT OR BELOW the runtime's carries a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>`; a target major ABOVE the runtime's carries NO `migrateCommand`, because `migrate meta` only moves metadata forward, and its `message` names the two remedies that apply instead, upgrading the runtime to protocol <targetMajor> or installing a build of the package for this runtime's protocol (checkProtocolCompat, #26480) — an author refused at the boundary is told which key to fix and which command or upgrade resolves it",
+          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the protocol version it was judged against (`protocolVersion`, the protocol major padded to a semver such as '18.0.0' — never the runtime's package version; packages/metadata-core/src/protocol-handshake.ts ProtocolIncompatibleDiagnostic), and the remedy, which depends on the direction and on the migrate-meta support floor (16, `MIGRATION_SUPPORT_FLOOR`, ADR-0087 D3): a declared target major AT OR ABOVE the floor and AT OR BELOW the runtime's carries a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>`; a target major BELOW the floor carries NO `migrateCommand`, because `migrate meta --from N` refuses every N under the floor, and its `message` names the two remedies that apply instead, installing a build of the package for this runtime's protocol or bringing its metadata to protocol 16 by another path and then running `objectstack migrate meta --from 16` (checkProtocolCompat, #33466); a target major ABOVE the runtime's carries NO `migrateCommand`, because `migrate meta` only moves metadata forward, and its `message` names the two remedies that apply instead, upgrading the runtime to protocol <targetMajor> or installing a build of the package for this runtime's protocol (checkProtocolCompat, #26480) — every refusal carries `targetMajor` whichever direction it takes, and an author refused at the boundary is told which key to fix and which command or upgrade resolves it",
           "oracle": "api",
           "verify": "read the named fields off the captured refusal body; the migrateCommand's --from must be the major of the DECLARED range, not the runtime's. On the AHEAD probe (steps[2], ^(RT+1)) the body carries targetMajor RT+1 and NO migrateCommand member at all, and its message names the runtime upgrade; a `migrate meta` command offered there is a FAIL, since it cannot resolve that refusal",
           "evidence": "both refusal bodies (the older and the AHEAD probe) with every named field shown"
@@ -1779,6 +1797,12 @@
           "date": "2026-11-14",
           "change": "steps[0] names where RT is read (stale read, card #33330, row 68 of the #32908 close-out ledger; QA run #33025 comment 6844741021 on #32908). GET /api/v1/meta has no protocol field; the major comes from GET /api/v1's version, which DiscoverySchema (packages/spec/src/api/discovery.zod.ts) declares and metadata-protocol's discovery-version.ts fills with the runtime's version, whose major equals the protocol major because protocol-version.test.ts holds PROTOCOL_VERSION in lockstep with the spec package major. No clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-15",
+          "change": "acceptance[1] scopes migrateCommand to the migrate-meta support floor. Loose end of #33031 (PR #33466): the clause said every declared target major at or below the runtime's carries `objectstack migrate meta --from <targetMajor>`, but checkProtocolCompat (packages/metadata-core/src/protocol-handshake.ts) leaves migrateCommand out when the target major is below MIGRATE_META_SUPPORT_FLOOR (16, held equal to the spec's MIGRATION_SUPPORT_FLOOR) and its message names the two remedies that apply. The clause also says every refusal carries targetMajor. The steps' probes (^(RT-1), ^(RT+1)) and the verify text are unchanged: on an 18 runtime ^(RT-1) targets 17, above the floor. Read from source at base 895783a1e8, not driven live",
+          "ref": "#33618"
         }
       ]
     },
@@ -2323,7 +2347,7 @@
       "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load') for every viewer ahead of the admin guard, Installed Apps drives the real same-origin lifecycle, and an enabled runtime turns a non-admin away with access-denied",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2335,7 +2359,7 @@
         "requires": [
           "the same two boots as platform-core.marketplace-install-local-lifecycle (boot A default cloud arm, boot B OS_CLOUD_URL=off offline arm) — reuse them and its installed CRM artifact for the Installed Apps content",
           "the marketplace routes are registered by DefaultAppContent in @object-ui/app-shell (system/marketplace, system/marketplace/:packageId), so they exist for every host console",
-          "boot B's Installed Apps content comes from an install, and install-local caches the manifest under the WORKING DIRECTORY's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd(); the CLI constructs the plugin with no storageDir). A per-boot OS_HOME and OS_STORAGE_LOCAL_ROOT do NOT redirect it, so a boot started from the shared tree writes examples/app-showcase/.objectstack/installed-packages/ into it. Boot every leg that installs a package from a scratch copy of the app, never from the tree (RUNNER.md environment facts)"
+          "boot B's Installed Apps content comes from an install, and install-local keeps the manifest in its ledger under OS_HOME/installed-packages when OS_HOME is set, and under the WORKING DIRECTORY's .objectstack/installed-packages only when it is not (packages/cloud-connection/src/local-manifest-source.ts#resolveInstalledPackagesDir; QA run #33853 read the CLI print and use OS_HOME/installed-packages). OS_STORAGE_LOCAL_ROOT does not move it. A boot with OS_HOME set copies a ledger it finds under the working directory into the home once and leaves that one in place, so a boot started from the shared tree adopts, and without OS_HOME writes, examples/app-showcase/.objectstack/installed-packages/. Boot every leg that installs a package from a scratch copy of the app, never from the tree (RUNNER.md environment facts)"
         ],
         "knownGaps": [
           "rendering the browse CATALOG (boot A) needs the public control plane reachable — on an egress-blocked runner the catalog leg is blocked(environment). The environment it needs is a boot whose process reaches the control plane: the default packages/cloud-connection/src/cloud-url.ts#DEFAULT_CLOUD_URL (https://cloud.objectos.ai), or an OS_CLOUD_URL that answers. No CI job drives this item, and the QA sandbox's egress proxy denies the host (QA run #21782, parked on #22017 row 10); the DISABLED state (boot B) is the leg this item can always prove, and it is the one #5504 was about"
@@ -2437,6 +2461,12 @@
           "date": "2026-11-14",
           "change": "steps[4] sends the member legs through an app the member can open (card #33330, row 266 of the #32908 close-out ledger; QA run #33096 comment 6852480973 on #32908, whose member legs used /apps/com.example.showcase/system/marketplace). The Setup app declares requiredPermissions ['setup.access'] (packages/platform-objects/src/apps/setup.app.ts), which a plain member does not hold, while AppContent mounts system/marketplace and system/marketplace/:packageId under every app, so the member's MarketplaceAccessDenied and MarketplaceDisabled reads are reachable only through another app's prefix. No acceptance clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[2] re-pointed (row 110 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): install-local's ledger follows OS_HOME (OS_HOME/installed-packages) and falls back to the working directory's .objectstack/installed-packages only without it, adopting a working-directory ledger once (local-manifest-source.ts resolveInstalledPackagesDir); the text said OS_HOME does not redirect it. The scratch-copy rule stands. No clause changed. Read from source at base 0ac112fc",
+          "ref": "#34004"
         }
       ]
     },
@@ -2541,7 +2571,7 @@
       "title": "Docs portal render: /docs lists the installed corpus, a doc body renders with working intra-corpus links, a flat-doc URL redirects to its canonical in-book path, the per-app index scopes to one package, and a lesser persona's rendered tree equals the API's pruned subset — never a blank region",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2561,7 +2591,7 @@
         "as admin, open /docs: DocsLayout fetches book + doc once and shares it; the index (DocsIndex) renders the installed corpus grouped by book/package — screenshot first, then diff the rendered entries against GET /api/v1/meta/book + /api/v1/meta/doc",
         "open a doc through the tree (BookSidebar → /docs/<book-slug>/<name>): the body renders; click an intra-corpus cross-reference — it resolves inside the portal viewer, not to a 404 or an external route",
         "flat-doc permalink: navigate to /docs/<doc-name> (one segment, not a book slug) — DocsSlug redirects to the canonical /docs/<home-book>/<name> (every doc has a home book; identity stays single-coordinate per ADR-0046 §4/§6)",
-        "app-scoped index: open /apps/<packageId>/docs — AppDocsIndex lists ONLY that package's docs (grouping derives the package from the name's namespace prefix, doc-groups.ts); open one through it (/apps/<packageId>/docs/<name>)",
+        "app-scoped index: open /apps/<packageId>/docs — AppDocsIndex lists ONLY that package's docs (grouping derives the package from the name's namespace prefix, doc-groups.ts), one card per book; with ONE book, the showcase's case, it renders no listing and redirects straight into that book's reader (/apps/<packageId>/docs/<book-slug>, ui/apps/console/src/pages/AppDocsIndex.tsx; QA run #33853 landed on /apps/<packageId>/docs/manual/showcase_index), so read the package's listing off that reader's book sidebar; open one through it (/apps/<packageId>/docs/<name>)",
         "as the plain member: open the top-bar Help menu (the '?' button, aria-label 'Help & Documentation' — AppHeader) and confirm it offers 'All documentation' (→ /docs). This menu is the documentation entry every persona has: /home has no sidebar for anyone (HomeLayout deliberately omits it), and UnifiedSidebar — whose home navigation carries a Documentation item — is mounted only inside ConsoleLayout, which sets the app context. Follow the entry to /docs and capture the rendered tree",
         "UI-mirror diff: fetch the book tree(s) via the API as the SAME member and diff the member's RENDERED entries against the API's pruned subset — equal sets; then open every entry the member's tree offers: each resolves, none errors (the UI half of platform-core.docs-audience-gate clause 3 — a nav entry that refuses on click is the exact defect the per-entry filter exists to prevent)",
         "screenshot-first throughout: any empty region is re-checked on a settled reload before being read as missing"
@@ -2637,6 +2667,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[0] cited lines 176-185 of objectui apps/console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the list 35-41 and 176-185). At the objectui pin that commit shipped, 9602dc820450, those lines were the app-scoped docs route (DocsLayout with its index, :slug and :slug/:name children); at the shipped pin 12dc7b47c340 that route sits further down in the same file's systemRoutes, which source[0] now names. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "steps[3] names the one-book redirect (row 108 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): AppDocsIndex renders a card per book and, with one book, navigates straight into that book's reader, so the listing a run diffs is the reader's book sidebar. No clause changed. Read from source at base 0ac112fc",
+          "ref": "#34004"
         }
       ]
     },
@@ -2761,7 +2797,7 @@
       "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the dialog lists exactly the shortcuts whose handler is mounted and every listed one fires (⌘K, ⌘/Ctrl+B shown as ⌘B, ⌘⇧H, Esc, ?), the five formerly advertised dead accelerators (⌘/, N, R, ⌘E, ⌘D) are neither listed nor bound, and the AI-chat pair ⌘⇧O / ⌘⇧S is listed only on the page that handles it (objectui#11674)",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2778,7 +2814,7 @@
       "steps": [
         "press `?` on a settled app page, e.g. an object list (focus NOT in an input; the dialog is mounted only inside app content, ui/packages/app-shell/src/console/AppContent.tsx, so on /_console/home neither `?` nor ?shortcuts=1 opens it and the Home Help menu offers no shortcuts entry) — the shortcuts dialog opens (overlay data-testid overlay:keyboard-shortcuts) and the URL carries ?shortcuts=1; press Esc — it closes and the param clears",
         "deep-link: open any app route with ?shortcuts=1 cold — the dialog is open on load (URL-addressable, ADR-0054)",
-        "input guard: focus a text input (on the stock object list, click the toolbar Search icon to open its `Search…` box, which writes uf__search; no text input is visible until then), type `?` — the character lands in the input and NO dialog opens (the handler returns early for INPUT/TEXTAREA/contentEditable)",
+        "input guard: focus a text input (on the stock object list, click the toolbar Search icon to open its `Search…` box, which writes uf__search; no text input is visible until then), type `?` — the character lands in the input and NO dialog opens (the handler returns early for INPUT/TEXTAREA/contentEditable). ⚠️ The typed term stays: the list carries it as uf__search (ui/packages/app-shell/src/views/userFilterUrlState.ts) and keeps it across navigation and reloads in the same browser context, so a later probe on that list runs on a filtered 'No matching records' list. Clear the box afterwards, or run each probe set in a fresh browser context (QA run #33914)",
         "inventory the dialog: capture every listed accelerator. The rows are derived from the handlers mounted at that moment (advertisedShortcuts.ts, objectui#11674), so on a stock page at the console pin the dialog lists exactly (read at objectui 1fb1ced36243, and again at daeb77fc84dd by QA run #23939): General — Close dialog/panel `Esc`, Open command palette `⌘ K`, Show keyboard shortcuts `?`; Navigation — Toggle sidebar `⌘ B`, Back to home `⌘ ⇧ H` (GO_HOME_SHORTCUT, advertised by AppHeader's useGoHomeShortcut beside its listener, on app pages only; added by objectui#12605 and read by QA run #33058). No AI-chat group appears off the chat page, and nothing else is listed",
         "fire the WIRED set: ⌘K (or Ctrl+K) opens the command palette (depth of the palette itself belongs to search.console-global-search — here only that the accelerator fires); ⌘/Ctrl+B toggles the sidebar; ⌘⇧H and Ctrl+Shift+H each navigate to /_console/home; ⌘⇧I is NOT probed here — its gated/entitled matrix belongs to ai.console-ai-surface-gating",
         "display-equals-binding probe for the sidebar: the dialog shows `⌘ B` (a mod chord), never bare B — press bare B (no modifier) outside any input: NOTHING happens (the handler requires metaKey||ctrlKey); press ⌘B and Ctrl+B: the sidebar toggles each time. Display and binding agree",
@@ -2874,6 +2910,12 @@
           "date": "2026-11-14",
           "change": "steps[0] to steps[4] and the title follow the dialog's current inventory and mount point (card #33330, row 175 of the #32908 close-out ledger; QA run #33058 comment 6846283471 on #32908). The Navigation group now also lists Back to home ⌘⇧H: GO_HOME_SHORTCUT in ui/packages/app-shell/src/chrome/advertisedShortcuts.ts, advertised by useGoHomeShortcut in ui/packages/app-shell/src/layout/AppHeader.tsx beside the listener that navigates home, so it joins the inventory and the wired set. KeyboardShortcutsDialog is mounted only in ui/packages/app-shell/src/console/AppContent.tsx, so steps[0] and steps[1] now say an app page or app route. The stock list has no visible text input until the toolbar Search icon opens one (uf__search, ui/packages/app-shell/src/views/userFilterUrlState.ts), so steps[2] says to open it. No acceptance clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "steps[2] warns that the search term persists (row 214 of ledger 6896511848 on #33761; QA run #33914 at b914e724): the `?` typed into the list search box stays as uf__search across reloads in the same browser context, and later probes there ran on a filtered empty list. No clause changed. Read from source at base 0ac112fc",
+          "ref": "#34004"
         }
       ]
     },
@@ -3568,7 +3610,7 @@
       "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and the ownership ceremony's plan and apply, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 9,
+      "revision": 11,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3592,13 +3634,13 @@
         {
           "clause": "the organization-ownership boot guard and the identity-objects boot refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's two steps spelled for the boot that refused: on a production `os serve` (steps[0]) `os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`; on a development boot (`os dev`, `os serve --dev`) both carry `--dev` after `organization-ownership`, so the ceremony boots the same way the refused boot did (packages/runtime/src/organization-ownership-boot-guard.ts, ceremonyCommand). It does not tell the operator to stay on 17.x. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
+          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's two steps spelled for the boot that refused: on a production `os serve` (steps[0]) `os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`; on a development boot (`os serve --dev`) both carry `--dev` after `organization-ownership`, so the ceremony boots the same way the refused boot did (packages/runtime/src/organization-ownership-boot-guard.ts, ceremonyCommand). `os dev` prints neither: its `serve --dev` child hands the refusal to its parent over IPC and exits without printing it (packages/cli/src/commands/serve.ts#announceOrganizationOwnershipRequired), and `os dev` then copies the development database and runs the ceremony itself (packages/cli/src/commands/dev.ts#upgradeRefusedDevelopmentDatabase, the ADR-0131 D10 development exception), so the development spelling is read on a standalone `os serve --dev`. It does not tell the operator to stay on 17.x. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
           "oracle": "log",
-          "verify": "boot output + exit code + no listening line: the printed refusal opens \"This database carries no organization-ownership marker\", names each table still carrying organization_id, and contains `os migrate organization-ownership --out PLAN` and `--apply --plan-file PLAN --backup-taken` (a development boot's refusal reads `os migrate organization-ownership --dev --out PLAN` and `--dev --apply --plan-file PLAN --backup-taken`; `--dev` missing from a development boot's refusal, or present on a production one, is a FAIL: the operator would run the ceremony against a differently composed boot); the refusal excerpt has 0 hits for `17.x release` and for `fresh installs only`. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
+          "verify": "boot output + exit code + no listening line: the printed refusal opens \"This database carries no organization-ownership marker\", names each table still carrying organization_id, and contains `os migrate organization-ownership --out PLAN` and `--apply --plan-file PLAN --backup-taken` (an `os serve --dev` boot's refusal reads `os migrate organization-ownership --dev --out PLAN` and `--dev --apply --plan-file PLAN --backup-taken`; `--dev` missing from a development boot's refusal, or present on a production one, is a FAIL: the operator would run the ceremony against a differently composed boot); the refusal excerpt has 0 hits for `17.x release` and for `fresh installs only`. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
           "evidence": "the refusal excerpt"
         },
         {
@@ -3685,6 +3727,18 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] and acceptance[1] corrected. Checklist-accuracy findings of QA run #27481 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): the v17-shaped DB comes from a 17.7.0 blank-scaffold `os dev` boot, since no 17.x showcase was published; and under `os serve --dev` the refusal spells the ceremony with `--dev`, which the clause's literal matched only on a production serve. The clause now pins the spelling to the boot mode (ceremonyCommand). A finding of QA run #27438 on the same anchor asked for the planted-shape recipe, and requires[1] now names it: a copy of this release's DB minus the adr-0131-organization-ownership marker, plus an organization_id column on a tenant-less table. Re-read at 3fd80337",
           "ref": "#27481"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "acceptance[1] names `os serve --dev` alone as the development boot that prints the `--dev` spelling (rows 4 and 185 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724). Under `os dev` the refused `serve --dev` child announces the refusal to its parent and exits without printing it, and `os dev` runs the ceremony on a copy itself (serve.ts announceOrganizationOwnershipRequired, dev.ts upgradeRefusedDevelopmentDatabase, ADR-0131 D10), so the clause listed a boot that never shows the text. The spelling the clause pins is unchanged. Read from source at base 0ac112fc",
+          "ref": "#34004"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3693,7 +3747,7 @@
       "title": "Protocol 18 upgrade surfaces: a package declaring engines.protocol \"^17\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 17` (\"^18\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and a \"^18\" artifact built before a retirement boots with one warn per replayed conversion",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3712,13 +3766,13 @@
       "steps": [
         "POST /api/v1/marketplace/install-local (or POST /api/v1/packages) with the ^17 manifest; then the ^18 one",
         "plant the row into sys_metadata, then reboot on the same DB (or plant with the server stopped), then GET /api/v1/meta/page/PLANTED and compare with the planted body; PUT the planted (old-shape) body back. ⚠️ A row planted under a running server is not what a GET reads: the server answers from its in-memory registry until it reboots (QA run #27438 read the pre-plant body), so a GET before the reboot scores the cache, not the stored-row replay",
-        "boot (`os start`) a ^18 dist/objectstack.json built before a retirement; read the boot warns. An edited copy of a built artifact must sit where its references resolve: its runtimeModule (objectstack-runtime.HASH.mjs) is resolved relative to the artifact's own directory (packages/runtime/src/load-artifact-bundle.ts#mergeRuntimeModule) and imports from node_modules, so keep the copy beside the original in the app's dist/ and boot it with `--artifact COPY`"
+        "boot (`os start`) a ^18 dist/objectstack.json built before a retirement; read the boot warns. An edited copy of a built artifact must sit where its references resolve: its runtimeModule (objectstack-runtime.HASH.mjs) is resolved relative to the artifact's own directory (packages/runtime/src/load-artifact-bundle.ts#mergeRuntimeModule) and imports from node_modules, so keep the copy beside the original in the app's dist/ and boot it with `--artifact COPY`. ⚠️ Such a copy boots ALONE: the cwd config joins a boot only when the artifact is its own compiled output (packages/cli/src/utils/artifact-precedence.ts#cwdConfigJoinsBoot), so the config's code plugins drop out, and the showcase's boot aborts after the conversion warns (service-automation refuses connector 'showcase_status_api', provider 'rest': 'Installed providers: [none]'; QA run #33853 at a557fa38, where an unedited copy aborted the same way). The warns print before the abort, so acceptance[3] is read from that log; for a boot that also serves, build the artifact from an app with no code-plugin connector (examples/app-todo). Putting the edited copy at a scratch copy's conventional dist/objectstack.json is no way round it: there the config boots, not the copy, and no conversion warn prints"
       ],
       "acceptance": [
         {
           "clause": "the protocol handshake, stored-row replay and artifact forward conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3736,7 +3790,7 @@
         {
           "clause": "the old artifact boots with one \"converted N site(s) … ID\" warn per conversion",
           "oracle": "log",
-          "verify": "boot log grep",
+          "verify": "boot log grep, read before the abort a showcase copy's boot ends in (steps[2]); that boot's exit is not this clause's evidence",
           "evidence": "the lines"
         }
       ],
@@ -3770,6 +3824,18 @@
           "date": "2026-10-31",
           "change": "steps[1] and steps[2] carry the two staging facts. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): a row planted into sys_metadata under a running server is served from the in-memory registry until a reboot, so the GET must follow a reboot on the same DB; and an off-tree artifact copy needs its runtime module beside it (mergeRuntimeModule resolves it against the artifact's directory) and resolvable node_modules. The finding's text is truncated after that; its unread remainder is not acted on here. The clauses are unchanged. Re-read at 3fd80337",
           "ref": "#27438"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "steps[2] and acceptance[3].verify re-pointed (row 122 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): a named, non-conventional artifact boots alone, without the cwd config (artifact-precedence.ts cwdConfigJoinsBoot), so the showcase copy's code plugins drop out and its boot aborts on the 'showcase_status_api' rest provider after the conversion warns. The clause is read from the warns that precede the abort; a serving boot needs an app with no code-plugin connector. No clause changed. Read from source at base 0ac112fc",
+          "ref": "#34004"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3778,7 +3844,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3808,7 +3874,7 @@
         {
           "clause": "the platform rung and per-organization settings isolation — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3882,6 +3948,12 @@
           "date": "2026-11-01",
           "change": "negative[0] added, with steps[2] driving it: LOCKED means platform-locked, so an organization administrator's save of its own locked tenant row must be refused, and a save that lands is a security FAIL. Ruling 6545938831 item ⑤ on #28345, which settles the semantics; the clause is a walled leg like acceptance[2] and [3]. No existing clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3890,7 +3962,7 @@
       "title": "`os serve` composition on v18: unclaimed top-level items of a packages[] config are served under manifest.id with a warn line, an app shipping its own default sys_organization record page boots, a host datasourceMapping is installed before the first schema sync, a production host with no storage refuses to boot naming three remedies, and /_console/ answers 503 with the remedy when the console is not built",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -3915,7 +3987,7 @@
         {
           "clause": "the serve composition guards and fallbacks — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item. One exception to that reading: packages/cli/test/serve-organization-record-page.e2e.test.ts is a *.e2e.test.ts file, which the cli vitest config collects only under OS_TEST_TIERS=nightly (packages/cli/vitest.config.ts, the nightly tiers) — run it with OS_TEST_TIERS=nightly set; without it the file reports 0 tests, which is not-run for that file (acceptance[2] then unscored), not a stale ref",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item. One exception to that reading: packages/cli/test/serve-organization-record-page.e2e.test.ts is a *.e2e.test.ts file, which the cli vitest config collects only under OS_TEST_TIERS=nightly (packages/cli/vitest.config.ts, the nightly tiers) — run it with OS_TEST_TIERS=nightly set; without it the file reports 0 tests, which is not-run for that file (acceptance[2] then unscored), not a stale ref",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3984,6 +4056,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] and acceptance[4] name the host config the no-storage leg needs. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): a plugin-less production stack booted on SQLite instead of refusing. That is by design: shouldBootWithLibrary sends a config with no instantiated plugin through createStandaloneStack, which provisions the SQLite default, and only a host config reaches the storage guard (the integration pin boots one). The clause is unchanged for the shape it was written for. Re-read at 3fd80337",
           "ref": "#27438"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -4480,15 +4558,15 @@
       "title": "An 18.3.0 database's activation ledger moves to the (metadata_type, package_id, name) key on its first boot: the package-less index is built, each package-less row binds to its one holder, ambiguous and environment rows stay null, a second boot writes nothing, and os migrate plan offers the old index as a safe replacement",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator at the CLI, with direct access to the database file"],
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds a package-less row (package_id NULL) for a flow one installed package ships, and a row for a position. On route (a), 18.3.0's door already writes package_id (for a name two packages hold, the first holder), and its position door does too (com.objectstack.plugin-security, QA run #33048), so set the flow row's AND the position row's package_id to NULL by SQL: the backfill never asks about a position row and leaves it as it is (packages/objectql/src/activation-ledger-backfill.ts), so an unplanted route (a) position row keeps 18.3.0's package and the clause's 'stays null' cannot be read. On route (b) it also holds a package-less row for a name two packages hold. An environment item's row is planted by SQL on either route: 18.3.0's door answers 409 for one. Every boot of this tree then logs ERROR \"[security] upgrade impact: 1 activation ledger row(s) for a flow, action or webhook name an item no package ships at this boot …\" for that planted row (packages/plugins/plugin-security/src/upgrade-impact-report.ts, the orphans line): expected for a switch row on an environment item, not a finding",
-          "a copy of the same file with two package-less rows planted by SQL for one (metadata_type, name), for the conflict leg. On a route (a) file, drop 18.3.0's unique (metadata_type, name) index first, because it forbids the pair"
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL and sys_metadata_activation's indexes are put back to 18.3.0's: drop uniq_sys_metadata_activation_packageless AND this release's declared uniq_sys_metadata_activation_metadata_type_package_id_name, then recreate 18.3.0's key (CREATE UNIQUE INDEX uniq_sys_metadata_activation_metadata_type_name ON sys_metadata_activation (metadata_type, name); it refuses while two rows share a (metadata_type, name), so plant after it). That is what a database an earlier release built holds once this release's schema sync has added the columns. Dropping the package-less index alone does not reproduce it: with the three-column key standing, no plan offers replace_unique_index and acceptance[3] cannot be read (QA runs #33853 and #33914). The name two packages hold comes from one `os dev` boot of a scratch app of two namespaced packages composed with composeStacks([...], { manifest: 'preserve' }), each declaring a flow of the same name (e.g. qa_sync); no install door is needed. Its sys_metadata_activation holds a package-less row (package_id NULL) for a flow one installed package ships, and a row for a position. On route (a), 18.3.0's door already writes package_id (for a name two packages hold, the first holder), and its position door does too (com.objectstack.plugin-security, QA run #33048), so set the flow row's AND the position row's package_id to NULL by SQL: the backfill never asks about a position row and leaves it as it is (packages/objectql/src/activation-ledger-backfill.ts), so an unplanted route (a) position row keeps 18.3.0's package and the clause's 'stays null' cannot be read. On route (b) it also holds a package-less row for a name two packages hold. An environment item's row is planted by SQL on either route: 18.3.0's door answers 409 for one. Every boot of this tree then logs ERROR \"[security] upgrade impact: 1 activation ledger row(s) for a flow, action or webhook name an item no package ships at this boot …\" for that planted row (packages/plugins/plugin-security/src/upgrade-impact-report.ts, the orphans line): expected for a switch row on an environment item, not a finding",
+          "a copy of the same file with two package-less rows planted by SQL for one (metadata_type, name), for the conflict leg. On either route, drop the unique (metadata_type, name) index first (18.3.0's on route (a), the recreated one on route (b)), because it forbids the pair"
         ],
         "knownGaps": [
           "the ambiguous-row leg stays RUNNER-BUILT, by design (maintainer ruling 2026-11-14 on #33351, row 90, option B): it needs one item name held by two installed packages, and no stock boot carries a second package. The showcase cannot grow one: an app package defines at most one app and a suite's other packages are module packages composed beside it (ADR-0019), so a second holder is a separate package, not a seed line. Plant it per requires[0] route (a) or (b). A permanent multi-package fixture, if a later item needs one, extends examples/app-multi-package (two packages composed with composeStacks(…, { manifest: 'preserve' })), not the showcase"
@@ -4569,41 +4647,47 @@
           "date": "2026-11-14",
           "change": "fixtures.knownGaps added: the ambiguous-row leg (a name two packages hold) stays runner-built by design (maintainer ruling 2026-11-14 on #33351, row 90, option B; QA run #33048 comment 6846028996 named the gap). Read at base ba35dfd78: ADR-0019 (an app package defines at most one app; measured on #33351 round 1, where a second app in the showcase failed its build), examples/app-multi-package (composeStacks with manifest 'preserve'). No clause changed",
           "ref": "#33351"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0] route (b) and requires[1] re-pointed (rows 106 and 218 of ledger 6896511848 on #33761; QA runs #33853 at a557fa38 and #33914 at b914e724). Dropping uniq_sys_metadata_activation_packageless alone left this release's three-column key (metadata_type, package_id, name) standing, so plan 1 and plan 2 never showed acceptance[3]'s create_index then replace_unique_index; both runs had to drop that key and recreate 18.3.0's UNIQUE (metadata_type, name) as uniq_sys_metadata_activation_metadata_type_name. Route (b) now says so, requires[1]'s pair needs that recreated index dropped too, and the two-holder name names the composeStacks scratch app both runs used. No clause changed. Index names read at base 0ac112fc (sys-metadata-activation.object.ts, schema-drift.ts buildIndexName)",
+          "ref": "#34004"
         }
       ]
     },
     {
       "id": "platform-core.bare-name-one-holder-refusal",
-      "title": "A covered bare name has one package holder: installing a second package that holds a connector name (the covered types NAMESPACE_SCOPED_BARE_NAME_TYPES does not list: connector alone at revision 4) is refused 422 naming both, the narrowed types (picklist, mapping, dataset, api, object-less action, function, flow, webhook, email template, agent, skill and tool) are held per namespace, and a clash an earlier deployment already holds boots with a warning",
+      "title": "A covered bare name has one holder per namespace: two packages in two namespaces may each hold the connector qa_conn, the webhook, the flow and the agent (every covered type is in NAMESPACE_SCOPED_BARE_NAME_TYPES since #33431), a package with no namespace that declares a held connector name is refused 422 naming every holder it meets, and a clash an earlier deployment already holds between a package with no namespace and another holder boots with a warning",
       "since": "v18.4",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): every install"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a connector qa_conn (a catalog descriptor: name, label and type 'api', no provider and enabled: false, so nothing is materialized or dispatched), a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted; a package that declares a webhook also declares requires: ['webhooks', 'realtime'], which the stack schema refuses it without), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
-          "for the cold-boot leg: a scratch app that registers two code packages which both hold the connector qa_conn (the doors judge nothing during a boot, so both register), booted on its own port and file DB. No install door is needed: one defineStack whose packages[] holds two bodies (ids com.qa.addr-c and com.qa.addr-d, each with its own namespace and its own connector qa_conn; ADR-0130 D4, packages/spec/src/stack.zod.ts) registers both at boot, and the CLI judges no bare name, so it builds"
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a connector qa_conn (a catalog descriptor: name, label and type 'api', no provider and enabled: false, so nothing is materialized or dispatched), a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted; a package that declares a webhook also declares requires: ['webhooks', 'realtime'], which the stack schema refuses it without), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline); plus a third, qa_e (manifest id com.qa.addr-e, built the same way but declaring NO namespace), which holds only the connector qa_conn (the same inert catalog descriptor)",
+          "for the cold-boot leg: a scratch app that registers two code packages which both hold the connector qa_conn (the doors judge nothing during a boot, so both register), booted on its own port and file DB. No install door is needed: one defineStack whose packages[] holds two bodies (ids com.qa.addr-c, namespace qa_c, and com.qa.addr-d, which declares NO namespace, each with its own connector qa_conn: a holder with no namespace meets every other holder, so the pair still clashes where two namespaces would not; ADR-0130 D4, packages/spec/src/stack.zod.ts) registers both at boot, and the CLI judges no bare name, so it builds. composeStacks([c, d], { manifest: 'preserve' }) of two such stacks is the shape QA run #33853 built and booted; keep it"
         ]
       },
       "steps": [
         "install qa_a, then qa_b; record each answer and GET /api/v1/packages",
-        "rebuild qa_b without the connector qa_conn (keep the webhook qa_hook, the flow qa_sync and the agent qa_helper) and install it again; record the answer",
+        "install qa_e (no namespace, holding the connector qa_conn); record the answer and GET /api/v1/packages",
         "boot the cold-boot app and read the boot log"
       ],
       "acceptance": [
         {
-          "clause": "the second package holding a covered name is refused 422 naming both packages and a rename, and leaves nothing installed",
+          "clause": "a package with no namespace that declares a name another package holds is refused 422 naming the holders, and leaves nothing installed",
           "oracle": "api",
-          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming connector qa_conn, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename). connector is the one covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) that packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES does not list at this revision, so two namespaces do not lift it. Re-read that complement before the run: a covered type still outside the list is the type this clause and acceptance[3] drive, and a type the list has gained is now acceptance[1]'s; qa_b is absent from the package list",
+          "verify": "installing qa_e answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming connector qa_conn, com.qa.addr-e and both holders it meets, com.qa.addr-a and com.qa.addr-b, with no rename, since a package with no namespace has no prefix to suggest (packages/objectql/src/registry.ts#bareNameRenameFor) (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT). Every covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) is in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES since #33431, so two namespaces never clash; two holders still clash when they meet (packages/objectql/src/bare-name-one-holder.ts#bareNameHoldersMeet over packages/spec/src/kernel/namespace-prefix.ts#namespacedHoldersMeet): a holder with no namespace meets every holder. The message's reason sentence is product copy tracked apart (#33507) and is not scored here; qa_e is absent from the package list",
           "evidence": "the 422 body and the package list"
         },
         {
-          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the webhook qa_hook, the flow qa_sync and the agent qa_helper",
+          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the connector qa_conn, the webhook qa_hook, the flow qa_sync and the agent qa_helper",
           "oracle": "api",
-          "verify": "the rebuilt qa_b installs 200 while both hold qa_hook, qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696, webhook #32577, tool #33124); the covered types that list lacks, connector alone at this revision, are still one holder per deployment",
+          "verify": "qa_b installs 200 while both hold qa_conn, qa_hook, qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696, webhook #32577, tool #33124, connector #33431); no covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) is left outside that list. Re-read the complement before the run: a type outside it is one holder per deployment, and qa_b's 200 on it is acceptance[0]'s FAIL, not this clause's pass",
           "evidence": "the 200 answer"
         },
         {
@@ -4613,19 +4697,19 @@
           "evidence": "the install answer"
         },
         {
-          "clause": "a clash the deployment already holds does not stop the boot: it boots and warns once naming both holders and the rename, changing nothing about which holder each caller is served",
+          "clause": "a clash the deployment already holds does not stop the boot: it boots and warns once naming both holders, changing nothing about which holder each caller is served",
           "oracle": "log",
-          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the connector qa_conn, both packages and the rename (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning)",
+          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the connector qa_conn, com.qa.addr-c and com.qa.addr-d; it names a rename only when the later-registered of the two declares a namespace (qa_c_qa_conn), since com.qa.addr-d has none to suggest (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning). The seal reports a pair only when the two holders meet (packages/objectql/src/bare-name-one-holder.ts#bareNameHoldersMeet), so two namespaces' holders boot with no warning, while a holder with no namespace beside any other holder still warns",
           "evidence": "the warning line"
         }
       ],
       "negative": [
-        "the second install answering 200 and the connector name then serving one of the two is a FAIL",
+        "qa_e's install answering 200 and the connector name then serving one of the holders is a FAIL",
         "a cold boot refused because of a pre-existing clash is a FAIL while the mode is warn",
-        "reading the rebuilt qa_b's 200 beside qa_a's flow qa_sync as a defect is wrong: flow is held per namespace since #31696, and the bare flow address answers 409 naming both"
+        "reading qa_b's 200 beside qa_a's connector qa_conn or flow qa_sync as a defect is wrong: connector is held per namespace since #33431 and flow since #31696, and the bare connector or flow address answers 409 naming both"
       ],
       "variants": [
-        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives connector (one holder per deployment: the covered types NAMESPACE_SCOPED_BARE_NAME_TYPES does not list) and webhook, flow and agent (per namespace), and names the types it did not drive"
+        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives connector (per namespace across qa_a and qa_b, refused to the namespace-less qa_e, and the namespace-less cold-boot pair) and webhook, flow and agent (per namespace), and names the types it did not drive"
       ],
       "automated": {
         "kind": "unit",
@@ -4633,10 +4717,10 @@
       },
       "source": [
         "packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE (the cold boot, and why the doors judge nothing during it)",
-        "packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (the types narrowed per namespace; objectql's bare-name-one-holder.ts re-exports it)",
+        "packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (the types narrowed per namespace, every covered type since #33431; objectql's bare-name-one-holder.ts re-exports it), and packages/objectql/src/bare-name-one-holder.ts#bareNameHoldersMeet (which holders still meet: a holder with no namespace meets every holder)",
         "packages/objectql/src/registry.ts#BareNameConflictError (422 NAMESPACE_CONFLICT)",
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D9 (phase 1 stands until each child B narrows it)",
-        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace), #32577 (webhook per namespace), #33124 (tool per namespace)"
+        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace), #32577 (webhook per namespace), #33124 (tool per namespace), #33431 (connector per namespace)"
       ],
       "history": [
         {
@@ -4668,6 +4752,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[1] names a buildable cold-boot fixture (card #33330, row 226 of the #32908 close-out ledger; QA run #33089 comment 6850460138 on #32908, which reached the leg this way). A defineStack with a packages[] of two bodies registers both code packages at boot (ADR-0130 D4, packages/spec/src/stack.zod.ts), and packages/cli/src/utils holds namespace co-owner and object-name judgements but no bare-name one, so the stack builds and the boot log is where the clash shows. No acceptance clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "stale-spec re-point of acceptance[0], acceptance[1] and acceptance[3] (with the title, fixtures, steps[1], negative[0], negative[2], variants and source), QA run #33853, card #33860. #33431 (322ded7d) put connector in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, so every covered type (BARE_NAME_ONE_HOLDER_TYPES) is now held per namespace and the complement r4 drove is empty: QA installed both qa_conn holders 200 and the namespaced cold-boot pair warned about nothing. acceptance[1] gains connector. acceptance[0] is re-pointed, not retired: a holder with no namespace still meets every holder (bareNameHoldersMeet over namespacedHoldersMeet), and QA's probe of a namespace-less com.qa.addr-e got 422 PLUGIN_REGISTER_FAILED naming com.qa.addr-a; the namespace-less shape is chosen over a same-namespace co-owner because it needs no dependency or object prefix in the fixture and is the one QA measured live, and its refusal carries no rename (bareNameRenameFor). acceptance[3] is re-pointed, not retired: sealBareNameHolders still reports a pair that meets, so the cold-boot fixture's com.qa.addr-d drops its namespace; the composeStacks preserve fixture stays. Re-read at main 895783a1 and read through a throwaway ObjectKernel probe at that commit (the flow-family pin's harness, packages/objectql/src/registry-bare-name-one-holder-flow-family.test.ts, not committed): a cold boot of com.qa.addr-c (qa_c) and a namespace-less com.qa.addr-d, each holding connector qa_conn, warns once naming both (with the rename only when the namespaced one registers later); the control of two namespaces warns nothing; after the seal a namespace-less com.qa.addr-e is refused 422 NAMESPACE_CONFLICT naming com.qa.addr-a and com.qa.addr-b. The CLI build, the install door and the boot log are not driven live by this edit",
+          "ref": "#33931"
         }
       ]
     },
@@ -4676,14 +4766,14 @@
       "title": "An 18.3.0 database's stored references gain the package that holds them on the first boot: grants, binding suggestions, managed sharing rules, queue members, assignment cursors, open approvals, paused runs, flow credentials, connector connections and email templates are bound to their one holder, refused names stay null with one warning per table, dispatch keys are re-keyed by package, and a second boot writes nothing",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator, with direct access to the database file", "admin (the seeded admin): the permission parity read"],
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. The rows planted: a sys_user_permission_set grant of a set one package holds; a managed sys_sharing_rule row; a paused sys_automation_run of a package flow; a pending sys_approval_request; a sys_email_template row for a platform template; a sys_flow_dispatch row keyed schedule:FLOW:WINDOW_START for a package flow inside 30 days, and one older than 30 days; and a sys_queue_member row naming a queue qa_desk that two installed packages in two namespaces both hold. Planted by SQL on either route: a DECIDED sys_audience_binding_suggestion row naming a set one package holds (R3: status confirmed with its deployment decision recorded, or a pending row for a set the package declares isDefault: true). A pending row whose declaration is gone is pruned by the boot's suggestion sync (packages/plugins/plugin-security/src/suggested-audience-bindings.ts), so a SQL-planted pending suggestion for a set no package declares isDefault vanishes on the first boot and R3 reads nothing (QA run #33090); a sys_flow_credential row for a package flow (R9), a sys_connector_connection row for a package connector (R11) and a sys_assignment_cursor row for a package assignment rule (R13). The app must DECLARE what those two rows name: a connector instance (stack `connectors`) and an assignment rule (stack `assignmentRules`), both keys 18.3.0's stack schema already accepts. A blank create-objectstack scaffold declares neither, so a planted R11 or R13 row has no holder, its package column stays null and the leg reads nothing (QA run #33090 found the fixture without them); add both to the scaffold before 18.3.0's first boot on route (a), or to the app this tree booted on route (b). On route (a), the managed sys_sharing_rule and sys_email_template rows are planted by SQL too, because 18.3.0 has no door that writes them (ADR-0131 D2, D6, D10). A stored sys_sharing_rule row carrying the name of a rule the package also declares makes every boot log ERROR \"[sharing-rule] declared sharing rule 'NAME' arrives over a stored sys_sharing_rule row of the same name …\" (packages/plugins/plugin-sharing/src/sharing-rule-service.ts, reportDeclarationOverAuthoredRow); the backfill still binds the row, so that ERROR is the fixture's shape, not a backfill finding (QA run #33090). The scaffold's requires lists 'approvals', or no sys_approval_request exists. 18.3.0 writes sys_flow_dispatch rows only when it boots with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true",
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL, which is what a database an earlier release built holds once this release's schema sync has added the columns. No row below is an activation-ledger row, so the ledger's own plant (its indexes put back to 18.3.0's) belongs to platform-core.activation-ledger-package-key-upgrade, and no clause here reads it. The rows planted: a sys_user_permission_set grant of a set one package holds; a managed sys_sharing_rule row; a paused sys_automation_run of a package flow; a pending sys_approval_request; a sys_email_template row for a platform template; a sys_flow_dispatch row keyed schedule:FLOW:WINDOW_START for a package flow inside 30 days, and one older than 30 days; and a sys_queue_member row naming a queue qa_desk that two installed packages in two namespaces both hold. Planted by SQL on either route: a DECIDED sys_audience_binding_suggestion row naming a set one package holds (R3: status confirmed with its deployment decision recorded, or a pending row for a set the package declares isDefault: true). A pending row whose declaration is gone is pruned by the boot's suggestion sync (packages/plugins/plugin-security/src/suggested-audience-bindings.ts), so a SQL-planted pending suggestion for a set no package declares isDefault vanishes on the first boot and R3 reads nothing (QA run #33090); a sys_flow_credential row for a package flow (R9), a sys_connector_connection row for a package connector (R11) and a sys_assignment_cursor row for a package assignment rule (R13). The app must DECLARE what those two rows name: a connector instance (stack `connectors`) and an assignment rule (stack `assignmentRules`), both keys 18.3.0's stack schema already accepts. A blank create-objectstack scaffold declares neither, so a planted R11 or R13 row has no holder, its package column stays null and the leg reads nothing (QA run #33090 found the fixture without them); add both to the scaffold before 18.3.0's first boot on route (a), or to the app this tree booted on route (b). On route (a), the managed sys_sharing_rule and sys_email_template rows are planted by SQL too, because 18.3.0 has no door that writes them (ADR-0131 D2, D6, D10). A stored sys_sharing_rule row carrying the name of a rule the package also declares makes every boot log ERROR \"[sharing-rule] declared sharing rule 'NAME' arrives over a stored sys_sharing_rule row of the same name …\" (packages/plugins/plugin-sharing/src/sharing-rule-service.ts, reportDeclarationOverAuthoredRow); the backfill still binds the row, so that ERROR is the fixture's shape, not a backfill finding (QA run #33090). The scaffold's requires lists 'approvals', or no sys_approval_request exists. 18.3.0 writes sys_flow_dispatch rows only when it boots with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true",
           "every boot of this tree on the copy leaves scheduled work off (OS_AUTOMATION_SCHEDULED_WORK_ENABLED unset), so no new dispatch row joins the ones being re-keyed",
           "a fresh install of this tree with the same app, the same grant for the same member and the same ledger switches: clause 4's reference body"
         ]
@@ -4760,6 +4850,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0]: the app must declare a connector instance and an assignment rule for the R11 and R13 rows to have a holder; a blank scaffold declares neither (row 227 of the #32908 close-out ledger, QA run #33090 comment 6850495479 on #32908). Read at base ba35dfd78: stored-reference-package-backfill.ts (R11, sys_connector_connection.connector_name), stored-declaration-package-backfill.ts (R13, sys_assignment_cursor.rule), and the 18.3.0 tag's packages/spec/src/stack.zod.ts (both `connectors` and `assignmentRules` declared). No clause changed",
           "ref": "#33351"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0] drops the activation-ledger index plant (row 123 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): route (b) said to drop uniq_sys_metadata_activation_packageless, but this item plants no ledger row and no clause reads that table, so the run did not plant it. The plant lives on platform-core.activation-ledger-package-key-upgrade. Route (a) not driven is the run's scope, not item text. No clause changed",
+          "ref": "#34004"
         }
       ]
     },

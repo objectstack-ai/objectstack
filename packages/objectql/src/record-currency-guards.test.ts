@@ -28,7 +28,13 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { defineStack } from '@objectstack/spec';
-import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT, type EngineAggregateOptions, type EngineUpdateOptions } from '@objectstack/spec/data';
+import {
+  RECYCLE_BIN_ENTRY_FIELDS,
+  RECYCLE_BIN_OBJECT,
+  recordCurrencyDynamicRollupNotHomeError,
+  type EngineAggregateOptions,
+  type EngineUpdateOptions,
+} from '@objectstack/spec/data';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 import { aggregateSummaryValue } from './summary-aggregate.js';
@@ -1110,5 +1116,293 @@ describe('a single-object save is refused when the currency it follows is not th
     expect(engine.registry.getObject('pp_line')).toBeDefined();
     save(engine, invoiceWithout('currency_code'));
     expect(engine.registry.getObject('pp_invoice')).toBeDefined();
+  });
+});
+
+// ── [#33713, ADR-0144 D6 and D8 rule 5] A `dynamic` roll-up at the single-object save ──
+//
+// `defineStack`'s case (d) admits a `dynamic` summary only over a stored home
+// amount. The follow door asks the same of a single save, a batch writer's row
+// and a registration run's end, against the objects as served, in the same
+// words (`recordCurrencyDynamicRollupNotHomeError`, `@objectstack/spec/data`).
+describe('a single-object save is refused a `dynamic` roll-up over a child field that is not a stored home amount (case (d))', () => {
+  async function bootSealed() {
+    const booted = await bootEngine();
+    booted.engine.registry.sealBareNameHolders();
+    return booted;
+  }
+  const save = (engine: ObjectQL, def: unknown, packageId?: string, ownership: 'own' | 'extend' = 'own') => {
+    const refusal = engine.registry.objectRegistrationRefusal(def as any, packageId, ownership, { againstRegistry: true });
+    if (refusal) throw refusal;
+    return engine.registry.registerObject(def as any, packageId, undefined, ownership);
+  };
+  const FOLLOW_REFUSED = 'RecordCurrencyFollowRefusedError';
+  /** The child: an amount in each expense's own currency, converted at write into `amount_home` (the #33659 probe). */
+  const EXPENSE = {
+    name: 'hr_expense',
+    fields: {
+      project: { type: 'master_detail', reference: 'hr_project' },
+      currency_code: CODE_FIELD,
+      expense_date: { type: 'date' },
+      rate_used: { type: 'number', readonly: true },
+      amount: {
+        type: 'currency',
+        currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: { field: 'amount_home', rateDate: 'expense_date', rateField: 'rate_used' } },
+      },
+      amount_home: { type: 'currency', readonly: true },
+      eur_amount: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
+      plain: { type: 'number' },
+      doubled: { type: 'formula', expression: 'plain * 2', returnType: 'number' },
+    },
+  };
+  /** The parent, rolling `fn(hr_expense.field)` up in `currencyConfig` (dynamic unless given; `null` declares none). */
+  const project = (field: string, currencyConfig: unknown = { currencyMode: 'dynamic' }, fn = 'sum') => ({
+    name: 'hr_project',
+    fields: {
+      title: { type: 'text' },
+      total: {
+        type: 'summary',
+        ...(currencyConfig === null ? {} : { currencyConfig }),
+        summaryOperations: { object: 'hr_expense', field, function: fn, relationshipField: 'project' },
+      },
+    },
+  });
+  const stackFinding = (objects: unknown[], objectExtensions?: unknown[]): string => {
+    try {
+      defineStack({ manifest: { id: 'com.example.dyndoor', name: 'dyn-door', version: '1.0.0', type: 'app' }, objects, objectExtensions } as Parameters<typeof defineStack>[0]);
+    } catch (e) {
+      const issues = (e as { issues?: unknown[] }).issues ?? [];
+      expect(issues).toHaveLength(1);
+      return String(issues[0]);
+    }
+    throw new Error('defineStack accepted the pair');
+  };
+
+  it('a `dynamic` roll-up over a fixed EUR amount, a plain number or a formula is refused 422, whichever end registers second, in defineStack\'s words', async () => {
+    for (const [field, says] of [
+      ['eur_amount', 'is fixed to EUR'],
+      ['plain', 'is not a stored home amount'],
+      ['doubled', 'is not a stored home amount'],
+    ] as const) {
+      const parent = project(field);
+      for (const order of [[EXPENSE, parent], [parent, EXPENSE]]) {
+        const { engine } = await bootSealed();
+        engine.registry.registerObject(order[0] as any);
+        const second = (order[1] as { name: string }).name;
+        const err = await refusalOf(() => save(engine, order[1]));
+        const at = `${field}, ${second} second`;
+        expect(envelopeOf(err), at).toEqual(INVALID_METADATA);
+        expect(err?.name, at).toBe(FOLLOW_REFUSED);
+        expect(err?.objectName, at).toBe('hr_project');
+        expect(err?.fieldName, at).toBe('total');
+        expect(err?.message, at).toBe(stackFinding([parent, EXPENSE]));
+        expect(err?.message, at).toContain(says);
+        expect(engine.registry.getObject(second), at).toBeUndefined();
+      }
+    }
+  });
+
+  it('a `dynamic` roll-up over the record-mode amount itself was already refused by D6, whatever it declares (pinned, not re-judged)', async () => {
+    for (const order of [[EXPENSE, project('amount')], [project('amount'), EXPENSE]]) {
+      const { engine } = await bootSealed();
+      engine.registry.registerObject(order[0] as any);
+      const err = await refusalOf(() => save(engine, order[1]));
+      expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+      expect(err?.name).toBe('RecordCurrencySummaryRefusedError');
+    }
+  });
+
+  it('a `currencyConfig` naming no mode is `dynamic`, and min / max / avg are judged as sum is', async () => {
+    for (const [config, fn] of [[{}, 'sum'], [{ currencyMode: 'dynamic' }, 'min'], [{ currencyMode: 'dynamic' }, 'max'], [{ currencyMode: 'dynamic' }, 'avg']] as const) {
+      const { engine } = await bootSealed();
+      engine.registry.registerObject(EXPENSE as any);
+      const err = await refusalOf(() => save(engine, project('plain', config, fn)));
+      expect(err?.name, fn).toBe(FOLLOW_REFUSED);
+      expect(err?.message, fn).toBe(stackFinding([project('plain', config, fn), EXPENSE]));
+    }
+  });
+
+  it('CONTROL: the #33659 probe shape, a `dynamic` roll-up of the stored home amount, registers in either order', async () => {
+    for (const fn of ['sum', 'min', 'max', 'avg']) {
+      for (const order of [[EXPENSE, project('amount_home', undefined, fn)], [project('amount_home', undefined, fn), EXPENSE]]) {
+        const { engine } = await bootSealed();
+        for (const o of order) save(engine, o);
+        expect(engine.registry.getObject('hr_project'), fn).toBeDefined();
+        expect(engine.registry.getObject('hr_expense'), fn).toBeDefined();
+      }
+    }
+  });
+
+  it('CONTROL: a summary with no currency, or `fixed`, over the same fields is not judged by this arm', async () => {
+    for (const config of [null, { currencyMode: 'fixed', defaultCurrency: 'EUR' }]) {
+      const { engine } = await bootSealed();
+      engine.registry.registerObject(EXPENSE as any);
+      for (const field of ['eur_amount', 'plain', 'doubled']) {
+        expect(() => save(engine, project(field, config)), `${field} ${JSON.stringify(config)}`).not.toThrow();
+      }
+    }
+  });
+
+  it('the child re-saved so that a registered `dynamic` roll-up no longer reads a home amount is refused, naming the roll-up; a run leaving a refused pair as it found it is not refused for it', async () => {
+    const { engine } = await bootSealed();
+    save(engine, EXPENSE);
+    save(engine, project('amount_home'));
+    const dehomed = { ...EXPENSE, fields: { ...EXPENSE.fields, amount_home: { type: 'currency' } } };
+    const err = await refusalOf(() => save(engine, dehomed));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.objectName).toBe('hr_project');
+    expect(err?.fieldName).toBe('total');
+    // `defineStack` never meets this pair: its object door refuses a writable home field first.
+    expect(err?.message).toBe(recordCurrencyDynamicRollupNotHomeError(
+      { object: 'hr_project', field: 'total', fn: 'sum', childObject: 'hr_expense', childField: 'amount_home' },
+      dehomed.fields,
+      dehomed.fields.amount_home,
+    ));
+    expect(err?.message).toContain("'hr_expense' stores no home amount");
+    expect((engine.registry.getObject('hr_expense')?.fields as any)?.amount_home?.readonly).toBe(true);
+
+    // A roll-up registered past the door (a stored row's hydration): a run that
+    // re-registers the child unchanged leaves the pair as it found it, so its
+    // end does not refuse it (#33593 ruling R7); one that de-homes it does.
+    const second = await bootSealed();
+    second.engine.registry.registerObject(EXPENSE as any);
+    second.engine.registry.registerObject(project('plain') as any);
+    expect(() => second.engine.registry.restoringOnRefusal(() => second.engine.registry.registerObject({ ...EXPENSE, label: 'Expense' } as any))).not.toThrow();
+    second.engine.registry.registerObject(project('amount_home') as any);
+    const run = await refusalOf(() => second.engine.registry.restoringOnRefusal(() => second.engine.registry.registerObject(dehomed as any)));
+    expect(run?.name).toBe(FOLLOW_REFUSED);
+    expect((second.engine.registry.getObject('hr_expense')?.fields as any)?.amount_home?.readonly).toBe(true);
+  });
+
+  it('[N6] an `object_extension` adding the roll-up to the parent is judged as the parent is served', async () => {
+    const { engine } = await bootSealed();
+    save(engine, EXPENSE);
+    save(engine, { name: 'hr_project', fields: { title: { type: 'text' } } }, 'pkg_owner');
+    const total = project('plain').fields.total;
+    const err = await refusalOf(() => save(engine, { name: 'hr_project', fields: { total } }, 'pkg_ext', 'extend'));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.message).toBe(stackFinding([project('plain'), EXPENSE]));
+    expect((engine.registry.getObject('hr_project')?.fields as any)?.total).toBeUndefined();
+    // CONTROL: the extension adding the roll-up of the home amount is served.
+    save(engine, { name: 'hr_project', fields: { total: project('amount_home').fields.total } }, 'pkg_ext', 'extend');
+    expect((engine.registry.getObject('hr_project')?.fields as any)?.total?.type).toBe('summary');
+  });
+
+  it('[N6] a child field an `object_extension` adds is judged as the child is served, at either end', async () => {
+    const { fields: { plain: _plain, ...ownFields } } = EXPENSE;
+    // Parent second: the child as served holds the extension's field.
+    const first = await bootSealed();
+    save(first.engine, { ...EXPENSE, fields: ownFields }, 'pkg_owner');
+    save(first.engine, { name: 'hr_expense', fields: { plain: { type: 'number' } } }, 'pkg_ext', 'extend');
+    const atParent = await refusalOf(() => save(first.engine, project('plain')));
+    expect(atParent?.name).toBe(FOLLOW_REFUSED);
+    expect(atParent?.message).toBe(stackFinding([project('plain'), EXPENSE]));
+    // Extension second: the parent's roll-up names a field no layer adds yet (no verdict), then the extension adds it.
+    const second = await bootSealed();
+    save(second.engine, { ...EXPENSE, fields: ownFields }, 'pkg_owner');
+    save(second.engine, project('plain'));
+    const atExtension = await refusalOf(() => save(second.engine, { name: 'hr_expense', fields: { plain: { type: 'number' } } }, 'pkg_ext', 'extend'));
+    expect(atExtension?.name).toBe(FOLLOW_REFUSED);
+    expect(atExtension?.objectName).toBe('hr_project');
+    expect((second.engine.registry.getObject('hr_expense')?.fields as any)?.plain).toBeUndefined();
+  });
+
+  it('[N6] a post-seal `registerApp` whose `objectExtensions` add the roll-up is refused at the end of its run, and leaves nothing of the package', async () => {
+    const { engine } = await bootSealed();
+    save(engine, EXPENSE, 'pkg_owner');
+    save(engine, { name: 'hr_project', fields: { title: { type: 'text' } } }, 'pkg_owner');
+    const err = await refusalOf(() => engine.registerApp({
+      id: 'com.test.dyn_ext', name: 'dyn-ext',
+      objectExtensions: [{ extend: 'hr_project', fields: { total: project('eur_amount').fields.total } }],
+    } as any));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.message).toBe(stackFinding([project('eur_amount'), EXPENSE]));
+    expect((engine.registry.getObject('hr_project')?.fields as any)?.total).toBeUndefined();
+    expect(engine.registry.getPackage('com.test.dyn_ext')).toBeUndefined();
+  });
+
+  it('[N7] a `homeAmount` an extension forges on the child does not make a plain number a home amount; a valid one does', async () => {
+    const forging = (target: string) => ({
+      forged: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: { field: target, rateDate: 'expense_date', rateField: 'rate_used' } } },
+    });
+    const { engine } = await bootSealed();
+    save(engine, EXPENSE, 'pkg_owner');
+    save(engine, { name: 'hr_expense', fields: forging('plain') }, 'pkg_ext', 'extend');
+    const err = await refusalOf(() => save(engine, project('plain')));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.message).toBe(stackFinding([project('plain'), EXPENSE], [{ extend: 'hr_expense', fields: forging('plain') }]));
+    // CONTROL: the extension adds its own readonly home field and the amount that converts into it.
+    const valid = await bootSealed();
+    save(valid.engine, EXPENSE, 'pkg_owner');
+    save(valid.engine, { name: 'hr_expense', fields: { ext_home: { type: 'currency', readonly: true }, ...forging('ext_home') } }, 'pkg_ext', 'extend');
+    expect(() => save(valid.engine, project('ext_home'))).not.toThrow();
+  });
+});
+
+// ── [ADR-0144 D2, amended] A followed parent code field the parent no longer serves ──
+//
+// The fixture is the package-lifecycle measurement's shape: `billing` owns
+// `suite_invoice` and `suite_line`, `supplier` extends `suite_invoice` with the
+// code field, and `suite_line.amount` follows `invoice.currency_code`. After the
+// supplier leaves, the next child write is still refused ERR_CURRENCY_CODE_REQUIRED
+// / 400, and the message says the field is not served instead of asking for a
+// code to be written into a field that is not there.
+
+describe('a following amount whose parent code field is no longer served is refused, and the message says so (ADR-0144 D2, amended)', () => {
+  const BILLING = 'com.test.billing';
+  const SUPPLIER = 'com.test.supplier';
+  const NOT_SERVED = "and 'suite_invoice' does not serve a field 'currency_code' (";
+  const NO_CODE_TO_FOLLOW = "; the amount has no code to follow until that field is served again, or leave 'amount' empty. The row was not written.";
+
+  async function bootSuite() {
+    const booted = await bootEngine();
+    booted.engine.registerApp({
+      id: BILLING, name: 'billing',
+      objects: [
+        { name: 'suite_invoice', fields: { title: { type: 'text' } } },
+        { name: 'suite_line', fields: { title: { type: 'text' }, invoice: { type: 'master_detail', reference: 'suite_invoice' }, amount: { type: 'currency', currencyConfig: FOLLOWS } } },
+      ],
+    } as any);
+    booted.engine.registerApp({ id: SUPPLIER, name: 'supplier', objectExtensions: [{ extend: 'suite_invoice', fields: { currency_code: CODE_FIELD } }] } as any);
+    await booted.engine.insert('suite_invoice', { id: 'inv_usd', title: 'usd', currency_code: 'USD' });
+    await booted.engine.insert('suite_invoice', { id: 'inv_blank', title: 'blank' });
+    // CONTROL: while the supplier serves the field, a line under a parent holding a code is written.
+    await booted.engine.insert('suite_line', { title: 'before', invoice: 'inv_usd', amount: 100 });
+    return booted;
+  }
+
+  it('disable: the supplier disabled, a line with an amount is refused naming the field as not served and the disabled package', async () => {
+    const { engine, storeFor } = await bootSuite();
+    engine.registry.disablePackage(SUPPLIER);
+    expect((engine.registry.getObject('suite_invoice')?.fields as any)?.currency_code).toBeUndefined();
+    const err = await refusalOf(engine.insert('suite_line', { title: 'after', invoice: 'inv_usd', amount: 100 }));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(err?.field).toBe('invoice.currency_code');
+    expect(err?.message).toContain(`${NOT_SERVED}the package '${SUPPLIER}' that contributed it is disabled)${NO_CODE_TO_FOLLOW}`);
+    expect(err?.message).not.toContain('has a blank');
+    expect(storeFor('suite_line').size).toBe(1);
+    // Uninstalled, the registry no longer holds the contribution: the package clause is the generic one.
+    engine.registry.uninstallPackage(SUPPLIER);
+    const gone = await refusalOf(engine.insert('suite_line', { title: 'gone', invoice: 'inv_usd', amount: 100 }));
+    expect(envelopeOf(gone)).toEqual(CODE_REQUIRED);
+    expect(gone?.message).toContain(`${NOT_SERVED}a package that contributed it may be disabled or uninstalled)${NO_CODE_TO_FOLLOW}`);
+  });
+
+  it('CONTROL: a served code field that is blank on the parent keeps the blank-code text', async () => {
+    const { engine } = await bootSuite();
+    const err = await refusalOf(engine.insert('suite_line', { title: 'blank', invoice: 'inv_blank', amount: 100 }));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(err?.message).toBe(
+      "Insert on 'suite_line' was REFUSED: 'amount' holds an amount in its parent record's currency (currencyMode: 'record', "
+        + "following 'invoice.currency_code' through the master_detail 'invoice'), and the 'suite_invoice' record it names "
+        + "has a blank 'currency_code', or it names none. The row was not written. Write the parent's ISO 4217 code (for "
+        + "example 'USD') into 'suite_invoice.currency_code' first, and name that parent in 'invoice', or leave 'amount' "
+        + 'empty. A child stores no code of its own: it follows its parent\'s. The server never fills a currency in: a '
+        + 'form pre-fills the organization\'s currency, and the stored code is always the one submitted.',
+    );
   });
 });

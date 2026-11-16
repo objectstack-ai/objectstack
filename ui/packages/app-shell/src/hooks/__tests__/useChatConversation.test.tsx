@@ -622,6 +622,28 @@ describe('sanitizeChatMessagesForCache — the answer source survives a cache ro
     expect(tool?.pendingActionId).toBe('pa_31868');
     expect(tool?.answerSource).toEqual(answerSource);
   });
+
+  // objectstack#33734 — `query_dataset`'s `provenance` is written back under
+  // its own key, so the same reader lifts it on reload.
+  it('keeps a query_dataset provenance through sanitize → localStorage → hydration', () => {
+    const provenance: AnswerSource = {
+      kind: 'dataset',
+      dataset: { name: 'sales_analysis', label: 'Sales analysis' },
+      measures: [{ name: 'total_amount', label: 'Revenue', description: 'Closed-won amount' }],
+      dimensions: [{ name: 'stage', label: 'Stage' }],
+      runtimeFilter: { region: 'EMEA' },
+    };
+    const persisted = roundTrip([
+      { toolCallId: 'tc-ds', toolName: 'query_dataset', state: 'output-available', answerSource: provenance },
+    ]);
+    const toolPart = persisted[0]?.parts.find((p) => p.type === 'tool-query_dataset') as
+      | { output?: Record<string, unknown> }
+      | undefined;
+    expect(toolPart?.output).toEqual({ provenance });
+
+    expect(hydratedMessagesToChatMessages(persisted)[0]?.toolInvocations?.[0]?.answerSource).toEqual(provenance);
+    expect(uiMessageToChatMessage(persisted[0]).toolInvocations?.[0]?.answerSource).toEqual(provenance);
+  });
 });
 
 // The server persists conversations in ModelMessage format, where an assistant

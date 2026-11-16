@@ -834,7 +834,7 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
         expect(messageOf(answer)).toContain('The platform\'s item binds it to object "contact"');
         const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
         expect([layers.status, codeOf(layers)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
-        // `/layers` and `/published` carry the refusal's text, not its candidates.
+        // `/layers` carries the refusal's candidates too (#32622, pinned below); `/published` carries its text, not its candidates.
         const published = await drive(PUBLISHED, { type: 'action', name: 'approve' });
         expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(messageOf(published)).toContain(`package "${A}"`);
@@ -865,6 +865,40 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
         expect(layers.status, JSON.stringify(layers.body)).toBe(200);
         expect(JSON.stringify(layers.body)).toContain('"label":"alpha"');
         expect(JSON.stringify(layers.body)).not.toContain('"label":"beta"');
+    });
+});
+
+/**
+ * [#32622, ADR-0150 D5] The two `/layers` refusal exits of this route that the
+ * candidates option reaches beyond the two-holder read: the bare action read
+ * weighing the package-less holder, and the exact qualifier of a package that
+ * holds nothing. Each answers the plain read's `details.candidates`.
+ */
+describe('#32622 — the other `/layers` refusal exits carry `details.candidates`', () => {
+    const LAYERS = '/api/v1/meta/:type/:name/layers';
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const conflictOf = (answer: { status: number; body?: any }) =>
+        [answer.status, codeOf(answer), answer.body?.details?.candidates];
+
+    it('the bare action read, the platform\'s item beside A\'s: `/layers` names A and the platform, as the item read does', async () => {
+        const shipAction = (packageId: string | undefined, objectName: string) => registry.registerItem('action', {
+            name: 'approve', label: packageId?.split('.').pop() ?? 'platform', type: 'script', objectName, target: 'approve',
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        }, 'name' as never, packageId);
+        shipAction(A, 'account');
+        shipAction(undefined, 'contact');
+        const plain = await drive(ITEM, { type: 'action', name: 'approve' });
+        const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
+        expect(conflictOf(layers), JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), { kind: 'platform' }]]);
+        expect(layers.body?.details?.candidates).toEqual(plain.body?.details?.candidates);
+    });
+
+    it('`/layers?package=` of a package that holds nothing: the holder, as the item read does', async () => {
+        ship('page', 'home', A);
+        const plain = await drive(ITEM, { type: 'page', name: 'home' }, { package: C });
+        const layers = await drive(LAYERS, { type: 'page', name: 'home' }, { package: C });
+        expect(conflictOf(layers), JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A)]]);
+        expect(layers.body?.details?.candidates).toEqual(plain.body?.details?.candidates);
     });
 });
 
@@ -977,4 +1011,124 @@ describe('#32501 — a pair address reads the package it names, never the first 
             expect([layers?.code?.label, layers?.packageId]).toEqual([`alpha ${type}`, A]);
         });
     }
+});
+
+/**
+ * [#33456, ADR-0150 D4] The bare action read's envelope names a package only
+ * for the item that package holds at its own `(object, name)`. An action is
+ * keyed `(package, object, name)`, so the environment's own item bound to an
+ * object no package binds the name to is served as the environment's, with no
+ * package's `_packageId` / `_provenance` grafted from a holder on another
+ * object. Both registration orders.
+ *
+ * BASE (main 1e65a389e1, the owner-key rule ablated in `lookupArtifactItem`
+ * and rebuilt): the mirror shape and the single-holder cell served the
+ * environment's item under the holder's `_packageId` and `_provenance:
+ * 'package'`. The CONTROLs read the same before and after.
+ */
+describe('#33456 — the bare action read grafts a holder\'s envelope only at its own (object, name)', () => {
+    let storedRows: any[] = [];
+    /** A fresh composition whose store answers `storedRows` for `sys_metadata`. */
+    const compose = () => {
+        registry = new SchemaRegistry({ multiTenant: false });
+        for (const id of [A, B]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
+        }
+        storedRows = [];
+        const engine = {
+            registry,
+            find: vi.fn(async (object: string) => (object === 'sys_metadata' ? storedRows.map((row) => ({ ...row })) : [])),
+            findOne: vi.fn().mockResolvedValue(null),
+            insert: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+        rest = new RestServer(mockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+        (rest as any).resolveExecCtx = async () => ({ isSystem: true });
+        rest.registerRoutes();
+    };
+    beforeEach(compose);
+    const body = (label: string, objectName: string | undefined) => ({
+        name: 'approve', label, type: 'script', ...(objectName ? { objectName } : {}), target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    });
+    const shipAction = (packageId: string, objectName: string) =>
+        registry.registerItem('action', body(packageId.split('.').pop()!, objectName), 'name' as never, packageId);
+    /** The environment's own item: the bare slot, and its active package-less row in the store. */
+    const environmentAction = (objectName: string | undefined) => {
+        registry.registerItem('action', body('env', objectName), 'name' as never);
+        storedRows.push({ id: 'r-env', type: 'action', name: 'approve', package_id: null, state: 'active', metadata: JSON.stringify(body('env', objectName)) });
+    };
+    const bothOrders = (steps: Array<() => void>) => [steps, [...steps].reverse()];
+    const envelopeOf = async (query: Record<string, unknown> = {}) => {
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' }, query);
+        const item = answer.body?.item ?? answer.body?.data?.item;
+        return [answer.status, item?.label, item?.objectName, item?._packageId, item?._provenance === 'package'];
+    };
+
+    for (const [shape, holder, held, other] of [
+        ['mirror shape: A on `account`, the environment\'s item on `contact`', A, 'account', 'contact'],
+        ['single-holder cell: B on `contact`, the environment\'s item on `account`', B, 'contact', 'account'],
+        ['object-less: A on `account`, the environment\'s item object-less', A, 'account', undefined],
+    ] as const) {
+        it(`${shape}: the environment's item with no package's envelope (BASE: the holder's), and \`?package=\` the holder's own`, async () => {
+            for (const steps of bothOrders([() => shipAction(holder, held), () => environmentAction(other)])) {
+                compose();
+                steps.forEach((step) => step());
+                expect(await envelopeOf()).toEqual([200, 'env', other, undefined, false]);
+                expect(await envelopeOf({ package: holder })).toEqual([200, holder.split('.').pop(), held, holder, true]);
+            }
+        });
+    }
+
+    /**
+     * [#33904 item 2, ADR-0150 D4] A DISABLED package holding the name on
+     * another object lends the environment's item no envelope: the face would
+     * withhold an item stamped with a disabled package's `_packageId` (404).
+     * Reported on main `895783a1e` by the #33385 fold's harness probe; closed
+     * by #33898's owner-key lookup (the package bound at the served item's
+     * object, disabled holders included, and none there).
+     */
+    describe('[#33904] a disabled holder on another object', () => {
+        const registryOnlyAction = (objectName: string) =>
+            registry.registerItem('action', body('platform', objectName), 'name' as never);
+        for (const [shape, place] of [
+            ['the environment\'s item (its row stored)', () => environmentAction('contact')],
+            ['a package-less registry item alone', () => registryOnlyAction('contact')],
+        ] as const) {
+            it(`A disabled on \`account\`, ${shape} on \`contact\`: served, with no package's envelope (BASE: A's \`_packageId\`, withheld 404)`, async () => {
+                for (const steps of bothOrders([() => shipAction(A, 'account'), place])) {
+                    compose();
+                    steps.forEach((step) => step());
+                    registry.disablePackage(A);
+                    const [status, , objectName, packageId, packaged] = await envelopeOf();
+                    expect([status, objectName, packageId, packaged]).toEqual([200, 'contact', undefined, false]);
+                }
+            });
+        }
+    });
+
+    describe('CONTROLs (unchanged)', () => {
+        it('one package on one object with the environment\'s item on that object: its customization, under the package\'s envelope', async () => {
+            shipAction(A, 'account');
+            environmentAction('account');
+            expect(await envelopeOf()).toEqual([200, 'env', 'account', A, true]);
+        });
+
+        it('two packages on one object: refused, naming both', async () => {
+            shipAction(A, 'account');
+            shipAction(B, 'account');
+            const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+            expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(answer.body?.details?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+        });
+
+        it('no package-less row: the one holder\'s own item, under its envelope', async () => {
+            shipAction(A, 'account');
+            expect(await envelopeOf()).toEqual([200, 'alpha', 'account', A, true]);
+        });
+    });
 });

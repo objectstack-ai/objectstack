@@ -1189,7 +1189,12 @@ export class AnalyticsServicePlugin implements Plugin {
         const bundle = buildTranslationBundle(i18n);
         if (!bundle) return undefined;
         const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-        const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        // [#33634] The authored language: the declared `sourceLocale`, else the
+        // users' `defaultLocale` — the metadata route's rule.
+        const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+        const defaultLocale = typeof source === 'string' && source.length > 0
+            ? source
+            : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
         // `value` here is `unknown` (an option's stored value, of whatever
         // shape the field declares); `ObjectFieldLike.options[].value` narrows
         // to `string | number | boolean` (`SelectOptionSchema.value`'s real

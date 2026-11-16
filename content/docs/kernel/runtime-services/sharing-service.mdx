@@ -37,6 +37,10 @@ manager** whose effective write DEPTH (`unit` / `unit_and_below` /
 `@objectstack/plugin-security` fails closed to owner-only; without the
 enterprise resolver the DEPTH path is inert and authority stays owner +
 Modify-All. Pass `{ isSystem: true }` only from platform-internal machinery.
+A share a non-system caller grants is always a **manual** share: `grant` refuses
+a `source` other than `'manual'`, and any `sourceId`, with `VALIDATION_FAILED`
+(400), because only the platform's own sharing-rule, team and system paths write
+a share of another source.
 
 ## The verb boundary (ADR-0111 D3)
 

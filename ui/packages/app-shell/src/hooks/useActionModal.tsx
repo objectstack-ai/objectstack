@@ -51,7 +51,7 @@ import {
 } from '@object-ui/components';
 import { SchemaRenderer, useMetadata } from '@object-ui/react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { ModalForm } from '@object-ui/plugin-form';
+import { LazyModalForm } from '../views/lazyFormSurfaces.js';
 import { resolveFormViewLayout } from '../utils/recordFormNavigation.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 
@@ -287,7 +287,7 @@ export function useActionModal(dataSource?: any) {
           })
           : undefined);
       modalElement = (
-        <ModalForm
+        <LazyModalForm
           schema={{
             type: 'object-form',
             formType: 'modal',

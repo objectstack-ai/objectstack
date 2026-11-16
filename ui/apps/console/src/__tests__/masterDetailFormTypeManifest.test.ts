@@ -32,6 +32,10 @@ import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import type { Diagnostic, SchemaElement } from '@objectstack/sdui-parser';
 import '@object-ui/components';
 import '../register-plugins';
+// `@object-ui/plugin-form` too: the console registers its tags as lazy stubs
+// since its first load stopped carrying the package (objectstack#33581), and
+// a stub carries no `inputs`, which is what this manifest is read from.
+import '@object-ui/plugin-form';
 
 const manifest = manifestFromConfigs(
   ComponentRegistry.getAllConfigs() as unknown as Parameters<typeof manifestFromConfigs>[0],

@@ -120,7 +120,10 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   operation's write excepted, a refused attempt included) or by a reply carrying two or more
   seeded values of `forbids.discloses`; not measured, never a pass, when the card declares no
   `forbids`, the seed refused the cell's row, or no turn read the cell. The runner records it
-  on `RunHalf.guardrails`. It owns `WRITE_TOOLS`, which the runner's observer re-exports.
+  on `RunHalf.guardrails`, and the scorecard states it on one row per Run half (`Run · guardrails`,
+  `Iterate · Run · guardrails`): `guardrail:injection_as_data pass`, `… fail`, or `… not measured:
+  <reason>`; a half recorded before it was graded shows nothing. It owns `WRITE_TOOLS`, which the
+  runner's observer re-exports.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -196,10 +199,14 @@ pnpm --filter @objectstack/scenarios run-scenarios --driver external:./my-agent.
 pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # minutes per authoring turn (default 60)
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
+pnpm --filter @objectstack/scenarios run-scenarios --ask-repeats 3           # ask each question turn 3 times, score k/3 (default 1; operations once)
+pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --ask-model haiku  # questions and operations only, on a build you supply
+pnpm --filter @objectstack/scenarios run-scenarios --modes scratch,ask --author-model opus --ask-model haiku   # ask mode on this run's scratch build
 pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # the effort every turn asks for (default: the CLI's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
+pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
@@ -235,6 +242,23 @@ npx @objectstack/scenarios help                                      # the comma
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
+| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Off by default (`--modes ask`, or `--modes scratch,ask`) |
+
+- **Ask mode** (`orchestrate.ts`, `scorecard.ts`): `--modes ask` runs only the Run half — every question (with
+  `--ask-repeats`) and every operation — on a verified build: `--template F` when given, else this run's scratch build
+  when it passed, exactly the build template mode installs. Two ask models run this way on one build are graded on the
+  same app, so a difference in 问数 is theirs, not the build's. The driver is never asked to author. Without
+  `--template` and without `scratch` in the same run it is refused before any card runs; when it relies on the scratch
+  build and that build did not pass, it is skipped with the reason, as template mode is. Its turns key as
+  `card/ask/run/<step>/<persona>`, so `--driver recorded:F` replays it from a recording that holds them, with no
+  authoring turn. The record names the build's source (`template.source` on the mode: `supplied template` or `this
+  run’s from-scratch build`), its Build rows are `not-run` with that note, and its iterate rows `not-run: ask mode
+  authors no iterate`. The scorecard's `ask` column reads `supplied` in its Build cells (not scored), a line under the
+  table names the source, and its `Author cost` / `Author time` read `no authoring turns` (so do the card's lines when
+  ask is the only mode that ran); every Run row — 问数, operations, `Run · model`, guardrails, `Ask cost`, `Ask time`,
+  the k/N table — reads as for any Run half. On the same build and the same turns its grades equal scratch mode's
+  first Run half's. The gallery exporter reads such a record and passes over the ask mode: it is not judged and its
+  turns are not shown, and the transcript says why (`notShown`).
 
 - **Package source** (`packages.ts`, `--packages`): `published` (the default) scaffolds with `npx -y
   create-objectstack@<version>` and installs from npm, what a customer gets. `workspace` measures the next release before
@@ -253,7 +277,8 @@ npx @objectstack/scenarios help                                      # the comma
   is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
-  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
+  and the end of its stderr. It also records the duration the CLI itself states on its result line, when it states one
+  (`reportedDurationMs` from `duration_ms`, `reportedApiDurationMs` from `duration_api_ms`). `RecordedDriver` replays a recording, and refuses the live-driver limits and models below (`--ask-repeats` is not one of them: see Repeats);
   its record keeps the driver of the recording (`replayOf`). It re-sends each turn's recorded writes to the booted app,
   in recorded order, as the turn's persona, before the read-back (reads are never re-sent; a refused write must be
   refused again; a row the run created is named by its new id); a turn the app answers otherwise, or one whose write
@@ -282,7 +307,53 @@ npx @objectstack/scenarios help                                      # the comma
   command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
   `author cost` line (the card) and `Author cost` row (each mode) sum the authoring turns' costs, build and iterate,
   only when every authoring turn that ran reported one (`$0.84 over 3 author turns`); otherwise they read `not reported`,
-  never a partial sum. `--driver codex` reports no cost, so its runs read `not reported`.
+  never a partial sum. The `ask cost` line and `Ask cost` row do the same for the persona turns (every question and
+  operation turn that ran, the Run half's and the iterate's), per served model: `claude-haiku-5-5: $0.31 over 28 ask
+  turns`, or `claude-haiku-5-5: not reported (27 of 28 ask turns reported a cost)`. `--driver codex` reports no cost,
+  so its runs read `not reported`.
+- **Time** (`scorecard.ts`): every turn records its wall-clock time by the runner's own clock (`elapsedMs`: the
+  driver's process, spawn to exit, for `claude`, `codex` and `external:` alike; a replay re-reads the recorded run's).
+  The `author time` line and `Author time` row sum the authoring turns' times (`30m 00s over 3 author turns`), and the
+  `ask time` line and `Ask time` row the persona turns' per served model (`claude-haiku-5-5: 6m 12s over 28 ask
+  turns`), per mode and for the card. A sum is stated only when every counted turn was timed; otherwise the cell says
+  how many were not (`2 of 28 ask turns not timed`), never a smaller sum and never a zero. A turn with no process on its
+  record (a replay of a recording made before the runner kept one) is not timed. The CLI's own duration stays on each
+  turn in the record, beside the runner's clock; the rows sum the runner's clock only. A scorecard written before
+  these rows reads `not recorded` in them.
+- **Repeats** (`orchestrate.ts`, `scorecard.ts`): `--ask-repeats N` asks each (question, persona) turn N times on the
+  same booted app, in a row, each ask a fresh agent session (one driver call), graded on its own; the record keeps
+  every ask (`repeat` on each question result, `askRepeats` on the card's run). Every question is asked before any
+  operation writes, so each ask reads the rows the seed loaded. **Operations are not repeated**: they write, and a
+  second run would act on the rows the first one changed. A turn the seed takes out is not measured at every ask
+  alike. The `Run-问数` cell counts passes over every asked turn (`24/27`), the heading says `each asked 3 times`, and
+  a table after the halves states each turn's k/N per Run half (`` `account_count` as sdr | 2/3 ``). Every other row
+  counts each ask as a turn: `Run · model`, `Ask cost`, `Ask time`, and the guardrail, graded over all of a half's
+  turns. With N = 1 (the default) the record and the scorecard are as before. The first ask keeps the replay key a
+  single ask has (`…/account_count/sdr`); asks 2..N add a segment (`…/account_count/sdr/repeat-2`), so a recording made
+  without repeats still replays. `--ask-repeats` is not a live-only flag: with `--driver recorded:F` it decides how
+  many recorded asks of each question turn are read (the first N), and an N larger than the recording holds of any
+  question turn is refused before any card runs, naming the turn and the count found.
+- **Language and build prompt** (`prompts.ts`, `orchestrate.ts`, `scorecard.ts`, `driver.ts`): `--lang zh|en` renders
+  every card-authored text a prompt carries in that language and no other — the build prompt (`prompt.short` or
+  `prompt.detailed`), the iterate change (`iterate.change`), and each question's and each operation's `ask` — in every
+  mode (scratch, template and ask) and at every ask of `--ask-repeats`. The runner's own text around it (the preamble,
+  the data contract, the naming rule, the answer instructions) stays in English, and so do the plain strings it quotes
+  from the card (a persona's role, an action's summary); a Chinese wrapper is not offered. **No silent fallback**: a
+  card that lacks one of the texts the run's modes render in that language (scratch: the build prompt `--prompt` names,
+  the iterate change, every question and operation; template: all but the build prompt; ask: the questions and
+  operations) is skipped before the first card runs, before any scaffold or boot, with a line naming each missing text
+  (``skipped crm_account_with_contacts: … no zh text for `prompt.detailed`, `iterate.change`, …``), and the other cards
+  run; with none left the run exits 2. `--prompt short|detailed` picks the card prompt the build turn is given; the
+  iterate turn is given `iterate.change` either way. With neither flag nothing changes, byte for byte: each text in
+  English when the card has it, else in Chinese, the build turn given `prompt.detailed`, and the record, the scorecard
+  and the recording carry no trace of the choice. With either flag, the run's record states it (`promptChoice` on the
+  card's run and on the scorecard, only the flags given) and the scorecard says `prompts: language zh · build prompt
+  short`. A recording made under a choice carries it (`promptChoice`), and `--driver recorded:F` under another choice
+  is refused before any card runs, naming both and the flags to replay it with: the recorded answers answered the
+  recorded prompts, and a replay sends none. `--prompt detailed` is the default's own prompt, so it replays a recording
+  made without flags; `--lang en` is another choice than none, refused alike. The grader reads a reply in either
+  language (`来源：` and `Source:` lines, Chinese measure words and declines), so a Chinese turn grades as an English
+  one does.
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn
@@ -328,13 +399,27 @@ npx @objectstack/scenarios help                                      # the comma
   in its text (ISO, English `[Weekday] D Month`, Chinese `M 月 D 日(周X)`, weekdays written again); the truths are
   computed again over the moved seed. The prompt's "today", the seeded rows, the timestamps the app's real clock
   stamps and the grader's expectations then agree, however long after `asOf` the run is. The card file is not
-  changed. A card on working days keeps to them only when the delta is whole weeks.
+  changed. A card that declares `workingDays: true` (the loader refuses one whose `asOf` or any other date falls on a
+  weekend) moves by whole working days instead: `asOf` onto the run date, every other date by the working days
+  from `asOf` to the run date (a weekend run date read as the Friday before it), so its weekdays stay weekdays.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
   read relative to it (`account` → `democrm_account`), because a scaffolded project and the unmanaged install both
   refuse bare object names. Views, docs, positions and capabilities (`<ns>.<short>`) keep the prefix too (ADR-0150 bucket 1 and
   D7): the scorer reports each bare one as a failing Build check (`bare-name:<type>:<name>`); other items may be bare.
+- **Roll-ups over withheld data** (`rollupSourceCharges` in `orchestrate.ts`): every build that produces an artifact
+  (scratch and its iterate, template's iterate on what the app serves) is read by `@objectstack/lint`'s own
+  `security-rollup-source-unreadable` rule (`validateRollupSourceVisibility`), run on the artifact itself, never on
+  `os build`'s kept output. A finding is charged when its permission set is a persona's (`<namespace>_<persona id>`) and
+  the card's `hidden` for that persona withholds the roll-up's child object, or the child field the finding names (the
+  aggregated one, or the filtered one the set cannot read): the roll-up still shows that persona an aggregate of what
+  it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
+  in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
+  is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
+  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
+  charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
@@ -489,7 +574,7 @@ the directory you run from. For anything more, write a wrapper script.
 - **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
   `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
 - **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
-  the directory of `mcp.configFile`.
+  the directory of `mcp.configFile`. `step.mode` is `scratch`, `template` or `ask` (ask mode sends only `ask` calls).
   `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
 - **The answer** to `author` and `ask`, strict (an unknown key is refused):
   `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3,"reportedCostUsd":0.42,"inputTokens":18000,"outputTokens":2300}`.
@@ -501,7 +586,9 @@ the directory you run from. For anything more, write a wrapper script.
   never a zero. A figure of another shape (a string, `null`, a negative cost, a fractional count) is
   `invalid-output(…)`. Each turn in the record (`cardRun`) carries the figures its command reported. The scorecard's
   `author cost` line and `Author cost` row, and the gallery page's `- Author cost` line, sum the authoring turns'
-  (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`. Adding
+  (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`; the `ask
+  cost` line and `Ask cost` row sum the question and operation turns' costs per served model under the same rule. The
+  runner times every call itself (`elapsedMs`, the command's process), so a command reports no duration. Adding
   these optional keys kept the contract name `objectstack-scenario-driver/1`; a runner built before them refuses an
   answer that carries one, so a command that must also serve such a runner leaves them out.
 - **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,

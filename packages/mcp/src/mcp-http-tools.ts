@@ -431,6 +431,10 @@ export interface McpActionBridge {
    * as the caller, loads the subject record under RLS when row-context, then
    * dispatches through the framework action runner. Throws on
    * denial / not-found / handler failure so the tool surfaces a tool-error.
+   * [#33690] An action declaring `ai.requiresConfirmation: true` is not run:
+   * the host hands it to the person and resolves to the contract's
+   * `ActionConfirmationPending` (`status: 'pending_confirmation'`), which the
+   * tool relays as its successful result; the request's `confirm` is not read.
    */
   runAction(
     name: string,
@@ -469,7 +473,9 @@ export interface McpActionBridge {
    * caller, and the run is parked on a screen. Resolves to `runAction`'s
    * envelope (`{ ok, action, objectName, recordId?, result }`). A run that
    * pauses on its next screen comes back paused again. Throws on refusal, with
-   * the ADR-0112 `code` / `status` on the thrown value.
+   * the ADR-0112 `code` / `status` on the thrown value. [#33690] A resume of a
+   * gated action resolves to `ActionConfirmationPending` instead, as
+   * {@link runAction} does, and the run stays parked.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -1162,8 +1168,11 @@ const DELETE_RECORD_TOOL = 'delete_record';
  * The confirmation gate on the MCP `delete_record` tool: `run_action`'s gate,
  * widened by the maintainer's decision to this one tool, for every object.
  *
- * A delete over MCP is permanent, and the bridge's checks say whether the
- * caller MAY delete, never whether a human asked for it. So a call that does
+ * A delete over MCP is destructive: a business record goes to the recycle
+ * bin (a person restores it from there until the retention ends), and a
+ * platform object's record, or any record on a host with no bin, is gone for
+ * good ({@link DELETE_RECYCLE_BIN_FACT}). And the bridge's checks say whether
+ * the caller MAY delete, never whether a human asked for it. So a call that does
  * not carry the confirmation member as the boolean `true` is refused with the
  * refusal `run_action` answers an author-gated action with: the same code,
  * status, envelope keys and `details` shape (`ActionConfirmationRequiredDetails`),
@@ -1195,10 +1204,35 @@ function recordDeleteConfirmationRefusal(
     DELETE_RECORD_TOOL,
     objectName,
     `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
-      + 'A delete over MCP is permanent: confirm with the human in the loop, then retry this call with '
+      + `${DELETE_IS_DESTRUCTIVE}: confirm with the human in the loop, then retry this call with `
       + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
   );
 }
+
+/**
+ * What a delete over MCP does with the record, as measured on a booted stack
+ * over both transports and both delete tools: every by-id delete of a
+ * business object is kept in the recycle bin (`sys_recycle_bin`, ADR-0148)
+ * for the deployment's retention (`OS_RECYCLE_BIN_RETENTION_DAYS` or the
+ * host's resolver, else 30 days), restorable through the REST door and the
+ * console's recycle-bin page by a holder of `manageRecycleBin`, or by the
+ * deleter under `allowRestoreOwnDeleted` (ADR-0148 D5); no MCP tool
+ * restores. The engine keeps nothing for a platform object (`sys_`, `cloud_`,
+ * `ai_`) or on a composition that registers no bin, and both delete tools
+ * always delete by id, so those are the only permanent deletes here. There is no per-object switch. The answer
+ * is the per-call fact: `recycleBinEntryId` (the spec's `DeleteDataResponse`
+ * key) present means kept, absent means permanent. One sentence for both
+ * tools' descriptions, so the one-row and many-row text cannot disagree.
+ */
+const DELETE_RECYCLE_BIN_FACT =
+  'A deleted business record goes to the recycle bin, where it can be restored until the deployment\'s retention '
+  + 'ends (30 days by default) by a recycle-bin manager of the object, or by you where your permissions let you '
+  + 'restore your own deletes; a record of a platform object (sys_, cloud_, ai_), or any record on a '
+  + 'deployment with no recycle bin, is deleted permanently. No MCP tool restores: tell the human it can be '
+  + 'restored from the recycle bin (the console, or POST /api/v1/data/{objectName}/recycle-bin/{recycleBinEntryId}/restore).';
+
+/** The clause both delete refusals open their instruction with: true whether or not the bin keeps the record. */
+const DELETE_IS_DESTRUCTIVE = 'Deleting is destructive even where the recycle bin keeps the record';
 
 /** The refusal both delete tools answer an unconfirmed call with: `run_action`'s, addressed to the tool. */
 type DeleteConfirmationRefusal = ThrownRefusalEnvelope & { details: ActionConfirmationRequiredDetails };
@@ -1407,11 +1441,29 @@ interface DeleteFault {
   message: string;
 }
 
+/** A deleted row the recycle bin kept, and the entry a person restores it from. */
+interface RecycledRecord {
+  recordId: string;
+  recycleBinEntryId: string;
+}
+
+/**
+ * The recycle-bin entry a `remove` answer names, or `undefined` when the
+ * delete wrote none: the answer's `recycleBinEntryId`, the spec's
+ * `DeleteDataResponse` key both bridges answer with.
+ */
+function recycleBinEntryIdOf(answer: unknown): string | undefined {
+  const entryId = (answer as { recycleBinEntryId?: unknown } | null | undefined)?.recycleBinEntryId;
+  return typeof entryId === 'string' && entryId !== '' ? entryId : undefined;
+}
+
 /** What {@link deleteEach} did with the attempt set, in order. */
 interface DeleteEachOutcome {
   /** Rows the bridge was asked to delete: every row before a fault, and the faulted one. */
   attempted: number;
   deleted: number;
+  /** The deleted rows the recycle bin kept, in delete order: each row's answered `recycleBinEntryId`. */
+  recycled: RecycledRecord[];
   refusals: DeleteRefusalGroup[];
   notRemoved: string[];
   /** Set when a fault stopped the walk; the rows after it were not attempted. */
@@ -1478,6 +1530,11 @@ async function deleteEach(
 ): Promise<DeleteEachOutcome> {
   let deleted = 0;
   let attempted = 0;
+  const recycled: RecycledRecord[] = [];
+  const kept = (id: string, answer: unknown) => {
+    const recycleBinEntryId = recycleBinEntryIdOf(answer);
+    if (recycleBinEntryId !== undefined) recycled.push({ recordId: id, recycleBinEntryId });
+  };
   const notRemoved: string[] = [];
   const groups = new Map<string, DeleteRefusalGroup>();
   let fault: DeleteFault | undefined;
@@ -1488,11 +1545,16 @@ async function deleteEach(
       // `success: false` is the protocol's "matched, and deliberately NOT
       // removed" (a reset, not a delete); anything else is a deletion.
       if ((answer as { success?: unknown } | null | undefined)?.success === false) notRemoved.push(id);
-      else deleted++;
+      else {
+        deleted++;
+        kept(id, answer);
+      }
     } catch (err) {
-      if (earnedAnswerOf(err) !== undefined) {
+      const earned = earnedAnswerOf(err);
+      if (earned !== undefined) {
         for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
         deleted++;
+        kept(id, earned);
         continue;
       }
       const refusal = rowRefusalOf(err, objectName);
@@ -1515,7 +1577,7 @@ async function deleteEach(
   }
   // Largest group first; a tie keeps the order the rows were refused in.
   const refusals = [...groups.values()].sort((a, b) => b.count - a.count);
-  return { attempted, deleted, refusals, notRemoved, ...(fault ? { fault } : {}), notAttempted: ids.length - attempted };
+  return { attempted, deleted, recycled, refusals, notRemoved, ...(fault ? { fault } : {}), notAttempted: ids.length - attempted };
 }
 
 /** How many records one call names: the exact count, or that more than the cap match. */
@@ -1545,7 +1607,7 @@ function deleteRecordsRefusalMessage(objectName: string, resolved: ResolvedDelet
     : `more than ${resolved.cap} records`;
   return (
     `delete_records on '${objectName}' carries no confirmation — nothing was deleted. The selection matches ${count}; `
-    + `a confirmed call deletes up to ${resolved.cap} of them. A delete over MCP is permanent: show `
+    + `a confirmed call deletes up to ${resolved.cap} of them. ${DELETE_IS_DESTRUCTIVE}: show `
     + `the preview to the human in the loop, then retry this call with '${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`
   );
 }
@@ -1576,6 +1638,9 @@ function deleteRecordsOutcome(objectName: string, resolved: ResolvedDeleteSelect
     ...selectionCount(resolved),
     attempted: done.attempted,
     deleted: done.deleted,
+    // The deleted records the recycle bin kept, with the entry each is
+    // restored from; a deleted record not listed was deleted permanently.
+    ...(done.recycled.length > 0 ? { recycleBinEntries: done.recycled } : {}),
     refused,
     refusals: done.refusals,
     ...(done.notRemoved.length > 0 ? { notRemoved: done.notRemoved } : {}),
@@ -1598,6 +1663,7 @@ function deleteRecordsFaultMessage(objectName: string, done: DeleteEachOutcome &
     `delete_records on '${objectName}' stopped at record '${done.fault.recordId}': ${done.fault.message} `
     + 'This is a fault, not a delete rule\'s refusal, so no record after it was attempted. '
     + `${done.deleted} record(s) were deleted before it and stay deleted; ${done.notAttempted} were not attempted. `
+    + (done.recycled.length > 0 ? 'progress.recycleBinEntries names the deleted records the recycle bin kept. ' : '')
     + 'Retry the same call once the fault is resolved: it selects what still matches.'
   );
 }
@@ -3016,8 +3082,10 @@ export function registerObjectTools(
       note('delete_record'),
       {
         description:
-          'Delete a record by id. This is destructive and permanent. A call is REFUSED unless it also sends ' +
-          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call.',
+          'Delete a record by id. This is destructive. A call is REFUSED unless it also sends ' +
+          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call. ' +
+          `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntryId names the recycle-bin entry; an answer ` +
+          'without one means this delete was permanent.',
         inputSchema: strictToolInput(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
@@ -3087,13 +3155,15 @@ export function registerObjectTools(
         {
           description:
             'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds) — '
-            + 'instead of one delete_record per row. Destructive and permanent. A call without confirm: true deletes '
+            + 'instead of one delete_record per row. Destructive. A call without confirm: true deletes '
             + 'nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) with a `preview` of what a confirmed call would '
             + 'delete (how many match, sample ids). Show that to the human, and retry with confirm: true only once they '
             + `approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (fewer when the `
             + 'deployment\'s read page size or row budget is smaller; the answer\'s cap says), each under your '
             + 'permissions, row-level security and the object\'s delete rules, which no caller can bypass. Records a '
-            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match.',
+            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match. '
+            + `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntries lists each deleted record the recycle bin kept `
+            + '(recordId, recycleBinEntryId); a deleted record not listed there was deleted permanently.',
           inputSchema: strictToolInput(
             {
               surface: 'this delete_records call',
@@ -3300,10 +3370,16 @@ export function registerActionTools(
         'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
-        'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
-        'send confirm: true — ask the human first, then retry; nothing runs on a refused call. ' +
-        // [ADR-0151 D3 rule 3] `actionConfirmationRefusal` (runtime) never reads
-        // the member for an AI service account, so no retry is taught to one.
+        // [#33690] The amended confirmation contract: the caller's `confirm`
+        // never counts on an action whose author declared
+        // `ai.requiresConfirmation: true`; the person is asked in the app.
+        'An action its author declared ai.requiresConfirmation: true never runs on this call, and confirm: true ' +
+        'does not change that: the call is handed to the person you act for, who approves or rejects it in ' +
+        'the app, and you are answered status "pending_confirmation" with a pendingId and a message to pass on. ' +
+        'Nothing has run then; do not retry, tell the user to approve it. Where the server cannot hand it off, ' +
+        'the call is refused ACTION_CONFIRMATION_REQUIRED (details.reason "no_confirmation_service"): the user ' +
+        'performs the action in the app. ' +
+        // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
         'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
         'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
         'ai.requiresConfirmation: false when it is safe unattended. ' +
@@ -3382,11 +3458,9 @@ export function registerActionTools(
           .boolean()
           .optional()
           .describe(
-            'Set to true to confirm a call the app author gated with ai.requiresConfirmation '
-            + '(list_actions reports requiresConfirmation for each action). Assert this only when '
-            + 'the human in the loop has approved THIS call; without it a gated action is refused '
-            + 'and nothing runs. Under an AI service account\'s own key it is not read: the call is '
-            + 'refused whatever it sends.',
+            'Not read by this tool: an action its author declared ai.requiresConfirmation: true is handed '
+            + 'to the person to approve in the app whatever this member says, and any other action runs '
+            + 'without it. Accepted so that a call carrying it is not refused for it.',
           ),
         },
       ),
@@ -3481,9 +3555,12 @@ export function registerActionTools(
           'pauses again on its NEXT screen with a new screen to fill (call resume_run again for it). Only ' +
           'the user whose call started the run can resume it, and it is gated exactly as run_action is ' +
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
-          'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
-          'the action that started the run, send confirm: true (ask the human first); without it the call ' +
-          'is refused and the run stays paused. Under an AI service account\'s own key the call is refused ' +
+          'the app\'s business logic and can mutate data. When the action that started the run was declared ' +
+          'ai.requiresConfirmation: true, the run does not continue on this call and confirm: true does not ' +
+          'change that: it is handed to the person you act for, who approves or rejects it in the app, and you ' +
+          'are answered status "pending_confirmation" with a pendingId; the run stays paused until they ' +
+          'approve. Where the server cannot hand it off, the call is refused ACTION_CONFIRMATION_REQUIRED and ' +
+          'the run stays paused. Under an AI service account\'s own key the call is refused ' +
           'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
           'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
           'in the error message.',
@@ -3525,11 +3602,9 @@ export function registerActionTools(
               .boolean()
               .optional()
               .describe(
-                'Set to true to confirm resuming a run of an action the app author gated with '
-                + 'ai.requiresConfirmation (list_actions reports requiresConfirmation). Assert this only when '
-                + 'the human in the loop has approved THIS call; without it the call is refused and the run '
-                + 'stays paused. Under an AI service account\'s own key it is not read: the call is refused '
-                + 'whatever it sends.',
+                'Not read by this tool: a resume of a run whose action was declared ai.requiresConfirmation: '
+                + 'true is handed to the person to approve in the app whatever this member says. Accepted so '
+                + 'that a call carrying it is not refused for it.',
               ),
           },
         ),

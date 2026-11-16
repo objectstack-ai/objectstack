@@ -155,7 +155,12 @@ export interface AdminUserEndpointDeps {
    * Absent ⇒ no join: the creation behaves as before.
    */
   getCallerActiveOrganizationId?(): Promise<string | null>;
-  logger?: { warn(msg: string): void };
+  /**
+   * The mount's logger. `error` receives, once, a failure that carries no
+   * vendor code and is answered with the generic internal-error message
+   * ({@link mapAuthApiError}).
+   */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 /**
@@ -242,7 +247,7 @@ import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ss
 import { temporaryPasswordLength } from './temporary-password-length.js';
 import { isPendingSsoSource, pendingSsoPasswordRefusal } from './pending-sso-marker.js';
 import { isCloudManaged } from '@objectstack/core';
-import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
+import { INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -668,17 +673,45 @@ export async function writeAdminAudit(
   }
 }
 
-export function mapAuthApiError(error: unknown, fallback: string): EndpointResult {
+/**
+ * Map what a vendor call threw onto the endpoint envelope.
+ *
+ * A refusal keeps its own message and status: one the vendor classifies (it
+ * carries a body code; `USER_ALREADY_EXISTS` is normalised to 409), and one
+ * whose status says it is addressed to the caller (4xx). Anything else is an
+ * unclassified internal failure: it is answered `INTERNAL_ERROR` in the
+ * generic words every route catch in `auth-plugin.ts` uses, and the error is
+ * handed to `logger.error` once (to `logger.warn` on a sink without one), as
+ * `[AuthPlugin] <fallback>` — the thrown
+ * error's own text never reaches the caller. The status is read the same way
+ * in every case.
+ *
+ * @param fallback  names the route's failure (`'create-user failed'`); it is
+ *                  the log line, and a classified refusal's message when the
+ *                  vendor sent none.
+ */
+export function mapAuthApiError(
+  error: unknown,
+  fallback: string,
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void },
+): EndpointResult {
   const e = error as {
     statusCode?: number;
     status?: number | string;
     body?: { code?: string; message?: string };
     message?: string;
   } | null;
-  const code = e?.body?.code ?? 'INTERNAL_ERROR';
-  const message = e?.body?.message ?? e?.message ?? fallback;
+  const vendorCode = e?.body?.code ?? undefined;
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
+  if (vendorCode === undefined && !(rawStatus >= 400 && rawStatus <= 499)) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    if (logger?.error) logger.error(`[AuthPlugin] ${fallback}`, failure);
+    else logger?.warn(`[AuthPlugin] ${fallback}: ${failure.message}`);
+    return { status: rawStatus, body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } } };
+  }
+  const code = vendorCode ?? 'INTERNAL_ERROR';
+  const message = e?.body?.message ?? e?.message ?? fallback;
   const status = code === 'USER_ALREADY_EXISTS' ? 409 : rawStatus;
   return { status, body: { success: false, error: { code, message } } };
 }
@@ -747,7 +780,7 @@ export async function runAdminCreateUser(
   try {
     lengthPolicy = (await deps.getAuthContext()).password.config;
   } catch (error) {
-    return mapAuthApiError(error, 'create-user failed');
+    return mapAuthApiError(error, 'create-user failed', deps.logger);
   }
   const resolved = await resolvePassword(deps, body, 'password', lengthPolicy);
   if ('status' in resolved) return resolved;
@@ -849,7 +882,7 @@ export async function runAdminCreateUser(
         },
       });
     } catch (error) {
-      return mapAuthApiError(error, 'create-user failed');
+      return mapAuthApiError(error, 'create-user failed', deps.logger);
     }
 
     const userId = created?.user?.id;
@@ -987,7 +1020,7 @@ export class CreationRefused extends Error {
  * answers by.
  */
 export async function joinCurrentOrganization(
-  deps: Pick<AdminUserEndpointDeps, 'getDataEngine'>,
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'logger'>,
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
   organizationId: string,
@@ -1004,7 +1037,7 @@ export async function joinCurrentOrganization(
   try {
     await addMember({ body: { userId, role: 'member', organizationId } });
   } catch (error) {
-    const refused = mapAuthApiError(error, 'organization/add-member failed');
+    const refused = mapAuthApiError(error, 'organization/add-member failed', deps.logger);
     throw new CreationRefused({
       status: refused.status,
       body: {
@@ -1101,7 +1134,7 @@ export async function runAdminSetUserPassword(
   try {
     authCtx = await deps.getAuthContext();
   } catch (error) {
-    return mapAuthApiError(error, 'set-user-password failed');
+    return mapAuthApiError(error, 'set-user-password failed', deps.logger);
   }
   const resolved = await resolvePassword(deps, body, 'newPassword', authCtx.password.config);
   if ('status' in resolved) return resolved;
@@ -1122,29 +1155,13 @@ export async function runAdminSetUserPassword(
       return pendingSsoPasswordRefusal('setUserPassword');
     }
 
-    // [#25083] On a cloud-managed environment a password is set here only on
-    // a local account. An `idp_provisioned` user signs in through the hosting
-    // organisation's identity provider, which owns their password; an
-    // `env_native` row (the break-glass administrator among them) still
-    // answers, because ADR-0135 D5.2 narrows by population, never wholesale.
-    if (isCloudManaged()) {
-      const source = await readUserSource(deps.getDataEngine(), userId);
-      if (!source.ok) {
-        return {
-          status: 503,
-          body: {
-            success: false,
-            error: {
-              code: 'SERVICE_UNAVAILABLE',
-              message:
-                "The user's identity source could not be read, so whether this cloud-managed environment may set "
-                + 'their password here cannot be judged. No password was changed.',
-            },
-          },
-        };
-      }
-      if (source.value === 'idp_provisioned') return cloudManagedRefusal('setUserPassword');
-    }
+    // [#25083] [#33203] On a cloud-managed environment no password is set
+    // here for anyone: everyone signs in through the hosting organisation's
+    // identity provider, and a hosted environment keeps no local break-glass
+    // administrator (ruling 10 of objectstack-ai/cloud#4465). So no arm below
+    // reads the target's identity source: an `env_native` row is refused like
+    // an `idp_provisioned` one. `cloud-managed.ts` states the rule.
+    if (isCloudManaged()) return cloudManagedRefusal('setUserPassword');
 
     // With SSO-only mode on, an IdP-provisioned user signs in through the
     // identity provider and is given no local password here; the one exception
@@ -1175,7 +1192,7 @@ export async function runAdminSetUserPassword(
       });
     }
   } catch (error) {
-    return mapAuthApiError(error, 'set-user-password failed');
+    return mapAuthApiError(error, 'set-user-password failed', deps.logger);
   }
 
   // The flag write is credited to the administrator this route admitted (and,

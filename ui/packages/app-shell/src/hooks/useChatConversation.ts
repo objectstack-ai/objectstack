@@ -252,7 +252,8 @@ interface CacheableChatToolInvocation {
   pendingActionId?: string;
   /**
    * objectstack#31868 — the data tool's `source` block ("How this was
-   * computed"), as `detectAnswerSource` lifted it. It rides INSIDE the cached
+   * computed"), or `query_dataset`'s `provenance` (objectstack#33734), as
+   * `detectAnswerSource` lifted it. It rides INSIDE the cached
    * `output`, beside whichever envelope took it, because `output` is the one
    * carrier both hydration paths re-parse (see `sanitizeChatMessagesForCache`).
    */
@@ -588,8 +589,16 @@ export function sanitizeChatMessagesForCache(
           // carries a pending approval keeps `status` / `pendingActionId` and
           // gains `source`, and `detectPendingApproval` and
           // `detectAnswerSource` each read their own keys back.
+          // objectstack#33734 — a `query_dataset` lift (`kind: 'dataset'`)
+          // goes back under `provenance`, the key that tool answers it under,
+          // so the same reader lifts it on reload.
           const output = tool.answerSource
-            ? { ...(cachedOutput ?? {}), source: tool.answerSource }
+            ? {
+                ...(cachedOutput ?? {}),
+                ...('kind' in tool.answerSource
+                  ? { provenance: tool.answerSource }
+                  : { source: tool.answerSource }),
+              }
             : cachedOutput;
           parts.push({
             type: `tool-${tool.toolName}`,

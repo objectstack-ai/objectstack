@@ -4071,6 +4071,18 @@ export const REPO_ROOT_WALK_SPELLINGS = [
     label: 'a walk whose DEFAULT PARAMETER is the repo-root binding',
     re: /[({,]\s*[A-Za-z_$][\w$]*\s*=\s*(?:REPO_ROOT|REPO_ROOT_DIR|ROOT_DIR)\s*[,)}]/,
   },
+  {
+    // `git grep` searches the tracked corpus by default — the same population
+    // limb A enumerates, read in one call (`check-adr-anchors`'s citation scan,
+    // #34086). Held to the execFile shape, `'git'` then an argv array whose
+    // element is `'grep'`, because a bare `'grep'` is also the system grep run
+    // over one named file (`check-skill-compatibility-version`), which reads
+    // no tree. Like every limb this is necessary, not sufficient: a pathspec
+    // after the pattern narrows the search, and the declaration's reason is
+    // where a reader judges that.
+    label: 'a `git grep` search of the tracked corpus',
+    re: /['"`]git['"`]\s*,\s*\[[^\]]*?['"`]grep['"`]/,
+  },
 ];
 
 /**
@@ -6573,6 +6585,174 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
 }
 
 /**
+ * ── The LOAD edge, read for the import-graph key (#33848) ──────────────────
+ *
+ * `firstPartyImportBindings` answers a POPULATION question — what a gate
+ * inherits from a module it imports — and every one of its narrowings is
+ * priced for that question: static clauses only, self-test bodies masked.
+ * This answers a different one: *which first-party modules does running this
+ * file LOAD?* — the question `importGraphReach` walks to name the family that
+ * runs a changed `scripts/pm/**` module. A missed edge here is a gate a card
+ * can break without being told, so every narrowing above is turned the other
+ * way, toward MORE edges:
+ *
+ *   - self-test bodies are NOT masked: a `--self-test` invocation runs them, and
+ *     a self-test that loads its battery lazily loads it there.
+ *   - comments ARE masked, and a keyword inside a string or template literal is
+ *     not a load: a fixture spelling an import is text this file carries.
+ *   - static `import … from`, `export … from` (a re-export loads its target)
+ *     and the side-effect form; a dynamic `import()` whose argument is a string
+ *     literal or `new URL('<literal>', import.meta.url)`.
+ *   - a dynamic `import()` whose argument this scan cannot read (a variable, a
+ *     property, a computed URL) has a target nothing here can name. It is not
+ *     dropped: the file is marked, and EVERY code-position string literal in it
+ *     that names a first-party module — a relative specifier, or a path spelled
+ *     from the repo ROOT under `scripts/` — is taken as an edge. Both live
+ *     shapes: a loader seam (`load = (specifier) => import(specifier)`) whose
+ *     relative specifiers sit in a constant elsewhere in the file
+ *     (`ARM_READER_SOURCE`), and a root-spelled roster loaded in process —
+ *     `fleet-write/dispatch.mjs`'s self-test imports every sender through
+ *     `pathToFileURL(join(REPO_ROOT, sender))`, `check-dispatch-gates.mjs` its
+ *     engine through `import(resolve(ROOT, TOOL))`. Taking the root spelling
+ *     also takes the fixture rows and text reads such a file spells in the same
+ *     form (measured: five modules `check-governed-merges.mjs` names as data
+ *     and never loads), and that is the direction this key errs in: a lead too
+ *     many costs one gate run, a lead too few costs a red CI round.
+ *
+ * Resolution is `firstPartyImportBindings`': relative specifiers only, inside
+ * `scripts/`, outside `node_modules`, and only a target that exists — a bare
+ * specifier is an installed package, not a source a card edits.
+ *
+ * Returns `{ targets, unreadDynamic }`: `targets` sorted, `unreadDynamic` the
+ * count of `import()` calls whose argument was not read, so a caller can name
+ * the files the literal fallback widened.
+ */
+const LOAD_DYNAMIC_IMPORT = /(?<![\w$.])import[ \t\n]*\(/g;
+const LOAD_DYNAMIC_LITERAL = /^[ \t\n]*(['"`])([^'"`\n]+)\1[ \t\n]*[,)]/;
+const LOAD_DYNAMIC_URL = /^[ \t\n]*new[ \t\n]+URL[ \t\n]*\([ \t\n]*(['"`])([^'"`\n]+)\1[ \t\n]*,[ \t\n]*import\.meta\.url[ \t\n]*\)/;
+const LOAD_MODULE_LITERAL = /(['"`])((?:\.\.?\/|scripts\/)[^'"`\n]*?\.(?:mjs|cjs|js|mts|cts|ts))\1/g;
+
+export function loadEdgeTargets(scriptPath, source, { root = ROOT, exists = null } = {}) {
+  const text = String(source);
+  const scan = scanSource(text);
+  const body = blank(text, scan.comment);
+  const isCode = (at) => !scan.comment[at] && !scan.literal[at];
+  const here = nodePath.dirname(nodePath.join(root, scriptPath));
+  const present = exists ?? ((rel) => {
+    const abs = nodePath.join(root, rel);
+    return existsSync(abs) && statSync(abs).isFile();
+  });
+  const targets = new Set();
+  const admit = (rel) => {
+    if (!rel.startsWith('scripts/')) return;
+    if (rel.split('/').includes('node_modules')) return;
+    if (rel === scriptPath) return;
+    if (present(rel)) targets.add(rel);
+  };
+  const resolveRelative = (specifier) => {
+    if (!specifier.startsWith('./') && !specifier.startsWith('../')) return;
+    admit(nodePath.relative(root, nodePath.resolve(here, specifier)));
+  };
+  // The keyword's own offset, not the match's: both regexes open on the
+  // statement separator before it.
+  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) {
+    if (isCode(m.index + m[0].indexOf(m[1]))) resolveRelative(m[4]);
+  }
+  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) {
+    if (isCode(m.index + m[0].indexOf('import'))) resolveRelative(m[2]);
+  }
+  let unreadDynamic = 0;
+  for (const m of body.matchAll(LOAD_DYNAMIC_IMPORT)) {
+    if (!isCode(m.index)) continue;
+    const rest = body.slice(m.index + m[0].length, m.index + m[0].length + 400);
+    if (/^[ \t\n]*\)/.test(rest)) continue;
+    const literal = LOAD_DYNAMIC_LITERAL.exec(rest);
+    if (literal && !(literal[1] === '`' && literal[2].includes('${'))) {
+      resolveRelative(literal[2]);
+      continue;
+    }
+    const url = LOAD_DYNAMIC_URL.exec(rest);
+    if (url && !(url[1] === '`' && url[2].includes('${'))) {
+      resolveRelative(url[2]);
+      continue;
+    }
+    unreadDynamic += 1;
+  }
+  if (unreadDynamic > 0) {
+    for (const m of body.matchAll(LOAD_MODULE_LITERAL)) {
+      // A literal in CODE: its opening delimiter is code and its first byte is
+      // literal — the scan flags a literal's content, never its delimiters.
+      if (!isCode(m.index) || !scan.literal[m.index + 1]) continue;
+      if (m[1] === '`' && m[2].includes('${')) continue;
+      if (m[2].startsWith('scripts/')) admit(m[2]);
+      else resolveRelative(m[2]);
+    }
+  }
+  return { targets: [...targets].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), unreadDynamic };
+}
+
+/**
+ * Every first-party module running these files LOADS, transitively, each with
+ * the importer that first reached it (#33848) — the forward closure of
+ * `loadEdgeTargets` from a family's gate files, which read from the module's
+ * side is the REVERSE import graph: module M is in family F's reach exactly
+ * when M is reachable backwards from F's gate files. Breadth-first, so each
+ * module's recorded importer is on a shortest chain, and the chain a row
+ * prints is the shortest one a reader can walk.
+ *
+ * `edgesOf(rel)` answers one file's targets; the discovery hands in a memoised
+ * one so a module shared by many families is scanned once. A file it cannot
+ * read contributes no edge and is still in the reach — the edge INTO it is a
+ * fact about its importer.
+ */
+export function importGraphReach(files, edgesOf) {
+  const own = new Set(files);
+  const reach = new Map();
+  const queue = [...files];
+  const seen = new Set(files);
+  while (queue.length > 0) {
+    const from = queue.shift();
+    let targets = [];
+    try {
+      targets = edgesOf(from) ?? [];
+    } catch {
+      targets = [];
+    }
+    for (const to of targets) {
+      if (seen.has(to)) continue;
+      seen.add(to);
+      if (!own.has(to)) reach.set(to, from);
+      queue.push(to);
+    }
+  }
+  return reach;
+}
+
+/**
+ * The chain a reach row prints, gate file first: walk the recorded importers
+ * back from the module until one is the family's own file.
+ */
+export function importGraphChain(reach, module) {
+  const chain = [module];
+  let at = module;
+  const guard = new Set([module]);
+  while (reach.has(at)) {
+    at = reach.get(at);
+    if (guard.has(at)) break;
+    guard.add(at);
+    chain.unshift(at);
+  }
+  return chain;
+}
+
+/**
+ * The subtree the import-graph key answers for (#33848). The refusal in
+ * `coveringKey`'s docblock (#13126) stands for every other module: its price is
+ * the fan-in of the shared heads under `scripts/`, none of which is in here.
+ */
+export const IMPORT_GRAPH_KEY_ROOT = 'scripts/pm/';
+
+/**
  * The exporter half of the binding rule: is NAME declared in this module as a
  * VALUE — a `const` initialised to one primitive literal?
  *
@@ -7889,12 +8069,43 @@ export function coveringJobFilter(entry, inputPath) {
  *
  * What the refusal COSTS is a live missing lead, and it is named rather than
  * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
- * THIS file, and a card editing this file derives 14 families without naming
+ * THIS file, and a card editing this file derived 14 families without naming
  * it. That gate gets run by hand, but lint.yml runs it on every PR too, so the
  * miss costs one CI round, which is the side this file's header errs on
  * everywhere, and it is a far smaller cost than the card the general key
  * prints for the module nearly every family imports — the run's `would name F
- * families` line is what prices that one.
+ * families` line is what prices that one. (That witness is now paid back by
+ * the admission below, because THIS file lives under `scripts/pm/`.)
+ *
+ * ## …and ADMITTED for `scripts/pm/**`, transitively (#33848)
+ *
+ * The refusal is priced on the shared heads, and none of them is a pm module.
+ * The pm tools are the other shape: they import one another in CHAINS — a
+ * register module read by an executor that a dispatcher loads — and each
+ * chain ends in a gate whose self-test fakes what it imports. Measured on PR
+ * #33804's first head (`check-governed-queue-guard.mjs` and
+ * `check-governed-merges.mjs`): the derivation named 35 gates and not
+ * `check:pm-fleet-write-execute`, whose script imports a changed function and
+ * whose self-test went red in CI on that head, behind a dev's "35 of 35 exit
+ * 0". So a changed path under `IMPORT_GRAPH_KEY_ROOT` is answered by the
+ * family of every gate whose files LOAD it, at any depth: `importGraphReach`
+ * walks `loadEdgeTargets` forward from each family's files, which read from
+ * the module's side is the reverse import graph. The key is the LAST one
+ * consulted, so it re-attributes nothing an earlier key answered, and it
+ * ignores both narrowings the population follow takes — it walks self-test
+ * families too, and gate files too — because it claims what RUNNING the
+ * family loads, never what the family watches.
+ *
+ * Its price is real and is the card's to pay: the pm tools close into one
+ * large cycle (the governed register, the half-state patrol, the queue guard
+ * and this file all load one another), so an edit to most pm modules names
+ * the forty-odd families that run any of them. That is the size of what such
+ * an edit can break, measured rather than assumed; the replay row and the
+ * transitive row in `--self-test` are its pins, and a row there PRINTS the
+ * current size (modules reached, pairs, the most-reached module) rather than
+ * this prose recording it. Its time price is small and measured: the load
+ * scan adds about one to two seconds to a cold discovery (`derivationInputs`
+ * carries the before/after readings).
  *
  * WHERE THAT PRICE DOES NOT HOLD (#13467). "One CI round" is the WITNESS's
  * price and an AVERAGE over the class, and the next reader will quote it as the
@@ -8009,6 +8220,16 @@ export function coveringKey(entry, inputPath) {
     const kind =
       entry.readEdge?.get(read) === 'declared-self-test' ? 'declared self-test read' : 'program text read';
     return { key: read, via: by && by !== read ? `${kind} by ${by}` : kind };
+  }
+  // The import-graph key (#33848), LAST for the reason the read key above is
+  // last: additive by construction, so every path an earlier key already
+  // answered keeps its exact key and label. The FIFTH key this docblock refuses
+  // is this one, and it stays refused outside `IMPORT_GRAPH_KEY_ROOT`; inside it
+  // it is admitted transitively, because the pm tools import one another in
+  // chains (a changed register read by an executor a dispatcher loads) and a
+  // one-level edge would miss the importer of an importer.
+  if (String(inputPath).startsWith(IMPORT_GRAPH_KEY_ROOT) && entry.importReach?.has(inputPath)) {
+    return { key: inputPath, via: `import graph ${importGraphChain(entry.importReach, inputPath).join(' -> ')}` };
   }
   return null;
 }
@@ -13527,7 +13748,22 @@ function discoverFamiliesPass(tree) {
     }
     return manifestHints.get(rel);
   };
+  // The LOAD graph the import-graph key walks (#33848), one scan per file
+  // however many families reach it — the discovery memo makes it one per tree.
+  const loadEdges = new Map();
+  const loadEdgesOf = (rel) => {
+    if (!loadEdges.has(rel)) {
+      const abs = nodePath.join(ROOT, rel);
+      loadEdges.set(rel, existsSync(abs) ? loadEdgeTargets(rel, readFileSync(abs, 'utf8')).targets : []);
+    }
+    return loadEdges.get(rel);
+  };
   for (const entry of byCheck.values()) {
+    // ⛔ NOT gated on `entry.selfTest`, and not narrowed to non-gate modules:
+    // this is a claim about what RUNNING the family loads, and a `--self-test`
+    // invocation loads its script's whole import graph as surely as the bare
+    // run does — the card's own specimen is a self-test family.
+    entry.importReach = importGraphReach(entry.files ?? [], loadEdgesOf);
     entry.imports = [];
     // The subset of `entry.imports` that CONTRIBUTES a population (#17991).
     // The edge list stays whole — the gate really does import every module in
@@ -15967,10 +16203,27 @@ function runGit(args, cwd) {
   return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }
 
-function gitLines(args, cwd) {
+/**
+ * A path list from git, read NUL-separated: `git <subcommand> -z <rest…>`.
+ *
+ * The `-z` is spliced in here rather than written at each call site, so no
+ * caller can list paths the other way. Without it git C-quotes any path that
+ * holds a non-ASCII byte, a double quote or a control character
+ * (`"skills/x/\346\226\207.md"` for a file named in Chinese), and the quoted
+ * spelling begins with a quote mark, so it matches no glob: a governed
+ * `skills/**` file read as no tier at all, every derived gate watching it went
+ * unnamed, and an untracked one was counted as an unreadable file of 0 lines.
+ * ⛔ `core.quotePath=false` alone is no repair: it unquotes the non-ASCII bytes
+ * only, and a newline in a path still splits one name into two on a line
+ * read. Split on NUL and never trim: a leading or trailing space is part of
+ * the name. Same reader shape as `trackedFiles` and the landing gates'
+ * `enumerateRows`.
+ */
+function gitPathList([subcommand, ...rest], cwd) {
+  const args = [subcommand, '-z', ...rest];
   const r = runGit(args, cwd);
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed — ${r.stderr || `exit ${r.status}`}`);
-  return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  return r.stdout.split('\0').filter(Boolean);
 }
 
 /**
@@ -16046,9 +16299,11 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
   // --no-renames so a moved file contributes BOTH names. Rename detection
   // prints only the new one, and a gate watching the old directory is exactly
   // as implicated by the move as one watching the new.
-  const committed = gitLines(['diff', '--name-only', '--no-renames', mergeBase, 'HEAD'], cwd);
-  const worktree = gitLines(['diff', '--name-only', '--no-renames', 'HEAD'], cwd);
-  const untracked = gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+  // Every list is read NUL-separated (`gitPathList`), so a name git would
+  // C-quote reaches the tier and the gate match spelled as it is on disk.
+  const committed = gitPathList(['diff', '--name-only', '--no-renames', mergeBase, 'HEAD'], cwd);
+  const worktree = gitPathList(['diff', '--name-only', '--no-renames', 'HEAD'], cwd);
+  const untracked = gitPathList(['ls-files', '--others', '--exclude-standard'], cwd);
 
   const paths = [...new Set([...committed, ...worktree, ...untracked])].sort();
   const size = changedLinesFromGit({ cwd, mergeBase, untracked });
@@ -16084,7 +16339,7 @@ export function changedLinesFromGit({ cwd = ROOT, mergeBase, untracked = null })
     throw new Error(`git diff --numstat ${mergeBase.slice(0, 9)} failed — ${tracked.stderr || `exit ${tracked.status}`}; the changed-line count cannot be answered, and an unanswered count is never zero`);
   }
   const counted = parseNumstat(tracked.stdout);
-  const others = untracked ?? gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+  const others = untracked ?? gitPathList(['ls-files', '--others', '--exclude-standard'], cwd);
   let untrackedLines = 0;
   let untrackedBinary = 0;
   let unreadable = 0;
@@ -16342,9 +16597,14 @@ const derivationInputsMemo = new WeakMap();
  *
  * Memoised per discovery, which is itself memoised per tree, so a derivation
  * that already discovered pays nothing more for it — and that is the ONLY
- * price this may have. A discovery costs seconds (measured: ~14 s cold on
- * this tree), so the modes that derive hand it to `baseDrift` and `--tier`,
- * which reads no workflow by contract, does not: a battery of `--tier`
+ * price this may have. A discovery costs seconds — measured on a quiet
+ * container, two cold runs each: 16.6 s and 14.8 s before the import-graph
+ * key (#33848, base e71ecc1b), 17.2 s and 17.0 s with it (6f34ab17); a whole `--commands`
+ * run over one pm path, 36.0 s and 37.0 s before, 38.0 s and 35.7 s after.
+ * A shared box reads higher (48.7 s was measured for that run under load), so
+ * quote the ratio, never one absolute. Because it costs that much, the modes
+ * that derive hand it to `baseDrift` and `--tier`, which reads no workflow by
+ * contract, does not: a battery of `--tier`
  * children on a tree a few commits behind was measured to quadruple its wall
  * clock when the banner asked for a discovery the mode never needed.
  */
@@ -16359,6 +16619,9 @@ export function derivationInputs({ tree = repoCorpus().tree } = {}) {
     for (const list of [entry.files, entry.imports, entry.runs, entry.reads, entry.manifests]) {
       for (const rel of list ?? []) inputs.add(rel);
     }
+    // The import-graph key's reach (#33848): a module's edges decide which
+    // families that key names, so every file the walk opened is an input.
+    for (const rel of entry.importReach?.keys() ?? []) inputs.add(rel);
   }
   derivationInputsMemo.set(discovered, inputs);
   return inputs;

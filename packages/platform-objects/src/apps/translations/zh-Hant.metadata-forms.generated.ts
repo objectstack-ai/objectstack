@@ -967,15 +967,27 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       refusals: {
         label: "拒絕目錄",
-        helpText: "拒絕目錄，以內文丟擲的 SCREAMING_SNAKE 錯誤碼為鍵（例如 CLEAN_VERSION_REQUIRED）。呼叫方讀到宣告的提示語（依其語言翻譯）和宣告的狀態碼。僅適用於 JavaScript（L2）內文"
+        helpText: "拒絕目錄，以掛鉤丟擲的 SCREAMING_SNAKE 錯誤碼為鍵（例如 CLEAN_VERSION_REQUIRED）。呼叫方讀到宣告的提示語（依其語言翻譯）和宣告的狀態碼。適用於 JavaScript（L2）內文或處理器；運算式內文宣告會被拒絕"
       },
       "refusals.message": {
         label: "提示語",
-        helpText: "內文丟擲此錯誤碼時使用者讀到的句子——純文字，不含預留位置"
+        helpText: "內文丟擲此錯誤碼時使用者讀到的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
       },
       "refusals.status": {
         label: "狀態碼",
         helpText: "拒絕的 HTTP 狀態碼（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一錯誤碼下的更多句子，以內文在錯誤碼旁丟擲的 snake_case 原因為鍵（{ code, reason }）。線上的錯誤碼和狀態碼仍取本條目的；未在此宣告的原因會被拒絕。不填：丟擲的原因不被讀取"
+      },
+      "refusals.reasons.message": {
+        label: "提示語",
+        helpText: "內文在此錯誤碼下丟擲此原因時使用者讀到的句子。其中的 {{ }} 預留位置遵循本條目的參數"
+      },
+      "refusals.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 state）：內文丟擲 { code, params: { state } }，{{ state }} 預留位置即顯示該值。不填：句子為純文字"
       },
       handler: {
         label: "處理器",

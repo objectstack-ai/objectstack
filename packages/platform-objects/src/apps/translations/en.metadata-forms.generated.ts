@@ -967,15 +967,27 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "Refusals",
-        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the body throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. JavaScript (L2) bodies only"
+        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the hook throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a JavaScript (L2) body or a handler; refused on an expression body"
       },
       "refusals.message": {
         label: "Message",
-        helpText: "The sentence the user reads when the body throws this code — plain text, with no placeholders"
+        helpText: "The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
       },
       "refusals.status": {
         label: "Status",
         helpText: "HTTP status of the refusal (400–499). Absent: 400"
+      },
+      "refusals.reasons": {
+        label: "Reasons",
+        helpText: "Further sentences under this same code, keyed by the snake_case reason the body throws beside the code ({ code, reason }). The wire code and status stay this entry's; a reason not declared here is refused. Absent: a thrown reason is not read"
+      },
+      "refusals.reasons.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this reason under the code. Its {{ }} holes follow the entry's params"
+      },
+      "refusals.params": {
+        label: "Params",
+        helpText: "Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text"
       },
       handler: {
         label: "Handler",

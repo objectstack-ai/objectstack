@@ -88,9 +88,11 @@
  *    returned, when every row in the batch exists.
  *  - **Where the refusals come from.** `applyUserManagerLink` — the same
  *    derivation `POST /admin/set-user-manager` runs, imported, ⛔ never copied.
- *    Self-assignment, cycle, depth cap, cross-organization and directory-owned
- *    identity are that function's to answer, and the refusal it returns is
- *    reported on the row rather than re-worded here.
+ *    Self-assignment, cycle, depth cap, cross-organization and an identity a
+ *    SCIM directory holds are that function's to answer, and the refusal it
+ *    returns is reported on the row rather than re-worded here. An identity
+ *    that only signs in through SSO (`idp_provisioned` with no directory
+ *    behind it) is linked like any other row.
  *  - **A manager problem never costs the row its identity.** The user is
  *    created either way; `rows[].manager` carries the machine-readable outcome
  *    in `rows[].delivery`'s shape and `rows[].error` carries the sentence.
@@ -213,7 +215,8 @@ export interface IdentityImportDeps {
    */
   consoleResetPasswordUrl?(): string;
   noteMustChangePasswordIssued(): void;
-  logger?: { warn(msg: string): void };
+  /** `error` receives, once, a failure answered with the generic message (`mapAuthApiError`). */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -631,7 +634,7 @@ export async function runAdminImportUsers(
   try {
     temporaryLength = temporaryPasswordLength((await deps.getAuthContext()).password.config);
   } catch (error) {
-    return mapAuthApiError(error, 'import-users failed');
+    return mapAuthApiError(error, 'import-users failed', deps.logger);
   }
 
   const protocol: ImportProtocolLike = {

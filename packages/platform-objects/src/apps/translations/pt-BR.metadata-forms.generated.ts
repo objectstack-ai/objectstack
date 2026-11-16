@@ -967,15 +967,27 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       refusals: {
         label: "Recusas",
-        helpText: "Catálogo de recusas, indexado pelo código SCREAMING_SNAKE que o corpo lança (por exemplo CLEAN_VERSION_REQUIRED). O chamador lê a mensagem declarada, traduzida para o idioma dele, com o status declarado. Somente corpos JavaScript (L2)"
+        helpText: "Catálogo de recusas, indexado pelo código SCREAMING_SNAKE que o hook lança (por exemplo CLEAN_VERSION_REQUIRED). O chamador lê a mensagem declarada, traduzida para o idioma dele, com o status declarado. Para um corpo JavaScript (L2) ou um handler; recusado em um corpo de expressão"
       },
       "refusals.message": {
         label: "Mensagem",
-        helpText: "A frase que o usuário lê quando o corpo lança este código — texto simples, sem marcadores"
+        helpText: "A frase que o usuário lê quando o corpo lança este código. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
       },
       "refusals.status": {
         label: "Status",
         helpText: "Status HTTP da recusa (400–499). Ausente: 400"
+      },
+      "refusals.reasons": {
+        label: "Motivos",
+        helpText: "Outras frases sob este mesmo código, indexadas pelo motivo snake_case que o corpo lança junto com o código ({ code, reason }). O código e o status enviados continuam sendo os desta entrada; um motivo não declarado aqui é recusado. Ausente: um motivo lançado não é lido"
+      },
+      "refusals.reasons.message": {
+        label: "Mensagem",
+        helpText: "A frase que o usuário lê quando o corpo lança este motivo sob o código. Seus marcadores {{ }} seguem os params da entrada"
+      },
+      "refusals.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que as frases podem preencher (por exemplo state): o corpo lança { code, params: { state } } e um marcador {{ state }} mostra o valor. Ausente: as frases são texto simples"
       },
       handler: {
         label: "Handler",

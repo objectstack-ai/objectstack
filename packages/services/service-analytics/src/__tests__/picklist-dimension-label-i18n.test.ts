@@ -127,6 +127,27 @@ const i18n = {
   loadTranslations: () => {},
 };
 
+/**
+ * [#33634] Run `fn` with accessors laid over the shared service (the plugin
+ * reads the service per call), restoring the originals afterwards.
+ */
+async function withI18n(overrides: Record<string, unknown>, fn: () => Promise<void>): Promise<void> {
+  const target = i18n as Record<string, unknown>;
+  const saved = Object.fromEntries(Object.keys(overrides).map((k) => [k, Object.prototype.hasOwnProperty.call(target, k) ? target[k] : undefined]));
+  Object.assign(target, overrides);
+  try {
+    await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete target[k];
+      else target[k] = v;
+    }
+  }
+}
+
+/** [#33634] An app authored in English that defaults its users to zh-CN, no `fallbackLocale` (collapsed to zh-CN). */
+const EN_SOURCE = { getDefaultLocale: () => 'zh-CN', getFallbackLocale: () => 'zh-CN', getSourceLocale: () => 'en' };
+
 /** Count per rendered label, from the rows the service answered. */
 const EXPECTED: Record<string, { industry: Record<string, number>; type: Record<string, number> }> = {
   'zh-CN': {
@@ -304,6 +325,21 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
       it('control — with no locale, an ascending order sorts by the authored label', async () => {
         expect(await orderedLabelsOf(face, 'industry')).toEqual(AUTHORED_ORDER.industry);
         expect(await orderedLabelsOf(face, 'type')).toEqual(AUTHORED_ORDER.type);
+      });
+
+      it('#33634: with sourceLocale en declared over a zh-CN default, an en request renders the inline labels and a zh-CN one the pack', async () => {
+        await withI18n(EN_SOURCE, async () => {
+          expect(await labelsOf(face, 'industry', 'en')).toEqual(AUTHORED.industry);
+          expect(await labelsOf(face, 'type', 'en')).toEqual(AUTHORED.type);
+          expect(await labelsOf(face, 'type', 'zh-CN')).toEqual(EXPECTED['zh-CN'].type);
+        });
+      });
+
+      it('#33634 CONTROL — no sourceLocale declared: an en request walks the chain to zh-CN, as before', async () => {
+        await withI18n({ ...EN_SOURCE, getSourceLocale: () => undefined }, async () => {
+          expect(await labelsOf(face, 'industry', 'en')).toEqual(EXPECTED['zh-CN'].industry);
+          expect(await labelsOf(face, 'type', 'en')).toEqual(EXPECTED['zh-CN'].type);
+        });
       });
     });
   }

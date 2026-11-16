@@ -3336,9 +3336,10 @@ const MANAGER_ONLY_ROUTES =
   'write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ' +
   'populate it too, but only through a provisioning path your own deployment supplies: this ' +
   'platform declares the SCIM \'manager\' attribute without projecting it onto the column — and ' +
-  'where an identity carries source \'idp_provisioned\' the admin operation refuses, the import\'s ' +
+  'where a SCIM directory holds an identity the admin operation refuses, the import\'s ' +
   'manager_id column included, leaving that directory the one surface that authors its ' +
-  'manager. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
+  'manager. An identity that only signs in through SSO, with no SCIM directory behind it, is set ' +
+  'through the admin operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
   'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
   'of on the organization\'s administrators, which needs no write to the column at all.';
 
@@ -6164,9 +6165,13 @@ const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
       'and the finding names that locale.',
     'An error at `os build`, `os validate`, `os lint` and the metadata publish door. At the door a write of ' +
       'another object is never refused for a clash a stored object carries, while saving the object itself is ' +
-      'refused until its clash is fixed; nothing on the boot path runs the rule, so an installed app keeps ' +
+      'refused until its clash is fixed. An `object_extension` publish is refused for a clash the fields it ' +
+      'adds create on the object it extends, two of its own fields included, judged on that object as it will be served, and never for one ' +
+      'the object already carried, nor for what is left of one after the extension took a field out of it. ' +
+      'Nothing on the boot path runs the rule, so an installed app keeps ' +
       'loading. To fix it, give each ' +
-      'visible field its own label (in the translation bundle too, when only a translation clashes), set ' +
+      'visible field its own label (in the translation bundle too, when only a translation clashes; the publish ' +
+      'door reads no bundle, the build does), set ' +
       '`hidden: true` on the field readers should not see, or drop the duplicate and use the platform\'s column.',
   ],
 };
