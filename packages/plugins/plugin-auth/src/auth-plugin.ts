@@ -5180,6 +5180,7 @@ export class AuthPlugin implements Plugin {
               sendInviteSms: (phone: string) => this.authManager!.sendPhoneInviteSms(phone),
               consoleResetPasswordUrl: () => this.authManager!.getConsoleUrl('/reset-password'),
               noteMustChangePasswordIssued: () => this.authManager!.noteMustChangePasswordIssued(),
+              createGrant: createGrantFor(c),
               logger: ctx.logger,
             },
             c.req.raw,
