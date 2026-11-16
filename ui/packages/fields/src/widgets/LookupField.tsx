@@ -15,6 +15,13 @@ import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
+import {
+  readRecordBeingEdited,
+  readsRecord,
+  resolveLookupFilters,
+  useRecordHopRows,
+  type LookupFilterEntry,
+} from './lookupRecordReference.js';
 import type { RecordPickerFilterColumn } from './RecordPickerDialog.js';
 import { PeoplePicker } from './PeoplePicker.js';
 import { useRecordQuery } from './useRecordQuery.js';
@@ -39,6 +46,9 @@ import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useH
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
+
+/** The record a host that edits none hands `{ $record }` resolution: nothing to read. */
+const NO_EDITED_RECORD: Readonly<Record<string, unknown>> = Object.freeze({});
 
 export interface LookupOption {
   value: string | number;
@@ -408,7 +418,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // Enterprise Record Picker configuration
   const lookupColumns: Array<string | LookupColumnDef> | undefined = fieldMeta?.lookupColumns;
   const lookupPageSize: number | undefined = fieldMeta?.lookupPageSize;
-  const lookupFilters: import('@object-ui/types').LookupFilterDef[] | undefined = fieldMeta?.lookupFilters;
+  const lookupFilters: LookupFilterEntry[] | undefined = fieldMeta?.lookupFilters;
 
   // Search-first PeoplePicker opt-in (user fields). When `picker === 'search'`
   // the Level-2 picker is the rich PeoplePicker (avatar rows + selection tray)
@@ -528,6 +538,47 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
     });
   }, [dependsOn, resolvedDependentValues]);
+
+  /**
+   * `lookupFilters` as the candidate queries send them: every `{ $record }`
+   * value replaced by the value it names on the record being edited — the
+   * same host record `dependsOn` reads — and every entry whose value is empty
+   * left out (`resolveLookupFilters`). A one-hop path (`account.cb_market`)
+   * reads the lookup's target row once per id, unless the record already
+   * holds it expanded; the queries wait for that read and go out once, with
+   * the value in them.
+   *
+   * The referenced fields are not `dependsOn` parents and gate nothing. A
+   * change to one changes the resolved values, and the queries key on those
+   * values, so the candidates re-query; a change to any other field of the
+   * record leaves the resolved list, and so every query, as it was.
+   *
+   * Opt-in by the host: only a field a record form stamped
+   * (`withRecordBeingEdited`) resolves against the values it is handed. On any
+   * other host — a bulk action over selected rows, an action's parameter
+   * dialog — those values are not the record the path names, so every
+   * `{ $record }` entry is left out, as on a picker given no record at all.
+   *
+   * Filters that read no record pass through as authored, the same array.
+   */
+  const filtersReadRecord = readsRecord(lookupFilters);
+  const recordBeingEdited = readRecordBeingEdited(fieldMeta);
+  const editedRecord = recordBeingEdited ? resolvedDependentValues : NO_EDITED_RECORD;
+  const recordHops = useRecordHopRows(
+    filtersReadRecord ? lookupFilters : undefined,
+    editedRecord,
+    recordBeingEdited?.hopObjects,
+    dataSource,
+  );
+  const recordReadsPending = recordHops.pending;
+  const resolvedFiltersKey = filtersReadRecord && lookupFilters
+    ? JSON.stringify(resolveLookupFilters(lookupFilters, editedRecord, recordHops.rows))
+    : '';
+  const resolvedRecordFilters = useMemo<LookupFilterEntry[] | undefined>(
+    () => (resolvedFiltersKey ? (JSON.parse(resolvedFiltersKey) as LookupFilterEntry[]) : undefined),
+    [resolvedFiltersKey],
+  );
+  const queryLookupFilters = filtersReadRecord ? resolvedRecordFilters : lookupFilters;
 
   const hasDataSource = dataSource != null && typeof dataSource.find === 'function' && !!referenceTo;
 
@@ -748,16 +799,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // + base lookupFilters, so the popover matches the full picker.
   const popoverFilter = useMemo<Record<string, any> | undefined>(() => {
     const f: Record<string, any> = {
-      ...(lookupFilters && lookupFilters.length > 0 ? lookupFiltersToRecord(lookupFilters) : {}),
+      ...(queryLookupFilters && queryLookupFilters.length > 0 ? lookupFiltersToRecord(queryLookupFilters) : {}),
       ...(dependentFilter ?? {}),
     };
     return Object.keys(f).length > 0 ? f : undefined;
-  }, [dependentFilter, lookupFilters]);
+  }, [dependentFilter, queryLookupFilters]);
 
   const popoverQuery = useRecordQuery({
     dataSource,
     objectName: referenceTo,
-    enabled: isOpen && hasDataSource && !dependenciesMissing,
+    enabled: isOpen && hasDataSource && !dependenciesMissing && !recordReadsPending,
     pageSize: LOOKUP_PAGE_SIZE,
     filter: popoverFilter,
     expand: candidateExpand,
@@ -1247,6 +1298,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   useEffect(() => {
     if (!isOpen || !hasDataSource || !dataSource || !referenceTo || searchQuery) return;
     if (dependenciesMissing) { setRecentRows([]); return; }
+    if (recordReadsPending) return;
     const ids = getRecentLookupIds(referenceTo);
     if (!ids.length) { setRecentRows([]); return; }
     let cancelled = false;
@@ -1277,7 +1329,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, hasDataSource, referenceTo, searchQuery, dependenciesMissing, popoverFilter, idField, candidateExpandKey]);
+  }, [isOpen, hasDataSource, referenceTo, searchQuery, dependenciesMissing, recordReadsPending, popoverFilter, idField, candidateExpandKey]);
   const recentOptions = useMemo(
     () =>
       recentRows.map((r) =>
@@ -1793,7 +1845,8 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         <PeoplePicker
           inline
           trigger={triggerButton}
-          open={isPickerOpen}
+          // Held shut while a `{ $record }` hop is read, so its first query carries the value.
+          open={isPickerOpen && !recordReadsPending}
           onOpenChange={(o) => {
             setIsPickerOpen(o);
             if (!o) setPickerInitialSearch(undefined);
@@ -1811,7 +1864,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           value={pickerValue}
           onSelect={onChange}
           onSelectRecords={handlePickerSelectRecords}
-          lookupFilters={lookupFilters}
+          lookupFilters={queryLookupFilters}
           baseFilter={dependentFilter}
         />
         {lookupScan}
@@ -2032,7 +2085,8 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       {/* Level 2: classic table picker — search fields use the inline combobox above. */}
       {hasDataSource && dataSource && referenceTo && pickerVariant !== 'search' && (
         <RecordPickerDialog
-          open={isPickerOpen}
+          // Held shut while a `{ $record }` hop is read, so its first query carries the value.
+          open={isPickerOpen && !recordReadsPending}
           onOpenChange={setIsPickerOpen}
           title={lookupField?.label || t('common.select')}
           multiple={multiple}
@@ -2049,7 +2103,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           value={pickerValue}
           onSelect={handleDialogSelect}
           onSelectRecords={handleDialogSelectRecords}
-          lookupFilters={lookupFilters}
+          lookupFilters={queryLookupFilters}
           baseFilter={dependentFilter}
           cellRenderer={getCellRendererResolver()}
           fieldsMeta={refObjectSchema?.fields}
