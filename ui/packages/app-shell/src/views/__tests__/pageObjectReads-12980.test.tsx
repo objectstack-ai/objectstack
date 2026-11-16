@@ -209,7 +209,7 @@ describe('the page blocks read the objects they name, not the whole registry (ob
     expect(ctx.reads.objects).toBe(0);
   });
 
-  it("nav:menu's capability gate reads the objects the app's entries require, by name", () => {
+  it("nav:menu's capability gate reads the objects the app's entries require, in the presence read (objectstack#34244)", () => {
     const app = {
       name: 'crm',
       _packageId: 'app.crm',
@@ -220,7 +220,11 @@ describe('the page blocks read the objects they name, not the whole registry (ob
     };
     const ctx = recordingContext([app]);
     mountBlock(<NavMenuRenderer />, ctx);
-    expect(ctx.reads.scopes).toContainEqual({ packageId: 'app.crm', names: ['cloud_only'] });
+    // objectstack#34244 — the package list answers the package's own objects;
+    // the name outside it is asked in the one `?names=` presence read, never by name.
+    expect(ctx.reads.scopes).toContainEqual({ packageId: 'app.crm', views: false });
+    expect(ctx.reads.scopes).toContainEqual({ names: ['cloud_only'], views: false, batch: true });
+    expect(ctx.reads.scopes.filter((scope) => scope.packageId && scope.names?.includes('cloud_only'))).toEqual([]);
     expect(ctx.reads.objects).toBe(0);
     // The server answered `cloud_only` without a definition: its entry is not drawn.
     expect(screen.getByText('Accounts')).toBeInTheDocument();
