@@ -28,9 +28,10 @@
  *   verification value.
  * - Bound to the invitation, its address and its expiry: the door requires
  *   all three to match the invitation as it stands.
- * - Single-use: spent through the internal adapter's consume before any
- *   write, and only by a request that passed every gate; a proof that does
- *   not match, or a request a gate refuses, leaves it unspent. Within one
+ * - Single-use: spent through the internal adapter's consume before the
+ *   account or its password is written, and only by a request that passed
+ *   every gate; a proof that does not match, or a request a gate refuses,
+ *   leaves it unspent. Within one
  *   server process concurrent redemptions of one proof are serialized, so
  *   exactly one succeeds. Across server processes the guarantee is the
  *   store's: on the platform's own adapter the consume reads the row and
@@ -67,7 +68,10 @@
  * revoked or expired ones included); its identity source is local; and the
  * server allows a local password here (not SSO-only, email and password on).
  * Every other account answers `sign_in`, including one in a state no rule
- * names and one whose reading fails, and the proof stays unspent. Every store
+ * names and one whose reading fails, and the proof stays unspent. Every
+ * reading is taken again once the account's sessions are revoked and before
+ * the password is written; an account that no longer passes then answers
+ * `sign_in` with its sessions revoked, and the proof stays unspent. Every store
  * this plugin mounts that is keyed by a user, and every column of the
  * vendor's user model with every plugin this plugin can mount, is classified
  * as a claim the judge reads or as no claim, and a test holds each
@@ -459,7 +463,9 @@ export type UserRowSignInReading =
 
 /**
  * The sign-in identity columns of `userId`'s stored row. One read by `id` as
- * the system. No read surface, a failed read, or no row is `ok: false`.
+ * the system. No read surface, a failed read, or no row is `ok: false`. A row
+ * that carries no value for a column reads as holding no phone number, the
+ * same as a null.
  */
 export async function readUserRowSignIn(engine: UserSourceReader | undefined, userId: string): Promise<UserRowSignInReading> {
   if (!engine?.find) return { ok: false };
@@ -631,11 +637,12 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       if (!(await admits(parseStored(stored?.value), proof, invitation))) return refuseProof();
 
       const email = invitation.email.toLowerCase();
-      const found = await internal.findUserByEmail(email, { includeAccounts: true });
-      const existing = found?.user;
-      if (existing) {
+      const signIn = () => ctx.json({ success: true, data: { outcome: 'sign_in' } });
+      // Every reading of the closing rule, judged. Taken before anything is
+      // written, and again once the account's sessions are revoked.
+      const judge = async (found: any): Promise<OneStepSignInState | undefined> => {
         const engine = host.getDataEngine() as UserSourceReader | undefined;
-        const userId = String(existing.id);
+        const userId = String(found.user.id);
         const [source, userRowSignIn, grantReadings] = await Promise.all([
           readUserSource(engine, userId),
           readUserRowSignIn(engine, userId),
@@ -644,19 +651,21 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         const standingGrants = Object.fromEntries(
           STANDING_GRANT_OBJECTS.map((object, i) => [object, grantReadings[i]]),
         ) as Record<StandingGrantObject, StandingGrantReading>;
-        const state = oneStepSignInState({
-          emailVerified: existing.emailVerified,
+        return oneStepSignInState({
+          emailVerified: found.user.emailVerified,
           accountProviders: (found.accounts ?? []).map((a: any) => a?.providerId),
-          twoFactorEnabled: existing.twoFactorEnabled,
-          phoneNumberVerified: existing.phoneNumberVerified,
+          twoFactorEnabled: found.user.twoFactorEnabled,
+          phoneNumberVerified: found.user.phoneNumberVerified,
           userRowSignIn,
           standingGrants,
           source,
           ssoOnly: host.isSsoOnlyMode(),
           emailPasswordEnabled: ctx.context.options.emailAndPassword?.enabled,
         });
-        if (state) return ctx.json({ success: true, data: { outcome: 'sign_in' } });
-      }
+      };
+      const found = await internal.findUserByEmail(email, { includeAccounts: true });
+      const existing = found?.user;
+      if (existing && (await judge(found))) return signIn();
 
       const password = typeof body.password === 'string' ? body.password : '';
       const passwordConfig = ctx.context.password.config;
@@ -698,8 +707,28 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       // (a breached one) leaves the proof usable.
       const passwordHash = await ctx.context.password.hash(password);
 
+      const sameProof = (row: { value: string } | null | undefined) =>
+        !!row && parseStored(row.value)?.h === parseStored(stored?.value)?.h;
+      if (existing) {
+        const userId = String(existing.id);
+        // The sessions are revoked before the password is written, which
+        // matches the vendor's order on its own password doors, and only while
+        // the proof this request admitted is still at rest.
+        if (!sameProof(await internal.findVerificationValue(identifier))) return refuseProof();
+        await internal.deleteUserSessions(userId);
+        // Every reading again, now that no session of the account can make a
+        // claim: one made after the first reading, a reading that fails, or
+        // another account at the address answers `sign_in`. Taken before the
+        // proof is spent, so it stays unspent; the sessions stay revoked.
+        const again: OneStepSignInState | undefined = await internal
+          .findUserByEmail(email, { includeAccounts: true })
+          .then((reread: any) => (String(reread?.user?.id) === userId ? judge(reread) : 'unrecognised'))
+          .catch(() => 'identity_unreadable');
+        if (again) return signIn();
+      }
+
       const consumed = await internal.consumeVerificationValue(identifier);
-      if (!consumed || parseStored(consumed.value)?.h !== parseStored(stored?.value)?.h) return refuseProof();
+      if (!sameProof(consumed)) return refuseProof();
 
       let user: any;
       if (!existing) {
@@ -707,9 +736,6 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         await internal.linkAccount({ userId: user.id, providerId: 'credential', accountId: user.id, password: passwordHash });
       } else {
         const userId = String(existing.id);
-        // The sessions are revoked before the password is written, which
-        // matches the vendor's order on its own password doors.
-        await internal.deleteUserSessions(userId);
         if (await internal.findCredentialAccount(userId)) {
           await internal.updatePassword(userId, passwordHash);
           if (historyHash) await host.recordPasswordHistory(userId, historyHash);

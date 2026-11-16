@@ -317,7 +317,9 @@ row holds no phone number, verified or not; it holds no standing grant (an API k
 access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an
 identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows
 a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a
-state no rule names and one whose reading fails, and the proof stays unspent. Every store this plugin mounts that is
+state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the
+account's sessions are revoked and before the password is written; an account that no longer passes then answers
+`sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is
 keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as
 a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification
 covers what this plugin mounts and nothing another package mounts. A cloud-managed environment sets no local password,

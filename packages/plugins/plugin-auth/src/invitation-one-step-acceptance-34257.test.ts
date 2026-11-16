@@ -1021,6 +1021,16 @@ describe('#34257 — the door sets a password on an existing account only where 
     const leave = findThrowsForUserRowSignIn(engine);
     expect(await readUserRowSignIn(engine, 'u_row')).toEqual({ ok: false });
     leave();
+    // The door reads the row as the system, so no caller's permissions narrow it.
+    const seen: unknown[] = [];
+    const find = engine.find.bind(engine);
+    engine.find = async (name: string, q: any = {}, options?: unknown) => {
+      seen.push(options);
+      return find(name, q);
+    };
+    await readUserRowSignIn(engine, 'u_row');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ context: { isSystem: true } });
   });
 
   it('a phone number on the user row answers sign_in with phone sign-in mounted, and is accepted once it is cleared', async () => {
@@ -1100,6 +1110,42 @@ describe('#34257 — the door sets a password on an existing account only where 
     await leave();
     await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
   });
+
+  // The readings are taken again once the sessions are revoked: a grant made
+  // after the first reading, or a reading that fails on the second take,
+  // answers sign_in with no password written and the proof unspent.
+  it.each(['a grant appears', 'a reading fails'] as const)(
+    'when %s between the first reading and the write, the door answers sign_in, writes no password and leaves the proof unspent',
+    async (race) => {
+      const { engine, manager, invite } = await boot();
+      const email = `raced-${race.replace(/ /g, '-')}@example.com`;
+      const { invitation, proof } = await invite(email);
+      const { userId, cookie } = await signUp(manager, engine, email);
+      const credential = () => (engine.tables.get('sys_account') ?? []).find((a) => a.user_id === userId && a.provider_id === 'credential');
+      const password = credential()!.password;
+      const find = engine.find.bind(engine);
+      let reads = 0;
+      let leave = () => {};
+      engine.find = async (name: string, q: any = {}) => {
+        if (name !== 'sys_api_key') return find(name, q);
+        reads += 1;
+        if (race === 'a reading fails' && reads > 1) throw new Error('store unavailable');
+        const rows = await find(name, q);
+        if (race === 'a grant appears' && reads === 1) leave = await holdGrant(engine, 'sys_api_key', email);
+        return rows;
+      };
+
+      await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD }));
+      expect(credential()!.password).toBe(password);
+      expect(userRow(engine, email)!.email_verified).toBeFalsy();
+      // The sessions were revoked before the second reading, and stay revoked.
+      expect(await sessionUser(manager, cookie)).toBeNull();
+
+      engine.find = find;
+      leave();
+      await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD }));
+    },
+  );
 });
 
 describe('#34257 — a password the door sets starts the password-age clock and clears a forced change', () => {
