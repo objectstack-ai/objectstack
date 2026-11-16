@@ -92,7 +92,11 @@ const DECLARED_MEMBERS = {
  * contract — plugin-internal, no caller outside this package — each with the
  * reason. An entry here is a decision that a member stays off the contract; a
  * member another package calls is a contract, and belongs on
- * `ISecurityService` instead.
+ * `ISecurityService` instead — except where a published contract places it
+ * off `ISecurityService`, and the entry cites that contract. One such entry:
+ * `canWriteObject`, which the `IAutomationService.dryRun` contract's
+ * `FlowDryRunWritePermission` text names a method of this plugin's service
+ * and not of `ISecurityService`.
  */
 const SERVED_NOT_DECLARED: Readonly<Record<string, string>> = {
   canWriteObject:
