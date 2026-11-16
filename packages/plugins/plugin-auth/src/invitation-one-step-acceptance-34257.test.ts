@@ -382,7 +382,7 @@ describe('#34257 — accepting with the proof', () => {
     }
     const over = await door(manager, { invitationId: invitation.id, proof: 'wrong-x', name: 'L', password: PASSWORD });
     expect(over.status).toBe(429);
-    expect((await over.json()).code).toBe('RATE_LIMITED');
+    expect((await over.json()).code).toBe('RATE_LIMIT_EXCEEDED');
   });
 
   it('a verified account signs in as today and the proof stays unspent', async () => {

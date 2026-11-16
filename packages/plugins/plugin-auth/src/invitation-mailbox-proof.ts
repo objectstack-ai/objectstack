@@ -210,7 +210,7 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       const { count, resetAt } = await incrementFixedWindow(store, key, INVITATION_PROOF_RATE_LIMIT.window);
       if (count > INVITATION_PROOF_RATE_LIMIT.max) {
         throw new APIError('TOO_MANY_REQUESTS', {
-          code: 'RATE_LIMITED',
+          code: 'RATE_LIMIT_EXCEEDED',
           message: `Too many attempts. Try again in ${Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))} seconds.`,
         });
       }
