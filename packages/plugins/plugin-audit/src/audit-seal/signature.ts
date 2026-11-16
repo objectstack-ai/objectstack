@@ -17,7 +17,7 @@ import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto
  *  - **Ed25519**: the raw 32-byte public key. Its fingerprint is what the
  *    local signer (D6) has always used; existing chains verify as before.
  *  - **ES256** (ECDSA on P-256 with SHA-256): the DER SubjectPublicKeyInfo of
- *    a P-256 key, uncompressed point, exactly as Node exports it.
+ *    a P-256 key with its point uncompressed (91 bytes).
  *
  * Anything else — another curve (P-384, secp256k1), RSA, an Ed25519 key in
  * SPKI form, a compressed point, base64 that does not round-trip, a key whose
@@ -60,8 +60,10 @@ export function auditTrustedKeyOf(keyId: string, publicKey: string): AuditTruste
     }
     const key = createPublicKey({ key: bytes, format: 'der', type: 'spki' });
     if (key.asymmetricKeyType !== 'ec' || key.asymmetricKeyDetails?.namedCurve !== P256) return null;
-    // One encoding: the uncompressed SPKI Node exports, byte for byte.
-    if (!(key.export({ format: 'der', type: 'spki' }) as Buffer).equals(bytes)) return null;
+    // One encoding: the uncompressed-point SPKI, byte for byte. Rebuilt from the key's coordinates,
+    // because a key imported with a compressed point exports compressed again.
+    const canonical = createPublicKey({ key: key.export({ format: 'jwk' }), format: 'jwk' }).export({ format: 'der', type: 'spki' }) as Buffer;
+    if (!canonical.equals(bytes)) return null;
     return { algorithm: 'ES256', key, publicKey };
   } catch {
     return null;
