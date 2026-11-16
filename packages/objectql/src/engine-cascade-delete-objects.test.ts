@@ -236,3 +236,101 @@ describe('[#28001] the object read serves `cascadeDeleteObjects` beside the item
       .toEqual(['cd_loner_line']);
   });
 });
+
+/**
+ * [#34206] The closure is memoized per engine on the registry's
+ * `objectRevision`: the metadata read serves it beside every object, and an
+ * app bundle reads every object it names, so the walk over the whole registry
+ * ran once per object per bundle request. The pins: a move of the revision
+ * retires the memo; a registry change that does not move it (a view) keeps the
+ * memo and the answer stays right; the memoized answer equals the uncached
+ * one for every object; and a caller's copy is its own.
+ */
+describe('[#34206] getCascadeDeleteObjects is memoized on the registry object revision', () => {
+  /** How many relation judgements the closure made: the walk's own unit of work. */
+  function countWalk(engine: ObjectQL) {
+    return vi.spyOn(engine as any, 'cascadeRelationBehavior');
+  }
+
+  it('a second call at the same revision does no walk, and answers the same list', async () => {
+    const { engine } = await makeEngine();
+    const first = engine.getCascadeDeleteObjects('cd_parent');
+    const walk = countWalk(engine);
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(first);
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(['cd_child', 'cd_grandchild']);
+    expect(walk).not.toHaveBeenCalled();
+  });
+
+  it('invalidation: registering a cascading child moves the revision, and the next call names it', async () => {
+    const { engine } = await makeEngine();
+    expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual([]);
+    const before = engine.registry.objectRevision;
+    engine.registry.registerObject({
+      name: 'cd_loner_line', label: 'Loner line',
+      fields: { id, name, loner: { name: 'loner', type: 'master_detail', reference: 'cd_loner', required: true } },
+    } as any, '__test__');
+    expect(engine.registry.objectRevision).not.toBe(before);
+    expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual(['cd_loner_line']);
+  });
+
+  it('invalidation: unregistering the cascading child drops it from the next answer', async () => {
+    const { engine } = await makeEngine();
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(['cd_child', 'cd_grandchild']);
+    engine.registry.unregisterObject('cd_grandchild', { force: true });
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(['cd_child']);
+  });
+
+  it('control: a registry change that leaves the object revision alone keeps the memo, and the answer is still right', async () => {
+    const { engine } = await makeEngine();
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(['cd_child', 'cd_grandchild']);
+    const before = engine.registry.objectRevision;
+    engine.registry.registerItem('view', { name: 'cd_parent_all', object: 'cd_parent', type: 'grid' } as any, 'name', '__test__');
+    // Non-vacuity: the view really landed, and the counter did not move.
+    expect(engine.registry.getItem('view', 'cd_parent_all')).toBeDefined();
+    expect(engine.registry.objectRevision).toBe(before);
+    const walk = countWalk(engine);
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(['cd_child', 'cd_grandchild']);
+    expect(walk).not.toHaveBeenCalled();
+  });
+
+  it('cached equals uncached for every object, the uncached reading taken from a registry with no counter', async () => {
+    const { engine } = await makeEngine();
+    const { ReferencesAndMasterDetailFacet } = await import('./engine-references-and-master-detail.js');
+    // The registry with its counter hidden: the memo declines and every call walks.
+    const registry = engine.registry;
+    const counterless = new Proxy(registry, {
+      get: (target, key) => (key === 'objectRevision' ? undefined : Reflect.get(target, key, target)),
+    });
+    const uncachedHost = {
+      _registry: counterless,
+      cascadeRelationBehavior: (...a: unknown[]) => (engine as any).cascadeRelationBehavior(...a),
+      resolveObjectName: (n: string) => (engine as any).resolveObjectName(n),
+    };
+    const names = [...OBJECTS.map((o) => o.name), 'cd_no_such_object'];
+    for (const n of names) {
+      const uncached = ReferencesAndMasterDetailFacet.getCascadeDeleteObjects.call(uncachedHost as any, n);
+      // First call fills the memo, the second reads it.
+      expect(engine.getCascadeDeleteObjects(n)).toEqual(uncached);
+      expect(engine.getCascadeDeleteObjects(n)).toEqual(uncached);
+    }
+    // Non-vacuity: the uncached path walked at least once.
+    const walk = countWalk(engine);
+    ReferencesAndMasterDetailFacet.getCascadeDeleteObjects.call(uncachedHost as any, 'cd_parent');
+    expect(walk).toHaveBeenCalled();
+  });
+
+  it('each call gets its own copy: editing one answer does not change the next', async () => {
+    const { engine } = await makeEngine();
+    const mine = engine.getCascadeDeleteObjects('cd_parent')!;
+    mine.push('cd_tag');
+    mine.reverse();
+    expect(engine.getCascadeDeleteObjects('cd_parent')).toEqual(['cd_child', 'cd_grandchild']);
+  });
+
+  it('a name the registry does not hold answers `undefined`, and its later registration is answered', async () => {
+    const { engine } = await makeEngine();
+    expect(engine.getCascadeDeleteObjects('cd_later')).toBeUndefined();
+    engine.registry.registerObject({ name: 'cd_later', label: 'Later', fields: { id, name } } as any, '__test__');
+    expect(engine.getCascadeDeleteObjects('cd_later')).toEqual([]);
+  });
+});
