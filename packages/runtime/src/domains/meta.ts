@@ -1636,6 +1636,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // package's address, `servedHolderAddressOf`), and every registry
         // holder of the name, as `RestServer`'s `/published` reads them. Two
         // served holders are refused by the plain read.
+        // [#34041, ADR-0150 D3] …and of every other type that read re-addresses
+        // (a `doc`, `view`, `translation`, …), all but an `action`, which its
+        // own bare judge serves: the metadata service keeps such a type by name
+        // alone, so its snapshot can be the disabled holder's body.
         let mixedOwner: string | undefined;
         let mixedHolders: readonly string[] = [];
         if (publishedType !== 'object' && publishedType !== 'package'
@@ -1652,7 +1656,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error('Not found', 404) };
                 }
                 if (typeof owner === 'string' && typeof registry.packageScopedHoldersOf === 'function'
-                    && typeof registry.readsByPackage === 'function' && registry.readsByPackage(publishedType) === true) {
+                    && publishedType !== 'action') {
                     const holders: readonly string[] = registry.packageScopedHoldersOf(
                         publishedType, name, null, { includeDisabledPackages: true },
                     ) ?? [];

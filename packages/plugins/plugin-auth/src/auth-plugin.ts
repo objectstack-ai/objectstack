@@ -389,12 +389,13 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * [#33181] The environment-user host (`environment-user-host.ts`): told
    * after a person is added through `admin/add-sso-user` or
    * `admin/import-sso-users`, and asked before a person is deactivated
-   * through `admin/ban-user` or reactivated through `admin/unban-user`. Read
-   * per call, so a host wired after boot is still found. A typed
-   * `EnvironmentUserHostRefusal` refuses the operation (a refused add is
-   * taken back out); any other failure refuses a deactivation (`503`) and is
-   * reported on an add or a reactivation as `host: { notified: false,
-   * reason }`, which it never undoes.
+   * through `admin/ban-user`, reactivated through `admin/unban-user`, or a
+   * pending person is removed through `admin/remove-sso-user` (`userRemoved`,
+   * else `userDeactivated`). Read per call, so a host wired after boot is
+   * still found. A typed `EnvironmentUserHostRefusal` refuses the operation
+   * (a refused add is taken back out); any other failure refuses a
+   * deactivation (`503`) and is reported on an add, a reactivation or a
+   * removal as `host: { notified: false, reason }`, which it never undoes.
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 
@@ -5252,6 +5253,25 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/import-sso-users failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
+        }
+      });
+
+      // Remove a person who is still pending (the email-typo case) and cancel
+      // their invitation at the host. Same gate and attribution as the two
+      // doors above; logic in `pending-sso-users.ts` (`runRemoveSsoUser`).
+      rawApp.post(`${basePath}/admin/remove-sso-user`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runRemoveSsoUser } = await import('./pending-sso-users.js');
+          const { status, body } = await runAttributedToUser(actor, () =>
+            runRemoveSsoUser(pendingSsoUserDeps(c), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/remove-sso-user failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });

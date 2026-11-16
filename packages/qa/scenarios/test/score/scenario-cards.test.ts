@@ -220,13 +220,22 @@ describe('control cards — scored end to end against their golden builds', () =
       expect(scoreScenarioArtifact(a, card).score!).toBeLessThan(1);
     }
 
-    // The sdr's delete waits on confirmation, and the build declares the
-    // card's confirm-gated delete_contact: withholding the raw delete is the
-    // route the card designs, so the check leaves both figures, never a pass.
+    // The sdr deletes a contact it names outright (`remove_ben`, applied: the
+    // maintainer's 2026-11-16 ruling) beside the ambiguous delete that waits on
+    // confirmation, so withholding the raw delete is measured, and fails, even
+    // though the build declares the card's confirm-gated delete_contact.
     const noDelete = structuredClone(complete);
     delete noDelete.permissions[0].objects.contact.allowDelete;
-    const routed = scoreScenarioArtifact(noDelete, card);
-    expect([routed.score, routed.total, routed.passed]).toEqual([1, full.total - 1, full.passed - 1]);
+    const withheld = scoreScenarioArtifact(noDelete, card);
+    expect(withheld.score!).toBeLessThan(1);
+    expect(withheld.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')).toMatchObject({ pass: false });
+    expect(withheld.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')!.notMeasured).toBeUndefined();
+    // Only a delete that waits on confirmation alone leaves the check to the run: with `remove_ben` out of the
+    // card, withholding the raw delete is the route the card designs, so the check leaves both figures, never a pass.
+    const waiting = { ...card, run: { ...card.run, operations: card.run.operations!.filter((o) => o.id !== 'remove_ben') } };
+    const fullWaiting = scoreScenarioArtifact(complete, waiting);
+    const routed = scoreScenarioArtifact(noDelete, waiting);
+    expect([routed.score, routed.total, routed.passed]).toEqual([1, fullWaiting.total - 1, fullWaiting.passed - 1]);
     expect(routed.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')!.notMeasured).toMatch(/confirm-gated agent action delete_contact/);
   });
 
