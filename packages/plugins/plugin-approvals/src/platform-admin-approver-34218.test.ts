@@ -81,10 +81,13 @@ const MEMBERS: Array<[string, string, string]> = [
   ['u_alice', ORG, 'member'],
 ];
 
-/** `sys_user_permission_set`: the cross-tenant grant is unscoped. */
+/** The Default Organization: an `admin_full_access` grant anchors platform standing only there (ADR-0131 D5). */
+const DEFAULT_ORG = 'org_default';
+
+/** `sys_user_permission_set`: the platform grant lives in the Default Organization. */
 const GRANTS: Array<[string, string, string, string | null]> = [
-  ['ups_root', 'u_root', 'admin_full_access', null],
-  ['ups_revoked', 'u_revoked', 'admin_full_access', null],
+  ['ups_root', 'u_root', 'admin_full_access', DEFAULT_ORG],
+  ['ups_revoked', 'u_revoked', 'admin_full_access', DEFAULT_ORG],
   ['ups_org_admin', 'u_org_admin', 'organization_admin', ORG],
   ['ups_other_admin', 'u_other_admin', 'organization_admin', OTHER_ORG],
 ];
@@ -182,7 +185,13 @@ describe('platform_admin approver: one slot the platform administrators decide u
     }), true);
     await engine.init();
     const defs = [
-      objectDef('sys_user', ['name', 'email'], { email_verified: { name: 'email_verified', label: 'v', type: 'boolean' } }),
+      // Accounts belong to no organization: membership says which they are in.
+      {
+        ...objectDef('sys_user', ['name', 'email'], { email_verified: { name: 'email_verified', label: 'v', type: 'boolean' } }),
+        systemFields: { tenant: false },
+      },
+      // Organizations belong to no organization (ADR-0131).
+      { ...objectDef('sys_organization', ['name', 'slug']), systemFields: { tenant: false } },
       objectDef('sys_member', ['user_id', 'organization_id', 'role']),
       objectDef('sys_user_position', ['user_id', 'position', 'organization_id']),
       objectDef('sys_user_permission_set', ['user_id', 'permission_set', 'organization_id']),
@@ -193,6 +202,9 @@ describe('platform_admin approver: one slot the platform administrators decide u
     await engine.syncSchemas();
     await relaxTenantColumns(engine, ['sys_user', 'sys_user_permission_set', 'crm_deal']);
     bindSecurityCatalogReader(engine, catalogServing(['organization_admin', 'admin_full_access']));
+    for (const [id, slug] of [[DEFAULT_ORG, 'default'], [ORG, 'org-a'], [OTHER_ORG, 'org-b']]) {
+      await engine.insert('sys_organization', { id, slug, name: slug }, { context: SYSTEM } as any);
+    }
     for (const u of USERS) await engine.insert('sys_user', { name: u.id, ...u }, { context: SYSTEM } as any);
     for (const [i, [user_id, organization_id, role]] of MEMBERS.entries()) {
       await engine.insert('sys_member', { id: `m_${i}`, user_id, organization_id, role }, { context: SYSTEM } as any);
@@ -264,8 +276,9 @@ describe('platform_admin approver: one slot the platform administrators decide u
   it('a member of the request\'s organization takes no slot and cannot decide', async () => {
     const row = await open('member', 'host_review', PLATFORM);
     expect(await inbox(as('u_member'))).toEqual([]);
+    // Not a participant, so the request is not theirs to read: it answers as an id that names none.
     await expect(svc.decide(row.id, { decision: 'approve' } as any, as('u_member')))
-      .rejects.toThrow(/^FORBIDDEN: actor 'u_member' is not a pending approver/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     await expect(svc.decide(row.id, { decision: 'approve', actorId: SLOT } as any, as('u_member')))
       .rejects.toThrow(/^FORBIDDEN: cannot act as 'platform_admin:\*'/);
     expect((await requestRows('member'))[0].status).toBe('pending');
@@ -278,7 +291,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
     await expect(svc.decide(row.id, { decision: 'approve', actorId: SLOT } as any, orgAdmin()))
       .rejects.toThrow(/^FORBIDDEN: cannot act as 'platform_admin:\*'/);
     await expect(svc.decide(row.id, { decision: 'approve' } as any, as('u_other_admin', OTHER_ORG, ['organization_admin'])))
-      .rejects.toThrow();
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     expect((await requestRows('org_admin'))[0].status).toBe('pending');
     await svc.decide(row.id, { decision: 'approve' } as any, orgAdmin());
     const decision = (await actionsOf(row.id)).find((a) => a.action === 'approve');
@@ -293,7 +306,7 @@ describe('platform_admin approver: one slot the platform administrators decide u
     await engine.delete('sys_user_permission_set', { where: { id: 'ups_revoked' }, context: SYSTEM } as any);
     expect(await inbox(as('u_revoked'))).toEqual([]);
     await expect(svc.decide(row.id, { decision: 'approve' } as any, as('u_revoked')))
-      .rejects.toThrow(/^FORBIDDEN: actor 'u_revoked' is not a pending approver/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     await expect(svc.decide(row.id, { decision: 'approve', actorId: SLOT } as any, as('u_revoked')))
       .rejects.toThrow(/^FORBIDDEN: cannot act as 'platform_admin:\*'/);
     expect((await requestRows('revoked'))[0].status).toBe('pending');
@@ -350,8 +363,8 @@ describe('platform_admin approver: one slot the platform administrators decide u
         { id: 'e2', source: 'review', target: 'end', label: 'approve' },
       ],
     };
-    const door = runRuntimeAuthoringRules({ type: 'flow', item: flow }).errors
-      .filter((f) => f.rule === APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED);
+    const judged = runRuntimeAuthoringRules({ type: 'flow', item: flow });
+    const door = judged.errors.filter((f) => f.rule === APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED);
     expect(door.map((f) => f.path)).toEqual(['flows[0].nodes[1].config.approvers[0].type']);
     const normalized = normalizeStackInput({
       manifest: { id: 'com.acme.lint', name: 'lint_probe', version: '1.0.0', type: 'app' }, flows: [flow],
@@ -364,9 +377,12 @@ describe('platform_admin approver: one slot the platform administrators decide u
   it('CONTROL: an existing approver type opens and is decided as before; the platform administrator takes no slot on it', async () => {
     const row = await open('control', 'tenant_review', [{ type: 'user', value: 'u_alice' }]);
     expect(row.pending_approvers).toEqual(['u_alice']);
-    expect((await svc.getRequest(row.id, as('u_root')) as any)?.viewer?.can_act).toBe(false);
+    // The scene: u_root DOES hold platform standing (the grant pin above), so
+    // the absence here is the slot's, not a caller with no standing.
+    expect(await inbox(as('u_root'))).not.toContain(row.id);
+    expect(await svc.getRequest(row.id, as('u_root'))).toBeNull();
     await expect(svc.decide(row.id, { decision: 'approve' } as any, as('u_root')))
-      .rejects.toThrow(/^FORBIDDEN: actor 'u_root' is not a pending approver/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     const out = await svc.decide(row.id, { decision: 'approve' } as any, as('u_alice'));
     expect(out.request.status).toBe('approved');
     expect((await actionsOf(row.id)).find((a) => a.action === 'approve')).toMatchObject({
