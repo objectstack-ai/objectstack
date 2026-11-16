@@ -12,6 +12,8 @@
  * `activityUpdatedFields` is the update summary that names the changed fields
  * (`{{fields}}` = the locale's list of field labels); `activityMoreFields` is
  * the list's last item when more fields changed than are named (#25787).
+ * `activityValueTrue` / `activityValueFalse` word a yes/no field's value inside
+ * a field-change summary, for a field that declares no option words of its own.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -26,6 +28,8 @@ export const enMessages: Messages = {
   activityDeleted: 'Deleted {{object}} "{{label}}"',
   mentionedYou: '{{actor}} mentioned you',
   mentionedYouAnonymous: 'You were mentioned',
+  activityValueTrue: 'Yes',
+  activityValueFalse: 'No',
 };
 
 export const zhCNMessages: Messages = {
@@ -36,6 +40,8 @@ export const zhCNMessages: Messages = {
   activityDeleted: '删除了 {{object}} "{{label}}"',
   mentionedYou: '{{actor}} 提到了你',
   mentionedYouAnonymous: '有人提到了你',
+  activityValueTrue: '是',
+  activityValueFalse: '否',
 };
 
 export const jaJPMessages: Messages = {
@@ -46,6 +52,8 @@ export const jaJPMessages: Messages = {
   activityDeleted: '{{object}}「{{label}}」を削除しました',
   mentionedYou: '{{actor}}さんがあなたをメンションしました',
   mentionedYouAnonymous: 'あなたがメンションされました',
+  activityValueTrue: 'はい',
+  activityValueFalse: 'いいえ',
 };
 
 export const esESMessages: Messages = {
@@ -56,6 +64,8 @@ export const esESMessages: Messages = {
   activityDeleted: 'Eliminó {{object}} "{{label}}"',
   mentionedYou: '{{actor}} te mencionó',
   mentionedYouAnonymous: 'Te han mencionado',
+  activityValueTrue: 'Sí',
+  activityValueFalse: 'No',
 };
 
 export const zhHantMessages: Messages = {
@@ -66,6 +76,8 @@ export const zhHantMessages: Messages = {
   activityDeleted: '刪除了 {{object}}「{{label}}」',
   mentionedYou: '{{actor}} 提及了你',
   mentionedYouAnonymous: '有人提及了你',
+  activityValueTrue: '是',
+  activityValueFalse: '否',
 };
 
 export const arMessages: Messages = {
@@ -76,6 +88,8 @@ export const arMessages: Messages = {
   activityDeleted: 'حذف {{object}} "{{label}}"',
   mentionedYou: 'أشار إليك {{actor}}',
   mentionedYouAnonymous: 'تمت الإشارة إليك',
+  activityValueTrue: 'نعم',
+  activityValueFalse: 'لا',
 };
 
 export const frMessages: Messages = {
@@ -86,6 +100,8 @@ export const frMessages: Messages = {
   activityDeleted: 'A supprimé {{object}} « {{label}} »',
   mentionedYou: '{{actor}} vous a mentionné',
   mentionedYouAnonymous: 'Vous avez été mentionné',
+  activityValueTrue: 'Oui',
+  activityValueFalse: 'Non',
 };
 
 export const ptBRMessages: Messages = {
@@ -96,6 +112,8 @@ export const ptBRMessages: Messages = {
   activityDeleted: 'Excluiu {{object}} "{{label}}"',
   mentionedYou: '{{actor}} mencionou você',
   mentionedYouAnonymous: 'Você foi mencionado',
+  activityValueTrue: 'Sim',
+  activityValueFalse: 'Não',
 };
 
 export const ruMessages: Messages = {
@@ -106,6 +124,8 @@ export const ruMessages: Messages = {
   activityDeleted: 'Удалил(а) {{object}} «{{label}}»',
   mentionedYou: '{{actor}} упомянул(а) вас',
   mentionedYouAnonymous: 'Вас упомянули',
+  activityValueTrue: 'Да',
+  activityValueFalse: 'Нет',
 };
 
 export const deMessages: Messages = {
@@ -116,6 +136,8 @@ export const deMessages: Messages = {
   activityDeleted: 'Hat {{object}} „{{label}}“ gelöscht',
   mentionedYou: '{{actor}} hat Sie erwähnt',
   mentionedYouAnonymous: 'Sie wurden erwähnt',
+  activityValueTrue: 'Ja',
+  activityValueFalse: 'Nein',
 };
 
 export const koMessages: Messages = {
@@ -126,4 +148,6 @@ export const koMessages: Messages = {
   activityDeleted: '{{object}} "{{label}}"을(를) 삭제했습니다',
   mentionedYou: '{{actor}}님이 회원님을 멘션했습니다',
   mentionedYouAnonymous: '회원님이 멘션되었습니다',
+  activityValueTrue: '예',
+  activityValueFalse: '아니요',
 };
