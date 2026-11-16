@@ -2527,7 +2527,15 @@ function summarizeTools(
  * Renders nothing without health data (older hosts return a bare boolean).
  */
 function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
+  // objectstack#32984 — the line's own words come from the pack, as count
+  // families (`chatbot.build.health.*`). The findings it lists below
+  // (`seedError`, `issues[].message`) are the producer's text and pass as sent.
+  const { t } = useObjectTranslation();
   if (!health) return null;
+  // The English default a provider-less host reads; with a pack, i18next picks
+  // the family's slot for `count` and this default is never consulted.
+  const counted = (key: string, count: number, one: string, other: string): string =>
+    t(`chatbot.build.health.${key}`, { count, defaultValue: count === 1 ? one : other });
   const issues = health.issues ?? [];
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity !== 'error');
@@ -2535,14 +2543,18 @@ function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
   const probesRan = !!checked && checked.seeds + checked.views + checked.widgets > 0;
   const okParts: string[] = [];
   if (typeof health.seededRows === 'number' && health.seededRows > 0 && !health.seedError) {
-    okParts.push(`${health.seededRows} sample row${health.seededRows === 1 ? '' : 's'} live`);
+    okParts.push(counted('sampleRowsLive', health.seededRows, '{{count}} sample row live', '{{count}} sample rows live'));
   }
   if (probesRan && errors.length === 0) {
     const planes: string[] = [];
-    if (checked!.views > 0) planes.push(`${checked!.views} view${checked!.views === 1 ? '' : 's'}`);
-    if (checked!.widgets > 0) planes.push(`${checked!.widgets} widget${checked!.widgets === 1 ? '' : 's'}`);
-    if (checked!.seeds > 0) planes.push(`${checked!.seeds} seed${checked!.seeds === 1 ? '' : 's'}`);
-    if (planes.length) okParts.push(`${planes.join(' · ')} verified`);
+    if (checked!.views > 0) planes.push(counted('views', checked!.views, '{{count}} view', '{{count}} views'));
+    if (checked!.widgets > 0) planes.push(counted('widgets', checked!.widgets, '{{count}} widget', '{{count}} widgets'));
+    if (checked!.seeds > 0) {
+      planes.push(counted('seeds', checked!.seeds, '{{count}} sample data set', '{{count}} sample data sets'));
+    }
+    if (planes.length) {
+      okParts.push(t('chatbot.build.health.verified', { checks: planes.join(' · '), defaultValue: '{{checks}} verified' }));
+    }
   }
   if (okParts.length === 0 && !health.seedError && issues.length === 0) return null;
   return (
