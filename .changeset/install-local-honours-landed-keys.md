@@ -18,7 +18,7 @@ install-local's seed loads now keep, and honour, the per-organization record of 
 
 Every row a load lands is recorded, whether it inserted, updated or matched the row. An existing install keeps no record until its next install, upgrade, reseed, replay or restart heal, so a row a person deletes before that load, after this release too, comes back once on it, and stays deleted from then on.
 
-A restart heal that withholds every row (a seed a person emptied, or a purge then a reinstall) reports a settled seed: the withheld rows are counted in `skipped` and logged at `info`, not recorded as an empty install, so the boot banner, `objectstack:seed-settled`, `GET /ready` and `os verify` read it as settled. A heal that lands nothing and withholds nothing, or errors, is still the empty install.
+A restart heal that withholds every row (a seed a person emptied, or a purge then a reinstall) reports a settled seed: the withheld rows are counted in `skipped` and logged at `info`, not recorded as an empty install, so the boot banner, `objectstack:seed-settled`, `GET /ready` and `os verify` read it as settled. The split reads the loader's `skipped`, which also counts an `update` seed row with no match, so a heal whose only skips are those also reports settled. A heal that lands nothing and skips nothing, or errors, is still the empty install.
 
 `@objectstack/spec`: the `mode` description of a seed dataset no longer says a package install keeps no record: a seed publish is the load that keeps none, and the sample-data reseed is named beside `seed-replayer(organizationId, { reseed: true })` as the deliberate re-seed.
 

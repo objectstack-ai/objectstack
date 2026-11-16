@@ -1944,11 +1944,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * as the runtime's boot seed does: a seed row whose key landed in this
      * organization before and whose row is gone was removed by a person, and is
      * withheld (counted in `skipped`), not inserted again. A database that lost
-     * its rows and the record with them is healed whole. A heal that withheld
-     * rows and landed none, with no error, is that declared outcome: it is
-     * reported at `info` and recorded with its real `skipped`, never as an
-     * `emptyInstall`. Only a load that landed nothing otherwise (nothing
-     * withheld, or an error) is the empty install the boot banner escalates.
+     * its rows and the record with them is healed whole. A heal that landed
+     * no rows but skipped some, with no error, is reported at `info` and
+     * recorded with its real `skipped`, never as an `emptyInstall`. The split
+     * reads the loader's `skipped`, which also counts an `update` row with no
+     * match, so a heal whose only skips are those records settled too. Only a
+     * load that landed nothing otherwise (nothing skipped, or an error) is the
+     * empty install the boot banner escalates.
      *
      * `converted` is the entry's manifest as rehydrate converted it — the one the
      * package registered — so the heal seeds what registered, not the raw
@@ -2016,10 +2018,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     healed: true,
                 });
             } else if ((summary.skipped ?? 0) > 0 && (summary.errors ?? 0) === 0) {
-                // [#34405] Every row withheld by the landed-key record: the seed
-                // a person emptied stays empty, on every restart from now on. A
-                // settled seed, not a failed one, so no `emptyInstall`.
-                ctx.logger?.info?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows: ${summary.skipped} seed row(s) skipped, none in error (a row a person removed is withheld by the landed-key record); the package's sample-data reseed brings them back`);
+                // [#34405] Rows skipped and none landed, no error: a seed a
+                // person emptied is withheld by the landed-key record and stays
+                // empty on every restart. `skipped` also counts an `update` row
+                // with no match, so a heal whose only skips are those lands here
+                // too. A settled seed, not a failed one, so no `emptyInstall`.
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows: ${summary.skipped} seed row(s) skipped, none in error (a row withheld by the landed-key record, or an update-mode row with no match); the package's sample-data reseed brings withheld rows back`);
                 await this.recordSeedSummary(ctx, {
                     source: entry.manifestId,
                     marketplace: true,
