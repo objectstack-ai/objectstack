@@ -34,9 +34,9 @@
  * doors that change them, `/organization/remove-member` and
  * `/organization/update-member-role` (Make Owner included, which sends the
  * owner role to it), refuse every request, as `/organization/invite-member`
- * does. A change made here would hold in the environment alone. The one door
- * left open is `/organization/add-member`, platform-administrator only: it is
- * the operator's way to restore a membership the environment lost.
+ * does. The one door left open is `/organization/add-member`,
+ * platform-administrator only: it is the operator's way to restore a
+ * membership the environment lost.
  *
  * Every refusal is `409 RESOURCE_CONFLICT`, no code minted — the answer
  * cloud-connection's platform-managed doors give, on the same rule: the
