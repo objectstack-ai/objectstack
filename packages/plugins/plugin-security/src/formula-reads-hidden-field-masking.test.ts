@@ -152,6 +152,8 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           code: { name: 'code', type: 'text', maskingRule: { keepHead: 1, keepTail: 1 } },
           code_copy: { name: 'code_copy', type: 'formula', returnType: 'text', expression: cel('record.code') },
           code_stored: { name: 'code_stored', type: 'text', expression: cel('record.code') },
+          // A stored field served masked itself (no gate), over a field every caller reads.
+          plain_masked: { name: 'plain_masked', type: 'text', expression: cel('record.plain'), maskingRule: { keepHead: 1, keepTail: 1 } },
           plain_copy: { name: 'plain_copy', type: 'formula', returnType: 'text', expression: cel('record.plain') },
         },
       },
@@ -189,8 +191,6 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           loop: { name: 'loop', type: 'lookup', reference: LOOP },
           loop_u: { name: 'loop_u', type: 'number', expression: cel('record.loop.u * 1.0') },
           loop_v: { name: 'loop_v', type: 'number', expression: cel('record.loop.v * 1.0') },
-          // A stored field served masked itself, over a field every caller reads.
-          name_masked: { name: 'name_masked', type: 'text', expression: cel('record.name'), maskingRule: { keepHead: 1, keepTail: 1 } },
           vault_ref: { name: 'vault_ref', type: 'lookup', reference: VAULT, referenceNameVisible: true },
           load: { name: 'load', ...num('record.open_cases / record.capacity') },
           load_pct: { name: 'load_pct', ...num('record.load * 100.0') },
@@ -710,14 +710,13 @@ describe('a chain of references that returns to an object: the walk ends, and ju
 describe('one write verdict: the preview, the write and the write projections agree on a computed field the caller is not served whole', () => {
   it('withheld for its input, or served masked itself: the preview refuses, the write refuses, the projections leave it out', async () => {
     const { engine, plugin } = await boot({ fields: HIDE_OPEN_CASES });
-    const writable = new Set(await plugin.getWritableFields(OBJ, { ...CALLER }));
-    const access: any = await plugin.getRecordFieldAccess(OBJ, 'a1', { ...CALLER });
-    for (const field of ['open_cases_stored', 'name_masked']) {
+    for (const [object, id, field] of [[OBJ, 'a1', 'open_cases_stored'], [NOTE, 'n1', 'plain_masked']] as const) {
       const payload = { [field]: 'x' };
-      expect(await plugin.canWriteObject(OBJ, 'update', { ...CALLER }, payload), `preview ${field}`).toBe(false);
-      expect(await outcome(engine.update(OBJ, payload, { where: { id: 'a1' }, context: { ...CALLER } } as never)), `write ${field}`)
+      expect(await plugin.canWriteObject(object, 'update', { ...CALLER }, payload), `preview ${field}`).toBe(false);
+      expect(await outcome(engine.update(object, payload, { where: { id }, context: { ...CALLER } } as never)), `write ${field}`)
         .toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: [field] });
-      expect(writable.has(field), `writable ${field}`).toBe(false);
+      expect(new Set(await plugin.getWritableFields(object, { ...CALLER })).has(field), `writable ${field}`).toBe(false);
+      const access: any = await plugin.getRecordFieldAccess(object, id, { ...CALLER });
       expect(access.editable, `record editable ${field}`).not.toContain(field);
     }
   });
