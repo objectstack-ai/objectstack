@@ -124,7 +124,7 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * active row stored, its history append then failed) is not in `landed` — the
  * promotion threw — and is the store's own non-atomicity on such a runtime.
  */
-async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
+async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
     repo: SysMetadataRepository;
     landed: ReadonlyArray<LandedPromotion>;
     /** The pre-publish capture (`existedBefore` / `prevVersion` per item). */
@@ -139,9 +139,15 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
     for (const item of [...args.landed].reverse()) {
         const ref = { type: item.singularType, name: item.d.name, org: 'env' } as unknown as Parameters<SysMetadataRepository['get']>[0];
         // Per item, as the revert derives it: a runtime item is not refused by
-        // the artifact-override gate on its way back out.
-        const intent: 'override-artifact' | 'runtime-only' =
-            host.isArtifactBacked(item.singularType, item.d.name) ? 'override-artifact' : 'runtime-only';
+        // the artifact-override gate on its way back out. [ADR-0150 D2] Per
+        // write, as the promotion derived it: a package's own permission set
+        // beside another namespace's shipped one is a runtime item to the
+        // package each write addresses (`isOwnPermissionSetWrite`).
+        const intentFor = (packageId: string | null): 'override-artifact' | 'runtime-only' =>
+            host.isArtifactBacked(item.singularType, item.d.name)
+                && !isOwnPermissionSetWrite(host.engine, item.singularType, item.d.name, packageId)
+                ? 'override-artifact' : 'runtime-only';
+        const intent = intentFor(item.packageId);
         try {
             if (!item.promotedDraft) {
                 throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
@@ -177,7 +183,7 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
             const pending = await args.repo.get(ref, { state: 'draft', packageId: draftKey, ...memberOption(item.d.member) });
             if (!pending) {
                 await args.repo.put(ref, item.promotedDraft.body, {
-                    parentVersion: null, actor, source, message, intent, state: 'draft', packageId: draftKey,
+                    parentVersion: null, actor, source, message, intent: intentFor(draftKey), state: 'draft', packageId: draftKey,
                 });
                 // No registry entry serves a draft row: the heal re-derives this
                 // item's entry from the active rows the store now serves, the
