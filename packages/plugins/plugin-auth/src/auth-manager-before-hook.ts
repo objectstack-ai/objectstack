@@ -12,7 +12,8 @@
  * it stood, re-indented four levels and otherwise unedited: the same actor
  * resolver handed to the attribution scope, the same refresh skip for a minted
  * principal session, the same per-number OTP send guard, the same password
- * complexity and reuse checks, the same
+ * complexity and reuse checks, the cloud-managed refusal on the two doors that
+ * change a membership or its role (added after the move), the same
  * remove-member, organization-delete and no-record revoke refusals, the same
  * held-caller refusal on the admin plugin's role-scalar actions, the same
  * no-record admin revoke refusal, the same held-caller refusal on rewriting or
@@ -121,6 +122,19 @@ const CLOUD_MANAGED_RESET_DOORS: ReadonlySet<string> = new Set([
   PHONE_RESET_PASSWORD_PATH,
   '/request-password-reset',
   '/phone-number/request-password-reset',
+]);
+
+/**
+ * The doors that change a membership or its role, which a cloud-managed
+ * environment refuses: the organisation that hosts it manages both. Make
+ * Owner (`sys_member.transfer_ownership`) sends the owner role to
+ * update-member-role, so it is refused there. `/organization/add-member`
+ * (platform administrators only) is deliberately absent: it restores a
+ * membership the environment lost.
+ */
+const CLOUD_MANAGED_MEMBERSHIP_DOORS: ReadonlyMap<string, 'removeMember' | 'updateMemberRole'> = new Map([
+  ['/organization/remove-member', 'removeMember'],
+  [UPDATE_MEMBER_ROLE_PATH, 'updateMemberRole'],
 ]);
 
 /**
@@ -362,6 +376,26 @@ export async function globalBeforeHook(
       }
     }
     // fall through to the path's own handling below
+  }
+
+  // ── Cloud-managed: membership and roles are the hosting organisation's ──
+  // On a cloud-managed environment the organisation that hosts it manages
+  // who is a member and with which role, so remove-member and
+  // update-member-role (Make Owner included) refuse every request with the
+  // invite-member envelope (`cloud-managed.ts`), ahead of the vendor's
+  // handler: nothing is written. AHEAD of the remove-member permission arm
+  // below and of the role-change grant read further down, so a refused
+  // request runs neither. As with invite-member, the fact is public
+  // (`features.cloudManaged` on `/auth/config`), so answering it ahead of the
+  // session check tells an anonymous caller nothing new. add-member is not
+  // among these doors (see `CLOUD_MANAGED_MEMBERSHIP_DOORS`).
+  const membershipDoor = CLOUD_MANAGED_MEMBERSHIP_DOORS.get(ctx?.path ?? '');
+  if (membershipDoor && isCloudManaged()) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('CONFLICT', {
+      message: CLOUD_MANAGED_REFUSAL_MESSAGES[membershipDoor],
+      code: CLOUD_MANAGED_REFUSAL_CODE,
+    });
   }
 
   // ── #8289: remove-member answers its PERMISSION denial itself ──
