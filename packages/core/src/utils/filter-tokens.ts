@@ -112,13 +112,13 @@
  * record" would otherwise come back as "about nobody", or, with the condition
  * gone, "about everybody".
  *
- * # A `{ $record }` comparand always refuses here too
+ * # A `{ $record }` comparand refuses here by name
  *
  * [#34199] The `lookupFilters` comparand `{ $record: 'path' }` reads the record
- * a form is editing, which only that form's record picker knows, so it is the
- * same case as `{record_id}` in object form: refused by name on every path,
- * `INVALID_FILTER` / 400 naming the field, the `$record` path and where it
- * sits — see {@link isRecordReference}.
+ * a form is editing, which only that form's record picker knows. Where it IS a
+ * field's comparand it is refused here, `INVALID_FILTER` / 400 naming the field,
+ * the `$record` path and where it sits; deeper inside a comparand it is data
+ * and is left alone — see {@link findRecordReferenceComparand}.
  */
 
 import {
@@ -529,9 +529,6 @@ function hasFilterToken(node: unknown): boolean {
   if (node && typeof node === 'object' && !(node instanceof Date)) {
     // [#25808] An unresolved `$now` anchor is a placeholder by construction.
     if (isUnresolvedNowAnchor(node)) return true;
-    // [#34199] So is a `{ $record }` reference — one the walk refuses, so the
-    // fast path must not hand it back by reference for want of a string token.
-    if (isRecordReference(node)) return true;
     return Object.values(node as Record<string, unknown>).some(hasFilterToken);
   }
   return false;
@@ -590,70 +587,106 @@ class MalformedNowAnchorError extends Error {
  * (`account.cb_market`). Only the record picker of the form editing that
  * record can resolve it — it sends the referenced value in its place before
  * the query leaves the browser — and no server path knows which record a form
- * is editing. So, like `{record_id}`, it never resolves here: any plain object
- * carrying an own `$record` key, at any depth and in any position, is refused
- * by name ({@link UnresolvedRecordReferenceError}) before a driver sees it.
- *
- * Refused HERE because this is the one pass every engine read and write
- * filter, and every analytics filter, goes through, whether or not it holds a
- * string token. Before this, the reference reached the driver and was refused
- * there in words that never named it (driver-memory: an unsupported operator
- * `"$record"`; driver-sql: an operator withheld from the message). The refusal reads
- * the KEY, not the shape: a malformed reference (`{ $record: 1 }`, a key
- * beside `$record`) is no more resolvable than a well-formed one.
- *
- * Doors upstream of this pass may refuse first, in their own words: the
- * engine's comparand-type door refuses any plain object under an operator
- * (`{ f: { $eq: { $record: 'x' } } }`), and the temporal door a non-date
- * comparand on a date column. Either way the filter never runs.
+ * is editing. The KEY decides, not the shape: a malformed reference
+ * (`{ $record: 1 }`, a key beside `$record`) is no more resolvable.
  */
 function isRecordReference(node: unknown): node is Record<string, unknown> {
   return !!node && typeof node === 'object' && !Array.isArray(node)
     && Object.prototype.hasOwnProperty.call(node, '$record');
 }
 
-/** One step of the walk: the node descended from and the key or index taken. */
-interface FilterWalkStep {
-  readonly parent: unknown;
-  readonly key: string | number;
+/** A plain filter object (not a `Date`, not a branded `ReadableIds` leaf). */
+function isFilterObject(node: unknown): node is Record<string, unknown> {
+  return !!node && typeof node === 'object' && !Array.isArray(node)
+    && !(node instanceof Date) && !isReadableIds(node);
+}
+
+/** An operator object: a field's value carrying at least one `$` key. */
+function isOperatorObject(node: unknown): node is Record<string, unknown> {
+  return isFilterObject(node) && Object.keys(node).some((k) => k.startsWith('$'));
+}
+
+/** [#34199] A `{ $record }` met where it is a field's comparand. */
+interface RecordReferenceComparand {
+  readonly reference: Record<string, unknown>;
+  readonly field: string;
+  readonly at: string;
 }
 
 /**
- * [#34199] The field a `{ $record }` comparand is aimed at, read off the walk's
- * steps: the non-`$` keys on the way down (`account` then `region` for the
- * nested-relation form), a rule entry's own `field` when the reference is its
- * `value` (`{ field, operator, value }`), and the head of a `[field, op,
- * value]` tuple. `undefined` when no field names it (the filter's root).
+ * [#34199] The first `{ $record }` that IS a field's comparand, walking the
+ * filter's node grammar (`FilterCondition`): the field's own value (the eq
+ * shorthand `{ f: { $record } }`, which is what the picker's flat lowering of
+ * `eq` sends) or the value of an operator on that field (`{ f: { $gt: {
+ * $record } } }`), under any `$and` / `$or` / `$not` nesting. `at` is spelled
+ * from the filter's root: `filter.$or[1].cb_market`.
+ *
+ * Deliberately NOT judged — each left exactly as it was before this pass
+ * learned the reference:
+ *
+ * - **Inside a no-`$` object beneath a field** (`{ attachment: { meta: {
+ *   $record: 'x' } } }`). That object is a deep-equality comparand or a
+ *   nested-relation condition, and only the field's declaration tells the two
+ *   apart, which this field-agnostic resolver never reads. As a deep-equality
+ *   comparand the `$record` key is part of a literal a driver may compare
+ *   whole (driver-memory does), so refusing it here would refuse a filter that
+ *   answers today.
+ * - **A member of an operator's list** (`$in: ['NA', { $record }]`) and
+ *   anything deeper inside an operator's value: the comparand-type door
+ *   refuses a plain-object list member on the engine's path first.
+ * - **A `$` key in a node position that is not `$and` / `$or` / `$not`**
+ *   (`{ $record: 'x' }` at the root): it is not a field's comparand, and the
+ *   drivers already refuse an undeclared node key.
+ * - **An array where a node belongs** is walked as a list of nodes, so the
+ *   legacy `[field, op, value]` tuple is never read as one: its third member is
+ *   a node to this walk, and a `{ $record }` node names no field.
+ *
+ * Allocation-free and shallow (it never enters a comparand), so it costs a
+ * read whose filter holds no reference one walk of its node keys.
  */
-function fieldOfRecordReference(steps: readonly FilterWalkStep[]): string | undefined {
-  let parts: string[] = [];
-  for (const { parent, key } of steps) {
-    if (Array.isArray(parent)) {
-      if (key === 2 && parent.length === 3 && typeof parent[0] === 'string') parts = [parent[0]];
+function findRecordReferenceComparand(node: unknown, at = 'filter'): RecordReferenceComparand | undefined {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      const hit = findRecordReferenceComparand(node[i], `${at}[${i}]`);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (!isFilterObject(node)) return undefined;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '$and' || key === '$or' || key === '$not') {
+      const hit = findRecordReferenceComparand(value, `${at}.${key}`);
+      if (hit) return hit;
       continue;
     }
-    const k = String(key);
-    if (k.startsWith('$')) continue;
-    const ruleField = (parent as Record<string, unknown>).field;
-    if (k === 'value' && typeof ruleField === 'string') parts = [ruleField];
-    else parts.push(k);
+    if (key.startsWith('$')) continue;
+    if (isRecordReference(value)) return { reference: value, field: key, at: `${at}.${key}` };
+    // A no-`$` object: a deep-equality comparand or a nested-relation condition — not judged.
+    if (!isOperatorObject(value)) continue;
+    for (const [op, comparand] of Object.entries(value)) {
+      if (op.startsWith('$') && isRecordReference(comparand)) {
+        return { reference: comparand, field: key, at: `${at}.${key}.${op}` };
+      }
+    }
   }
-  return parts.length > 0 ? parts.join('.') : undefined;
-}
-
-/** [#34199] Where the walk stands, spelled from the filter's root: `filter.$or[0].cb_market`. */
-function filterLocation(steps: readonly FilterWalkStep[]): string {
-  return steps.reduce<string>((at, { key }) => (typeof key === 'number' ? `${at}[${key}]` : `${at}.${key}`), 'filter');
+  return undefined;
 }
 
 /**
- * [#34199] An unresolved `{ $record }` comparand met at resolution — see
- * {@link isRecordReference}. `INVALID_FILTER` / 400, the code every comparand
- * door answers with and the one the drivers answered this input with before;
- * the message names the field, the `$record` path and where it sits.
- * ⛔ Not `FILTER_TOKEN_UNRESOLVED`: that code's declared meaning is a
- * vocabulary placeholder string the request carries no context for, and the
- * `{ $record }` reference is a comparand object, not a placeholder string.
+ * [#34199] An unresolved `{ $record }` met where it is a field's comparand —
+ * see {@link findRecordReferenceComparand}. `INVALID_FILTER` / 400, the code
+ * every comparand door answers with and the one the drivers answered this
+ * input with before; the message names the field, the `$record` path and
+ * where it sits. ⛔ Not `FILTER_TOKEN_UNRESOLVED`: that code's declared meaning
+ * is a vocabulary placeholder STRING the request carries no context for, and
+ * the reference is a comparand object.
+ *
+ * On the engine's object path the doors in front of this pass meet most
+ * operator forms first: the comparand-type door refuses any plain object
+ * under an operator (`{ f: { $gt: { $record } } }`), and the temporal door the
+ * eq shorthand on a temporal column — each in its own words. What reaches
+ * this pass there is the eq shorthand on any other column, and every shape
+ * from a caller with no such door in front.
  *
  * Not exported, like the module's other `INVALID_FILTER` refusals: a caller
  * reads `code` and `status`.
@@ -662,17 +695,16 @@ class UnresolvedRecordReferenceError extends Error {
   readonly status = 400;
   readonly code = 'INVALID_FILTER' satisfies StandardErrorCode;
 
-  constructor(reference: Record<string, unknown>, steps: readonly FilterWalkStep[]) {
-    const field = fieldOfRecordReference(steps);
+  constructor({ reference, field, at }: RecordReferenceComparand) {
     super(
-      `A { "$record": ${JSON.stringify(reference.$record)} } comparand ` +
-      `${field ? `on field "${field}" ` : ''}at ${filterLocation(steps)} reached the server unresolved, ` +
-      'and is refused rather than compared. { $record } reads the record being edited (a field of it, ' +
-      'or one lookup hop such as "account.cb_market"), and only the record picker of the form editing ' +
-      'that record can resolve it: the picker sends the referenced value in its place. No server path ' +
-      'knows which record a form is editing, so reading the reference as null, or comparing the object ' +
-      'as a literal, would answer rows the filter was written to exclude. Send the referenced value ' +
-      'itself, or write { $record } only in a lookup field\'s lookupFilters, where the picker resolves it.',
+      `A { "$record": ${JSON.stringify(reference.$record)} } comparand on field "${field}" at ${at} ` +
+      'reached the server unresolved, and is refused rather than compared. { $record } reads the record ' +
+      'being edited (a field of it, or one lookup hop such as "account.cb_market"), and only the record ' +
+      'picker of the form editing that record can resolve it: the picker sends the referenced value in ' +
+      'its place. No server path knows which record a form is editing, so reading the reference as null, ' +
+      'or comparing the object as a literal, would answer rows the filter was written to exclude. Send ' +
+      'the referenced value itself, or write { $record } only in a lookup field\'s lookupFilters, where ' +
+      'the picker resolves it.',
     );
     this.name = 'UnresolvedRecordReferenceError';
   }
@@ -713,21 +745,14 @@ export function resolveFilterTokens<T>(
   ctx: FilterTokenResolutionContext = {},
 ): T {
   if (filter == null) return filter;
+  // [#34199] Before the fast path: the refusal must not depend on a string
+  // token being in the same tree, and it reads only comparand positions.
+  const reference = findRecordReferenceComparand(filter);
+  if (reference) throw new UnresolvedRecordReferenceError(reference);
   if (!hasFilterToken(filter)) return filter;
 
   // One instant for the whole tree (see FilterTokenResolutionContext.now).
   const pinned: FilterTokenResolutionContext = { ...ctx, now: ctx.now ?? new Date() };
-
-  // [#34199] Where the walk stands, read only to word a refusal. Pushed and
-  // popped around each descent; a throw abandons the whole walk, so it needs
-  // no unwinding.
-  const steps: FilterWalkStep[] = [];
-  const descend = (parent: unknown, key: string | number, child: unknown): unknown => {
-    steps.push({ parent, key });
-    const out = walk(child);
-    steps.pop();
-    return out;
-  };
 
   const walk = (node: unknown): unknown => {
     if (typeof node === 'string') {
@@ -741,18 +766,16 @@ export function resolveFilterTokens<T>(
       if (resolved === undefined) throw new UnknownFilterTokenError(cls.token);
       return resolved;
     }
-    if (Array.isArray(node)) return node.map((v, i) => descend(node, i, v));
+    if (Array.isArray(node)) return node.map(walk);
     // [ADR-0139 D1] The leaf by reference, brand intact (see above).
     if (isReadableIds(node)) return node;
     if (node && typeof node === 'object') {
       // Dates and other class instances are comparands, not filter structure.
       if (node instanceof Date) return node;
-      // [#34199] A `{ $record }` reference never resolves on a server.
-      if (isRecordReference(node)) throw new UnresolvedRecordReferenceError(node, steps);
       // [#25808] The now anchor: its instant pinned, its offset kept.
       if (isUnresolvedNowAnchor(node)) return resolveNowAnchor(node, pinned.now!);
       const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = descend(node, k, v);
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = walk(v);
       return out;
     }
     return node;

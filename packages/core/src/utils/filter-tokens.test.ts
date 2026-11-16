@@ -275,34 +275,42 @@ describe('[#34199] resolveFilterTokens — an unresolved { $record } comparand r
   }
 
   it.each([
-    // The two shapes a picker that does not resolve it sends (the card's market entry).
+    // The eq shorthand is what a picker that does not resolve it sends (the card's market entry).
     ['the eq shorthand', { cb_market: { $record: 'account.cb_market' } }, 'cb_market', 'account.cb_market', 'filter.cb_market'],
     ['an operator comparand', { cb_market: { $eq: { $record: 'account.cb_market' } } }, 'cb_market', 'account.cb_market', 'filter.cb_market.$eq'],
     ['an ordering comparand', { valid_from: { $lte: { $record: 'quote_date' } } }, 'valid_from', 'quote_date', 'filter.valid_from.$lte'],
     ['inside $or beside a literal', { $or: [{ cb_market: 'export' }, { cb_market: { $record: 'account.cb_market' } }] }, 'cb_market', 'account.cb_market', 'filter.$or[1].cb_market'],
     ['under $not', { $not: { cb_market: { $ne: { $record: 'account.cb_market' } } } }, 'cb_market', 'account.cb_market', 'filter.$not.cb_market.$ne'],
     ['beside a string token it no longer depends on', { $and: [{ owner: '{current_user_id}' }, { cb_market: { $record: 'account.cb_market' } }] }, 'cb_market', 'account.cb_market', 'filter.$and[1].cb_market'],
-    ['the nested-relation form', { account: { cb_market: { $record: 'account.cb_market' } } }, 'account.cb_market', 'account.cb_market', 'filter.account.cb_market'],
-    ['a rule entry, as a lookupFilters entry is written', [{ field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } }], 'cb_market', 'account.cb_market', 'filter[0].value'],
-    ['a [field, op, value] tuple', ['cb_market', '=', { $record: 'account.cb_market' }], 'cb_market', 'account.cb_market', 'filter[2]'],
+    // A column literally named `value` beside one named `field` is two columns, not a rule entry.
+    ['on a column named value beside one named field', { field: 'x', value: { $record: 'account.cb_market' } }, 'value', 'account.cb_market', 'filter.value'],
   ])('%s: INVALID_FILTER / 400 naming the field, the $record path and the position', (_label, filter, field, path, at) => {
     const err = refusal(filter);
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
     expect(err.message).toContain(`{ "$record": "${path}" }`);
-    expect(err.message).toContain(`on field "${field}"`);
-    expect(err.message).toContain(`at ${at} reached the server unresolved`);
+    expect(err.message).toContain(`on field "${field}" at ${at} reached the server unresolved`);
   });
 
-  it('refuses a malformed reference by its key too, and one at the root names no field', () => {
+  it('refuses a malformed reference by its key too', () => {
     const malformed = refusal({ cb_market: { $record: 'account.cb_market', addDays: 1 } });
     expect(malformed.code).toBe('INVALID_FILTER');
-    expect(malformed.message).toContain('on field "cb_market"');
-    const root = refusal({ $record: 'account.cb_market' });
-    expect(root.code).toBe('INVALID_FILTER');
-    expect(root.status).toBe(400);
-    expect(root.message).not.toContain('on field');
-    expect(root.message).toContain('at filter reached the server unresolved');
+    expect(malformed.status).toBe(400);
+    expect(malformed.message).toContain('on field "cb_market" at filter.cb_market reached');
+  });
+
+  it.each([
+    // A no-`$` object beneath a field is a deep-equality comparand (or a
+    // nested-relation condition): the `$record` inside it is data to this pass.
+    ['inside a deep-equality comparand', { attachment: { meta: { $record: 'x' } } }],
+    ['inside a nested-relation condition', { account: { cb_market: { $record: 'account.cb_market' } } }],
+    // A list member: the engine's comparand-type door refuses it first, and the
+    // first string of the list is never read as a field name.
+    ['as an $in list member', { region: { $in: ['NA', 'EU', { $record: 'account.region' }] } }],
+    ['at the root, where no field names it', { $record: 'account.cb_market' }],
+    ['as the third member of a [field, op, value] tuple', ['cb_market', '=', { $record: 'account.cb_market' }]],
+  ])('control — %s: not a field\'s comparand, so it comes back by reference', (_label, filter) => {
+    expect(resolveFilterTokens(filter, full)).toBe(filter);
   });
 
   it('control — a filter with no placeholder still returns by reference, nested objects included', () => {
@@ -316,6 +324,12 @@ describe('[#34199] resolveFilterTokens — an unresolved { $record } comparand r
     });
     expect(resolveFilterTokens({ due: { $gte: { $now: true, addDays: -1 } } }, full)).toEqual({
       due: { $gte: { $now: NOW.toISOString(), addDays: -1 } },
+    });
+  });
+
+  it('control — a deep { $record } beside a string token is resolved around, kept as written', () => {
+    expect(resolveFilterTokens({ owner: '{current_user_id}', attachment: { meta: { $record: 'x' } } }, full)).toEqual({
+      owner: 'usr_1', attachment: { meta: { $record: 'x' } },
     });
   });
 });
