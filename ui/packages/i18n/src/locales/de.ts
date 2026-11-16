@@ -2710,6 +2710,7 @@ const de = {
         retry: "Mit Single Sign-on fortfahren",
       },
       ssoHandoff: "Weiter zu {{target}}",
+      ssoHandoffClient: "Melden Sie sich an, um mit {{clientName}} fortzufahren",
       devAdminHint: {
         title: "Lokale Entwicklungsinstanz",
         signIn: "Als Entwickler-Admin anmelden",
@@ -2739,6 +2740,8 @@ const de = {
         directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
         networkNotAllowed: "Dieses System erlaubt keine Anmeldung aus Ihrem Netzwerk. Verbinden Sie sich über ein zugelassenes Netzwerk (zum Beispiel das Büronetz oder VPN Ihrer Organisation), oder wenden Sie sich an Ihren Administrator.",
         ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
+        ssoAccessDeniedNotMember: "Das Konto, mit dem Sie sich angemeldet haben, ist kein Mitglied der Organisation dieser Umgebung. Melden Sie sich mit einem Konto an, das Mitglied ist, oder bitten Sie einen Administrator der Organisation, Sie einzuladen.",
+        ssoAccessDeniedInvitationPending: "Sie wurden in die Organisation dieser Umgebung eingeladen, haben die Einladung aber noch nicht angenommen. Nehmen Sie die Einladung aus Ihrer E-Mail an und melden Sie sich dann erneut an.",
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",

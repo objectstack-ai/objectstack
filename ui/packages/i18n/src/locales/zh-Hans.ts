@@ -2789,6 +2789,7 @@ const zh = {
         retry: "继续单点登录",
       },
       ssoHandoff: '继续前往 {{target}}',
+      ssoHandoffClient: "登录以继续前往 {{clientName}}",
       devAdminHint: {
         title: '本地开发实例',
         signIn: '以开发管理员登录',
@@ -2811,6 +2812,8 @@ const zh = {
         directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
         networkNotAllowed: "本系统不允许从你当前的网络登录。请从允许的网络（例如组织的办公网络或 VPN）连接，或联系管理员。",
         ssoAccessDenied: "你登录所用的账号无权访问本系统。请使用有权访问的账号登录，或请本系统所属组织的管理员将你添加为成员。",
+        ssoAccessDeniedNotMember: "你登录所用的账号不是本系统所属组织的成员。请使用该组织成员的账号登录，或请该组织的管理员邀请你。",
+        ssoAccessDeniedInvitationPending: "你已受邀加入本系统所属组织，但尚未接受邀请。请先在邮件中接受邀请，然后重新登录。",
         ssoSwitchAccount: "切换账号",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
