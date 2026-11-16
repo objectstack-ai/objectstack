@@ -436,8 +436,8 @@ describe('[#34226] a permission set is (package, name): the seal and the lock ju
       expect({ crm: await confers(registry, CRM), hr: await confers(registry, HR) }).toEqual({ crm: ['cap_crm_shipped'], hr: ['cap_hr'] });
     }, 30_000);
 
-    // The refusal each answers at main: the managed seal at the store for crm and its pair, and the
-    // one-name-per-namespace rule for the environment and crm's co-owner, which it judges first.
+    // The refusal each answers: the managed seal at the store for crm and its pair, and the
+    // one-name-per-namespace rule, which the publish judges first, for the environment and crm's co-owner.
     it.each([
       ['naming no package', null, ['NAMESPACE_CONFLICT', 422]],
       ['addressed to crm', CRM, ['NOT_OVERRIDABLE', 403]],
