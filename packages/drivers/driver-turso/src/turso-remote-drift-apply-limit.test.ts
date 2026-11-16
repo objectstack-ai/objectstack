@@ -20,8 +20,9 @@
  * 1. Over a real remote face (a `@libsql/client` `file:` client) and its own
  *    drift report, every entry the apply door applies is one `driftApplyLimit`
  *    answers `null` for, and every entry it answers a limit for is skipped,
- *    with nothing on disk moved by it. The drop and the index land; the
- *    tightening and the relax do not.
+ *    with nothing on disk moved by it. The drop, the index and [#33724] the
+ *    relax land (the relax in place, with libSQL's `ALTER COLUMN`, so
+ *    `os migrate plan` lists it with no limit); the tightening does not.
  * 2. A report-only op (`unbuildable_index`) answers `null` (no face applies
  *    it, so it is no limit of this transport) and is still skipped.
  * 3. The local and embedded-replica faces declare no limit for any op: their
@@ -111,7 +112,8 @@ describe('the REMOTE face: driftApplyLimit and the apply door read one declarati
 
     const limits = new Map(report.map((d) => [d, remote.driftApplyLimit(d.op.type)] as const));
     expect(limits.get(op(report, 'tighten_not_null')[0]!)).toBe(LIMIT);
-    expect(limits.get(op(report, 'relax_not_null')[0]!)).toBe(LIMIT);
+    // [#33724] Ruling 6915086281: relaxed in place, so the plan offers it as any face does.
+    expect(limits.get(op(report, 'relax_not_null')[0]!)).toBeNull();
     expect(limits.get(op(report, 'drop_column')[0]!)).toBeNull();
     expect(limits.get(op(report, 'create_index')[0]!)).toBeNull();
     expect(limits.get(op(report, 'unbuildable_index')[0]!)).toBeNull();
@@ -129,7 +131,7 @@ describe('the REMOTE face: driftApplyLimit and the apply door read one declarati
         .map((r) => [String(r.name), Number(r.nn) === 1]),
     );
     expect(columns).not.toHaveProperty('legacy');
-    expect(columns).toMatchObject({ code: false, memo: true });
+    expect(columns).toMatchObject({ code: false, memo: false });
     const indexes = (await secondConnection(file, `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'note'`))
       .map((r) => String(r.name));
     expect(indexes).toContain((op(report, 'create_index')[0]!.op as { indexName: string }).indexName);

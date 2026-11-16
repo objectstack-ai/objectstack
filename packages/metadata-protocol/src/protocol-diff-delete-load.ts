@@ -66,6 +66,7 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { packagelessHolderRefusal } from './protocol-save.js';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -729,6 +730,23 @@ export class ProtocolDiffDeleteLoadFacet {
                         'delete', request.type, request.name, rowsAtAddress.candidates,
                     );
                     throw addressRefusal;
+                }
+                // [ADR-0150 D3/D5, red line 2, ruling A] …and the holders the
+                // read naming no package counts, as the save door asks them
+                // ({@link packagelessHolderRefusal}): two or more enabled holders
+                // are refused naming them, and a name only disabled packages hold
+                // is refused naming none, never one row removed. Over no stored
+                // row too (the delete and the draft discard answered the no-op
+                // receipt). A package-unbound row at the address is the
+                // environment's own, and its removal is left as it was.
+                if (request.packageId == null) {
+                    const holderRefusal = packagelessHolderRefusal(
+                        host, 'delete', request.type, singularTypeForRepo, request.name, member, rowsAtAddress,
+                    );
+                    if (holderRefusal) {
+                        addressRefusal = holderRefusal;
+                        throw addressRefusal;
+                    }
                 }
                 const packageId: string | null = request.packageId
                     ?? (draftAddress !== undefined ? draftAddress.key : rowsAtAddress.packageId);

@@ -174,7 +174,8 @@ async function boot() {
 }
 
 function parseCsv(text: string): string[][] {
-  return text.split('\r\n').filter((l) => l.length > 0).map((l) => l.split(','));
+  // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+  return text.replace(/^\uFEFF/, '').split('\r\n').filter((l) => l.length > 0).map((l) => l.split(','));
 }
 
 describe('export route — real engine + protocol integration', () => {

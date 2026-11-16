@@ -45,7 +45,8 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "憑證使用",
           scim_refused: "SCIM 請求遭拒",
           audit_signing_key_change: "稽核簽章金鑰變更",
-          dataset_query: "資料集查詢"
+          dataset_query: "資料集查詢",
+          scim_manager_unresolved: "SCIM 上級無法解析"
         }
       },
       user_id: {

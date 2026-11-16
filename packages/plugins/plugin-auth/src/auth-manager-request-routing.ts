@@ -286,10 +286,24 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
         const scope: ScimRequestScope = { scim: true };
+        // Whether this user write names the Enterprise `manager` attribute,
+        // read off a clone before the vendor consumes the body: the manager
+        // projection writes only on a write that names it
+        // (`scim-manager-projection.ts`).
+        const { scimUserManagerIntentOf } = await import('./scim-manager-projection.js');
+        const userManagerIntent = await scimUserManagerIntentOf(request, endpointPath);
+        if (userManagerIntent) scope.userManagerIntent = userManagerIntent;
         let scimResponse = await scimRequestScope.run(scope, runHandler);
         if (scimResponse.status === 409) {
           const { translateScimConflictDetail } = await import('./scim-conflict-detail.js');
           scimResponse = await translateScimConflictDetail(scimResponse);
+        }
+        // [#33918] A served write whose manager reference named no User: one
+        // bounded `scim_manager_unresolved` row, after the response and outside
+        // the SCIM transaction (`scim-manager-projection.ts`).
+        if (scope.userManagerUnresolved) {
+          const { observeScimManagerUnresolved } = await import('./scim-manager-projection.js');
+          observeScimManagerUnresolved(this.config.getAuditSink?.(), scimResponse.status, scope);
         }
         if (scimResponse.status >= 400) {
           const { observeScimRefusal, scimRefusalConnectionResolver } = await import('./scim-refusal-audit.js');
