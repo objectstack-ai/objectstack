@@ -2532,10 +2532,9 @@ function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
   // (`seedError`, `issues[].message`) are the producer's text and pass as sent.
   const { t } = useObjectTranslation();
   if (!health) return null;
-  // The English default a provider-less host reads; with a pack, i18next picks
-  // the family's slot for `count` and this default is never consulted.
-  const counted = (key: string, count: number, one: string, other: string): string =>
-    t(`chatbot.build.health.${key}`, { count, defaultValue: count === 1 ? one : other });
+  // `defaultValue` is the English a provider-less host reads; with a pack,
+  // i18next picks the family's slot for `count` and never consults it.
+  const en = (count: number, one: string, other: string): string => (count === 1 ? one : other);
   const issues = health.issues ?? [];
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity !== 'error');
@@ -2543,14 +2542,32 @@ function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
   const probesRan = !!checked && checked.seeds + checked.views + checked.widgets > 0;
   const okParts: string[] = [];
   if (typeof health.seededRows === 'number' && health.seededRows > 0 && !health.seedError) {
-    okParts.push(counted('sampleRowsLive', health.seededRows, '{{count}} sample row live', '{{count}} sample rows live'));
+    const count = health.seededRows;
+    okParts.push(
+      t('chatbot.build.health.sampleRowsLive', {
+        count,
+        defaultValue: en(count, '{{count}} sample row live', '{{count}} sample rows live'),
+      }),
+    );
   }
   if (probesRan && errors.length === 0) {
     const planes: string[] = [];
-    if (checked!.views > 0) planes.push(counted('views', checked!.views, '{{count}} view', '{{count}} views'));
-    if (checked!.widgets > 0) planes.push(counted('widgets', checked!.widgets, '{{count}} widget', '{{count}} widgets'));
-    if (checked!.seeds > 0) {
-      planes.push(counted('seeds', checked!.seeds, '{{count}} sample data set', '{{count}} sample data sets'));
+    const { views, widgets, seeds } = checked!;
+    if (views > 0) {
+      planes.push(t('chatbot.build.health.views', { count: views, defaultValue: en(views, '{{count}} view', '{{count}} views') }));
+    }
+    if (widgets > 0) {
+      planes.push(
+        t('chatbot.build.health.widgets', { count: widgets, defaultValue: en(widgets, '{{count}} widget', '{{count}} widgets') }),
+      );
+    }
+    if (seeds > 0) {
+      planes.push(
+        t('chatbot.build.health.seeds', {
+          count: seeds,
+          defaultValue: en(seeds, '{{count}} sample data set', '{{count}} sample data sets'),
+        }),
+      );
     }
     if (planes.length) {
       okParts.push(t('chatbot.build.health.verified', { checks: planes.join(' · '), defaultValue: '{{checks}} verified' }));
