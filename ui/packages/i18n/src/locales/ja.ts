@@ -3982,13 +3982,11 @@ const ja = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it (empty while the registry is
+  // current): a step label the user reads must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 利用枠の残りは {{left}} です。×N と表示されたモデルは、既定のモデルの N 倍の速さで利用枠を消費します。',
@@ -4053,6 +4051,7 @@ const ja = {
       get_metadata_schema: "メタデータの形式を調べる",
       get_package: "パッケージの情報を確認する",
       get_record_history: "このレコードの履歴を読む",
+      list_flow_runs: "フローの実行履歴を確認する",
       list_metadata: "既存のメタデータを一覧表示する",
       list_objects: "既存のオブジェクトを一覧表示する",
       list_packages: "既存のパッケージを一覧表示する",

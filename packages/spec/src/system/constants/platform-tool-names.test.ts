@@ -64,6 +64,18 @@ describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
     expect(isPlatformProvidedToolName('query_datasets')).toBe(false);
   });
 
+  it('lists the service-ai-studio flow-run reader beside the flow pair', () => {
+    // Cloud `service-ai-studio` registers it for the build agent. While the
+    // registry lacked it, a skill naming it read as a fictional tool and the
+    // chat step fell back to the English title-caser in every language.
+    expect(PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']).toEqual(
+      expect.arrayContaining(['list_flow_runs', 'test_flow', 'toggle_flow']),
+    );
+    expect(isPlatformProvidedToolName('list_flow_runs')).toBe(true);
+    // The control: a neighbour spelling nobody registers still misses.
+    expect(isPlatformProvidedToolName('list_flow_run')).toBe(false);
+  });
+
   it('each group is sorted, so diffs stay reviewable', () => {
     for (const [pkg, names] of Object.entries(PLATFORM_TOOLS_BY_PACKAGE)) {
       expect([...names].sort(), pkg).toEqual([...names]);

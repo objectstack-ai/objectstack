@@ -4159,13 +4159,11 @@ const ru = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it (empty while the registry is
+  // current): a step label the user reads must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Осталось {{left}} лимита ИИ. Модель с пометкой ×N расходует его в N раз быстрее, чем модель по умолчанию.',
@@ -4230,6 +4228,7 @@ const ru = {
       get_metadata_schema: "Изучить формат метаданных",
       get_package: "Посмотреть сведения о пакете",
       get_record_history: "Прочитать историю этой записи",
+      list_flow_runs: "Проверить запуски процесса",
       list_metadata: "Перечислить имеющиеся метаданные",
       list_objects: "Перечислить имеющиеся объекты",
       list_packages: "Перечислить имеющиеся пакеты",
