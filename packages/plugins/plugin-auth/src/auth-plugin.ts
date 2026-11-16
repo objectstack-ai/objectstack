@@ -5313,6 +5313,27 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // The application name for a sign-in hand-off: the sign-in page reads the
+    // client name only for the client its signed request names. The reasons
+    // for each answer live in oauth-client-name.ts. It never reads the
+    // session. Ledgered `public` in auth-route-ledger.ts.
+    rawApp.get(`${basePath}/oauth2/client-name`, async (c: any) => {
+      try {
+        const mgr = this.authManager!;
+        const { answerOAuthClientName } = await import('./oauth-client-name.js');
+        const answer = await answerOAuthClientName(
+          { queries: (c.req.queries() ?? {}) as Record<string, string[]> },
+          { getAuthContext: () => mgr.getAuthContext(), getDataEngine: () => mgr.getDataEngine() as any },
+        );
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] oauth2/client-name failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The application name is unavailable.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // The mobile sign-in hand-off: a session signed in in the SYSTEM browser
     // is handed to a REGISTERED app scheme as a single-use, one-minute token
     // the app redeems at better-auth's own `/one-time-token/verify`, bound to

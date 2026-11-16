@@ -2774,6 +2774,7 @@ const es = {
         retry: "Continuar con el inicio de sesión único",
       },
       ssoHandoff: "Continuar a {{target}}",
+      ssoHandoffClient: "Inicia sesión para continuar en {{clientName}}",
       devAdminHint: {
         title: "Instancia de desarrollo local",
         signIn: "Iniciar sesión como administrador de desarrollo",
@@ -2803,6 +2804,8 @@ const es = {
         directSignInRateLimited: "Se iniciaron demasiados inicios de sesión desde esta red hace un momento. Espera unos segundos y vuelve a intentarlo.",
         networkNotAllowed: "Este sistema no permite iniciar sesión desde tu red. Conéctate desde una red permitida (por ejemplo, la red de la oficina o la VPN de tu organización) o pide ayuda a tu administrador.",
         ssoAccessDenied: "La cuenta con la que iniciaste sesión no tiene acceso a este entorno. Inicia sesión con una cuenta que tenga acceso o pide a un administrador de la organización de este entorno que te añada como miembro.",
+        ssoAccessDeniedNotMember: "La cuenta con la que iniciaste sesión no es miembro de la organización de este entorno. Inicia sesión con una cuenta que lo sea o pide a un administrador de la organización que te invite.",
+        ssoAccessDeniedInvitationPending: "Te han invitado a la organización de este entorno, pero aún no has aceptado la invitación. Acepta la invitación desde tu correo electrónico y vuelve a iniciar sesión.",
         ssoSwitchAccount: "Cambiar de cuenta",
         ssoBackToConsole: "Volver a la consola",
         ssoSwitchAccountHint: "Cambiar de cuenta abre tu servicio de inicio de sesión en una pestaña nueva y cierra allí tu sesión. Después, vuelve a iniciar sesión aquí con una cuenta que tenga acceso.",

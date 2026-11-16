@@ -29,6 +29,8 @@ import {
   OAUTH_REFUSAL_REASON_PARAM,
   REFUSAL_MESSAGE_MAX_LENGTH,
 } from './oauth-authorize-refusal';
+import { answerOAuthClientName, OAUTH_CLIENT_NAME_NOT_FOUND } from './oauth-client-name';
+import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking';
 
 const SECRET = 'test-secret-at-least-32-chars-long-authorize-refusal';
 const PASSWORD = 'S3cure!Passw0rd-authorize-refusal';
@@ -160,7 +162,7 @@ const arrange = async () => {
     );
   };
 
-  return { manager, gate, userId, register, clientRow, authorize, authorizeForm, call, cookie };
+  return { manager, engine, gate, userId, register, clientRow, authorize, authorizeForm, call, cookie };
 };
 
 const codeRequest = (clientId: string, redirectUri: string): Record<string, string> => ({
@@ -837,5 +839,240 @@ describe("a refused /oauth2/authorize carries the host's reason when the gate an
     expect(rig.gate.calls).toEqual([{ userId: rig.userId, clientId }]);
     await expectRefusalEnvelope(res);
     expect((await res.json()).reason).toBe('not_member');
+  });
+});
+
+describe('the sign-in page reads the client name only for the client its signed request names', () => {
+  type Rig = Awaited<ReturnType<typeof arrange>>;
+
+  /** The signed authorization request the provider puts on the sign-in URL, for a signed-out browser. */
+  const signedRequestFor = async (rig: Rig, clientId: string): Promise<string> => {
+    const res = await rig.authorize(codeRequest(clientId, ENV_CALLBACK), NAVIGATION, 'anonymous');
+    const location = res.headers.get('location') ?? '';
+    expect(location.startsWith(`${ORIGIN}/_console/login?`), location).toBe(true);
+    return location.slice(location.indexOf('?') + 1);
+  };
+
+  const read = (rig: Rig, queries: Record<string, string[]>) =>
+    answerOAuthClientName(
+      { queries },
+      { getAuthContext: () => rig.manager.getAuthContext(), getDataEngine: () => rig.manager.getDataEngine() as any },
+    );
+
+  /** A client registered with every public field set, so an answer that carried more would show it. */
+  const registerNamed = async (rig: Rig, name: string): Promise<string> => {
+    const res = await rig.call('/oauth2/register', {
+      body: {
+        client_name: name,
+        client_uri: 'https://app.example',
+        logo_uri: 'https://app.example/logo.png',
+        contacts: ['owner@app.example'],
+        tos_uri: 'https://app.example/tos',
+        policy_uri: 'https://app.example/policy',
+        redirect_uris: [ENV_CALLBACK],
+        grant_types: ['authorization_code'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+        application_type: 'web',
+      },
+    });
+    const body: any = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    return String(body.client_id);
+  };
+
+  it('the client the signed request names is served its name, and nothing else of the client', async () => {
+    const rig = await arrange();
+    const clientId = await registerNamed(rig, 'Acme Corp');
+    const oauthQuery = await signedRequestFor(rig, clientId);
+
+    const answer = await read(rig, { client_id: [clientId], oauth_query: [oauthQuery] });
+
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({ success: true, data: { client_name: 'Acme Corp' } });
+    expect(answer.headers['Cache-Control']).toBe('no-store');
+  });
+
+  it('a client_id that is not the one the signed request names is refused, and its name is never read', async () => {
+    const rig = await arrange();
+    const signedFor = await registerNamed(rig, 'Acme Corp');
+    const other = await registerNamed(rig, 'Other Org');
+    const oauthQuery = await signedRequestFor(rig, signedFor);
+
+    const answer = await read(rig, { client_id: [other], oauth_query: [oauthQuery] });
+
+    expect(answer.status).toBe(404);
+    expect(answer.body).toEqual(OAUTH_CLIENT_NAME_NOT_FOUND);
+    expect(JSON.stringify(answer.body)).not.toContain('Other Org');
+  });
+
+  const sameRefusal: ReadonlyArray<[string, (rig: Rig, clientId: string, oauthQuery: string) => Record<string, string[]>]> = [
+    ['an unknown client (the row is gone)', (rig, clientId, oauthQuery) => {
+      const rows = rig.engine.tables.get('sys_oauth_application') as any[];
+      rows.splice(rows.indexOf(rig.clientRow(clientId)), 1);
+      return { client_id: [clientId], oauth_query: [oauthQuery] };
+    }],
+    ['a disabled client', (rig, clientId, oauthQuery) => {
+      rig.clientRow(clientId).disabled = true;
+      return { client_id: [clientId], oauth_query: [oauthQuery] };
+    }],
+    ['a signed request whose client_id was changed after signing', (_rig, clientId, oauthQuery) => {
+      const tampered = new URLSearchParams(oauthQuery);
+      tampered.set('client_id', `${clientId}x`);
+      return { client_id: [`${clientId}x`], oauth_query: [tampered.toString()] };
+    }],
+    ['a signed request that has expired', (_rig, clientId, oauthQuery) => {
+      const expired = new URLSearchParams(oauthQuery);
+      expired.set('exp', '1');
+      return { client_id: [clientId], oauth_query: [expired.toString()] };
+    }],
+  ];
+  for (const [name, mutate] of sameRefusal) {
+    it(`${name} gets the same refusal as a mismatch`, async () => {
+      const rig = await arrange();
+      const clientId = await registerNamed(rig, 'Acme Corp');
+      const oauthQuery = await signedRequestFor(rig, clientId);
+
+      const answer = await read(rig, mutate(rig, clientId, oauthQuery));
+
+      expect(answer.status).toBe(404);
+      expect(answer.body).toEqual(OAUTH_CLIENT_NAME_NOT_FOUND);
+    });
+  }
+
+  it('a malformed request answers 400: a parameter outside the closed set, a repeated one, a missing one', async () => {
+    const rig = await arrange();
+    const clientId = await registerNamed(rig, 'Acme Corp');
+    const oauthQuery = await signedRequestFor(rig, clientId);
+
+    for (const queries of [
+      { client_id: [clientId], oauth_query: [oauthQuery], scope: ['openid'] },
+      { client_id: [clientId, clientId], oauth_query: [oauthQuery] },
+      { oauth_query: [oauthQuery] },
+      { client_id: [clientId] },
+    ]) {
+      const answer: any = await read(rig, queries);
+      expect(answer.status, JSON.stringify(Object.keys(queries))).toBe(400);
+      expect(answer.body.error.code).toBe('VALIDATION_ERROR');
+    }
+  });
+});
+
+describe("the environment's callback carries the host's refusal reason on to the sign-in page", () => {
+  const IDP = 'https://idp.example.test';
+  const KEPT = '/_console/login?redirect=%2Fapps%2Fcrm&direct=returned';
+  const OTHER_IDP = 'acme-idp';
+
+  const idpProvider = (providerId: string) => ({
+    providerId,
+    clientId: `${providerId}-client`,
+    clientSecret: `${providerId}-secret`,
+    authorizationUrl: `${IDP}/${providerId}/authorize`,
+    tokenUrl: `${IDP}/${providerId}/token`,
+    userInfoUrl: `${IDP}/${providerId}/userinfo`,
+    pkce: false,
+  });
+
+  /** An environment that signs in through the platform identity provider. */
+  const environment = () =>
+    new AuthManager({
+      secret: SECRET,
+      baseUrl: ORIGIN,
+      dataEngine: createMemoryEngine(),
+      oidcProviders: [idpProvider(PLATFORM_IDP_PROVIDER_ID), idpProvider(OTHER_IDP)],
+      directSignIn: { provider: PLATFORM_IDP_PROVIDER_ID },
+    } as any);
+
+  const cookieList = (res: Response): string[] =>
+    (res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie') ?? '']).map((c) => c.split(';')[0]!).filter(Boolean);
+
+  /** A sign-in started at the environment: the state the identity provider must hand back, and its cookies. */
+  const begin = async (env: AuthManager, providerId: string) => {
+    if (providerId === PLATFORM_IDP_PROVIDER_ID) {
+      const res = await env.startDirectSignIn(
+        new Request(`${ORIGIN}/api/v1/auth/sign-in/direct?callbackURL=${encodeURIComponent(KEPT)}`),
+      );
+      expect(res.status).toBe(302);
+      return { state: new URL(res.headers.get('location')!).searchParams.get('state')!, cookies: cookieList(res) };
+    }
+    const res = await env.handleRequest(
+      new Request(`${ORIGIN}/api/v1/auth/sign-in/oauth2`, {
+        method: 'POST',
+        headers: { origin: ORIGIN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId, callbackURL: KEPT }),
+      }),
+    );
+    const body: any = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    return { state: new URL(body.url).searchParams.get('state')!, cookies: cookieList(res) };
+  };
+
+  /** The identity provider's refusal arriving at the environment's callback; answers where the browser goes next. */
+  const landOn = async (providerId: string, refusal: Record<string, string>) => {
+    const env = environment();
+    const begun = await begin(env, providerId);
+    const query = new URLSearchParams({ ...refusal, state: begun.state });
+    const res = await env.handleRequest(
+      new Request(`${ORIGIN}/api/v1/auth/callback/${providerId}?${query}`, { headers: { cookie: begun.cookies.join('; ') } }),
+    );
+    expect(res.status).toBe(302);
+    return new URL(res.headers.get('location') ?? '');
+  };
+
+  /** The refusal the provider sends back, read off a real refused authorize. */
+  const providerRefusal = async (answer: unknown): Promise<Record<string, string>> => {
+    const rig = await arrange();
+    rig.gate.answer = answer;
+    const clientId = await rig.register(ENV_CALLBACK, 'web');
+    const res = await rig.authorize(codeRequest(clientId, ENV_CALLBACK), NAVIGATION);
+    const params = Object.fromEntries(new URL(res.headers.get('location') ?? '').searchParams);
+    delete params.state;
+    delete params.iss;
+    return params;
+  };
+
+  const NOT_MEMBER = { allowed: false, reason: 'not_member', message: 'You are not a member of Acme Corp.' } as const;
+
+  it('a refusal with a reason lands on the sign-in page with error, error_description and the reason', async () => {
+    const landed = await landOn(PLATFORM_IDP_PROVIDER_ID, await providerRefusal(NOT_MEMBER));
+
+    expect(`${landed.pathname}`).toBe('/_console/login');
+    expect(landed.searchParams.get('redirect')).toBe('/apps/crm');
+    expect(landed.searchParams.get('error')).toBe(OAUTH_ACCESS_DENIED_ERROR);
+    expect(landed.searchParams.get('error_description')).toBe(NOT_MEMBER.message);
+    expect(landed.searchParams.getAll(OAUTH_REFUSAL_REASON_PARAM)).toEqual(['not_member']);
+  });
+
+  it('control: a boolean refusal lands exactly as before, with no reason', async () => {
+    const landed = await landOn(PLATFORM_IDP_PROVIDER_ID, await providerRefusal(false));
+
+    expect(landed.searchParams.get('error')).toBe(OAUTH_ACCESS_DENIED_ERROR);
+    expect(landed.searchParams.get('error_description')).toBe(ENV_ACCESS_DENIED_MESSAGE);
+    expect(landed.searchParams.has(OAUTH_REFUSAL_REASON_PARAM)).toBe(false);
+  });
+
+  const notCarried: ReadonlyArray<[string, string, Record<string, string>]> = [
+    ['a reason outside [a-z_]{1,40}', PLATFORM_IDP_PROVIDER_ID, { error: 'access_denied', [OAUTH_REFUSAL_REASON_PARAM]: 'NOT_MEMBER' }],
+    ['a reason beside an error other than access_denied', PLATFORM_IDP_PROVIDER_ID, { error: 'server_error', [OAUTH_REFUSAL_REASON_PARAM]: 'not_member' }],
+    ['a reason from an identity provider that is not the platform one', OTHER_IDP, { error: 'access_denied', [OAUTH_REFUSAL_REASON_PARAM]: 'not_member' }],
+  ];
+  for (const [name, providerId, refusal] of notCarried) {
+    it(`${name} is not carried`, async () => {
+      const landed = await landOn(providerId, refusal);
+      expect(landed.searchParams.get('error')).toBe(refusal.error);
+      expect(landed.searchParams.has(OAUTH_REFUSAL_REASON_PARAM)).toBe(false);
+    });
+  }
+
+  it('two reasons on the callback are not carried', async () => {
+    const env = environment();
+    const begun = await begin(env, PLATFORM_IDP_PROVIDER_ID);
+    const query = `error=access_denied&${OAUTH_REFUSAL_REASON_PARAM}=not_member&${OAUTH_REFUSAL_REASON_PARAM}=invitation_pending&state=${encodeURIComponent(begun.state)}`;
+    const res = await env.handleRequest(
+      new Request(`${ORIGIN}/api/v1/auth/callback/${PLATFORM_IDP_PROVIDER_ID}?${query}`, { headers: { cookie: begun.cookies.join('; ') } }),
+    );
+    const landed = new URL(res.headers.get('location') ?? '');
+    expect(landed.searchParams.get('error')).toBe(OAUTH_ACCESS_DENIED_ERROR);
+    expect(landed.searchParams.has(OAUTH_REFUSAL_REASON_PARAM)).toBe(false);
   });
 });

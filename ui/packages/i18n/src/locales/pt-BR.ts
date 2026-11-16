@@ -2769,6 +2769,7 @@ const pt = {
         retry: "Continuar com login único",
       },
       ssoHandoff: "Continuar para {{target}}",
+      ssoHandoffClient: "Entre para continuar em {{clientName}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
         signIn: "Entrar como administrador de desenvolvimento",
@@ -2798,6 +2799,8 @@ const pt = {
         directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
         networkNotAllowed: "Este sistema não permite entrar a partir da sua rede. Conecte-se de uma rede permitida (por exemplo, a rede do escritório ou a VPN da sua organização) ou fale com o administrador.",
         ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
+        ssoAccessDeniedNotMember: "A conta com a qual você entrou não é membro da organização deste ambiente. Entre com uma conta que seja ou peça a um administrador da organização para convidar você.",
+        ssoAccessDeniedInvitationPending: "Você foi convidado para a organização deste ambiente, mas o convite ainda não foi aceito. Aceite o convite pelo seu e-mail e entre novamente.",
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",
         ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",

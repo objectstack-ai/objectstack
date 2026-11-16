@@ -2770,6 +2770,7 @@ const fr = {
         retry: "Continuer avec l'authentification unique",
       },
       ssoHandoff: "Continuer vers {{target}}",
+      ssoHandoffClient: "Connectez-vous pour continuer vers {{clientName}}",
       devAdminHint: {
         title: "Instance de développement locale",
         signIn: "Se connecter en tant qu'administrateur de développement",
@@ -2799,6 +2800,8 @@ const fr = {
         directSignInRateLimited: "Trop de connexions ont été lancées depuis ce réseau à l'instant. Patientez quelques secondes, puis réessayez.",
         networkNotAllowed: "Ce système n'autorise pas la connexion depuis votre réseau. Connectez-vous depuis un réseau autorisé (par exemple le réseau du bureau ou le VPN de votre organisation), ou contactez votre administrateur.",
         ssoAccessDenied: "Le compte avec lequel vous vous êtes connecté n'a pas accès à cet environnement. Connectez-vous avec un compte qui y a accès, ou demandez à un administrateur de l'organisation de cet environnement de vous ajouter comme membre.",
+        ssoAccessDeniedNotMember: "Le compte avec lequel vous vous êtes connecté n'est pas membre de l'organisation de cet environnement. Connectez-vous avec un compte qui l'est, ou demandez à un administrateur de l'organisation de vous inviter.",
+        ssoAccessDeniedInvitationPending: "Vous avez été invité à rejoindre l'organisation de cet environnement, mais l'invitation n'a pas encore été acceptée. Acceptez l'invitation depuis votre e-mail, puis reconnectez-vous.",
         ssoSwitchAccount: "Changer de compte",
         ssoBackToConsole: "Retour à la console",
         ssoSwitchAccountHint: "Changer de compte ouvre votre service de connexion dans un nouvel onglet et vous y déconnecte. Reconnectez-vous ensuite ici avec un compte qui a accès.",
