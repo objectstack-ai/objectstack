@@ -70,8 +70,7 @@
  */
 
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
-import { authSystemWriteContext } from './auth-actor-attribution.js';
-import { screenUserManagerLink, type SetUserManagerDeps } from './admin-set-user-manager.js';
+import { screenUserManagerLink, writeUserManagerLink, type SetUserManagerDeps } from './admin-set-user-manager.js';
 import { scimRequestConnectionId } from './scim-connection-service.js';
 
 /** The SCIM Enterprise User extension the attribute lives in. */
@@ -215,5 +214,5 @@ export async function projectScimManager(
 
   // Attributed to the connection (`svc:scim:CONNECTION_ID`) inside a SCIM
   // request, and joined to its transaction.
-  await engine.update('sys_user', { id: state.userId, manager_id: managerId }, { context: await authSystemWriteContext() });
+  await writeUserManagerLink(engine, state.userId, managerId);
 }

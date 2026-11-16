@@ -654,13 +654,26 @@ export async function applyUserManagerLink(
     if (screened) return screened;
   }
 
-  // The write. `authSystemWriteContext()` builds both halves together:
-  // `isSystem: true` is the AUTHORIZATION half that carries this past the
-  // ADR-0092 identity write guard without any whitelist entry, and
-  // `attributedUserId` is the ATTRIBUTION half, so the row records the admin
-  // who made the change rather than the system.
+  await writeUserManagerLink(engine, userId, managerId);
+  return null;
+}
+
+/**
+ * The one write of `sys_user.manager_id`, shared by every caller that has
+ * already judged the link: {@link applyUserManagerLink} and the SCIM manager
+ * projection (`scim-manager-projection.ts`).
+ *
+ * `authSystemWriteContext()` builds both halves together: `isSystem: true` is
+ * the AUTHORIZATION half that carries this past the ADR-0092 identity write
+ * guard without any whitelist entry, and `attributedUserId` is the ATTRIBUTION
+ * half, so the row records the admin who made the change (or, inside a SCIM
+ * request, the connection) rather than the system.
+ */
+export async function writeUserManagerLink(
+  engine: SetUserManagerEngine,
+  userId: string,
+  managerId: string | null,
+): Promise<void> {
   const context = await authSystemWriteContext();
   await engine.update('sys_user', { id: userId, manager_id: managerId }, { context });
-
-  return null;
 }
