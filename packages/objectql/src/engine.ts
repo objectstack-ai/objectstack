@@ -145,6 +145,7 @@ import {
   type SummaryDescriptor,
 } from './summary-aggregate.js';
 import { refreshSummariesExtendedBy, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
+import { materialiseSummariesAddedSinceBoot, sealSummariesMaterialisedAtBoot, type SummaryMaterialiseOutcome } from './summary-install-materialise.js';
 import {
   DriverConnectError,
   DatasourceUnavailableError,
@@ -4093,6 +4094,29 @@ export class ObjectQL implements IObjectQLEngine {
     return refreshSummariesExtendedBy(this, this.logger, packageId);
   }
 
+  /**
+   * [#34096] Record the roll-up `summary` fields served at the end of the
+   * boot as the ones the stored rows were computed for. `ObjectQLPlugin` calls
+   * it at `kernel:bootstrapped`; until then {@link materialiseAddedSummaries}
+   * walks nothing. Returns how many roll-ups are recorded.
+   */
+  sealSummariesMaterialisedAtBoot(): number {
+    return sealSummariesMaterialisedAtBoot(this);
+  }
+
+  /**
+   * [#34096] Compute, on every stored row still `NULL` there, the roll-up
+   * `summary` fields served now that the boot did not record — the ones a
+   * package install or upgrade added — through the child-write recompute's own
+   * aggregate and system-context `update`, then record them. {@link syncSchemas}
+   * runs it, so every install door's sync does. Never throws: an incomplete
+   * walk is logged at `error`, left unrecorded, and walked again by the next
+   * call (`summary-install-materialise.ts`).
+   */
+  materialiseAddedSummaries(): Promise<SummaryMaterialiseOutcome> {
+    return materialiseSummariesAddedSinceBoot(this, this.logger);
+  }
+
   /** [#30377] Resolves once the summary recomputes the enables so far started ({@link refreshSummariesEnabledBy}) have settled, so a door can answer after them. */
   summaryRefreshSettled(): Promise<void> {
     return summaryRefreshesSettled(this);
@@ -5544,6 +5568,7 @@ export class ObjectQL implements IObjectQLEngine {
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof syncSchemas> = {
       getDriverForObject: (...a) => this.getDriverForObject(...a),
+      materialiseAddedSummaries: () => this.materialiseAddedSummaries(),
       get _registry() { return readRegistry(); },
       get logger() { return readLogger(); },
     };

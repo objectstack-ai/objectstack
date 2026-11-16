@@ -1381,6 +1381,12 @@ export class ObjectQLPlugin implements Plugin {
         // hooks: there the doors never refuse.
         const registry = this.ql?.registry;
         if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
+        // [#34096] The same moment, for roll-ups: every package of this boot
+        // is registered and schema sync has run, so the roll-ups served now are
+        // the ones the stored rows were computed for. From here on an install
+        // door's `syncSchemas` computes, on the stored rows, the roll-ups an
+        // install or upgrade adds (`summary-install-materialise.ts`).
+        this.ql?.sealSummariesMaterialisedAtBoot();
         // [ADR-0150 D8 row R4] With the holders sealed, bind every activation
         // ledger row that names no package to the one package that holds its
         // item, and report the rows two packages hold (never guessed). Writes
