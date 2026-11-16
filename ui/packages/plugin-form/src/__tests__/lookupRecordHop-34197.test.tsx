@@ -241,13 +241,15 @@ function inlineDataSource() {
   return { ds, priceBookFilters, hopReads };
 }
 
+// A form with `customFields` opens on the caller's record (`initialData`), not
+// on a read: the members' values come from it.
 describe('a record form stamps its inline members as fields of the record being edited (#34344)', () => {
   it('auto-layout ObjectForm: a customFields member with { $record } resolves, the hop read for the account the form holds', async () => {
     const { ds, priceBookFilters, hopReads } = inlineDataSource();
     render(
       <SchemaRendererProvider dataSource={ds as any}>
         <ObjectForm
-          schema={{ type: 'object-form', objectName: 'quote', mode: 'edit', recordId: 'q1', customFields: [inlinePriceBook()] } as any}
+          schema={{ type: 'object-form', objectName: 'quote', mode: 'edit', recordId: 'q1', initialData: ROW, customFields: [inlinePriceBook()] } as any}
           dataSource={ds as any}
         />
       </SchemaRendererProvider>,
@@ -255,7 +257,8 @@ describe('a record form stamps its inline members as fields of the record being 
     await openPriceBook();
     await waitFor(() => expect(priceBookFilters.length).toBeGreaterThan(0), { timeout: 5000 });
     expect(priceBookFilters).toEqual([EXPECTED]);
-    expect(hopReads).toEqual([['account', 'a1', { $select: ['id', 'cb_market'] }]]);
+    // The hop reads alone (the account lookup also reads its own label row, unselected).
+    expect(hopReads.filter((r: any) => r[2])).toEqual([['account', 'a1', { $select: ['id', 'cb_market'] }]]);
   });
 
   it('sectioned ObjectForm: an inline section entry with { $record } resolves the same way', async () => {
@@ -282,7 +285,7 @@ describe('a record form stamps its inline members as fields of the record being 
     render(
       <SchemaRendererProvider dataSource={ds as any}>
         <ObjectForm
-          schema={{ type: 'object-form', objectName: 'quote', mode: 'edit', recordId: 'q1', customFields: [forged] } as any}
+          schema={{ type: 'object-form', objectName: 'quote', mode: 'edit', recordId: 'q1', initialData: ROW, customFields: [forged] } as any}
           dataSource={ds as any}
         />
       </SchemaRendererProvider>,
@@ -290,7 +293,8 @@ describe('a record form stamps its inline members as fields of the record being 
     await openPriceBook();
     await waitFor(() => expect(priceBookFilters.length).toBeGreaterThan(0), { timeout: 5000 });
     expect(priceBookFilters).toEqual([EXPECTED]);
-    expect(hopReads).toEqual([['account', 'a1', { $select: ['id', 'cb_market'] }]]);
+    // The hop reads alone (the account lookup also reads its own label row, unselected).
+    expect(hopReads.filter((r: any) => r[2])).toEqual([['account', 'a1', { $select: ['id', 'cb_market'] }]]);
   });
 });
 
