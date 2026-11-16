@@ -2388,6 +2388,9 @@ const ru = {
       fieldErrorsToast_many: "{{count}} настроек требуют внимания: {{settings}}",
       fieldErrorsToast_other: "{{count}} настройки требуют внимания: {{settings}}",
       cryptoRefusalTitle: "Эта установка не может шифровать секреты",
+      platformManagedTitle: "Управляется платформой",
+      platformManagedBody: "Хостинг-платформа предоставляет и настраивает это для данной среды, поэтому здесь это не настраивается.",
+      aiProviderManaged: "Поставщик ИИ, его модель и учётные данные управляются платформой.",
       cryptoRefusalSubjectSuffix: "объявлен зашифрованным, поэтому ничего не было записано.",
       cryptoRefusalNoSubject: "Значение, объявленное зашифрованным, было отклонено, поэтому ничего не было записано.",
       cryptoRefusalToast: "Не удалось зашифровать секреты: {{subject}}",
@@ -2852,6 +2855,7 @@ const ru = {
         retry: "Продолжить через единый вход",
       },
       ssoHandoff: "Перейти к {{target}}",
+      ssoHandoffClient: "Войдите, чтобы продолжить в {{clientName}}",
       devAdminHint: {
         title: "Локальная среда разработки",
         signIn: "Войти как администратор разработки",
@@ -2881,6 +2885,8 @@ const ru = {
         directSignInRateLimited: "Только что из этой сети было начато слишком много входов. Подождите несколько секунд и повторите попытку.",
         networkNotAllowed: "Эта система не разрешает вход из вашей сети. Подключитесь из разрешённой сети (например, офисной сети или VPN вашей организации) или обратитесь к администратору.",
         ssoAccessDenied: "У учётной записи, с которой вы вошли, нет доступа к этой среде. Войдите с учётной записью, у которой есть доступ, или попросите администратора организации этой среды добавить вас в участники.",
+        ssoAccessDeniedNotMember: "Учётная запись, с которой вы вошли, не является участником организации этой среды. Войдите с учётной записью участника или попросите администратора организации пригласить вас.",
+        ssoAccessDeniedInvitationPending: "Вас пригласили в организацию этой среды, но приглашение ещё не принято. Примите приглашение из письма и войдите снова.",
         ssoSwitchAccount: "Сменить учётную запись",
         ssoBackToConsole: "Вернуться в консоль",
         ssoSwitchAccountHint: "«Сменить учётную запись» открывает вашу службу входа в новой вкладке и выполняет там выход. Затем снова войдите здесь с учётной записью, у которой есть доступ.",
@@ -3193,6 +3199,10 @@ const ru = {
       granted: "Доступ предоставлен",
       denied: "Доступ запрещён",
       noRedirect: "Сервер не вернул URL для перенаправления.",
+      returnToApp: "Вернитесь в {{appName}}, чтобы продолжить. Эту вкладку можно закрыть.",
+      returnToUnnamedApp: "Вернитесь в приложение, чтобы продолжить. Эту вкладку можно закрыть.",
+      openApp: "Открыть {{appName}}",
+      openUnnamedApp: "Открыть приложение",
       failed: "Не удалось выдать согласие",
       footer: "Вы можете отозвать доступ в любое время в настройках аккаунта.",
     },
@@ -4153,13 +4163,11 @@ const ru = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Осталось {{left}} лимита ИИ. Модель с пометкой ×N расходует его в N раз быстрее, чем модель по умолчанию.',
@@ -4224,6 +4232,7 @@ const ru = {
       get_metadata_schema: "Изучить формат метаданных",
       get_package: "Посмотреть сведения о пакете",
       get_record_history: "Прочитать историю этой записи",
+      list_flow_runs: "Проверить запуски процесса",
       list_metadata: "Перечислить имеющиеся метаданные",
       list_objects: "Перечислить имеющиеся объекты",
       list_packages: "Перечислить имеющиеся пакеты",

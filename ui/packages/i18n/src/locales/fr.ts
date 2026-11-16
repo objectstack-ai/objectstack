@@ -2316,6 +2316,9 @@ const fr = {
       fieldErrorsToast_many: "{{count}} de paramètres nécessitent votre attention : {{settings}}",
       fieldErrorsToast_other: "{{count}} paramètres nécessitent votre attention : {{settings}}",
       cryptoRefusalTitle: "Ce déploiement ne peut pas chiffrer les secrets",
+      platformManagedTitle: "Géré par la plateforme",
+      platformManagedBody: "La plateforme d'hébergement fournit et configure ceci pour cet environnement ; il n'est donc pas réglé ici.",
+      aiProviderManaged: "Le fournisseur d'IA, son modèle et ses identifiants sont gérés par la plateforme.",
       cryptoRefusalSubjectSuffix: "est déclaré chiffré, aucune écriture n'a donc eu lieu.",
       cryptoRefusalNoSubject: "La valeur déclarée chiffrée a été refusée, aucune écriture n'a donc eu lieu.",
       cryptoRefusalToast: "Impossible de chiffrer les secrets : {{subject}}",
@@ -2773,6 +2776,7 @@ const fr = {
         retry: "Continuer avec l'authentification unique",
       },
       ssoHandoff: "Continuer vers {{target}}",
+      ssoHandoffClient: "Connectez-vous pour continuer vers {{clientName}}",
       devAdminHint: {
         title: "Instance de développement locale",
         signIn: "Se connecter en tant qu'administrateur de développement",
@@ -2802,6 +2806,8 @@ const fr = {
         directSignInRateLimited: "Trop de connexions ont été lancées depuis ce réseau à l'instant. Patientez quelques secondes, puis réessayez.",
         networkNotAllowed: "Ce système n'autorise pas la connexion depuis votre réseau. Connectez-vous depuis un réseau autorisé (par exemple le réseau du bureau ou le VPN de votre organisation), ou contactez votre administrateur.",
         ssoAccessDenied: "Le compte avec lequel vous vous êtes connecté n'a pas accès à cet environnement. Connectez-vous avec un compte qui y a accès, ou demandez à un administrateur de l'organisation de cet environnement de vous ajouter comme membre.",
+        ssoAccessDeniedNotMember: "Le compte avec lequel vous vous êtes connecté n'est pas membre de l'organisation de cet environnement. Connectez-vous avec un compte qui l'est, ou demandez à un administrateur de l'organisation de vous inviter.",
+        ssoAccessDeniedInvitationPending: "Vous avez été invité à rejoindre l'organisation de cet environnement, mais l'invitation n'a pas encore été acceptée. Acceptez l'invitation depuis votre e-mail, puis reconnectez-vous.",
         ssoSwitchAccount: "Changer de compte",
         ssoBackToConsole: "Retour à la console",
         ssoSwitchAccountHint: "Changer de compte ouvre votre service de connexion dans un nouvel onglet et vous y déconnecte. Reconnectez-vous ensuite ici avec un compte qui a accès.",
@@ -3114,6 +3120,10 @@ const fr = {
       granted: "Accès accordé",
       denied: "Accès refusé",
       noRedirect: "Le serveur n'a renvoyé aucune URL de redirection.",
+      returnToApp: "Retournez dans {{appName}} pour continuer. Vous pouvez fermer cet onglet.",
+      returnToUnnamedApp: "Retournez dans l'application pour continuer. Vous pouvez fermer cet onglet.",
+      openApp: "Ouvrir {{appName}}",
+      openUnnamedApp: "Ouvrir l'application",
       failed: "Échec du consentement",
       footer: "Vous pouvez révoquer cet accès à tout moment dans les paramètres de votre compte.",
     },
@@ -4055,13 +4065,11 @@ const fr = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Il vous reste {{left}} de votre quota d’IA. Un modèle marqué ×N le consomme N fois plus vite que le modèle par défaut.',
@@ -4126,6 +4134,7 @@ const fr = {
       get_metadata_schema: "Consulter le format des métadonnées",
       get_package: "Examiner le paquet",
       get_record_history: "Lire l'historique de cette fiche",
+      list_flow_runs: "Consulter les exécutions du flux",
       list_metadata: "Lister les métadonnées existantes",
       list_objects: "Lister les objets existants",
       list_packages: "Lister les paquets existants",

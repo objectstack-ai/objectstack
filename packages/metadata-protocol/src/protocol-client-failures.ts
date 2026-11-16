@@ -7,7 +7,7 @@
 // A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
 // above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
 // are new. `protocol.ts` re-exports what it exported.
-import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, packageScopedRefusalCandidates, resolveThrownHttpError, sandboxBusinessMessage, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
+import { boundedDeclaredUserMessage, declaredHttpStatus, declaredUserMessage, isSandboxOrigin, packageScopedRefusalCandidates, resolveThrownHttpError, sandboxBusinessMessage, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { zodIssuesToMetadataIssues } from './protocol-metadata-issues.js';
@@ -155,6 +155,16 @@ export type BatchDataRowResult = BatchOperationResult;
  * caller which packages to choose between as a single write does. Read through
  * `@objectstack/types`' one recogniser; every other row error carries no
  * `details`, as before.
+ *
+ * ## A producer-marked `userMessage` rides the row
+ *
+ * `ApiError.userMessage` is the contract's producer-marked end-user channel,
+ * and every whole-request door already carries it (`withDeclaredUserMessage`
+ * on `/data`, the dispatcher's thrown answer). A row carries it by the same
+ * read and the same bound (`boundedDeclaredUserMessage`, `@objectstack/types`),
+ * so the engine's duplicate refusal reaches a bulk edit in the writer's locale
+ * as it reaches the single-record save. `message` is unchanged: it stays the
+ * diagnostic the limb above decides. An unmarked throw adds no key.
  */
 export function toRowApiError(err: any, fallback: string): ApiError {
     const thrown = isEngineDuplicateRecordEnvelope(err)
@@ -166,12 +176,14 @@ export function toRowApiError(err: any, fallback: string): ApiError {
     const refusal = sandboxRefusalSentence(err) !== undefined;
     const servedStatus = declaredStatus ?? (refusal ? 400 : undefined);
     const candidates = packageScopedRefusalCandidates(err);
+    const userMessage = boundedDeclaredUserMessage(err);
     return {
         code: thrown
             ?? (isUndeclaredHookAbort(err, refusal, servedStatus) ? UNDECLARED_HOOK_REFUSAL_CODE
                 : servedStatus !== undefined ? standardErrorCodeForHttpStatus(servedStatus) : 'INTERNAL_ERROR'),
         message: clientFacingRowFailureText(err, fallback),
         ...(declaredStatus !== undefined ? { httpStatus: declaredStatus } : {}),
+        ...(userMessage !== undefined ? { userMessage } : {}),
         ...(candidates ? { details: { candidates } } : {}),
     };
 }

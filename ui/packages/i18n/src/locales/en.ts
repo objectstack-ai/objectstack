@@ -2390,6 +2390,9 @@ const en = {
       // would have left a single translated string among a dozen hardcoded
       // ones — and deferred them to this card, which converts the screen whole.
       cryptoRefusalTitle: 'This deployment cannot encrypt secrets',
+      platformManagedTitle: 'Managed by the platform',
+      platformManagedBody: 'The hosting platform provides and configures this for this environment, so it is not set here.',
+      aiProviderManaged: 'The AI provider, its model and credentials are managed by the platform.',
       // `{{subject}}` is rendered as a `< code >` element by the view, so the
       // sentence is split around it rather than interpolated.
       cryptoRefusalSubjectSuffix: 'is declared encrypted, so nothing was written.',
@@ -3281,6 +3284,7 @@ const en = {
         retry: "Continue with single sign-on",
       },
       ssoHandoff: 'Continue to {{target}}',
+      ssoHandoffClient: "Sign in to continue to {{clientName}}",
       // Phone/OTP sign-in labels. `LoginForm` interpolates `{seconds}` with a
       // literal `.replace('{seconds}', …)` of its own (in `LoginForm`),
       // so those SINGLE braces must survive translation — i18next never sees
@@ -3398,6 +3402,8 @@ const en = {
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
+        ssoAccessDeniedNotMember: "The account you signed in with is not a member of this environment's organization. Sign in with an account that is, or ask an administrator of the organization to invite you.",
+        ssoAccessDeniedInvitationPending: "You have been invited to this environment's organization, but the invitation has not been accepted yet. Accept the invitation from your email, then sign in again.",
         ssoSwitchAccount: "Switch account",
         ssoBackToConsole: "Back to console",
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
@@ -3704,6 +3710,14 @@ const en = {
       granted: 'Access granted',
       denied: 'Access denied',
       noRedirect: 'No redirect URL returned by the server.',
+      // Shown in place of the consent card after a decision whose redirect is
+      // not `http(s)` (a native app's custom scheme): the tab stays here while
+      // the operating system opens the app. `{{appName}}` is the registered
+      // name; the Unnamed forms are used when the client was not identified.
+      returnToApp: 'Return to {{appName}} to continue. You can close this tab.',
+      returnToUnnamedApp: 'Return to the application to continue. You can close this tab.',
+      openApp: 'Open {{appName}}',
+      openUnnamedApp: 'Open the application',
       failed: 'Consent failed',
       footer: 'You can revoke access at any time from your account settings.',
     },
@@ -4899,13 +4913,11 @@ const en = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
     modelPicker: {
@@ -4971,6 +4983,7 @@ const en = {
       get_metadata_schema: 'Read the metadata format',
       get_package: 'Look at the package',
       get_record_history: 'Read the record history',
+      list_flow_runs: 'Check automation runs',
       list_metadata: 'List the existing metadata',
       list_objects: 'List the existing objects',
       list_packages: 'List the existing packages',

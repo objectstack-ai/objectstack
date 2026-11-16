@@ -277,6 +277,7 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         const env = labelled('duly_note', sqliteRaw());
         expect(mapDataError(env, 'duly_note').body).toEqual({
             error: CURATED_NAMED,
+            userMessage: CURATED_NAMED,
             code: 'UNIQUE_VIOLATION',
             developerMessage: env.message,
             field: 'email',
@@ -286,6 +287,7 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         const composite = envelope('duly_pair', sqliteCompositeRaw());
         expect(mapDataError(composite, 'duly_pair').body).toEqual({
             error: CURATED_UNNAMED,
+            userMessage: CURATED_UNNAMED,
             code: 'UNIQUE_VIOLATION',
             developerMessage: composite.message,
             object: 'duly_pair',
@@ -388,6 +390,7 @@ describe('#14389 §2 — a real insert conflict, real engine on real better-sqli
         expect(r.status).toBe(409);
         expect(r.body).toEqual({
             error: CURATED_NAMED,
+            userMessage: CURATED_NAMED,
             code: 'UNIQUE_VIOLATION',
             developerMessage: env.message,
             field: 'email',
@@ -570,6 +573,7 @@ describe('a declared composite unique index: its fields named by label, in the w
         expect(r.status).toBe(409);
         expect(r.body).toEqual({
             error: sentence,
+            userMessage: sentence,
             code: 'UNIQUE_VIOLATION',
             developerMessage: env.message,
             object: 'duly_pair_declared',
