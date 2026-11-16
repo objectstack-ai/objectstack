@@ -3,8 +3,8 @@
 /**
  * [#29986 codemod] The "Transactions" section of `ObjectQL`: the bodies of
  * `transaction`, `runOpenedUnit`, `isClosedUnitHandle`, `newTransactionScope`,
- * `datasourceNameOf` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `datasourceNameOf` moved out of `engine.ts` whole (split
+ * by #30012).
  *
  * A MOVE, not a redesign. {@link TransactionsSectionFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`

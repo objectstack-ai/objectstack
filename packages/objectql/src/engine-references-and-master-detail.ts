@@ -10,8 +10,8 @@
  * `callerReadableReferenceExists`, `resolveMasterDetailParent`,
  * `resolveMasterDetailParents`, `materializeParentHeader`,
  * `masterDeclaredFields`, `inspectDanglingReferences`, `inspectCascadeDelete`,
- * `getCascadeDeleteObjects` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `getCascadeDeleteObjects` moved out of `engine.ts` whole (split
+ * by #30012 and #30463).
  *
  * A MOVE, not a redesign. {@link ReferencesAndMasterDetailFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`

@@ -3,7 +3,7 @@
 /**
  * [#29520 codemod] The "Aggregation" section of `SqlDriver`: the bodies of
  * `aggregate`, `aggregandColumnClassOf`, `foldEmptyAggregateAnswers` moved out
- * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * of `sql-driver.ts` whole (split by #29598 and #30139).
  *
  * A MOVE, not a redesign. {@link AggregationFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
