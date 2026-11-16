@@ -34,6 +34,10 @@ import type { Logger } from '@objectstack/spec/contracts';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { AnalyticsService, type AnalyticsServiceConfig } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 function mockServer() {
   return {
