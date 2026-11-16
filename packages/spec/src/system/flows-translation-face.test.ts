@@ -49,7 +49,13 @@
 
 import { describe, expect, it } from 'vitest';
 import { FlowSchema, FlowNodeSchema } from '../automation/flow.zod';
-import { EndConfigSchema, SaveNoticeConfigSchema, ScreenConfigSchema } from '../automation/builtin-node-config.zod';
+import {
+  CreateRecordConfigSchema,
+  EndConfigSchema,
+  SaveNoticeConfigSchema,
+  ScreenConfigSchema,
+  UpdateRecordConfigSchema,
+} from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ApprovalNodeConfigSchema, APPROVAL_NODE_TYPE } from '../automation/approval.zod';
 import { getBuiltinNodeConfigContracts } from '../automation/flow-node-config-refusals';
@@ -174,6 +180,26 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
     'notices.NODE.message',
     "the sentence the writer reads with the save, picked by the engine in the writer's locale",
   ),
+
+  // The record writes (ruling 6913660232 on objectstack#34062, letter B): a
+  // `fields` value MARKED as text — a text envelope — is a sentence the record
+  // keeps, picked by the engine in the organization's language before its
+  // holes are filled. Tier 1 for the `save_notice` reason: the engine renders
+  // it. A bare string or a CEL envelope in the same map is a value, which the
+  // one `fields.*` row covers: the key is read only for the text envelope.
+  'create_record.objectName': noReader('an object name — the object the row is inserted into'),
+  'create_record.outputVariable': noReader('a variable name the created row binds'),
+  'create_record.fields.*': keyed(
+    'records.NODE.fields.FIELD',
+    "a field value marked as text (a text envelope): the record keeps it for people to read, written in the "
+      + "organization's language; any other value is data the run computes or spells, never translated",
+  ),
+  'update_record.objectName': noReader('an object name — the object whose rows are updated'),
+  'update_record.filter': noReader('a match condition — field names, operators and the values the run compares'),
+  'update_record.fields.*': keyed(
+    'records.NODE.fields.FIELD',
+    'a field value marked as text, as on `create_record.fields.*`',
+  ),
 };
 
 /**
@@ -280,6 +306,8 @@ function runnerLeaves(): string[] {
     ...prefixed('screen', textLeaves(ScreenConfigSchema)),
     ...prefixed('end', textLeaves(EndConfigSchema)),
     ...prefixed('save_notice', textLeaves(SaveNoticeConfigSchema)),
+    ...prefixed('create_record', textLeaves(CreateRecordConfigSchema)),
+    ...prefixed('update_record', textLeaves(UpdateRecordConfigSchema)),
   ];
 }
 
@@ -295,7 +323,7 @@ function otherNodeLeaves(): string[] {
   contracts.set(APPROVAL_NODE_TYPE, ApprovalNodeConfigSchema);
   const out: string[] = [];
   for (const [type, schema] of contracts) {
-    if (type === 'screen' || type === 'save_notice') continue; // tier 1
+    if (type === 'screen' || type === 'save_notice' || type === 'create_record' || type === 'update_record') continue; // tier 1
     const regions = new Set((FLOW_REGION_SLOTS_BY_TYPE.get(type) ?? []).map((slot) => slot.key));
     for (const leaf of textLeaves(schema, (p) => regions.has(p.split(/[.[]/)[0]!))) {
       if (COPY_WORD.test(leaf.replace(/\[\]/g, '').replace(/\.\*/g, ''))) out.push(`${type}.${leaf}`);
@@ -356,8 +384,10 @@ describe('the flows translation face covers every user-read flow slot (#22507)',
 
     // Every slot the engine renders as text, on any node type, is classified.
     const all = { ...RUNNER_SLOTS, ...OTHER_NODE_SLOTS };
+    // A map slot (`eachValue`) is classified where its values sit (`.*`).
     for (const slot of FLOW_NODE_TEXT_SLOTS) {
-      expect(rowFor(all, `${slot.nodeType}.${slot.key}`), `${slot.label} has no disposition`).toBeDefined();
+      const leaf = `${slot.nodeType}.${slot.key}${slot.eachValue ? '.*' : ''}`;
+      expect(rowFor(all, leaf), `${slot.label} has no disposition`).toBeDefined();
     }
   });
 

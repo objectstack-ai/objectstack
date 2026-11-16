@@ -232,6 +232,17 @@ const READERS: Record<string, Row> = {
     disposition: 'exempt',
     why: 'a federated related object keeps the id read, so no subquery is compiled against it; it reads no row',
   },
+  // The relation group join: a federated base object declines (its caller
+  // keeps the FK-expand), and a federated related object declines through
+  // `relationSemiJoinServes`, so no join is compiled against either.
+  'relation-group-join.ts#relationGroupRegistryDecline :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated base object declines the join, so no statement is compiled against it; it reads no row',
+  },
+  'relation-group-join.ts#relationGroupRegistryDecline :: referenceTargetOf()': {
+    disposition: 'exempt',
+    why: 'names the related object only to judge the join beside the federated test; it reads no row',
+  },
   // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
   // validation predicates and formula fields share it; a formula's hop is read
   // as the caller outright, so its federated answer is the caller's own read.
