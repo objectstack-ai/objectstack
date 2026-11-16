@@ -192,10 +192,13 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * (#12017 two-copies failure shape; the #11875 lesson that a hand-written
  * enumeration goes one revision stale).
  *
- * Package-internal on purpose: it is the superRefine's membership test, not a
- * third answer to "is this field multi-valued". That question has exactly one
- * answer — `isMultiValueField` (`field-value.zod.ts`) — and both of the sets
- * this one unions stay untouched.
+ * Exported for ONE reader beside this file's superRefine: the AI blueprint
+ * field (`ai/solution-blueprint.zod.ts`), which refuses `multiple: true` on
+ * exactly the types this file refuses it on, reading this set rather than a
+ * copy. It answers "may an author DECLARE `multiple: true` here", and
+ * is not a third answer to "is this field multi-valued". That question has
+ * exactly one answer — `isMultiValueField` (`field-value.zod.ts`) — and both of
+ * the sets this one unions stay untouched.
  *
  * ⚠️ Computed on FIRST USE, never at module top level. `field-value.zod` reaches
  * back into this module through `shared/strict-object` → `shared/suggestions.zod`,
@@ -206,7 +209,7 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * module has settled) is the same discipline `lazySchema` applies above.
  */
 let multiDeclarableTypes: ReadonlySet<string> | undefined;
-function multiDeclarableTypeSet(): ReadonlySet<string> {
+export function multiDeclarableFieldTypes(): ReadonlySet<string> {
   return (multiDeclarableTypes ??= new Set([...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]));
 }
 
@@ -221,7 +224,7 @@ function multiDeclarableTypeSet(): ReadonlySet<string> {
  */
 let multiDeclarableRemedyTypes: readonly string[] | undefined;
 function multiDeclarableRemedyTypeList(): readonly string[] {
-  return (multiDeclarableRemedyTypes ??= [...multiDeclarableTypeSet()].filter((t) => t !== 'radio'));
+  return (multiDeclarableRemedyTypes ??= [...multiDeclarableFieldTypes()].filter((t) => t !== 'radio'));
 }
 
 /**
@@ -3202,7 +3205,7 @@ export const FieldSchema = lazySchema(() => {
   //
   // `radio` is INSIDE the set and is therefore never refused here — its own
   // narrower #11437 check above owns that pair, so the two never double-fire.
-  if (field.multiple === true && !multiDeclarableTypeSet().has(field.type)) {
+  if (field.multiple === true && !multiDeclarableFieldTypes().has(field.type)) {
     const alternative = REFERENCE_VALUE_TYPES.has(field.type)
       ? 'a `lookup` with `reference` naming the same object (`multiple: true` there stores several related records)'
       : FILE_REFERENCE_TYPES.has(field.type)
