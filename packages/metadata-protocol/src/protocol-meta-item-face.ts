@@ -47,7 +47,7 @@ import { packageDependencyClosure, pairsOf, type PackageClosureRegistry } from '
 import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import type { PrereadActiveRows } from './protocol-meta-item-reads.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import { OVERLAY_MEMBER_COLUMN, overlayMemberValue, overlayMemberWhere } from './migrations/overlay-index.js';
+import { overlayMemberValue, overlayMemberWhere } from './migrations/overlay-index.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import {
     isActionWithheldByDisabledPackage,
@@ -623,8 +623,15 @@ export async function declaredMemberOverrideAddressOf(
  * ({@link ObjectStackProtocolImplementation.declinesStoredRow}). Each package
  * holding members of the name as active rows is judged against its OWN
  * declared dependency closure: it is an addition when some other row-holding
- * package B is in that closure, it is not in B's, and none of its members is
- * one B holds. The base is the one row-holding package that is no addition;
+ * package B is in that closure and it is not in B's. [#33210 contract review
+ * S2] A member both hold is no clash here: the registry counts a clash only
+ * at a member either package ships in code (`codeMembersOf`, #33127), and
+ * this arm runs only for a name no package ships, so a member two packages
+ * hold only as stored rows never clashes. A dependent that also stores a
+ * member the base stores (D's `en-US` and `fr-FR` over A's `en-US`) stays an
+ * addition, as the registry names A the one holder there; the read at the
+ * shared member is left to the rows' own judgment (A holds a row there). The
+ * base is the one row-holding package that is no addition;
  * the read is moved only when there is exactly one, it holds no row at the
  * member, and no package at the member is a customization pair of another
  * row-holding package (`pairsOf`: a pair's added member is served on its
@@ -672,26 +679,22 @@ export async function rowHeldBaseAddressOf(
     if (atMember.length === 0 || atMember.some((row) => packageOf(row) === undefined || host.declinesStoredRow(type, name, row))) {
         return undefined;
     }
-    const membersOf = new Map<string, Set<string | null>>();
-    for (const row of rows) {
-        const packageId = packageOf(row);
-        if (packageId === undefined || host.declinesStoredRow(type, name, row)) continue;
-        const stored = (row as Record<string, unknown>)[OVERLAY_MEMBER_COLUMN];
-        const members = membersOf.get(packageId) ?? new Set<string | null>();
-        members.add(typeof stored === 'string' && stored !== '' ? stored : null);
-        membersOf.set(packageId, members);
-    }
-    const holders = [...membersOf.keys()];
+    const holders = [...new Set(rows
+        .filter((row) => !host.declinesStoredRow(type, name, row))
+        .map(packageOf)
+        .filter((id): id is string => id !== undefined))];
     if (typeof registry.isPackageDisabled === 'function' && holders.some((id) => registry.isPackageDisabled(id) === true)) {
         return undefined;
     }
     const closure = (id: string): readonly string[] => packageDependencyClosure(id, registry as PackageClosureRegistry)?.dependencies ?? [];
     // [#33210 contract review M1] Each package against its own closure, as
     // `isBundleAddition` judges it: an addition to ANY other holder it
-    // declares, never to one base every package must share.
+    // declares, never to one base every package must share. [S2] No member
+    // clashes: no package ships the name here, and the registry's clash is
+    // a member shipped in code (`codeMembersOf`), never one held only as
+    // stored rows.
     const isAdditionTo = (id: string, other: string): boolean => other !== id
-        && closure(id).includes(other) && !closure(other).includes(id)
-        && ![...membersOf.get(id)!].some((held) => membersOf.get(other)!.has(held));
+        && closure(id).includes(other) && !closure(other).includes(id);
     const bases = holders.filter((id) => !holders.some((other) => isAdditionTo(id, other)));
     if (bases.length !== 1) return undefined;
     const [base] = bases;

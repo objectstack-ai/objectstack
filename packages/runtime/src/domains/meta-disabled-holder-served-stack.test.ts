@@ -717,6 +717,55 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
         }
     }, 240_000);
 
+    // [#33210 contract review S2] A dependent that also stores a member the
+    // base stores (D's `en-US` and `fr-FR` over A's `en-US`) is still an
+    // addition: the registry counts a clash only at a member shipped in code
+    // (#33127), and no package ships this name. So the read naming no package
+    // at D's `fr-FR` takes A's address (404), as with a shipped base. FROM
+    // (head 2b9293e63a, any shared member a clash): two bases, and the read at
+    // `fr-FR` served D's row (200).
+    it.each([
+        { order: 'row-held base, registered and saved A, D', ships: false, registered: [A, D] },
+        { order: 'row-held base, registered and saved D, A', ships: false, registered: [D, A] },
+        { order: 'shipped base (CONTROL), registered A, D', ships: true, registered: [A, D] },
+        { order: 'shipped base (CONTROL), registered D, A', ships: true, registered: [D, A] },
+    ])('S2, $order: a dependent storing the base\'s member as well as its own is an addition, and its own member answers 404 naming no package, before and after a reboot', async ({ ships, registered }) => {
+        const file = freshFile();
+        const manifestOf = (id: string) => (id === A
+            ? appManifest(A, ships ? { emailTemplates: [{ name: 'sharedmail', ...template('en-US', 'base en') }] } : {})
+            : appManifest(D, { dependencies: { [A]: '*' } }));
+        const manifests = registered.map(manifestOf);
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            const read = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR' });
+            const layers = await get(b.kernel, '/meta/email_template/sharedmail/layers', { member: 'fr-FR' });
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'sharedmail', member: 'fr-FR' });
+            expect([leg, read.status, codeOf(read.body), layers.status, codeOf(layers.body), executed?.item ?? null], JSON.stringify([read.body, layers.body]))
+                .toEqual([leg, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
+            const own = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR', package: D });
+            expect([leg, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([leg, 200, 'addon fr', D]);
+        };
+        try {
+            for (const id of registered) {
+                if (id === A) {
+                    if (!ships) await layRow(booted.engine, 'email_template', 'sharedmail', A, template('en-US', 'base en'));
+                    continue;
+                }
+                await layRow(booted.engine, 'email_template', 'sharedmail', D, template('en-US', 'addon en'));
+                await layRow(booted.engine, 'email_template', 'sharedmail', D, template('fr-FR', 'addon fr'));
+            }
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
     // [#33210 contract review S1] The canonical-member mirror is left as it
     // was: a dependent's row of the CANONICAL member (`en-US`) over a base that
     // holds the name only as a stored row of another member (`fr-FR`). The
