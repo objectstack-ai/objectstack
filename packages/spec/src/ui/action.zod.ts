@@ -935,7 +935,7 @@ function actionAnswerFieldRow(surface: string, pathDescription: string) {
     path: z.string().describe(pathDescription),
     label: I18nLabelSchema.optional(),
     format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override.'),
-    columns: z.array(ActionAnswerTableColumnSchema).optional().describe("The cells of a `format: 'table'` field, in order — required by `table`, refused beside any other format."),
+    columns: z.array(ActionAnswerTableColumnSchema).optional().describe("[PLANNED — not yet rendered] The cells of a `format: 'table'` field, in order: `[{ path, label?, format? }]`, `path` read in ONE element of the array. Required by `table` (never guessed from the element's keys) and refused beside any other format. Until the console's table renderer lands, a `table` field draws its label alone."),
   }).superRefine(refuseTableColumnContradictions);
 }
 
