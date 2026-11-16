@@ -50,6 +50,7 @@ import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } fr
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   askedFirst,
+  askNamesTarget,
   flowRefusalOf,
   gradeCardAnswer,
   gradeCardInjection,
@@ -297,7 +298,9 @@ export interface OperationResult {
    * first one passed by asking first (`OperationGrade.confirmation` is
    * `asked first`): the person confirms, and the turn's write is graded on
    * its own ({@link ConfirmTurnResult}). Absent on every other operation, and
-   * on one whose first turn wrote, failed or measured nothing.
+   * on one whose first turn wrote, failed or measured nothing. On one whose
+   * ask names no single row it is not sent, and carries only
+   * {@link confirmationAmbiguous}.
    */
   confirmTurn?: ConfirmTurnResult;
   error?: string;
@@ -314,8 +317,9 @@ export interface OperationResult {
 export interface ConfirmTurnResult {
   /**
    * Why the confirmed write measured nothing: the replayed recording holds no
-   * confirmation turn ({@link confirmationNotRecorded}), or the replay of it
-   * was not faithful (`ReplayNotFaithfulError`). Never a fail; the operation
+   * confirmation turn ({@link confirmationNotRecorded}), the replay of it
+   * was not faithful (`ReplayNotFaithfulError`), or the ask matches more than
+   * one row and no turn was sent ({@link confirmationAmbiguous}). Never a fail; the operation
    * is then scored on its first turn alone, as before.
    */
   notMeasured?: string;
@@ -340,6 +344,14 @@ export interface RowRestore {
 
 /** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
 export const confirmationNotRecorded = 'the recording holds no confirmation turn for this operation, so the confirmed write was not replayed';
+
+/**
+ * Why an ambiguous operation's confirmed write is not measured, and no confirmation turn is sent: its ask
+ * matches more than one row (`askNamesTarget`), and the person's confirmation words ("Yes, I confirm. Go
+ * ahead.") say no row, so whatever the agent then writes cannot be graded against the one target the card
+ * declares. The first turn, which asked, is graded as before.
+ */
+export const confirmationAmbiguous = 'the ask matches more than one row and the confirmation words say no row, so no confirmation turn was sent';
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -1403,8 +1415,11 @@ export async function runHalf(
           res.buildDenial = { persona: op.actingAs, object: op.object, verb: op.kind };
         }
         // The agent asked first and wrote nothing: the person confirms, in a
-        // turn of its own, and that turn's write is graded on its own.
-        if (op.outcome.kind === 'pending_confirmation' && res.grade.confirmation === askedFirst) {
+        // turn of its own, and that turn's write is graded on its own. An ask
+        // that matches more than one row gets no such turn: a bare yes says no row.
+        if (op.outcome.kind === 'pending_confirmation' && res.grade.confirmation === askedFirst && !askNamesTarget(card, op.id).names) {
+          res.confirmTurn = { notMeasured: confirmationAmbiguous };
+        } else if (op.outcome.kind === 'pending_confirmation' && res.grade.confirmation === askedFirst) {
           const confirmed: ConfirmTurnResult = {};
           try {
             const beforeConfirm = (await app.listRows(op.object)).rows as Row[];

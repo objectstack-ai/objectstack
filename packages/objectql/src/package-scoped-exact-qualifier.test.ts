@@ -831,6 +831,100 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
 });
 
 /**
+ * [#34041, ADR-0150 D3] A disabled package holds no name, of any type: beside
+ * one enabled holder, the read naming no package serves that holder's item, and
+ * so does `/layers`. For a type the registry does not read by package, the read
+ * reached the layer it reads by name alone (the service's copy, kept for the
+ * package registered last, else the registry's first composite) and the face
+ * withheld it when it was the disabled holder's.
+ *
+ * BASE (measured before the fix, origin/main 01598d93, this fixture): with
+ * beta disabled, every type below answered no item whenever that layer was
+ * beta's (the service keeping beta's copy, or no service copy and beta
+ * registered first), and `/layers` served beta's body as `effective`.
+ */
+describe('[#34041] the read naming no package serves the one enabled holder beside a disabled one, for every type the registry does not read by package', () => {
+  const NOT_READ_BY_PACKAGE = MetadataTypeSchema.options.filter((type) => !(PACKAGE_SCOPED_READ_TYPES as readonly string[]).includes(type));
+  /** The security catalog keeps one package holder of these: a second holder is refused (the #34040 describe pins it). */
+  const ONE_HOLDER = ['position', 'capability'];
+  /** Judged against a disabled package by their own bare judges: the object's owner refusal, the action's `judgeBareActionRead`. */
+  const JUDGED_ELSEWHERE = ['object', 'action'];
+  const TWO_HOLDER = NOT_READ_BY_PACKAGE.filter((type) => !ONE_HOLDER.includes(type) && !JUDGED_ELSEWHERE.includes(type));
+
+  it('the enumeration: every type the registry does not read by package is pinned below, one-holder, or judged elsewhere', () => {
+    expect([...TWO_HOLDER].sort()).toEqual(
+      ['assignment_rule', 'datasource', 'doc', 'external_catalog', 'field', 'hook', 'job', 'object_extension', 'queue', 'seed', 'sharing_rule', 'translation', 'view'],
+    );
+  });
+
+  const bodyOf = (type: string, packageId: string) => ({
+    name: 'shared', label: `${packageId.split('.').pop()} ${type}`, ...(type === 'action' ? { type: 'url', target: 'https://example.com' } : {}),
+  });
+  /** The protocol over this fixture's engine: no service, or a service keeping `kept`'s copy for every read. */
+  const protocolKeeping = (type: string, kept: string | undefined) => {
+    if (kept === undefined) return protocol;
+    const copy = { ...bodyOf(type, kept), _packageId: kept };
+    const metadata = { get: vi.fn(async () => copy), getDiagnosed: vi.fn(async () => ({ data: copy, degraded: false, errors: [] })) };
+    return new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', metadata]]));
+  };
+  /** The plain read's and `/layers`' labels, for each service state: none, alpha's copy, beta's copy. */
+  const bareLabels = async (type: string) => {
+    const seen: Array<[string, unknown, unknown]> = [];
+    for (const kept of [undefined, A, B]) {
+      const served = protocolKeeping(type, kept);
+      const plain = labelOf(await served.getMetaItem({ type, name: 'shared' }));
+      const layered = ((await served.getMetaItemLayered({ type, name: 'shared' })) as { effective?: { label?: string } }).effective?.label;
+      seen.push([kept ?? 'no service copy', plain, layered]);
+    }
+    return seen;
+  };
+
+  it.each(TWO_HOLDER.flatMap((type) => [[type, 'beta registered last', [A, B]], [type, 'beta registered first', [B, A]]] as const))(
+    '%s, %s: beta disabled, the plain read and /layers serve alpha\'s item whichever layer holds beta\'s; both disabled, no item',
+    async (type, _order, order) => {
+      for (const id of order) registry.registerItem(type, bodyOf(type, id) as never, 'name' as never, id);
+      registry.disablePackage(B);
+      const alpha = `alpha ${type}`;
+      expect(await bareLabels(type)).toEqual([['no service copy', alpha, alpha], [A, alpha, alpha], [B, alpha, alpha]]);
+      // CONTROL: no enabled holder, no served holder: the withheld item, as before.
+      registry.disablePackage(A);
+      expect(labelOf(await protocolKeeping(type, B).getMetaItem({ type, name: 'shared' })), `${type}, both disabled`).toBeUndefined();
+    },
+  );
+
+  it.each([['beta registered last', [A, B]], ['beta registered first', [B, A]]] as const)(
+    'CONTROL — doc, %s: two enabled holders are refused 409 naming both, before and after beta is disabled and enabled again',
+    async (_order, order) => {
+      for (const id of order) registry.registerItem('doc', bodyOf('doc', id) as never, 'name' as never, id);
+      const expectRefused = async () => {
+        const err = await refusalOf(() => protocolKeeping('doc', order[1]).getMetaItem({ type: 'doc', name: 'shared' }));
+        expect([err.code, err.status, [...err.refusal.candidates].map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual(['RESOURCE_CONFLICT', 409, [A, B]]);
+      };
+      await expectRefused();
+      registry.disablePackage(B);
+      expect(labelOf(await protocolKeeping('doc', B).getMetaItem({ type: 'doc', name: 'shared' }))).toBe('alpha doc');
+      registry.enablePackage(B);
+      await expectRefused();
+    },
+  );
+
+  it.each([['beta registered last', [A, B]], ['beta registered first', [B, A]]] as const)(
+    'CONTROL — action, %s: judged by its own bare judge, beta disabled serves alpha\'s, unchanged',
+    async (_order, order) => {
+      for (const id of order) registry.registerItem('action', bodyOf('action', id) as never, 'name' as never, id);
+      registry.disablePackage(B);
+      expect(await bareLabels('action')).toEqual([['no service copy', 'alpha action', 'alpha action'], [A, 'alpha action', 'alpha action'], [B, 'alpha action', 'alpha action']]);
+    },
+  );
+
+  it('CONTROL — no disabled holder: a view two enabled packages ship reads as before, the service\'s copy', async () => {
+    for (const id of [A, B]) registry.registerItem('view', bodyOf('view', id) as never, 'name' as never, id);
+    expect(labelOf(await protocolKeeping('view', B).getMetaItem({ type: 'view', name: 'shared' }))).toBe('beta view');
+    expect(labelOf(await protocolKeeping('view', A).getMetaItem({ type: 'view', name: 'shared' }))).toBe('alpha view');
+  });
+});
+
+/**
  * [#31699 F2, the epic's ruling on the contract review] Two packages of one
  * App share the App's customization pair, so a locale Studio added there with
  * no `overrides` cannot say whose template it extends. Serving it on both

@@ -3054,6 +3054,10 @@ const ko = {
       granted: "액세스가 허용되었습니다",
       denied: "액세스 거부됨",
       noRedirect: "서버가 리디렉션 URL을 반환하지 않았습니다.",
+      returnToApp: "{{appName}}(으)로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      returnToUnnamedApp: "애플리케이션으로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      openApp: "{{appName}} 열기",
+      openUnnamedApp: "애플리케이션 열기",
       failed: "동의 실패",
       footer: "계정 설정에서 언제든지 액세스를 취소할 수 있습니다.",
     },
@@ -3979,13 +3983,11 @@ const ko = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 사용 한도가 {{left}} 남았습니다. ×N으로 표시된 모델은 기본 모델보다 N배 빠르게 한도를 사용합니다.',
@@ -4050,6 +4052,7 @@ const ko = {
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
       get_record_history: "이 레코드의 변경 기록 읽기",
+      list_flow_runs: "플로우 실행 기록 확인하기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",

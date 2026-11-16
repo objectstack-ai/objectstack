@@ -1681,35 +1681,43 @@ describe('[#32530] describe_object serves readonly where a write never stands â€
             bare_formula: true,
             doubled: true,
             locked_note: false,
-            marked_up: true,
         };
         const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
         const served = readonlyOf(await bridge.describeObject(OBJ));
         expect(served).not.toHaveProperty('hidden_cost');
+        // Field-level security covers what a value is computed from: the stored
+        // expression over `hidden_cost` is withheld from the member with it.
+        expect(served).not.toHaveProperty('marked_up');
         const authored = Object.fromEntries(
             Object.keys(STDIO_TWIN_MEMBER_READONLY).map((k) => [k, served[k]]),
         );
         expect(authored).toEqual(STDIO_TWIN_MEMBER_READONLY);
     });
 
-    it('a stored expression over a field the caller cannot read is still served readonly: true, and neither the expression nor that field is served', async () => {
+    it('a stored expression over a field the caller cannot read is not served at all: field-level security covers what a value is computed from', async () => {
         const { bridge } = await bridgeFor(kernelOver(services), MEMBER);
         const described: any = await bridge.describeObject(OBJ);
-        expect(readonlyOf(described).marked_up).toBe(true);
+        const names = described.fields.map((f: any) => f.name);
+        expect(names).not.toContain('hidden_cost');
+        expect(names).not.toContain('marked_up');
         const text = JSON.stringify(described);
-        expect(described.fields.map((f: any) => f.name)).not.toContain('hidden_cost');
         expect(text).not.toContain('hidden_cost');
         expect(text).not.toContain('record.');
-        // Precondition: the member's served object is the masked one: the
-        // expression the declaration carries is not in it.
+        // The member's served object is the masked one: neither field is in
+        // it, while the declaration still carries both, and CONTROL the staff
+        // caller, who reads `hidden_cost`, is served `marked_up`.
         const { dispatcher } = await bridgeFor(kernelOver(services), MEMBER);
         const meta = await dispatcher.handleMetadata(`/object/${OBJ}`, {
             request: {}, environmentId: undefined, executionContext: { ...MEMBER },
         } as any, 'GET');
-        const servedField = meta.response?.body?.data?.item?.fields?.marked_up ?? meta.response?.body?.data?.fields?.marked_up;
-        expect(servedField, 'precondition: the member is served the field').toBeDefined();
-        expect(servedField.expression, 'precondition: the mask deleted the expression').toBeUndefined();
+        const servedFields = meta.response?.body?.data?.item?.fields ?? meta.response?.body?.data?.fields;
+        expect(servedFields, 'precondition: the member is served the object').toBeDefined();
+        expect(servedFields.marked_up, 'the stored expression over the hidden field is not served').toBeUndefined();
+        expect(servedFields.hidden_cost).toBeUndefined();
         expect((engine.getSchema(OBJ) as any).fields.marked_up.expression, 'the declaration still carries it').toBeDefined();
+        const STAFF = { ...MEMBER, userId: 'usr_ticket_staff', permissions: ['mcp_ticket_staff'] };
+        const { bridge: staffBridge } = await bridgeFor(kernelOver(services), STAFF);
+        expect(readonlyOf(await staffBridge.describeObject(OBJ)).marked_up, 'CONTROL: a caller who reads hidden_cost is served it').toBe(true);
     });
 });
 
