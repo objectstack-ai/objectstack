@@ -38,7 +38,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EXPLAIN_BATCH_MAX_RECORD_IDS } from '@objectstack/spec/security';
-import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -72,7 +72,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 import { ObjectGrid } from '../ObjectGrid';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { registerAllFields } from '@object-ui/fields';
-import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
+import { ActionProvider, SchemaRendererProvider, notifyDataChanged } from '@object-ui/react';
 // READ-ONLY reference to the OTHER surface's real implementation. The agreement
 // pin is worth nothing against a local re-statement of the detail header's
 // logic: it has to consume the same hook `RecordDetailView` consumes, unchanged
@@ -257,6 +257,16 @@ async function rowKebab(label: string): Promise<{ edit: boolean; delete: boolean
   return answer;
 }
 
+/**
+ * [objectstack#34208] Reach for a row's actions the way a pointer does —
+ * hover the "⋮" — which is when the grid asks for the record verdicts. The
+ * first paint asks nothing; every pin below that reads a verdict reaches first.
+ */
+async function reachRowActions() {
+  const trigger = screen.getAllByTestId('row-action-trigger')[0];
+  await userEvent.hover(trigger);
+}
+
 beforeEach(() => {
   server.reset();
   __clearRecordCrudVerdictCache();
@@ -273,6 +283,7 @@ describe('[#4296] the row kebab folds the record-level verdict', () => {
     // Pre-fix this returned `{ edit: true, delete: true }` — the whole card.
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: false, delete: false });
   });
@@ -283,6 +294,7 @@ describe('[#4296] the row kebab folds the record-level verdict', () => {
     // wearing a bug fix's clothes.
     renderGrid();
     await waitFor(() => expect(screen.getByText(OWN_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     expect(await rowKebab(OWN_ROW.name)).toEqual({ edit: true, delete: true });
   });
@@ -293,6 +305,7 @@ describe('[#4296] the row kebab folds the record-level verdict', () => {
     // ONE decision, so a row with nothing left must not sprout an empty menu.
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     const deniedRow = screen.getByText(OTHER_ROW.name).closest('tr');
     expect(deniedRow?.querySelector('[data-testid="row-action-trigger"]')).toBeNull();
@@ -306,6 +319,7 @@ describe('[#4296] the row kebab folds the record-level verdict', () => {
     server.verdicts.set(OTHER_ROW.id, { update: false, delete: true });
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: false, delete: true });
   });
@@ -328,6 +342,7 @@ describe('[#4296] kebab answer == detail-header answer, for the same record and 
     });
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
     // 2 batch calls (one per operation, for the page) + 4 singular probes.
+    await reachRowActions();
     await settle(6);
 
     // The detail header's own verdicts, measured first and independently.
@@ -371,6 +386,7 @@ describe('[#4296] degradation — an unanswered row keeps the object-level verdi
     server.ok = false;
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
   });
@@ -379,6 +395,7 @@ describe('[#4296] degradation — an unanswered row keeps the object-level verdi
     server.network = false;
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
   });
@@ -387,6 +404,7 @@ describe('[#4296] degradation — an unanswered row keeps the object-level verdi
     server.answersBatch = false;
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(2);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
   });
@@ -408,6 +426,7 @@ describe('[#4296] degradation — an unanswered row keeps the object-level verdi
     server.hold();
     renderGrid();
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await waitFor(() => expect(server.calls.length).toBe(2));
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
     // …and once the verdict lands, the entries go.
@@ -435,6 +454,7 @@ describe('[#4296] one batched call per (object, operation) per page', () => {
     // text is no readiness signal: on this many rows the settled re-render
     // outran the wait. The rows being on screen is: count them.
     await waitFor(() => expect(container.querySelectorAll('tbody tr')).toHaveLength(rows.length));
+    await reachRowActions();
     await settle(2);
 
     expect(server.calls.length).toBe(2);
@@ -470,6 +490,7 @@ describe('[#4296] one batched call per (object, operation) per page', () => {
     // text is no readiness signal: on this many rows the settled re-render
     // outran the wait. The rows being on screen is: count them.
     await waitFor(() => expect(container.querySelectorAll('tbody tr')).toHaveLength(rows.length));
+    await reachRowActions();
     await settle(4);
 
     expect(server.calls.length).toBe(4);
@@ -506,6 +527,7 @@ describe('[#4296] the record layer intersects, never unions', () => {
     server.verdicts.set(OTHER_ROW.id, { update: true, delete: true });
     renderGrid({ permDelete: false });
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await reachRowActions();
     await settle(1);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: false });
     expect(server.calls.map((c) => c.operation)).toEqual(['update']);
@@ -517,5 +539,130 @@ describe('[#4296] the record layer intersects, never unions', () => {
     await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
     expect(server.calls.length).toBe(0);
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: false, delete: false });
+  });
+});
+
+/**
+ * [objectstack#34208] The verdicts are asked when a row's actions are reached
+ * for, never on first paint. Each batch costs the server tens of milliseconds
+ * and dozens of queries, and the answer only matters to items a row shows
+ * inside its menus — so the list paints without asking, and the first reach
+ * for a row's actions asks once for the whole page.
+ */
+describe('[objectstack#34208] verdicts are asked on first use of the row actions, not on first paint', () => {
+  /** Let every effect the first paint scheduled run and every read it started land. */
+  async function firstPaintSettled() {
+    await waitFor(() => expect(screen.getByText(OTHER_ROW.name)).toBeInTheDocument());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+  }
+
+  const triggerOf = (label: string) =>
+    screen.getByText(label).closest('tr')!.querySelector<HTMLElement>('[data-testid="row-action-trigger"]')!;
+
+  it('the first paint of a list with rows sends no explain request, and rows keep the object-level verdict', async () => {
+    renderGrid();
+    await firstPaintSettled();
+    expect(server.calls).toEqual([]);
+    // Fail open meanwhile: the server would refuse this row, nobody asked yet.
+    const deniedRow = screen.getByText(OTHER_ROW.name).closest('tr');
+    expect(deniedRow?.querySelector('[data-testid="row-action-trigger"]')).not.toBeNull();
+  });
+
+  it('opening a row\'s "⋮" asks once for the page — one batch per operation — and the open menu narrows to the answer', async () => {
+    server.hold();
+    renderGrid();
+    await firstPaintSettled();
+    expect(server.calls).toEqual([]);
+
+    // Open the menu without a hover first (a keyboard press on the trigger).
+    triggerOf(OTHER_ROW.name).focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(server.calls).toHaveLength(2));
+    expect(server.calls.map((c) => c.operation).sort()).toEqual(['delete', 'update']);
+    for (const call of server.calls) expect(call.recordIds).toEqual(ROWS.map((r) => r.id));
+
+    // While the answer is on the wire the items show, inert: neither can be
+    // clicked into a write the answer is about to refuse.
+    const edit = screen.getByTestId('row-action-builtin-edit');
+    const del = screen.getByTestId('row-action-builtin-delete');
+    expect(edit).toHaveAttribute('aria-disabled', 'true');
+    expect(del).toHaveAttribute('aria-disabled', 'true');
+    expect(edit).toHaveAttribute('aria-busy', 'true');
+
+    server.release();
+    await settle(2);
+    // The answer refuses both, so the open menu has nothing left and the row
+    // grows no "⋮" (#3562's invariant, unchanged).
+    await waitFor(() => expect(screen.queryByTestId('row-action-builtin-edit')).toBeNull());
+    expect(screen.queryByTestId('row-action-builtin-delete')).toBeNull();
+    expect(screen.getByText(OTHER_ROW.name).closest('tr')?.querySelector('[data-testid="row-action-trigger"]')).toBeNull();
+  });
+
+  it('a second row\'s menu sends nothing new, and a permitted row\'s items are live once answered', async () => {
+    server.hold();
+    renderGrid();
+    await firstPaintSettled();
+    // The first row's menu, opened while the answer is on the wire.
+    expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
+    server.release();
+    await settle(2);
+
+    const ownTrigger = triggerOf(OWN_ROW.name);
+    await userEvent.click(ownTrigger);
+    const edit = screen.getByTestId('row-action-builtin-edit');
+    expect(edit).not.toHaveAttribute('aria-disabled');
+    expect(edit).not.toHaveAttribute('aria-busy');
+    await userEvent.keyboard('{Escape}');
+    expect(server.calls).toHaveLength(2);
+  });
+
+  it('a pointer reaching the actions cell asks before the menu opens, so the answer can be in hand by the click', async () => {
+    renderGrid();
+    await firstPaintSettled();
+    await userEvent.hover(triggerOf(OWN_ROW.name));
+    await settle(2);
+    // Answered before any menu opened: the denied row's "⋮" is already gone.
+    expect(screen.getByText(OTHER_ROW.name).closest('tr')?.querySelector('[data-testid="row-action-trigger"]')).toBeNull();
+  });
+
+  it('the row context menu is a use of the row actions too', async () => {
+    renderGrid();
+    await firstPaintSettled();
+    const cell = screen.getByText(OWN_ROW.name).closest('td')!;
+    act(() => {
+      fireEvent.contextMenu(cell, { button: 2, clientX: 40, clientY: 60 });
+    });
+    await settle(2);
+  });
+
+  it('a data change before any use asks nothing; after the first use it re-asks the changed row', async () => {
+    renderGrid();
+    await firstPaintSettled();
+    act(() => notifyDataChanged({ objectName: OBJECT, recordId: OTHER_ROW.id }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(server.calls).toEqual([]);
+
+    await reachRowActions();
+    await settle(2);
+    act(() => notifyDataChanged({ objectName: OBJECT, recordId: OWN_ROW.id }));
+    await settle(4);
+    expect(server.calls.slice(2).map((c) => c.recordIds)).toEqual([[OWN_ROW.id], [OWN_ROW.id]]);
+  });
+
+  it('CONTROL: a non-OK answer to the first use keeps the object-level items, live (fail open)', async () => {
+    server.ok = false;
+    renderGrid();
+    await firstPaintSettled();
+    await reachRowActions();
+    await settle(2);
+    expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
+    await userEvent.click(triggerOf(OTHER_ROW.name));
+    expect(screen.getByTestId('row-action-builtin-edit')).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByTestId('row-action-builtin-delete')).not.toHaveAttribute('aria-disabled');
+    await userEvent.keyboard('{Escape}');
   });
 });
