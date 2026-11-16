@@ -45,7 +45,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Uso de credencial",
           scim_refused: "Solicitud SCIM rechazada",
           audit_signing_key_change: "Cambio de clave de firma de auditoría",
-          dataset_query: "Consulta de conjunto de datos"
+          dataset_query: "Consulta de conjunto de datos",
+          scim_manager_unresolved: "Responsable SCIM no resuelto"
         }
       },
       user_id: {

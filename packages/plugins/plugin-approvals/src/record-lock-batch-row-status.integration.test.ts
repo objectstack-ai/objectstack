@@ -50,6 +50,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
@@ -190,6 +191,37 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
     expect(res.results[0].errors).toBeUndefined();
     expect(res.results[1].errors[0].httpStatus).toBe(409);
     expect((await engine.findOne('opportunity', { where: { id: freeId } }))?.amount).toBe(555);
+  });
+
+  // [#34060] The row carries the sentence in the WRITER's locale — the same
+  // sentence the by-id door answers (`record-lock-user-facing-message.test.ts`),
+  // because both are the one hook's one refusal. Only the sentence moves: the
+  // row's `code` and `httpStatus` are the ones pinned above, in every locale.
+  it('a zh-CN writer\'s row carries the Chinese sentence; an en-US writer\'s the English one', async () => {
+    const rowIn = async (locale: string) => {
+      const res: any = await protocol.updateManyData({
+        object: 'opportunity',
+        records: [{ id: lockedId, data: { amount: 999 } }],
+        context: { userId: 'u_writer', positions: [], permissions: [], locale },
+      });
+      expect(res.results[0].success).toBe(false);
+      return res.results[0].errors[0];
+    };
+    const zh = BUILTIN_OPERATION_MESSAGES['zh-CN'].record_locked
+      .replace('{{object}}', 'Opportunity').replace('{{title}}', 'Deal');
+    expect(await rowIn('zh-CN')).toEqual({ code: 'RECORD_LOCKED', message: `RECORD_LOCKED: ${zh}`, httpStatus: 409 });
+    expect(await rowIn('en-US')).toEqual({
+      code: 'RECORD_LOCKED',
+      message: "RECORD_LOCKED: Opportunity 'Deal' is locked while an approval is in progress, and cannot be edited until that approval is complete",
+      httpStatus: 409,
+    });
+    const upsert: any = await protocol.batchData({
+      object: 'opportunity',
+      request: { operation: 'upsert', records: [{ id: lockedId, data: { amount: 999 } }] },
+      context: { userId: 'u_writer', positions: [], permissions: [], locale: 'zh-CN' },
+    });
+    expect(upsert.results[0].errors[0]).toEqual({ code: 'RECORD_LOCKED', message: `RECORD_LOCKED: ${zh}`, httpStatus: 409 });
+    expect((await engine.findOne('opportunity', { where: { id: lockedId } }))?.amount).toBe(100);
   });
 
   it('the batchData upsert loop answers the same way — not just updateManyData', async () => {

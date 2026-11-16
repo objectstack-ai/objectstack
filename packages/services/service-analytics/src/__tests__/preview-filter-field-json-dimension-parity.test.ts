@@ -20,6 +20,10 @@
  * - The preview asks both gates in the live order: the JSON door after the
  *   dimension-field gate and before the field-type door, the `where` gate last
  *   among `ensureCube`'s and before the column-reference gate.
+ * - [ADR-0149 D1] A selection member the dataset does not declare (the raw
+ *   `payload`, `region_sum`, `amount + 1`) is refused by the closed-member rule
+ *   ahead of all of these, on every face alike; the JSON door is pinned
+ *   through the declared `payload_dim`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -163,20 +167,34 @@ describe('[#28257] an unknown filter field and a json dimension on the native, O
     });
   }
 
-  for (const dimension of ['payload', 'payload_dim'] as const) {
-    it(`refuses the json dimension '${dimension}' INVALID_FIELD / 400 param dimensions, with one message on every face`, async () => {
-      const err = await refusedAlike({ dimensions: [dimension], measures: ['total'] }, 'dimensions', 'payload');
-      expect(err.message).toContain('declares as json');
-    });
-  }
+  it("refuses the json dimension 'payload_dim' INVALID_FIELD / 400 param dimensions, with one message on every face", async () => {
+    const err = await refusedAlike({ dimensions: ['payload_dim'], measures: ['total'] }, 'dimensions', 'payload');
+    expect(err.message).toContain('declares as json');
+  });
 
-  for (const [label, selection, param, field] of [
-    ['a json dimension beside a bogus filter: the json door', { dimensions: ['payload'], measures: ['total'], runtimeFilter: { ghost: 1 } }, 'dimensions', 'payload'],
-    ["a json dimension beside 'region_sum': the json door", { dimensions: ['payload'], measures: ['region_sum'] }, 'dimensions', 'payload'],
-    ["'amount + 1' beside a bogus filter: the where gate", { dimensions: ['region'], measures: ['amount + 1'], runtimeFilter: { ghost: 1 } }, 'where', 'ghost'],
+  it("CONTROL: the json field 'payload' named raw is not a declared dimension: the closed-member refusal, alike on every face", async () => {
+    const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, { dimensions: ['payload'], measures: ['total'] }))));
+    for (const err of refusals) {
+      expect(err).toMatchObject({ code: 'INVALID_FIELD', status: 400, param: 'dimensions', member: 'payload' });
+      expect(err.message).toContain('The dataset "os28257_deals" does not declare the dimension "payload".');
+    }
+    expect(refusals[2].message).toBe(refusals[0].message);
+  });
+
+  it('two mistakes, a json dimension beside a bogus filter: the json door first, on every face', async () => {
+    await refusedAlike({ dimensions: ['payload_dim'], measures: ['total'], runtimeFilter: { ghost: 1 } }, 'dimensions', 'payload');
+  });
+
+  for (const [label, selection, member] of [
+    ["a json dimension beside 'region_sum'", { dimensions: ['payload_dim'], measures: ['region_sum'] }, 'region_sum'],
+    ["'amount + 1' beside a bogus filter", { dimensions: ['region'], measures: ['amount + 1'], runtimeFilter: { ghost: 1 } }, 'amount + 1'],
   ] as const) {
-    it(`two mistakes, ${label} first, on every face`, async () => {
-      await refusedAlike(selection, param, field);
+    it(`two mistakes, ${label}: the undeclared measure first, on every face`, async () => {
+      const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, selection))));
+      for (const err of refusals) {
+        expect(err).toMatchObject({ code: 'INVALID_FIELD', status: 400, param: 'measures', member });
+      }
+      expect(refusals[2].message).toBe(refusals[0].message);
     });
   }
 });
