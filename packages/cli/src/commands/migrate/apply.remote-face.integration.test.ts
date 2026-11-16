@@ -457,7 +457,9 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
     // [#33724] The relax landed in the case before: it is drift no more.
     expect(kinds(apply.payload.notApplied)).toEqual([]);
     expect(kinds(apply.payload.skipped)).toEqual([DROP, TIGHTEN].sort());
-    expect(apply.payload.message).toBeUndefined();
+    // With the relax applied, nothing is left that this run may apply, and the
+    // apply says so (measured on sqld 0.24.33, record 6921391723).
+    expect(apply.payload.message).toBe('nothing_safe_to_apply');
     expect(await remote(columnsOf)).toMatchObject({ code: false, memo: false, legacy_23848: false });
   }, CASE_TIMEOUT_MS);
 
