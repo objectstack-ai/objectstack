@@ -1825,7 +1825,7 @@ function resumeDoorError(
     const envelope = (response?.body as {
         error?: { code?: unknown; message?: unknown; details?: unknown; userMessage?: unknown };
     } | undefined)?.error;
-    return Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
+    const thrown = Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
         code: typeof envelope?.code === 'string' ? envelope.code : undefined,
         status: response?.status ?? httpStatus,
         ...(envelope?.details !== undefined ? { details: envelope.details } : {}),
@@ -1835,6 +1835,26 @@ function resumeDoorError(
         // envelope's top level, never folded into `message`.
         ...(typeof envelope?.userMessage === 'string' ? { userMessage: envelope.userMessage } : {}),
     });
+    // [#34386] The host's resume door answers this refusal with the envelope
+    // it was built from (`resumeDoorAnswerOf`), `details` included.
+    resumeDoorEnvelopes.set(thrown, response);
+    return thrown;
+}
+
+/**
+ * [#34386] Each refusal {@link resumeDoorError} built, keyed to the envelope
+ * `deps.error` built for it. The MCP door throws the refusal and its tool
+ * reads `code`, `status` and `details` off it; the host's resume door answers
+ * that same envelope. A generic thrown-value reader would keep the code and
+ * the status but drop `details` (a confirmation refusal's `reason`, a shared
+ * flow name's `candidates`), so the host door does not read it that way.
+ */
+const resumeDoorEnvelopes = new WeakMap<object, { status: number; body: any }>();
+
+/** [#34386] The host resume door's answer to a throw: the door's own envelope, or the dispatcher's reader for anything else. */
+function resumeDoorAnswerOf(deps: DomainHandlerDeps, err: unknown): ActionDispatchAnswer {
+    const envelope = err !== null && typeof err === 'object' ? resumeDoorEnvelopes.get(err) : undefined;
+    return (envelope ?? deps.errorFromThrown(err, 500)) as ActionDispatchAnswer;
 }
 
 /**
@@ -2223,7 +2243,7 @@ export async function resumeActionRunRequest(
         });
         return deps.success(answer) as ActionDispatchAnswer;
     } catch (err) {
-        return deps.errorFromThrown(err, 500) as ActionDispatchAnswer;
+        return resumeDoorAnswerOf(deps, err);
     }
 }
 
