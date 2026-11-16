@@ -66,7 +66,7 @@ export function crmArtifact(iterated: boolean) {
     manifest: { id: `com.example.${NS}`, namespace: NS },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
   };
@@ -232,6 +232,7 @@ class ScriptedDriver implements AgentDriver {
     if (op.outcome.kind === 'applied') {
       if (op.kind === 'create') rows.push({ id: `new-${op.id}`, ...op.values });
       if (op.kind === 'update') Object.assign(rows.find((r) => r.id === op.target)!, op.values);
+      if (op.kind === 'delete') app.rows[op.object] = rows.filter((r) => r.id !== op.target);
       app.audit[op.target ?? `new-${op.id}`] = `u-${op.actingAs}`;
       return turn('Done.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: '{"ok":true}' }]);
     }

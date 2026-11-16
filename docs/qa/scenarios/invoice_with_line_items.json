@@ -197,9 +197,7 @@
           "state": [
             {"object": "invoice_line", "id": "l5", "absent": true},
             {"object": "invoice_line", "id": "l1", "values": {"product": "Widget"}},
-            {"object": "invoice_line", "id": "l2", "values": {"product": "Gadget"}},
-            {"object": "invoice_line", "id": "l3", "values": {"product": "Widget"}},
-            {"object": "invoice_line", "id": "l4", "values": {"product": "Service"}}
+            {"object": "invoice_line", "id": "l2", "values": {"product": "Gadget"}}
           ]
         }
       },
