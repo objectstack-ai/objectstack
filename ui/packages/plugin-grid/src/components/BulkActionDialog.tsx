@@ -574,7 +574,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
               <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
               <span>
                 {t('grid.bulk.aggregateNotCompleted', {
-                  defaultValue: 'The action did not complete for the selected records. Records it changed before stopping keep their changes.',
+                  defaultValue: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
                 })}
               </span>
             </div>

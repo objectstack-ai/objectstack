@@ -553,7 +553,7 @@ const pt = {
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
       succeededRecords: "Registros concluídos",
-      aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Os registros alterados antes da interrupção mantêm as alterações.",
+      aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Alguns registros podem já ter sido alterados; ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",

@@ -543,7 +543,7 @@ const ko = {
       succeeded: "성공 {{count}} / {{total}}",
       resultFailed: " · 실패 {{count}}",
       succeededRecords: "성공한 레코드",
-      aggregateNotCompleted: "선택한 레코드에 대한 작업이 완료되지 않았습니다. 중단되기 전에 변경된 레코드는 변경 내용이 유지됩니다.",
+      aggregateNotCompleted: "선택한 레코드에 대한 작업이 완료되지 않았습니다. 일부 레코드는 이미 변경되었을 수 있습니다. 닫으면 목록에 현재 값이 표시됩니다.",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
       cancel: "취소",

@@ -553,6 +553,13 @@ describe('an aggregate rejection is one outcome for the selection (objectstack#3
     expect(screen.getByTestId('bulk-aggregate-rejection')).toHaveTextContent(
       'The action did not complete for the selected records.',
     );
+    // The client cannot know whether the handler kept any write (a
+    // transactional body keeps none), so the sentence is modal — it never
+    // asserts that changed records keep their changes.
+    expect(screen.getByTestId('bulk-aggregate-rejection')).toHaveTextContent(
+      'Some records may already have been changed; the list shows their current values when you close this.',
+    );
+    expect(screen.queryByText(/keep their changes/)).not.toBeInTheDocument();
     expect(screen.getAllByText(USER_TEXT)).toHaveLength(1);
     expect(screen.queryByText(PLATFORM_TEXT, { exact: false })).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-testid^="bulk-error-row-"]')).toHaveLength(0);
