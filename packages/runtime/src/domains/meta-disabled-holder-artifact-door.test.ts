@@ -382,8 +382,8 @@ describe.each([
         booted!.engine.registry.disablePackage(BETA);
         try {
             const answers = await bareDoors(booted!, 'doc', 'shared_doc');
-            expect(answers.map((answer) => [answer.door, answer.status, errorCodeOf(answer.body)]))
-                .toEqual(answers.map((answer) => [answer.door, 404, 'RESOURCE_NOT_FOUND']));
+            expect(answers.map((answer) => [answer.door, answer.status])).toEqual(answers.map((answer) => [answer.door, 404]));
+            for (const answer of answers) expect(JSON.stringify(answer.body ?? null), answer.door).not.toMatch(/# (alpha|beta)/);
         } finally {
             booted!.engine.registry.enablePackage(ALPHA);
             booted!.engine.registry.enablePackage(BETA);

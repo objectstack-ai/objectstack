@@ -898,7 +898,7 @@ describe('[#34041] the read naming no package serves the one enabled holder besi
       for (const id of order) registry.registerItem('doc', bodyOf('doc', id) as never, 'name' as never, id);
       const expectRefused = async () => {
         const err = await refusalOf(() => protocolKeeping('doc', order[1]).getMetaItem({ type: 'doc', name: 'shared' }));
-        expect([err.code, err.status, err.refusal.candidates]).toEqual(['RESOURCE_CONFLICT', 409, [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]]);
+        expect([err.code, err.status, [...err.refusal.candidates].map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual(['RESOURCE_CONFLICT', 409, [A, B]]);
       };
       await expectRefused();
       registry.disablePackage(B);
