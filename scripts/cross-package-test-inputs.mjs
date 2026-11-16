@@ -720,7 +720,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/drivers/driver-sql/src/sql-driver.ts',
       'packages/drivers/driver-sql/src/schema-drift.ts',
       // The facade form of that first file (#30147). The codemod
-      // (`scripts/codemod-split-sql-driver.mjs`) left `createColumn` and the
+      // (split by #30139 and #30363) left `createColumn` and the
       // other members those pins slice on the class as one-call stubs and moved
       // their bodies into `sql-driver-*.ts` facet modules, and the top-level
       // declarations into the leaf. The five generate-* pins read `SqlDriver`
