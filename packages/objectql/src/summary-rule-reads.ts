@@ -14,7 +14,7 @@
  * row, as it does outside one, and a rule's answer during a bulk update is the
  * answer one-by-one updates give, for every summary function.
  *
- * "Read by a rule" is two classes, judged on the summary field that is read,
+ * "Read by a rule" is three classes, judged on the summary field that is read,
  * never on the object written:
  *
  * - (i) a validation rule of ANY object that reads the field one hop through a
@@ -23,7 +23,19 @@
  *   ({@link collectPredicateRelationships}) — the class #25579 covers for a
  *   multi-row insert;
  * - (ii) a field-level `requiredWhen` / `readonlyWhen` of a detail object that
- *   reads the field on its `parent` (the master-detail header), by field name.
+ *   reads the field on its `parent` (the master-detail header), by field name;
+ * - (iii) a rule of the summary's OWN object that reads the field on `record`
+ *   or `previous`: a validation rule (a CEL condition, or the field a
+ *   `state_machine` / `format` / `json_schema` rule names) or a field-level
+ *   `requiredWhen` / `readonlyWhen`. The recompute's own write is an update of
+ *   that row, judged by those rules: one by one they judge every intermediate
+ *   value (an atomic move A→B then B→A over a cap refuses the first), so
+ *   deferred they would judge only the last.
+ *
+ * Then the set is closed over what the fields read are computed from: a
+ * formula or stored computed field a rule reads reads what its expression
+ * reads, and a summary over a summary that a rule reads makes the summary it
+ * aggregates read too, so the chain recomputes row by row up to the rule.
  *
  * ⛔ A `parent.` predicate that reads a field which is not a summary (the
  * showcase invoice line's `parent.status == 'paid'`) names that field and no
@@ -43,6 +55,36 @@ const PARENT_ROOT = 'parent';
 /** The field-level predicates that may read `parent` (#4889, #4977). */
 const PARENT_PREDICATE_SLOTS = ['requiredWhen', 'readonlyWhen'] as const;
 
+/** The CEL roots a rule reads its own row under: the row, and the row before the write. */
+const OWN_ROW_ROOTS = ['record', 'previous'] as const;
+
+/** Every field `source` reads on `root`, as a value or through it. Empty when it does not parse. */
+function fieldsReadOn(source: string, root: string): string[] {
+  const analysis = analyzeRelationshipTraversals(source, root);
+  return analysis ? [...analysis.bareFields, ...analysis.traversals.keys()] : [];
+}
+
+/**
+ * (iii) The fields of its own row a validation rule reads: its CEL condition
+ * (`script`, `cross_field`, a `conditional`'s `when`, at every depth) on
+ * `record` or `previous`, and the field a `state_machine` / `format` /
+ * `json_schema` rule names.
+ */
+function ownFieldsReadByRule(rule: unknown, out: Set<string>, depth = 0): void {
+  if (!rule || typeof rule !== 'object' || depth > 8) return;
+  const r = rule as { type?: unknown; condition?: unknown; when?: unknown; then?: unknown; otherwise?: unknown; field?: unknown };
+  for (const slot of [r.condition, r.when]) {
+    const source = celSource(slot);
+    if (!source) continue;
+    for (const root of OWN_ROW_ROOTS) for (const field of fieldsReadOn(source, root)) out.add(field);
+  }
+  if (typeof r.field === 'string' && r.field) out.add(r.field);
+  if (r.type === 'conditional') {
+    ownFieldsReadByRule(r.then, out, depth + 1);
+    ownFieldsReadByRule(r.otherwise, out, depth + 1);
+  }
+}
+
 /** The CEL source of an authored predicate slot, or `undefined` when it is not CEL. */
 function celSource(slot: unknown): string | undefined {
   if (typeof slot === 'string') return slot || undefined;
@@ -57,18 +99,82 @@ export function ruleReadKey(object: string, field: string): string {
   return `${object}.${field}`;
 }
 
+/** An object definition as this module reads it. */
+type ObjectDef = { name?: unknown; fields?: Record<string, Record<string, unknown> | null | undefined>; validations?: unknown[] } | null | undefined;
+
+/** The parts of a roll-up descriptor the chain closure reads. */
+export interface ChainLink {
+  parentObject: string;
+  summaryField: string;
+  childObject: string;
+  sourceField?: string;
+  filter?: Record<string, unknown>;
+}
+
 /**
- * Every `<object>.<field>` a rule of `objects` reads on ANOTHER row: through a
- * reference, one hop (class i), or on the master-detail header by a
- * field-level predicate (class ii). A field that is not a summary may be in
- * the set; the caller asks only about summary fields.
+ * The `<object>.<field>` keys a CEL source reads, evaluated against a row of
+ * `object`: its own fields on `record` (as a value or as the reference a hop
+ * goes through), and one hop through a reference to the target's field.
  */
-export function summaryFieldsReadByRules(objects: Iterable<unknown>): Set<string> {
+function keysReadFrom(source: string, object: string, fields: NonNullable<NonNullable<ObjectDef>['fields']>, out: Set<string>): void {
+  const analysis = analyzeRelationshipTraversals(source, 'record');
+  if (!analysis) return;
+  for (const field of analysis.bareFields) out.add(ruleReadKey(object, field));
+  for (const [reference, related] of analysis.traversals) {
+    out.add(ruleReadKey(object, reference));
+    const target = referenceTargetOf(fields[reference] as never);
+    if (!target) continue;
+    for (const field of related) out.add(ruleReadKey(target, field));
+  }
+}
+
+/**
+ * Every `<object>.<field>` a rule of `objects` reads, closed over what those
+ * fields are computed from. Direct reads: on another row through a reference,
+ * one hop (class i), on the master-detail header by a field-level predicate
+ * (class ii), or on its own row (class iii). Then, to a fixed point:
+ *
+ * - a computed field read (a `formula`, or a stored field with an
+ *   `expression`) makes what its expression reads read too, on its own row and
+ *   one hop through a reference: a rule reading `record.project.remaining`,
+ *   where `remaining` is `record.budget - record.spent_total`, reads the
+ *   summary `spent_total`;
+ * - a summary read that aggregates a field of its child rows (`sourceField`,
+ *   from `links`) makes that field read; a filtered one makes every summary of
+ *   its child object read (the filter may name any of them). So a rule on the
+ *   top of a chain of summaries keeps every link under it recomputing row by
+ *   row, as one by one, where the rule judges each step.
+ *
+ * A field that is not a summary may be in the set; the caller asks only about
+ * summary fields.
+ */
+export function summaryFieldsReadByRules(objects: Iterable<unknown>, links: Iterable<ChainLink> = []): Set<string> {
   const out = new Set<string>();
+  /** `<object>.<field>` → the CEL source a computed field is computed from. */
+  const computed = new Map<string, { source: string; object: string; fields: NonNullable<NonNullable<ObjectDef>['fields']> }>();
   for (const candidate of objects) {
-    const schema = candidate as { fields?: Record<string, Record<string, unknown> | null | undefined>; validations?: unknown[] } | null | undefined;
+    const schema = candidate as ObjectDef;
     const fields = schema?.fields;
     if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    const name = typeof schema?.name === 'string' && schema.name ? schema.name : undefined;
+    if (name) {
+      for (const [field, def] of Object.entries(fields)) {
+        const source = def && typeof def === 'object' ? celSource(def.expression) : undefined;
+        if (source) computed.set(ruleReadKey(name, field), { source, object: name, fields });
+      }
+    }
+    // (iii) A rule reading its own row: validation rules, then field-level predicates.
+    const own = new Set<string>();
+    if (Array.isArray(schema?.validations)) for (const rule of schema.validations) ownFieldsReadByRule(rule, own);
+    for (const def of Object.values(fields)) {
+      if (!def || typeof def !== 'object') continue;
+      for (const slot of PARENT_PREDICATE_SLOTS) {
+        const source = celSource(def[slot]);
+        if (!source) continue;
+        for (const root of OWN_ROW_ROOTS) for (const field of fieldsReadOn(source, root)) own.add(field);
+      }
+    }
+    if (name) for (const field of own) out.add(ruleReadKey(name, field));
     // (i) A validation rule reading through a reference, one hop.
     for (const [reference, related] of collectPredicateRelationships(schema as never)) {
       const target = referenceTargetOf(fields[reference] as never);
@@ -82,9 +188,7 @@ export function summaryFieldsReadByRules(objects: Iterable<unknown>): Set<string
       for (const slot of PARENT_PREDICATE_SLOTS) {
         const source = celSource(def[slot]);
         if (!source) continue;
-        const analysis = analyzeRelationshipTraversals(source, PARENT_ROOT);
-        if (!analysis) continue;
-        const read = [...analysis.bareFields, ...analysis.traversals.keys()];
+        const read = fieldsReadOn(source, PARENT_ROOT);
         if (read.length === 0) continue;
         // No single master-detail relation: `parent` is unbound and the
         // predicate faults where it is judged; it reads no header field.
@@ -93,6 +197,25 @@ export function summaryFieldsReadByRules(objects: Iterable<unknown>): Set<string
         for (const field of read) out.add(ruleReadKey(master, field));
       }
     }
+  }
+  // The closure: computed fields, then summary chains, to a fixed point.
+  const chain = [...links];
+  let grew = true;
+  while (grew) {
+    grew = false;
+    const add = new Set<string>();
+    for (const key of out) {
+      const formula = computed.get(key);
+      if (formula) keysReadFrom(formula.source, formula.object, formula.fields, add);
+    }
+    for (const link of chain) {
+      if (!out.has(ruleReadKey(link.parentObject, link.summaryField))) continue;
+      if (link.sourceField) add.add(ruleReadKey(link.childObject, link.sourceField));
+      if (link.filter && Object.keys(link.filter).length > 0) {
+        for (const other of chain) if (other.parentObject === link.childObject) add.add(ruleReadKey(other.parentObject, other.summaryField));
+      }
+    }
+    for (const key of add) if (!out.has(key)) { out.add(key); grew = true; }
   }
   return out;
 }

@@ -1108,6 +1108,86 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
       lineWith({ validations: [{ name: 'named', type: 'script', severity: 'error', message: 'named', condition: "record.inv.name == 'never'" }] });
       expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
     });
+
+    /** `inv` as registered above, with `extra` fields and validations of its own. */
+    const invWith = (extra: { fields?: Record<string, unknown>; validations?: unknown[] }) => engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        ...(extra.fields ?? {}),
+      },
+      ...(extra.validations ? { validations: extra.validations } : {}),
+    } as any);
+
+    it('(iii) a validation rule of the parent reading its OWN summary: each row recomputes at once, so the rule judges every step', async () => {
+      invWith({ validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.line_count > 1000' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) the same through `previous`, and through a conditional rule at depth', async () => {
+      invWith({ validations: [{ name: 'grow', type: 'conditional', when: "record.name != ''", then: { name: 'g', type: 'script', severity: 'error', message: 'g', condition: 'previous != null && previous.line_total > 100000' } }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a field-level requiredWhen of the parent reading its own summary', async () => {
+      invWith({ fields: { memo: { type: 'text', requiredWhen: 'record.line_total > 100000' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a rule of the parent reading only its own non-summary fields keeps the deferral', async () => {
+      invWith({ validations: [{ name: 'named', type: 'script', severity: 'error', message: 'named', condition: "record.name == 'never'" }] });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    /** `inv` with a formula over its own summary: `headroom = 1000000 - line_total`. */
+    const withHeadroom = (extra: { fields?: Record<string, unknown>; validations?: unknown[] } = {}) => invWith({
+      fields: { headroom: { type: 'formula', returnType: 'number', expression: '1000000 - record.line_total' }, ...(extra.fields ?? {}) },
+      ...(extra.validations ? { validations: extra.validations } : {}),
+    });
+
+    it('(i) through a formula: a child rule reading the parent formula computed from its summary', async () => {
+      withHeadroom();
+      lineWith({ validations: [{ name: 'room', type: 'script', severity: 'error', message: 'room', condition: 'record.inv.headroom < 0' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(ii) through a formula: a parent. predicate reading the header formula computed from its summary', async () => {
+      withHeadroom();
+      lineWith({ fields: { note: { type: 'text', requiredWhen: 'parent.headroom < 0' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) through a formula: a rule of the parent reading its own formula computed from its summary', async () => {
+      withHeadroom({ validations: [{ name: 'room', type: 'script', severity: 'error', message: 'room', condition: 'record.headroom != null && record.headroom < 0' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('through a stored computed field: an expression on a stored field of the parent reading its summary', async () => {
+      invWith({ fields: { doubled: { type: 'number', expression: 'record.line_total * 2' } } });
+      lineWith({ validations: [{ name: 'dbl', type: 'script', severity: 'error', message: 'dbl', condition: 'record.inv.doubled > 100000000' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a rule reading a formula that reads no summary keeps the deferral', async () => {
+      invWith({ fields: { shout: { type: 'formula', returnType: 'text', expression: 'record.name.upperAscii()' } } });
+      lineWith({ validations: [{ name: 'shout', type: 'script', severity: 'error', message: 'shout', condition: "record.inv.shout == 'NEVER'" }] });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a chain: a rule on the grandparent reading a summary over the parent summary keeps the parent summary per row', async () => {
+      engine.registry.registerObject({
+        name: 'region',
+        fields: {
+          name: { type: 'text' },
+          grand_total: { type: 'summary', summaryOperations: { object: 'inv', field: 'line_total', function: 'sum' } },
+        },
+        validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.grand_total > 1000000' }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
   });
 
   it('a scope with no roll-up write runs nothing', async () => {

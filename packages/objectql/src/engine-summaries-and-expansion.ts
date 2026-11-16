@@ -145,15 +145,17 @@ const ruleReadsByIndex = new WeakMap<object, Set<string>>();
 
 /**
  * [#33795, ruling 6928862195 B] Does a rule read any of `descriptors`'
- * summary fields? Then this recompute runs at once inside a batch scope, so a
- * rule's answer during a bulk update is the one-by-one answer
+ * summary fields (on another row, or on the summary's own row, through a
+ * formula or stored computed field, and up a chain of summaries to the
+ * rule)? Then this recompute runs at once inside a batch scope, so a rule's
+ * answer during a bulk update is the one-by-one answer
  * (`summary-rule-reads.ts`).
  */
 function rollUpReadByARule(host: Pick<SummariesAndExpansionHost, '_registry' | 'summaryIndex'>, descriptors: readonly SummaryDescriptor[]): boolean {
   const index = host.summaryIndex;
   let read = index ? ruleReadsByIndex.get(index) : undefined;
   if (!read) {
-    read = summaryFieldsReadByRules(host._registry.getAllObjects());
+    read = summaryFieldsReadByRules(host._registry.getAllObjects(), index ? [...index.values()].flat() : []);
     if (index) ruleReadsByIndex.set(index, read);
   }
   return descriptors.some((d) => read.has(ruleReadKey(d.parentObject, d.summaryField)));
@@ -578,8 +580,9 @@ export class SummariesAndExpansionFacet {
     // another (a hook's `ctx.api.transaction`, a nested atomic batch) may
     // commit before the scope ends, so it recomputes now, inside it. A
     // roll-up a rule reads is not recorded either (ruling 6928862195 B): it
-    // recomputes after each row, so the next row's rule reads it as
-    // one-by-one updates would.
+    // recomputes after each row, so the next row's rule, and the parent's
+    // own rule judging the recompute's write, read it as one-by-one updates
+    // would.
     const scope = this.summaryBatchStore.getStore();
     if (scope && !scope.closed && writeTransactionOf(this, execCtx) === scope.transaction && !rollUpReadByARule(this, descriptors)) {
       const fkFields = [...new Set(descriptors.map((d) => d.fkField))];
@@ -752,8 +755,8 @@ export class SummariesAndExpansionFacet {
    * and realtime run where they run outside a scope. A summary field a rule
    * reads is never deferred (ruling 6928862195 B, `summary-rule-reads.ts`):
    * its recompute runs after each row, inside the scope, so the next row's
-   * rule reads what one-by-one writes would have it read, for every summary
-   * function. A hook or flow step that reads a parent's summary during the
+   * rule, and a rule of the parent judging the recompute's own write, reads
+   * what one-by-one writes would have it read, for every summary function. A hook or flow step that reads a parent's summary during the
    * batch reads the value from before the batch, as it does during a
    * multi-row insert.
    *

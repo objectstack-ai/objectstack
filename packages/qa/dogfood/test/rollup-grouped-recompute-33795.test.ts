@@ -154,7 +154,103 @@ const RULE_OBJECTS = [
   })),
 ];
 
-const OBJECTS = [...rollupPair(0), ...rollupPair(1), ...rollupPair(2), ...KIND_OBJECTS, ...RULE_OBJECTS];
+/**
+ * [#33795, ruling 6928862195 B, class iii] An invoice whose OWN rule caps its
+ * own roll-up: at most two lines. The recompute's write is an update of the
+ * invoice, judged by that rule, so one by one it judges every intermediate
+ * count.
+ */
+const CAP_TEXT = 'An invoice holds at most two lines.';
+/**
+ * The capped invoice and its lines; `viaComputed` caps a stored computed field
+ * over the count (`room = 2 - line_count`, recomputed on the recompute's own
+ * write) instead of the count itself.
+ */
+function capObjects(parent: string, line: string, viaComputed: boolean) {
+  return [
+    {
+      name: parent,
+      label: viaComputed ? 'Capped invoice (computed)' : 'Capped invoice',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        line_count: { type: 'summary', label: 'Lines', summaryOperations: { object: line, function: 'count' } },
+        ...(viaComputed ? { room: { type: 'number', label: 'Room', expression: '2 - record.line_count' } } : {}),
+      },
+      validations: [{
+        name: 'cap_lines', type: 'script', severity: 'error', message: CAP_TEXT,
+        condition: viaComputed ? 'record.room != null && record.room < 0' : 'record.line_count != null && record.line_count > 2',
+      }],
+    },
+    {
+      name: line,
+      label: viaComputed ? 'Capped invoice line (computed)' : 'Capped invoice line',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        invoice: { type: 'lookup', label: 'Invoice', reference: parent },
+      },
+    },
+  ];
+}
+const CAP = { parent: 'r33795_cap', line: 'r33795_cap_line' };
+const CCAP = { parent: 'r33795_ccap', line: 'r33795_ccap_line' };
+
+/**
+ * [#33795, ruling 6928862195 B, through a computed field] (i) a contact's rule
+ * reads the supplier's formula `slots = 1 - primary_count` one hop (the hop's
+ * read computes formulas); (ii) a line's `readonlyWhen` reads the header's
+ * stored computed field `room = 1 - flagged_count` on `parent` (the header is
+ * read as stored). Neither rule names the summary.
+ */
+const FSUP = 'r33795_fsup';
+const FSUP_CONTACT = 'r33795_fsup_contact';
+const FSUP_TEXT = 'No primary slot is left on this supplier.';
+const FHDR = 'r33795_fhdr';
+const FHDR_LINE = 'r33795_fhdr_line';
+const FORMULA_OBJECTS = [
+  {
+    name: FSUP,
+    label: 'Formula supplier',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      primary_count: { type: 'summary', label: 'Primaries', summaryOperations: { object: FSUP_CONTACT, function: 'count', filter: { is_primary: true } } },
+      slots: { type: 'formula', label: 'Slots', returnType: 'number', expression: '1 - record.primary_count' },
+    },
+  },
+  {
+    name: FSUP_CONTACT,
+    label: 'Formula supplier contact',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      supplier: { type: 'lookup', label: 'Supplier', reference: FSUP },
+      is_primary: { type: 'boolean', label: 'Primary' },
+    },
+    validations: [{ name: 'slots_left', type: 'script', severity: 'error', message: FSUP_TEXT, condition: 'record.is_primary == true && record.supplier.slots != null && record.supplier.slots < 1' }],
+  },
+  {
+    name: FHDR,
+    label: 'Formula header',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      flagged_count: { type: 'summary', label: 'Flagged', summaryOperations: { object: FHDR_LINE, function: 'count', filter: { flag: true } } },
+      room: { type: 'number', label: 'Room', expression: '1 - record.flagged_count' },
+    },
+  },
+  {
+    name: FHDR_LINE,
+    label: 'Formula header line',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      header: { type: 'master_detail', label: 'Header', reference: FHDR, deleteBehavior: 'cascade' },
+      flag: { type: 'boolean', label: 'Flag' },
+      note: { type: 'text', label: 'Note', readonlyWhen: 'parent.room != null && parent.room < 1' },
+    },
+  },
+];
+
+const OBJECTS = [
+  ...rollupPair(0), ...rollupPair(1), ...rollupPair(2), ...KIND_OBJECTS, ...RULE_OBJECTS,
+  ...capObjects(CAP.parent, CAP.line, false), ...capObjects(CCAP.parent, CCAP.line, true), ...FORMULA_OBJECTS,
+];
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -476,6 +572,99 @@ describe.each(CELLS)('a roll-up a rule reads is not deferred (#33795 B): $name',
       expect(got[1]).toEqual(second);
       expect(await batch.state()).toEqual(before);
     });
+  }
+});
+
+/** One bulk update a rule judges, set up on twin data: the door's object, its records, and the state to compare. */
+type ParityCase = (engine: ObjectQL, tag: string) => Promise<{ object: string; records: Array<{ id: string; data: Record<string, unknown> }>; state: () => Promise<unknown> }>;
+
+/** The capped invoice: A holds one line, B two; the batch moves A's line onto B and one of B's onto A. */
+const capCase = ({ parent, line }: { parent: string; line: string }): ParityCase => async (engine, tag) => {
+  const [a, b] = await engine.insert(parent, [{ name: `${tag}A` }, { name: `${tag}B` }], SYSTEM) as Array<{ id: string }>;
+  const [a1, b1] = await engine.insert(line, [
+    { name: `${tag}a1`, invoice: a.id }, { name: `${tag}b1`, invoice: b.id }, { name: `${tag}b2`, invoice: b.id },
+  ], SYSTEM) as Array<{ id: string }>;
+  return {
+    object: line,
+    records: [{ id: a1.id, data: { invoice: b.id } }, { id: b1.id, data: { invoice: a.id } }],
+    state: async () => ({
+      counts: await Promise.all([a, b].map(async (p) => num((await engine.findOne(parent, { where: { id: p.id } }, SYSTEM) as any).line_count))),
+      lines: (await engine.find(line, { where: { invoice: { $in: [a.id, b.id] } }, orderBy: [{ field: 'name', order: 'asc' }] }, SYSTEM) as any[])
+        .map((l) => ({ name: String(l.name).slice(tag.length), on: l.invoice === a.id ? 'A' : 'B' })),
+    }),
+  };
+};
+
+/** Two contacts of one supplier set primary: the formula `slots` is 1 before the batch, 0 after the first. */
+const slotsCase: ParityCase = async (engine, tag) => {
+  const [supplier] = await engine.insert(FSUP, [{ name: `${tag}S` }], SYSTEM) as Array<{ id: string }>;
+  const contacts = await engine.insert(FSUP_CONTACT, [0, 1].map((k) => ({ name: `${tag}${k}`, supplier: supplier.id, is_primary: false })), SYSTEM) as Array<{ id: string }>;
+  return {
+    object: FSUP_CONTACT,
+    records: contacts.map((c) => ({ id: c.id, data: { is_primary: true } })),
+    state: async () => ({
+      primaries: num((await engine.findOne(FSUP, { where: { id: supplier.id } }, SYSTEM) as any).primary_count),
+      contacts: (await engine.find(FSUP_CONTACT, { where: { supplier: supplier.id }, orderBy: [{ field: 'name', order: 'asc' }] }, SYSTEM) as any[]).map((c) => !!c.is_primary),
+    }),
+  };
+};
+
+/** Two lines of one header flagged, each with a note: the header's computed `room` is 1 before the batch and 0 after the first, so one by one the second note is locked and dropped. */
+const roomCase: ParityCase = async (engine, tag) => {
+  const [header] = await engine.insert(FHDR, [{ name: `${tag}H` }], SYSTEM) as Array<{ id: string }>;
+  const lines = await engine.insert(FHDR_LINE, [0, 1].map((k) => ({ name: `${tag}${k}`, header: header.id, flag: false })), SYSTEM) as Array<{ id: string }>;
+  return {
+    object: FHDR_LINE,
+    records: lines.map((l) => ({ id: l.id, data: { flag: true, note: 'set' } })),
+    state: async () => ({
+      flagged: num((await engine.findOne(FHDR, { where: { id: header.id } }, SYSTEM) as any).flagged_count),
+      lines: (await engine.find(FHDR_LINE, { where: { header: header.id }, orderBy: [{ field: 'name', order: 'asc' }] }, SYSTEM) as any[]).map((l) => ({ flag: !!l.flag, note: l.note ?? null })),
+    }),
+  };
+};
+
+/**
+ * [#33795, ruling 6928862195 B] The classes a rule reads a roll-up through that
+ * the supplier describe above does not cover: (iii) a rule of the parent on its
+ * own roll-up, and a rule reading the roll-up through a computed field: a
+ * formula one hop (i), a stored computed field on `parent` (ii) and on its own
+ * row (iii). Each case's pre-batch value admits
+ * the whole batch where one-by-one refuses a step. The oracle is the same door
+ * on the same engine with the member hidden: today's per-row recompute, so
+ * "rules do not change against today" is pinned as stated, the answer and the
+ * stored rows alike, atomic and `continueOnError`.
+ */
+const refused = (answer: any): boolean => answer.success === false;
+const PARITY_CASES: Array<{ name: string; make: ParityCase; live: (answer: any, state: any) => boolean }> = [
+  // Invoice A holds one line, B two (the cap). Moving A's line onto B makes
+  // B hold 3, and B's own rule refuses that recompute; moving one of B's
+  // lines back leaves B at 2, so deferred the rule would see only B = 2.
+  { name: '(iii) the parent caps its own count', make: capCase(CAP), live: refused },
+  { name: '(iii) the parent caps a stored computed field over its own count', make: capCase(CCAP), live: refused },
+  { name: '(i) a contact rule reads the supplier formula over its count, one hop', make: slotsCase, live: refused },
+  { name: '(ii) a line readonlyWhen reads the header computed field over its count on parent', make: roomCase, live: (_answer, state) => state.lines[1].note === null },
+];
+
+describe.each(CELLS)('a roll-up a rule reads through its own row or a formula is not deferred (#33795 B): $name', ({ url, make }) => {
+  const skip = !url;
+  const rows = (answer: any) => (answer.results as any[]).map((r) => ({ success: r.success, code: r.errors?.[0]?.code, message: r.errors?.[0]?.message }));
+
+  for (const parity of PARITY_CASES) {
+    for (const options of [{ atomic: true }, { continueOnError: true }] as const) {
+      const label = 'atomic' in options ? 'atomic' : 'continueOnError';
+      it.skipIf(skip)(`${parity.name}, ${label}: answers what today's per-row recompute answers`, async () => {
+        const { engine } = await boot(make);
+        const protocol = new ObjectStackProtocolImplementation(engine as never);
+        const today = await parity.make(engine, 'today');
+        const expected = await withoutBatchScope(engine, () => protocol.updateManyData({ object: today.object, records: today.records, options, context: SYSTEM.context } as never)) as any;
+        const batch = await parity.make(engine, 'batch');
+        const answer = await protocol.updateManyData({ object: batch.object, records: batch.records, options, context: SYSTEM.context } as never) as any;
+        // The case is live: one by one, the batch is refused, or (a lock) drops the second note.
+        if ('atomic' in options) expect(parity.live(expected, await today.state())).toBe(true);
+        expect({ success: answer.success, rows: rows(answer) }).toEqual({ success: expected.success, rows: rows(expected) });
+        expect(await batch.state()).toEqual(await today.state());
+      });
+    }
   }
 });
 
