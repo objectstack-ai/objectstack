@@ -194,7 +194,11 @@ describe('ObjectDataTable — a masked column is withheld on every table path (o
         await settledWithMask();
         fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
         expect(createObjectURL, 'CONTROL: the export produced a file').toHaveBeenCalledTimes(1);
-        const csv = await (createObjectURL.mock.calls[0]![0] as Blob).text();
+        const file = await (createObjectURL.mock.calls[0]![0] as Blob).text();
+        // A CSV the Console builds opens with one UTF-8 byte-order mark (objectstack#34420);
+        // the rows are read after it.
+        expect(file.charCodeAt(0), 'the file opens with the byte-order mark').toBe(0xfeff);
+        const csv = file.slice(1);
         expect(csv, 'CONTROL: the text column is exported').toContain('"Ada"');
         expect(csv.split('\n')[0], 'the header row names only the text column').toBe('Name');
         expect(csv).not.toContain('RAW-');
