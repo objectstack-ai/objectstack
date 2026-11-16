@@ -111,6 +111,25 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    * rows a write touches.
    */
   bypassTenantAudit: z.boolean().optional().describe('Suppress the driver tenant-audit warning for a deliberately global write on a tenant-scoped object (diagnostics only — never changes what the write touches)'),
+
+  /**
+   * Lock the rows a read returns against concurrent writers until the
+   * `transaction` it runs in ends (SQL `SELECT … FOR UPDATE`).
+   *
+   * Meaningful on `find()` only, and only with `transaction` set: a read
+   * outside a transaction has nothing to hold the lock to, so a driver ignores
+   * the key there. A driver honours it only when it declares
+   * `DriverCapabilities.lockRows`, and the engine sends it only to such a
+   * driver.
+   *
+   * The engine's one sender is a predicate delete whose target is referenced by
+   * delete-family lookups: it reads the matched ids, walks the cascade, then
+   * deletes those rows by id. Under the lock no concurrent commit can move a
+   * matched row out of the caller's predicate between that read and the
+   * delete, so a guard such as "delete only if still pending" holds for the
+   * whole unit of work.
+   */
+  lockRows: z.boolean().optional().describe('find() inside a transaction: lock the returned rows against concurrent writers until the transaction ends (SELECT … FOR UPDATE); honoured only by a driver declaring supports.lockRows'),
 }));
 
 /**
@@ -160,6 +179,9 @@ const capRemoved = (key: string, mechanism: string) =>
  *   `aggregate()`: the engine ANDs it with method presence, because a driver
  *   can carry `aggregate()` without compiling that key (and a subclass can
  *   inherit a compiler its own transport refuses).
+ * - `lockRows` — opt-IN for `DriverOptions.lockRows` on `find()`: the engine
+ *   sends the lock request on a predicate delete's matched-row read only when
+ *   the bit is set and the read runs inside a transaction.
  *
  * Everything else IS the method: aggregate pushdown gates on
  * `typeof driver.aggregate === 'function'`, schema sync on
@@ -337,6 +359,38 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
   aggregationFilter: z.boolean().optional().describe('`aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine\'s in-memory answer, except that text compares by the backend collation as in `where` (absence = false: the engine aggregates filtered measures in memory)'),
+
+  /**
+   * This driver's `find()` honours `DriverOptions.lockRows` inside a
+   * transaction.
+   *
+   * The promise: when `find()` runs with both `transaction` and `lockRows`
+   * set, no other writer can commit a change to a row that read returned
+   * until that transaction ends. The writer waits, or one side fails loudly;
+   * it never commits in between. PostgreSQL and MySQL take row locks
+   * (`FOR UPDATE`), SQL Server an update lock (`UPDLOCK`). SQLite has no row
+   * locks and needs none: `driver-sql`'s pool holds one connection, so a
+   * second writer through this driver waits for it, and a writer in another
+   * process meets the database lock (busy) rather than slipping a commit
+   * between the read and the transaction's own write.
+   *
+   * What the engine does with it: a predicate delete on an object that
+   * delete-family lookups reference reads the matched ids inside the unit of
+   * work, walks the cascade, and deletes those rows by id. With the bit set it
+   * sends that read with `lockRows`, so the caller's predicate cannot stop
+   * holding for a matched row before the delete. Without it, or outside a
+   * transaction (the `'split'` cascade plan, or a driver with no
+   * transactions), the read takes no lock and a concurrent commit between the
+   * read and the delete is not seen: the memory, MongoDB and OData drivers
+   * keep that window.
+   *
+   * Why a bit and not the option alone: an option a driver silently ignores is
+   * a lock the engine believes it holds and does not. The bit is the driver's
+   * promise; the engine ANDs it with the open transaction.
+   *
+   * Optional; absence means `false`, like `batchSchemaSync`.
+   */
+  lockRows: z.boolean().optional().describe('`find()` honours `DriverOptions.lockRows` inside a transaction: no concurrent commit changes a returned row until the transaction ends (absence = false: the engine sends no lock request)'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0

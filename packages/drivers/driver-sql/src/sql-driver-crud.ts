@@ -42,6 +42,23 @@ import type { SqlDriver } from './sql-driver.js';
 import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
 
 /**
+ * [`DriverOptions.lockRows`] Lock the rows a `find()` returns until its
+ * transaction ends, the promise `supports.lockRows` makes for this driver.
+ *
+ * Only with a `transaction`: a read outside one has nothing to hold the lock
+ * to (on PostgreSQL a bare `FOR UPDATE` releases at the statement's own
+ * implicit commit), so the key is ignored there. knex compiles `forUpdate()`
+ * per dialect: `FOR UPDATE` on PostgreSQL, MySQL and Oracle, the `UPDLOCK`
+ * table hint on SQL Server, and nothing at all on SQLite, whose single-connection
+ * pool and database lock already keep a concurrent commit out of an open
+ * transaction (the capability's TSDoc in `data/driver.zod.ts`).
+ */
+function lockRowsIfAsked(builder: Knex.QueryBuilder, options?: DriverOptions): Knex.QueryBuilder {
+  if (options?.lockRows === true && options.transaction) return builder.forUpdate();
+  return builder;
+}
+
+/**
  * The `SqlDriver` members the bodies of {@link CrudFacet} read — every one of
  * them, and no other. Each is typed AS the class member (an indexed access on
  * the class), so a change to a member's signature on the class is a change
@@ -169,12 +186,12 @@ export class CrudFacet {
         if (window.offset !== null) b.offset(window.offset);
         const rows = window.top ?? window.fetch;
         if (rows !== null) b.limit(rows);
-        return b;
+        return lockRowsIfAsked(b, options);
       }
       if (query.offset !== undefined) b.offset(query.offset);
       if (query.limit !== undefined) b.limit(query.limit);
 
-      return b;
+      return lockRowsIfAsked(b, options);
     };
 
     const builder = buildBase();
