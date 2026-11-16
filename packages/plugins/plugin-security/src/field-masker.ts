@@ -68,6 +68,8 @@ const isRecordRoot = (node: unknown): boolean =>
  * macro on the root, the root handed whole to a function). Every `record`
  * identifier in the parse is accounted for, so a spelling not recognised
  * here counts as such a use: the answer errs toward hiding, never serving.
+ * The references such an expression reads through by a literal member are
+ * still named in `hops`, so what it reads there is judged as for any other.
  */
 export function readComputedFieldExpression(def: unknown): ComputedFieldInput | undefined {
   if (!def || typeof def !== 'object') return undefined;
@@ -110,7 +112,9 @@ export function readComputedFieldExpression(def: unknown): ComputedFieldInput | 
     for (const value of Object.values(node as Record<string, unknown>)) walk(value);
   };
   walk(ast);
-  if (roots > named) return UNNAMED;
+  // Reads that cannot be named still read through the references they name:
+  // those are judged like any other (the engine loads exactly those).
+  if (roots > named) return { reads: null, hops };
   return { reads, hops };
 }
 

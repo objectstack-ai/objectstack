@@ -352,7 +352,8 @@ function withUserMessage(refusal: PermissionDeniedError, userMessage: string): P
  *    caller's locale, else the declared label. The API name is never the last
  *    rung (#7414), and a declared label equal to the API name counts as none.
  *  - the caller READS it: the caller's read guard leaves it readable
- *    (`computeQueryGuardFieldPerms`, the guard the read path masks with). A
+ *    (`computeQueryGuardFieldPerms` with the computed fields withheld for
+ *    what they read through a reference, the map the gate beside it asks). A
  *    field withheld from the caller is not named to them, even by label.
  *
  * One field that fails either test makes the whole sentence opaque: naming
@@ -1638,7 +1639,7 @@ export function registerAuthzMiddleware(
             opCtx.object,
             forbidden,
             typeof ql?.getSchema === 'function' ? ql.getSchema(opCtx.object) as any : undefined,
-            this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets),
+            this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld()),
             denialLocalesOf(opCtx.context),
           ),
         );

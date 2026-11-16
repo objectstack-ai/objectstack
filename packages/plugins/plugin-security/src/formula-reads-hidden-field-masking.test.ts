@@ -44,6 +44,7 @@ const RELAY = 'qa_fhf_relay';
 const VAULT = 'qa_fhf_vault';
 const LOOP = 'qa_fhf_loop';
 const CYCLE = 'qa_fhf_cycle';
+const OPAQUE = 'qa_fhf_opaque';
 const SET = 'qa_fhf_reader';
 const SECOND = 'qa_fhf_second';
 const DELEGATOR_SET = 'qa_fhf_delegator';
@@ -55,6 +56,34 @@ const cel = (source: string) => ({ dialect: 'cel', source });
 const num = (source: string) => ({ type: 'formula', returnType: 'number', expression: cel(source) });
 
 type FieldEntries = Record<string, { readable: boolean; editable: boolean }>;
+
+/** The shapes of expression whose reads cannot be named, each gating a read through the reference. */
+const UNNAMED_SHAPES: Record<string, string> = {
+  computed_key: "string(record[record.pick]) != ''",
+  method: 'record.size() > 0',
+  macro: "record.exists(k, k == 'pick')",
+  whole: 'size(record) > 0',
+};
+/** The literal spellings of one read through the reference. */
+const SPELLINGS: Record<string, string> = {
+  dot: 'record.region.secret_score',
+  index_leaf: "record.region['secret_score']",
+  index_ref: "record['region'].secret_score",
+  index_both: "record['region']['secret_score']",
+};
+const unnamedThroughReference = () => Object.fromEntries(Object.entries(UNNAMED_SHAPES).flatMap(([shape, test]) => {
+  const source = `${test} ? record.region.secret_score * 1.0 : 0.0`;
+  return [
+    [`opaque_${shape}`, { name: `opaque_${shape}`, ...num(source) }],
+    [`opaque_${shape}_stored`, { name: `opaque_${shape}_stored`, type: 'number', expression: cel(source) }],
+  ];
+}));
+const spelledThroughReference = () => Object.fromEntries(Object.entries(SPELLINGS).flatMap(([spelling, read]) => [
+  [`spelled_${spelling}`, { name: `spelled_${spelling}`, ...num(`${read} * 1.0`) }],
+  [`spelled_${spelling}_stored`, { name: `spelled_${spelling}_stored`, type: 'number', expression: cel(`${read} * 1.0`) }],
+]));
+const OPAQUE_FIELDS = Object.keys(UNNAMED_SHAPES).flatMap((s) => [`opaque_${s}`, `opaque_${s}_stored`]);
+const SPELLED_FIELDS = Object.keys(SPELLINGS).flatMap((s) => [`spelled_${s}`, `spelled_${s}_stored`]);
 
 interface BootOptions {
   /** Field-level entries of the caller's permission set. */
@@ -118,6 +147,19 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           cycle: { name: 'cycle', type: 'lookup', reference: CYCLE },
           // Over a field of the record that points BACK here: the chain returns to the relay.
           w: { name: 'w', type: 'number', expression: cel('record.cycle.u * 1.0') },
+        },
+      },
+      {
+        // Every other field served whole, so only what the shapes read through the reference can withhold them.
+        name: OPAQUE,
+        label: 'Opaque',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          pick: { name: 'pick', type: 'text' },
+          region: { name: 'region', type: 'lookup', reference: REGION },
+          // Each shape whose reads cannot be named, reading through the reference too.
+          ...unnamedThroughReference(),
         },
       },
       {
@@ -193,7 +235,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           name: { name: 'name', type: 'text' },
           pick: { name: 'pick', type: 'text' },
           open_cases: { name: 'open_cases', type: 'number' },
-          capacity: { name: 'capacity', type: 'number' },
+          capacity: { name: 'capacity', type: 'number', label: 'Capacity' },
           gated: { name: 'gated', type: 'number', requiredPermissions: ['qa_fhf_gate'] },
           phone: { name: 'phone', type: 'text', maskingRule: 'phone', requiredPermissions: ['qa_fhf_unmask'] },
           tier: {
@@ -220,7 +262,9 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
           region_gated: { name: 'region_gated', ...num('record.region.gated_score * 1.0') },
           region_phone_copy: { name: 'region_phone_copy', type: 'formula', returnType: 'text', expression: cel('record.region.region_phone') },
           region_ghost: { name: 'region_ghost', ...num('record.region.no_such_field * 1.0') },
-          region_score_stored: { name: 'region_score_stored', type: 'number', expression: cel('record.region.secret_score * 1.0') },
+          region_score_stored: { name: 'region_score_stored', label: 'Region Score', type: 'number', expression: cel('record.region.secret_score * 1.0') },
+          // The literal spellings of a read through the reference.
+          ...spelledThroughReference(),
           // Through a reference to a stored field that reads through a reference of its own.
           relay_stored: { name: 'relay_stored', type: 'number', expression: cel('record.relay.t * 1.0') },
           relay_formula: { name: 'relay_formula', ...num('record.relay.t * 1.0') },
@@ -247,6 +291,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
   await engine.update(RELAY, { cycle: 'cy1' }, { where: { id: 'rl1' }, context: { isSystem: true } } as never);
   await engine.insert(VAULT, [{ id: 'v1', secret: 'S' }], SYS);
   await engine.insert(REGION, [{ id: 'r1', name: 'North', secret_score: 7, gated_score: 3, region_phone: '13900001111' }], SYS);
+  await engine.insert(OPAQUE, [{ id: 'o1', pick: 'id', region: 'r1' }], SYS);
   if (opts.delegatorFields) {
     await engine.insert('sys_user', { id: DELEGATOR, name: DELEGATOR, email: `${DELEGATOR}@example.test` }, SYS);
     await engine.insert('sys_member', { id: `mem_${DELEGATOR}`, user_id: DELEGATOR, organization_id: DEFAULT_ORGANIZATION_ID, role: 'member' }, SYS);
@@ -271,7 +316,7 @@ async function boot(opts: BootOptions = {}): Promise<Rig> {
     name: SET,
     ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
     // No grant on VAULT: its records are read only by name, through `referenceNameVisible`.
-    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant, [CYCLE]: grant, [LOOP]: grant },
+    objects: { [OBJ]: grant, ...(opts.regionRead === false ? {} : { [REGION]: grant }), [NOTE]: grant, [SOURCE]: grant, [RELAY]: grant, [CYCLE]: grant, [OPAQUE]: grant, [LOOP]: grant },
     ...(opts.fields ? { fields: opts.fields } : {}),
   });
   const second = PermissionSetSchema.parse({
@@ -324,11 +369,11 @@ const aggregate = (engine: ObjectQL, query: Record<string, unknown>) =>
   (engine as any).aggregate(OBJ, { ...query, context: { ...CALLER } }) as Promise<unknown>;
 
 /** What a refused call carries (the ADR-0112 envelope), or `landed`. */
-async function outcome(p: Promise<unknown>): Promise<{ landed: unknown } | { code?: string; status?: number; forbiddenFields?: unknown }> {
+async function outcome(p: Promise<unknown>): Promise<{ landed: unknown } | { code?: string; status?: number; forbiddenFields?: unknown; userMessage?: string }> {
   try {
     return { landed: await p };
   } catch (e: any) {
-    return { code: e?.code, status: e?.statusCode ?? e?.status, forbiddenFields: e?.details?.forbiddenFields };
+    return { code: e?.code, status: e?.statusCode ?? e?.status, forbiddenFields: e?.details?.forbiddenFields, userMessage: e?.userMessage };
   }
 }
 
@@ -733,6 +778,53 @@ describe('a chain of references that returns to an object withholds as any chain
   });
 });
 
+describe('every shape of expression reads through a reference as a named read does', () => {
+  const findO1 = (engine: ObjectQL) =>
+    engine.findOne(OPAQUE, { where: { id: 'o1' }, context: { ...CALLER } } as never) as Promise<Record<string, unknown> | null>;
+
+  it('a shape whose reads cannot be named, formula and stored alike: absent and not queryable for a caller not served the referenced field', async () => {
+    const { engine, plugin } = await boot({ fields: hide(REGION, 'secret_score') });
+    const one = await findO1(engine);
+    expect(one).toMatchObject({ id: 'o1', pick: 'id', region: 'r1' });
+    const queryable = new Set(await plugin.getQueryableFields(OPAQUE, { ...CALLER }));
+    for (const f of OPAQUE_FIELDS) {
+      expect(one, f).not.toHaveProperty(f);
+      expect(queryable.has(f), f).toBe(false);
+    }
+  });
+
+  it('every literal spelling of the read, formula and stored alike: absent for a caller not served the referenced field', async () => {
+    const { engine } = await boot({ fields: hide(REGION, 'secret_score') });
+    const one = await findA1(engine);
+    for (const f of SPELLED_FIELDS) expect(one, f).not.toHaveProperty(f);
+  });
+
+  it('control: a caller served the referenced field whole reads each of them', async () => {
+    const { engine } = await boot();
+    const opaque = await findO1(engine);
+    for (const f of OPAQUE_FIELDS) expect(opaque, f).toHaveProperty(f, 7);
+    const one = await findA1(engine);
+    for (const f of SPELLED_FIELDS) expect(one, f).toHaveProperty(f, 7);
+  });
+});
+
+describe('the sentence a write refusal shows names no field the caller is not served whole', () => {
+  it('a computed field withheld for what it reads through a reference is not named, even by label', async () => {
+    const { engine } = await boot({ fields: hide(REGION, 'secret_score') });
+    const refused: any = await outcome(engine.update(OBJ, { region_score_stored: 1 }, { where: { id: 'a1' }, context: { ...CALLER } } as never));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: ['region_score_stored'] });
+    expect(typeof refused.userMessage).toBe('string');
+    expect(refused.userMessage).not.toContain('Region Score');
+  });
+
+  it('control: a field the caller reads but may not edit is named by its label', async () => {
+    const { engine } = await boot({ fields: { [`${OBJ}.capacity`]: { readable: true, editable: false } } });
+    const refused: any = await outcome(engine.update(OBJ, { capacity: 1 }, { where: { id: 'a1' }, context: { ...CALLER } } as never));
+    expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, forbiddenFields: ['capacity'] });
+    expect(refused.userMessage).toContain('Capacity');
+  });
+});
+
 describe('one write verdict: the preview, the write and the write projections agree on a computed field the caller is not served whole', () => {
   it('withheld for its input, or served masked itself: the preview refuses, the write refuses, the projections leave it out', async () => {
     const { engine, plugin } = await boot({ fields: HIDE_OPEN_CASES });
@@ -912,6 +1004,12 @@ describe('what a computed field reads, as the masker names it', () => {
     expect(read('record.size()')?.reads).toBeNull();
     expect(read('size(record)')?.reads).toBeNull();
     expect(read("record.exists(k, k == 'a')")?.reads).toBeNull();
+    // ...and still names the references they read through, as the platform member reader does.
+    for (const source of ['size(record) > 0 ? record.owner.name : 0', "record[record.k] + record['owner'].name", 'record.size() + record.owner.name']) {
+      expect(read(source)?.reads, source).toBeNull();
+      const hops = Object.fromEntries([...(read(source)?.hops ?? [])].map(([k, v]) => [k, [...v].sort()]));
+      expect(hops, source).toEqual(Object.fromEntries([...analyzeRelationshipTraversals(source)!.traversals].map(([k, v]) => [k, [...v].sort()])));
+    }
     expect(readComputedFieldExpression({ type: 'formula', expression: { dialect: 'js', source: 'record.a' } })?.reads).toBeNull();
   });
 
