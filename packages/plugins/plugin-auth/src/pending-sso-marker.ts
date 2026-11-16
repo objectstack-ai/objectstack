@@ -50,9 +50,9 @@ export const PENDING_SSO_MESSAGES = {
     + 'succeed, so they stay pending with no invitation: add them again to send one.',
   removeHostCancelled:
     'The hosting organisation had already been told to cancel their invitation, and it is not sent again.',
-  removeHostUnconfirmed:
-    'The hosting organisation was asked to cancel their invitation but did not confirm it, and the request is not '
-    + 'retried.',
+  removeHostUnreachable:
+    "The hosting organisation could not be reached to cancel this person's invitation, so they were not removed. "
+    + 'Nothing was changed; try again.',
   alreadyExists:
     'A user with this email address already exists in this environment, so no one was added. Change the existing '
     + "user's positions, permission sets or manager on their record instead.",

@@ -247,8 +247,12 @@ async function findUserByEmail(
     : undefined;
 }
 
-/** Whether a `sys_user` row is deactivated (the memory engine stores `banned` as `0` / `1`). */
-const isDeactivated = (user: { banned?: unknown }): boolean => user.banned === true || user.banned === 1;
+/**
+ * Whether a `sys_user` row is deactivated. A boolean column reads back as
+ * `true`, `1`, or a string form (`'1'`, `'true'`) depending on the driver.
+ */
+const isDeactivated = (user: { banned?: unknown }): boolean =>
+  user.banned === true || user.banned === 1 || user.banned === '1' || user.banned === 'true';
 
 /** The answer for a grant the security service refused: its own status and code, and that no one was added. */
 function grantRefused(what: string, error: unknown): EndpointResult {
@@ -472,30 +476,41 @@ const hostRefusal = ({ refused }: EnvironmentUserHostRefused): EndpointResult =>
 const TAKE_BACK_OBJECTS = ['sys_user_position', 'sys_user_permission_set', 'sys_member'] as const;
 
 /**
- * Take a person the host refused back out: their grants, their membership
- * and their row, as the system, in one unit of work. The person was never
- * told anything and never signed in, so nothing else points at them. A
- * failure here is thrown: the person would stay without the host's consent,
- * and the caller must hear that rather than a clean refusal.
+ * Take a pending person back out: their grants, their membership and their
+ * row, as the system, in one unit of work, through the engine's delete, so a
+ * record that points at the person follows its lookup's `deleteBehavior`.
+ * Two callers: an add the host refused (the person was just written and
+ * never told anything), and `admin/remove-sso-user`, which passes
+ * `pendingOnly`. Then the person is read inside the unit of work before
+ * anything is deleted, and the row's delete carries the pending marker in
+ * its `where`, so a person whose first sign-in commits at any point before
+ * that delete is not removed: {@link NoLongerPending} is thrown and the unit
+ * of work rolls the child deletes back. A failure here is thrown: the caller
+ * must hear it rather than a clean answer.
  */
 async function takeBackPerson(
   deps: PendingSsoUserDeps,
   engine: PendingSsoUserEngine,
   userId: string,
   settlement: RequestSettlement,
-  first?: () => Promise<void>,
+  opts: { pendingOnly?: boolean } = {},
 ): Promise<void> {
   if (typeof engine.delete !== 'function') {
-    throw new Error(`The host refused user ${userId}, and this data engine cannot take the row back out`);
+    throw new Error(`This data engine cannot delete, so user ${userId} could not be taken back out`);
   }
   const remove = engine.delete.bind(engine);
   const work = async (): Promise<void> => {
-    if (first) await first();
+    if (opts.pendingOnly) await assertStillPending(engine, userId);
     const context = await authSystemWriteContext();
     for (const object of TAKE_BACK_OBJECTS) {
       await remove(object, { where: { user_id: userId }, multi: true, context });
     }
-    await remove('sys_user', { where: { id: userId }, context });
+    if (!opts.pendingOnly) {
+      await remove('sys_user', { where: { id: userId }, context });
+      return;
+    }
+    const removed = await remove('sys_user', { where: { id: userId, source: PENDING_SSO_SOURCE }, multi: true, context });
+    if (removed === 0 || removed === false || removed == null) throw new NoLongerPending();
   };
   const unit = settlement.grant?.seam ?? deps.createGrant;
   await (unit ? unit.runAtomically(work) : work());
@@ -719,11 +734,13 @@ const REMOVE_KEYS = new Set(['userId']);
  * of work, through the engine's delete, so a record that points at the person
  * follows its lookup's `deleteBehavior`: a `restrict` refuses the removal with
  * the engine's own answer and nothing is removed. "Pending only" is held at
- * the removal too: a person who signs in while the host is asked is answered
- * `409` and kept. A host that could not be reached does not block the
- * removal, and the answer says `host_failed`: the door calls the host once,
- * and retrying a call is the host's own business. With no host wired nothing
- * is called.
+ * the removal too: the row's delete carries the pending marker, so a person
+ * who signs in while the host is asked, or inside the unit of work, is
+ * answered `409` and kept. A host that could not be reached refuses the
+ * removal (`503`, nothing removed), as it refuses a deactivation: the door
+ * calls the host once and keeps no record to ask again from, so removing the
+ * person would leave an invitation nothing can cancel. With no host wired
+ * nothing is called.
  */
 export async function runRemoveSsoUser(
   deps: PendingSsoUserDeps,
@@ -773,6 +790,9 @@ export async function runRemoveSsoUser(
     };
     const answer = await notifyEnvironmentUserHost(deps.host, 'removed', event, deps.logger);
     if ('refused' in answer) return hostRefusal(answer);
+    if (!answer.notified && answer.reason === 'host_failed') {
+      return fail(503, 'SERVICE_UNAVAILABLE', PENDING_SSO_MESSAGES.removeHostUnreachable);
+    }
     host = answer;
   } else {
     host = { notified: false, reason: 'no_host' };
@@ -780,18 +800,20 @@ export async function runRemoveSsoUser(
 
   // Pending only, held at the write: the person may have signed in while the
   // host was asked, and then they are not removed.
-  const stillPending = async (): Promise<void> => {
-    const now = await engine.find('sys_user', { where: { id: userId }, fields: ['id', 'source'], limit: 1, context: SYSTEM_CTX });
-    const row = (Array.isArray(now) ? now[0] : undefined) as { source?: unknown } | undefined;
-    if (!row || !isPendingSsoSource(row.source)) throw new NoLongerPending();
-  };
   try {
-    await takeBackPerson(deps, engine, userId, {}, stillPending);
+    await takeBackPerson(deps, engine, userId, {}, { pendingOnly: true });
   } catch (error) {
     return removalNotDone(deps, engine, error, { userId, host, event });
   }
 
   return { status: 200, body: { success: true, data: { userId, email, removed: true, host } } };
+}
+
+/** Throws {@link NoLongerPending} unless the person is still pending, read now. */
+async function assertStillPending(engine: PendingSsoUserEngine, userId: string): Promise<void> {
+  const now = await engine.find('sys_user', { where: { id: userId }, fields: ['id', 'source'], limit: 1, context: SYSTEM_CTX });
+  const row = (Array.isArray(now) ? now[0] : undefined) as { source?: unknown } | undefined;
+  if (!row || !isPendingSsoSource(row.source)) throw new NoLongerPending();
 }
 
 /** Thrown inside the removal's unit of work when the person is no longer pending there. */
@@ -816,12 +838,10 @@ async function removalNotDone(
   call: { userId: string; host: EnvironmentUserHostOutcome; event: EnvironmentUserEvent | undefined },
 ): Promise<EndpointResult> {
   const { userId, host, event } = call;
+  // A host that could not be reached refused the removal before this, so the
+  // host was either told (and took the cancellation) or not called at all.
   const told = event !== undefined && host.notified;
-  const hostSentence = told
-    ? PENDING_SSO_MESSAGES.removeHostCancelled
-    : event && !(!host.notified && host.reason === 'no_host')
-      ? PENDING_SSO_MESSAGES.removeHostUnconfirmed
-      : '';
+  const hostSentence = told ? PENDING_SSO_MESSAGES.removeHostCancelled : '';
 
   if (error instanceof NoLongerPending) {
     return fail(

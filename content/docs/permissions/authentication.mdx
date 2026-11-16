@@ -1344,12 +1344,14 @@ membership, and cancels their invitation at the host. The host is asked
 first, through its `userRemoved` member; a host without that member is asked
 through `userDeactivated` for the pending person instead, which means the same
 thing, but a host should implement `userRemoved`. A host's refusal leaves the
-person as they are. A host that cannot be reached does not block the removal:
-the person is removed and the answer says `host: { notified: false, reason:
-'host_failed' }`. A person who is not pending (they have signed in, or were
-not added this way) is refused with `409`: deactivate them instead. That holds
-at the removal itself, so a person who signs in while the host is asked is not
-removed either, and the answer says the host was already told. A record that
+person as they are. A host that cannot be reached refuses the removal too,
+with `503` and nothing removed, as it refuses a deactivation: the door calls
+the host once and keeps no record to ask again from, so try again once the
+host is back. A person who is not pending (they have signed in, or were not
+added this way) is refused with `409`: deactivate them instead. That holds at
+the removal itself, so a person whose first sign-in lands while the host is
+asked, or while the removal is being written, is not removed either, and the
+answer says the host was already told. A record that
 still points at the person through a lookup that restricts deletes refuses the
 removal with that lookup's own answer, and nothing is removed; when the host
 had already cancelled the invitation of a person who is still pending and not

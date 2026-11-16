@@ -1283,7 +1283,7 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
     expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
   });
 
-  it('a host that cannot be reached does not block the removal, and the answer says host_failed', async () => {
+  it('a host that cannot be reached refuses the removal: 503, the person is kept and nothing is re-sent', async () => {
     const { host, told } = removingHost({
       removed: () => {
         throw new Error('host down');
@@ -1292,11 +1292,12 @@ describe('[#33228] admin/remove-sso-user removes a pending person and cancels th
     const s = await managedStage({ host });
     const id = await addPending(s, 'unreached.remove@example.com');
 
-    const body: any = await (await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).json();
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
 
-    expect(body.data).toEqual({ userId: id, email: 'unreached.remove@example.com', removed: true, host: { notified: false, reason: 'host_failed' } });
-    expect(s.row('unreached.remove@example.com')).toBeUndefined();
-    // Asked once: the door retries nothing.
+    expect([v.status, v.code, v.message]).toEqual([503, 'SERVICE_UNAVAILABLE', PENDING_SSO_MESSAGES.removeHostUnreachable]);
+    expect(s.row('unreached.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+    // Asked once, and no invitation is sent again.
     expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
   });
 
@@ -1408,21 +1409,17 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
     expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated', 'removed']);
   });
 
-  it('a refused removal the host never took sends no new invitation, and says the cancellation was not confirmed', async () => {
-    const { host, told } = removingHost({
-      removed: () => {
-        throw new Error('host down');
-      },
-    });
+  it('a deactivated pending person whose banned column reads back as a string is not invited on a re-add', async () => {
+    const { host, told } = removingHost();
     const s = await managedStage({ host });
-    const id = await addPending(s, 'held.unreached@example.com');
-    restrictDelete(s);
-
-    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
-
-    expect(v.status, v.text).toBe(409);
-    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostUnconfirmed}`);
-    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+    const email = 'readd.banned.string@example.com';
+    const id = await addPending(s, email);
+    for (const stored of ['1', 'true']) {
+      s.row(email)!.banned = stored;
+      const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin)).json();
+      expect(body.data, stored).toMatchObject({ userId: id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } });
+    }
+    expect(told.map((t) => t.kind)).toEqual(['added']);
   });
 
   it('a person who signs in while the host is asked is not removed: 409, and the answer says the host was told', async () => {
@@ -1443,6 +1440,27 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
     expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
     expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
     expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+  });
+
+  it('a person whose first sign-in commits inside the unit of work, after the pending read, is not removed: 409', async () => {
+    const email = 'signs.in.late@example.com';
+    const { host } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, email);
+    // The first sign-in lands between the in-unit pending read and the row's
+    // delete: the first child delete is the moment after that read.
+    const realDelete = s.engine.delete.bind(s.engine);
+    s.engine.delete = async (name: string, q: any = {}) => {
+      if (name === 'sys_user_position') s.row(email)!.source = 'idp_provisioned';
+      return realDelete(name, q);
+    };
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('RESOURCE_CONFLICT');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
   });
 });
 
