@@ -429,8 +429,10 @@ describe('[#33918] SCIM manager projection: an unresolvable reference leaves one
 
   it('the reference is capped, and nothing of the body rides with it', async () => {
     const h = await boot();
-    const long = `r${'x'.repeat(400)}`;
-    await provision(h, 'emp', { value: long });
+    // The vendor caps `manager.value` at 256 characters but a `$ref` at 2048,
+    // so a long unreadable `$ref` is what reaches the door's cap.
+    const long = `https://idp.example/people/${'x'.repeat(400)}`;
+    await provision(h, 'emp', { $ref: long });
     const [event] = await h.unresolvedEvents();
     expect(String(event?.reference)).toBe(long.slice(0, 257));
     const carried = JSON.stringify(event);
