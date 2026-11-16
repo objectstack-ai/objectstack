@@ -174,8 +174,11 @@ seed publish keeps no record, so a deleted row comes back on that. So do a load
 with no organization and a composition that does not register
 `sys_seed_landed_key` (`@objectstack/platform-objects`).
 
-A row deleted before your runtime had this rule comes back once, on the first
-replay after the upgrade, and stays deleted from then on.
+A row deleted before any load recorded it comes back once, on the first load
+that keeps the record, and stays deleted from then on. For the boot seed that
+is the first boot after the upgrade. An installed package records nothing
+until its next install, upgrade, reseed, replay or restart heal, so a row
+deleted before that load, even after the upgrade, comes back on it.
 
 To bring the deleted rows back on purpose, a host or plugin calls the
 `seed-replayer` kernel service with `{ reseed: true }`:

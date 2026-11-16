@@ -177,17 +177,20 @@ export const SeedSchema = lazySchema(() => strictObject({
    * (ruling 6631016988 on objectstack#30081, which measured exactly that on a
    * production boot and on both upgrade paths while the default was `upsert`).
    *
-   * A row a person deleted is not brought back by every replay. The loads
-   * AppPlugin (`@objectstack/runtime`) runs for an organization — the
-   * single-tenant boot seed, the per-organization replay (the `seed-replayer`
-   * service) and the dev hot reload — and the package install or upgrade
-   * (`os package install`, the marketplace install) with its restart heal,
-   * where the composition registers `sys_seed_landed_key`
-   * (`@objectstack/platform-objects`), record, per organization, the key of
-   * every keyed row an `ignore` or `upsert` dataset landed, and do not insert
-   * again a recorded row that is now gone. A key never recorded still lands,
-   * so a row an upgrade adds to the seed is inserted. A seed publish keeps no
-   * record, so the row comes back on that. The deliberate re-seed —
+   * A row a person deleted is not brought back by every replay. The loads that
+   * seed an organization — AppPlugin's (`@objectstack/runtime`) single-tenant
+   * boot seed and dev hot reload, the per-organization replay (the
+   * `seed-replayer` service, AppPlugin's or the marketplace's fallback one),
+   * and the package install or upgrade (`os package install`, the marketplace
+   * install) with its restart heal, into the installing person's organization
+   * or the sole organization — record, per organization, where the
+   * composition registers `sys_seed_landed_key`
+   * (`@objectstack/platform-objects`), the key of every keyed row an `ignore`
+   * or `upsert` dataset landed, and do not insert again a recorded row that is
+   * now gone. A key never recorded still lands, so a row an upgrade adds to
+   * the seed is inserted. A seed publish keeps no record, nor does a load with
+   * no `config.organizationId` and no sole organization, so the row comes back
+   * on those. The deliberate re-seed —
    * `seed-replayer(organizationId, { reseed: true })`, or the installed
    * package's sample-data reseed — inserts every missing row whatever the
    * record says.
@@ -213,11 +216,11 @@ export const SeedSchema = lazySchema(() => strictObject({
       'later edit. `upsert` also writes every declared column back onto the matched row on each replay; ' +
       'declare it for reference data the package keeps current. `update` writes matched rows only, ' +
       '`insert` inserts every record with no match, so each replay inserts them again, and `replace` does the ' +
-      'same and deletes nothing: it is for a table the caller cleared. On the loads AppPlugin runs for an ' +
-      'organization (the boot seed, the seed-replayer replay, the dev hot reload) and on a package install or ' +
-      'upgrade, an `ignore` or `upsert` row that landed once and was later deleted is not inserted again; a ' +
-      'publish keeps no such record, and seed-replayer called with { reseed: true } or the sample-data reseed ' +
-      'inserts every missing row.',
+      'same and deletes nothing: it is for a table the caller cleared. On the loads that seed an organization ' +
+      '(the boot seed, a seed-replayer replay, the dev hot reload, a package install or upgrade), an `ignore` or ' +
+      '`upsert` row that landed once and was later deleted is not inserted again; a publish, or a load that ' +
+      'names no organization and finds no sole one, keeps no such record, and seed-replayer called with ' +
+      '{ reseed: true } or the sample-data reseed inserts every missing row.',
     ),
 
   /**

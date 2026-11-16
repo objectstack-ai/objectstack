@@ -4851,7 +4851,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         (ledger.withdrawnReferences > 0
           ? ` ${ledger.withdrawnReferences} reference(s) to such rows were left as they are rather than reported unresolved.`
           : '') +
-        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }.`,
+        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }, or an installed package's sample-data reseed.`,
       {
         organizationId: ledger.organizationId,
         rows,
