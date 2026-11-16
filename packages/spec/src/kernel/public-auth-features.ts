@@ -257,11 +257,10 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'opt-in',
     gatedInputs: [
       'sys_user.actions.create_user',
-      // `ban_user` / `unban_user` are not booked: their doors are ObjectStack
-      // mounts that work without the admin plugin, so neither is gated on this
-      // flag (see the admin block header in sys-user.object.ts).
-      'sys_user.actions.unlock_user',
-      'sys_user.actions.set_user_password',
+      // `ban_user` / `unban_user` / `unlock_user` / `set_user_password` are
+      // not booked: their doors are ObjectStack mounts that work without the
+      // admin plugin, so none is gated on this flag (see the admin block
+      // header in sys-user.object.ts).
       // 'sys_user.actions.set_user_role' retired (#9968) — see the removal
       // note beside `impersonate_user` in sys-user.object.ts.
       'sys_user.actions.impersonate_user',
