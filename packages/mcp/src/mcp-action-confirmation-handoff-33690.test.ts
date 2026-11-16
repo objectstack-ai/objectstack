@@ -220,12 +220,10 @@ function elicitingBridge() {
     ...makeBridge('service'),
     calls,
     async runAction(name: string, _input: any, door?: McpActionCallDoor) {
-      // eslint-disable-next-line prefer-rest-params
       calls.push({ tool: 'run_action', door, argCount: arguments.length });
       return confirmWith(door, name);
     },
     async resumeRun(_runId: string, _input: any, door?: McpActionCallDoor) {
-      // eslint-disable-next-line prefer-rest-params
       calls.push({ tool: 'resume_run', door, argCount: arguments.length });
       return confirmWith(door, GATED);
     },
