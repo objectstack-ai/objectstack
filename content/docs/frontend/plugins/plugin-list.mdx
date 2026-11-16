@@ -67,9 +67,10 @@ and the grid's phone cards, the gallery's cards and a board card that cannot be
 dragged draw no pointer and no hover lift. The click still reaches
 `onRowClick`, and row and card actions stay. Absent (or `true`), nothing
 changes. It is a host prop, not a schema key: list metadata cannot set it. The
-console passes `false` for a view authored `navigation: { mode: 'none' }` and
-for an object whose data API serves no single-record read (objectstack#33317,
-objectstack#33548).
+console passes `false` for a view authored `navigation: { mode: 'none' }` or
+`navigation.preventNavigation: true` (whatever its mode) and for an object whose
+data API serves no single-record read (objectstack#33317, objectstack#33548,
+objectstack#33549).
 
 ## Status
 

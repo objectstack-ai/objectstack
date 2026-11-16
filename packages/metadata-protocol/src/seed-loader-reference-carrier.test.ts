@@ -58,6 +58,14 @@ const bookWith = (carrier: Record<string, unknown>) => ({
   },
 });
 
+/**
+ * [#33791] The references `book` derives from its DECLARED fields. `book` is a
+ * user-owned object, so the graph also carries a row for the `owner_id` the
+ * platform injects on it; these cases judge the declared carrier, not that row.
+ */
+const declaredReferencesOf = <T extends { field: string }>(node: { references: T[] } | undefined) =>
+  node?.references.filter((r) => r.field !== 'owner_id');
+
 const graphOver = (schemas: Record<string, unknown>) =>
   new SeedLoaderService(engineWith(schemas), emptyMetadata(), createLogger()).buildDependencyGraph(['author', 'book']);
 
@@ -68,7 +76,7 @@ describe('[#18550] seed dependency graph — an unreadable `reference` carrier i
     const graph = await graphOver({ author, book: bookWith({ reference: 'author' }) });
     const book = graph.nodes.find((n) => n.object === 'book');
     expect(book?.dependsOn).toEqual(['author']);
-    expect(book?.references.map((r) => r.targetObject)).toEqual(['author']);
+    expect(declaredReferencesOf(book)?.map((r) => r.targetObject)).toEqual(['author']);
     expect(graph.insertOrder.indexOf('author')).toBeLessThan(graph.insertOrder.indexOf('book'));
   });
 
@@ -103,7 +111,7 @@ describe('[#18550] seed dependency graph — an unreadable `reference` carrier i
     const graph = await graphOver({ author, book: bookWith(carrier) });
     const book = graph.nodes.find((n) => n.object === 'book');
     expect(book?.dependsOn).toEqual([]);
-    expect(book?.references).toEqual([]);
+    expect(declaredReferencesOf(book)).toEqual([]);
   });
 
   it('the type gate stays FIRST: a `text` field carrying a stray `reference` is not read, so not refused', async () => {
@@ -119,6 +127,6 @@ describe('[#18550] seed dependency graph — an unreadable `reference` carrier i
       },
     };
     const graph = await graphOver({ author, book: strayCarrier });
-    expect(graph.nodes.find((n) => n.object === 'book')?.references).toEqual([]);
+    expect(declaredReferencesOf(graph.nodes.find((n) => n.object === 'book'))).toEqual([]);
   });
 });

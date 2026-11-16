@@ -555,6 +555,7 @@
     "data/LocationValue:altitude",
     "data/LocationValue:lat",
     "data/LocationValue:lng",
+    "data/LookupFilterRecordReference:$record",
     "data/Mapping:_lock",
     "data/Mapping:_lockDocsUrl",
     "data/Mapping:_lockReason",

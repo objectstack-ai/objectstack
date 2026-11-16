@@ -1317,7 +1317,7 @@ export const UI_SCRIPTS_SUITE_ROOTS = Object.freeze([
  * recall expires. The model tier had the same shape and had not been fixed: the
  * PM recalled the mandatory roots and wrote free prose into the claim comment's
  * `Container & model` line. Measured incident: a card whose surface included
- * `.claude/skills/pm-dispatch/references/review-checklist.md` was claimed as
+ * `.claude/skills/pm-dispatch/references/review-checklist.md` (since renamed `l1-review-checklist.md`) was claimed as
  * "not under the fable-mandatory roots" and dispatched at opus. One
  * misclassification sentence flowed unchecked from claim to dispatch to model
  * choice, and only a downstream seat's skepticism caught it — at PR time, after

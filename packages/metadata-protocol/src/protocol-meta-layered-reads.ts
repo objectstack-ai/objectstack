@@ -78,7 +78,7 @@ import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
+import { declaredMemberOverrideAddressOf, isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -103,8 +103,42 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'de
     if (judged !== undefined) return undefined;
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
     return address.candidates.length > 1
-        ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
+        ? withPackageCandidates(
+            packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates),
+            PLURAL_TO_SINGULAR[type] ?? type, name, address.candidates,
+        )
         : undefined;
+}
+
+/**
+ * [#32622, ADR-0150 D5] The package-less writes' refusal, as the layered door
+ * answers it (#28337: its sentence, code, status and `?package=` remedy,
+ * unchanged), with the holders it names carried as a package-scoped refusal's
+ * `refusal.candidates` (`[{ kind: 'package', packageId }, …]`, the `/actions`
+ * shape), so each transport answers them as `details.candidates`, as for every
+ * other `/layers` refusal. Carried by SHAPE (`refusal.status: 'refused'`),
+ * which the one recogniser reads (`packageScopedRefusalCandidates` in
+ * `@objectstack/types`), because the type this refusal judges need not be one
+ * the package-scoped resolver covers. The save and delete doors' answer of
+ * the same rows does not move.
+ */
+function withPackageCandidates(
+    error: Error & { code: 'RESOURCE_CONFLICT'; status: 409 },
+    type: string,
+    name: string,
+    packageIds: readonly string[],
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+    return Object.assign(error, {
+        refusal: {
+            status: 'refused' as const,
+            reason: 'ambiguous-in-environment' as const,
+            type,
+            name,
+            callerPackageId: null,
+            candidates: packageIds.map((packageId) => ({ kind: 'package' as const, packageId })),
+            message: error.message,
+        },
+    });
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */
@@ -182,6 +216,18 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         : await servedAddressJudgment(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
     const servedAddress = judged?.kind === 'served' ? judged.packageId : undefined;
     if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
+    // [#32849, ADR-0150 D4, ADR-0146 D8 item 2] …and, judged neither way, a
+    // member whose one shipper's declared override is stored is read at that
+    // shipper, as the plain read takes it ({@link declaredMemberOverrideAddressOf}):
+    // `effective` is then the override `?package=<shipper>` serves, never the
+    // shipper's own member beside it. The draft layer stays at the address the
+    // strict draft read takes, which this arm does not move (the plain read
+    // leaves its strict draft read where it was).
+    const declaredOverrideAt = request.packageId || judged !== undefined
+        ? undefined
+        : await declaredMemberOverrideAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
+    const draftPackageId = request.packageId;
+    if (declaredOverrideAt !== undefined) request = { ...request, packageId: declaredOverrideAt };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the
     // selector's or else the canonical one, read exactly as
@@ -216,6 +262,21 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         ? await judgeBareActionRead(host, request.name)
         : undefined;
     const exactAddress = await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
+    // [ADR-0150 D3, #32914] …and, naming no package, a type addressed by
+    // package is judged by the registry's package-scoped resolver, as the
+    // plain read judges it ({@link getMetaItem}, its `packagelessScopedRead`):
+    // a name two or more served packages hold is refused naming each
+    // (`PackageScopedNameRefusedError`, `409 RESOURCE_CONFLICT` with its
+    // candidates), before any layer is read and whatever the metadata service
+    // holds. The code layer below otherwise fell back to the artifact lookup's
+    // first composite, so the read answered the holder that registered first.
+    // Asked for the judgment only: a name one holder holds keeps the layers
+    // below as they were. [contract review S1] Stored-row holders are not
+    // this judgment's: the door refuses them through
+    // {@link packagelessLayeredReadRefusal}, its step 1c.
+    if (!request.packageId && host.engine?.registry?.readsByPackage?.(request.type) === true) {
+        host.engine.registry.resolveItem(request.type, request.name, null, member);
+    }
 
     // [ADR-0131 D6] Environment → code: the overlay layer is the
     // environment's stored row; no organization's row is read.
@@ -598,7 +659,7 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     let draft: unknown | null | undefined;
     if (opts.withDraft === true) {
         draft = null;
-        const draftAddress = request.packageId
+        const draftAddress = draftPackageId
             ? undefined
             : await host.strictDraftReadAddress(request.type, request.name, member);
         try {
@@ -606,8 +667,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 type: request.type,
                 name: request.name,
                 state: 'draft',
-                ...(request.packageId
-                    ? { packageId: request.packageId }
+                ...(draftPackageId
+                    ? { packageId: draftPackageId }
                     : draftAddress ? { packageId: draftAddress.packageId } : {}),
                 ...memberOption(member),
             }))?.row;
@@ -631,7 +692,9 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 // package-less draft of a name two or more packages hold is
                 // refused naming every holder, and another holder's draft is
                 // no draft here. The layer itself stays the draft as stored.
-                if (exactAddress) {
+                // [#32849] A draft read at the address the strict draft read
+                // takes is no exact address's.
+                if (exactAddress && draftPackageId) {
                     const stamped = withRowBinding(draft, (draftRow as { package_id?: unknown }).package_id);
                     if ((isPackageLessRow(draftRow) && declinesPackageLessRowAt(host, request.type, request.name, draftRow as ServedOverrideRow))
                         || exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {
