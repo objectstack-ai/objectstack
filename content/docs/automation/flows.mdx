@@ -567,6 +567,48 @@ check.
 
 [#22110]: https://github.com/objectstack-ai/objectstack/issues/22110
 
+### Text a record keeps — a field value marked as text
+
+A `create_record` / `update_record` field value is a literal or a CEL value
+envelope, and a literal string is written exactly as spelled. A field that
+stores a **sentence people read** — an escalation reason, a status note — is
+marked as text instead, with the text envelope `{ dialect: 'template', source }`.
+Only the `fields` map of these two nodes takes it; every other value slot
+refuses it.
+
+```typescript
+{
+  id: 'set_reason', type: 'update_record', label: 'Set reason',
+  config: {
+    objectName: 'crm_case',
+    filter: { id: { dialect: 'cel', source: 'record.id' } },
+    fields: {
+      escalation_reason: { dialect: 'template', source: 'Auto-escalated: {{ record.priority }} priority' },
+      status: 'escalated',          // a literal: written as spelled, never translated
+    },
+  },
+}
+```
+
+- `source` is a text slot like the ones above: `{{ }}` holes over the flow's
+  variables, and a single-brace `{…}` token is refused with its `{{ }}` spelling.
+- The text is written in the **organization's** language, because everyone in
+  the organization reads the record: the Localization setting
+  (`localization.locale`) when somebody set it, else the app's declared
+  `i18n.defaultLocale`. It is never the language of the person who started the
+  run — a button-started run writes the same text a record-change run does.
+- The translated template is picked first, then its holes are filled. Its key is
+  `flows.<flow>.records.<node_id>.fields.<field>`; `os i18n extract` scaffolds
+  it and `os lint` reports it missing against `supportedLocales`, like every
+  other `flows.*` key.
+- A missing translation, or no language to pick, writes the authored text and
+  the run goes on. A Localization setting that cannot be **read** fails the
+  node and writes nothing: the organization's choice may exist, and writing
+  another language over it would look like success. A `fault` edge routes it.
+- The text is picked once, when it is written. Records written before a
+  translation existed keep what they hold, and changing the Localization setting
+  does not rewrite them.
+
 **Create Record:**
 
 ```typescript
