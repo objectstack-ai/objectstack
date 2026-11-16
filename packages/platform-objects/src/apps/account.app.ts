@@ -73,6 +73,17 @@ export const ACCOUNT_APP: App = {
       componentRef: 'account:profile_card',
       icon: 'user-circle',
     },
+    // The QR code and link that connect the ObjectOS mobile app to this
+    // server, registered by the Console as `account:mobile_app`. Built from
+    // the server's published public base URL; every signed-in user may
+    // connect their own phone, so the entry carries no gate.
+    {
+      id: 'nav_account_mobile_app',
+      type: 'component',
+      label: 'Mobile App',
+      componentRef: 'account:mobile_app',
+      icon: 'smartphone',
+    },
 
     // --- Inbox & work assigned to me -----------------------------------
     // Notifications, approvals waiting on me, and the orgs I belong to.

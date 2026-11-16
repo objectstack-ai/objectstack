@@ -407,6 +407,14 @@ describe('per-org seed replay names the founder (#30281)', () => {
     result: { id },
     context,
   });
+  /** better-auth's member write, as the adapter hands it to the engine. */
+  const memberInsert = (organizationId: string, userId: string) => ({
+    object: 'sys_member',
+    operation: 'insert' as const,
+    data: { organization_id: organizationId, user_id: userId, role: 'owner' },
+    result: { id: `mem_${organizationId}_${userId}`, organization_id: organizationId, user_id: userId, role: 'owner' },
+    context: { isSystem: true, attributedUserId: userId },
+  });
 
   async function startWithReplayer() {
     const plugin = new OrganizationsPlugin();
@@ -424,9 +432,34 @@ describe('per-org seed replay names the founder (#30281)', () => {
     const { seedReplayer, middlewares } = await startWithReplayer();
 
     await middlewares[1](insertBy('org_zh', { isSystem: true, attributedUserId: 'usr_founder' }), async () => {});
+    // [#34038] better-auth writes the founder's member row next; the replay runs on it.
+    await middlewares[1](memberInsert('org_zh', 'usr_founder'), async () => {});
 
     expect(seedReplayer).toHaveBeenCalledTimes(1);
     expect(seedReplayer.mock.calls[0]).toEqual(['org_zh', { userId: 'usr_founder' }]);
+  });
+
+  it('[#34038] an organization a person created waits for its first member row, and replays once', async () => {
+    const { seedReplayer, middlewares } = await startWithReplayer();
+
+    await middlewares[1](insertBy('org_wait', { isSystem: true, attributedUserId: 'usr_founder' }), async () => {});
+    expect(seedReplayer).not.toHaveBeenCalled();
+
+    // A member of ANOTHER organization does not release it.
+    await middlewares[1](memberInsert('org_other', 'usr_founder'), async () => {});
+    expect(seedReplayer).not.toHaveBeenCalled();
+
+    await middlewares[1](memberInsert('org_wait', 'usr_founder'), async () => {});
+    await middlewares[1](memberInsert('org_wait', 'usr_colleague'), async () => {});
+    expect(seedReplayer.mock.calls).toEqual([['org_wait', { userId: 'usr_founder' }]]);
+  });
+
+  it('[#34038] a member row of an organization nobody is waiting on replays nothing', async () => {
+    const { seedReplayer, middlewares } = await startWithReplayer();
+
+    await middlewares[1](memberInsert('org_existing', 'usr_someone'), async () => {});
+
+    expect(seedReplayer).not.toHaveBeenCalled();
   });
 
   it('keeps the one-argument call when no person founded the organization', async () => {

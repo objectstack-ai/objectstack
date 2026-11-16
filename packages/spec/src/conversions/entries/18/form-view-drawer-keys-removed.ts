@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#29987 codemod] The `form-view-drawer-keys-removed` conversion (`toMajor:
-// 18`), moved out of `conversions/registry.ts` whole by
-// `scripts/codemod-split-conversions-registry.mjs` (ruling 6583399215:
+// 18`), moved out of `conversions/registry.ts` whole
+// (split by #29993; ruling 6583399215:
 // per-entry files).
 //
 // A MOVE, not a redesign: each declaration below is its `registry.ts` text

@@ -271,6 +271,10 @@ list re-reads its rows, whether the action resolved or rejected, so a record
 the handler changed shows its current value; the selection stays after a
 rejection, ready for a re-run.
 
+A per-record run reports each record on its own: the result dialog lists every
+failed record with its refusal's `userMessage` when the handler threw one, else
+the error's message, and the error CSV keeps each failure's whole message.
+
 **Pick the right key for the dispatch you mean.** Per-record is
 `bulkActions: ['<name>']` — the bare-string form, which has nowhere to carry a
 flag and is promoted with the action's own label, params and `visible`.

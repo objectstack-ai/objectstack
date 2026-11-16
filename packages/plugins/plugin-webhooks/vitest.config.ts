@@ -48,6 +48,9 @@ export default defineConfig({
     resolve: {
         alias: [
             { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+            // The outbound-request guard the boot census judges stored targets
+            // with. Same reason and anchoring as the `core` entry above.
+            { find: /^@objectstack\/core\/egress$/, replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
             // [#12642] The i18n provenance seam. This package's translation
             // barrel passes its committed `<locale>.source-hashes.generated.ts`
             // companions through `withSourceFallback`, whose home is this

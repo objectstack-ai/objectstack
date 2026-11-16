@@ -389,12 +389,13 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * [#33181] The environment-user host (`environment-user-host.ts`): told
    * after a person is added through `admin/add-sso-user` or
    * `admin/import-sso-users`, and asked before a person is deactivated
-   * through `admin/ban-user` or reactivated through `admin/unban-user`. Read
-   * per call, so a host wired after boot is still found. A typed
-   * `EnvironmentUserHostRefusal` refuses the operation (a refused add is
-   * taken back out); any other failure refuses a deactivation (`503`) and is
-   * reported on an add or a reactivation as `host: { notified: false,
-   * reason }`, which it never undoes.
+   * through `admin/ban-user`, reactivated through `admin/unban-user`, or a
+   * pending person is removed through `admin/remove-sso-user` (`userRemoved`,
+   * else `userDeactivated`). Read per call, so a host wired after boot is
+   * still found. A typed `EnvironmentUserHostRefusal` refuses the operation
+   * (a refused add is taken back out); any other failure refuses a
+   * deactivation (`503`) and is reported on an add, a reactivation or a
+   * removal as `host: { notified: false, reason }`, which it never undoes.
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 
@@ -726,6 +727,8 @@ export class AuthPlugin implements Plugin {
   private authSettingsBinding: Promise<void> | null = null;
   /** [#26020] The per-address window of the signed-out invitation preview counts here; set in `init()`. */
   private invitationPreviewCounters: (() => Promise<CounterStore>) | null = null;
+  /** The per-address window of the signed-out application-name read counts here; set in `init()`. */
+  private oauthClientNameCounters: (() => Promise<CounterStore>) | null = null;
 
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
@@ -900,6 +903,16 @@ export class AuthPlugin implements Plugin {
         degradedImpact:
           'The limit is still enforced, but PER NODE: an N-node deployment admits up to N× the configured ' +
           'previews per address per window',
+      });
+      // The signed-out application-name read (`oauth-client-name.ts`): the
+      // same per-address window, under its own subject.
+      this.oauthClientNameCounters = createLazyCounterStore({
+        resolveCache,
+        logger: ctx.logger,
+        subject: 'signed-out application name rate limit',
+        degradedImpact:
+          'The limit is still enforced, but PER NODE: an N-node deployment admits up to N× the configured ' +
+          'reads per address per window',
       });
     }
 
@@ -5243,6 +5256,25 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
+
+      // Remove a person who is still pending (the email-typo case) and cancel
+      // their invitation at the host. Same gate and attribution as the two
+      // doors above; logic in `pending-sso-users.ts` (`runRemoveSsoUser`).
+      rawApp.post(`${basePath}/admin/remove-sso-user`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runRemoveSsoUser } = await import('./pending-sso-users.js');
+          const { status, body } = await runAttributedToUser(actor, () =>
+            runRemoveSsoUser(pendingSsoUserDeps(c), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/remove-sso-user failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
+        }
+      });
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -5309,6 +5341,45 @@ export class AuthPlugin implements Plugin {
         ctx.logger.error('[AuthPlugin] organization/invitation-preview failed', err);
         // A signed-out caller is told the read failed, never why.
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // The application name for a sign-in hand-off: the sign-in page reads the
+    // client name only for the client its signed request names. The reasons
+    // for each answer live in oauth-client-name.ts. It never reads the
+    // session, and it is rate-limited per client address (ADR-0121 D6), like
+    // the invitation preview above. Ledgered `public` in auth-route-ledger.ts.
+    rawApp.get(`${basePath}/oauth2/client-name`, async (c: any) => {
+      try {
+        const counters = this.oauthClientNameCounters;
+        const mgr = this.authManager!;
+        if (!counters) {
+          ctx.logger.error('[AuthPlugin] oauth2/client-name: the rate-limit store was never wired; refusing');
+          return c.json(
+            { success: false, error: { code: 'INTERNAL_ERROR', message: 'The application name is unavailable.' } },
+            500,
+            { 'Cache-Control': 'no-store' },
+          );
+        }
+        const { answerOAuthClientName } = await import('./oauth-client-name.js');
+        const headers = (c.req.header() ?? {}) as Record<string, string>;
+        const answer = await answerOAuthClientName(
+          {
+            queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+            clientAddress: mgr.resolveClientAddress({ headers, ...transportOf(c) }),
+          },
+          {
+            getAuthContext: () => mgr.getAuthContext(),
+            getDataEngine: () => mgr.getDataEngine() as any,
+            counterStore: counters,
+          },
+        );
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] oauth2/client-name failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The application name is unavailable.' } }, 500);
       }
     });
 

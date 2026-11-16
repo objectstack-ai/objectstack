@@ -116,6 +116,9 @@ const PackagesPage = lazyPage('packages', () =>
 const PermissionMatrixEditPage = lazyPage('permission set', () =>
   import('../views/metadata-admin/PermissionMatrixEditor.js').then((m) => m.PermissionMatrixEditPage),
 );
+const MobileAppPage = lazyPage('mobile app', () =>
+  import('../console/mobile-app/MobileAppPage.js').then((m) => m.MobileAppPage),
+);
 const PackagedActionsPage = lazyPage('packaged actions', () =>
   import('../views/setup/PackagedActionsPage.js').then((m) => m.PackagedActionsPage),
 );
@@ -184,6 +187,18 @@ registerAppComponent({
   label: 'Packages',
   source: '@object-ui/app-shell',
   component: PackagesPage,
+});
+
+/**
+ * The account app's Mobile App page: the QR code and link that connect the
+ * ObjectOS mobile app to this server. The account app's navigation names
+ * `account:mobile_app`, and `ComponentNavView` resolves it.
+ */
+registerAppComponent({
+  ref: 'account:mobile_app',
+  label: 'Mobile App',
+  source: '@object-ui/app-shell',
+  component: MobileAppPage,
 });
 
 /**

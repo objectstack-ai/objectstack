@@ -42,6 +42,14 @@ function readSeededRecordIds(
   }
 }
 
+/**
+ * [#34038] How long an organization better-auth created may wait for its first
+ * `sys_member` row before Middleware B stops waiting and says so. better-auth
+ * writes that row in the same request, milliseconds later; an entry this old
+ * belongs to a create that failed between the two writes.
+ */
+const FIRST_MEMBER_WAIT_MS = 10 * 60_000;
+
 async function resolveKernelService(kernel: any, name: string): Promise<any> {
   if (typeof kernel?.getServiceAsync === 'function') {
     try {
@@ -136,7 +144,9 @@ interface OrgScopingMetadataSlot {
  *      `tenant_isolation` RLS policy hides them from the very user
  *      who just created them.
  *
- *   2. **per-org seed replay** — after `sys_organization` insert, load
+ *   2. **per-org seed replay** — after `sys_organization` insert (for an
+ *      organization better-auth creates, after its founder's `sys_member`
+ *      row, so the seed's person references resolve them), load
  *      the APP's own demo seed data into the new org, by replaying the
  *      registered `seed-datasets` through the kernel-level
  *      `seed-replayer` callable (set by AppPlugin). It reads no other
@@ -386,17 +396,77 @@ export class OrganizationsPlugin implements Plugin {
     });
 
     // ── Middleware B: per-org seed pipeline on sys_organization insert ─
+    //
+    // [#34038] WHEN the replay runs depends on who created the organization.
+    //
+    // better-auth's `organization/create` writes the `sys_organization` row and
+    // THEN the founder's `sys_member` row, as two separate adapter writes. An
+    // organization-scoped seed load resolves a person through membership in the
+    // load organization (`Field.user()`, `Field.lookup('sys_user')`, the injected
+    // `owner_id`), so a replay run on the organization insert finds no member at
+    // all: every person reference the seed declared, the founder's included,
+    // landed NULL with "not a member of organization ORG". better-auth's create
+    // is the only `sys_organization` insert that carries `attributedUserId` (the
+    // adapter's `withSystemContext` stamps the signed-in creator), and it always
+    // writes the creator's member row next. So an organization insert attributed to a person waits for the
+    // organization's FIRST `sys_member` insert and replays inside it, after that
+    // row is stored. better-auth's create runs no database transaction here, so
+    // the stored row is what the replay's membership probe reads. Everything a
+    // host's `onOrganizationCreated` observes is unchanged: it runs from
+    // `afterCreateOrganization`, after the member write, so the seed rows are
+    // there before it either way.
+    //
+    // Every other organization insert replays on the insert, exactly as before:
+    // a SYSTEM insert with no person behind it (the default-organization
+    // bootstrap, whose seed-ownership handoff below reads the rows this replay
+    // landed; imports; migrations) gets no member write it could wait for.
+    //
+    // ⛔ One replay per organization: the entry is removed before the replay
+    // runs, so a second member never replays again.
+    const awaitingFirstMember = new Map<string, { founderId: string; since: number }>();
+    const forgetAbandonedCreates = (now: number) => {
+      for (const [organizationId, entry] of awaitingFirstMember) {
+        if (now - entry.since < FIRST_MEMBER_WAIT_MS) continue;
+        awaitingFirstMember.delete(organizationId);
+        ctx.logger.warn(
+          `[org-scoping] organization ${organizationId} was created by ${entry.founderId}, but no member row ` +
+            `followed within ${FIRST_MEMBER_WAIT_MS / 60_000} minutes, so its seed was not replayed. ` +
+            'The create did not finish; an organization with no member has nobody to see the data. ' +
+            'Once it has a member, the seed-replayer service called with its id loads the seed.',
+          { organizationId, founderId: entry.founderId },
+        );
+      }
+    };
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
       await next();
-      if (
-        opCtx?.object !== 'sys_organization' ||
-        (opCtx?.operation !== 'create' && opCtx?.operation !== 'insert')
-      ) {
+      if (opCtx?.operation !== 'create' && opCtx?.operation !== 'insert') return;
+
+      if (opCtx?.object === 'sys_member') {
+        if (awaitingFirstMember.size === 0) return;
+        const organizationId = opCtx?.result?.organization_id ?? opCtx?.data?.organization_id;
+        const waiting = typeof organizationId === 'string' ? awaitingFirstMember.get(organizationId) : undefined;
+        if (!waiting) return;
+        awaitingFirstMember.delete(organizationId);
+        await replayOrganizationSeed(organizationId, waiting.founderId);
         return;
       }
+
+      if (opCtx?.object !== 'sys_organization') return;
       const newOrgId = opCtx?.result?.id ?? opCtx?.data?.id;
       if (!newOrgId) return;
 
+      const attributedFounder = opCtx?.context?.attributedUserId;
+      if (typeof attributedFounder === 'string' && attributedFounder !== '') {
+        const now = Date.now();
+        forgetAbandonedCreates(now);
+        awaitingFirstMember.set(String(newOrgId), { founderId: attributedFounder, since: now });
+        return;
+      }
+      const userId = opCtx?.context?.userId;
+      await replayOrganizationSeed(newOrgId, typeof userId === 'string' && userId !== '' ? userId : undefined);
+    });
+
+    const replayOrganizationSeed = async (newOrgId: string, founderId: string | undefined): Promise<void> => {
       const kernel: any = (ctx as any).kernel ?? ctx;
       const datasetsRaw = await resolveKernelService(kernel, 'seed-datasets');
       const datasets: any[] | undefined =
@@ -413,7 +483,6 @@ export class OrganizationsPlugin implements Plugin {
           // SYSTEM with the signed-in creator as `attributedUserId`; a
           // system insert with no person behind it names nobody, and the
           // replay falls back to the app's declared default locale.
-          const founderId = opCtx?.context?.attributedUserId ?? opCtx?.context?.userId;
           const summary =
             typeof founderId === 'string' && founderId !== ''
               ? await replayer(newOrgId, { userId: founderId })
@@ -478,7 +547,7 @@ export class OrganizationsPlugin implements Plugin {
           'Demo data on signup comes from the app\'s own seed definitions — never from another organization\'s rows.',
         { organizationId: newOrgId },
       );
-    });
+    };
 
     // ── Default-org bootstrap on kernel:ready + on admin grant ────────
     if (this.opts.ensureDefaultOrganization) {

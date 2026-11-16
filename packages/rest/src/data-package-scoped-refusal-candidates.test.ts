@@ -229,6 +229,7 @@ describe('[#32250] /data names the candidates of a package-scoped refusal — sq
     // label, so the end-user sentence stays the unnamed one).
     const UNIQUE = {
       error: 'A record with this value already exists',
+      userMessage: 'A record with this value already exists',
       code: 'UNIQUE_VIOLATION',
       developerMessage: "Duplicate record refused on 'Scoped refusal 32250': a unique constraint on 'code' already holds this value. No record was written.",
       field: 'code',
@@ -238,6 +239,7 @@ describe('[#32250] /data names the candidates of a package-scoped refusal — sq
       code: 'UNIQUE_VIOLATION',
       message: "Duplicate record refused on 'Scoped refusal 32250': a unique constraint on 'code' already holds this value. No record was written.",
       httpStatus: 409,
+      userMessage: UNIQUE.error,
     };
 
     it('unique violation on create, update and createMany', async () => {
