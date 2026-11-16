@@ -30,7 +30,7 @@
 import { createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { inboundHookJsonResponse, inboundHookRefusalResponse } from '@objectstack/core';
-import { SchemaRegistry, assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '@objectstack/runtime';
 import { AutomationEngine, AutomationServicePlugin, FlowCredentialChannel } from '@objectstack/service-automation';
 import { ApiTriggerPlugin, HOOKS_ADDRESSED_PATH, HOOKS_PATH } from '@objectstack/trigger-api';
@@ -74,7 +74,7 @@ function hooked(name: string, tag: string) {
     };
 }
 
-/** One active hook-secret row per (flow, package), as the channel stores them. */
+/** One active hook-secret row per (flow, package), as the channel stores them: read-only, the hook door writes nothing. */
 function credentialStore(rows: Array<{ flow: string; packageId: string; value: string }>) {
     const stored = rows.map((r, i) => ({
         id: `cred_${i}`, flow_name: r.flow, flow_package: r.packageId, node_id: 'start', credential_key: 'secret', state: 'active', value: r.value,
@@ -85,15 +85,6 @@ function credentialStore(rows: Array<{ flow: string; packageId: string; value: s
             const rows = stored.filter((row) => Object.entries(where).every(([k, v]) => (row as Record<string, unknown>)[k] === v));
             const page = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
             return page.map(({ value: _value, ...row }) => row);
-        },
-        async insert() { throw new Error('read-only probe store'); },
-        async update(_object: string, data: unknown, options?: unknown) {
-            assertEngineUpdateDispatch(data as never, options as never);
-            throw new Error('read-only probe store');
-        },
-        async delete(_object: string, options?: unknown) {
-            assertEngineDeleteDispatch(options as never);
-            throw new Error('read-only probe store');
         },
         async resolveSecretField(_object: string, id: string) {
             return stored.find((row) => row.id === id)?.value ?? null;
@@ -215,7 +206,7 @@ beforeEach(async () => {
         { flow: SHARED, packageId: P1, value: S1 },
         { flow: SHARED, packageId: P2, value: S2 },
         { flow: ALONE, packageId: P1, value: S_ALONE },
-    ]));
+    ]) as never);
     await channel.loadIndex();
     engine.setFlowCredentialSource(channel);
 
