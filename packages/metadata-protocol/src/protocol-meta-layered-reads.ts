@@ -66,9 +66,11 @@ import {
 } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
+    bareDocServiceCopyDisplacesEntry,
     judgeBareActionRead,
     judgeDroppedServiceRefusal,
     packageScopedRefusalOf,
+    refuseAmbiguousBareDocRead,
     rethrowPackageScopedRefusal,
     registryAnswerAtAddress,
     servedFromDisabledHolder,
@@ -264,6 +266,19 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         ? await judgeBareActionRead(host, request.name)
         : undefined;
     const exactAddress = await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
+    // [#34248, ruling 6893582352] …and a bare doc read of a name two enabled
+    // packages hold, beside the environment's own entry, reads that entry as
+    // {@link getMetaItem} serves it ({@link refuseAmbiguousBareDocRead}): as
+    // its code layer, never the package copy the service kept. Its refusal
+    // without such an entry stays the door's, as before.
+    let bareDocEnvironmentEntry: unknown;
+    if (!request.packageId && request.type === 'doc') {
+        try {
+            bareDocEnvironmentEntry = refuseAmbiguousBareDocRead(host, request.name, member);
+        } catch (error) {
+            if (packageScopedRefusalOf(error) === undefined) throw error;
+        }
+    }
     // [ADR-0150 D3, #32914] …and, naming no package, a type addressed by
     // package is judged by the registry's package-scoped resolver, as the
     // plain read judges it ({@link getMetaItem}, its `packagelessScopedRead`):
@@ -305,7 +320,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         if (fromService.data !== undefined && fromService.data !== null
             && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
                 || await servedFromDisabledHolder(host, request.name, fromService.data)))
-            && !(exactAddress === undefined && serviceCopyOfAnotherPackage(host, request, fromService.data))) {
+            && !(exactAddress === undefined && serviceCopyOfAnotherPackage(host, request, fromService.data))
+            && !bareDocServiceCopyDisplacesEntry(bareDocEnvironmentEntry, fromService.data)) {
             // [#26699] …when it is the member this read addresses, as in
             // {@link getMetaItem}: the service keys a type's items by name
             // alone, so for a bundle it holds whichever member it
@@ -396,14 +412,19 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         const judgedPackageId = typeof (bareActionAnswer?.item as { _packageId?: unknown } | undefined)?._packageId === 'string'
             ? (bareActionAnswer!.item as { _packageId: string })._packageId
             : undefined;
-        const artifact = bareActionAnswer !== undefined && judgedPackageId === undefined
+        // [#34248] …and so is a bare doc read's environment entry: no
+        // package's artifact is its code layer; the entry is, as the plain
+        // read's code step serves it.
+        const artifact = (bareActionAnswer !== undefined && judgedPackageId === undefined) || bareDocEnvironmentEntry !== undefined
             ? undefined
             : host.lookupArtifactItem(request.type, request.name, request.packageId || judgedPackageId, wantedMember);
         let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
             ?? namedMemberOnly(runtimeOnly(bareActionAnswer !== undefined
                 ? bareActionAnswer.item
-                : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
-        if (regItem === undefined) {
+                : bareDocEnvironmentEntry !== undefined
+                    ? bareDocEnvironmentEntry
+                    : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
+        if (regItem === undefined && bareDocEnvironmentEntry === undefined) {
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
         }

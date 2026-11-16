@@ -1625,7 +1625,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         let publishedCode: unknown;
         const notAnotherHoldersCopy = (copy: unknown): unknown => {
             const stamp = (copy as { _packageId?: unknown } | null | undefined)?._packageId;
-            return mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)
+            if (mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)) return publishedCode;
+            // [#34248, ruling 6893582352] …and a bare doc's package copy where
+            // the layered read's code layer is the environment's own
+            // package-less entry (two enabled holders beside it): that entry
+            // answers first, never the holder registered last.
+            const codeStamp = (publishedCode as { _packageId?: unknown } | null | undefined)?._packageId;
+            return publishedType === 'doc' && publishedCode != null && (typeof codeStamp !== 'string' || codeStamp === '' || codeStamp === 'sys_metadata')
+                && typeof stamp === 'string' && stamp !== '' && stamp !== 'sys_metadata'
                 ? publishedCode
                 : copy;
         };

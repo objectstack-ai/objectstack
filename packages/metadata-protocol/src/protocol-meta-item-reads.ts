@@ -329,40 +329,43 @@ export async function judgeBareActionRead(
  * exemption, because the layers below do not serve it for a `doc` and would
  * answer a holder by registration order again.
  *
- * [#34248, ADR-0150 red line 2] Nor is a package-less entry in the registry's
- * bare slot (a hydrated or saved row, or a stamp-less registration) that is
- * the copy of a row the layers decline ({@link ProtocolHost.isStoredEntryOfDeclinedName}:
- * a doc a package ships is sealed, so its package-less row is never served).
- * The registry exempts the name for such an entry, but the layers do not
- * serve it: they served the MetadataService's copy, the holder registered
- * last. So two or more enabled holders beside such an entry are refused here
- * as without it, naming each holder. An entry the layers would serve keeps
- * the exemption.
+ * [#34248, ruling 6893582352] A package-less entry in the registry's bare
+ * slot (a stamp-less registration, or a hydrated or saved row stamped with
+ * the store's sentinel) exempts the name: it is the environment's own item,
+ * which answers first, as the registry and `MetadataFacade.get` serve it.
+ * That entry is returned when two or more enabled packages hold the name,
+ * because the layers must then serve it: the MetadataService keeps a doc by
+ * name alone, so its copy is the holder registered last, and it answered
+ * first ({@link bareDocServiceCopyDisplacesEntry}).
  *
+ * @returns the environment's entry beside two or more enabled holders, else
+ *   `undefined` (no such entry, or a name one package or none holds).
  * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
  */
-export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine' | 'isStoredEntryOfDeclinedName'>, name: string, member: string | undefined): void {
+export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): unknown {
     const registry = host.engine?.registry as {
         resolveItem?(type: string, name: string, caller: null, member?: string): unknown;
         packageScopedHoldersOf?(type: string, name: string): string[] | undefined;
     } | undefined;
-    if (typeof registry?.resolveItem !== 'function') return;
+    if (typeof registry?.resolveItem !== 'function') return undefined;
     const answer = registry.resolveItem('doc', name, null, member);
     // The registry's answer naming no package is the exempting entry (or a
     // name one package or none holds, which the count below leaves alone).
-    if (answer === undefined || answer === null || storedItemPackageId(answer) !== undefined) return;
-    if (!host.isStoredEntryOfDeclinedName('doc', answer)) return;
-    const holders = registry.packageScopedHoldersOf?.('doc', name) ?? [];
-    if (holders.length < 2) return;
-    const refused: Omit<PackageScopedRefusal, 'message'> = {
-        status: 'refused',
-        reason: 'ambiguous-in-environment',
-        type: 'doc' as PackageScopedRefusal['type'],
-        name,
-        callerPackageId: null,
-        candidates: holders.map((packageId) => ({ kind: 'package' as const, packageId })),
-    };
-    throw new PackageScopedNameRefusedError({ ...refused, message: packageScopedRefusalMessage(refused) });
+    if (answer === undefined || answer === null || storedItemPackageId(answer) !== undefined) return undefined;
+    return (registry.packageScopedHoldersOf?.('doc', name) ?? []).length >= 2 ? answer : undefined;
+}
+
+/**
+ * [#34248, ruling 6893582352] Is the MetadataService's answer to a bare doc
+ * read a package's copy where the environment's own entry answers
+ * ({@link refuseAmbiguousBareDocRead}'s return)? Such a copy is declined at
+ * the service step, so the registry's bare slot, read first by `getItem`,
+ * serves the environment's entry. A package-less service copy is the
+ * environment's own and is kept.
+ */
+export function bareDocServiceCopyDisplacesEntry(environmentEntry: unknown, serviceCopy: unknown): boolean {
+    return environmentEntry !== undefined && serviceCopy !== undefined && serviceCopy !== null
+        && storedItemPackageId(serviceCopy) !== undefined;
 }
 
 /**
@@ -723,9 +726,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // more enabled packages hold is refused here when the read names no
     // package, naming each, before any layer is read; the environment's own
     // item still answers first ({@link refuseAmbiguousBareDocRead}), [#34248]
-    // when the layers serve it: a package-less entry that copies a row they
-    // decline is refused as without it.
-    if (!request.packageId && request.type === 'doc') refuseAmbiguousBareDocRead(host, request.name, member);
+    // and the service step below declines a package's copy in its place.
+    const bareDocEnvironmentEntry = !request.packageId && request.type === 'doc'
+        ? refuseAmbiguousBareDocRead(host, request.name, member)
+        : undefined;
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }
@@ -1226,7 +1230,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             if (fromService.data !== undefined && fromService.data !== null
                 && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
                     || await servedFromDisabledHolder(host, request.name, fromService.data)))
-                && !anotherPackagesCopy) {
+                && !anotherPackagesCopy
+                // [#34248] …or, at a bare doc read the environment's own entry
+                // answers beside two holders, a package's copy
+                // ({@link bareDocServiceCopyDisplacesEntry}): step 3 serves the entry.
+                && !bareDocServiceCopyDisplacesEntry(bareDocEnvironmentEntry, fromService.data)) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
