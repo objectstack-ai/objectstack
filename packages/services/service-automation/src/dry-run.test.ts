@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { AI_ACCOUNT_ELEVATED_START_REFUSAL, requiredPermissionsRefusal } from '@objectstack/core';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { FlowDryRunResult } from '@objectstack/spec/contracts';
 import { AutomationEngine, type FlowUserGrants } from './engine.js';
@@ -27,13 +28,36 @@ function makeLogger(): any {
 /** A live data engine holding `deal` rows, recording every call. */
 function liveData(rows: Record<string, Record<string, unknown>> = { d1: { id: 'd1', stage: 'open', amount: 10 } }) {
     const calls: Array<{ op: string; obj: string; q?: any }> = [];
-    const match = (where: any) => Object.values(rows).filter((r) => !where || Object.entries(where).every(([k, v]) => r[k] === v));
+    // Equality on plain fields only: a combinator or an operator object is
+    // refused, never read as a field name.
+    const match = (where: any) => Object.values(rows).filter((r) => !where || Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`liveData: unsupported filter '${k}'`);
+        return r[k] === v;
+    }));
     const data: any = {
-        async find(obj: string, q: any) { calls.push({ op: 'find', obj, q }); return match(q?.where).map((r) => ({ ...r })); },
-        async findOne(obj: string, q: any) { calls.push({ op: 'findOne', obj, q }); const r = match(q?.where)[0]; return r ? { ...r } : null; },
+        async find(obj: string, q: any) {
+            calls.push({ op: 'find', obj, q });
+            const hits = match(q?.where);
+            const page = typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
+            return page.map((r) => ({ ...r }));
+        },
+        async findOne(obj: string, q: any) {
+            assertEngineFindOnePredicate(obj, q);
+            calls.push({ op: 'findOne', obj, q });
+            const r = match(q?.where)[0];
+            return r ? { ...r } : null;
+        },
         async insert(obj: string) { calls.push({ op: 'insert', obj }); throw new Error('a dry run must not insert'); },
-        async update(obj: string) { calls.push({ op: 'update', obj }); throw new Error('a dry run must not update'); },
-        async delete(obj: string) { calls.push({ op: 'delete', obj }); throw new Error('a dry run must not delete'); },
+        async update(obj: string, payload: any, options?: any) {
+            assertEngineUpdateDispatch(payload, options);
+            calls.push({ op: 'update', obj });
+            throw new Error('a dry run must not update');
+        },
+        async delete(obj: string, options?: any) {
+            assertEngineDeleteDispatch(options);
+            calls.push({ op: 'delete', obj });
+            throw new Error('a dry run must not delete');
+        },
     };
     return { data, calls };
 }
