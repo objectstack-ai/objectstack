@@ -1683,8 +1683,11 @@ just declared.
 installs or upgrades a package through an install door (the marketplace
 install, for example), the door's schema sync computes every roll-up the
 package added, on each stored row still holding `NULL`. It uses the aggregate
-and the system-context write that the child-write recompute uses, for every
-organization's rows, and it writes no child row. `min` / `max` / `avg` are
+the child-write recompute uses and a system-context write that covers every
+organization's rows, and it writes no child row. Like the door's own seed
+writes, it runs with automations off: no metadata-bound hook or record-change
+flow fires on a backfilled parent. A roll-up over that parent is still
+recomputed. This command, run by hand, keeps running them. `min` / `max` / `avg` are
 included, because the door knows those columns are new. Roll-ups the deployment
 already served when it booted are not walked again, so an upgrade that adds no
 roll-up costs nothing here. Two cases still need this command:

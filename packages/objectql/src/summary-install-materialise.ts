@@ -27,10 +27,13 @@
  * The install door is the one moment that both knows a summary is new and has
  * just created its column, so the values are written there, through
  * {@link backfillSummaryNulls}: the same aggregate the engine's own recompute
- * uses, the same system context (`{ isSystem: true }`, no tenant — every
- * organization's rows), the same `update` verb on the parent, so a parent
- * write fires what the child-write recompute's parent write fires and no
- * child row is written. Keyset pages of 500, bounded per object.
+ * uses, a system context with no tenant (every organization's rows), and the
+ * engine's `update` verb on the parent. No child row is written. The parent
+ * write carries `skipAutomations: true`, as the door's own seed writes do
+ * (end-state data, not user events): no metadata-bound hook and no
+ * record-change flow runs on a backfilled parent, while the engine's own
+ * roll-up recompute still runs, so a parent that is itself a child of another
+ * roll-up moves that roll-up too. Keyset pages of 500, bounded per object.
  *
  * ## Which summaries are new
  *
@@ -152,6 +155,11 @@ async function walkAdded(
       apply: true,
       objects,
       recomputeUndefinedOnEmpty: added,
+      // The door's own writes are end-state data, not user events (its seed
+      // owner stamp, the seed-loader rule): no metadata-bound hook or
+      // record-change flow runs on a backfilled parent. The roll-up recompute
+      // is the engine's, so a chained roll-up still moves.
+      skipAutomations: true,
     });
   } catch (err) {
     const error = (err as Error)?.message ?? String(err);

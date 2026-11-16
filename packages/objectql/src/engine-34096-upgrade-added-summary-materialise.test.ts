@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
+import { backfillSummaryNulls } from './summary-backfill.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -321,3 +322,91 @@ describe('#34096 — the ObjectQL plugin records the boot\'s roll-ups, so an ins
     }
   });
 });
+
+/**
+ * The install door's writes are end-state data, not user events: its seed
+ * writes carry `skipAutomations`, and so does this walk's parent write. No
+ * metadata-bound hook or record-change flow runs on a backfilled parent,
+ * while the engine's own roll-up recompute does, so a chained roll-up moves.
+ * `os migrate summary-nulls` is the operator's run, at the operator's time,
+ * and keeps firing them.
+ */
+describe('#34096 — the install walk runs no automation on the parents it backfills', () => {
+  const ACCOUNT = 'qx_account';
+  const ROLLED = 'contracts_invoiced';
+  const account = { name: ACCOUNT, label: 'Account', fields: { title: { name: 'title', type: 'text', label: 'Title' } } };
+  const contractOfAccount = {
+    ...contract,
+    fields: { ...contract.fields, account: { name: 'account', type: 'lookup', label: 'Account', reference: ACCOUNT } },
+  };
+  const c1 = { id: APP, name: 'o2c', version: '6.2.0', objects: [account, contractOfAccount, invoice] };
+  // The upgrade adds the contract roll-ups AND one on the account over the
+  // contract's new `invoiced_amount`: the account is a parent of a parent.
+  const c2 = {
+    ...c1, version: '6.3.0',
+    objectExtensions: [
+      { extend: CONTRACT, fields: ROLLUPS },
+      { extend: ACCOUNT, fields: { [ROLLED]: { name: ROLLED, type: 'summary', label: 'Invoiced over contracts', summaryOperations: { object: CONTRACT, field: INVOICED, function: 'sum' } } } },
+    ],
+  };
+  const SYS = { context: { isSystem: true } } as const;
+
+  async function setUp(opts: { sealed: boolean }) {
+    const logger: any = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(), fatal: vi.fn() };
+    logger.child = () => logger;
+    const engine = new ObjectQL({ logger });
+    const d = makeDriver();
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registerApp(c1);
+    if (opts.sealed) bootCompleted(engine);
+    const firm = await engine.insert(ACCOUNT, { title: 'firm' }, SYS);
+    const acme = await engine.insert(CONTRACT, { title: 'acme', account: firm.id }, SYS);
+    await engine.insert(INVOICE, { contract: acme.id, amount: 36000 }, SYS);
+    await engine.insert(INVOICE, { contract: acme.id, amount: 4000 }, SYS);
+    // A metadata-bound hook on the parent, bound as an app binds one.
+    const boundCalls: string[] = [];
+    engine.bindHooks([
+      { name: 'contract_touch', object: CONTRACT, events: ['beforeUpdate', 'afterUpdate'], handler: async (ctx: any) => { boundCalls.push(ctx.event); } },
+    ] as any, { packageId: APP });
+    const parentWrites: Array<{ skipAutomations: unknown }> = [];
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.object === CONTRACT && opCtx.operation === 'update') parentWrites.push({ skipAutomations: opCtx.context?.skipAutomations });
+      return next();
+    });
+    engine.registerApp(c2);
+    return { engine, firm, acme, boundCalls, parentWrites, logger };
+  }
+
+  it('writes each backfilled parent with skipAutomations, and its metadata-bound update hook does not fire', async () => {
+    const { engine, acme, boundCalls, parentWrites } = await setUp({ sealed: true });
+    await engine.syncSchemas();
+
+    expect((await engine.findOne(CONTRACT, { where: { id: acme.id }, ...SYS }))?.[INVOICED]).toBe(40000);
+    expect(parentWrites.length).toBeGreaterThan(0);
+    for (const w of parentWrites) expect(w.skipAutomations).toBe(true);
+    expect(boundCalls).toEqual([]);
+  });
+
+  it('still recomputes a chained roll-up: the account over the contracts it just filled', async () => {
+    const { engine, firm } = await setUp({ sealed: true });
+    await engine.syncSchemas();
+
+    expect((await engine.findOne(ACCOUNT, { where: { id: firm.id }, ...SYS }))?.[ROLLED]).toBe(40000);
+  });
+
+  it('CONTROL — the operator backfill (os migrate summary-nulls) writes with automations on, as before', async () => {
+    const { engine, acme, boundCalls, parentWrites, logger } = await setUp({ sealed: false });
+    // Unsealed: the door's sync walks nothing, so only the operator's run writes.
+    await engine.syncSchemas();
+    expect(parentWrites).toEqual([]);
+
+    await backfillSummaryNulls(engine, logger, { apply: true, recomputeUndefinedOnEmpty: [`${CONTRACT}.${LAST_INVOICE}`] });
+
+    expect((await engine.findOne(CONTRACT, { where: { id: acme.id }, ...SYS }))?.[INVOICED]).toBe(40000);
+    expect(parentWrites.length).toBeGreaterThan(0);
+    for (const w of parentWrites) expect(w.skipAutomations).toBeUndefined();
+    expect(boundCalls).toContain('beforeUpdate');
+  });
+});
+
