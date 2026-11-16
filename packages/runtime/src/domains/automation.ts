@@ -4542,7 +4542,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // when two holders are served, the read's refusal, caught into
                 // this door's own taken-name answer as the store's is
                 // (`flowWriteRefusal`'s clone arm). The remedy is a NEW name,
-                // not a package.
+                // not a package. The one exception, as on `main` (seat ruling
+                // 6911640332, M1 = B): a name two packages hold with BOTH
+                // holders disabled is NOT taken here. `getHeldFlow` refuses
+                // the shared name, the served fallback `getFlow` answers
+                // `null` (no holder is served), and the copy is admitted.
                 const readHeld = heldFlowReader(automationService);
                 const collision = readHeld === undefined ? null : await cloneTargetHeld(readHeld, targetName);
                 if (collision) {
