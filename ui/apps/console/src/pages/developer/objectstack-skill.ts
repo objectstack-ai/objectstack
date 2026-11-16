@@ -201,27 +201,33 @@ create/update payload.
   but \`run_action\` would refuse it for you (your credential, or your role in
   this organization): \`unavailable.reason\` says why and what would let it
   run, so tell your human instead of calling it.
-- **run_action({ actionName, objectName?, recordId?, params?, confirm? })** —
+- **run_action({ actionName, objectName?, recordId?, params? })** —
   invoke a business action by name. Invocation is permission-gated, but the
   action body executes the app's registered logic as trusted code (it can
   mutate data or trigger flows with the app's own authority). Pass
   \`recordId\` for record-scoped actions and \`params\` for declared inputs;
-  \`objectName\` only disambiguates a name shared by multiple objects. Pass
-  \`confirm: true\` on an action \`list_actions\` reports as
-  \`requiresConfirmation\` — the server REFUSES such a call without it
-  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
-  the flag asserts an approval, it does not obtain one. Under an AI service
+  \`objectName\` only disambiguates a name shared by multiple objects. An
+  action \`list_actions\` reports as \`requiresConfirmation\` may need a
+  person's approval, which you cannot give: when its author declared it, the
+  call does not run, and you are answered \`status: "pending_confirmation"\`
+  with a \`pendingId\` — the person approves or rejects it in the app, so
+  relay the message and do not retry. A server that cannot hand it off
+  refuses it (\`ACTION_CONFIRMATION_REQUIRED\`, \`details.reason\`
+  \`no_confirmation_service\`) and nothing runs: the person performs it in the
+  app. Never send \`confirm\`: the tool refuses a call that carries it, on
+  every action. Under an AI service
   account's own key (an agent acting for itself, for no person) the call is
   refused whatever it sends and nothing runs: hand the action to a person, or
   its author declares \`ai.requiresConfirmation: false\` when it is safe
   unattended.
-- **resume_run({ runId, values?, confirm? })** — continue a flow run that
+- **resume_run({ runId, values? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
   the names in \`screen.fields\`. The run completes, or pauses again on its next
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
-  (including \`confirm: true\` for an action flagged \`requiresConfirmation\`,
+  (the hand-off to the person for an action its author declared
+  \`requiresConfirmation\`, the refusal of a call that sends \`confirm\`,
   and its refusal under an AI service account's own key whatever the call sends).
 
 ## Conventions & gotchas

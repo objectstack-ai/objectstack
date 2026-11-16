@@ -204,7 +204,9 @@ export interface AIToolDefinition {
  * ONE exported constant, because the member's SPELLING is the whole contract:
  * the door that refuses and the client that retries have to agree on it, and a
  * door hand-spelling its own `'confirm'` is precisely how two doors drift into
- * two dialects (Prime Directive #12). Every AI-facing action door reads this.
+ * two dialects (Prime Directive #12). Every door that gates on the member reads
+ * this, and the MCP `run_action` and `resume_run` tools key their REFUSAL of it
+ * off this constant (below).
  *
  * It rides as a TOP-LEVEL member of the action request. The two request
  * shapes it is destined for are the MCP `run_action` tool input (`actionName`
@@ -212,8 +214,10 @@ export interface AIToolDefinition {
  * and the runtime action door's own request object — the `input` argument of
  * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
  * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
- * that object from. Each grows the member in the change that enforces it, so
- * neither ever accepts-and-ignores it. A third door carries the same member
+ * that object from. Each grew the member in the change that enforced it, so
+ * neither ever accepted-and-ignored it; the MCP tool input has since retired
+ * it (below), and the runtime request keeps it for the host door. A third door
+ * carries the same member
  * at the top level of its input: the MCP `delete_record` tool (see
  * {@link AIActionConfirmation}, "The second gate"). Two placements were
  * rejected, and the reasons are the contract:
@@ -244,10 +248,15 @@ export interface AIToolDefinition {
  * The amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) has a
  * person confirm an action declaring `ai.requiresConfirmation: true`, through
  * an elicitation or a hand-off to the app, and the member never counts on such
- * a call. That is what the doors enforce from the change that implements the
- * amendment; until it ships they still gate on the member as described above
- * and in {@link AIActionConfirmation}. The MCP `delete_record` and
- * `delete_records` gates are outside the amendment and keep reading it.
+ * a call. The MCP `run_action` and `resume_run` tools implement it, and with
+ * it the member is RETIRED from both tools' input: a call that carries it is
+ * refused by the tool's closed input, before the call is resolved, on every
+ * action, declared-gated or not. The refusal says that confirmation happens in
+ * the app, by the person, and the caller resends without the member. A door
+ * that has not implemented the amendment (a host door under the `ai` posture)
+ * still gates on the member as described above and in
+ * {@link AIActionConfirmation}. The MCP `delete_record` and `delete_records`
+ * gates are outside the amendment and keep reading it.
  */
 export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
 
@@ -262,8 +271,12 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * now a person's confirmation ({@link AI_ACTION_CONFIRMATION_CAPABILITY}):
  * the server elicits it through the client, or hands the call to the host's
  * pending-confirmation service for the person to decide in the app, and the
- * caller's own `confirm` never counts. What follows describes the member contract the
- * doors enforce until the change that implements the amendment; the
+ * caller's own `confirm` never counts. The MCP `run_action` and `resume_run`
+ * tools implement the amendment and no longer accept the member at all: a call
+ * that carries it is refused at the tool's input, on every action, and the
+ * caller resends without it. What follows describes the member contract a
+ * door enforces until it implements the amendment (a host door under the `ai`
+ * posture), and the FROM half of the MCP tools' breaking note; the
  * predicate section (the DECLARED flag, never the listing heuristic) and the
  * AI service account rule carry over unchanged. The MCP `delete_record` and
  * `delete_records` gates are outside the amendment and keep reading the
@@ -391,17 +404,22 @@ export interface ActionConfirmationRequiredDetails {
     /** The object the action operates on; omitted for object-less actions. */
     objectName?: string;
     /**
-     * The request member a caller acting for a person sets to `true` and
-     * retries with, once its human approves — always the value of
-     * {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the caller reads it off
-     * the refusal instead of restating it. An AI service account's refusal
-     * carries it too, but no retry of that account's succeeds: a person runs
-     * the action (ADR-0151 D3 rule 3).
+     * Always the value of {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the
+     * caller reads the member's spelling off the refusal instead of restating
+     * it. What the caller does with it depends on the gate that refused:
      *
-     * Under the amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}),
-     * once the doors implement it, no retry with the member runs a
-     * declared-gated action: the member confers nothing there, and `reason`
-     * says what the caller can do.
+     * - A member gate (no `reason`: the MCP `delete_record` / `delete_records`
+     *   gate, or a door before the amendment): a caller acting for a person
+     *   sets it to `true` and retries, once its human approves.
+     * - A refusal under the amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY},
+     *   `reason` set): the member confers nothing, and no retry with it runs
+     *   the action; `reason` says what the caller can do. At the MCP
+     *   `run_action` and `resume_run` tools the echo names the member those
+     *   tools REFUSE at their input: the caller never sends it there, since
+     *   confirmation happens in the app, by the person.
+     *
+     * An AI service account's refusal carries it too, but no retry of that
+     * account's succeeds: a person runs the action (ADR-0151 D3 rule 3).
      */
     confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER;
     /**
@@ -524,7 +542,10 @@ export interface ActionConfirmationRequiredDetails {
  * 5. **The caller's `confirm` never counts.** On a declared-gated call the
  *    member ({@link AI_ACTION_CONFIRMATION_MEMBER}) confers nothing: not with
  *    an elicitation, not in place of one, not in place of a hand-off, and not
- *    when the host has no service.
+ *    when the host has no service. The MCP `run_action` and `resume_run`
+ *    tools do not accept it at all: a call carrying it is refused at the
+ *    tool's input, on every action, gated or not, because confirmation
+ *    happens in the app, by the person; the caller resends without it.
  * 6. **An AI service account: unchanged** (ADR-0151 D3 rule 3). An agent
  *    principal acting for itself, with no `onBehalfOf`, is refused whatever it
  *    sends, reason `service_account`. It is neither elicited (no person stands
@@ -614,11 +635,13 @@ export interface ActionConfirmationRequiredDetails {
  *
  * This text is the contract from the release that carries it. The doors
  * implement it in the change that enforces it, which also moves the shipped
- * prescriptions that describe the member. Until that change ships, every door
- * still gates on the member as {@link AIActionConfirmation} describes: the
- * MCP `run_action` and `resume_run` tools run a declared-gated action on
- * `confirm: true`, over stdio and over Streamable HTTP alike, and that reading
- * is the FROM half of the breaking note. The in-app door likewise runs
+ * prescriptions that describe the member. Until a door's change ships, it
+ * still gates on the member as {@link AIActionConfirmation} describes. The
+ * MCP `run_action` and `resume_run` tools ran a declared-gated action on
+ * `confirm: true` until theirs, over stdio and over Streamable HTTP alike, and
+ * that reading is the FROM half of their breaking note; the release that
+ * ships their hand-off also retires the member from their input, so a call
+ * that carries it is refused there. The in-app door likewise runs
  * ADR-0011's queue as documented until its implementing change ships: any
  * holder of `ai:approve` may decide an item, the approve and reject doors take
  * whatever credential they authenticate, and an approved item is re-dispatched
