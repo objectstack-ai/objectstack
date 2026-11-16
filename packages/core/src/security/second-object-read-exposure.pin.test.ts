@@ -97,7 +97,7 @@ type Classification =
       /** The read, in words. */
       read: string;
       /** The operation the target is judged as. */
-      operation: 'get' | 'list';
+      operation: 'get' | 'list' | 'aggregate';
       /** The function that asks the decision, and the file it lives in. */
       decision: { file: string; fn: string };
       /** Where the read takes its answer from that function: a call site that must exist. */
@@ -194,6 +194,17 @@ const CALLERS: Record<string, Classification> = {
     decision: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', fn: 'servesSummaryTitleTarget' },
     wiring: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', call: 'servesSummaryTitleTarget(objectName' },
     pin: 'packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts',
+  },
+  // The engine's relation group join: an analytics cross-object dimension as one `LEFT JOIN … GROUP BY`.
+  'packages/objectql/src/relation-group-join.ts': {
+    kind: 'decided',
+    read:
+      "the engine's relation group join (an analytics dimension through a lookup grouped by the related record's " +
+      'attribute in one statement; `referenceTargetOf` checks that the relation points at the object the request names)',
+    operation: 'aggregate',
+    decision: { file: 'packages/services/service-analytics/src/api-exposure-door.ts', fn: 'assertObjectsExposed' },
+    wiring: { file: 'packages/services/service-analytics/src/analytics-service.ts', call: 'assertObjectsExposed(objects, provider' },
+    pin: 'packages/services/service-analytics/src/__tests__/cross-object-relation-group-join.test.ts',
   },
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
@@ -489,6 +500,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         (c): c is Extract<Classification, { kind: 'decided' }> => c.kind === 'decided',
       );
       expect(decided.map((d) => d.decision.fn).sort()).toEqual([
+        'assertObjectsExposed',
         'refuseUnservedRelationTarget',
         'servesExpansionTarget',
         'servesLabelTarget',

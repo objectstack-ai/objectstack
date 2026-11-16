@@ -247,7 +247,7 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, expandViewContainer } from '@objectstack/spec';
-import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
   deriveImplicitPackageBook,
@@ -289,6 +289,13 @@ const END_NODE_TYPE = 'end';
  * reason.
  */
 const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
+ * [ruling 6913660232] The nodes a `flows.<name>.records.*` key addresses: a
+ * `create_record` / `update_record` node, whose `fields` values the author may
+ * MARK as text. Local consts for {@link SCREEN_NODE_TYPE}'s reason.
+ */
+const RECORD_WRITE_NODE_TYPES: ReadonlySet<string> = new Set(['create_record', 'update_record']);
 
 /**
  * The component a misplaced `components.<id>.items` key most often sits on: a
@@ -501,6 +508,13 @@ interface FlowFacts {
    * `flows.<name>.notices.<node_id>` key addresses, at any depth.
    */
   notices: Set<string>;
+  /**
+   * [ruling 6913660232] Record-write node id → the fields whose value it
+   * MARKS as text (a `{ dialect: 'template', source }` envelope) — the only
+   * fields a `flows.<name>.records.<node_id>.fields.<field>` key translates.
+   * Every `create_record` / `update_record` node is listed, marking none or not.
+   */
+  records: Map<string, Set<string>>;
   /**
    * The ids of the `approval` nodes — the nodes a
    * `flows.<name>.approvals.<node_id>` key addresses, at any depth.
@@ -1614,6 +1628,7 @@ function buildUniverse(stack: AnyRec): Universe {
     const screens = new Map<string, ScreenFacts>();
     const refusals = new Set<string>();
     const notices = new Set<string>();
+    const records = new Map<string, Set<string>>();
     const approvals = new Set<string>();
     const otherNodes = new Map<string, string>();
     const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
@@ -1630,6 +1645,14 @@ function buildUniverse(stack: AnyRec): Universe {
         }
         if (nodeType === APPROVAL_NODE_TYPE) approvals.add(nodeId);
         if (nodeType === SAVE_NOTICE_NODE_TYPE) notices.add(nodeId);
+        if (nodeType && RECORD_WRITE_NODE_TYPES.has(nodeType) && !records.has(nodeId)) {
+          const marked = new Set<string>();
+          const fields = isRec(node.config) ? asRecord(node.config.fields) : {};
+          for (const [fieldName, value] of Object.entries(fields)) {
+            if (isFlowTextEnvelopeShaped(value)) marked.add(fieldName);
+          }
+          records.set(nodeId, marked);
+        }
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1649,7 +1672,7 @@ function buildUniverse(stack: AnyRec): Universe {
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
       });
     }
-    flows.set(flowName, { screens, refusals, notices, approvals, messages, otherNodes });
+    flows.set(flowName, { screens, refusals, notices, records, approvals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -2465,6 +2488,39 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 suggest(nodeId, flow.notices),
             `Save-notice translations are keyed by the \`id\` of a \`save_notice\` node.`,
           );
+        }
+        // ── flows.<name>.records.<node_id>.fields.<field> (ruling 6913660232) ──
+        for (const [nodeId, rawRecord] of Object.entries(asRecord(rawFlow.records))) {
+          const marked = flow.records.get(nodeId);
+          if (!marked) {
+            const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+            orphan(
+              `${inLocale} · flow "${flowName}" · record write "${nodeId}"`,
+              `${flowPath}.records.${nodeId}`,
+              nodeType
+                ? `Translations are keyed to record write "${nodeId}", which flow "${flowName}" declares as ` +
+                  `${/^[aeiou]/.test(nodeType) ? 'an' : 'a'} \`${nodeType}\` node, not a \`create_record\` or ` +
+                  `\`update_record\`, so nothing resolves this key.`
+                : `Translations are keyed to record write "${nodeId}", a node id flow "${flowName}" does not ` +
+                  `declare, so the text it names keeps its authored language.` +
+                  suggest(nodeId, flow.records.keys()),
+              `Record-write translations are keyed by the \`id\` of a \`create_record\` or \`update_record\` node.`,
+            );
+            continue;
+          }
+          for (const fieldName of Object.keys(asRecord(isRec(rawRecord) ? rawRecord.fields : undefined))) {
+            if (marked.has(fieldName)) continue;
+            orphan(
+              `${inLocale} · flow "${flowName}" · record write "${nodeId}" · field "${fieldName}"`,
+              `${flowPath}.records.${nodeId}.fields.${fieldName}`,
+              `Translations are keyed to field "${fieldName}" of record write "${nodeId}" in flow ` +
+                `"${flowName}", whose \`fields\` value there is not marked as text, so nothing resolves this ` +
+                `key: only a \`{ dialect: 'template', source }\` value is written in the organization's language, ` +
+                `and a bare string is a value written as it is spelled.` +
+                suggest(fieldName, marked),
+              `Mark the value as text — \`{ dialect: 'template', source: '…' }\` — or drop the key.`,
+            );
+          }
         }
         // ── flows.<name>.approvals.<node_id> ──────────────────────────────
         for (const nodeId of Object.keys(asRecord(rawFlow.approvals))) {
