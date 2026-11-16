@@ -46,6 +46,7 @@ import {
     engineExternalWriteForbidden,
     IDataEngine,
     resolveLocalizationContext,
+    resolveOrganizationLocale,
     resolveRequestExecutionContext,
     rethrowAuthzStoreUnavailable,
     type ApiExposureSchemaLike,
@@ -54,7 +55,7 @@ import {
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
-import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, resolveLocaleAmong } from '@objectstack/spec/system';
 import {
     OWNERSHIP_QUEUE_SERVICE,
     type IMetadataService,
@@ -786,17 +787,37 @@ interface CurrentUserLocalization {
  * cascade (#15387).
  *
  * `locale` keeps the three rungs of #14788 (maintainer ruling 2026-09-03,
- * option D):
+ * option D), with the order the maintainer ruled for a user with no personal
+ * language inside rungs 2 and 3 (#34392, ruling 6915665005 on #33985:
+ * `sys_user.locale` → the browser's language when the app lists it → the
+ * organization's `localization.locale` → the app's `i18n.defaultLocale` →
+ * `en`):
  *
  *   1. `sys_user.locale` when set and shaped like the column's own rule says
  *      ({@link storedSignedInUserLocale});
  *   2. the request's `Accept-Language` preference — the SAME parse REST and
  *      the runtime dispatcher feed `execCtx.locale` from
  *      (`preferredLocaleFromHeader`, #3957), so this surface and a rejection
- *      message cannot disagree about what the request asked for;
- *   3. the deployment default — `resolveLocalizationContext`, the cascade
+ *      message cannot disagree about what the request asked for — when the
+ *      app lists that language ({@link requestedServedLocale}), answered in
+ *      the app's own spelling;
+ *   3. the deployment default: the organization's `localization.locale` when
+ *      somebody SET it, else the app's declared `i18n.defaultLocale` — the
+ *      platform's one reader of that ladder, `resolveOrganizationLocale`
+ *      ({@link organizationDefaultLocale}) — else the cascade
  *      `execCtx.locale` already derives from on the dispatcher
- *      (`localization.locale` settings → tenant `sys_setting` rows → `en-US`).
+ *      (`resolveLocalizationContext`: `localization.locale` settings → tenant
+ *      `sys_setting` rows → `en-US`), which is its floor.
+ *
+ * Why rungs 2 and 3 read the app's list and the setting's source (#34392):
+ * the request's language used to answer whatever the app ships, and rung 3
+ * answered the settings cascade, whose untouched value is the manifest's
+ * built-in `en-US` placeholder. The Console states a language on every read,
+ * so rung 3 never answered it, and an organization that set 中文 in Setup →
+ * Localization never decided the language of a member who had chosen none.
+ * The auth mail reads the same deployment default the same way (a request's
+ * language only when the platform ships it, then `localization.locale` →
+ * `i18n.defaultLocale`, ruling 2026-09-02 in plugin-auth's `auth-manager.ts`).
  *
  * `currency` and `timezone` come off that same cascade reading, which is the
  * repair #15387 names: they used to be read off the request
@@ -831,15 +852,97 @@ async function resolveCurrentUserLocalization(
     const settings = (() => {
         try { return ctx.getService<unknown>('settings'); } catch { return undefined; }
     })();
-    const [stored, deployment] = await Promise.all([
+    const i18n = (() => {
+        try { return ctx.getService<unknown>('i18n'); } catch { return undefined; }
+    })();
+    // Rung 2 needs no read, so it is known before the reads leave: the
+    // organization's language is asked for only when the request names no
+    // language the app lists, and then beside the other two reads, not after
+    // them (the console races this endpoint on a first visit).
+    const requested = requestedServedLocale(input.acceptLanguage, i18n);
+    const [stored, deployment, organization] = await Promise.all([
         storedSignedInUserLocale(ql, userId, ctx.logger),
         resolveLocalizationContext({ ql, settings, organizationId: tenantId, userId }),
+        requested ? undefined : organizationDefaultLocale(settings, i18n, tenantId, ctx.logger),
     ]);
     return {
         currency: deployment.currency,
-        locale: stored ?? preferredLocaleFromHeader(input.acceptLanguage) ?? deployment.locale,
+        locale: stored ?? requested ?? organization ?? deployment.locale,
         timezone: deployment.timezone,
     };
+}
+
+/**
+ * The locales the app lists — what discovery serves as `locale.supported`
+ * (`i18n.getLocales()`, else the declared default alone) — or `undefined`
+ * when there is no `i18n` service to ask, or it answers neither.
+ */
+function servedLocales(i18n: unknown): string[] | undefined {
+    const service = i18n as { getLocales?: unknown; getDefaultLocale?: unknown } | null | undefined;
+    if (!service || typeof service !== 'object') return undefined;
+    const text = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
+    try {
+        const listed = typeof service.getLocales === 'function'
+            ? (service.getLocales as () => unknown).call(service)
+            : undefined;
+        const locales = Array.isArray(listed) ? listed.filter(text) : [];
+        if (locales.length > 0) return locales;
+        const declared = typeof service.getDefaultLocale === 'function'
+            ? (service.getDefaultLocale as () => unknown).call(service)
+            : undefined;
+        return text(declared) ? [declared] : undefined;
+    } catch {
+        // Best-effort, as every reader of the i18n service probes it.
+        return undefined;
+    }
+}
+
+/**
+ * Rung 2 (#34392): the request's top `Accept-Language` tag when the app lists
+ * that language, in the app's own spelling — the platform's one locale
+ * ladder, `resolveLocaleAmong`, the matcher the Console reads the browser's
+ * language through (`ja` → `ja-JP`, `en-US` → `en`, `es-MX` → `es-ES`). A
+ * language the app does not ship is no answer here, so the deployment default
+ * decides instead of a language with no translations.
+ *
+ * With no `i18n` service there is no list to match against, and the tag
+ * answers as it always did: nothing here can say the app does not ship it.
+ */
+function requestedServedLocale(acceptLanguage: string | null | undefined, i18n: unknown): string | undefined {
+    const requested = preferredLocaleFromHeader(acceptLanguage);
+    if (!requested) return undefined;
+    const served = servedLocales(i18n);
+    return served ? resolveLocaleAmong(requested, served) : requested;
+}
+
+/**
+ * Rung 3's first two steps (#34392): the organization's `localization.locale`
+ * when somebody SET it, else the app's declared `i18n.defaultLocale`
+ * (`resolveOrganizationLocale`, `@objectstack/core`, the one reader of that
+ * ladder). `undefined` sends the caller to the cascade's answer, which is its
+ * floor.
+ *
+ * A host with no `settings` service is left to that cascade too: its direct
+ * read of the organization's `sys_setting` row IS the organization's setting
+ * there, and nothing tells that row from the `en-US` floor, so ranking the
+ * app's default above it could hide a language an admin set. A settings read
+ * that fails is a courtesy lost, never a failed answer — and it is not
+ * answered with the app's default either, since the organization's choice may
+ * exist: the cascade, which falls back to the organization's own row, decides.
+ */
+async function organizationDefaultLocale(
+    settings: unknown,
+    i18n: unknown,
+    tenantId: string | undefined,
+    logger: CurrentUserEndpointsContext['logger'],
+): Promise<string | undefined> {
+    if (!settings || typeof (settings as { get?: unknown }).get !== 'function') return undefined;
+    try {
+        return (await resolveOrganizationLocale({ settings, i18n, organizationId: tenantId }))?.locale;
+    } catch (err: any) {
+        logger?.warn?.('[hono] /auth/me/localization: organization language read failed — the deployment cascade answers', { err: err?.message, tenantId });
+        return undefined;
+    }
 }
 
 /**
@@ -850,7 +953,10 @@ async function resolveCurrentUserLocalization(
  * Exported for the serverless host path that composes the resolver directly
  * (cloud#924) and for the pin that asserts the precedence. Its ANSWER is
  * unchanged by #15387; what changed underneath is that the deployment cascade
- * is now read even when rung 1 or 2 wins (see above).
+ * is now read even when rung 1 or 2 wins (see above). #34392 changed it: a
+ * requested language the app does not list no longer answers, and the
+ * organization's setting, then the app's declared default, rank above the
+ * cascade's `en-US` placeholder.
  */
 export async function resolveSignedInUserLocale(input: ResolveSignedInUserLocaleInput): Promise<string> {
     return (await resolveCurrentUserLocalization(input)).locale;
@@ -1088,9 +1194,11 @@ export function registerCurrentUserEndpoints(
     //   1. the user's own `sys_user.locale` when set — a user-stated
     //      preference since the 2026-09-03 ruling on the column (#14787 B),
     //      accepted only when it passes the column's OWN shape rule;
-    //   2. the request's `Accept-Language` preference;
-    //   3. the deployment default (`localization.locale`, the same cascade
-    //      that feeds `execCtx.locale` on the dispatcher).
+    //   2. the request's `Accept-Language` preference, when the app lists
+    //      that language (#34392);
+    //   3. the deployment default: the organization's `localization.locale`
+    //      when set, else the app's `i18n.defaultLocale` (#34392), else the
+    //      same cascade that feeds `execCtx.locale` on the dispatcher.
     //
     // [#15387] All three come from {@link resolveCurrentUserLocalization} —
     // ONE reading of that same cascade. `currency` / `timezone` used to be read
