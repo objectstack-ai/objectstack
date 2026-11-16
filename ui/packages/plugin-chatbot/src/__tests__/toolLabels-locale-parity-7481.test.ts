@@ -25,7 +25,8 @@
  * was written around — `get_authoring_rules` (cloud#1837), `load_tools`,
  * `open_record`, `test_flow`, `toggle_flow` — are all in
  * `PLATFORM_TOOLS_BY_PACKAGE` as of `@objectstack/spec` 17.4.0, so they left
- * {@link AHEAD_OF_PIN} (objectui#8772 took the pin there). ⛔ The list is kept,
+ * {@link AHEAD_OF_PIN} (objectui#8772 took the pin there); `list_flow_runs`
+ * followed when objectstack#34372 listed it. ⛔ The list is kept,
  * not deleted: the next tool the cloud registers ahead of a snapshot needs the
  * same hatch, and rebuilding it under pressure is how a permanent second
  * registry starts. {@link GRADUATED} keeps this file's guards honest whenever
@@ -56,11 +57,9 @@ const REGISTRY = (
  * list yet — sourced from cloud `service-ai-studio`'s `plugin.ts` tool
  * definitions. Shrink this list on a pin bump — never grow it as a habit.
  *
- * `list_flow_runs` (the build agent's read-only reader of a flow's recent
- * runs) waits on the registry entry that objectstack#34372 adds; that change
- * moves it from here to {@link GRADUATED}.
+ * EMPTY at this pin: every name it carried has graduated (see {@link GRADUATED}).
  */
-const AHEAD_OF_PIN: readonly string[] = ['list_flow_runs'];
+const AHEAD_OF_PIN: readonly string[] = [];
 
 /**
  * The names that HAVE graduated from {@link AHEAD_OF_PIN} into the registry.
@@ -70,10 +69,17 @@ const AHEAD_OF_PIN: readonly string[] = ['list_flow_runs'];
  * being non-empty, so with it emptied they would read green against a
  * `PLATFORM_TOOLS_BY_PACKAGE` that had vanished, gone empty, or lost these very
  * names: `[].filter(…)` is `[]` and `arrayContaining([])` passes on anything.
- * Asserting these five ARE in the registry is the reading that cannot be
+ * Asserting these names ARE in the registry is the reading that cannot be
  * satisfied by an absent export, and it is the same fact the emptying rests on.
  */
-const GRADUATED = ['get_authoring_rules', 'load_tools', 'open_record', 'test_flow', 'toggle_flow'] as const;
+const GRADUATED = [
+  'get_authoring_rules',
+  'list_flow_runs',
+  'load_tools',
+  'open_record',
+  'test_flow',
+  'toggle_flow',
+] as const;
 
 /** Every tool name that must carry a step label in every pack. */
 const COVERED: string[] = [
