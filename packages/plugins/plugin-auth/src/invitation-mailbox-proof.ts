@@ -290,18 +290,18 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       const password = typeof body.password === 'string' ? body.password : '';
       const passwordConfig = ctx.context.password.config;
       if (password.length < passwordConfig.minPasswordLength) {
-        throw new APIError('BAD_REQUEST', { code: 'PASSWORD_TOO_SHORT', message: 'Password too short' });
+        throw new APIError('BAD_REQUEST', { code: 'PASSWORD_POLICY_VIOLATION', message: 'Password too short' });
       }
       if (password.length > passwordConfig.maxPasswordLength) {
-        throw new APIError('BAD_REQUEST', { code: 'PASSWORD_TOO_LONG', message: 'Password too long' });
+        throw new APIError('BAD_REQUEST', { code: 'PASSWORD_POLICY_VIOLATION', message: 'Password too long' });
       }
       const name = nonEmpty(body.name);
 
       if (!existing) {
         const ep = ctx.context.options.emailAndPassword;
         if (!ep?.enabled || ep.disableSignUp) {
-          throw new APIError('BAD_REQUEST', {
-            code: 'EMAIL_PASSWORD_SIGN_UP_DISABLED',
+          throw new APIError('FORBIDDEN', {
+            code: 'PERMISSION_DENIED',
             message: 'Email and password sign up is not enabled',
           });
         }
