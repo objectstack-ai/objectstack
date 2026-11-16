@@ -51,7 +51,14 @@ function makeAdapter(calls: string[], apps: unknown[], objects: readonly { name:
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34188 — the `?names=` read answers the asked names it
+          // holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            calls.push(`${type}?names=${options.names.join(',')}`);
+            const all: any[] = type === 'object' ? [...objects] : [];
+            return Promise.resolve({ type, items: structuredClone(all.filter((o) => options.names!.includes(o.name))) });
+          }
           calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? objects : type === 'app' ? apps : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -146,7 +153,8 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(objectCalls(outside)).toEqual([]);
     expect(objectCalls(overlay)).toEqual([]);
-    expect([...objectCalls(noPackage)].sort()).toEqual(['object/crm_account', 'object/sys_user']);
+    // objectstack#34188 — the lookup target is asked by name once the `?names=` read has answered it served.
+    expect([...objectCalls(noPackage)].sort()).toEqual(['object/crm_account', 'object/sys_user', 'object?names=sys_user']);
   });
 });
 

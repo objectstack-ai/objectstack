@@ -83,7 +83,9 @@ async function boot(opts: { hostMountsRoutes: boolean; runtimeConfig?: RuntimeCo
     for (const hook of hooks) await hook();
     if (opts.hostMountsRoutes) {
         // The hosted shape: the settings family, mounted by the host, with no door.
-        registerSettingsRoutes(server as any, services.settings as any, { contextFromRequest: () => ({ enforced: false }) });
+        registerSettingsRoutes(server as any, services.settings as any, {
+            contextFromRequest: () => ({ enforced: true, userId: 'usr_admin', permissions: ['setup.access', 'manage_platform_settings'] }),
+        });
     }
     return { app, services };
 }
@@ -95,7 +97,7 @@ async function readConfig(app: ReturnType<typeof createHttp>['app']): Promise<an
     return handler({ req: { header: () => undefined }, json: (body: any) => body });
 }
 
-/** Ask the notice route the way the Console does, and return the status it answers. */
+/** Ask the notice route as an administrator, the way the Console does, and return the status it answers. */
 async function askNotice(app: ReturnType<typeof createHttp>['app']): Promise<number> {
     const handler = app.handlers.get('GET /api/settings/deployment/notice');
     if (typeof handler !== 'function') throw new Error('the notice route was never mounted');

@@ -133,7 +133,14 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34188 — the `?names=` read answers the asked names it
+          // holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? OBJECTS.filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -239,7 +246,8 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
 
     expect(objectCalls()).not.toContain('object');
-    expect(objectCalls().some((c) => c.startsWith('object?'))).toBe(false);
+    // objectstack#34188 — the one list-shaped read is the lookup target's presence, by name.
+    expect(objectCalls().filter((c) => c.startsWith('object?'))).toEqual(['object?names=sys_user']);
     expect(objectCalls()).toEqual(expect.arrayContaining(['object/crm_account', 'object/sys_user']));
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account');
   });
