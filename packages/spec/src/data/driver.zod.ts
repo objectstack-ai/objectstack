@@ -116,11 +116,14 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    * Lock the rows a read returns against concurrent writers until the
    * `transaction` it runs in ends (SQL `SELECT … FOR UPDATE`).
    *
-   * Meaningful on `find()` only, and only with `transaction` set: a read
-   * outside a transaction has nothing to hold the lock to, so a driver ignores
-   * the key there. A driver honours it only when it declares
-   * `DriverCapabilities.lockRows`, and the engine sends it only to such a
-   * driver.
+   * A request on the rows a read returns (`find()`, `findOne()`), and only
+   * with `transaction` set: a read outside a transaction has nothing to hold
+   * the lock to. A driver honours it only when it declares
+   * `DriverCapabilities.lockRows`. The engine never answers a request it
+   * cannot honour as if the rows were locked: a caller's `lockRows` on an
+   * object whose driver lacks the bit is refused `NOT_IMPLEMENTED` (501), and
+   * one with no transaction reaching that driver `PRECONDITION_REQUIRED`
+   * (428), before any driver runs.
    *
    * The engine's one sender is a predicate delete whose target is referenced by
    * delete-family lookups: it reads the matched ids, walks the cascade, then

@@ -40,22 +40,37 @@ import {
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
+import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
  * [`DriverOptions.lockRows`] Lock the rows a `find()` returns until its
  * transaction ends, the promise `supports.lockRows` makes for this driver.
  *
- * Only with a `transaction`: a read outside one has nothing to hold the lock
- * to (on PostgreSQL a bare `FOR UPDATE` releases at the statement's own
- * implicit commit), so the key is ignored there. knex compiles `forUpdate()`
- * per dialect: `FOR UPDATE` on PostgreSQL, MySQL and Oracle, the `UPDLOCK`
- * table hint on SQL Server, and nothing at all on SQLite, whose single-connection
- * pool and database lock already keep a concurrent commit out of an open
- * transaction (the capability's TSDoc in `data/driver.zod.ts`).
+ * knex compiles `forUpdate()` per dialect: `FOR UPDATE` on PostgreSQL, MySQL
+ * and Oracle, the `UPDLOCK` table hint on SQL Server, and nothing at all on
+ * SQLite, whose single-connection pool and database lock already keep a
+ * concurrent commit out of an open transaction (the capability's TSDoc in
+ * `data/driver.zod.ts`).
+ *
+ * A request with no `transaction` is refused, PRECONDITION_REQUIRED / 428: a
+ * read outside a transaction has nothing to hold the lock to (on PostgreSQL a
+ * bare `FOR UPDATE` releases at the statement's own implicit commit), and
+ * answering it as if the rows were locked is the one wrong answer. The engine
+ * refuses the same request before it reaches a driver; this is the answer a
+ * direct caller gets.
  */
-function lockRowsIfAsked(builder: Knex.QueryBuilder, options?: DriverOptions): Knex.QueryBuilder {
-  if (options?.lockRows === true && options.transaction) return builder.forUpdate();
-  return builder;
+function lockRowsIfAsked(builder: Knex.QueryBuilder, object: string, options?: DriverOptions): Knex.QueryBuilder {
+  if (options?.lockRows !== true) return builder;
+  if (!options.transaction) {
+    const err = new Error(
+      `Cannot lock the rows of "${object}" outside a transaction: a row lock is held until the transaction ` +
+        'ends, and this read runs in none. Pass the open transaction with lockRows, or drop lockRows.',
+    ) as Error & { code?: string; status?: number };
+    err.code = StandardErrorCode.enum.PRECONDITION_REQUIRED;
+    err.status = 428;
+    throw err;
+  }
+  return builder.forUpdate();
 }
 
 /**
@@ -186,12 +201,12 @@ export class CrudFacet {
         if (window.offset !== null) b.offset(window.offset);
         const rows = window.top ?? window.fetch;
         if (rows !== null) b.limit(rows);
-        return lockRowsIfAsked(b, options);
+        return lockRowsIfAsked(b, object, options);
       }
       if (query.offset !== undefined) b.offset(query.offset);
       if (query.limit !== undefined) b.limit(query.limit);
 
-      return lockRowsIfAsked(b, options);
+      return lockRowsIfAsked(b, object, options);
     };
 
     const builder = buildBase();
