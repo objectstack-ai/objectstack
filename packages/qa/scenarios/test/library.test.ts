@@ -46,6 +46,13 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     // asOf 2026-10-31, calendar this_month: i2 (10-03) and i3 (10-28), not i1 (09-12).
     issued_this_month: scalar(2),
     tax_rate: UNANSWERABLE,
+    // The answerable twins of the three unanswerable questions, and the min truth.
+    inv_002_largest_line: scalar(100),
+    acme_discount: UNANSWERABLE,
+    // Acme's invoices are i1 (100) and i2 (120).
+    acme_invoiced: scalar(220),
+    lowest_shipping: UNANSWERABLE,
+    smallest_invoice: scalar(75),
   },
   project_with_tasks: {
     open_tasks: scalar(3),
@@ -56,6 +63,13 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     tasks_in_active_projects: scalar(3),
     open_by_project_status: groups(['active', 2], ['planned', 1]),
     relaunch_sponsor: UNANSWERABLE,
+    // Website relaunch tasks not done: t2 (in_progress) and t3 (todo).
+    relaunch_open_tasks: scalar(2),
+    office_move_hourly_rate: UNANSWERABLE,
+    // Office move: t5 (12) and t6 (2).
+    office_move_avg_estimate: scalar(7),
+    smallest_budget: UNANSWERABLE,
+    smallest_total_estimate: scalar(4),
   },
   crm_account_with_contacts: {
     tech_accounts: scalar(2),
@@ -67,6 +81,13 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     tech_contacts: scalar(3),
     contacts_by_industry: groups([null, 1], ['retail', 1], ['tech', 3]),
     acme_revenue: UNANSWERABLE,
+    // Headcounts: Acme 120, Shopwell 15, Bitworks 45.
+    acme_headcount: scalar(120),
+    avg_credit_limit: UNANSWERABLE,
+    avg_headcount: scalar(60),
+    most_open_tickets: UNANSWERABLE,
+    largest_headcount: scalar(120),
+    smallest_headcount: scalar(15),
   },
 };
 
@@ -82,11 +103,15 @@ const EXPECTED_PERSONA_TRUTHS: Record<string, Record<string, Record<string, Trut
     // contractor is assigned t1, t3, t5 — only t3 is open; client_viewer hides `task`.
     open_tasks: { contractor: scalar(1), client_viewer: WITHHELD },
     relaunch_estimate: { contractor: WITHHELD },
+    // contractor is assigned t1 (done) and t3 (todo) on the relaunch.
+    relaunch_open_tasks: { contractor: scalar(1), client_viewer: WITHHELD },
   },
   crm_account_with_contacts: {
     // sdr owns ac1 and ac3; the unattached contact resolves to no owner.
     contacts_per_account: { sdr: groups(['ac1', 2], ['ac3', 1]) },
     account_count: { sdr: scalar(2), partner_user: WITHHELD },
+    // sdr's accounts are Acme (120) and Bitworks (45); partner_user hides `account`.
+    smallest_headcount: { sdr: scalar(45), partner_user: WITHHELD },
   },
 };
 

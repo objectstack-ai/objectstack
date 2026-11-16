@@ -128,16 +128,15 @@
       },
       {
         "id": "lowest_shipping",
-        "ask": {"zh": "所有发票里,最低的运费是多少?", "en": "What is the lowest shipping charge on any invoice?"},
+        "ask": {"zh": "所有发票里,最低的运费是多少?", "en": "What is the lowest shipping charge of any invoice?"},
         "object": "invoice",
         "truth": {"kind": "unanswerable", "reason": "No seeded field records a shipping charge."}
       },
       {
-        "id": "lowest_unit_price",
-        "ask": {"zh": "所有明细行里,最低的单价是多少?", "en": "What is the lowest unit price on any invoice line?"},
-        "object": "invoice_line",
-        "truth": {"kind": "min", "field": "unit_price"},
-        "personas": ["sales_rep"]
+        "id": "smallest_invoice",
+        "ask": {"zh": "所有发票里,总额最小的是多少?", "en": "What is the smallest total of any invoice?"},
+        "object": "invoice",
+        "truth": {"kind": "min", "field": "total"}
       }
     ],
     "personas": [
