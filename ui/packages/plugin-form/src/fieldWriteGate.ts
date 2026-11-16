@@ -82,6 +82,7 @@ import {
   type SchemaLike,
 } from '@object-ui/core';
 import { narrowStateMachineOptions } from './stateMachineOptions';
+import { stampRecordFormFields } from './recordFormStamp';
 
 /**
  * The permission surface this module consumes — structurally the subset of
@@ -368,13 +369,26 @@ export function closedFormAffordance({
  * and an already-built section entry as much as a field generated from the
  * object — which is what "blanket" says.
  *
+ * For the same reason, the record form's stamp is applied here first
+ * ({@link stampRecordFormFields}): every drawn field is a field of the record
+ * being edited, so a `{ $record }` lookup filter resolves whatever produced the
+ * field, and an authored stamp is dropped before the form writes its own.
+ *
  * Entries with no `name` pass through untouched, as in the render pass.
  */
 export function gateFormFields<T extends Record<string, any>>(
   fields: T[] | undefined,
   { objectSchema, previousValues, openingValues, ...options }: GateFormFieldsOptions,
 ): T[] | undefined {
-  const permitted = applyFieldPermissions(fields, options);
+  // Every drawn field is a field of the record being edited, whatever
+  // produced it (generated, a `customFields` member, an inline section entry):
+  // the form's stamp is applied here, once, after the merge and the section
+  // expansion (`recordFormStamp.ts`).
+  const stamped = stampRecordFormFields(
+    fields,
+    (objectSchema as { fields?: Record<string, unknown> } | null | undefined)?.fields,
+  );
+  const permitted = applyFieldPermissions(stamped, options);
   if (!Array.isArray(permitted)) return permitted;
   const narrowed = narrowStateMachineOptions(permitted, {
     objectSchema,

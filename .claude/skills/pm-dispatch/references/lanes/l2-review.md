@@ -4,7 +4,7 @@
 ## 座位
 
 - 席位 `l2-review#N`,一席一座位贴;坐席者 = 能达 `CONTRACT_REVIEW_TIER` 的账号的会话。
-- 会话 effort `high`;L2 子代理恒契约审核档;仅申报面 `TIER_DEFAULT`,档随面定照 contract-review.md
+- 会话 effort `high`;L2 子代理恒契约审核档。
 - 每席开一个 `pm:mailbox` PR(`mailbox-open.mjs --seat l2-review#N`);签名、坐席与收班同他席。
 
 ## 路由
@@ -13,7 +13,7 @@
 - 先请本账号开的审核席(本项目线程,从线程清单与 `seat-online` 帖找);皆忙才溢至他账号席。
 - 同项目向 L1/L2 席请审、delta 与回告发线程消息,⛔ 不敲信箱;信箱只留跨账号或跨项目。
 - N 席按认领分行:欠审表每个 head 先贴 `Contract-review-claim:` 者持有;后者撤回弃产出。
-- 欠审表 `check-owed-reviews.mjs` 先给 L2 席;车道只在无 L2 席在座或 (b) 后再一轮无认领才接
+- 本席只兜底:接哪些 head 只住 contract-review.md 欠审接审行,欠审表 `check-owed-reviews.mjs` 同读
 - delta 归原 L2 审核者;L2 席下班留下旧记录 ⇒ 下一 L2 席接 delta,交接行点名它。
 
 ## 独立性与边界
