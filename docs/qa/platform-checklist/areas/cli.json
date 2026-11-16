@@ -2424,7 +2424,7 @@
       "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object with no master_detail or with two required ones (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2440,7 +2440,7 @@
       "steps": [
         "for each arm run `os validate --json` and `os build`, recording exit code + rule id + path: seed key created_atx; record[\"typo\"] in a validation; two datasources named alike; a cbp object with no master_detail; a cbp object with two master_details both declared required: true, once inline and once with the second arriving through objectExtensions; an object-grid with defaultFilters; email:{apiKey:\"x\"}",
         "controls: seed key created_at, record.name == \"record.typo\", email.provider, and a cbp object whose ONLY master_detail declares required: false (the optional master, ruling A of #30905) — all pass",
-        "the os lint arm: in the scratch app switch the stack call to `defineStack({ … }, { strict: false })` — the one door where the omission survives to `os lint` — and author a cbp object as a plain object literal (not through ObjectSchema.create(), which forces an omitted required to true) whose ONLY master_detail omits `required`; run `os lint --json`, then `os validate --json` and `os build`, recording each exit code and rule id. Not the default strict `defineStack({ … })`: its parse defaults the omitted `required` to false before any CLI verb loads the stack, so `os lint` reads the optional master and reports nothing. Not a raw-object default export either: `os lint` reports the rule there, but `os validate` and `os build` refuse any export `defineStack` did not build"
+        "the os lint arm: in the scratch app keep the default strict `defineStack({ … })` and author a cbp object as a plain object literal (not through ObjectSchema.create(), which forces an omitted required to true) whose ONLY master_detail omits `required`; run `os lint --json`, then `os validate --json` and `os build`, recording each exit code and rule id. The strict parse defaults the omitted `required` to false (ruling A of #30905, the optional master) and records the omission on the field it returns, which the lint rule reads. `defineStack({ … }, { strict: false })` reaches the same finding (the key is still absent there). Not a raw-object default export: `os lint` reports the rule there, but `os validate` and `os build` refuse any export `defineStack` did not build"
       ],
       "acceptance": [
         {
@@ -2462,9 +2462,9 @@
           "evidence": "four lines"
         },
         {
-          "clause": "the lint-only shape is `os lint`'s verdict, not the build's: on a stack built by `defineStack(…, { strict: false })` (steps[2]'s door), a cbp object whose ONLY master_detail omits `required` fails `os lint` with relationship/master-detail-required at error, while `os validate` and `os build` accept it",
+          "clause": "the lint-only shape is `os lint`'s verdict, not the build's: on a stack built by the default strict `defineStack({ … })` (steps[2]'s door), a cbp object whose ONLY master_detail omits `required` fails `os lint` with relationship/master-detail-required at error, while `os validate` and `os build` accept it",
           "oracle": "build",
-          "verify": "on the `strict: false` door, `os lint` exits ≠ 0 naming relationship/master-detail-required at the master_detail's path (it is a lintDataModel rule, packages/lint/src/data-model-rules.ts#RELATIONSHIP_MASTER_DETAIL_REQUIRED, which `os lint` runs and `os validate` / `os build` do not; the same run also reports security-controlled-by-parent-no-relation at error on the object's sharingModel); the door matters because the rule reads the stack as loaded and, as its docblock says, the strict parse cannot see the omission: on the default strict `defineStack` the same object reaches every verb as `required: false`, `os lint` exits 0 with no relationship/master-detail-required, and that run is not this clause's arm; `os validate --json` and `os build` exit 0, because the parse reads the parsed `required: false` and admits the optional master (packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal, ruling A of #30905). An explicit `required: false` on the ONLY master_detail is the optional master and passes all three (a control, steps[1]); the rule's cases are pinned at unit by packages/lint/src/data-model-rules.master-detail-required.test.ts, acceptance[0]'s pin",
+          "verify": "on the default strict door, `os lint` exits ≠ 0 naming relationship/master-detail-required at the master_detail's `.required` path (it is a lintDataModel rule, packages/lint/src/data-model-rules.ts#RELATIONSHIP_MASTER_DETAIL_REQUIRED, which `os lint` runs and `os validate` / `os build` do not); the rule sees the omission there because `defineStack` records it on the parsed field (packages/spec/src/data/master-detail-required-omission.ts#masterDetailRequiredOmitted) after the parse has written `required: false`. The same run does NOT report security-controlled-by-parent-no-relation: the parsed field is the optional master the runtime derives access from. On `defineStack(…, { strict: false })` the key stays absent, so `os lint` reports relationship/master-detail-required at the same path and also security-controlled-by-parent-no-relation at the object's sharingModel. `os validate --json` and `os build` exit 0 on both doors, because the parse reads the parsed `required: false` and admits the optional master (packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal, ruling A of #30905). An explicit `required: false` on the ONLY master_detail is the optional master and passes all three (a control, steps[1]); the rule's cases are pinned at unit by packages/lint/src/data-model-rules.master-detail-required.test.ts, acceptance[0]'s pin",
           "evidence": "the os lint, os validate and os build exits + the lint finding line"
         }
       ],
@@ -2509,6 +2509,12 @@
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
           "ref": "#34068"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "steps[2] and acceptance[3] move the os lint arm back to the default strict `defineStack({ … })` (card #33940, the reach half of ruling A of #30905: `os lint` errors on the omitted spelling). `defineStack` now records an omitted `required` on a cbp master_detail on the parsed field (packages/spec/src/data/master-detail-required-omission.ts#masterDetailRequiredOmitted) and relationship/master-detail-required reads it. Driven live in a scratch copy of examples/app-todo with the CLI from the tree: default strict door `os lint --json` exit 1 with relationship/master-detail-required at objects[2].fields.hdr.required (no security-controlled-by-parent-no-relation), `os validate --json` / `os build` exit 0; `required: false` and `required: true` lint clean; `{ strict: false }` unchanged from rev 4. The other clauses are unchanged",
+          "ref": "#33940"
         }
       ]
     },
