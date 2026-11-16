@@ -134,11 +134,9 @@ whether the expression names it directly, inside a function such as
 object declares, on the record the expression reads through one
 reference, where the caller may not read that object, may not read the
 field, or is served it masked — a stored field there withheld for what it
-reads through a reference of its own included, each object along the
-chain judged once. When the chain comes back to an object it has
-already passed through, that object is judged by its own fields and
-the computed fields over them only: a field of it withheld solely for
-what it reads through a reference is not followed again. What is judged is the field, not the row:
+reads through a reference of its own included, however long the chain
+and wherever it comes back to an object it has already passed through.
+What is judged is the field, not the row:
 a computed field is not withheld because the caller may not read the
 particular record a reference points at (a formula reads `null` there; a
 stored one keeps the value its writer computed). A withheld computed
