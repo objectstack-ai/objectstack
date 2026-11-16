@@ -14,9 +14,11 @@ import {
   AUDIT_SEAL_CANON_VERSION,
   CanonicalFormError,
   canonicalDatetime,
+  chainValueOf,
   leafHash,
   leafInput,
   rowIdOf,
+  sealChainFieldOf,
   sealedColumnSet,
   unsealableColumns,
   type SealedColumnSet,
@@ -177,6 +179,8 @@ interface SealPlan {
   readonly name: string;
   readonly fields: SealedFieldTypes;
   readonly columns: SealedColumnSet;
+  /** The column each row's chain is read from ({@link chainValueOf}): `lifecycle.seal.chainField`, or `tenant_id`. */
+  readonly chainField: string;
   readonly archiveTo?: string;
 }
 
@@ -232,7 +236,6 @@ function faultOf(err: unknown): string {
   return typeof code === 'string' || typeof code === 'number' ? `${String(code)}: ${reason}` : reason;
 }
 const windowOf = (ms: number): number => Math.floor(ms / AUDIT_SEAL_WINDOW_MS) * AUDIT_SEAL_WINDOW_MS;
-const tenantOf = (row: Row): string | null => (typeof row.tenant_id === 'string' && row.tenant_id !== '' ? row.tenant_id : null);
 
 /**
  * The locks a pass holds (D3 amended): the lease `audit.sealer`, whose fencing
@@ -362,6 +365,7 @@ export class AuditSealer {
       const lifecycle = object.lifecycle as { seal?: { valueFields?: string[] }; archive?: { to?: string } } | undefined;
       if (!lifecycle?.seal) continue;
       const fields = (object.fields ?? {}) as SealedFieldTypes;
+      const chainField = sealChainFieldOf(lifecycle);
       let reason: string | null = null;
       let columns: SealedColumnSet | null = null;
       try {
@@ -370,9 +374,11 @@ export class AuditSealer {
         if (refused.length > 0) {
           reason = `its column(s) ${refused.map((c) => `'${c.column}' (type '${c.type ?? 'none'}')`).join(', ')} ` +
             'have no canonical rule';
-        } else if (!Object.prototype.hasOwnProperty.call(fields, 'tenant_id')) {
-          // S3: a chain is the row's own `tenant_id`; without the column every organization would share one.
-          reason = "it declares no 'tenant_id' field, so its rows cannot be chained per organization";
+        } else if (!Object.prototype.hasOwnProperty.call(fields, chainField)) {
+          // S3: a chain is the row's own chain column (D10 note: `seal.chainField`, default `tenant_id`); without
+          // it every organization would share one. A NAMED column the object lacks is refused at authoring; this
+          // stays for the default, and for a definition that reached the registry without the parse.
+          reason = `it has no '${chainField}' field, the column its rows are chained by per organization`;
         }
       } catch (err) {
         reason = (err as Error).message;
@@ -381,11 +387,11 @@ export class AuditSealer {
         this.report(`plan:${object.name}`, () =>
           `AuditSealer: '${object.name}' declares lifecycle.seal but cannot be sealed: ${reason}. Its rows are NOT ` +
           'being sealed — no checkpoint covers them, so a change made outside the platform would not show. Fix: ' +
-          "give the object a 'tenant_id' field and only columns of a type with a canonical rule (ADR-0154 D1, D5), " +
-          'or remove lifecycle.seal.');
+          "give the object its chain column ('tenant_id', or the one lifecycle.seal.chainField names) and only " +
+          'columns of a type with a canonical rule (ADR-0154 D1, D5, D10), or remove lifecycle.seal.');
         continue;
       }
-      plans.push({ name: object.name, fields, columns, ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}) });
+      plans.push({ name: object.name, fields, columns, chainField, ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}) });
     }
     return plans;
   }
@@ -595,7 +601,7 @@ class ObjectPass {
         break;
       }
       const start = windowOf(next);
-      const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(tenantOf(row))));
+      const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(chainValueOf(row, this.plan.chainField))));
       if (chains.size > 0) n += 1;
       else if (this.skipped.size > 0) idle += 1;
       await this.writeChains(chains, start, 'window', Math.max(this.watermark ?? Number.NEGATIVE_INFINITY, Math.min(start, this.stuckFrom())));
@@ -666,7 +672,7 @@ class ObjectPass {
         }
       }
       const chains = await this.readWindow(start, (row) =>
-        !ids.has(rowIdOf(row)) && start < this.cursorOf(chainKeyOf(tenantOf(row))));
+        !ids.has(rowIdOf(row)) && start < this.cursorOf(chainKeyOf(chainValueOf(row, this.plan.chainField))));
       await this.writeChains(chains, start, 'late', this.watermark ?? start);
     }
   }
@@ -742,7 +748,7 @@ class ObjectPass {
           limit: PAGE_SIZE,
         });
         for (const row of rows) {
-          const tenantId = tenantOf(row);
+          const tenantId = chainValueOf(row, this.plan.chainField);
           const key = chainKeyOf(tenantId);
           if (this.skipped.has(key)) continue; // S4: out for the rest of the pass
           try {
@@ -874,7 +880,7 @@ class ObjectPass {
       const row = byId.get(id);
       if (!row) continue;
       const at = canonicalDatetime(row.created_at, `${id}.created_at`);
-      if (windowOf(Date.parse(at)) !== start || chainKeyOf(tenantOf(row)) !== key) continue;
+      if (windowOf(Date.parse(at)) !== start || chainKeyOf(chainValueOf(row, this.plan.chainField)) !== key) continue;
       leaves.push({ id, at, hash: leafHash(leafInput(row, this.plan.columns, this.plan.fields, saltOf)) });
     }
     return leaves.sort(leafOrder);

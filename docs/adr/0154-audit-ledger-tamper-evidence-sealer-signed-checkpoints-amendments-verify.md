@@ -91,7 +91,7 @@ Terms. A **sealed object** is an object that declares `lifecycle.seal` ([D10](#d
 
 ### D5 — Rows about no organization seal into a deployment chain
 
-- **A row whose `tenant_id` is NULL** — a deployment-level action under ADR-0131 D7 (`config_change` on the settings global rung, `platform_admin_standing_change`, plugin-auth's run-level `import`) — seals into the sealed object's **deployment chain**, whose checkpoints carry a NULL organization id. Every other row seals into the chain of the organization its `tenant_id` names.
+- **A row whose `tenant_id` is NULL** — a deployment-level action under ADR-0131 D7 (`config_change` on the settings global rung, `platform_admin_standing_change`, plugin-auth's run-level `import`) — seals into the sealed object's **deployment chain**, whose checkpoints carry a NULL organization id. Every other row seals into the chain of the organization its `tenant_id` names. *(Noted 2026-11-16: `tenant_id` here reads as the sealed object's chain column, which `lifecycle.seal.chainField` may name; see [the note](#note-2026-11-16-34164-the-chain-column-lifecycleseal-chainfield-d10-and-how-d5-reads).)*
 - **Why not leave them out.** The rows about no organization are the platform-administrator acts: who held standing, which global setting changed. A proof that skipped them would skip the rows a security review asks about first.
 - **Why not one deployment-wide chain for everything.** A per-organization chain is what lets an organization be verified, exported and expired on its own, and what stage 2 hands to one customer without the others' roots. An organization that is deleted keeps its ledger rows (the delete leaves every `append-only` object's rows naming it) and so keeps its chain.
 
@@ -142,6 +142,7 @@ Terms. A **sealed object** is an object that declares `lifecycle.seal` ([D10](#d
 - **Only `lifecycle.class: 'audit'` may declare it**, and every name in `valueFields` must be a declared field; anything else is refused at authoring. The sealer's expiry rides on the same block's `archive.keep`, and the class that needs a proof is the one that block already calls the compliance ledger.
 - **Three lifecycle policies are refused beside it**, because [D8](#d8--expiry-removes-a-sealed-prefix-of-the-chain-and-writes-a-signed-amendment) cannot align them to whole windows and an honest expiry would read as `missing`: `retention.onlyWhen` (it deletes part of a window), a `ttl` whose `field` is not `created_at` (its cutoff is not a `created_at` window), and `storage: { strategy: 'rotation' }` (it drops whole shards, not windows). Each is refused at authoring with the reason, in the same change that adds the key.
 - **`sys_audit_log` opts in by default** with `valueFields: ['old_value', 'new_value', 'metadata']`. Enterprise's `sys_ai_audit_log` opts in from cloud.
+- *(Noted 2026-11-16: the block gains the optional `chainField`, the column a row's chain is read from; see [the note](#note-2026-11-16-34164-the-chain-column-lifecycleseal-chainfield-d10-and-how-d5-reads).)*
 - **This record names the key; it does not add it.** The build card adds it to `packages/spec` together with its reader, as an ADR-0049 pair, declaring `Metadata-protocol: added`. Until then nothing is sealed.
 - **Not taken:** `enable.tamperEvidence` (a flag cannot say which columns are value-bearing, and `enable` gates UI and API capabilities, not persistence); a new top-level `ledger` block (a top-level key for one feature of one class).
 
@@ -158,7 +159,7 @@ Terms. A **sealed object** is an object that declares `lifecycle.seal` ([D10](#d
 
 | What | Name |
 |:--|:--|
-| Opt-in key | `lifecycle.seal` = `{ valueFields: string[] }`, `lifecycle.class: 'audit'` only |
+| Opt-in key | `lifecycle.seal` = `{ valueFields: string[] }`, `lifecycle.class: 'audit'` only *(noted 2026-11-16: `{ valueFields, chainField? }`; see [the note](#note-2026-11-16-34164-the-chain-column-lifecycleseal-chainfield-d10-and-how-d5-reads))* |
 | Checkpoint object | `sys_audit_checkpoint` |
 | Amendment object | `sys_audit_amendment` |
 | Signing public-key object | `sys_audit_signing_key` |
@@ -232,3 +233,23 @@ Ruling record 6885005594 (E + B).
 - **Unchanged.** The cluster lock `audit.sealer`, the unique `(chain, sequence)` index, and D7's order — the amendment is written before the row is rewritten ([D7](#d7--redaction-writes-a-signed-amendment-before-the-rewrite)) — all stay. The migrations' dry-run default is unchanged.
 - **The build pins in tests** that the lock is taken on the datasource holding the audit rows (the hot store, where it differs from the primary), and that the command's wait timeout outlasts a normal sealer pass.
 - **Not taken.** Composing `os serve`'s cluster driver into the one-shot boot of the migrate commands (the area's option A); a lock that excludes nothing (option D, ruled out by the red line); option C, because it would reopen D7.
+
+---
+
+## Note (2026-11-16, #34164): the chain column, `lifecycle.seal.chainField` (D10), and how D5 reads
+
+**Status of this note**: a seat ruling by the owning seat (`domain:server#5`) on card [#34164](https://github.com/objectstack-ai/objectstack/issues/34164), as narrowed at 09:00Z and recorded in hand-off [`6912069272`](https://github.com/objectstack-ai/objectstack/pull/34351#issuecomment-6912069272) on PR #34351: the key is a widening, a named chain column must be a field the object has, and refusing at authoring an object that names none and has no `tenant_id` is card [#34352](https://github.com/objectstack-ai/objectstack/issues/34352), not this note. Such an object still parses, and the sealer reports it at `error` and does not seal it. The ruling names this note as the governed change it ships with, for this card only. `docs/adr/**` is a Tier H governed surface (Prime Directive #14): this note is accepted by the merge that lands it. **Change**: no decision above is reversed and no sentence above is edited; D5, D10 and the "Names this record fixes" table each gain a dated pointer here. The note adds one optional key to D10's `lifecycle.seal` and records how D5's wording reads with it. Its consumer is cloud#4128, where Enterprise's `sys_ai_audit_log` opts in as D10 says it will. That object's organization lives in the tenant column the registry injects (ADR-0131 `organization_id`), and it has no `tenant_id`.
+
+### D10 — the chain column
+
+- **The key.** `lifecycle.seal = { valueFields, chainField? }`. `chainField` names the column whose value is the organization chain a sealed row joins ([D5](#d5--rows-about-no-organization-seal-into-a-deployment-chain)). It is optional, and when absent the chain column is `tenant_id`, as before the key existed.
+- **It names a field the object has.** The field may be declared, or it may be a column the registry injects, the ADR-0131 tenant column `organization_id` included. A named column the object does not have is refused at authoring, with the reason, at `lifecycle.seal.chainField`.
+- **It names a column that can carry an organization.** Also refused there, each with its reason: a column whose value is not one text on every store (a numeric, boolean, `date`, `datetime`, JSON-shaped or multi-value column, judged by the declared field or by the definition the registry injects, so the injected `updated_at` is refused), since `chainValueOf` reads a chain only from a non-empty string and such a column would seal rows into the deployment chain with no report; `id` and `created_at`, which order the leaves (the same predicate `valueFields` reads); and a `valueFields` member, whose value [D1](#d1--canonical-form-each-row-is-one-leaf-value-columns-enter-as-salted-commitments) commits while the chain carries it in clear in every checkpoint and proof bundle ([D9](#d9--os-audit-verify)). The default `tenant_id`, when `chainField` is absent, is not judged at authoring; that half is #34352.
+- **One reader.** The sealer, the live check of [D9](#d9--os-audit-verify) and the proof bundle it writes read a row's chain value through one function (`chainValueOf` in `@objectstack/plugin-audit`). The key and its reader land together, as an ADR-0049 pair, declaring `Metadata-protocol: added`.
+- **The chain column is a clear column of the leaf** ([D1](#d1--canonical-form-each-row-is-one-leaf-value-columns-enter-as-salted-commitments)), like every other declared column, so a row moved to another organization reads `modified`.
+- **The chain column is fixed once the object has checkpoints.** Changing it does not move a sealed row: each checkpoint keeps the chain it was written in. Measured with the in-memory store (`audit-seal-chain-field-34164.test.ts`): the next pass starts each new chain at the object's floor, the last sealed window, so that window's rows are sealed again under the new chain, and `os audit verify` reports the second checkpoint `listed_twice`; scoped with `--org` to a new chain, the rows sealed before the change read `late` and unsealed. Both fail closed.
+
+### D5, read with it
+
+- D5's "a row whose `tenant_id` is NULL" and "the organization its `tenant_id` names" read as the sealed object's **chain column**: `tenant_id`, unless `chainField` names another. A row whose chain value is empty seals into the deployment chain.
+- [D4](#d4--checkpoints-one-merkle-root-per-chain-per-window-chained-and-signed) is unchanged. It defines a checkpoint's chain as an organization id, not a column, so the signed body's member keeps its name `tenant_id` and carries the chain column's value. The leaf input, the signed body and the root of an object chained by `tenant_id` are byte for byte what they were before this note.

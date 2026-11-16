@@ -31,7 +31,7 @@ import type { MetadataItem } from '@objectstack/metadata-core';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { serveStoredHashTokens, servedContentHash } from './metadata-redaction.js';
-import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import type { OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
@@ -124,7 +124,7 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * active row stored, its history append then failed) is not in `landed` — the
  * promotion threw — and is the store's own non-atomicity on such a runtime.
  */
-async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
+async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
     repo: SysMetadataRepository;
     landed: ReadonlyArray<LandedPromotion>;
     /** The pre-publish capture (`existedBefore` / `prevVersion` per item). */
@@ -139,9 +139,15 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
     for (const item of [...args.landed].reverse()) {
         const ref = { type: item.singularType, name: item.d.name, org: 'env' } as unknown as Parameters<SysMetadataRepository['get']>[0];
         // Per item, as the revert derives it: a runtime item is not refused by
-        // the artifact-override gate on its way back out.
-        const intent: 'override-artifact' | 'runtime-only' =
-            host.isArtifactBacked(item.singularType, item.d.name) ? 'override-artifact' : 'runtime-only';
+        // the artifact-override gate on its way back out. [ADR-0150 D2] Per
+        // write, as the promotion derived it: a package's own permission set
+        // beside another namespace's shipped one is a runtime item to the
+        // package each write addresses (`isOwnPermissionSetWrite`).
+        const intentFor = (packageId: string | null): 'override-artifact' | 'runtime-only' =>
+            host.isArtifactBacked(item.singularType, item.d.name)
+                && !isOwnPermissionSetWrite(host.engine, item.singularType, item.d.name, packageId)
+                ? 'override-artifact' : 'runtime-only';
+        const intent = intentFor(item.packageId);
         try {
             if (!item.promotedDraft) {
                 throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
@@ -177,7 +183,7 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
             const pending = await args.repo.get(ref, { state: 'draft', packageId: draftKey, ...memberOption(item.d.member) });
             if (!pending) {
                 await args.repo.put(ref, item.promotedDraft.body, {
-                    parentVersion: null, actor, source, message, intent, state: 'draft', packageId: draftKey,
+                    parentVersion: null, actor, source, message, intent: intentFor(draftKey), state: 'draft', packageId: draftKey,
                 });
                 // No registry entry serves a draft row: the heal re-derives this
                 // item's entry from the active rows the store now serves, the
@@ -664,7 +670,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -1251,7 +1257,7 @@ export class ProtocolHistoryAndPublishFacet {
                 ...(draftForGate ? { judged: { body: draftForGate.body, packageId: promoteInto } } : {}),
             };
         }
-        const artifactBacked = host.isArtifactBacked(singularType, request.name);
+        const artifactBacked = host.isArtifactBacked(singularType, request.name) && !isOwnPermissionSetWrite(host.engine, singularType, request.name, promoteInto);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
         const ref = {
