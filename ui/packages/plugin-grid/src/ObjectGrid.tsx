@@ -2183,8 +2183,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     } as any);
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
+    // The refusal's producer-marked `userMessage` rides on the rejection, as
+    // on the aggregate path below: the row shows it, and `message` stays the
+    // whole text the error CSV keeps (objectstack#34215).
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
 

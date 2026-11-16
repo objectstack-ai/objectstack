@@ -585,8 +585,9 @@ describe('an aggregate rejection is one outcome for the selection (objectstack#3
     expect(await refreshesOnClose(ds)).toBe(1);
   });
 
-  // CONTROL: the per-record dispatch keeps its per-row display exactly as it
-  // was — a failing row is listed under its record, with the run's count.
+  // CONTROL: the per-record dispatch keeps its per-row display — a failing
+  // row is listed under its record, with the run's count. The row reads the
+  // refusal's userMessage (objectstack#34215, pinned in its own block below).
   it('CONTROL: a per-record dispatch with one failing row still lists that row', async () => {
     const actionsFetch = vi.fn(async (_url: string, init: { body: string }) =>
       JSON.parse(init.body).recordId === 'r2' ? refusal({ userMessage: USER_TEXT }) : accepted());
@@ -595,7 +596,81 @@ describe('an aggregate rejection is one outcome for the selection (objectstack#3
     expect(actionsFetch).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('bulk-aggregate-rejection')).not.toBeInTheDocument();
     expect(screen.getByText(/Succeeded 1 \/ 2/)).toBeInTheDocument();
-    expect(screen.getByTestId('bulk-error-row-r2')).toHaveTextContent(PLATFORM_TEXT);
+    expect(screen.getByTestId('bulk-error-row-r2')).toHaveTextContent(USER_TEXT);
     expect(screen.queryByTestId('bulk-error-row-r1')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * A per-record dispatch's failed row speaks the handler's words
+ * (objectstack#34215): the row lists the refusal's producer-marked
+ * `userMessage`, while the error CSV keeps the failure's whole text — the
+ * record of what the platform answered. A refusal with no `userMessage`
+ * keeps the platform text on the row.
+ */
+describe('a per-record failed row shows the refusal\'s userMessage (objectstack#34215)', () => {
+  const MOVE = { name: 'mass_update_stage', label: 'Update Stage', type: 'script' };
+  const USER_TEXT = 'Plan B is Closed Won and was not moved.';
+  const PLATFORM_TEXT = 'mass_update_stage: plan_b stage is closed_won';
+  const refusal = (error: Record<string, unknown>) => ({
+    ok: false,
+    status: 400,
+    json: async () => ({ success: false, error: { code: 'HOOK_ABORTED', httpStatus: 400, message: PLATFORM_TEXT, ...error } }),
+  });
+  const accepted = () => ({ ok: true, status: 200, json: async () => ({ success: true, data: { moved: 1 } }) });
+
+  /** Run the per-record action over both rows; only r2 is refused, with `error`. */
+  async function runWithRefusedR2(error: Record<string, unknown>) {
+    const actionsFetch = vi.fn(async (_url: string, init: { body: string }) =>
+      JSON.parse(init.body).recordId === 'r2' ? refusal(error) : accepted());
+    const script = createServerActionHandler({ fetch: actionsFetch as any, baseUrl: '' });
+    await renderAndSelectAll({ objectActions: [MOVE], schema: { bulkActions: ['mass_update_stage'] }, handlers: { script } });
+    fireEvent.click(await screen.findByTestId('bulk-action-mass_update_stage'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    await screen.findByRole('button', { name: 'Done' });
+    expect(actionsFetch).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/Succeeded 1 \/ 2/)).toBeInTheDocument();
+  }
+
+  /** Click "Download error CSV" and read the text of the file it builds. */
+  async function downloadedCsv(): Promise<string> {
+    let blob: Blob | undefined;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b: Blob | MediaSource) => { blob = b as Blob; return 'blob:errors'; });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Download error CSV' }));
+    expect(blob).toBeDefined();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob!);
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('lists the userMessage on the row, and the error CSV keeps the whole text', async () => {
+    await runWithRefusedR2({ userMessage: USER_TEXT });
+
+    const row = screen.getByTestId('bulk-error-row-r2');
+    expect(row).toHaveTextContent(USER_TEXT);
+    expect(row).not.toHaveTextContent(PLATFORM_TEXT);
+    expect(screen.queryByTestId('bulk-error-row-r1')).not.toBeInTheDocument();
+
+    const lines = (await downloadedCsv()).split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[1].startsWith('r2,"')).toBe(true);
+    expect(lines[1]).toContain(PLATFORM_TEXT);
+    expect(lines[1]).not.toContain(USER_TEXT);
+  });
+
+  it('CONTROL: a refusal without a userMessage keeps the platform text on the row', async () => {
+    await runWithRefusedR2({});
+
+    expect(screen.getByTestId('bulk-error-row-r2')).toHaveTextContent(PLATFORM_TEXT);
+    expect(screen.queryByText(USER_TEXT, { exact: false })).not.toBeInTheDocument();
   });
 });
