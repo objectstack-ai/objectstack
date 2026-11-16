@@ -2,15 +2,15 @@
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
 '@object-ui/auth': patch
-'@objectstack/platform-objects': patch
-'@objectstack/spec': patch
-'@objectstack/plugin-auth': patch
+'@objectstack/platform-objects': minor
+'@objectstack/spec': minor
+'@objectstack/plugin-auth': minor
 ---
 
 feat(console): a Mobile App page in the account app shows the code that connects the ObjectOS mobile app to this server
 
 Clause-②: yes (widening) — a new account-app navigation entry and component (`account:mobile_app`), a new `mobileApp` namespace in the `@object-ui/i18n` packs, and a new optional `features.publicBaseUrl` served on `GET /api/v1/auth/config` (declared in `AuthFeaturesConfigSchema`, registered in `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`, typed on `AuthPublicConfig`); nothing that worked before is refused
-Metadata-protocol: none
+Metadata-protocol: added
 
 The account app (avatar menu → Profile) gains a **Mobile App** entry after Profile. Its page shows a QR code that encodes `objectos://connect?server=<this server's public base URL, URL-encoded>`, the same link as copyable text, and one line saying the code holds only the server's address, never the account.
 
