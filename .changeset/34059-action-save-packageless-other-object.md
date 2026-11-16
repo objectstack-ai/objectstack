@@ -1,5 +1,6 @@
 ---
 '@objectstack/metadata-protocol': minor
+'@objectstack/spec': patch
 ---
 
 fix(metadata-protocol)!: a package-less action save on an object no package binds the name to writes the environment's own action
@@ -17,7 +18,13 @@ The moved answers, for a writable package `P` holding `approve` on `invoice`:
 - a package-less save of `approve` bound to `task` was written into `P` (receipt `package=P`) and moved `P`'s action from `invoice` to `task`; it now writes the environment's own row on `task` (a receipt with no package), and `P`'s action on `invoice` is untouched: `GET /meta/action/approve?package=P` still serves it and `/actions/invoice/approve` still runs it.
 - the same save with an object-less body: it now writes the environment's own object-less row.
 - with two packages holding `approve` on two other objects, the save was refused `409 RESOURCE_CONFLICT` naming both; it now writes the environment's own row.
+- with `P` the sole holder and `P` disabled, the save was written into `P`'s row; it now writes the environment's own row on `task`.
+- with the sole row on `invoice` bound to a package that is not installed, the save was refused `422`; it now writes the environment's own row on `task`.
+- with `P` (enabled) on `invoice` and a disabled package `Q` on `task`, the save on `task` was written into `P` and moved its action to `task`; it is now judged over the holders on `task` only, so it writes `Q`'s row (as a save over a name only a disabled package holds does), and `P`'s action on `invoice` is untouched.
+- a draft save (`PUT …?mode=draft`) of `approve` bound to `task` was written as `P`'s draft (receipt `package=P`), and the per-item publish naming no package (`POST /meta/action/approve/publish`) promoted it over `P`'s action on `invoice`; the draft is now the environment's own draft (a receipt with no package), and its publish writes the environment's own row on `task`. Beside a sole binding to a package that is not installed, the draft save was refused `422`; it now writes the environment's own draft.
 
-Unchanged: the same save on `invoice` (the object `P` binds) is still `P`'s customization; a package on `invoice` and another on `task` still answer a save on `task` with `409` naming both; a managed (code) package's action name is still refused `403 NOT_OVERRIDABLE`; every type other than `action`; a draft save (`?mode=draft`) still inherits the package of the item's active rows.
+Unchanged: the same save or draft save on `invoice` (the object `P` binds) is still `P`'s customization, and its publish is `P`'s row; a package on `invoice` and another on `task`, both enabled, still answer a save on `task` with `409` naming both; a managed (code) package's action name is still refused `403 NOT_OVERRIDABLE`; every type other than `action`.
 
-Nothing to do for the environment's own actions. A package's own action is moved to another object by a save naming the package (`?package=P`), as before. A package's action that an older build moved to another object stays where it was stored.
+Not moved yet (#33904, the read, list and delete half): the environment's row on `task` has no by-name read, since `GET /meta/action/approve` naming no package still serves `P`'s action; it is not in `GET /meta/action`; and a package-less `DELETE /meta/action/approve` removes `P`'s row on `invoice`, not the environment's. The one address that reaches the environment's row today is the action route `/actions/_env/task/approve`; a read or delete naming `P` (`?package=P`) reaches `P`'s.
+
+Until #33904 lands, no meta address deletes only the environment's own action: do not send a package-less delete of the name to remove it, because that removes the package's action. A package's own action is moved to another object by a save naming the package (`?package=P`), as before. A package's action that an older build moved to another object stays where it was stored.
