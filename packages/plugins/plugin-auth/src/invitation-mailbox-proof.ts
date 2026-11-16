@@ -175,8 +175,6 @@ export interface InvitationProofDoorHost {
   counterStore?: () => Promise<CounterStore>;
 }
 
-const FALLBACK_COUNTERS = new InProcessCounterStore();
-
 const INVALID_PROOF_MESSAGE =
   'This invitation link cannot be used to join. Open the latest invitation email, or sign in to accept the invitation.';
 
@@ -194,16 +192,19 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
     import('better-auth/cookies'),
   ]);
 
+  // Per door instance: the window counts somewhere even with no shared store.
+  const fallbackCounters = new InProcessCounterStore();
+
   const refuseProof = (): never => {
     throw new APIError('BAD_REQUEST', { code: 'INVALID_TOKEN', message: INVALID_PROOF_MESSAGE });
   };
 
   const rateLimit = async (keys: string[]) => {
-    let store: CounterStore = FALLBACK_COUNTERS;
+    let store: CounterStore = fallbackCounters;
     try {
-      store = (await host.counterStore?.()) ?? FALLBACK_COUNTERS;
+      store = (await host.counterStore?.()) ?? fallbackCounters;
     } catch {
-      store = FALLBACK_COUNTERS;
+      store = fallbackCounters;
     }
     for (const key of keys) {
       const { count, resetAt } = await incrementFixedWindow(store, key, INVITATION_PROOF_RATE_LIMIT.window);
