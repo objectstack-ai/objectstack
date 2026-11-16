@@ -84,7 +84,7 @@ import { isListComparandOperator } from '@objectstack/spec/data';
 // compiles the same operator independently and calls the same two functions.
 // [#20041] And the U+0000 gate beside the dangling-escape one, for the same reason.
 import { hasDanglingLikeEscape, hasNulInLikePattern } from '@objectstack/spec/data';
-import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverAggregateQuery, DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
@@ -393,6 +393,13 @@ export class SqlDriver implements IDataDriver {
       // collation's, as for this datasource's `where` (the latitude the bit's
       // TSDoc in `data/driver.zod.ts` states, measured dialects named there).
       aggregationFilter: true,
+      // [#33697] ADR-0053 Phase 2 D2 as amended: PostgreSQL buckets a
+      // non-UTC reference zone in the database (`AT TIME ZONE` over the
+      // server's tz database, `buildDateBucketExpr`). SQLite has no tz
+      // database, and MySQL / SQL Server / Oracle declare nothing here, so the
+      // engine keeps bucketing those zones in memory. TursoDriver is SQLite in
+      // every mode and inherits `false` through this getter.
+      zonedDateBucketing: this.isPostgres,
     };
   }
 
@@ -1194,7 +1201,19 @@ export class SqlDriver implements IDataDriver {
    *
    * Exposed as `{sql, bindings}` (not `Knex.Raw`) so callers can both
    * `groupByRaw()` and embed the same expression inside a `select() as alias`
-   * with correctly forwarded identifier bindings.
+   * with correctly forwarded identifier bindings. A zoned bucket (below) also
+   * binds a VALUE, the zone, and then must not be spelled twice: PostgreSQL
+   * numbers each `?` as its own parameter, sees two different expressions in
+   * the select list and the GROUP BY, and refuses (42803). {@link aggregate}
+   * groups such a bucket by its select-list position instead.
+   *
+   * ## A reference zone (#33697, ADR-0053 Phase 2 D2 as amended)
+   *
+   * `timezone`, when given, is the resolved IANA area/location name the engine
+   * sends on a driver that declares `supports.zonedDateBucketing`. Only the
+   * PostgreSQL arm reads it (`(col)::timestamptz AT TIME ZONE ?`); every other
+   * dialect answers `null` for it, never a UTC bucket under a zone's name. A
+   * `Field.date` ignores it: a calendar day is never zone-shifted.
    *
    * `table` is the coercion key of the object being aggregated (what
    * {@link coercionKey} returns for the builder). It is what makes the SQLite
@@ -1228,6 +1247,7 @@ export class SqlDriver implements IDataDriver {
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
     table?: string | null,
     column?: string,
+    timezone?: string,
   ): { sql: string; bindings: any[] } | null {
     // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
     const readDateFields = () => this.dateFields;
@@ -1248,7 +1268,7 @@ export class SqlDriver implements IDataDriver {
       sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
       temporalFieldKind: (...a) => this.temporalFieldKind(...a),
     };
-    return buildDateBucketExpr.call(host, field, granularity, table, column);
+    return buildDateBucketExpr.call(host, field, granularity, table, column, timezone);
   }
 
   /**
@@ -3731,7 +3751,7 @@ export class SqlDriver implements IDataDriver {
    * below is the contract's own, pinned at the type level in
    * `sql-driver-doors-declared-types.test.ts`.
    */
-  aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  aggregate(object: string, query: DriverAggregateQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#29520 codemod] The body moved to `sql-driver-aggregation.ts` (see `AggregationHost`).
     return AggregationFacet.aggregate.call(aggregationHost.of(this), object, query, options);
   }
@@ -9395,6 +9415,7 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
+      get isPostgres() { return driver.isPostgres; },
       get knex() { return driver.knex; },
       mapAggregateFunc: (...a) => driver.mapAggregateFunc(...a),
       get numericFields() { return driver.numericFields; },
