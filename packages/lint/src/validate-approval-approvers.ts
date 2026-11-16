@@ -27,6 +27,7 @@
  * | approval-expression-no-empty-policy        | info     | #3447 P2 empty-slate policy |
  * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
  * | approval-approver-cross-org-unsupported    | error    | ADR-0105 D9 targeting      |
+ * | approval-approver-platform-admin-authored  | error    | save door only (see below) |
  *
  * The first two are mutually exclusive by construction — a bad *value* wins,
  * because its fix (`position`) differs from the deprecation's fix
@@ -65,6 +66,21 @@ export const APPROVAL_EXPRESSION_INVALID = 'approval-expression-invalid';
 export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty-policy';
 export const APPROVAL_DECISION_OUTPUTS_RESERVED = 'approval-decision-outputs-reserved';
 export const APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED = 'approval-approver-cross-org-unsupported';
+export const APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED = 'approval-approver-platform-admin-authored';
+
+/** What {@link validateApprovalApprovers} needs to know about the door that runs it. */
+export interface ValidateApprovalApproversOptions {
+  /**
+   * True at the runtime publish gate, the save door every flow authored in a
+   * deployment passes (Studio, REST `/meta`, an MCP author). A flow saved there
+   * is never a package's own code, so a `platform_admin` approver in it is
+   * refused at that door ({@link APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED}).
+   * Absent on the CLI commands: they read a package's source tree and cannot
+   * know which door will register it, so they know the type and refuse
+   * nothing. The approval node's refusal at entry is the gate that holds.
+   */
+  atSaveDoor?: boolean;
+}
 
 /**
  * The CLOSED root set an `expression` approver may reference (#3447 P2) —
@@ -368,7 +384,10 @@ function stackWiresManagerChain(stack: AnyRec): boolean {
  * Validate the approvers of every Approval node in the stack's flows.
  * Returns findings (empty = clean).
  */
-export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFinding[] {
+export function validateApprovalApprovers(
+  stack: AnyRec,
+  options: ValidateApprovalApproversOptions = {},
+): ApprovalApproverFinding[] {
   const findings: ApprovalApproverFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
@@ -419,6 +438,27 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
         }
 
         const canonical = canonicalApproverType(type);
+
+        // The platform administrators, named in a flow saved at the runtime
+        // door: that flow is authored in this deployment, and only a flow a
+        // package registered in code ships may address them. Early feedback;
+        // the approval node refuses to open on it whatever door it came in by.
+        if (options.atSaveDoor === true && canonical === 'platform_admin') {
+          findings.push({
+            severity: 'error',
+            rule: APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
+            where,
+            path: `${path}.type`,
+            message:
+              "approver type 'platform_admin' addresses the deployment's platform administrators, and a flow " +
+              'saved here is authored in this deployment: only a flow shipped by a package the deployment ' +
+              'registers in code may name them. The approval node would refuse to open on it.',
+            hint:
+              'Route the step to people of the organization (a position, a team, a department or a person), ' +
+              'or ship the flow in a package the deployment registers in code.',
+          });
+          continue;
+        }
 
         // Expression approvers (#3447 P2): the runtime REJECTS an expression
         // that doesn't parse or references a root outside `current`/`trigger`/
@@ -574,6 +614,30 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             hint:
               `Drop 'organization' here. Cross-organization targeting applies to ` +
               `'position', 'org_membership_level', 'department', 'queue' and 'expression' approvers.`,
+          });
+        }
+      }
+
+      // The same save-door refusal for the node's fallback slate, which the
+      // approval node opens on through the same expansion.
+      if (options.atSaveDoor === true && Array.isArray(cfg.fallbackApprovers)) {
+        const fallback = cfg.fallbackApprovers as unknown[];
+        for (let ai = 0; ai < fallback.length; ai++) {
+          const a = fallback[ai] as AnyRec | null;
+          if (!a || typeof a !== 'object' || typeof a.type !== 'string') continue;
+          if (canonicalApproverType(a.type) !== 'platform_admin') continue;
+          findings.push({
+            severity: 'error',
+            rule: APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
+            where,
+            path: `${nodePath}.config.fallbackApprovers[${ai}].type`,
+            message:
+              "fallback approver type 'platform_admin' addresses the deployment's platform administrators, and " +
+              'a flow saved here is authored in this deployment: only a flow shipped by a package the ' +
+              'deployment registers in code may name them. The approval node would refuse to open on it.',
+            hint:
+              'Name people of the organization as the fallback, or ship the flow in a package the deployment ' +
+              'registers in code.',
           });
         }
       }

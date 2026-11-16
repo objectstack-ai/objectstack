@@ -135,6 +135,11 @@ function makeCountingDriver() {
         continue;
       }
       if (k.startsWith('$')) continue;
+      // A field's `$in`: a recompute naming several parents groups them under it (#33795).
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+        if (!(v as any).$in.includes(row[k])) return false;
+        continue;
+      }
       const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
       if ((row[k] ?? null) !== (expected ?? null)) return false;
     }
