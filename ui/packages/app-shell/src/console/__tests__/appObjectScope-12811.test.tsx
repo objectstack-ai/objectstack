@@ -9,7 +9,9 @@
  * scope it alone asked for started one permission round trip later.
  * `useAppObjectScopePrefetch` (mounted by `ConsoleShell`'s root action runtime)
  * asks the scope as soon as the app list names the app: the package list,
- * then by name the route object's lookup targets outside the package.
+ * then by name the route object's lookup targets outside the package, each
+ * once the one `?names=` presence read has answered it served
+ * (objectstack#34244).
  *
  * CONTROLs: a route outside an app and a record form overlay ask nothing here
  * (`AppContent` reads the whole registry there). An app item with no package
@@ -102,13 +104,14 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
   it("asks the app's package list, then the route object's lookup targets by name, never the whole list", async () => {
     const calls = mount('/apps/crm/crm_account', APPS);
     await waitFor(() => expect(calls).toContain('object/sys_user'));
-    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+    // objectstack#34244 — the target outside the package is asked by name once the presence read answered it served.
+    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object?names=sys_user', 'object/sys_user']);
   });
 
   it('objectstack#27626 — under a record drawer it asks the scope of the list the drawer opens over', async () => {
     const calls = mount('/apps/crm/crm_account?recordId=r1', APPS);
     await waitFor(() => expect(calls).toContain('object/sys_user'));
-    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object?names=sys_user', 'object/sys_user']);
   });
 
   it('objectstack#28645 — enters the app\'s metadata bundle as it starts the scope, once the app list names the app', async () => {
@@ -197,7 +200,13 @@ describe('objectstack#29551 — a packaged app asks its lookup targets without v
       },
       getClient: () => ({
         meta: {
-          getItems: (type: string, options?: { packageId?: string }) => {
+          getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+            // objectstack#34244 — the `?names=` presence read answers the asked names it holds.
+            if (options?.names) {
+              calls.push(`${type}?names=${options.names.join(',')}`);
+              const named = type === 'object' ? ALL.filter((o) => options.names!.includes(o.name)) : [];
+              return Promise.resolve({ type, items: structuredClone(named) });
+            }
             calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
             const all = type === 'object' ? ALL : type === 'view' ? VIEWS : type === 'app' ? APPS : [];
             const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -247,7 +256,7 @@ describe('objectstack#29551 — a packaged app asks its lookup targets without v
     const { calls, scope } = mountBundled('/apps/crm/crm_account');
     await waitFor(() => expect(scope()).toContain('sys_user['));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(reads(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+    expect(reads(calls)).toEqual([`object?package=${CRM}`, 'object?names=sys_user', 'object/sys_user']);
     expect(scope()).toBe('crm_account[crm_account.all],crm_contact[crm_contact.all],sys_user[]');
   });
 
@@ -287,15 +296,22 @@ describe('objectstack#33343 — a hidden lookup asks no definition of its target
     const calls = mount('/apps/crm/crm_account', APPS, withAnchors(true));
     await waitFor(() => expect(calls).toContain('object/sys_user'));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object?names=sys_user', 'object/sys_user']);
   });
 
-  it('CONTROL: the same lookups drawn ask every target by name', async () => {
+  it('CONTROL: the same lookups drawn ask every registered target by name, once one presence read has answered them', async () => {
     const calls = mount('/apps/crm/crm_account', APPS, withAnchors(false));
     await waitFor(() => expect(calls).toContain('object/sys_business_unit'));
     await new Promise((resolve) => setTimeout(resolve, 50));
+    // objectstack#34244 — the three targets outside the package are asked in ONE `?names=` read first.
     expect([...objectCalls(calls)].sort()).toEqual(
-      [`object?package=${CRM}`, 'object/sys_business_unit', 'object/sys_organization', 'object/sys_user'].sort(),
+      [
+        `object?package=${CRM}`,
+        'object?names=sys_user,sys_organization,sys_business_unit',
+        'object/sys_business_unit',
+        'object/sys_organization',
+        'object/sys_user',
+      ].sort(),
     );
   });
 });
@@ -396,5 +412,80 @@ describe('objectstack#34188 — a lookup target the host does not register is ne
     const { calls, scope } = mountRoute(subPath);
     await waitFor(() => expect(scope()).toBe('sys_invitation,sys_user'));
     expect(calls).toContain('object/sys_user');
+  });
+});
+
+describe('objectstack#34244 — a packaged app asks an off-package lookup target or a requiresObject by name only once it is served', () => {
+  /**
+   * A packaged app whose account object draws a lookup to
+   * `sys_approval_request`, and whose navigation requires `cloud_billing`:
+   * a Free environment registers neither, and asked by name each answered 404
+   * on every open (cloud#4300's staging note). `sys_user` is registered
+   * outside the package; `crm_account` is the package's own.
+   */
+  const PKG_OBJECTS = [
+    {
+      name: 'crm_account',
+      _packageId: CRM,
+      fields: {
+        owner: { type: 'lookup', reference: 'sys_user' },
+        approval: { type: 'lookup', reference: 'sys_approval_request' },
+      },
+    },
+    { name: 'sys_user', _packageId: 'plugin.auth', fields: {} },
+  ];
+  const entry = (name: string) => ({ id: `nav_${name}`, type: 'object', objectName: name, requiresObject: name });
+  const PKG_APPS = [{ name: 'crm', _packageId: CRM, navigation: [entry('crm_account'), entry('sys_user'), entry('cloud_billing')] }];
+  const ACCOUNTS_PAGE = { name: 'accounts_home', object: 'crm_account' };
+
+  function RouteProbe({ subPath }: { subPath: string }) {
+    const { apps, readObjectScope } = useMetadata();
+    const app = apps.find((a: any) => a?.name === 'crm');
+    const read =
+      app && readObjectScope
+        ? readAppObjectScope(readObjectScope, app, subPath, '', [], () => ({ page: ACCOUNTS_PAGE, settled: true }))
+        : undefined;
+    const names = ((read?.scope?.objects ?? []) as any[]).map((o) => o?.name).sort().join(',');
+    return <div data-testid="scope">{names}</div>;
+  }
+
+  function mountRoute(subPath: string) {
+    sessionStorage.clear();
+    const calls: string[] = [];
+    const view = render(
+      <MetadataProvider adapter={makeAdapter(calls, PKG_APPS, PKG_OBJECTS)}>
+        <MemoryRouter initialEntries={['/']}>
+          <RouteProbe subPath={subPath} />
+        </MemoryRouter>
+      </MetadataProvider>,
+    );
+    return { calls, scope: () => view.getByTestId('scope').textContent };
+  }
+
+  const ARMS = [
+    ['a page bound to the object', 'page/accounts_home'],
+    ["the object's own list route", 'crm_account'],
+  ] as const;
+
+  it.each(ARMS)('%s asks neither unregistered name by name, each only in a presence read', async (_arm, subPath) => {
+    const { calls, scope } = mountRoute(subPath);
+    await waitFor(() => expect(scope()).toBe('crm_account,sys_user'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).not.toContain('object/sys_approval_request');
+    expect(calls).not.toContain('object/cloud_billing');
+    // Two presence reads: the app's required names outside the package as the
+    // package list lands, then the route object's lookup targets it does not
+    // already ask, once its definition lands. The package's own object is in neither.
+    expect(objectCalls(calls).filter((c) => c.startsWith('object?names='))).toEqual([
+      'object?names=sys_user,cloud_billing',
+      'object?names=sys_approval_request',
+    ]);
+  });
+
+  it.each(ARMS)('CONTROL: on %s a registered off-package target and requiresObject still resolve by name', async (_arm, subPath) => {
+    const { calls, scope } = mountRoute(subPath);
+    await waitFor(() => expect(scope()).toBe('crm_account,sys_user'));
+    expect(calls).toContain('object/sys_user');
+    expect(calls).toContain(`object?package=${CRM}`);
   });
 });
