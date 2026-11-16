@@ -449,9 +449,10 @@ export interface AuthPublicConfig {
      * This deployment's public base URL, as the auth layer composes every link
      * it hands out: the configured base URL (`OS_AUTH_URL`, then
      * `BETTER_AUTH_URL`, then `OS_BASE_URL`) with any sub-path it carries, or
-     * the loopback fallback when none is set. The account app's Mobile App
-     * page encodes it in the connect code, never the browser's own address.
-     * Absent from a server that does not publish it.
+     * the loopback fallback when none is set, served as an address only
+     * (scheme, host, path). The account app's Mobile App page encodes it in
+     * the connect code, never the browser's own address. Absent from a server
+     * that does not publish it.
      */
     publicBaseUrl?: string;
   };
