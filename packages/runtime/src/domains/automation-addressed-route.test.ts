@@ -636,3 +636,86 @@ describe('[#33386] the by-name doors judge the served holders of a name two pack
         });
     });
 });
+
+/**
+ * [ADR-0150 D3, #33905] A flow name one package holds, that package disabled,
+ * over a real `SchemaRegistry`: its namespaced address is refused `404` at
+ * admission, before the service is asked. The bare path reaches the engine,
+ * whose bare entries now answer as for a flow it does not hold (`getFlow`
+ * `null`, pinned in service-automation's `flow-slots-per-package.test.ts`),
+ * so each bare door answers what the address answers. The service here
+ * answers as the engine does for such a flow.
+ */
+describe('[#33905] a flow whose only holder\'s package is disabled: the bare door answers as its namespaced address (404)', () => {
+    function registryHolding(disabled: boolean) {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        registry.installPackage({ id: CRM, name: CRM, version: '1.0.0', type: 'app', namespace: 'crm' } as never, 'code');
+        registry.registerItem('flow', { name: 'solo', _packageId: CRM }, 'name' as never, CRM);
+        if (disabled) registry.disablePackage(CRM);
+        return registry;
+    }
+
+    function dispatcherOver(registry: SchemaRegistry, held: boolean) {
+        const automation = {
+            handlerReady: true,
+            getFlow: vi.fn(async (name: string) => (held && name === 'solo' ? { name } : null)),
+            execute: vi.fn(async (name: string) => (held ? { success: true, output: {} } : { success: false, error: `Flow '${name}' not found` })),
+            toggleFlow: vi.fn(async (name: string) => { if (!held) throw new Error(`Flow '${name}' not found`); }),
+            listRunsPage: vi.fn(async () => ({ runs: [] as unknown[], hasMore: false })),
+            getActionDescriptors: vi.fn(() => []),
+            getFlowRuntimeStates: vi.fn(() => []),
+        };
+        const services: Record<string, unknown> = { automation, objectql: { registry } };
+        const resolve = (name: string) => services[name];
+        const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
+        const dispatcher = new HttpDispatcher(kernel);
+        const call = async (path: string, method: string, body: unknown = {}) => {
+            const answered = await dispatcher.handleAutomation(path, method, body, { request: {}, executionContext: ADMIN } as any, {});
+            return { status: answered.response?.status ?? 200, body: answered.response?.body as any };
+        };
+        return { call, automation };
+    }
+
+    const DOORS: ReadonlyArray<readonly [string, string, string, unknown]> = [
+        ['/solo', '/crm/solo', 'GET', {}],
+        ['/solo/trigger', '/crm/solo/trigger', 'POST', {}],
+        ['/trigger/solo', '/trigger/crm/solo', 'POST', {}],
+        ['/solo/toggle', '/crm/solo/toggle', 'POST', { enabled: false }],
+        ['/solo/runs', '/crm/solo/runs', 'GET', {}],
+    ];
+
+    it('each bare door answers 404 as its namespaced address does; nothing runs or switches (FROM: the bare door served the flow)', async () => {
+        const { call, automation } = dispatcherOver(registryHolding(true), false);
+        for (const [bare, addressed, method, body] of DOORS) {
+            const viaAddress = await call(addressed, method, body);
+            const viaBare = await call(bare, method, body);
+            expect([bare, viaBare.status, codeOf(viaBare)]).toEqual([bare, 404, codeOf(viaAddress)]);
+            expect([addressed, viaAddress.status]).toEqual([addressed, 404]);
+        }
+        expect(automation.execute).not.toHaveBeenCalled();
+        expect(automation.toggleFlow).not.toHaveBeenCalled();
+        expect(automation.listRunsPage).not.toHaveBeenCalled();
+    });
+
+    it('the clone door with the flow as its source answers 404 as its namespaced address does; nothing is registered (FROM: the source was copied)', async () => {
+        const { call, automation } = dispatcherOver(registryHolding(true), false);
+        const registerFlow = vi.fn();
+        (automation as Record<string, unknown>).registerFlow = registerFlow;
+        const viaAddress = await call('/crm/solo/clone', 'POST', { name: 'solo_copy', label: 'Solo copy' });
+        const viaBare = await call('/solo/clone', 'POST', { name: 'solo_copy', label: 'Solo copy' });
+        expect([viaBare.status, codeOf(viaBare)]).toEqual([404, codeOf(viaAddress)]);
+        expect(viaAddress.status).toBe(404);
+        expect(registerFlow).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — the package enabled: the address is its bare path, and both serve the flow', async () => {
+        const { call } = dispatcherOver(registryHolding(false), true);
+        for (const [bare, addressed, method, body] of DOORS) {
+            const viaAddress = await call(addressed, method, body);
+            const viaBare = await call(bare, method, body);
+            expect([bare, viaBare.status]).toEqual([bare, 200]);
+            expect([addressed, viaAddress.status]).toEqual([addressed, 200]);
+        }
+    });
+});

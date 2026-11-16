@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * One card, end to end, in up to two modes:
+ * One card, end to end, in up to three modes:
  *
  *   scratch   scaffold → the agent builds from the card prompt → `os validate`,
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
@@ -23,6 +23,11 @@
  *             change to the installed copy → score it → seed → the Run half.
  *             A refused install (`UNCOPYABLE`, …) is a finding, recorded and
  *             never worked around.
+ *   ask       the same install of the same verified build as `template`, into
+ *             a blank host of its own → seed → the Run half, and nothing else:
+ *             no authoring turn, no score, no iterate. Two ask models run this
+ *             way on one build are graded on the same app, so a difference in
+ *             their answers is theirs, not the build's.
  *
  * Names: the app is always in the card's own namespace, `demo` + its code
  * (`democrm`). Scratch mode scaffolds the project under that name; template
@@ -58,7 +63,21 @@ import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTa
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
-import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
+import {
+  buildPrompt,
+  iteratePrompt,
+  operationPrompt,
+  personaHandles,
+  personaRecords,
+  promptLanguageRefusal,
+  statedPromptChoice,
+  questionPrompt,
+  rowOwner,
+  templateIteratePrompt,
+  userHandleFields,
+  verifyArgs,
+  type PromptChoice,
+} from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
@@ -86,10 +105,14 @@ export interface ProjectOps {
 }
 
 export interface RunOptions {
-  modes: ReadonlyArray<'scratch' | 'template'>;
+  modes: ReadonlyArray<'scratch' | 'template' | 'ask'>;
   /** Re-run the Run half after the iterate (scratch mode). Default true. */
   iterateRun?: boolean;
-  /** A verified build to install in template mode (e.g. the gallery's last passing export). */
+  /**
+   * A verified build to install in template and ask modes (e.g. the gallery's
+   * last passing export); without it they install this run's from-scratch
+   * build when it passed. Ask mode needs one or the other ({@link askModeRefusal}).
+   */
   templateArtifact?: unknown;
   /** The dev admin the runner signs in as (`os dev --fresh` seeds it). */
   admin: { email: string; password: string };
@@ -100,6 +123,16 @@ export interface RunOptions {
    * the rows the first one changed.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice (`--lang`, `--prompt`, {@link PromptChoice}), sent in
+   * every mode: the build turn, the iterate turn (scratch and template), and
+   * every question and operation turn, each ask of a repeated one included.
+   * Absent ⇒ today's prompts, byte for byte. A card that lacks a text the
+   * run would render in the chosen language is refused before any mode
+   * runs ({@link promptLanguageRefusal}); the CLI skips it before the first
+   * card instead.
+   */
+  promptChoice?: PromptChoice;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -257,10 +290,17 @@ export interface ChangeSize {
 }
 
 export interface ModeRun {
-  mode: 'scratch' | 'template';
+  mode: 'scratch' | 'template' | 'ask';
+  /** Absent in template and ask modes, which build nothing first. */
   build?: BuildHalf;
   run?: RunHalf;
+  /** Absent in ask mode, which authors nothing. */
   iterate?: { build: BuildHalf; run?: RunHalf; changeSize?: ChangeSize };
+  /**
+   * The verified build template and ask modes installed: where it came from
+   * (`supplied template`, or `this run’s from-scratch build`) and how the
+   * unmanaged install door answered.
+   */
   template?: { source: string; install: { ok: boolean; status: number; code?: string; message?: string }; installModesSupplied: boolean };
   skipped?: string;
   findings: string[];
@@ -278,6 +318,12 @@ export interface CardRun {
    * reader may hold exact.
    */
   askRepeats?: number;
+  /**
+   * The prompt choice the run was given ({@link RunOptions.promptChoice}),
+   * when a flag set one; absent ⇒ the default prompts. Outside `counts`, like
+   * `askRepeats`, so a default record keeps its bytes.
+   */
+  promptChoice?: PromptChoice;
   modes: ModeRun[];
 }
 
@@ -776,6 +822,8 @@ export async function seedApp(
  * operation writes, so each ask reads the same rows. A turn the seed takes out
  * ({@link seedDependence}) is not measured at every ask alike. Operations run
  * once. The guardrails are graded over every turn that ran, each ask included.
+ * Every question and operation turn is sent in the prompt choice `choice`
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -785,6 +833,7 @@ export async function runHalf(
   objectLabels?: Record<string, string[]>,
   built?: unknown,
   askRepeats = 1,
+  choice?: PromptChoice,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -825,7 +874,7 @@ export async function runHalf(
             continue;
           }
           try {
-            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id, choice), ...doorOf(persona) });
             turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
             res.turn = summarize(turn);
             res.grade = gradeCardAnswer(scenario, {
@@ -857,7 +906,7 @@ export async function runHalf(
         const started = new Date();
         let turn: ParsedTurn;
         try {
-          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), ...doorOf(op.actingAs) });
+          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id, choice), ...doorOf(op.actingAs) });
         } catch (e) {
           if (!(e instanceof ReplayNotFaithfulError)) throw e;
           half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
@@ -948,7 +997,7 @@ async function withApp<T>(ops: ProjectOps, dir: string, findings: string[], use:
  * scaffolded in (`ProjectOps.scaffold`'s `under`): one per card and mode. The
  * gallery exporter finds a run's scratch project by it.
  */
-export const modeDir = (card: { id: string }, mode: 'scratch' | 'template'): string => `${card.id.replace(/_/g, '-')}-${mode}`;
+export const modeDir = (card: { id: string }, mode: ModeRun['mode']): string => `${card.id.replace(/_/g, '-')}-${mode}`;
 
 /** Did the build pass — every counted check of the card's `expect`, and no bare item name? */
 export const buildPassed = (b: BuildHalf | undefined): boolean =>
@@ -972,14 +1021,14 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const labels = citationLabels(original);
   const card = scenario.card;
   const ref = { card: card.id, mode: 'scratch' as const };
-  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card), tier: card.tier })).turn, scenario);
+  mode.build = await buildHalf(scenario, dir, ops, async () => (await driver.author({ ...ref, phase: 'build', step: 'author', cwd: dir, prompt: buildPrompt(card, opts.promptChoice), tier: card.tier })).turn, scenario);
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice));
 
   const iterated = iteratedScenario(scenario);
-  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
+  const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
   if (build.notMeasured) {
     mode.iterate = { build };
     return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -987,35 +1036,53 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
 }
 
-async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: { artifact: unknown; source: string } | undefined): Promise<ModeRun> {
+/** A verified build to install, and where it came from (`ModeRun.template.source`). */
+interface VerifiedBuild {
+  artifact: unknown;
+  source: string;
+}
+
+/**
+ * Install `verified` into a blank host of its own, booted, for template or ask
+ * mode, then hand the app to `use`. The host is scaffolded under the mode's
+ * own directory ({@link modeDir}) with a namespace of its own
+ * (`templateHostName` says why), and the build goes in through the unmanaged
+ * install door (ADR-0131 D6), recorded on `mode.template`. Nothing is
+ * installed, and the mode is skipped with the reason, when there is no
+ * verified build or it declares another namespace than the card's; a refused
+ * install is a finding, recorded and never worked around, and `use` is not
+ * called.
+ */
+async function withInstalledBuild(
+  original: LoadedScenario,
+  ops: ProjectOps,
+  mode: ModeRun,
+  verified: VerifiedBuild | undefined,
+  use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]> }) => Promise<void>,
+): Promise<void> {
   // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
   const ns = scenarioNamespace(original.card);
-  const scenario = namespacedScenario(original);
-  const labels = citationLabels(original);
-  const card = scenario.card;
-  const mode: ModeRun = { mode: 'template', findings: [] };
   if (!verified) {
     mode.skipped = 'no verified build of this card to install: the from-scratch build did not pass and no template was supplied';
-    return mode;
+    return;
   }
   const templateNs = namespaceOfArtifact(verified.artifact);
   if (templateNs !== ns) {
     mode.skipped = `the template declares namespace \`${templateNs ?? '(none)'}\`, not the card's \`${ns}\`: its names would not be the card's`;
-    return mode;
+    return;
   }
   // The blank host gets a namespace of its own (`templateHostName` says why).
-  const { dir, result } = await ops.scaffold(templateHostName(original.card), modeDir(card, 'template'));
+  const { dir, result } = await ops.scaffold(templateHostName(original.card), modeDir(original.card, mode.mode));
   if (result.exit !== 0) {
     mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
-    return mode;
+    return;
   }
-  const iterated = iteratedScenario(scenario);
   await withApp(ops, dir, mode.findings, async (app, booted) => {
     await app.signInAdmin();
     const { manifest, installModesSupplied } = installableManifest(verified.artifact);
@@ -1032,9 +1099,20 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
       mode.findings.push(`unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim());
       return;
     }
+    await use(app, { dir, url: booted.url, collections, baseline });
+  });
+}
+
+async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: VerifiedBuild | undefined): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const card = scenario.card;
+  const mode: ModeRun = { mode: 'template', findings: [] };
+  const iterated = iteratedScenario(scenario);
+  await withInstalledBuild(original, ops, mode, verified, async (app, { dir, url, collections, baseline }) => {
     const before = await app.metadataAsArtifact(collections);
     const build: BuildHalf = { commands: [], score: null };
-    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: booted.url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }), tier: card.tier })).turn);
+    await authorInto(build, async () => (await driver.author({ card: card.id, mode: 'template', phase: 'iterate', step: 'author', cwd: dir, prompt: templateIteratePrompt(card, { baseUrl: url, adminEmail: opts.admin.email, adminPassword: opts.admin.password }, opts.promptChoice), tier: card.tier })).turn);
     if (build.notMeasured) {
       mode.iterate = { build };
       return;
@@ -1043,9 +1121,41 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice);
   });
   return mode;
+}
+
+/**
+ * Ask mode: the verified build template mode installs, installed the same way
+ * ({@link withInstalledBuild}), then the Run half on it — seed, personas, every
+ * question (`askRepeats` times) and every operation — and nothing else. The
+ * driver is never asked to author: there is no build half, no score and no
+ * iterate, and the record names the build's source (`ModeRun.template`). Its
+ * turns key as `card/ask/run/<step>/<persona>`. The Run half reads the
+ * verified build itself as the artifact the app serves (`runHalf`'s `built`),
+ * as scratch mode's first Run half reads the same build, so on the same build
+ * and the same turns the two grade alike.
+ */
+async function askMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions, verified: VerifiedBuild | undefined): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const mode: ModeRun = { mode: 'ask', findings: [] };
+  await withInstalledBuild(original, ops, mode, verified, async (app) => {
+    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice);
+  });
+  return mode;
+}
+
+/**
+ * Why a run asking for `modes` cannot start, or `undefined` when it can: ask
+ * mode runs on a verified build and authors none, so it needs `--template`
+ * (`templateSupplied`) or scratch mode in the same run, whose build it
+ * installs when that build passes. Refused before any card runs.
+ */
+export function askModeRefusal(modes: ReadonlyArray<ModeRun['mode']>, templateSupplied: boolean): string | undefined {
+  if (!modes.includes('ask') || templateSupplied || modes.includes('scratch')) return undefined;
+  return 'ask mode runs the questions and operations on a verified build and authors none: give it one with --template F, or run scratch mode with it (--modes scratch,ask), whose build it installs when that build passes';
 }
 
 /** Run one card in the requested modes. */
@@ -1053,6 +1163,9 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
   const { card } = scenario;
   const askRepeats = opts.askRepeats ?? 1;
   assertAskRepeats(askRepeats);
+  const languageRefusal = promptLanguageRefusal(card, opts.promptChoice, opts.modes);
+  if (languageRefusal) throw new Error(`${card.id}: ${languageRefusal}`);
+  const stated = statedPromptChoice(opts.promptChoice);
   const questionTurns = card.run.questions.reduce((n, q) => n + (q.personas?.length ? q.personas.length : 1), 0);
   const out: CardRun = {
     card: card.id,
@@ -1060,15 +1173,18 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
     capabilities: card.capabilities,
     counts: { questions: card.run.questions.length, questionTurns, operations: card.run.operations.length, personas: card.run.personas.length },
     ...(askRepeats > 1 ? { askRepeats } : {}),
+    ...(stated !== undefined ? { promptChoice: stated } : {}),
     modes: [],
   };
-  let verified: { artifact: unknown; source: string } | undefined =
-    opts.templateArtifact !== undefined ? { artifact: opts.templateArtifact, source: 'supplied template' } : undefined;
+  const refusal = askModeRefusal(opts.modes, opts.templateArtifact !== undefined);
+  if (refusal) throw new Error(refusal);
+  let verified: VerifiedBuild | undefined = opts.templateArtifact !== undefined ? { artifact: opts.templateArtifact, source: 'supplied template' } : undefined;
   if (opts.modes.includes('scratch')) {
     const r = await scratchMode(scenario, driver, ops, opts);
     out.modes.push(r.mode);
     if (!verified && r.verified !== undefined) verified = { artifact: r.verified, source: 'this run’s from-scratch build' };
   }
   if (opts.modes.includes('template')) out.modes.push(await templateMode(scenario, driver, ops, opts, verified));
+  if (opts.modes.includes('ask')) out.modes.push(await askMode(scenario, driver, ops, opts, verified));
   return out;
 }

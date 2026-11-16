@@ -967,7 +967,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       refusals: {
         label: "Rechazos",
-        helpText: "Catálogo de rechazos, indexado por el código SCREAMING_SNAKE que lanza el cuerpo (p. ej. CLEAN_VERSION_REQUIRED). Quien llama recibe el mensaje declarado, traducido a su idioma, con el estado declarado. Solo cuerpos JavaScript (L2)"
+        helpText: "Catálogo de rechazos, indexado por el código SCREAMING_SNAKE que lanza el gancho (p. ej. CLEAN_VERSION_REQUIRED). Quien llama recibe el mensaje declarado, traducido a su idioma, con el estado declarado. Para un cuerpo JavaScript (L2) o un manejador; se rechaza en un cuerpo de expresión"
       },
       "refusals.message": {
         label: "Mensaje",

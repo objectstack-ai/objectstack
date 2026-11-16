@@ -80,9 +80,17 @@ import { isComposedReadableIds, type FilterCondition } from '@objectstack/spec/d
 // (`normalizeDeclaredIndex`). Until then only the field-level half above was
 // imported, so every object-level index — unique or not — had no consumer on
 // this face and never reached a remote database at all.
+//
+// [#33695] …and the indexes the sync builds without a declaration (the #31882
+// reference columns, `(created_at, id)`, `owner_id`), through the composition
+// `SqlDriver.syncTableIndexes` and the drift differ read
+// (`implicitReferenceIndexes`). The drift differ runs over the remote face
+// too, so a remote sync that built fewer than it expects reported each one as
+// a `create_index` it never converged on.
 import {
   uniqueIndexesFromFields,
   normalizeDeclaredIndex,
+  implicitReferenceIndexes,
   organizationKeyPartSql,
   type DeclaredIndexInput,
   type ExpectedIndex,
@@ -2660,6 +2668,18 @@ export class RemoteTransport {
       const normalized = normalizeDeclaredIndex(tableName, entry, tenantField);
       if (normalized) expected.push(normalized);
     }
+    // [#33695] The implicit set, after the declared one, as the local face's
+    // `syncTableIndexes` composes it. A key over a column this table lacks is
+    // left out by the composition itself, never reported as a skip below.
+    expected.push(
+      ...implicitReferenceIndexes({
+        table: tableName,
+        fields: objectDef.fields ?? {},
+        tenantField,
+        declaredIndexes: declared,
+        physicalColumns: materializedColumns,
+      }),
+    );
 
     const planned: PlannedIndex[] = [];
     const emitted = new Set<string>();

@@ -535,3 +535,89 @@ describe('[#29673] a zh-CN read echoed back is stored as its source, and publish
         expect(host.registry.getObject('crm_lead')).toBeDefined();
     });
 });
+
+/**
+ * [#29673 door · a code dependent's added field] The save door translates its
+ * source against the same packaged base the read uses
+ * (`getPackagedObjectBase`), which now carries the fields a CODE extender adds.
+ * So a zh-CN read that serves such a field translated, echoed back by Studio's
+ * PUT, is stored as the extender's source text — with a stored row (its
+ * source) and without one (the packaged base is the source). Were the read and
+ * the door to disagree about the base, the translation would be stored as the
+ * tenant's own label, and served in English to every reader after it.
+ */
+describe('a zh-CN read of a field a code dependent adds, echoed back, is stored as its source', () => {
+    const MARKET = {
+        name: 'cb_market',
+        type: 'select',
+        label: 'Market',
+        options: [
+            { value: 'domestic', label: 'Domestic' },
+            { value: 'export', label: 'Export' },
+        ],
+    };
+    const bundle = {
+        'zh-CN': {
+            objects: {
+                crm_account: {
+                    fields: {
+                        name: { label: '名称' },
+                        cb_market: { label: '市场', options: { domestic: '内销', export: '出口' } },
+                    },
+                },
+            },
+        },
+    };
+
+    /** The code layers: a base package's owner and a dependent's `objectExtensions` field. */
+    function codeLayers(): SchemaRegistry {
+        const reg = new SchemaRegistry({ multiTenant: false });
+        reg.logLevel = 'silent';
+        reg.installPackage({ id: 'com.example.crm', name: 'crm', version: '1.0.0' } as any, 'code');
+        reg.registerObject(
+            { name: 'crm_account', label: 'Account', sharingModel: 'private', fields: { name: { name: 'name', type: 'text', label: 'Name' } } } as any,
+            'com.example.crm',
+        );
+        reg.installPackage({ id: 'com.example.carbon', name: 'carbon', version: '1.0.0' } as any, 'code');
+        reg.registerObject({ name: 'crm_account', fields: { cb_market: MARKET } } as any, 'com.example.carbon', undefined, 'extend', 200);
+        return reg;
+    }
+
+    const storedOf = (host: ReturnType<typeof makeHost>) =>
+        JSON.parse(Array.from(host.rows.values()).find((r) => r.name === 'crm_account' && r.state === 'active')!.metadata);
+
+    for (const withStoredRow of [true, false]) {
+        it(`stores 'Market' and its option labels, ${withStoredRow ? 'over a stored row' : 'with no stored row'}`, async () => {
+            const layers = codeLayers();
+            const packagedBase = () => layers.getPackagedObjectBase('crm_account');
+            const served: any = { ...structuredClone(layers.getObject('crm_account') as any), sharingModel: 'private' };
+            for (const k of Object.keys(served)) if (k.startsWith('_')) delete served[k];
+            const echo: any = translateMetadataDocument('object', structuredClone(served), bundle as any, { locale: 'zh-CN', packagedBase: packagedBase() });
+            // The precondition: the read serves the dependent's field translated.
+            expect(echo.fields.cb_market.label).toBe('市场');
+            expect(echo.fields.cb_market.options.map((o: any) => o.label)).toEqual(['内销', '出口']);
+
+            const host = makeHost(false);
+            if (withStoredRow) {
+                await host.engine.insert('sys_metadata', {
+                    type: 'object', name: 'crm_account', organization_id: null, package_id: null, state: 'active',
+                    metadata: JSON.stringify({ name: 'crm_account', label: 'Account', sharingModel: 'private', fields: { name: served.fields.name, cb_market: MARKET } }),
+                });
+            }
+            const protocol: any = new ObjectStackProtocolImplementation(host.engine, () => new Map<string, any>([
+                ['i18n', { getLocales: () => Object.keys(bundle), getTranslations: (locale: string) => (bundle as any)[locale] }],
+            ]));
+            protocol.getPackagedObjectBase = (name: string) => (name === 'crm_account' ? packagedBase() : undefined);
+            const saved: any = await protocol.saveMetaItem({ type: 'object', name: 'crm_account', item: echo, mode: 'publish' } as any);
+
+            const stored = storedOf(host);
+            expect(stored.fields.cb_market.label).toBe('Market');
+            expect(stored.fields.cb_market.options.map((o: any) => o.label)).toEqual(['Domestic', 'Export']);
+            expect(stored.fields.name.label).toBe('Name');
+            expect((saved.advisories ?? []).map((a: any) => a.path)).toEqual(expect.arrayContaining([
+                'objects.crm_account.fields.cb_market.label',
+                'objects.crm_account.fields.cb_market.options[domestic].label',
+            ]));
+        });
+    }
+});
