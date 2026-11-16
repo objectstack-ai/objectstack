@@ -601,9 +601,12 @@ describe('[objectstack#34208] verdicts are asked on first use of the row actions
   });
 
   it('a second row\'s menu sends nothing new, and a permitted row\'s items are live once answered', async () => {
+    server.hold();
     renderGrid();
     await firstPaintSettled();
+    // The first row's menu, opened while the answer is on the wire.
     expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
+    server.release();
     await settle(2);
 
     const ownTrigger = triggerOf(OWN_ROW.name);
@@ -654,8 +657,9 @@ describe('[objectstack#34208] verdicts are asked on first use of the row actions
     server.ok = false;
     renderGrid();
     await firstPaintSettled();
-    expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
+    await reachRowActions();
     await settle(2);
+    expect(await rowKebab(OTHER_ROW.name)).toEqual({ edit: true, delete: true });
     await userEvent.click(triggerOf(OTHER_ROW.name));
     expect(screen.getByTestId('row-action-builtin-edit')).not.toHaveAttribute('aria-disabled');
     expect(screen.getByTestId('row-action-builtin-delete')).not.toHaveAttribute('aria-disabled');
