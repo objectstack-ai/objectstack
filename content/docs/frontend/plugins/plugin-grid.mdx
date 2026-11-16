@@ -297,7 +297,8 @@ On a phone, where the grid draws each row as a card, the card draws no pointer
 and no hover wash, and its "⋮" stays (objectstack#33548). Absent (or `true`),
 every row is drawn as before. It is a host prop, not a
 schema key: list metadata cannot set it. The console passes `false` for a view
-authored `navigation: { mode: 'none' }` and for an object whose data API serves
+authored `navigation: { mode: 'none' }` or `navigation.preventNavigation: true`
+(whatever its mode, objectstack#33549) and for an object whose data API serves
 no single-record read (objectstack#33317).
 
 ### Inline Editing
