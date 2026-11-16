@@ -138,6 +138,7 @@ export {
   planActivityRowPatch,
   redactLedgerSnapshotBody,
   STORED_METADATA_BODY_AUDIT_OBJECTS,
+  STORED_METADATA_BODY_REWRITTEN_OBJECTS,
 } from './stored-metadata-body-migration.js';
 export type {
   MigrationLogger,
@@ -233,18 +234,30 @@ export type {
 // this one reads: the `sys_secret` reference union (`@objectstack/cli`) finds
 // the sealer's secrets through the holder list, the coordinate predicate and
 // the two sealing contexts, and `os audit verify` runs the live check (D9),
-// writes its proof bundle, and checks one offline.
+// writes its proof bundle, and checks one offline. The `os migrate audit-*`
+// rewrites hold the audit seal lock for their whole `--apply` run (D3 as
+// amended by seat ruling 6885005594).
 // The rest of the pure core (`./audit-seal/`) is reached by path inside this
 // package.
 export {
   AUDIT_PROOF_BUNDLE_FORMAT,
   AUDIT_ROW_VERDICTS,
+  AUDIT_SEAL_LOCK_NAME,
+  AUDIT_SEAL_LOCK_WAIT_MS,
   AUDIT_SEAL_SECRET_HOLDERS,
   AuditProofBundleError,
   checkpointSeedContext,
+  holdAuditSealLock,
   isAuditSealSecretCoordinate,
   signingKeyContext,
   verifyAuditLedger,
   verifyAuditProofBundle,
 } from './audit-seal/index.js';
-export type { AuditProofBundle, AuditRowVerdict, AuditVerifyReport } from './audit-seal/index.js';
+export type {
+  AuditProofBundle,
+  AuditRowVerdict,
+  AuditSealLockEngine,
+  AuditSealLockFinish,
+  AuditSealLockHold,
+  AuditVerifyReport,
+} from './audit-seal/index.js';

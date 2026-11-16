@@ -72,14 +72,16 @@ export type ReferenceResolutionParsed = z.infer<typeof ReferenceResolutionSchema
 
 /**
  * Represents a single object in the dependency graph.
- * Built from object metadata by inspecting lookup/master_detail fields.
+ * Built from object metadata by inspecting lookup/master_detail fields, and
+ * from the seed datasets' declared `dependsOn` edges.
  */
 export const ObjectDependencyNodeSchema = lazySchema(() => z.object({
   /** Object machine name */
   object: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Object name (snake_case)'),
 
   /**
-   * Objects that this object depends on (via lookup/master_detail fields).
+   * Objects that this object depends on: via its lookup / master_detail /
+   * user fields, plus the objects its datasets declare in `Seed.dependsOn`.
    * These must be loaded before this object.
    */
   dependsOn: z.array(z.string()).describe('Objects this object depends on'),

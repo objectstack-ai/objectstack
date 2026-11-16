@@ -45,7 +45,8 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "자격 증명 사용",
           scim_refused: "SCIM 요청 거부",
           audit_signing_key_change: "감사 서명 키 변경",
-          dataset_query: "데이터 세트 쿼리"
+          dataset_query: "데이터 세트 쿼리",
+          scim_manager_unresolved: "SCIM 관리자 확인 불가"
         }
       },
       user_id: {

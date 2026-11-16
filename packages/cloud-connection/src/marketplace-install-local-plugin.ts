@@ -252,6 +252,10 @@ import {
     declaredDependencyIds,
     credentialUseClientFor,
     transportPeerAddressOf,
+    // [#34336, ADR-0130 D4] The one reader of a package-owned collection across
+    // both artifact shapes: every seed door reads `data` through it
+    // ({@link seedDatasetsOf}).
+    resolveStackCollection,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -1261,14 +1265,27 @@ function unmanagedCopyBaseManifest(ctx: PluginContext, baseId: string): unknown 
 }
 
 /**
- * The seed datasets a cached manifest bundles: its `data[]` entries that name
- * an object and carry records. One reading for the two doors that match seed
- * rows — the purge, and the listing's `withSampleData` (#21775).
+ * The seed datasets a package body bundles: its `data[]` entries that name an
+ * object and carry records. The ONE reading for every seed door of this
+ * plugin — the install, the reseed and the upgrade (through
+ * `applySideEffects`), the rehydrate's share and its heal, the purge, the
+ * sample-data count and the listing's `withSampleData` (#21775).
+ *
+ * [#34336, ADR-0130 D4] Read through `resolveStackCollection(body, 'data')`:
+ * the top-level `data` when the body carries one (a flat bundle, or a composed
+ * artifact that still carries its flattened union — read once, never again per
+ * package), otherwise every package body's, in the artifact's package order
+ * (the dependency order the packages register in). A composed bundle
+ * (`dist/objectstack.json` with `packages[]`) carries no top-level `data`, and
+ * a top-level-only read answered "no-datasets" for every one of its doors.
+ *
+ * @throws The resolver's ADR-0112 refusal for a malformed `packages`
+ *   (`INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`, …) — the
+ *   refusal the `manifest` service raises on the same bytes.
  */
-function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
-    return Array.isArray(manifest?.data)
-        ? manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-        : [];
+function seedDatasetsOf(body: unknown): PurgeSeedDataset[] {
+    return resolveStackCollection(body, 'data')
+        .filter((d: any) => d && d.object && Array.isArray(d.records)) as PurgeSeedDataset[];
 }
 
 /**
@@ -1877,9 +1894,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Never throws — a failed heal logs and leaves the boot untouched.
      */
     private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry, converted: any): Promise<void> => {
-        const datasets = Array.isArray(converted?.data)
-            ? converted.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-            : [];
+        // [#34336] Every package body's datasets, through the one reader. The
+        // register above already judged these bytes, so a refusal here is not
+        // expected; it is said once and the boot continues unhealed.
+        let datasets: PurgeSeedDataset[];
+        try {
+            datasets = seedDatasetsOf(converted);
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} skipped: its seed datasets could not be read: ${err?.message ?? err}`);
+            return;
+        }
         if (datasets.length === 0) return;
         if (entry.sampleDataPurged === true) return;
         if (organizationWallActive(ctx)) {
@@ -3592,9 +3616,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private sampleDataInScope = async (c: any, ctx: PluginContext, entries: InstalledEntry[]): Promise<Set<string>> => {
         const present = new Set<string>();
+        // [#34336] A ledger body whose `packages` the resolver refuses answers
+        // `false` with the reason at `warn`, as every other unread entry does —
+        // never a refusal of the whole listing.
+        const unreadBodies: Array<{ manifestId: string; why: string }> = [];
         const seeded = entries
-            .map((entry) => ({ entry, datasets: seedDatasetsOf(entry.manifest) }))
+            .map((entry) => {
+                try {
+                    return { entry, datasets: seedDatasetsOf(entry.manifest) };
+                } catch (err: any) {
+                    unreadBodies.push({ manifestId: entry.manifestId, why: `its seed datasets could not be read: ${err?.message ?? err}` });
+                    return { entry, datasets: [] as PurgeSeedDataset[] };
+                }
+            })
             .filter(({ datasets }) => datasets.length > 0);
+        for (const { manifestId, why } of unreadBodies) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: the installed-apps listing could not read this package's `
+                + `seed rows (${why}), so it answers withSampleData: false for it`,
+            );
+        }
         if (seeded.length === 0) return present;
 
         let organizationId: string | undefined;
@@ -6081,7 +6122,33 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
         if (incompatible) return incompatible;
 
-        return this.purgeSeedDatasets(c, ctx, manifestId, seedDatasetsOf(entry.manifest), entry);
+        const read = this.ledgerSeedDatasets(c, ctx, manifestId, entry, 'purge sample data');
+        if ('response' in read) return read.response;
+        return this.purgeSeedDatasets(c, ctx, manifestId, read.datasets, entry);
+    };
+
+    /**
+     * [#34336] The seed datasets of a ledger entry the purge or the count acts
+     * on ({@link seedDatasetsOf}), or — when the resolver refuses the entry's
+     * body (a malformed `packages`, ADR-0112) — the answer the two doors give
+     * an unreadable entry ({@link unreadableLedgerEntry}), naming the ledger
+     * file and quoting the refusal, instead of a throw that reaches the route's
+     * error path with no entry named.
+     */
+    private ledgerSeedDatasets = (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        entry: InstalledEntry,
+        attempted: string,
+    ): { datasets: PurgeSeedDataset[] } | { response: Response } => {
+        try {
+            return { datasets: seedDatasetsOf(entry.manifest) };
+        } catch (cause) {
+            return {
+                response: this.unreadableLedgerEntry(c, ctx, manifestId, { file: this.ledger.fileNameOf(manifestId), cause }, attempted),
+            };
+        }
     };
 
     /**
@@ -6382,7 +6449,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
             if (incompatible) return incompatible;
-            datasets = seedDatasetsOf(entry.manifest);
+            const read = this.ledgerSeedDatasets(c, ctx, manifestId, entry, 'count sample data');
+            if ('response' in read) return read.response;
+            datasets = read.datasets;
         }
         if (datasets.length === 0) return answer(0, 0);
 
@@ -6968,10 +7037,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *      into the i18n service — auto-creating an in-memory fallback if
      *      none is registered, matching AppPlugin's behaviour.
      *
-     *   2. Merge `manifest.data` (an array of seed datasets) into the
-     *      kernel's `seed-datasets` service so SecurityPlugin's per-org
-     *      replay middleware picks them up on every future
-     *      sys_organization insert.
+     *   2. Merge the package's seed datasets ({@link seedDatasetsOf}: the
+     *      top-level `data`, or every package body's in package order for a
+     *      composed bundle, #34336) into the kernel's `seed-datasets` service
+     *      so SecurityPlugin's per-org replay middleware picks them up on
+     *      every future sys_organization insert.
      *
      *   3. When `seedNow=true`, also run the seed immediately so the user
      *      sees demo data without having to create a new org:
@@ -7037,9 +7107,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         // ── 2. Seed datasets — merge into kernel service ─────────────────
-        const datasets = Array.isArray(manifest?.data)
-            ? manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
-            : [];
+        // [#34336] Through the one reader, so a composed bundle's package
+        // bodies are seeded too. Every caller hands a body the `manifest`
+        // service already registered, so a refusal here is not expected; it
+        // is reported in the summary rather than thrown, per this method's
+        // contract.
+        let datasets: PurgeSeedDataset[] = [];
+        try {
+            datasets = seedDatasetsOf(manifest);
+        } catch (err: any) {
+            seedSummary = { mode: 'skipped', reason: `seed-datasets-unread: ${err?.message ?? err}` };
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: its seed datasets could not be read, so none were merged or seeded: ${err?.message ?? err}`);
+        }
 
         if (datasets.length > 0) {
             try {

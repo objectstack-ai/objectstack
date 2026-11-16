@@ -5952,6 +5952,25 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [ADR-0150 D3, #34145; seat ruling 6884403301, amendment 7] {@link getFlow}'s
+     * question judged over every holder ({@link bareFlowKey}): the flow the
+     * engine holds under the bare `name`, a disabled sole holder's included,
+     * `null` for a name it does not hold or a slot-key spelling, and a name two
+     * packages hold refused (409, every holder named), served or not, whether
+     * the engine holds one slot of it or both. For a door that asks a durable
+     * question of a name (is it taken, what did the engine hold before this
+     * write, which credential does it keep), whose answer must not move with a
+     * package's enable state. Engine-local. Not a pure read: like
+     * {@link getFlow}, it first settles the name ({@link settleFlowName}), so a
+     * lone qualified slot of a name one package holds again is re-keyed to the
+     * bare name.
+     */
+    getHeldFlow(name: string): FlowParsed | null {
+        const key = this.bareFlowKey(name);
+        return key === undefined ? null : this.flows.get(key) ?? null;
+    }
+
+    /**
      * Attach the durable activation ledger (ADR-0126 §4). Hosts call this at
      * start(), after ObjectQL is available; see the automation plugin.
      */

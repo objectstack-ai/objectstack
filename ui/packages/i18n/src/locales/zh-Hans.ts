@@ -2010,6 +2010,9 @@ const zh = {
       fieldErrorsToast_one: '{{count}} 项设置需要处理：{{settings}}',
       fieldErrorsToast_other: '{{count}} 项设置需要处理：{{settings}}',
       cryptoRefusalTitle: '此部署无法加密机密信息',
+      platformManagedTitle: '此项由平台托管',
+      platformManagedBody: '托管平台为此环境提供并配置此项，因此无需在此设置。',
+      aiProviderManaged: 'AI 提供商、模型与凭据由平台托管。',
       cryptoRefusalSubjectSuffix: '被声明为加密字段，因此未写入任何内容。',
       cryptoRefusalNoSubject: '声明为加密的值被拒绝，因此未写入任何内容。',
       cryptoRefusalToast: '无法加密机密信息：{{subject}}',
@@ -2108,6 +2111,8 @@ const zh = {
         done: '你已连接了 AI 助手或 API 密钥。',
         action: '连接',
       },
+      firstApp: { title: '放进第一个应用', todo: '还没有你自己的应用。从应用市场安装一个或自己搭建一个，它会出现在首页。', done: '你自己的应用已在首页。' },
+      firstRecord: { title: '添加第一条记录', todo: '还没有人在你的应用里创建记录。', done: '你的应用里已经有人创建了记录。', action: '打开应用' },
     },
     error: {
       connectionFailed: '无法连接到服务器',
@@ -2784,6 +2789,7 @@ const zh = {
         retry: "继续单点登录",
       },
       ssoHandoff: '继续前往 {{target}}',
+      ssoHandoffClient: "登录以继续前往 {{clientName}}",
       devAdminHint: {
         title: '本地开发实例',
         signIn: '以开发管理员登录',
@@ -2806,6 +2812,8 @@ const zh = {
         directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
         networkNotAllowed: "本系统不允许从你当前的网络登录。请从允许的网络（例如组织的办公网络或 VPN）连接，或联系管理员。",
         ssoAccessDenied: "你登录所用的账号无权访问本系统。请使用有权访问的账号登录，或请本系统所属组织的管理员将你添加为成员。",
+        ssoAccessDeniedNotMember: "你登录所用的账号不是本系统所属组织的成员。请使用该组织成员的账号登录，或请该组织的管理员邀请你。",
+        ssoAccessDeniedInvitationPending: "你已受邀加入本系统所属组织，但尚未接受邀请。请先在邮件中接受邀请，然后重新登录。",
         ssoSwitchAccount: "切换账号",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
@@ -3128,6 +3136,10 @@ const zh = {
       granted: '已授予访问权限',
       denied: '访问被拒绝',
       noRedirect: '服务器未返回跳转地址。',
+      returnToApp: '返回 {{appName}} 继续操作。您可以关闭此标签页。',
+      returnToUnnamedApp: '返回该应用继续操作。您可以关闭此标签页。',
+      openApp: '打开 {{appName}}',
+      openUnnamedApp: '打开该应用',
       failed: '授权失败',
       footer: '您可以随时在账户设置中撤销访问权限。',
     },
@@ -4220,13 +4232,11 @@ const zh = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 额度还剩 {{left}}。标有 ×N 的模型消耗额度的速度是默认模型的 N 倍。',
@@ -4291,6 +4301,7 @@ const zh = {
       get_metadata_schema: '查阅元数据的格式',
       get_package: '查看应用包信息',
       get_record_history: '读取这条记录的修改历史',
+      list_flow_runs: '查看自动化运行记录',
       list_metadata: '列出已有元数据',
       list_objects: '列出已有对象',
       list_packages: '列出已有应用包',
