@@ -2351,6 +2351,8 @@ const ko = {
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
+      firstApp: { title: '첫 번째 앱 추가', todo: '아직 자체 앱이 없습니다. 마켓플레이스에서 설치하거나 직접 만들면 홈에 표시됩니다.', done: '자체 앱이 홈에 있습니다.' },
+      firstRecord: { title: '첫 번째 레코드 추가', todo: '아직 앱에서 레코드를 만든 사람이 없습니다.', done: '앱에서 레코드가 만들어졌습니다.', action: '앱 열기' },
     },
     error: {
       connectionFailed: "서버에 연결할 수 없습니다",

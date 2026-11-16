@@ -2107,6 +2107,8 @@ const zh = {
         done: '你已连接了 AI 助手或 API 密钥。',
         action: '连接',
       },
+      firstApp: { title: '放进第一个应用', todo: '还没有你自己的应用。从应用市场安装一个或自己搭建一个，它会出现在首页。', done: '你自己的应用已在首页。' },
+      firstRecord: { title: '添加第一条记录', todo: '还没有人在你的应用里创建记录。', done: '你的应用里已经有人创建了记录。', action: '打开应用' },
     },
     error: {
       connectionFailed: '无法连接到服务器',

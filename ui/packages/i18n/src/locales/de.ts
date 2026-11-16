@@ -2351,6 +2351,8 @@ const de = {
         done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
         action: 'Verbinden',
       },
+      firstApp: { title: 'Erste App hinzufügen', todo: 'Noch keine eigene App. Installieren Sie eine aus dem Marktplatz oder erstellen Sie eine; sie erscheint auf der Startseite.', done: 'Eine eigene App ist auf der Startseite.' },
+      firstRecord: { title: 'Ersten Datensatz anlegen', todo: 'In Ihren Apps hat noch niemand einen Datensatz angelegt.', done: 'In Ihren Apps wurde ein Datensatz angelegt.', action: 'App öffnen' },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",

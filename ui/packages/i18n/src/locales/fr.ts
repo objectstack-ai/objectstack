@@ -2413,6 +2413,8 @@ const fr = {
         done: "Un assistant IA ou une clé d'API à vous est connecté.",
         action: 'Connecter',
       },
+      firstApp: { title: 'Ajouter votre première application', todo: 'Aucune application à vous pour l’instant. Installez-en une depuis la place de marché ou créez-la : elle apparaîtra sur l’accueil.', done: 'Une application à vous figure sur l’accueil.' },
+      firstRecord: { title: 'Ajouter votre premier enregistrement', todo: 'Personne n’a encore créé d’enregistrement dans vos applications.', done: 'Un enregistrement a été créé dans vos applications.', action: 'Ouvrir l’application' },
     },
     error: {
       connectionFailed: "Impossible de se connecter au serveur",

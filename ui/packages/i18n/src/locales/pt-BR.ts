@@ -2412,6 +2412,8 @@ const pt = {
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Adicione seu primeiro aplicativo', todo: 'Ainda não há um aplicativo seu. Instale um pelo marketplace ou crie um, e ele aparecerá no Início.', done: 'Um aplicativo seu está no Início.' },
+      firstRecord: { title: 'Adicione seu primeiro registro', todo: 'Ninguém criou um registro nos seus aplicativos ainda.', done: 'Um registro foi criado nos seus aplicativos.', action: 'Abrir aplicativo' },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",
