@@ -726,9 +726,13 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
     // [#33955] Names two ENABLED packages ship (neither disabled), and [#34144] names only D ships.
     const TWO_SHIP = ['two_none_dash', 'two_erow_dash', 'two_drow_dash', 'two_rows_dash', 'two_unbound_dash', 'two_draft_dash', 'two_del_dash'];
     const D_SHIPS = ['d_none_dash', 'd_drow_dash', 'd_unbound_dash', 'd_draft_dash', 'd_del_dash'];
+    const MAIL = 'save_beta_welcome';
+    const mailAt = (locale: string, subject: string) => ({ name: MAIL, label: 'Welcome', locale, subject, bodyHtml: `<p>${subject}</p>` });
     const savePackageOf = (id: string) => ({
         id, name: id.split('.').pop(), namespace: id.split('.').pop(), version: '1.0.0', type: 'app', objects: [],
         dashboards: [...BOTH_SHIP, ...TWO_SHIP, ...(id === CODE_E ? E_SHIPS : D_SHIPS)].map((name) => ({ name, label: `${id} code`, widgets: [] })),
+        // [#34262] A bundled name D alone ships, at one member (`en-US`).
+        ...(id === CODE_D ? { emailTemplates: [mailAt('en-US', 'D en')] } : {}),
     });
 
     interface SaveBooted extends Booted { put(name: string, label: string, query?: Record<string, string>): Promise<{ status: number | undefined; body: any }> }
@@ -1085,6 +1089,27 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
             expect(await everyRow(booted!.engine, 'two_unbound_dash')).toEqual(['active:null:edited']);
             expect(await booted!.kernel.getService<any>('protocol').deleteMetaItem({ type: 'dashboard', name: 'two_unbound_dash' })).toMatchObject({ success: true });
             expect(await everyRow(booted!.engine, 'two_unbound_dash')).toEqual([]);
+        });
+
+        // [#34262, ruling A] Every holder of a bundled name disabled: the bare
+        // save at a member D never ships was accepted and stored (200), then
+        // withheld by every read until D was enabled again. It is refused as
+        // any bare save of a name only disabled packages hold is.
+        it('ruling A: every holder of a bundled name disabled, the bare save at a member D never ships (and at the one it ships) is refused naming no package and stores nothing; re-enabled, the unshipped member saves (CONTROL)', async () => {
+            const protocol = booted!.kernel.getService<any>('protocol');
+            const mailRows = async () => ((await booted!.engine.find('sys_metadata', { where: { type: 'email_template', name: MAIL }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[]).length;
+            await withDisabled(CODE_D, async () => {
+                for (const locale of ['fr-FR', 'en-US']) {
+                    let refusal: any;
+                    try { await protocol.saveMetaItem({ type: 'email_template', name: MAIL, item: mailAt(locale, `saved ${locale}`) }); } catch (error) { refusal = error; }
+                    expect([refusal?.code, refusal?.status], String(refusal?.message)).toEqual(['RESOURCE_CONFLICT', 409]);
+                    expect(String(refusal?.message)).toContain('?package=');
+                    expect(String(refusal?.message)).not.toContain(CODE_D);
+                }
+                expect(await mailRows()).toBe(0);
+            });
+            expect(await protocol.saveMetaItem({ type: 'email_template', name: MAIL, item: mailAt('fr-FR', 'saved fr-FR') })).toMatchObject({ success: true });
+            expect(await mailRows()).toBe(1);
         });
     });
 });

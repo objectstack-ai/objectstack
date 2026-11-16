@@ -20,6 +20,7 @@ Metadata-protocol: none
 **Every package that holds the name is disabled.** A disabled package holds no name (ADR-0150 D3), so the bare read answers 404. The bare write is now refused naming no package (ruling A):
 
 - A publish-mode bare save of a name whose only holder D is disabled used to answer 200. Over D's row alone it updated D's row; over no stored row it wrote a package-unbound row that every read then withheld. It is now refused, and nothing is written.
+- A bare save of a bundled name (an `email_template`) whose every holder is disabled, at a member the holder never ships, used to answer 200 and store a package-unbound row that the by-name read and both lists withheld until the package was enabled again. It is now refused, and nothing is stored.
 - A draft-mode bare save (`?mode=draft`) of such a name used to write a package-unbound draft. It is now refused the same way.
 - A bare delete of such a name used to remove D's row. It is now refused, and D's row stays.
 
