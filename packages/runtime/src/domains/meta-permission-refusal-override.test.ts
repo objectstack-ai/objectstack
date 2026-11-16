@@ -20,6 +20,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not in a case's clocked window: `HttpDispatcher` reaches a
+// dynamic `import('@objectstack/metadata')` (`standalone-stack.ts`).
+import '@objectstack/metadata';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
