@@ -433,9 +433,10 @@ Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
 
 Approver entries resolve by kind — `position`, `user`, `field`, `manager`,
-`team`, `department`, `org_membership_level`, `queue`, and `expression`
-(described in the [callout above](#3-the-approval-node) and in
-[Dynamic approvers](#dynamic-approvers-3447)); `org_membership_level` is the
+`team`, `department`, `org_membership_level`, `queue`, `expression` and
+`platform_admin` (described in the [callout above](#3-the-approval-node) and in
+[Dynamic approvers](#dynamic-approvers-3447), and `platform_admin` in
+[Routing to the platform administrators](#platform-admin-approvers)); `org_membership_level` is the
 one that silently resolves to nobody when it's mistaken for a business
 hierarchy. A `queue` entry names an ownership queue by its machine name — one
 an installed app declares, or one of the organization's own — and resolves to
@@ -453,6 +454,51 @@ organization's directory resolves them — see
 A `position` or `queue` name is not checked when the flow is saved: positions and
 queues are runtime data an administrator adds and removes, so a name nobody holds
 yet saves, and it is resolved when the run reaches the node.
+
+#### Routing to the platform administrators [#platform-admin-approvers]
+
+`{ type: 'platform_admin' }` routes the step to the deployment's **platform
+administrators**: the people with platform-administrator standing, which is a
+cross-tenant `admin_full_access` grant or a verified account whose email the
+deployment declares in `OS_PLATFORM_OWNER_EMAIL`. It takes no `value` and no
+`organization`.
+
+- **One slot, nobody listed.** The request opens on one slot,
+  `platform_admin:*`, that names no person. At every inbox read and every
+  decision, the server asks whether the caller has platform-administrator
+  standing at that moment. A caller who has it sees the request under
+  "My Pending" and decides it as an ordinary approver, and the decision records
+  that person. A caller whose standing was revoked cannot decide it, even if
+  the request opened before the revocation. An organization administrator
+  neither takes the slot nor overrides the request: the tenant admin override
+  below is withheld from any request whose slate holds `platform_admin:*`,
+  including a mixed slate that also names ordinary approvers. An override
+  decides the whole request, so a mixed slate is withheld whole, and its
+  ordinary approvers still decide it as usual. The platform admin override is
+  unchanged.
+- **Only this type opens the slot.** The rule holds on the slate as the
+  decision, override and inbox doors read it: however else a slate is resolved
+  or later rewritten, the slot is not opened through it. A request records,
+  when it opens, that a `platform_admin` step opened its slot, and the doors
+  honour the slot only on a request that carries that record. Moving the slot
+  to someone else takes a platform administrator, the platform admin override,
+  or the system.
+- **Nobody is told.** The slot names no person, so opening the request sends
+  no notification, and the slot grants no read of the record. The request does
+  not count as an empty slate, so `onEmptyApprovers` never replaces it with
+  the organization's administrators.
+- **Only the deployment's own packaged flows may use it.** The approval node
+  opens on this type only when the flow body it runs ships in a package the
+  deployment registers in code (registry `source: 'code'`). The origin is
+  answered for the body whose step is being opened, in every run state. Anywhere else, the
+  node fails with a `FORBIDDEN:` error that says why, and writes no request.
+  That covers a flow authored in the deployment, an environment override of a
+  packaged flow, and a flow from a package installed from the marketplace or
+  created in the deployment. Saving an active flow that names the type, in
+  Studio or through `/meta`, is refused with
+  `approval-approver-platform-admin-authored`. `os lint` accepts the type. It
+  cannot know which door will register the package it reads. No designer
+  offers the type.
 
 What an entry that resolves to nobody leaves on the slate depends on its kind:
 
@@ -913,7 +959,9 @@ then — and for a `team` or `department` literal, always — no concrete user c
 act, and (with `lockRecord`) the record stays locked. A **platform admin**
 (`admin_full_access`) or **tenant admin** (`organization_admin`, org-scoped) may
 act on any `pending` request — **approve, reject, reassign** it to a real
-approver, or **recall** it — releasing the lock. An admin decision is
+approver, or **recall** it — releasing the lock. The one exception is a
+request whose slate holds the platform administrators' slot: a tenant admin
+cannot override it ([Routing to the platform administrators](#platform-admin-approvers)). An admin decision is
 authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`,
 and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
