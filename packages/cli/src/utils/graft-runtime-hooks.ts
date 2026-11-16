@@ -37,7 +37,7 @@
 // beside those callables split one app's code across two evaluations: state
 // `onEnable` binds at module scope was written into a copy no handler reads,
 // and a job reading it failed on every run while `onEnable` reported success.
-// `graftAuthoredCode` closes that split. When the module's `onEnable` is what
+// `graftAuthoredRuntimeMembers` closes that split. When the module's `onEnable` is what
 // the bundle runs, every callable the runtime module supplied is re-pointed at
 // the module's own callable for the same ref — the ref → callable reading the
 // build itself used (`lowerCallables`), so the two agree by construction —
@@ -85,7 +85,7 @@ export interface RuntimeGraftResult {
   /** `manifest.id` of the bundle that received the graft. */
   appId?: string;
   /**
-   * Set by {@link graftAuthoredCode} when it re-pointed the target bundle's
+   * Set when it re-pointed the target bundle's
    * runtime-module callables at the module's own: the refs now served by the
    * module this boot evaluated.
    */
@@ -96,7 +96,7 @@ export interface RuntimeGraftResult {
    * the caller must announce.
    */
   unbound?: string[];
-  /** The target bundle's `runtimeModule`, when {@link graftAuthoredCode} read it. */
+  /** The target bundle's `runtimeModule`, when the re-point read it. */
   runtimeModule?: string;
   /** Why the module's callables could not be read at all, when that is the answer. */
   rebindError?: string;
@@ -134,23 +134,7 @@ function readManifestId(source: unknown): string | undefined {
   return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
-/**
- * Move the authored module's runtime members onto the already-registered app
- * bundle they belong to, and report anything that had nowhere to go.
- *
- * Target selection is by `manifest.id`, so a host composing several
- * `AppPlugin`s can never have one app's handlers attached to another. A config
- * with no manifest id at all falls back to the single app bundle present, and
- * refuses when there is more than one.
- */
-export function graftAuthoredRuntimeMembers(
-  plugins: readonly unknown[] | undefined,
-  authored: unknown,
-): RuntimeGraftResult {
-  return graftOntoTarget(plugins, authored).result;
-}
-
-/** The graft, plus the bundle it landed on, for {@link graftAuthoredCode}. */
+/** The graft, plus the bundle it landed on, for {@link graftAuthoredRuntimeMembers}. */
 function graftOntoTarget(
   plugins: readonly unknown[] | undefined,
   authored: unknown,
@@ -254,10 +238,16 @@ function repointCallables(functions: unknown, fns: Readonly<Record<string, AnyFn
 }
 
 /**
- * {@link graftAuthoredRuntimeMembers}, then one evaluation of the module for
- * all of the bundle's code: what both of serve's graft routes call.
+ * Move the authored module's runtime members onto the already-registered app
+ * bundle they belong to, and report anything that had nowhere to go.
  *
- * Runs only where the split exists — the target bundle came from an artifact
+ * Target selection is by `manifest.id`, so a host composing several
+ * `AppPlugin`s can never have one app's handlers attached to another. A config
+ * with no manifest id at all falls back to the single app bundle present, and
+ * refuses when there is more than one.
+ *
+ * Then one evaluation of the module for all of the bundle's code. The re-point
+ * runs only where the split exists: the target bundle came from an artifact
  * whose `runtimeModule` supplied its callables, AND the bundle runs the
  * module's `onEnable`. A bundle with no runtime module carries no callable of
  * another evaluation; a bundle whose own `onEnable` won (a host that wrapped
@@ -270,7 +260,7 @@ function repointCallables(functions: unknown, fns: Readonly<Record<string, AnyFn
  * loaded only when the split exists: it pulls in the TypeScript parser, which
  * no other boot pays for.
  */
-export async function graftAuthoredCode(
+export async function graftAuthoredRuntimeMembers(
   plugins: readonly unknown[] | undefined,
   authored: unknown,
 ): Promise<RuntimeGraftResult> {

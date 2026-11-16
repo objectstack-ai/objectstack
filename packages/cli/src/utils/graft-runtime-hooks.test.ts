@@ -23,11 +23,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppPlugin, collectBundleFunctions, loadArtifactBundle } from '@objectstack/runtime';
+// `os compile` (run in-process below) dynamic-imports these; loaded here so the
+// transform is paid during collection, not inside the beforeAll's clocked window.
+import '@objectstack/objectql/core';
+import '@objectstack/plugin-security';
 import Compile from '../commands/compile.js';
 import { bundleConfigModule } from './config.js';
 import {
   GRAFTABLE_RUNTIME_MEMBERS,
-  graftAuthoredCode,
   graftAuthoredRuntimeMembers,
   isAppPluginLike,
 } from './graft-runtime-hooks.js';
@@ -73,10 +76,10 @@ describe('isAppPluginLike', () => {
 });
 
 describe('graftAuthoredRuntimeMembers', () => {
-  it('moves onEnable onto the artifact-derived bundle — the #4095 repair', () => {
+  it('moves onEnable onto the artifact-derived bundle — the #4095 repair', async () => {
     const app = artifactApp('com.example.todo');
     const config = authoredConfig('com.example.todo');
-    const result = graftAuthoredRuntimeMembers([{ name: 'com.objectstack.metadata' }, app], config);
+    const result = await graftAuthoredRuntimeMembers([{ name: 'com.objectstack.metadata' }, app], config);
 
     expect(result.grafted).toEqual(['onEnable']);
     expect(result.orphaned).toEqual([]);
@@ -86,42 +89,42 @@ describe('graftAuthoredRuntimeMembers', () => {
     expect((app.bundle as any).onEnable).toBe(config.onEnable);
   });
 
-  it('moves the `functions` map too — string-named hook/job handlers are code as well', () => {
+  it('moves the `functions` map too — string-named hook/job handlers are code as well', async () => {
     const app = artifactApp('com.example.todo');
     const config = authoredConfig('com.example.todo', { functions: { doThing: () => 1 } });
-    const result = graftAuthoredRuntimeMembers([app], config);
+    const result = await graftAuthoredRuntimeMembers([app], config);
 
     expect(result.grafted).toEqual(['onEnable', 'functions']);
     expect(typeof (app.bundle as any).functions.doThing).toBe('function');
   });
 
-  it('grafts nothing the artifact never lost', () => {
+  it('grafts nothing the artifact never lost', async () => {
     // Only executable members travel. Metadata is the artifact's job, and the
     // artifact is the richer source (it carries compile-time docs the config
     // never has), so nothing else may be copied over it.
     const app = artifactApp('com.example.todo', { docs: [{ name: 'readme' }] });
     const config = authoredConfig('com.example.todo', { objects: [{ name: 'DIFFERENT' }] });
-    graftAuthoredRuntimeMembers([app], config);
+    await graftAuthoredRuntimeMembers([app], config);
 
     expect((app.bundle as any).objects).toEqual([{ name: 'x_task' }]);
     expect((app.bundle as any).docs).toEqual([{ name: 'readme' }]);
   });
 
-  it('never overwrites a hook the bundle already has', () => {
+  it('never overwrites a hook the bundle already has', async () => {
     // A host that wrapped itself on purpose already decided what runs.
     const own = async () => {};
     const app = artifactApp('com.example.todo', { onEnable: own });
-    const result = graftAuthoredRuntimeMembers([app], authoredConfig('com.example.todo'));
+    const result = await graftAuthoredRuntimeMembers([app], authoredConfig('com.example.todo'));
 
     expect(result.grafted).toEqual([]);
     expect(result.reason).toBe('already-present');
     expect((app.bundle as any).onEnable).toBe(own);
   });
 
-  it('matches by manifest.id, so one app never gets another app\'s handlers', () => {
+  it('matches by manifest.id, so one app never gets another app\'s handlers', async () => {
     const todo = artifactApp('com.example.todo');
     const crm = artifactApp('com.example.crm');
-    const result = graftAuthoredRuntimeMembers([todo, crm], authoredConfig('com.example.crm'));
+    const result = await graftAuthoredRuntimeMembers([todo, crm], authoredConfig('com.example.crm'));
 
     expect(result.grafted).toEqual(['onEnable']);
     expect(result.appId).toBe('com.example.crm');
@@ -129,10 +132,10 @@ describe('graftAuthoredRuntimeMembers', () => {
     expect((todo.bundle as any).onEnable).toBeUndefined();
   });
 
-  it('refuses rather than guess when the authored id matches nothing', () => {
+  it('refuses rather than guess when the authored id matches nothing', async () => {
     // Grafting onto "the only candidate" here would wire the wrong app.
     const other = artifactApp('com.example.other');
-    const result = graftAuthoredRuntimeMembers([other], authoredConfig('com.example.todo'));
+    const result = await graftAuthoredRuntimeMembers([other], authoredConfig('com.example.todo'));
 
     expect(result.grafted).toEqual([]);
     expect(result.orphaned).toEqual(['onEnable']);
@@ -140,14 +143,14 @@ describe('graftAuthoredRuntimeMembers', () => {
     expect((other.bundle as any).onEnable).toBeUndefined();
   });
 
-  it('falls back to the single app bundle when the config declares no manifest id', () => {
+  it('falls back to the single app bundle when the config declares no manifest id', async () => {
     const app = artifactApp('com.example.todo');
-    const result = graftAuthoredRuntimeMembers([app], { objects: [], onEnable: async () => {} });
+    const result = await graftAuthoredRuntimeMembers([app], { objects: [], onEnable: async () => {} });
     expect(result.grafted).toEqual(['onEnable']);
   });
 
-  it('refuses when there is no id AND several candidates', () => {
-    const result = graftAuthoredRuntimeMembers(
+  it('refuses when there is no id AND several candidates', async () => {
+    const result = await graftAuthoredRuntimeMembers(
       [artifactApp('com.example.todo'), artifactApp('com.example.crm')],
       { objects: [], onEnable: async () => {} },
     );
@@ -156,9 +159,9 @@ describe('graftAuthoredRuntimeMembers', () => {
     expect(result.reason).toBe('ambiguous-app-plugin');
   });
 
-  it('reports orphaned code when no app bundle is registered at all', () => {
+  it('reports orphaned code when no app bundle is registered at all', async () => {
     // The silent-drop case that hid #4095 — the caller has to be able to shout.
-    const result = graftAuthoredRuntimeMembers(
+    const result = await graftAuthoredRuntimeMembers(
       [{ name: 'com.objectstack.metadata' }],
       authoredConfig('com.example.todo'),
     );
@@ -166,32 +169,32 @@ describe('graftAuthoredRuntimeMembers', () => {
     expect(result.reason).toBe('no-app-plugin');
   });
 
-  it('stays quiet for a config that carries no code', () => {
+  it('stays quiet for a config that carries no code', async () => {
     const app = artifactApp('com.example.todo');
-    const result = graftAuthoredRuntimeMembers([app], { manifest: { id: 'com.example.todo' } });
+    const result = await graftAuthoredRuntimeMembers([app], { manifest: { id: 'com.example.todo' } });
     expect(result).toEqual({ grafted: [], orphaned: [], reason: 'no-authored-members' });
   });
 
-  it('tolerates the degenerate inputs a boot can hand it', () => {
+  it('tolerates the degenerate inputs a boot can hand it', async () => {
     for (const plugins of [undefined, [], [null], [undefined]]) {
-      expect(() => graftAuthoredRuntimeMembers(plugins as any, authoredConfig('x'))).not.toThrow();
+      await expect(graftAuthoredRuntimeMembers(plugins as any, authoredConfig('x'))).resolves.toBeDefined();
     }
     for (const authored of [undefined, null, 'nope', 42, {}]) {
-      expect(graftAuthoredRuntimeMembers([artifactApp('x')], authored).grafted).toEqual([]);
+      expect((await graftAuthoredRuntimeMembers([artifactApp('x')], authored)).grafted).toEqual([]);
     }
     // An app plugin with no bundle at all must not throw.
     expect(
-      graftAuthoredRuntimeMembers([{ type: 'app' }], authoredConfig('x')).reason,
+      (await graftAuthoredRuntimeMembers([{ type: 'app' }], authoredConfig('x'))).reason,
     ).toBe('no-app-plugin');
   });
 
-  it('grafts only members AppPlugin actually executes', () => {
+  it('grafts only members AppPlugin actually executes', async () => {
     // `onDisable` is declared in packages/spec but called by no kernel, runtime
     // or service — grafting it would wire a hook nothing runs.
     expect([...GRAFTABLE_RUNTIME_MEMBERS]).toEqual(['onEnable', 'functions']);
 
     const app = artifactApp('com.example.todo');
-    graftAuthoredRuntimeMembers([app], authoredConfig('com.example.todo', {
+    await graftAuthoredRuntimeMembers([app], authoredConfig('com.example.todo', {
       onDisable: async () => {},
     }));
     expect((app.bundle as any).onDisable).toBeUndefined();
@@ -214,7 +217,7 @@ describe('graftAuthoredRuntimeMembers', () => {
  * each handler read through `collectBundleFunctions` — the map a job's and a
  * string-named hook's `handler` resolve against.
  */
-describe('graftAuthoredCode — onEnable and every handler run from one module evaluation', () => {
+describe('graftAuthoredRuntimeMembers — onEnable and every handler run from one module evaluation', () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const PKG = resolve(HERE, '../..');
   const ENGINE = { tag: 'the-engine' };
@@ -224,7 +227,7 @@ describe('graftAuthoredCode — onEnable and every handler run from one module e
   /** The wrap's bundle — the object `AppPlugin` executes (`onEnable` at start, `functions` for handlers). */
   let served: Record<string, any>;
   let artifactFns: Record<string, (ctx: any) => any>;
-  let graft: Awaited<ReturnType<typeof graftAuthoredCode>>;
+  let graft: Awaited<ReturnType<typeof graftAuthoredRuntimeMembers>>;
 
   beforeAll(async () => {
     // Under the package's git-ignored `tmp/`, so the fixture's
@@ -279,7 +282,7 @@ export default defineStack({
     artifact = await loadArtifactBundle(artifactPath, { tag: '[serve]', unwrapEnvelope: true });
     artifactFns = collectBundleFunctions(artifact);
     const wrap = new AppPlugin(artifact, undefined, { securityMetadataRegistrar: 'artifact-door' });
-    graft = await graftAuthoredCode([wrap], config);
+    graft = await graftAuthoredRuntimeMembers([wrap], config);
     served = (wrap as unknown as { bundle: Record<string, any> }).bundle;
   }, 120_000);
 
@@ -311,7 +314,7 @@ export default defineStack({
   });
 });
 
-describe('graftAuthoredCode — where no split exists, and where the module cannot answer', () => {
+describe('graftAuthoredRuntimeMembers — where no split exists, and where the module cannot answer', () => {
   const authored = (extra: Record<string, unknown> = {}) => ({
     manifest: { id: 'com.example.todo' },
     onEnable: async () => {},
@@ -325,7 +328,7 @@ describe('graftAuthoredCode — where no split exists, and where the module cann
       runtimeModule: './objectstack-runtime.0123456789abcdef.mjs',
       functions: { kept: { handler: () => 'runtime-module', effect: 'writes' }, gone: stale },
     });
-    const result = await graftAuthoredCode([app], authored({ functions: { kept: fromModule } }));
+    const result = await graftAuthoredRuntimeMembers([app], authored({ functions: { kept: fromModule } }));
 
     expect(result.rebound).toEqual(['kept']);
     expect(result.unbound).toEqual(['gone']);
@@ -341,7 +344,7 @@ describe('graftAuthoredCode — where no split exists, and where the module cann
       runtimeModule: './objectstack-runtime.0123456789abcdef.mjs',
       functions: [{ name: 'kept', handler: () => 'runtime-module' }, { name: 'declared_only', effect: 'pure' }],
     });
-    const result = await graftAuthoredCode([app], authored({
+    const result = await graftAuthoredRuntimeMembers([app], authored({
       functions: { kept: fromModule, declared_only: () => 'module' },
     }));
 
@@ -355,9 +358,9 @@ describe('graftAuthoredCode — where no split exists, and where the module cann
   it('leaves a bundle with no runtime module exactly as the graft left it', async () => {
     const own = () => 'own';
     const app = artifactApp('com.example.todo', { functions: { kept: own } });
-    const result = await graftAuthoredCode([app], authored({ functions: { kept: () => 'module' } }));
+    const result = await graftAuthoredRuntimeMembers([app], authored({ functions: { kept: () => 'module' } }));
 
-    expect(result).toEqual(graftAuthoredRuntimeMembers([artifactApp('com.example.todo', { functions: { kept: own } })],
+    expect(result).toEqual(await graftAuthoredRuntimeMembers([artifactApp('com.example.todo', { functions: { kept: own } })],
       authored({ functions: { kept: () => 'module' } })));
     expect((app.bundle as any).functions.kept).toBe(own);
   });
@@ -369,7 +372,7 @@ describe('graftAuthoredCode — where no split exists, and where the module cann
       onEnable: async () => {},
       functions: { kept: own },
     });
-    const result = await graftAuthoredCode([app], authored({ functions: { kept: () => 'module' } }));
+    const result = await graftAuthoredRuntimeMembers([app], authored({ functions: { kept: () => 'module' } }));
 
     expect(result.reason).toBe('already-present');
     expect(result.rebound).toBeUndefined();

@@ -162,9 +162,9 @@ const SERVE_ONLY: Record<string, string> = {
   bundleDeclaresTranslations:
     'decides serve\'s tier-gated i18n service, which the declaration boot does not compose '
     + '(schema-migration-plugins.ts, "What this does NOT compose")',
-  graftAuthoredCode:
-    'grafts the config\'s runtime hooks (onEnable and the rest) onto its AppPlugin, and re-points the artifact\'s '
-    + 'runtime-module callables at the module\'s own: host code the declaration boot deliberately does not run',
+  graftAuthoredRuntimeMembers:
+    'grafts the config\'s runtime hooks (onEnable and the rest) onto its AppPlugin: host code the declaration '
+    + 'boot deliberately does not run',
   stackSuppliesAuthPlugin:
     'serve\'s own "is an AuthPlugin already composed" read ahead of its auth block; the auth-family gate '
     + '(resolvePlatformAuthComposition, called by both boots) asks the same predicate first',

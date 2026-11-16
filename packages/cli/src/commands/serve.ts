@@ -118,7 +118,7 @@ import {
   type ListenerProtocol,
 } from '../utils/dev-tls-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
-import { graftAuthoredCode, isAppPluginLike, type RuntimeGraftResult } from '../utils/graft-runtime-hooks.js';
+import { graftAuthoredRuntimeMembers, isAppPluginLike, type RuntimeGraftResult } from '../utils/graft-runtime-hooks.js';
 // [ADR-0130 D4 / option B, #15006] Every read below that keys off a
 // PACKAGE-OWNED collection goes through this seam, so an option-B artifact
 // (flattened top level gone, `packages[]` carrying everything once) reaches
@@ -3931,7 +3931,7 @@ export default class Serve extends Command {
             // it, and grafting the module's `onEnable` beside them put state
             // `onEnable` binds at module scope out of every handler's reach (a
             // job reading it failed each run while `os start` served it).
-            // `graftAuthoredCode` re-points those callables at the module's own,
+            // `graftAuthoredRuntimeMembers` re-points those callables at the module's own,
             // ref for ref, so `onEnable` and every handler share one evaluation;
             // a ref the module no longer serves is announced, never left silent.
             //
@@ -3958,7 +3958,7 @@ export default class Serve extends Command {
               // Grafted onto THIS wrap only: the host's own `plugins[]` may hold
               // other apps, and the module's code belongs to the bundle it was
               // compiled into.
-              reportRuntimeGraft(await graftAuthoredCode([wrap], config));
+              reportRuntimeGraft(await graftAuthoredRuntimeMembers([wrap], config));
               // The ready banner names the file the metadata came from (#21501).
               configBootBundle = path.relative(process.cwd(), devArtifactDoorPath) || devArtifactDoorPath;
             }
@@ -3989,9 +3989,9 @@ export default class Serve extends Command {
         // that the actions dispatch. The standalone stack's bundle got its
         // callables from the artifact's runtime module, a second evaluation of
         // this source, so the graft also re-points them at the module's own
-        // (`graftAuthoredCode`): the `onEnable` grafted here and every handler
+        // (`graftAuthoredRuntimeMembers`): the `onEnable` grafted here and every handler
         // then share one module evaluation, as the wrap above gives a host.
-        reportRuntimeGraft(await graftAuthoredCode(plugins, config));
+        reportRuntimeGraft(await graftAuthoredRuntimeMembers(plugins, config));
       }
 
       // 3b. Auto-register I18nServicePlugin if config contains translations/i18n
