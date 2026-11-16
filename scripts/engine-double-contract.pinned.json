@@ -12,6 +12,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/cli/src/commands/serve-seed-refused-load-33812.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cli/src/commands/serve-seed-refused-load-33812.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cli/src/utils/organization-ownership-apply.test.ts",
       "verb": "delete",
       "pinned": 1
