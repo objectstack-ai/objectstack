@@ -10,7 +10,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { authGateEvents } from './auth-gate-events.js';
 import { sessionEndEvents } from './session-end-events.js';
 import { runBeforeSignOut } from './beforeSignOut.js';
-import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationProofInput, AuthInvitationProofOutcome, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
+import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationOneStepInput, AuthInvitationOneStepOutcome, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
 import { createAuthClient, sessionReadWasInconclusive, takePreflightSession, TokenStorage } from './createAuthClient.js';
@@ -1144,9 +1144,9 @@ export function AuthProvider({
     [client, refreshOrganizations],
   );
 
-  const acceptInvitationWithProof = useCallback(
-    (input: AuthInvitationProofInput): Promise<AuthInvitationProofOutcome> =>
-      client.acceptInvitationWithProof(input),
+  const acceptInvitationOneStep = useCallback(
+    (input: AuthInvitationOneStepInput): Promise<AuthInvitationOneStepOutcome> =>
+      client.acceptInvitationOneStep(input),
     [client],
   );
 
@@ -1239,7 +1239,7 @@ export function AuthProvider({
       getInvitation,
       getInvitationPreview,
       acceptInvitation,
-      acceptInvitationWithProof,
+      acceptInvitationOneStep,
       rejectInvitation,
       listUserInvitations,
     }),
@@ -1251,7 +1251,7 @@ export function AuthProvider({
       organizations, activeOrganization, activeMember, isOrganizationsLoading, isMembershipResolved, switchOrganization, createOrganization, refreshOrganizations,
       updateOrganization, deleteOrganization, leaveOrganization,
       getMembers, inviteMember, describeDelegableScope, removeMember, updateMemberRole,
-      listInvitations, cancelInvitation, getInvitation, getInvitationPreview, acceptInvitation, acceptInvitationWithProof, rejectInvitation, listUserInvitations,
+      listInvitations, cancelInvitation, getInvitation, getInvitationPreview, acceptInvitation, acceptInvitationOneStep, rejectInvitation, listUserInvitations,
     ],
   );
 

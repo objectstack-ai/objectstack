@@ -1472,7 +1472,7 @@ const PLUGIN_ROUTE_MODULES = {
   'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts': {},
 
   // [#34257] FIRST AUDIT — the one-step invitation acceptance, a better-auth
-  // endpoint this repo defines (`POST /organization/accept-invitation-with-proof`).
+  // endpoint this repo defines (`POST /organization/accept-invitation-one-step`).
   // Every body it BUILDS is the envelope, `{ success: true, data: { outcome, … } }`;
   // its refusals are `throw APIError.*`, raised rather than written.
   'packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts': {},

@@ -198,16 +198,19 @@ export interface SendTemplateInput {
    * The message the recipient receives renders `data` overlaid with these
    * values. The stored row (`sys_email` / `sys_identity_email`) records the
    * message rendered from `data` alone, so a hole present in both reads the
-   * `data` value in the row. A send carrying any deliver-only value is
-   * delivered inline, never through the durable queue: the queue delivers
-   * from the stored row, which does not hold them. A message re-delivered from
-   * its stored row carries the row's faces.
+   * `data` value in the row, and the row gives no sign that deliver-only
+   * values were overlaid. Required template variables are checked against
+   * `data` alone, so a deliver-only value never satisfies one. A send carrying
+   * any deliver-only value is delivered inline, never through the durable
+   * queue, so its sender gives up queued delivery where a queue is mounted:
+   * the queue delivers from the stored row, which does not hold them. A
+   * message re-delivered from its stored row carries the row's faces.
    *
    * Only this server-side template send declares it; the caller-facing mail
    * doors (`POST /email/send`, a script body's `ctx.email.send`) take a
    * {@link SendEmailInput}, which has no such member.
    */
-  deliverOnly?: Record<string, unknown>;
+  deliverOnlyData?: Record<string, unknown>;
   /**
    * Preferred BCP-47 locale (e.g. user's locale).
    *

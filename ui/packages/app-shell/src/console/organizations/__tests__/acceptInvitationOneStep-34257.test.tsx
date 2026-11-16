@@ -44,7 +44,7 @@ const auth = {
   getInvitation: vi.fn(async () => INVITATION),
   getInvitationPreview: vi.fn(async () => PREVIEW as typeof PREVIEW | null),
   acceptInvitation: vi.fn(async () => undefined),
-  acceptInvitationWithProof: vi.fn(async (): Promise<unknown> => ({ outcome: 'accepted', organizationId: 'org-42' })),
+  acceptInvitationOneStep: vi.fn(async (): Promise<unknown> => ({ outcome: 'accepted', organizationId: 'org-42' })),
   rejectInvitation: vi.fn(async () => undefined),
   switchOrganization: vi.fn(async () => undefined),
 };
@@ -91,7 +91,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   socialProps.current = null;
   auth.getInvitationPreview.mockImplementation(async () => PREVIEW);
-  auth.acceptInvitationWithProof.mockImplementation(async () => ({ outcome: 'accepted', organizationId: 'org-42' }));
+  auth.acceptInvitationOneStep.mockImplementation(async () => ({ outcome: 'accepted', organizationId: 'org-42' }));
 });
 
 afterEach(() => {
@@ -140,7 +140,7 @@ describe('AcceptInvitationPage — one-step acceptance (objectstack#34257)', () 
     fillAndSubmit();
 
     expect(await screen.findByTestId('accept-invitation-joined')).toHaveTextContent('Welcome to Acme.');
-    expect(auth.acceptInvitationWithProof).toHaveBeenCalledWith({
+    expect(auth.acceptInvitationOneStep).toHaveBeenCalledWith({
       invitationId: 'inv-1',
       proof: 'p-1',
       name: 'Ada',
@@ -150,7 +150,7 @@ describe('AcceptInvitationPage — one-step acceptance (objectstack#34257)', () 
   });
 
   it('an address with an account hands over to the sign-in, as today', async () => {
-    auth.acceptInvitationWithProof.mockImplementation(async () => ({ outcome: 'sign_in' }));
+    auth.acceptInvitationOneStep.mockImplementation(async () => ({ outcome: 'sign_in' }));
     arriveAt('/accept-invitation/inv-1#proof=p-1', false);
     await screen.findByText('Join Acme');
 
@@ -160,7 +160,7 @@ describe('AcceptInvitationPage — one-step acceptance (objectstack#34257)', () 
   });
 
   it('a refused proof says the link can no longer be used', async () => {
-    auth.acceptInvitationWithProof.mockImplementation(async () => {
+    auth.acceptInvitationOneStep.mockImplementation(async () => {
       throw Object.assign(new Error('no'), { code: 'INVALID_TOKEN', status: 400 });
     });
     arriveAt('/accept-invitation/inv-1#proof=p-1', false);
@@ -177,21 +177,21 @@ describe('AcceptInvitationPage — one-step acceptance (objectstack#34257)', () 
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith(LOGIN_REDIRECT));
     expect(screen.queryByTestId('accept-invitation-one-step')).toBeNull();
-    expect(auth.acceptInvitationWithProof).not.toHaveBeenCalled();
+    expect(auth.acceptInvitationOneStep).not.toHaveBeenCalled();
   });
 
   it('back from a provider sign-in, the page redeems the invitation for the session', async () => {
     arriveAt('/accept-invitation/inv-1?via=provider', true);
 
     expect(await screen.findByTestId('accept-invitation-joined')).toHaveTextContent('Welcome to Acme.');
-    expect(auth.acceptInvitationWithProof).toHaveBeenCalledTimes(1);
-    expect(auth.acceptInvitationWithProof).toHaveBeenCalledWith({ invitationId: 'inv-1' });
+    expect(auth.acceptInvitationOneStep).toHaveBeenCalledTimes(1);
+    expect(auth.acceptInvitationOneStep).toHaveBeenCalledWith({ invitationId: 'inv-1' });
     expect(auth.switchOrganization).toHaveBeenCalledWith('org-42');
     expect(window.location.search).toBe('');
   });
 
   it('back from a provider sign-in with an address that is not the verified invited one, the page asks for verification', async () => {
-    auth.acceptInvitationWithProof.mockImplementation(async () => ({ outcome: 'verify_email' }));
+    auth.acceptInvitationOneStep.mockImplementation(async () => ({ outcome: 'verify_email' }));
     arriveAt('/accept-invitation/inv-1?via=provider', true);
 
     expect(await screen.findByTestId('accept-invitation-verify-email')).toHaveTextContent(en.verifyEmailTitle);
@@ -202,6 +202,6 @@ describe('AcceptInvitationPage — one-step acceptance (objectstack#34257)', () 
     arriveAt('/accept-invitation/inv-1', true);
 
     expect(await screen.findByRole('button', { name: en.accept })).toBeInTheDocument();
-    expect(auth.acceptInvitationWithProof).not.toHaveBeenCalled();
+    expect(auth.acceptInvitationOneStep).not.toHaveBeenCalled();
   });
 });

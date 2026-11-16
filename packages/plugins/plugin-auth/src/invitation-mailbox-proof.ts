@@ -19,7 +19,7 @@
  * - Minted by `sendInvitationEmail` for each send, a resend included, and put
  *   in the mail's link only, after `#`, as `proof=VALUE`
  *   ({@link withInvitationProof}). The mail goes out through
- *   `SendTemplateInput.deliverOnly`, so the stored mail row never holds it.
+ *   `SendTemplateInput.deliverOnlyData`, so the stored mail row never holds it.
  * - Never at rest in clear. One `sys_verification` row per invitation,
  *   identifier {@link invitationProofIdentifier}, holds the proof's SHA-256,
  *   the invited address and the invitation's expiry, with the invitation's
@@ -28,12 +28,17 @@
  *   verification value.
  * - Bound to the invitation, its address and its expiry: the door requires
  *   all three to match the invitation as it stands.
- * - Single-use: spent by the internal adapter's atomic consume, before any
- *   side effect. A proof that does not match is not spent.
+ * - Single-use: spent through the internal adapter's consume before any
+ *   write, and only by a request that passed every gate; a proof that does
+ *   not match, or a request a gate refuses, leaves it unspent. Within one
+ *   server process concurrent redemptions of one proof are serialized, so
+ *   exactly one succeeds. Across server processes the guarantee is the
+ *   store's: on the platform's own adapter the consume reads the row and
+ *   then deletes it, which is not one atomic step.
  * - A resend retires the old proof: the mint deletes the invitation's row
  *   before writing the new one.
  *
- * ## The door — `POST /organization/accept-invitation-with-proof`
+ * ## The door — `POST /organization/accept-invitation-one-step`
  *
  * Body `{ invitationId, proof, name, password }`, or `{ invitationId }` alone
  * from a signed-in session (the social return). Answers in the envelope,
@@ -42,33 +47,50 @@
  * - `{ outcome: 'accepted', organizationId }` — the invitation is accepted and
  *   the caller is signed in.
  * - `{ outcome: 'sign_in' }` — the proof is good, and the address has an
- *   account the one-step path does not set a password on (verified, linked to
- *   a provider, second factor enrolled, or managed by an identity provider).
- *   The proof is not spent; the person signs in as today.
+ *   account the one-step path does not set a password on (the closing rule
+ *   below). The proof is not spent; the person signs in as today.
  * - `{ outcome: 'verify_email' }` — session mode, and the session's address is
  *   not verified. Nothing is accepted.
  * - `400 INVALID_TOKEN` — any proof that does not admit: unknown, used,
  *   expired, for another invitation or address, or an invitation that is no
  *   longer pending. One answer, which does not say which check failed.
  *
- * An unverified account with no linked provider account gets the typed
- * password in place of its own, and every one of its sessions is revoked, as a
- * password reset does. A new account is created through the internal adapter,
- * so the sign-up gates that run on every creation (audience admission and the
- * database hooks) run here too; the door itself refuses where email sign-up is
- * off. The invitation is accepted through better-auth's own accept route, so
- * every organization hook runs.
+ * ## Which existing account the door sets a password on
+ *
+ * The closing rule: the door sets a password on an existing account only when
+ * the mailbox the proof establishes is the account's one and only claim, and
+ * the server lets a local password be set here at all. Every other existing
+ * account answers `sign_in` with the proof unspent. The states, each one a
+ * reason the account holds a claim the proof does not outrank or the server
+ * sets no local password, are {@link ONE_STEP_SIGN_IN_STATES}, judged by
+ * {@link oneStepSignInState}; the card's test pins one case per state.
+ *
+ * An account that passes gets the typed password in place of its own, and
+ * every one of its sessions is revoked with the reason a password reset
+ * records (`session-tombstone.ts`). A new account is created through the
+ * internal adapter, so the sign-up gates that run on every creation (audience
+ * admission and the database hooks) run here too; the door itself refuses
+ * where email sign-up is off. Either way the password-age stamp and the
+ * forced-change clear a password change writes (ADR-0069 D1) are written. The
+ * invitation is accepted through better-auth's own accept route, so every
+ * organization hook runs.
+ *
+ * On a cloud-managed environment the door sets no local password for anyone
+ * (`cloud-managed.ts`): proof mode answers that posture's refusal before the
+ * proof is read, and the proof stays unspent.
  *
  * Rate-limited per client address and per invitation, always armed.
  */
 
+import { isCloudManaged } from '@objectstack/core';
+import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { incrementFixedWindow, InProcessCounterStore, type CounterStore } from './rate-limit-storage.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { isPendingSsoSource } from './pending-sso-marker.js';
 import { isIdpProvisionedSource, readUserSource } from './sso-only-local-password.js';
 
 /** The door's path, under the auth mount. */
-export const ACCEPT_INVITATION_WITH_PROOF_PATH = '/organization/accept-invitation-with-proof';
+export const ACCEPT_INVITATION_ONE_STEP_PATH = '/organization/accept-invitation-one-step';
 
 /** The fragment key the mail's link carries the proof under. */
 export const INVITATION_PROOF_FRAGMENT_KEY = 'proof';
@@ -174,6 +196,54 @@ export interface InvitationProofDoorHost {
   getDataEngine(): unknown;
   /** The shared counter store, when one is wired. */
   counterStore?: () => Promise<CounterStore>;
+  /** The ADR-0069 D1 after-effects of a password set (`AuthManager#stampPasswordChangedAt`). */
+  stampPasswordChangedAt(userId: string): Promise<void>;
+}
+
+/**
+ * The states of an existing account that answer `sign_in`, in the order they
+ * are judged. Each is either a claim on the account the mailbox proof does not
+ * outrank, or a server that sets no local password here.
+ */
+export const ONE_STEP_SIGN_IN_STATES = [
+  /** The address is already verified: its holder signs in. */
+  'verified',
+  /** The account is linked to a sign-in provider. */
+  'linked_provider',
+  /** The account has a second factor enrolled. */
+  'second_factor',
+  /** The account is provisioned by an identity provider. */
+  'idp_provisioned',
+  /** The account is waiting for its first single sign-on. */
+  'pending_sso',
+  /** The account's directory source cannot be read: judged as managed. */
+  'source_unreadable',
+  /** SSO-only mode: no local password is set. */
+  'sso_only',
+  /** Email and password sign-in is off. */
+  'email_password_off',
+] as const;
+
+export type OneStepSignInState = (typeof ONE_STEP_SIGN_IN_STATES)[number];
+
+/** The first state of {@link ONE_STEP_SIGN_IN_STATES} the account is in, or `undefined` when the door may set its password. */
+export function oneStepSignInState(account: {
+  emailVerified: boolean;
+  linkedProvider: boolean;
+  twoFactorEnabled: boolean;
+  source: { ok: true; value: string | null } | { ok: false };
+  ssoOnly: boolean;
+  emailPasswordEnabled: boolean;
+}): OneStepSignInState | undefined {
+  if (account.emailVerified) return 'verified';
+  if (account.linkedProvider) return 'linked_provider';
+  if (account.twoFactorEnabled) return 'second_factor';
+  if (account.source.ok && isIdpProvisionedSource(account.source.value)) return 'idp_provisioned';
+  if (account.source.ok && isPendingSsoSource(account.source.value)) return 'pending_sso';
+  if (!account.source.ok) return 'source_unreadable';
+  if (account.ssoOnly) return 'sso_only';
+  if (!account.emailPasswordEnabled) return 'email_password_off';
+  return undefined;
 }
 
 const INVALID_PROOF_MESSAGE =
@@ -227,7 +297,7 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
   };
 
   const endpoint = createAuthEndpoint(
-    ACCEPT_INVITATION_WITH_PROOF_PATH,
+    ACCEPT_INVITATION_ONE_STEP_PATH,
     { method: 'POST' },
     async (ctx: any) => {
       const body = (ctx.body ?? {}) as Record<string, unknown>;
@@ -263,6 +333,14 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       }
 
       // ── Proof mode ─────────────────────────────────────────────────────
+      // A cloud-managed environment sets no local password for anyone
+      // (`cloud-managed.ts`); asked before the proof is read, so it stays unspent.
+      if (isCloudManaged()) {
+        throw new APIError('CONFLICT', {
+          code: CLOUD_MANAGED_REFUSAL_CODE,
+          message: CLOUD_MANAGED_REFUSAL_MESSAGES.acceptInvitationOneStep,
+        });
+      }
       if (!pending) return refuseProof();
       const identifier = invitationProofIdentifier(invitationId);
       const internal = ctx.context.internalAdapter;
@@ -273,19 +351,15 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       const found = await internal.findUserByEmail(email, { includeAccounts: true });
       const existing = found?.user;
       if (existing) {
-        const linkedProvider = (found.accounts ?? []).some((a: any) => a?.providerId !== 'credential');
-        const source = await readUserSource(host.getDataEngine() as never, String(existing.id));
-        const directoryManaged = !source.ok || isPendingSsoSource(source.value) || isIdpProvisionedSource(source.value);
-        if (
-          existing.emailVerified === true ||
-          linkedProvider ||
-          existing.twoFactorEnabled === true ||
-          directoryManaged ||
-          host.isSsoOnlyMode() ||
-          !ctx.context.options.emailAndPassword?.enabled
-        ) {
-          return ctx.json({ success: true, data: { outcome: 'sign_in' } });
-        }
+        const state = oneStepSignInState({
+          emailVerified: existing.emailVerified === true,
+          linkedProvider: (found.accounts ?? []).some((a: any) => a?.providerId !== 'credential'),
+          twoFactorEnabled: existing.twoFactorEnabled === true,
+          source: await readUserSource(host.getDataEngine() as never, String(existing.id)),
+          ssoOnly: host.isSsoOnlyMode(),
+          emailPasswordEnabled: Boolean(ctx.context.options.emailAndPassword?.enabled),
+        });
+        if (state) return ctx.json({ success: true, data: { outcome: 'sign_in' } });
       }
 
       const password = typeof body.password === 'string' ? body.password : '';
@@ -337,6 +411,8 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
         }
         user = await internal.updateUser(userId, { emailVerified: true, ...(name ? { name } : {}) });
       }
+      // ADR-0069 D1: the password-age stamp and the forced-change clear.
+      await host.stampPasswordChangedAt(String(user.id));
 
       const session = await internal.createSession(user.id, false);
       if (!session) throw new APIError('INTERNAL_SERVER_ERROR', { code: 'INTERNAL_ERROR', message: 'Failed to create a session.' });
@@ -348,6 +424,6 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
 
   return {
     id: 'invitation-mailbox-proof',
-    endpoints: { acceptInvitationWithProof: endpoint },
+    endpoints: { acceptInvitationOneStep: endpoint },
   };
 }

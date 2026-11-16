@@ -64,7 +64,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 import { applyPlatformAdminImpersonation } from './admin-impersonate-endpoint.js';
 import { requireSecondFactorAtCodeAndLinkDoors } from './second-factor-code-and-link-doors.js';
 import { buildOrganizationPlugin, type OrganizationPluginHost } from './auth-manager-organization-plugin.js';
-import { ACCEPT_INVITATION_WITH_PROOF_PATH, buildInvitationProofDoorPlugin } from './invitation-mailbox-proof.js';
+import { ACCEPT_INVITATION_ONE_STEP_PATH, buildInvitationProofDoorPlugin } from './invitation-mailbox-proof.js';
 import {
   OAUTH_ORGANIZATION_CLAIM,
   assertScimAdminCoherence,
@@ -132,9 +132,28 @@ export interface PluginListHost {
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
   resolveTwoFactorAccountLockout: AuthManager['resolveTwoFactorAccountLockout'];
+  stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
   storedRecipientLocale: AuthManager['storedRecipientLocale'];
   validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
+
+/**
+ * better-auth's `haveIBeenPwned` default door list, as the installed vendor
+ * declares it. Handing the plugin an explicit list replaces that default, so
+ * the list the platform hands it is this one plus the one-step invitation
+ * acceptance; the card's test reads the installed vendor default and pins the
+ * two equal, so a vendor that grows its list reds that test instead of
+ * silently losing the addition.
+ */
+export const BREACH_CHECK_VENDOR_DEFAULT_PATHS: readonly string[] = [
+  '/sign-up/email',
+  '/change-password',
+  '/reset-password',
+  '/email-otp/reset-password',
+  '/phone-number/reset-password',
+  '/admin/create-user',
+  '/admin/set-user-password',
+];
 
 /**
  * The body of `AuthManager.buildPluginList()`; the method's docblock and the
@@ -288,6 +307,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       isSsoOnlyMode: () => this.isSsoOnlyMode(),
       getDataEngine: () => this.getDataEngine(),
       counterStore: () => this.config.sharedCounterStore?.() ?? Promise.reject(new Error('no shared counter store')),
+      stampPasswordChangedAt: (userId) => this.stampPasswordChangedAt(userId),
     }));
   }
 
@@ -314,18 +334,9 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.passwordRejectBreached) {
     const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
     plugins.push(haveIBeenPwned({
-      // The plugin's own default doors, plus the invitation proof door, which
-      // sets a password too.
-      paths: [
-        '/sign-up/email',
-        '/change-password',
-        '/reset-password',
-        '/email-otp/reset-password',
-        '/phone-number/reset-password',
-        '/admin/create-user',
-        '/admin/set-user-password',
-        ACCEPT_INVITATION_WITH_PROOF_PATH,
-      ],
+      // The plugin's own default doors, plus the one-step invitation
+      // acceptance, which sets a password too.
+      paths: [...BREACH_CHECK_VENDOR_DEFAULT_PATHS, ACCEPT_INVITATION_ONE_STEP_PATH],
       customPasswordCompromisedMessage:
         'This password has appeared in a known data breach. Please choose a different one.',
     }));

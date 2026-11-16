@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// `SendTemplateInput.deliverOnly`: values delivered with the message and never
+// `SendTemplateInput.deliverOnlyData`: values delivered with the message and never
 // written to the stored mail row.
 
 import { describe, it, expect } from 'vitest';
@@ -63,7 +63,7 @@ describe('deliver-only template values (#34257)', () => {
       template: 'auth.invitation',
       to: 'invitee@example.com',
       data: { orgName: 'Acme', acceptUrl: PLAIN_URL },
-      deliverOnly: { acceptUrl: DELIVERED_URL },
+      deliverOnlyData: { acceptUrl: DELIVERED_URL },
     });
 
     expect(res.status).toBe('sent');
@@ -83,7 +83,7 @@ describe('deliver-only template values (#34257)', () => {
       template: 'auth.invitation',
       to: 'invitee@example.com',
       data: { orgName: 'Acme', acceptUrl: PLAIN_URL },
-      deliverOnly: { acceptUrl: DELIVERED_URL },
+      deliverOnlyData: { acceptUrl: DELIVERED_URL },
     });
 
     expect(res.status).toBe('sent');

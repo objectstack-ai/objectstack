@@ -25,7 +25,11 @@
  * creates the credential when the user holds none) refuse every request, with
  * the two doors that send their link or code (`/request-password-reset`,
  * `/phone-number/request-password-reset`), so nobody is sent a link the reset
- * door would refuse. A password set before stays where it is (changing one is
+ * door would refuse; and the one-step invitation acceptance
+ * (`/organization/accept-invitation-one-step`, `invitation-mailbox-proof.ts`),
+ * which creates an account with a password or sets one on an unverified
+ * account, refuses every request that carries the invitation mail's proof,
+ * before the proof is read. A password set before stays where it is (changing one is
  * `/change-password`'s, objectstack-ai/cloud#4471). ADR-0135 D5.2's
  * break-glass clause, which kept a local credential reachable by population,
  * holds on self-hosted deployments only.
@@ -83,6 +87,11 @@ export const CLOUD_MANAGED_REFUSAL_MESSAGES = {
   requestPasswordReset:
     "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and no "
     + 'local password is set or reset here for anyone, an administrator included. No reset link or code was sent.',
+  // `/organization/accept-invitation-one-step` with the invitation mail's proof.
+  acceptInvitationOneStep:
+    "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and no "
+    + 'local password is set here for anyone, so an invitation is not accepted with a new password. Sign in through '
+    + 'that identity provider instead. No account or password was changed.',
 } as const;
 
 /** The doors a cloud-managed environment narrows. */

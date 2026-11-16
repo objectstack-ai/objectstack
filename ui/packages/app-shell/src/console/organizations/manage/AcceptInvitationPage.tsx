@@ -94,7 +94,7 @@ export function AcceptInvitationPage() {
     isLoading: isAuthLoading,
     getInvitation,
     acceptInvitation,
-    acceptInvitationWithProof,
+    acceptInvitationOneStep,
     rejectInvitation,
     switchOrganization,
   } = useAuth();
@@ -167,7 +167,7 @@ export function AcceptInvitationPage() {
     void (async () => {
       const inv = await getInvitation(invitationId).catch(() => null);
       try {
-        const outcome = await acceptInvitationWithProof({ invitationId });
+        const outcome = await acceptInvitationOneStep({ invitationId });
         if (outcome.outcome === 'accepted') {
           await switchOrganization(outcome.organizationId).catch(() => null);
           setOneStepJoined({
@@ -186,7 +186,7 @@ export function AcceptInvitationPage() {
       }
       setProviderReturn(false);
     })();
-  }, [providerReturn, invitationId, isAuthLoading, isAuthenticated, getInvitation, acceptInvitationWithProof, switchOrganization]);
+  }, [providerReturn, invitationId, isAuthLoading, isAuthenticated, getInvitation, acceptInvitationOneStep, switchOrganization]);
 
   // Fetch invitation details
   useEffect(() => {
@@ -329,7 +329,7 @@ export function AcceptInvitationPage() {
             <OneStepJoinForm
               invitationId={invitationId}
               proof={proof}
-              acceptInvitationWithProof={acceptInvitationWithProof}
+              acceptInvitationOneStep={acceptInvitationOneStep}
               onJoined={(orgName) => setOneStepJoined({ orgName })}
               onSignIn={() => navigate(loginRedirect)}
             />
@@ -486,7 +486,7 @@ export function AcceptInvitationPage() {
 interface OneStepJoinFormProps {
   invitationId: string;
   proof: string;
-  acceptInvitationWithProof: ReturnType<typeof useAuth>['acceptInvitationWithProof'];
+  acceptInvitationOneStep: ReturnType<typeof useAuth>['acceptInvitationOneStep'];
   /** The door accepted: the visitor has an account, a session and the membership. */
   onJoined: (orgName: string) => void;
   /** The address has an account the visitor signs in to, as today. */
@@ -500,7 +500,7 @@ interface OneStepJoinFormProps {
  * in. A provider sign-in returns to this page, which redeems the invitation for
  * the provider's session.
  */
-function OneStepJoinForm({ invitationId, proof, acceptInvitationWithProof, onJoined, onSignIn }: OneStepJoinFormProps) {
+function OneStepJoinForm({ invitationId, proof, acceptInvitationOneStep, onJoined, onSignIn }: OneStepJoinFormProps) {
   const { t } = useObjectTranslation();
   const { getInvitationPreview } = useAuth();
   const [preview, setPreview] = useState<AuthInvitationPreview | null>(null);
@@ -534,7 +534,7 @@ function OneStepJoinForm({ invitationId, proof, acceptInvitationWithProof, onJoi
     setSubmitting(true);
     setFailure(null);
     try {
-      const outcome = await acceptInvitationWithProof({ invitationId, proof, name: name.trim(), password });
+      const outcome = await acceptInvitationOneStep({ invitationId, proof, name: name.trim(), password });
       if (outcome.outcome === 'accepted') {
         onJoined(preview?.organizationName ?? outcome.organizationId);
         return;

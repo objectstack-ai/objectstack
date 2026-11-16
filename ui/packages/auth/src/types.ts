@@ -622,7 +622,7 @@ export interface AuthClient {
   acceptInvitation: (invitationId: string) => Promise<void>;
   /**
    * The one-step invitation acceptance (objectstack
-   * `POST /organization/accept-invitation-with-proof`). With the mailbox
+   * `POST /organization/accept-invitation-one-step`). With the mailbox
    * proof the invitation mail's link carries, it needs no session: it creates
    * the account (or sets the password of an unverified one), verifies the
    * address, accepts and signs in, answering `accepted`, or `sign_in` when the
@@ -631,7 +631,7 @@ export interface AuthClient {
    * verified, else answers `verify_email`. Rejects with the server's `code` and
    * `status` otherwise (`INVALID_TOKEN` for any proof that does not admit).
    */
-  acceptInvitationWithProof: (input: AuthInvitationProofInput) => Promise<AuthInvitationProofOutcome>;
+  acceptInvitationOneStep: (input: AuthInvitationOneStepInput) => Promise<AuthInvitationOneStepOutcome>;
   /** Reject an invitation as the current user */
   rejectInvitation: (invitationId: string) => Promise<void>;
   /** List invitations addressed to the current user */
@@ -732,7 +732,7 @@ export interface AuthInvitationPreview {
 }
 
 /** The body of the one-step invitation acceptance. */
-export interface AuthInvitationProofInput {
+export interface AuthInvitationOneStepInput {
   invitationId: string;
   /** The mailbox proof from the invitation mail's link; absent for a signed-in session. */
   proof?: string;
@@ -741,7 +741,7 @@ export interface AuthInvitationProofInput {
 }
 
 /** What the one-step invitation acceptance answers. */
-export type AuthInvitationProofOutcome =
+export type AuthInvitationOneStepOutcome =
   | { outcome: 'accepted'; organizationId: string }
   | { outcome: 'sign_in' }
   | { outcome: 'verify_email' };

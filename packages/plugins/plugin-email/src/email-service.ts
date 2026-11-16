@@ -965,7 +965,7 @@ export class EmailService implements IEmailService {
 
   /**
    * `delivered`, when given, holds the faces the recipient receives in place
-   * of the stored row's (`SendTemplateInput.deliverOnly`): the row is written
+   * of the stored row's (`SendTemplateInput.deliverOnlyData`): the row is written
    * from `input`, the transport is handed `delivered`, and the send is inline,
    * because the queue delivers from the row.
    */
@@ -1854,9 +1854,9 @@ export class EmailService implements IEmailService {
     // Deliver-only values reach the recipient and never the stored row: the
     // row is written from the faces rendered above, from `data` alone, and the
     // transport gets the faces rendered from `data` overlaid with them.
-    const deliverOnly = input.deliverOnly;
-    const delivered = deliverOnly && Object.keys(deliverOnly).length > 0
-      ? (await this.resolveAndRenderTemplate({ ...input, data: { ...(input.data || {}), ...deliverOnly } })).rendered
+    const deliverOnlyData = input.deliverOnlyData;
+    const delivered = deliverOnlyData && Object.keys(deliverOnlyData).length > 0
+      ? (await this.resolveAndRenderTemplate({ ...input, data: { ...(input.data || {}), ...deliverOnlyData } })).rendered
       : undefined;
 
     const from: EmailAddress | undefined = input.from

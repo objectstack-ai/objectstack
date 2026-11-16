@@ -169,6 +169,7 @@ import { cloudManagedRefusal } from './cloud-managed.js';
 import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
 import { isPendingSsoSource, pendingSsoPasswordRefusal } from './pending-sso-marker.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
+import { ACCEPT_INVITATION_ONE_STEP_PATH } from './invitation-mailbox-proof.js';
 import {
   ALLOWED_IP_RANGES_ENV,
   allowedIpRangesWritePredicate,
@@ -2760,7 +2761,7 @@ export class AuthPlugin implements Plugin {
               '/sign-up/email': { window, max },
               '/request-password-reset': { window, max },
               '/reset-password': { window, max },
-              '/organization/accept-invitation-with-proof': { window, max },
+              [ACCEPT_INVITATION_ONE_STEP_PATH]: { window, max },
               // #2780 — OTP endpoints cost an SMS per hit (pumping abuse);
               // the per-number cooldown (otp-send-guard.ts) is always on,
               // this adds the operator-tuned per-IP dimension. The plugin

@@ -10,7 +10,7 @@ import { createAuthClient as createBetterAuthClient, parseJSON } from 'better-au
 import { organizationClient, twoFactorClient } from 'better-auth/client/plugins';
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
-  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationProofInput, AuthInvitationProofOutcome, AuthPublicConfig,
+  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationOneStepInput, AuthInvitationOneStepOutcome, AuthPublicConfig,
   SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
@@ -1384,8 +1384,8 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       if (error) throw toAuthError(error, 'Failed to accept invitation');
     },
 
-    async acceptInvitationWithProof(input: AuthInvitationProofInput): Promise<AuthInvitationProofOutcome> {
-      const url = `${origin}${basePath}/organization/accept-invitation-with-proof`;
+    async acceptInvitationOneStep(input: AuthInvitationOneStepInput): Promise<AuthInvitationOneStepOutcome> {
+      const url = `${origin}${basePath}/organization/accept-invitation-one-step`;
       const response = await bearerFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1415,7 +1415,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         return { outcome: 'accepted', organizationId: data.organizationId };
       }
       if (data?.outcome === 'sign_in' || data?.outcome === 'verify_email') return { outcome: data.outcome };
-      throw new Error('acceptInvitationWithProof: unexpected response body');
+      throw new Error('acceptInvitationOneStep: unexpected response body');
     },
 
     async rejectInvitation(invitationId: string): Promise<void> {

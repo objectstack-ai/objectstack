@@ -2449,6 +2449,7 @@ export class AuthManager {
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
       resolveMembershipRole: (...a) => this.resolveMembershipRole(...a),
       resolveTwoFactorAccountLockout: (...a) => this.resolveTwoFactorAccountLockout(...a),
+      stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
       storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
       validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...a),
     };

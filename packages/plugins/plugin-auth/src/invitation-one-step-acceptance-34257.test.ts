@@ -7,12 +7,22 @@
 // same minimal engine double the other end-to-end auth-manager suites use.
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { resetCloudManagedForTesting } from '@objectstack/core';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { createCopyInvitationLinkHandler } from './invitation-link-action';
-import { ACCEPT_INVITATION_WITH_PROOF_PATH, invitationProofIdentifier } from './invitation-mailbox-proof';
+import {
+  ACCEPT_INVITATION_ONE_STEP_PATH,
+  ONE_STEP_SIGN_IN_STATES,
+  invitationProofIdentifier,
+  type OneStepSignInState,
+} from './invitation-mailbox-proof';
+import { BREACH_CHECK_VENDOR_DEFAULT_PATHS } from './auth-manager-plugin-list';
+import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -102,7 +112,7 @@ interface SentMail {
   template: string;
   to: string;
   data: Record<string, any>;
-  deliverOnly?: Record<string, any>;
+  deliverOnlyData?: Record<string, any>;
 }
 
 const singleOrgTenancy = () =>
@@ -121,13 +131,14 @@ const cookieFrom = (response: Response): string =>
     .filter(Boolean)
     .join('; ');
 
-const post = (manager: AuthManager, path: string, body: unknown, cookie?: string) =>
+const post = (manager: AuthManager, path: string, body: unknown, cookie?: string, remoteAddress?: string) =>
   manager.handleRequest(
     new Request(`${BASE}/api/v1/auth${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
       body: JSON.stringify(body),
     }),
+    remoteAddress ? { remoteAddress } : undefined,
   );
 
 const sessionUser = async (manager: AuthManager, cookie: string) => {
@@ -160,7 +171,7 @@ const invitationOf = (engine: MemoryEngine, email: string) =>
   );
 
 const proofOf = (mail: SentMail): string => {
-  const link = String(mail.deliverOnly?.acceptUrl ?? '');
+  const link = String(mail.deliverOnlyData?.acceptUrl ?? '');
   const match = /#proof=([^&]+)$/.exec(link);
   expect(match, `the mail's link carries no proof: ${link}`).not.toBeNull();
   return decodeURIComponent(match![1]!);
@@ -204,8 +215,8 @@ const boot = async (options: Record<string, unknown> = {}) => {
   return { engine, manager, owner, sent, invite };
 };
 
-const door = (manager: AuthManager, body: Record<string, unknown>, cookie?: string) =>
-  post(manager, ACCEPT_INVITATION_WITH_PROOF_PATH, body, cookie);
+const door = (manager: AuthManager, body: Record<string, unknown>, cookie?: string, remoteAddress?: string) =>
+  post(manager, ACCEPT_INVITATION_ONE_STEP_PATH, body, cookie, remoteAddress);
 
 const expectRefused = async (res: Response) => {
   const text = await res.clone().text();
@@ -225,7 +236,7 @@ describe('#34257 — the invitation mail carries a mailbox-only proof', () => {
     const { invite } = await boot();
     const { mail, proof } = await invite('invitee@example.com');
     expect(JSON.stringify(mail.data)).not.toContain(proof);
-    expect(String(mail.deliverOnly?.acceptUrl).startsWith(`${mail.data.acceptUrl}#`)).toBe(true);
+    expect(String(mail.deliverOnlyData?.acceptUrl).startsWith(`${mail.data.acceptUrl}#`)).toBe(true);
   });
 
   it('the proof is never at rest in clear', async () => {
@@ -352,6 +363,10 @@ describe('#34257 — accepting with the proof', () => {
     expect((await res.json()).data).toMatchObject({ outcome: 'accepted' });
 
     expect(await sessionUser(manager, earlier.cookie)).toBeNull();
+    // Each session it ended records the reason a password reset records.
+    const ended = (engine.tables.get('sys_session') ?? []).filter((row) => row.user_id === earlier.userId && row.revoked_at);
+    expect(ended.length).toBeGreaterThan(0);
+    expect(ended.map((row) => row.revoke_reason)).toEqual(ended.map(() => 'password_reset'));
     expect(userRow(engine, 'squatted@example.com')?.email_verified).toBeTruthy();
     const oldPassword = await post(manager, '/sign-in/email', { email: 'squatted@example.com', password: PASSWORD });
     expect(oldPassword.status).not.toBe(200);
@@ -439,6 +454,7 @@ describe('#34257 — a signed-in return accepts only a verified address', () => 
   });
 });
 
+
 // The tables a redemption writes: the account, its credential, its sessions,
 // the membership, the invitation and the proof row.
 const WRITTEN_TABLES = ['sys_user', 'sys_account', 'sys_session', 'sys_member', 'sys_invitation', 'sys_verification'];
@@ -463,13 +479,21 @@ const expectAccepted = async (res: Response) => {
   expect(JSON.parse(text).data).toEqual({ outcome: 'accepted', organizationId: PARTNER_ORG });
 };
 
-describe('#34257 — every gate refuses before anything is written, and the proof stays usable', () => {
+const quietConsole = () => {
   beforeEach(() => {
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    resetCloudManagedForTesting();
+  });
+};
+
+describe('#34257 — every gate refuses before anything is written, and the proof stays usable', () => {
+  quietConsole();
 
   it('a new address is refused where email sign-up is switched off', async () => {
     const { engine, manager, invite } = await boot({ emailAndPassword: { disableSignUp: true } });
@@ -493,52 +517,6 @@ describe('#34257 — every gate refuses before anything is written, and the proo
 
     manager.applyConfigPatch({ ssoOnlyMode: false } as never);
     await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: PASSWORD }));
-  });
-
-  it('an unverified account in SSO-only mode signs in as today, and the proof stays unspent', async () => {
-    const { engine, manager, invite } = await boot();
-    const { invitation, proof } = await invite('sso-held@example.com');
-    await signUp(manager, engine, 'sso-held@example.com');
-    manager.applyConfigPatch({ ssoOnlyMode: true } as never);
-    const before = writtenState(engine);
-
-    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
-    expect(writtenState(engine)).toBe(before);
-
-    manager.applyConfigPatch({ ssoOnlyMode: false } as never);
-    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
-  });
-
-  it('an unverified account with a second factor signs in as today, and the proof stays unspent', async () => {
-    const { engine, manager, invite } = await boot({ plugins: { twoFactor: true } });
-    const { invitation, proof } = await invite('two-factor@example.com');
-    await signUp(manager, engine, 'two-factor@example.com');
-    userRow(engine, 'two-factor@example.com')!.two_factor_enabled = true;
-    const before = writtenState(engine);
-
-    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'T', password: NEW_PASSWORD }));
-    expect(writtenState(engine)).toBe(before);
-
-    userRow(engine, 'two-factor@example.com')!.two_factor_enabled = false;
-    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'T', password: NEW_PASSWORD }));
-  });
-
-  it.each([
-    ['provisioned by an identity provider', 'idp_provisioned'],
-    ['pending its first SSO sign-in', 'idp_pending'],
-  ])('an unverified account %s signs in as today, and the proof stays unspent', async (_label, source) => {
-    const { engine, manager, invite } = await boot();
-    const email = `directory-${source}@example.com`;
-    const { invitation, proof } = await invite(email);
-    await signUp(manager, engine, email);
-    userRow(engine, email)!.source = source;
-    const before = writtenState(engine);
-
-    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'D', password: NEW_PASSWORD }));
-    expect(writtenState(engine)).toBe(before);
-
-    userRow(engine, email)!.source = null;
-    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'D', password: NEW_PASSWORD }));
   });
 
   it('a password under the minimum length is refused', async () => {
@@ -586,6 +564,17 @@ describe('#34257 — every gate refuses before anything is written, and the proo
     await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'B', password: PASSWORD }));
   });
 
+  it('the breach check covers the vendor default doors and this door, and the vendor list is the installed one', () => {
+    const vendorFile = createRequire(import.meta.url).resolve('better-auth/plugins/haveibeenpwned');
+    const source = readFileSync(vendorFile, 'utf8');
+    const literal = /options\?\.paths\s*\|\|\s*\[([^\]]*)\]/.exec(source);
+    expect(literal, `no default path list found in ${vendorFile}`).not.toBeNull();
+    const vendorDefault = [...literal![1]!.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+    expect(vendorDefault.length).toBeGreaterThan(0);
+    expect([...BREACH_CHECK_VENDOR_DEFAULT_PATHS]).toEqual(vendorDefault);
+    expect(vendorDefault).not.toContain(ACCEPT_INVITATION_ONE_STEP_PATH);
+  });
+
   it('a new address the audience admission refuses is refused', async () => {
     const { engine, manager, invite } = await boot();
     const { invitation, proof } = await invite('refused@example.com');
@@ -612,5 +601,184 @@ describe('#34257 — every gate refuses before anything is written, and the proo
     expect(writtenState(engine)).toBe(before);
 
     await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'Named', password: PASSWORD }));
+  });
+
+  it('the window per client network address refuses, and the proof stays usable from another address', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('windowed@example.com');
+    for (let i = 0; i < 10; i++) {
+      await expectRefused(await door(manager, { invitationId: `inv_unknown_${i}`, proof: 'wrong', name: 'W', password: PASSWORD }, undefined, '203.0.113.7'));
+    }
+    const before = writtenState(engine);
+
+    await expectAnswer(
+      await door(manager, { invitationId: invitation.id, proof, name: 'W', password: PASSWORD }, undefined, '203.0.113.7'),
+      429,
+      'RATE_LIMIT_EXCEEDED',
+    );
+    expect(writtenState(engine)).toBe(before);
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'W', password: PASSWORD }, undefined, '203.0.113.8'));
+  });
+
+  it('a cloud-managed environment refuses a proof, and the proof stays usable where it is not', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('managed@example.com');
+    vi.stubEnv('OS_CLOUD_MANAGED', '1');
+    resetCloudManagedForTesting();
+    const before = writtenState(engine);
+
+    await expectAnswer(await door(manager, { invitationId: invitation.id, proof, name: 'M', password: PASSWORD }), 409, 'RESOURCE_CONFLICT');
+    expect(writtenState(engine)).toBe(before);
+
+    vi.unstubAllEnvs();
+    resetCloudManagedForTesting();
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'M', password: PASSWORD }));
+  });
+
+  it('two concurrent redemptions of one proof: exactly one is accepted', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('raced@example.com');
+    const answers = await Promise.all([
+      door(manager, { invitationId: invitation.id, proof, name: 'One', password: PASSWORD }),
+      door(manager, { invitationId: invitation.id, proof, name: 'Two', password: NEW_PASSWORD }),
+    ]);
+    const statuses = answers.map((res) => res.status).sort();
+    expect(statuses).toEqual([200, 400]);
+    await expectRefused(answers.find((res) => res.status === 400)!);
+    expect((engine.tables.get('sys_user') ?? []).filter((u) => u.email === 'raced@example.com')).toHaveLength(1);
+  });
+});
+
+describe('#34257 — the door sets a password only where the mailbox is the account\'s one claim', () => {
+  quietConsole();
+
+  type Booted = Awaited<ReturnType<typeof boot>>;
+  interface StateCase {
+    options?: Record<string, unknown>;
+    /** Put the account into the state, and answer how to take it out again. */
+    enter(booted: Booted, email: string): Promise<() => Promise<void> | void>;
+  }
+  const findThrowsForSource = (engine: MemoryEngine) => {
+    const find = engine.find.bind(engine);
+    engine.find = async (name: string, q: any = {}) => {
+      if (name === 'sys_user' && Array.isArray(q.fields) && q.fields.includes('source')) throw new Error('store unavailable');
+      return find(name, q);
+    };
+    return () => {
+      engine.find = find;
+    };
+  };
+
+  // Typed as a Record over the states, so a state added to the rule without a
+  // case here fails to compile, and the test below fails at run time.
+  const CASES: Record<OneStepSignInState, StateCase> = {
+    verified: {
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.email_verified = true;
+        return () => {
+          userRow(engine, email)!.email_verified = false;
+        };
+      },
+    },
+    linked_provider: {
+      enter: async ({ engine }, email) => {
+        await engine.insert('sys_account', { id: `acc_${email}`, user_id: userRow(engine, email)!.id, provider_id: 'google', account_id: `google-${email}` });
+        return () => {
+          engine.tables.set('sys_account', (engine.tables.get('sys_account') ?? []).filter((a) => a.id !== `acc_${email}`));
+        };
+      },
+    },
+    second_factor: {
+      options: { plugins: { twoFactor: true } },
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.two_factor_enabled = true;
+        return () => {
+          userRow(engine, email)!.two_factor_enabled = false;
+        };
+      },
+    },
+    idp_provisioned: {
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.source = 'idp_provisioned';
+        return () => {
+          userRow(engine, email)!.source = null;
+        };
+      },
+    },
+    pending_sso: {
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.source = 'idp_pending';
+        return () => {
+          userRow(engine, email)!.source = null;
+        };
+      },
+    },
+    source_unreadable: {
+      enter: async ({ engine }) => findThrowsForSource(engine),
+    },
+    sso_only: {
+      enter: async ({ manager }) => {
+        manager.applyConfigPatch({ ssoOnlyMode: true } as never);
+        return () => manager.applyConfigPatch({ ssoOnlyMode: false } as never);
+      },
+    },
+    email_password_off: {
+      enter: async ({ manager }) => {
+        manager.applyConfigPatch({ emailAndPassword: { enabled: false } } as never);
+        return () => manager.applyConfigPatch({ emailAndPassword: { enabled: true } } as never);
+      },
+    },
+  };
+
+  it('every state the closing rule names has a case, and no case names another state', () => {
+    expect(Object.keys(CASES).sort()).toEqual([...ONE_STEP_SIGN_IN_STATES].sort());
+  });
+
+  it.each([...ONE_STEP_SIGN_IN_STATES])('an unverified account in state %s signs in as today, and the proof stays unspent', async (state) => {
+    const testCase = CASES[state];
+    const booted = await boot(testCase.options);
+    const { engine, manager, invite } = booted;
+    const email = `state-${state.replace(/_/g, '-')}@example.com`;
+    const { invitation, proof } = await invite(email);
+    await signUp(manager, engine, email);
+    const leave = await testCase.enter(booted, email);
+    const before = writtenState(engine);
+
+    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
+    expect(writtenState(engine)).toBe(before);
+
+    await leave();
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'S', password: NEW_PASSWORD }));
+  });
+});
+
+describe('#34257 — a password the door sets starts the password-age clock and clears a forced change', () => {
+  quietConsole();
+
+  it('a new account is stamped', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('aged-new@example.com');
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'N', password: PASSWORD }));
+    const user = userRow(engine, 'aged-new@example.com')!;
+    expect(user.password_changed_at).toBeInstanceOf(Date);
+    expect(user.must_change_password).toBe(false);
+  });
+
+  it('an unverified account under a forced change is stamped and the forced change cleared', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('aged-held@example.com');
+    await signUp(manager, engine, 'aged-held@example.com');
+    const user = userRow(engine, 'aged-held@example.com')!;
+    user.must_change_password = true;
+    user.password_changed_at = new Date('2020-01-01T00:00:00Z');
+
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'H', password: NEW_PASSWORD }));
+    expect(user.must_change_password).toBe(false);
+    expect(new Date(user.password_changed_at).getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it('the sessions the door ends are ledgered with the reason a password reset records', () => {
+    expect(INTERACTIVE_REVOKE_REASON[ACCEPT_INVITATION_ONE_STEP_PATH]).toBe('password_reset');
   });
 });

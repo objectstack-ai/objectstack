@@ -659,7 +659,7 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
           template: 'auth.invitation',
           to: recipientEmail,
           ...mailLocale,
-          ...(proof ? { deliverOnly: { acceptUrl: withInvitationProof(acceptUrl, proof) } } : {}),
+          ...(proof ? { deliverOnlyData: { acceptUrl: withInvitationProof(acceptUrl, proof) } } : {}),
           data: {
             inviter: {
               name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
