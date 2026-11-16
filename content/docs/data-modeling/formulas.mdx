@@ -618,7 +618,8 @@ The amount is rounded once to 分, half away from zero, on the decimal it spells
 stands for each run of zeros, a ten is `壹拾`, a whole amount ends in `整` and an
 amount under one yuan is its 角 and 分 alone (`0.5` is `伍角`). A number, a
 currency field and decimal text (`'245000.00'`) are read; any other value, and
-an amount of 10^16 yuan or more, is a runtime error rather than some text.
+an amount of 10^16 yuan or more, is a runtime error rather than some text; a
+formula field reads that error as `null`.
 
 ### Text Manipulation
 

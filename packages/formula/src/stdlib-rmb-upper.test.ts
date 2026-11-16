@@ -154,6 +154,51 @@ describe('rmbUpper — what it refuses', () => {
   });
 });
 
+describe('rmbUpper — an exponent spelling is judged before it is converted', () => {
+  /** Evaluate and time one call; every row must answer well inside a second. */
+  function timed(amount: string) {
+    const started = performance.now();
+    const r = celEngine.evaluate({ dialect: 'cel', source: 'rmbUpper(record.amount)' }, { record: { amount } });
+    return { r, ms: performance.now() - started };
+  }
+
+  it.each([
+    ['1e3', '壹仟元整'],
+    ['1.05e2', '壹佰零伍元整'],
+    ['10500.5e0', '壹万零伍佰元伍角'],
+    ['1050050e-2', '壹万零伍佰元伍角'],
+    ['9.999999999999999e15', '玖仟玖佰玖拾玖万玖仟玖佰玖拾玖亿玖仟玖佰玖拾玖万玖仟玖佰玖拾玖元整'],
+    ['5e-3', '壹分'],
+    ['4.99e-3', '零元整'],
+  ])('%s → %s', (amount, text) => {
+    expect(upper(amount)).toBe(text);
+  });
+
+  it.each(['1e16', '1e400', '1e200000000', '9'.repeat(400), '1e' + '9'.repeat(400)])(
+    '%s is refused as too large, promptly',
+    (amount) => {
+      const { r, ms } = timed(amount);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toContain('too large');
+      expect(ms).toBeLessThan(1000);
+    },
+  );
+
+  it.each(['1e-400', '1e-999999999', '-1e-999999999', '0e-999999999', '0e999999999', '0.' + '0'.repeat(100_000) + '1'])(
+    'an amount below 0.001 (here %#) is 零元整, promptly',
+    (amount) => {
+      const { r, ms } = timed(amount);
+      expect(r).toEqual({ ok: true, value: '零元整' });
+      expect(ms).toBeLessThan(1000);
+    },
+  );
+
+  it('digits below the 0.001 place never move the rounding', () => {
+    expect(upper('1.0049' + '9'.repeat(1000))).toBe('壹元整');
+    expect(upper('1.005' + '0'.repeat(1000))).toBe('壹元零壹分');
+  });
+});
+
 describe('rmbUpper — authoring', () => {
   it('a formula over a currency field validates, and is typed text', () => {
     const schema = { fields: ['total'], fieldTypes: { total: 'currency' }, scope: 'record' as const };

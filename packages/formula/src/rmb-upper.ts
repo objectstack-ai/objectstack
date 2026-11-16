@@ -26,21 +26,28 @@
  *    zero is `零元整`, never `负零元整`.
  *
  * The amount is rounded to 分 (two decimals) once, half away from zero, on
- * the exact decimal it spells — the reading and the rounding the home-amount
- * projection uses (`home-amount-arithmetic.ts`), so `1.005` is `壹元零壹分`
+ * the exact decimal it spells — the rounding the home-amount projection uses
+ * (`divideToPlaces`, `home-amount-arithmetic.ts`), so `1.005` is `壹元零壹分`
  * and binary floating point never decides a cent. A number, a bigint or the
- * decimal text a driver answers a currency column with (`"245000.00"`) is
- * read; `null` reads `''`, the way `trim(null)` and `label()` of an empty
- * field do, so an empty total prints an empty line. Anything else — text that
- * spells no decimal, a boolean, a list, NaN, an infinity — is refused with a
- * throw, which the engine reports as a runtime error, rather than printed as
- * some amount.
+ * decimal text a driver answers a currency column with (`"245000.00"`, an
+ * exponent spelling too) is read; `null` reads `''`, the way `trim(null)` and
+ * `label()` of an empty field do, so an empty total prints an empty line.
+ * Anything else — text that spells no decimal, a boolean, a list, NaN, an
+ * infinity — is refused with a throw, which the engine reports as a runtime
+ * error, rather than printed as some amount.
+ *
+ * The spelling is judged before any conversion ({@link spelledFen}): its
+ * magnitude is read off its digits and exponent, an amount of 10^16 yuan or
+ * more is refused there, an amount below 0.001 is zero there, and only the
+ * digits down to the 0.001 place — the place half-away-from-zero rounding to
+ * 分 reads — are converted. So the work is bounded by the length of the text,
+ * whatever its exponent says.
  *
  * Package-internal (NOT re-exported from `index.ts`): the CEL function is the
  * published surface.
  */
 
-import { divideToPlaces, toScaledDecimal } from './home-amount-arithmetic';
+import { divideToPlaces } from './home-amount-arithmetic';
 
 const DIGITS = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖'] as const;
 const PLACES = ['', '拾', '佰', '仟'] as const;
@@ -48,8 +55,21 @@ const PLACES = ['', '拾', '佰', '仟'] as const;
 const TEN_THOUSAND = 10_000n;
 const HUNDRED_MILLION = 100_000_000n;
 
-/** 10^16 yuan in 分: the first amount the 万/亿 scheme would have to write as 亿亿. */
-const LIMIT_FEN = 10n ** 18n;
+/** The decimal spellings read: sign, integer digits, fraction digits, exponent. */
+const DECIMAL_SPELLING = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+
+/**
+ * The power of ten of the highest place an amount may reach: 10^15, so the
+ * largest amount written is 9999万9999亿9999万9999 yuan and 99 分, and 10^16
+ * (一亿亿, which the 万/亿 scheme would have to write as 亿亿) is refused.
+ */
+const TOP_PLACE = 15;
+
+/** The lowest place rounding to 分 reads: 0.001. */
+const BOTTOM_PLACE = -3;
+
+const TOO_LARGE =
+  'rmbUpper(amount): `amount` is too large to write in capital numerals (10^16 yuan or more).';
 
 /** `n` in 1..9999 with places, one `零` per inner run of zeros and none at the end. */
 function group(n: number): string {
@@ -88,23 +108,9 @@ function yuan(n: bigint): string {
 /** The capital-numeral text of `amount`, rounded to 分; see the module docblock. */
 export function rmbUpper(amount: unknown): string {
   if (amount === null || amount === undefined) return '';
-  const exact = typeof amount === 'number' || typeof amount === 'bigint' || typeof amount === 'string'
-    ? toScaledDecimal(amount)
-    : undefined;
-  if (exact === undefined) {
-    throw new Error(
-      `rmbUpper(amount): \`amount\` is not a number (${describe(amount)}). ` +
-      'Pass a number, a currency field, or decimal text such as "245000.00".',
-    );
-  }
-  const fen = divideToPlaces(exact, { digits: 1n, scale: 0 }, 2).digits;
+  const fen = spelledFen(amount);
   const negative = fen < 0n;
   const abs = negative ? -fen : fen;
-  if (abs >= LIMIT_FEN) {
-    throw new Error(
-      'rmbUpper(amount): `amount` is too large to write in capital numerals (10^16 yuan or more).',
-    );
-  }
   if (abs === 0n) return '零元整';
 
   const whole = abs / 100n;
@@ -120,6 +126,38 @@ export function rmbUpper(amount: unknown): string {
     if (fenDigit > 0) text += DIGITS[fenDigit] + '分';
   }
   return (negative ? '负' : '') + text;
+}
+
+/**
+ * `amount` in 分, rounded half away from zero, with the magnitude judged from
+ * the spelling before anything is converted: 10^16 yuan or more throws, an
+ * amount below 0.001 is 0, and only the digits from the leading one down to
+ * the 0.001 place become a number — the digits below it cannot move the
+ * rounding, because half away from zero at 分 reads the 0.001 digit alone.
+ */
+function spelledFen(amount: unknown): bigint {
+  let text: string | undefined;
+  if (typeof amount === 'number') text = Number.isFinite(amount) ? String(amount) : undefined;
+  else if (typeof amount === 'bigint') text = amount.toString();
+  else if (typeof amount === 'string') text = amount.trim();
+  const m = text === undefined ? null : DECIMAL_SPELLING.exec(text);
+  if (!m || (m[2] === '' && (m[3] ?? '') === '')) {
+    throw new Error(
+      `rmbUpper(amount): \`amount\` is not a number (${describe(amount)}). ` +
+      'Pass a number, a currency field, or decimal text such as "245000.00".',
+    );
+  }
+  const [, sign, int, frac = '', exp] = m;
+  const digits = int + frac;
+  const lead = digits.search(/[1-9]/);
+  if (lead === -1) return 0n;
+  // The power of ten of the leading digit; a long exponent reads ±Infinity.
+  const place = int.length - 1 - lead + (exp === undefined ? 0 : Number(exp));
+  if (place > TOP_PLACE) throw new Error(TOO_LARGE);
+  if (place < BOTTOM_PLACE) return 0n;
+  const kept = digits.slice(lead, lead + place - BOTTOM_PLACE + 1).padEnd(place - BOTTOM_PLACE + 1, '0');
+  const thousandths = BigInt(sign === '-' ? `-${kept}` : kept);
+  return divideToPlaces({ digits: thousandths, scale: -BOTTOM_PLACE }, { digits: 1n, scale: 0 }, 2).digits;
 }
 
 /** A short, value-free description of a refused argument for the error text. */
