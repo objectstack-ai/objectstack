@@ -1340,6 +1340,11 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     // read the protocol takes at that package's address,
                     // `servedHolderAddressOf`), and every registry holder of
                     // the name. Two served holders are refused above.
+                    // [#34041, ADR-0150 D3] …and of every other type that read
+                    // re-addresses (a `doc`, `view`, `translation`, …), all but
+                    // an `action`, which its own bare judge serves: the
+                    // metadata service keeps such a type by name alone, so its
+                    // snapshot can be the disabled holder's body.
                     let mixedOwner: string | undefined;
                     let mixedHolders: readonly string[] = [];
                     if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
@@ -1357,7 +1362,7 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                             const owner = envelope?.packageId;
                             const ownerType = canonicalMetaUrlType(type);
                             if (!withheld && typeof owner === 'string' && typeof registry.packageScopedHoldersOf === 'function'
-                                && typeof registry.readsByPackage === 'function' && registry.readsByPackage(ownerType) === true) {
+                                && ownerType !== 'action') {
                                 const holders: readonly string[] = registry.packageScopedHoldersOf(
                                     ownerType, name, null, { includeDisabledPackages: true },
                                 ) ?? [];

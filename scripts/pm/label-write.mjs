@@ -198,7 +198,8 @@
  *   report    the NEWEST `os-dev-report` on the card the pull delivers (`deliveredCardNumber`) among comments by the
  *             relay's identity or a governed approver (`recordAuthorTrusted`) — newest-of, marker and payload
  *             candidates are the patrol's readers, called, ⛔ never a second parser. When that report's `pr` names
- *             ANOTHER pull (siblings on one card), the newest trusted report whose `pr` names THIS pull, or none.
+ *             ANOTHER pull (siblings on one card), the newest trusted report whose `pr` names THIS pull, or none — a
+ *             null or URL-less `pr` names no pull, so in that fallback it is not this pull's and is passed over too.
  *   sha       its `dogfood_battery` must open with a sha that is the pull's head, or that a first-parent walk from the
  *             head reaches over merges of the base alone: each step's commit has exactly two parents, the second one
  *             on the base branch (`GET /compare/{parent2}...{base}` answers `ahead` or `identical`).
@@ -1549,7 +1550,10 @@ export async function landDogfoodGate({ repo, issue, card, doCall }) {
       );
     }
     const listed = await doCall('comments-list', `/repos/${repo}/issues/${delivered.card}/comments?per_page=100&page=${page}`, {});
-    if (listed.verdict !== 'ok') return unread(`card #${delivered.card}'s thread`, listed, 'land again once the card reads');
+    if (listed.verdict !== 'ok') {
+      // A 404 is as likely the pull delivering the wrong card (its body or its branch) as the platform failing to answer.
+      return unread(`card #${delivered.card}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card this pull delivers (#${delivered.card})` : ''}`);
+    }
     if (!Array.isArray(listed.json)) return refuse(`card #${delivered.card}'s thread answered no list on page ${page}`, 'land again once the card reads');
     rows.push(...listed.json);
     if (listed.json.length < 100) break;
@@ -2434,7 +2438,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
-  [LAND_DOGFOOD_BATTERY]: 46,
+  [LAND_DOGFOOD_BATTERY]: 50,
 });
 const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -3072,6 +3076,7 @@ export async function selfTest() {
       'an UNREADABLE title': [pull({ title: '' }), 'its title did not read'],
       'a MALFORMED `Clause-②:` line on an unmarked title': [pull({ title: 'fix: x', body: 'Fixes #8\n\nClause-②: maybe\n' }), 'reads malformed'],
       'a NEAR-MISS `Clause-②:` line on an unmarked title': [pull({ title: 'fix: x', body: 'Fixes #8\n\nClause-2: no (narrowing)\n' }), 'reads as a near miss (spelling)'],
+      'an INLINE-KEY `Clause-②:` near miss on an unmarked title': [pull({ title: 'fix: x', body: 'Fixes #8\n\nThe claim says Clause-②: no (narrowing) here.\n' }), 'reads as a near miss (inline-key)'],
       'a pull that does not read': [{ ...pull(), hooks: { 'pull-read': [{ status: 404 }] } }, 'the pull did not read', EXIT_PREREQUISITE],
       'a pull read with no full head sha': [pull({ head: 'abc' }), 'no full head sha'],
       'NO CARD — no closing keyword, no `Part of`, no dev branch': [pull({ body: 'A body naming nothing.\n', ref: 'feature/x' }), 'why: no card'],
@@ -3105,6 +3110,9 @@ export async function selfTest() {
     const oneShorter = await land({ ...atCap, commits: { ...atCap.commits, [(LAND_MERGE_HOP_CAP).toString(16).padStart(2, '0').repeat(20)]: undefined, [(LAND_MERGE_HOP_CAP - 1).toString(16).padStart(2, '0').repeat(20)]: [BELOW, MAIN_SIDE] } });
     t(`…while a battery exactly ${LAND_MERGE_HOP_CAP} merges below the head passes — the cap is the hop count, not one short of it`, [oneShorter.exit, oneShorter.text.includes(`ran ${LAND_MERGE_HOP_CAP} merge(s)`)], [EXIT_OK, true], oneShorter.text.slice(-400));
     const pageCount = (await land(cases['a TRUNCATED listing'][0])).fake.calls.filter((c) => c.op === 'comments-list').length;
+    const card404 = await land(cases['a card thread that does not read'][0]);
+    const cardLimited = await land(cases['a RATE-LIMITED card thread read'][0]);
+    t('…a card thread answering 404 also names the body\'s card as the thing to correct; a rate-limited read does not', [card404.text.includes('HTTP 404'), card404.text.includes('or correct the card this pull delivers (#8)'), cardLimited.text.includes('or correct the card this pull delivers')], [true, true, false], card404.text.slice(-400));
     t('…the truncated listing read exactly the page cap and stopped', pageCount, LAND_COMMENT_PAGE_CAP);
 
     // Whose report, and which one.
@@ -3119,11 +3127,20 @@ export async function selfTest() {
     t('sibling pulls on one card: a newer report whose `pr` names ANOTHER pull is passed over for the newest naming THIS pull', [sibling.exit, sibling.text.includes('report comment 800')], [EXIT_OK, true], sibling.text.slice(-400));
     const noPr = await land(pull({ cards: { 8: [report(RAN_HEAD, { id: 810, at: '2026-11-08T12:00:00Z', pr: 'https://github.com/objectstack-ai/objectstack/pull/9' }), report(NA, { id: 811, at: '2026-11-08T13:00:00Z', pr: null })] } }));
     t('…while a newest report whose `pr` is null stays the newest — only a report naming another pull moves the gate', [noPr.exit, noPr.text.includes('comment 811')], [EXIT_USAGE, true]);
+    const nullFallback = await land(pull({ cards: { 8: [report(RAN_HEAD, { id: 820, at: '2026-11-08T12:00:00Z', pr: null }), report(NA, { id: 821, at: '2026-11-08T13:00:00Z', pr: 'https://github.com/objectstack-ai/objectstack/pull/9' })] } }));
+    t('⛔ …and in the sibling fallback a null-`pr` report is NOT this pull\'s: under a newest naming another pull, an older null-`pr` run on the head refuses', [...refused(nullFallback), nullFallback.text.includes('no trusted report names this one'), nullFallback.text.includes('comment 821')], [...REFUSED, true, true], nullFallback.text.slice(-400));
     t('the `pr` reading: this pull, another pull (number or repo), and null for no URL', [reportNamesPull(report(NA).body, { repo: 'objectstack-ai/objectstack', number: 7 }), reportNamesPull(report(NA, { pr: 'https://github.com/objectstack-ai/objectstack/pull/70' }).body, { repo: 'objectstack-ai/objectstack', number: 7 }), reportNamesPull(report(NA, { pr: 'https://github.com/objectstack-ai/cloud/pull/7' }).body, { repo: 'objectstack-ai/objectstack', number: 7 }), reportNamesPull(report(NA, { pr: null }).body, { repo: 'objectstack-ai/objectstack', number: 7 })], ['this', 'other', 'other', null]);
     const absent = await land(pull({ title: 'fix(pm): no declaration', body: 'Fixes #8\n\nNo declaration line at all.\n', cards: {} }));
     t('an ABSENT `Clause-②:` line on an unmarked title is not judged — as Check Changeset reads it', [absent.exit, absent.text.includes('not judged')], [EXIT_OK, true]);
     const approver = await land(pull({ cards: { 8: [report(RAN_HEAD, { login: GOVERNED_APPROVERS[0] })] } }));
     t('…a report written by a governed approver is trusted, as the record leg trusts it', approver.exit, EXIT_OK);
+    // ↔ the rules text names this gate where `--land` is taught, and the gate's rule path is still the file that holds the rule.
+    const landingText = readFileSync(new URL('.claude/skills/pm-dispatch/references/landing-operations.md', REPO_ROOT), 'utf8');
+    const gateLine = landingText.split('\n').find((l) => l.includes('`--land`') && l.includes('`(narrowing)`')) ?? '';
+    const ruleLine = readFileSync(new URL(LAND_DOGFOOD_RULE_PATH, REPO_ROOT), 'utf8').split('\n').find((l) => l.includes('dogfood') && l.includes('`!`') && l.includes('`(narrowing)`')) ?? '';
+    t('↔ both ends name the same rule, one line each: landing-operations.md\'s `--land` line carries `!`, `(narrowing)`, dogfood and `os-dev.md`, and the gate\'s rule path (os-dev.md) has ONE line carrying dogfood, `!` and `(narrowing)` together',
+      [gateLine.includes('`!`'), gateLine.includes('dogfood'), gateLine.includes('`os-dev.md`'), LAND_DOGFOOD_RULE_PATH, ruleLine !== ''],
+      [true, true, true, '.claude/agents/os-dev.md', true], `rule line: ${JSON.stringify(ruleLine)}`);
 
     // Ordering and shape.
     const early = await land(pull({ cards: { 8: [report(NA)] } }));

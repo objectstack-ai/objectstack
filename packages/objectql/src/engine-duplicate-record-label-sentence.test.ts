@@ -409,7 +409,10 @@ describe('the duplicate refusal speaks the writer\'s locale, and names a declare
       expect(answer.status).toBe(409);
       expect(answer.body.code).toBe('UNIQUE_VIOLATION');
       expect(answer.body).not.toHaveProperty('field');
-      expect(answer.body).not.toHaveProperty('userMessage');
+      // The producer declares the same sentence on the marked channel, and the
+      // flat 409 carries it beside `error`.
+      expect(failure.userMessage).toBe(EN_NAMED);
+      expect(answer.body.userMessage).toBe(EN_NAMED);
       expect(answer.body.error).toBe(EN_NAMED);
     });
 
@@ -425,6 +428,7 @@ describe('the duplicate refusal speaks the writer\'s locale, and names a declare
       expect(answer.body.code).toBe('UNIQUE_VIOLATION');
       expect(answer.body).not.toHaveProperty('field');
       expect(answer.body.error).toBe(ZH_NAMED);
+      expect(answer.body.userMessage).toBe(ZH_NAMED);
     });
 
     it('the Postgres DETAIL shape matches the same declared index', async () => {

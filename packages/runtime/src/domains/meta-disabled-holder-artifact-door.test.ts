@@ -420,3 +420,66 @@ describe.each([
         await expectRefusedNamingBoth();
     });
 });
+
+// [#34041, ADR-0150 D3] A disabled package holds no name, so beside one
+// enabled holder of a doc every bare door serves that holder's doc. The
+// artifact door's manager keeps a `doc` by name alone (the body registered
+// last), and the read naming no package was re-addressed to the served holder
+// only for a type the registry reads by package (`servedHolderAddressOf`), so
+// the service's copy, the disabled body's when it registered last, was the
+// layer read and then withheld. Measured on this rig before the fix
+// (origin/main 01598d93): with beta disabled and registered last, the plain
+// read, `/layers` and `/published` answered 404 on both transports.
+describe.each([
+    { order: 'the disabled holder registered last', packages: [ALPHA, BETA] },
+    { order: 'the disabled holder registered first', packages: [BETA, ALPHA] },
+])('[#34041] the bare doc doors beside one enabled and one disabled holder of one doc name, $order', ({ packages }) => {
+    let booted: Booted | undefined;
+
+    beforeAll(async () => {
+        booted = await bootArtifactKernel(packages, docBodyOf([ALPHA, BETA]));
+    }, 120_000);
+
+    afterAll(async () => {
+        if (!booted) return;
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        rmSync(booted.root, { recursive: true, force: true });
+    });
+
+    it('the fixture: the metadata service keeps the doc of the body registered last', async () => {
+        const service = booted!.kernel.getService<MetadataManager>('metadata');
+        expect((await service.get('doc', 'shared_doc') as { _packageId?: unknown } | undefined)?._packageId).toBe(packages[packages.length - 1]);
+    });
+
+    it('beta disabled: the plain read, /layers and /published serve alpha\'s doc on both transports, never beta\'s', async () => {
+        booted!.engine.registry.disablePackage(BETA);
+        try {
+            const answers = await bareDoors(booted!, 'doc', 'shared_doc');
+            // Every door at once, so a red names each door that answered otherwise.
+            expect(answers.map((answer) => [answer.door, answer.status, ...(answer.door.endsWith('/layers')
+                ? [answer.body?.code?.label, answer.body?.effective?.label]
+                : [answer.body?.item?.label ?? answer.body?.label])]))
+                .toEqual(answers.map((answer) => [answer.door, 200, ...(answer.door.endsWith('/layers') ? ['alpha doc', 'alpha doc'] : ['alpha doc'])]));
+            for (const answer of answers) expect(JSON.stringify(answer.body ?? null), answer.door).not.toContain('# beta');
+        } finally {
+            booted!.engine.registry.enablePackage(BETA);
+        }
+    });
+
+    it('CONTROL: both disabled, every bare door answers 404; both enabled again, every bare door refuses 409 naming both', async () => {
+        booted!.engine.registry.disablePackage(ALPHA);
+        booted!.engine.registry.disablePackage(BETA);
+        try {
+            const answers = await bareDoors(booted!, 'doc', 'shared_doc');
+            expect(answers.map((answer) => [answer.door, answer.status])).toEqual(answers.map((answer) => [answer.door, 404]));
+            for (const answer of answers) expect(JSON.stringify(answer.body ?? null), answer.door).not.toMatch(/# (alpha|beta)/);
+        } finally {
+            booted!.engine.registry.enablePackage(ALPHA);
+            booted!.engine.registry.enablePackage(BETA);
+        }
+        for (const answer of await bareDoors(booted!, 'doc', 'shared_doc')) {
+            expect([answer.status, errorCodeOf(answer.body), answer.door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', answer.door]);
+            for (const id of [ALPHA, BETA]) expect(JSON.stringify(answer.body ?? null), answer.door).toContain(id);
+        }
+    });
+});
