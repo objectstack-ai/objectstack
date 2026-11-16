@@ -2936,7 +2936,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     everyone.
         const previousLookup = this.ledger.read(manifestId);
         const previousEntry = previousLookup.entry;
-        const gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
+        //
+        //     [#34407] The gate reads every package body's objects, so a
+        //     `packages` the resolver refuses (ADR-0112 `code` + its declared
+        //     4xx status, the refusal the `manifest` service raises on the same
+        //     bytes) is answered here, before anything is written — never
+        //     thrown out of the door. An undeclared throw stays a throw.
+        let gate: ReturnType<MarketplaceInstallLocalPlugin['evaluateGlobalUniqueGate']>;
+        try {
+            gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
+        } catch (err: any) {
+            const refusal = resolveThrownHttpError(err);
+            if (refusal.declaredStatus === undefined || refusal.status >= 500) throw err;
+            return c.json({
+                success: false,
+                error: {
+                    code: refusal.code,
+                    message: `Package '${manifestId}' cannot be installed: ${String(err?.message ?? err)} Nothing was installed or written.`,
+                },
+            }, refusal.status);
+        }
         if (gate.blocked) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] install of ${manifestId} stopped by the ADR-0120 D5e posture gate ` +
@@ -4608,7 +4627,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return { blocked: false, posture, pending: [], ...(carried ? { attestation: carried } : {}) };
         }
 
-        const findings = collectGlobalUniques(manifest?.objects);
+        // [#34407, ADR-0130 D4] The objects of every package this artifact
+        // delivers, through the one reader of a package-owned collection: the
+        // top-level `objects` when the body carries them (a flat bundle, or a
+        // composed artifact's flattened union — read once), otherwise every
+        // package body's, in package order. A composed bundle carries no
+        // top-level `objects`, so the top-level read listed nothing and its
+        // installation-wide uniques installed unasked. The resolver's refusal
+        // of a malformed `packages` propagates to the caller, which answers it.
+        const findings = collectGlobalUniques(resolveStackCollection(manifest, 'objects'));
         const pending = unconfirmedGlobalUniques(findings, carried, posture);
         if (pending.length === 0) {
             return { blocked: false, posture, pending: [], ...(carried ? { attestation: carried } : {}) };
@@ -6976,9 +7003,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Replicate the start-time side-effects that AppPlugin runs for
      * statically-declared apps but the `manifest` service does NOT:
      *
-     *   1. Load `manifest.translations` (array of `Record<locale, data>`)
-     *      into the i18n service — auto-creating an in-memory fallback if
-     *      none is registered, matching AppPlugin's behaviour.
+     *   1. Load the package's `translations` (arrays of `Record<locale, data>`:
+     *      the top-level list, or every package body's in package order for a
+     *      composed bundle, #34407) into the i18n service — auto-creating an
+     *      in-memory fallback if none is registered, matching AppPlugin's
+     *      behaviour.
      *
      *   2. Merge the package's seed datasets ({@link seedDatasetsOf}: the
      *      top-level `data`, or every package body's in package order for a
@@ -7010,9 +7039,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         let seedSummary: any = { mode: 'skipped', reason: 'no-datasets' };
 
         // ── 1. i18n bundles ─────────────────────────────────────────────
+        // [#34407, ADR-0130 D4] `translations` through the one reader of a
+        // package-owned collection, as the seed datasets below: the top-level
+        // list when the body carries one (a flat bundle, or a composed artifact
+        // that still carries its flattened union — read once), otherwise every
+        // package body's, in package order. A composed bundle carries no
+        // top-level `translations`, and the top-level read loaded none of its
+        // labels. A resolver refusal lands in this step's catch, as any other
+        // failure of it does.
         try {
             const bundles: Array<Record<string, unknown>> = [];
-            if (Array.isArray(manifest?.translations)) bundles.push(...manifest.translations);
+            bundles.push(...(resolveStackCollection(manifest, 'translations') as Array<Record<string, unknown>>));
             if (Array.isArray(manifest?.i18n)) bundles.push(...manifest.i18n);
 
             if (bundles.length > 0) {
