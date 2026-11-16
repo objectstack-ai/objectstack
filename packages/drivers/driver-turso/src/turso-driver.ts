@@ -4957,10 +4957,18 @@ export class TursoDriver extends SqlDriver {
             `could not be read back (${readError?.message ?? readError}); the next drift read decides`,
         );
       }
+      // The comma class (ruling 6922037129, the limit accepted): libSQL ends
+      // the old definition at the first comma after the column's name, so a
+      // definition holding one is refused. The log names the class, and no
+      // rebuild follows; the column keeps its NOT NULL.
+      const commaClass = plan.definition.includes(',')
+        ? '. The column\'s stored definition holds a comma, and libSQL\'s ALTER COLUMN ends the old definition at the ' +
+          'first comma after the column\'s name, so this transport cannot relax it: the column keeps its NOT NULL'
+        : '';
       return skip(
         now === stored
           ? `the batch carrying \`${statement}\` and its check that the stored table SQL reads as planned failed, ` +
-              `and the stored table SQL reads as before, so nothing landed: ${failure}`
+              `and the stored table SQL reads as before, so nothing landed: ${failure}${commaClass}`
           : `the batch carrying \`${statement}\` failed (${failure}), and its outcome is unknown: the stored table SQL ` +
               'no longer reads as before; the next drift read decides',
       );

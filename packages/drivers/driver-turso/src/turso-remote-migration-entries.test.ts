@@ -436,6 +436,9 @@ describe('relax_not_null in place, with libSQL\'s ALTER COLUMN (#33724, ruling 6
     // Called refused only because the stored SQL, read again, is what it was.
     const [line] = warned().filter((l) => l.includes('relax_not_null on p.code'));
     expect(line).toContain('and the stored table SQL reads as before, so nothing landed');
+    // …and names the class (ruling 6922037129): the comma, and the NOT NULL the column keeps.
+    expect(line).toContain("The column's stored definition holds a comma");
+    expect(line).toContain('so this transport cannot relax it: the column keeps its NOT NULL');
   });
 
   it('a transport error after the server committed is logged as an unknown outcome, never as a rollback', async () => {
@@ -478,11 +481,16 @@ describe('relax_not_null in place, with libSQL\'s ALTER COLUMN (#33724, ruling 6
       }
       return send(statements, mode);
     };
+    const warned = warnLines(remote);
 
     expect(await remote.applyMigrationEntries([entry!])).toEqual({ applied: [], skipped: [entry] });
 
     expect(checked).toBe(true);
     expect(await tableSqlOf(file, 'p')).toBe(before);
+    // A comma-free definition is not called the comma class.
+    const [line] = warned().filter((l) => l.includes('relax_not_null on p.price'));
+    expect(line).toContain('so nothing landed');
+    expect(line).not.toContain('holds a comma');
     expect((await columnFactsOf(file, 'p')).price?.notNull).toBe(true);
   });
 });
