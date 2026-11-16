@@ -22,6 +22,9 @@
  *   selected rows, an action's parameter dialog, inline edit on a record
  *   page — leaves every `{ $record }` entry out, whatever values it passes the widget: the values
  *   such a host passes are not the record the author's path names.
+ * - Only a stamp `withRecordBeingEdited` issued counts. The key written as
+ *   data — on a document's form field, an action's params — is no stamp, so
+ *   no host is opted in by what it is handed.
  * - An entry whose referenced value is empty — null, unset, `''`, an empty
  *   list, a hop whose lookup is unset — is left out of the query, the rule an
  *   unset `dependsOn` parent follows.
@@ -48,8 +51,20 @@ export type LookupFilterEntry = NonNullable<SpecField['lookupFilters']>[number];
  * `FOLLOWED_PARENT_OBJECT_KEY` (`currency.ts`) and `FORM_OBJECT_KEY`.
  *
  * ⛔ Opt-in: a widget whose field carries no stamp resolves no `{ $record }`.
+ * ⛔ Only a stamp {@link withRecordBeingEdited} issued counts: a value under
+ * this key that arrived as data (a document's form field, an action's params)
+ * is not one, whatever its shape, so no host can be opted in by what it is
+ * handed.
  */
 export const RECORD_BEING_EDITED_KEY = 'recordBeingEdited';
+
+/**
+ * Every stamp {@link withRecordBeingEdited} issued. Membership is what makes a
+ * stamp the form's statement rather than a document's: nothing parsed from
+ * JSON is ever in it. A copy of the field def keeps the stamp it carries, so
+ * the stamp survives every spread between the form and the widget.
+ */
+const ISSUED_STAMPS = new WeakSet<object>();
 
 /** What a record form stamps under {@link RECORD_BEING_EDITED_KEY}. */
 export interface RecordBeingEdited {
@@ -138,16 +153,20 @@ export function withRecordBeingEdited<T extends object>(
     const target = referenceTargetOf(fields?.[via]);
     if (target) hopObjects[via] = target;
   }
-  const stamp: RecordBeingEdited = { hopObjects };
+  const stamp: RecordBeingEdited = Object.freeze({ hopObjects: Object.freeze(hopObjects) });
+  ISSUED_STAMPS.add(stamp);
   return { ...def, [RECORD_BEING_EDITED_KEY]: stamp };
 }
 
-/** The record-being-edited stamp a form put on `field`, or `undefined` when none did. */
+/**
+ * The record-being-edited stamp a form put on `field`, or `undefined` when
+ * none did. A value under the key that {@link withRecordBeingEdited} did not
+ * issue is no stamp.
+ */
 export function readRecordBeingEdited(field: unknown): RecordBeingEdited | undefined {
   const value = (field as Record<string, unknown> | null | undefined)?.[RECORD_BEING_EDITED_KEY];
-  if (!isRow(value)) return undefined;
-  const hopObjects = isRow(value.hopObjects) ? (value.hopObjects as Record<string, string>) : {};
-  return { hopObjects };
+  if (!isRow(value) || !ISSUED_STAMPS.has(value)) return undefined;
+  return value as unknown as RecordBeingEdited;
 }
 
 /**
