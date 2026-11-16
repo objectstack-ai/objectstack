@@ -434,7 +434,7 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'both is usually right, but "usually" is a human judgement, not a merge rule. Not split per-entry '
       + 'alongside the migrations registry by #7297 (the #6957 ruling names two append registries and the '
       + 'other one is `scripts/adr-anchors.json`, #7301); #29987 split it by a codemod '
-      + '(`scripts/codemod-split-conversions-registry.mjs`): each conversion is now a module of its own '
+      + '(split by #29993): each conversion is now a module of its own '
       + 'under `conversions/entries/`, a new file that never conflicts, and what a retirement still edits '
       + 'here is its import line and its list entry — hand-written text a human merges, never regenerated.',
   },

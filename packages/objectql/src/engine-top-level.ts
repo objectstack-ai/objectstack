@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#29986 codemod] The top-level declarations ahead of `ObjectQL` in
-// `engine.ts` that moved out whole by `scripts/codemod-split-engine.mjs` (lever
+// `engine.ts` that moved out whole (split by #30012; lever
 // (b) of ruling 6591753301).
 //
 // A MOVE, not a redesign: each declaration below is its `engine.ts` text

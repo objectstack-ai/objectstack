@@ -12,7 +12,8 @@
  * it stood, re-indented four levels and otherwise unedited: the same actor
  * resolver handed to the attribution scope, the same refresh skip for a minted
  * principal session, the same per-number OTP send guard, the same password
- * complexity and reuse checks, the same
+ * complexity and reuse checks, the cloud-managed refusal on the two doors that
+ * change a membership or its role (added after the move), the same
  * remove-member, organization-delete and no-record revoke refusals, the same
  * held-caller refusal on the admin plugin's role-scalar actions, the same
  * no-record admin revoke refusal, the same held-caller refusal on rewriting or
@@ -121,6 +122,30 @@ const CLOUD_MANAGED_RESET_DOORS: ReadonlySet<string> = new Set([
   PHONE_RESET_PASSWORD_PATH,
   '/request-password-reset',
   '/phone-number/request-password-reset',
+]);
+
+/**
+ * Every organization-family door that writes or deletes an organization
+ * membership row, which a cloud-managed environment refuses: the
+ * organisation that hosts it manages membership and its tiers. Make Owner
+ * (`sys_member.transfer_ownership`) sends the owner tier to
+ * update-member-role, so it is refused there; create makes the caller the
+ * new organization's owner, and delete ends every membership of the
+ * organization. `/organization/add-member` (exactly a platform administrator,
+ * adding a membership) is deliberately absent: it restores a membership the
+ * environment lost. The census of the family, with each other route's reason,
+ * is `cloud-managed.ts`'s header.
+ */
+const CLOUD_MANAGED_MEMBERSHIP_DOORS: ReadonlyMap<
+  string,
+  'removeMember' | 'updateMemberRole' | 'leaveOrganization' | 'acceptInvitation' | 'createOrganization' | 'deleteOrganization'
+> = new Map([
+  ['/organization/remove-member', 'removeMember'],
+  [UPDATE_MEMBER_ROLE_PATH, 'updateMemberRole'],
+  ['/organization/leave', 'leaveOrganization'],
+  ['/organization/accept-invitation', 'acceptInvitation'],
+  ['/organization/create', 'createOrganization'],
+  [ORGANIZATION_DELETE_PATH, 'deleteOrganization'],
 ]);
 
 /**
@@ -372,6 +397,32 @@ export async function globalBeforeHook(
       }
     }
     // fall through to the path's own handling below
+  }
+
+  // ── Cloud-managed: membership and its tiers are the hosting organisation's ──
+  // On a cloud-managed environment the organisation that hosts it manages
+  // who is a member and at which tier, so every door that writes or deletes
+  // an organization membership row (`CLOUD_MANAGED_MEMBERSHIP_DOORS`:
+  // remove-member, update-member-role with Make Owner, leave,
+  // accept-invitation, create, delete) refuses every request with the
+  // invite-member envelope (`cloud-managed.ts`), ahead of the vendor's
+  // handler: nothing is written. AHEAD of the remove-member permission arm,
+  // the organization-delete records arm and the role-change grant read below,
+  // so a refused request runs none of them. As with invite-member, the fact
+  // is public (`features.cloudManaged` on `/auth/config`), so answering it
+  // ahead of the session check tells an anonymous caller nothing new.
+  // add-member is not among these doors. This line is the only one: the
+  // invitation refusal has a second line in `beforeCreateInvitation`, but no
+  // in-process caller reaches these vendor operations (each is reached
+  // through its route alone, so through this hook), so one line is enough
+  // today. A future in-process caller of one of them needs its own refusal.
+  const membershipDoor = CLOUD_MANAGED_MEMBERSHIP_DOORS.get(ctx?.path ?? '');
+  if (membershipDoor && isCloudManaged()) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('CONFLICT', {
+      message: CLOUD_MANAGED_REFUSAL_MESSAGES[membershipDoor],
+      code: CLOUD_MANAGED_REFUSAL_CODE,
+    });
   }
 
   // ── #8289: remove-member answers its PERMISSION denial itself ──
