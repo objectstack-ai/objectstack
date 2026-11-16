@@ -123,12 +123,6 @@ function isHoldersPairRow(engine: unknown, type: string, name: string, item: unk
 }
 
 /**
- * [#34041] The types whose bare read {@link servedHolderAddressOf} never
- * re-addresses: each is judged against a disabled package elsewhere.
- */
-const SERVED_HOLDER_JUDGED_ELSEWHERE: ReadonlySet<string> = new Set(['object', 'action', 'package']);
-
-/**
  * [#32183] The package whose stack a read naming no package takes, for a
  * name a disabled package also holds: the one holder ADR-0150 D3 resolves
  * over the served set. `undefined` leaves the read as it was: a type judged
@@ -169,6 +163,12 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
     }
     return served[0];
 }
+
+/**
+ * [#34041] The types whose bare read {@link servedHolderAddressOf} never
+ * re-addresses: each is judged against a disabled package elsewhere.
+ */
+const SERVED_HOLDER_JUDGED_ELSEWHERE: ReadonlySet<string> = new Set(['object', 'action', 'package']);
 
 /**
  * [#32354, ADR-0150 D3] The served holder of a name for a read naming no
