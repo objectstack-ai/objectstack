@@ -1720,14 +1720,15 @@ describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)',
 /**
  * ── Rule: security-superuser-field-mask-inert (ADR-0066 D2 ⑧ as amended) ────
  *
- * Ruling of record 6573563853, letter A: a set holding View All / Modify All
- * on an object votes on every field of it, so the same set's `readable: false`
- * (View All or Modify All) or edit lock (Modify All) binds none of its holders.
- * The pair is legal, so the finding is a warning. Each case below is a set
- * PARSED by `PermissionSetSchema`, the normalized set the runtime reads, unless
- * it says otherwise.
+ * Ruling of record 6573563853, letter A: a set holding Modify All on an
+ * object votes on every field of it, so the same set's `readable: false` or
+ * edit lock binds none of its holders. ADR-0066 D2 ⑧ note of 2026-11-15: a
+ * set's own `readable: false` binds beside its own View All, so that pair is
+ * not reported. The pair is legal, so the finding is a warning. Each case
+ * below is a set PARSED by `PermissionSetSchema`, the normalized set the
+ * runtime reads, unless it says otherwise.
  */
-describe('validateSecurityPosture · a field mask its own set\'s View All / Modify All makes inert', () => {
+describe('validateSecurityPosture · a field mask its own set\'s Modify All makes inert', () => {
   const inert = (stack: Record<string, unknown>) =>
     validateSecurityPosture(stack)
       .filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
@@ -1747,23 +1748,22 @@ describe('validateSecurityPosture · a field mask its own set\'s View All / Modi
     }))).toEqual([['warning', 'permission set "deal_manager"', 'permissions[0].fields["deal.restricted_note"]']]);
   });
 
-  it('the explain-principal-person fixture before its repair: View All beside a read mask', () => {
-    // `qa_pp_directory_masked` in plugin-security's `explain-principal-person.test.ts`
-    // reached every user through View All until the ruling made its email
-    // mask inert; it now reaches them through a row policy.
+  it('View All beside the set\'s own read mask is not reported: the mask binds', () => {
+    // `qa_pp_directory_masked` as plugin-security's `explain-principal-person.test.ts`
+    // first wrote it: every user through View All, the email withheld.
     expect(inert(parsed({
       name: 'qa_pp_directory_masked',
       objects: { sys_user: { allowRead: true, viewAllRecords: true }, qa_pp_board: { allowRead: true } },
       fields: { 'sys_user.email': { readable: false, editable: false } },
       systemPermissions: ['manage_users'],
-    }))).toEqual([['warning', 'permission set "qa_pp_directory_masked"', 'permissions[0].fields["sys_user.email"]']]);
+    }))).toEqual([]);
   });
 
-  it('the composed sets of admin-ledger-decision-metadata.dogfood.test.ts: only the read mask is inert', () => {
+  it('the composed sets of admin-ledger-decision-metadata.dogfood.test.ts: View All unbinds none of their rows', () => {
     // Spelled as that file composes them, from shared consts, which is why a
     // structural grep for the pair finds nothing there. View All on the user
-    // object leaves the two `editable: false` grants binding; it unbinds the
-    // `readable: false` on `email`, in both sets that carry it.
+    // object leaves the `editable: false` grants binding, and the
+    // `readable: false` on `email` binds in both sets that carry it.
     const read = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
     const grants = { sys_user: { ...read, viewAllRecords: true }, sys_audit_log: read };
     const withheldField = { 'sys_user.email': { readable: false, editable: false } };
@@ -1775,10 +1775,7 @@ describe('validateSecurityPosture · a field mask its own set\'s View All / Modi
       { name: 'ald_unmask_set', label: 'ALD unmask', objects: grants, fields: classFieldsReadable },
       { name: 'ald_withhold_set', label: 'ALD withhold', objects: grants, fields: { ...classFieldsReadable, ...withheldField } },
       { name: 'ald_withhold_only_set', label: 'ALD withhold only', objects: { sys_user: { allowRead: true, viewAllRecords: true } }, fields: withheldField },
-    ))).toEqual([
-      ['warning', 'permission set "ald_withhold_set"', 'permissions[1].fields["sys_user.email"]'],
-      ['warning', 'permission set "ald_withhold_only_set"', 'permissions[2].fields["sys_user.email"]'],
-    ]);
+    ))).toEqual([]);
   });
 
   it('Modify All unbinds a read mask too; View All never unbinds an edit lock', () => {
@@ -1838,15 +1835,15 @@ describe('validateSecurityPosture · a field mask its own set\'s View All / Modi
     ))).toEqual([]);
   });
 
-  it('says which bit unbinds which mask, in one line, and the id is explained', () => {
+  it('says which mask Modify All unbinds, in one line, and the id is explained', () => {
     const [read] = validateSecurityPosture(parsed({
-      name: 'ps', objects: { sys_user: { allowRead: true, viewAllRecords: true } },
-      fields: { 'sys_user.email': { readable: false } },
+      name: 'ps', objects: { sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+      fields: { 'sys_user.email': { readable: false, editable: true } },
     })).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
     const [write] = validateSecurityPosture({
       permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.note': { readable: false, editable: false } } }],
     }).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
-    expect(read.message).toContain('viewAllRecords');
+    expect(read.message).toContain('modifyAllRecords on objects.sys_user');
     expect(read.message).toContain('readable: false');
     expect(write.message).toContain("objects['*']");
     expect(write.message).toContain('modifyAllRecords');
@@ -2060,9 +2057,9 @@ describe('validateSecurityPosture · a hidden master reference still decides a c
     }))).toEqual([]);
   });
 
-  it('control: the set\'s own View All on the detail makes the mask inert, so the inert rule speaks instead', () => {
+  it('control: the set\'s own Modify All on the detail makes the mask inert, so the inert rule speaks instead', () => {
     const stack = withSets([MASTER, DETAIL], {
-      name: 'auditor', objects: { line_item: { allowRead: true, viewAllRecords: true } },
+      name: 'operator', objects: { line_item: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
       fields: { 'line_item.invoice': { readable: false, editable: false } },
     });
     expect(hidden(stack)).toEqual([]);
@@ -2636,7 +2633,7 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     stack: {
       permissions: [{
         name: 'ps', label: 'PS',
-        objects: { deal: { allowRead: true, viewAllRecords: true } },
+        objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
         fields: { 'deal.amount': { readable: false, editable: false } },
       }],
     },
@@ -2799,7 +2796,7 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
-    // 20 since #29544: a field mask its own set's View All / Modify All makes inert.
+    // 20 since #29544: a field mask its own set's Modify All makes inert.
     // 21: a caller-keyed update policy that declares no check (ADR-0058 D4, info).
     // 22: a set's readable: false on a controlled_by_parent detail's master reference.
     expect(pushedRuleIds()).toHaveLength(22);
