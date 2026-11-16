@@ -806,8 +806,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // hydrator lays for it is tenant-authored, so it is no code layer (#21059,
     // above), and the row it came from is the environment's own item, which
     // answers first. Declined, `effective` was the empty code layer while the
-    // plain read served the row.
+    // plain read served the row. Only that entry: a stamp-less runtime
+    // registration is a code layer (`code` holds it), and beside a different
+    // package-less stored row it stays the effective layer, as the plain read
+    // serves it.
     const environmentRowAnswers = bareDocEnvironmentEntry !== undefined
+        && code === null
+        && isTenantAuthored(bareDocEnvironmentEntry)
         && isPackageLessRow({ package_id: overlayBinding });
     const effectiveBase: unknown | null = expandedFrom !== undefined
         ? expandedFrom.item

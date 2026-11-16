@@ -394,6 +394,15 @@ describe.each([
     const last = packages[packages.length - 1]!;
     const lastDoc = `${last.split('.').pop()} doc`;
 
+    // The environment's package-less stored row, laid once per kernel (the
+    // pins below read it in turn).
+    let rowLaid = false;
+    const layRowOnce = async () => {
+        if (rowLaid) return;
+        await layEnvironmentDocRow(booted!.engine);
+        rowLaid = true;
+    };
+
     beforeAll(async () => {
         booted = await bootArtifactKernel(packages, docBodyOf([ALPHA, BETA]));
     }, 120_000);
@@ -462,13 +471,29 @@ describe.each([
     // served the row while `/layers` answered `effective: null` (the sealed
     // doc's row declined) and both `/published` doors served an empty body.
     it('[#34248] a hydrated package-less row (hydrated before the artifacts): the plain read, /layers (no code layer, the row as overlay and effective) and /published serve the row on both transports, never the holder registered last; each exact address reads its own doc', async () => {
-        await layEnvironmentDocRow(booted!.engine);
+        await layRowOnce();
         booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'environment doc', content: '# env', _provenance: 'org' } as never, 'name' as never);
         await expectBareDoorsServe({ item: 'environment doc', code: undefined, overlay: 'environment doc' });
         await expectExactReadsOwnDoc();
         // The row alone, its registry copy gone: no exemption, refused again.
         docRegistryOf(booted!).delete('shared_doc');
         await expectRefusedNamingBoth();
+    });
+
+    // [review S4] A stamp-less runtime registration in the bare slot beside a
+    // DIFFERENT package-less stored row: the entry is a code layer, not the
+    // row's tenant-authored copy, so the row is no effective layer here and
+    // all three doors serve the entry, the row reported as `overlay` (as at
+    // 989f4ad7, before the hydrated row's rule was added).
+    it('[#34248] a stamp-less bare entry beside a different package-less stored row: the plain read, /layers (the entry as code and effective, the row as overlay) and /published serve the entry on both transports', async () => {
+        await layRowOnce();
+        booted!.engine.registry.registerItem('doc', { name: 'shared_doc', label: 'bare entry', content: '# bare' } as never, 'name' as never);
+        try {
+            await expectBareDoorsServe({ item: 'bare entry', code: 'bare entry', overlay: 'environment doc' });
+            await expectExactReadsOwnDoc();
+        } finally {
+            docRegistryOf(booted!).delete('shared_doc');
+        }
     });
 
     // [review M1] The same stored row hydrated by the production read
@@ -478,6 +503,7 @@ describe.each([
     // origin/main c9346317 and at this head). The other holder's address
     // reads its own doc.
     it('CONTROL [#34248]: the row hydrated after the artifacts (`loadMetaFromDb`) wears the first holder\'s envelope, and the bare doors refuse 409 naming both on both transports', async () => {
+        await layRowOnce();
         const hydrated = await (booted!.kernel.getService('protocol') as { loadMetaFromDb(): Promise<{ loaded: number; errors: number }> }).loadMetaFromDb();
         expect([hydrated.loaded > 0, hydrated.errors]).toEqual([true, 0]);
         const entry = docRegistryOf(booted!).get('shared_doc') as { _packageId?: unknown; _provenance?: unknown } | undefined;

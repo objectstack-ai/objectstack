@@ -4452,7 +4452,23 @@ export class RestServer {
             return;
         }
         const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
-        const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
+        let layered: unknown;
+        try {
+            layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
+        } catch (readError) {
+            // [ruling 6917064203 on #34398] The audience gate answers before
+            // any refusal that names holders — the plain read's own question.
+            const gated = await metaReadGate.gateHolderNamingRefusal(
+                this.metaItemReadGateSources(environmentId, req, p, true),
+                RestServer.metaTypeSingular(req.params.type), req.params.name,
+                metaReadGate.STORED_VERSION_DOOR_POLICY, readError,
+            );
+            if (gated) {
+                RestServer.sendMetaReadRefusal(res, gated);
+                return;
+            }
+            throw readError;
+        }
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
         // exemption, so the caller carries this transport's save-door

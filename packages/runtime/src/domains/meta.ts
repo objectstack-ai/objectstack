@@ -83,6 +83,7 @@ import {
     createMetaItemReadGate,
     createMetaLayeredAnswer,
     createMetaListAnswer,
+    gateHolderNamingRefusal,
     isPublicAudienceRead,
     metaDraftsQueryRefusal,
     metaItemLayersDeprecationHeaders,
@@ -1018,6 +1019,18 @@ async function answerMetaLayered(
             { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
     } catch (e: any) {
+        // [ruling 6917064203 on #34398] The audience gate answers before any
+        // refusal that names holders, as `RestServer`'s layered read asks it.
+        let gated: Awaited<ReturnType<typeof gateHolderNamingRefusal>>;
+        try {
+            gated = await gateHolderNamingRefusal(
+                metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+                pluralToSingular(type), name, STORED_VERSION_DOOR_POLICY, e,
+            );
+        } catch (fault: any) {
+            return withHeaders(deps.errorFromThrown(fault, 500), headers);
+        }
+        if (gated) return withHeaders(deps.error(gated.message, gated.status, { code: gated.code }), headers);
         return withHeaders(deps.errorFromThrown(e, 500), headers);
     }
     switch (answer.kind) {
@@ -2414,7 +2427,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // rule's refusal: `409` naming every holder, never a miss
                     // for the by-name service read below to answer with
                     // whichever item it finds first.
-                    if (isPackageScopedRefusal(e)) throw e;
+                    if (isPackageScopedRefusal(e)) {
+                        // [ruling 6917064203 on #34398] …answered only after
+                        // the audience gate admits the caller: the audience
+                        // gate answers before any refusal that names holders
+                        // (`gateHolderNamingRefusal`, `RestServer`'s question).
+                        const gated = await gateHolderNamingRefusal(
+                            metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
+                        );
+                        if (gated) return { handled: true, response: deps.error(gated.message, gated.status, { code: gated.code }) };
+                        throw e;
+                    }
                     // [ADR-0150 D3/D5, epic #31527] …and so is any refusal the
                     // protocol DECLARED (`refusal: true`): the read's answer,
                     // such as a by-name read an engine with no package-scoped

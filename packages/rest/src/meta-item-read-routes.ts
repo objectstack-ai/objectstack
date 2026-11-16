@@ -1086,7 +1086,26 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // [#22877] The member, read once above.
                             ...memberSelector,
                         };
-                        const envelope = await measureMetaRead(() => p.getMetaItem(itemRequest)) as Record<string, any>;
+                        // [ruling 6917064203 on #34398] The audience gate answers
+                        // before any refusal that names holders
+                        // (`gateHolderNamingRefusal`, the one both transports ask).
+                        const readPolicyFor: MetaReadGatePolicy = isDraftRead
+                            ? this.STORED_VERSION_DOOR_POLICY
+                            : { arms: 'all', app: 'gate' };
+                        let envelope: Record<string, any>;
+                        try {
+                            envelope = await measureMetaRead(() => p.getMetaItem(itemRequest)) as Record<string, any>;
+                        } catch (readError) {
+                            const gated = await metaReadGate.gateHolderNamingRefusal(
+                                this.metaItemAnswerSources(environmentId, req, p, readPolicyFor),
+                                metaType, req.params.name, readPolicyFor, readError,
+                            );
+                            if (gated) {
+                                this.sendMetaReadRefusal(res, gated);
+                                return;
+                            }
+                            throw readError;
+                        }
 
                         // [#20408] Everything this read does to the envelope
                         // after the store read is ONE chain,
@@ -1121,9 +1140,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // other caller" is every other caller who may READ
                         // drafts: one who may not never reaches this branch
                         // (`isDraftRead` is false for them).
-                        const readPolicy: MetaReadGatePolicy = isDraftRead
-                            ? this.STORED_VERSION_DOOR_POLICY
-                            : { arms: 'all', app: 'gate' };
+                        const readPolicy: MetaReadGatePolicy = readPolicyFor;
                         const answer = await metaReadGate.createMetaItemAnswer(
                             this.metaItemAnswerSources(environmentId, req, p, readPolicy),
                             { metaType, name: req.params.name, policy: readPolicy, maskPosture },

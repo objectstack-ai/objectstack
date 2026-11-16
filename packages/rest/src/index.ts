@@ -167,6 +167,7 @@ export {
     createMetaLayeredAnswer,
     createMetaListReadGate,
     createMetaListAnswer,
+    gateHolderNamingRefusal,
     isPublicAudienceRead,
     META_TYPE_READ_CAPABILITIES,
     META_TYPE_WRITE_CAPABILITIES,

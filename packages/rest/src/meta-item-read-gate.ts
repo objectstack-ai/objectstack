@@ -4755,6 +4755,39 @@ export function createMetaItemAnswer(
     };
 }
 
+/**
+ * [ruling 6917064203 on #34398 · #34247] The audience gate answers before any
+ * refusal that names holders. An exact `?package=X` read of a `doc` X holds no
+ * item of, while another package holds the name, is refused by the protocol
+ * `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with the holders as its
+ * candidates; that refusal is answered only to a caller the ADR-0046 §6.7
+ * docs audience admits to the name. A caller the gate refuses is answered the
+ * gate's own `401 UNAUTHENTICATED` / `403 PERMISSION_DENIED` instead.
+ *
+ * The doc arm of {@link createMetaItemReadGate} judges a doc by its NAME (its
+ * effective audience over the books that claim the name), so the judgment
+ * needs no holder's item. Any other thrown value, and any other type, is
+ * `undefined`: the transport answers the thrown value as it did. A gate input
+ * that cannot be read REJECTS, as the gate always does: the transport answers
+ * that fault, never the refusal.
+ *
+ * One function, called by both transports' plain read and `/layers` read.
+ */
+export async function gateHolderNamingRefusal(
+    sources: MetaItemReadGateSources,
+    metaType: string,
+    name: string,
+    policy: MetaReadGatePolicy,
+    thrown: unknown,
+): Promise<Extract<MetaItemReadRefusal, { reason: 'docs-audience' }> | undefined> {
+    if (metaType !== 'doc') return undefined;
+    const reason = (thrown as { refusal?: { reason?: unknown } } | null | undefined)?.refusal?.reason;
+    if (reason !== 'not-held-by-qualifier') return undefined;
+    const named = { name };
+    const verdict = await createMetaItemReadGate(sources, metaType, name, [named], policy)(named);
+    return verdict.kind === 'refuse' && verdict.refusal.reason === 'docs-audience' ? verdict.refusal : undefined;
+}
+
 // ── THE layered answer ────────────────────────────────────────────────────────
 
 /**

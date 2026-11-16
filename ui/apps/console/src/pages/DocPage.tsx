@@ -13,6 +13,7 @@ import { useAdapter } from '@object-ui/app-shell';
 import { MarkdownRenderer, extractToc } from '@object-ui/plugin-markdown';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { rewriteDocLinks } from './doc-links';
+import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
 import { BookSidebar } from './BookSidebar';
 import { DocRefusal } from './BookPage';
@@ -30,24 +31,6 @@ function scrollHeadingIntoView(id: string): boolean {
   const target = document.getElementById(id);
   target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return target !== null;
-}
-
-/**
- * The packages a `409 RESOURCE_CONFLICT` doc read names as holders of the
- * name: `@objectstack/client` carries the refusal's `details.candidates` on the
- * rejection (`{ kind: 'package', packageId }` per package). Null for any other
- * failure, and for a refusal that names no package, so those keep their state.
- */
-function conflictCandidates(err: unknown): string[] | null {
-  const e = err as { httpStatus?: unknown; code?: unknown; details?: { candidates?: unknown } } | null;
-  if (e?.httpStatus !== 409 || e.code !== 'RESOURCE_CONFLICT') return null;
-  const candidates = e.details?.candidates;
-  if (!Array.isArray(candidates)) return null;
-  const packageIds = candidates
-    .filter((c): c is { kind: 'package'; packageId: string } =>
-      c?.kind === 'package' && typeof c.packageId === 'string' && c.packageId !== '')
-    .map((c) => c.packageId);
-  return packageIds.length > 0 ? packageIds : null;
 }
 
 /**
@@ -123,10 +106,8 @@ export default function DocPage() {
         let raw: any;
         try {
           raw = await client.meta.getItem('doc', name, appName ? { packageId: appName } : undefined);
-        } catch (localErr: any) {
-          if (!appName) throw localErr;
-          const holders = conflictCandidates(localErr);
-          if (localErr?.httpStatus !== 404 && (holders === null || holders.includes(appName))) throw localErr;
+        } catch (localErr) {
+          if (!appName || !readsByNameAfter(localErr, appName)) throw localErr;
           raw = await client.meta.getItem('doc', name);
         }
         const item = raw?.item ?? raw?.data ?? raw;
