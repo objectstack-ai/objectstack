@@ -223,10 +223,10 @@ beforeAll(async () => {
  * staging gave, so no case sees another's writes. The tests switch the mode
  * on afterwards: every door under test reads the accessor per request.
  */
-async function stage() {
+async function stage(extra: Record<string, unknown> = {}) {
   const engine = createMemoryEngine();
   for (const [name, rows] of structuredClone(staged.tables)) engine.tables.set(name, rows);
-  const manager = makeManager(engine);
+  const manager = makeManager(engine, extra);
   const { ids, bearers } = staged;
 
   const users = () => (engine.tables.get('sys_user') ?? []) as any[];
@@ -805,15 +805,19 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the s
 
 /**
  * On a cloud-managed environment the organisation that hosts it manages who
- * is a member and with which role. The two doors that change a membership,
- * `remove-member` and `update-member-role` (Make Owner sends the owner role to
- * the second), refuse with the invite-member envelope and write nothing; the
- * remove-member permission arm and the role-change grant read stay behind the
- * refusal, so neither runs. `add-member`, platform-administrator only, stays
- * open: it restores a membership the environment lost. Self-hosted, every door
- * answers as before.
+ * is a member and at which tier. Every organization door that writes or
+ * deletes a membership row refuses with the invite-member envelope and writes
+ * nothing: `remove-member`, `update-member-role` (Make Owner sends the owner
+ * tier to it), `leave`, `accept-invitation`, `create` (the caller would own
+ * the new organization) and `delete` (every membership would end). The arms
+ * behind the refusal (the remove-member permission judge, the role-change
+ * grant read, the organization-delete records judge) do not run.
+ * `add-member` stays open and admits exactly a platform administrator: it
+ * restores a membership the environment lost. Self-hosted, every door answers
+ * as before, and a door that writes no membership row (`reject-invitation`)
+ * answers as before on a managed environment too.
  */
-describe('on a cloud-managed environment, membership and roles are managed by the hosting organisation', () => {
+describe('on a cloud-managed environment, membership and its tiers are managed by the hosting organisation', () => {
   type Staged = Awaited<ReturnType<typeof stage>>;
   const memberships = (s: Staged) =>
     ((s.engine.tables.get('sys_member') ?? []) as any[]).filter((m) => m.organization_id === DEFAULT_ORG);
@@ -989,9 +993,13 @@ describe('on a cloud-managed environment, membership and roles are managed by th
   const organizations = (s: Staged) => (s.engine.tables.get('sys_organization') ?? []) as any[];
   const allMemberships = (s: Staged) => (s.engine.tables.get('sys_member') ?? []) as any[];
   const SECOND_ORG = { name: 'Second Org', slug: 'second-org-membership' };
+  /** A walled posture, where a second organization may be created at all. */
+  const multiOrg = () => stage({
+    getTenancy: () => ({ ...singleOrgTenancy(), posture: 'isolated', requestedPosture: 'isolated', isolationActive: true }),
+  });
 
   it('create answers 409 RESOURCE_CONFLICT to the owner: no organization and no owner membership are written', async () => {
-    const s = await stage();
+    const s = await multiOrg();
     const orgsBefore = structuredClone(organizations(s));
     const membersBefore = structuredClone(allMemberships(s));
     setManaged(true);
@@ -1002,7 +1010,7 @@ describe('on a cloud-managed environment, membership and roles are managed by th
   }, 120_000);
 
   it('CONTROL: self-hosted, create answers 200 and makes the caller the new organization\'s owner as before', async () => {
-    const s = await stage();
+    const s = await multiOrg();
     const v = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
     expect(v.status, v.text).toBe(200);
     const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
@@ -1012,7 +1020,7 @@ describe('on a cloud-managed environment, membership and roles are managed by th
   }, 120_000);
 
   it('delete answers 409 RESOURCE_CONFLICT to the owner, ahead of the records arm: the organization and its memberships remain', async () => {
-    const s = await stage();
+    const s = await multiOrg();
     const created = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
     expect(created.status, `fixture: the organization is created while unmanaged — ${created.text}`).toBe(200);
     const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);
@@ -1028,7 +1036,7 @@ describe('on a cloud-managed environment, membership and roles are managed by th
   }, 120_000);
 
   it('CONTROL: self-hosted, delete answers 200 and ends the organization\'s memberships as before', async () => {
-    const s = await stage();
+    const s = await multiOrg();
     const created = await verdict(await s.fire('/organization/create', SECOND_ORG, s.bearers.admin));
     expect(created.status, `fixture: the organization is created — ${created.text}`).toBe(200);
     const org = organizations(s).find((o) => o.slug === SECOND_ORG.slug);

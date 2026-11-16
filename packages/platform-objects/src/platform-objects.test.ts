@@ -743,16 +743,18 @@ describe('feature-gate lowering matrix (#2874)', () => {
   const MANAGED_ON = 'has(features.cloudManaged) && features.cloudManaged == true';
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
-    ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
+    // Hidden while cloud-managed: create makes the caller an owner, and
+    // membership is the hosting organisation's there.
+    ['SysOrganization', SysOrganization, 'create_organization', `(${MANAGED}) && ${MULTI_ORG}`],
     // Their doors are better-auth's `organization/update` (owner, admin) and
     // `organization/delete` (owner), so the grade term leads the feature gate.
     ['SysOrganization', SysOrganization, 'update_organization', `${ADMINS} && ${MULTI_ORG}`],
     // [#25347] The name/logo-only rename is on the capability: under `single`
     // it is the one organization's only name door.
     ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${ORG}`],
-    ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
+    ['SysOrganization', SysOrganization, 'delete_organization', `((${MANAGED}) && ${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
-    ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
+    ['SysOrganization', SysOrganization, 'leave_organization', `(${MANAGED}) && ${MULTI_ORG}`],
     ['SysUser', SysUser, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysUser', SysUser, 'create_user', `(${STANDING} && ${MANAGED}) && features.admin == true`],
     // Their managed counterparts carry no feature gate (their doors mount
