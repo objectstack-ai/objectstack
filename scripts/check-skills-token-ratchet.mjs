@@ -889,7 +889,19 @@ export const CEILINGS = new Map([
   // parenthetical is cut to a pointer (-168 bytes; home: rules/relationships.md § Delete
   // Behaviors, every fact). `wc -c` = 12831 bytes -> ceil(12831 / 4) = 3208 tokens: RE-LOCK
   // down at the landed count, zero headroom.
-  ['skills/objectstack-data/rules/field-types.md', 3208],
+  // 3208 -> 3349 (#33714, 2026-11-15): § Currency teaches the roll-up of a stored home
+  // amount: a `sum` / `min` / `max` / `avg` `summary` over a child's `homeAmount.field`
+  // declares `currencyMode: 'dynamic'` with no `defaultCurrency` and shows in
+  // `localization.currency`; `dynamic` on any other roll-up and a `currencyConfig` on a
+  // `count` are refused; one `project` / `expense` example. +689 bytes. PAID DOWN FIRST by
+  // two same-file restatement cuts, 115 bytes (45 + 70): the `currency` row's list of
+  // `currencyConfig` keys, cut to a pointer (home: § Currency, which spells all four), and
+  // the Autonumber snippet (home: the `autonumber` row's `format` example and the token
+  // table, both `CASE-{0000}`). `wc -c` = 13395 bytes -> ceil(13395 / 4) = 3349 tokens,
+  // zero headroom, ceiling +141, pinned AT the measurement. Standing ruling (2026-10-27,
+  // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
+  // ruling record 6513306068; seat widening record 6784270263.
+  ['skills/objectstack-data/rules/field-types.md', 3349],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
