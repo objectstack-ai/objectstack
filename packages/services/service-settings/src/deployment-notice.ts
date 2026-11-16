@@ -71,6 +71,18 @@ const BOOT_FINDINGS_CHANNEL_ENV = 'OS_INTERNAL_DEPLOYMENT_FINDINGS';
 /** The capability that reads the notice and hides it — the infrastructure namespaces' gate. */
 export const DEPLOYMENT_NOTICE_CAPABILITY = 'manage_platform_settings';
 
+/**
+ * The kernel service a composition that serves the notice registers its door
+ * under, at the moment `SettingsServicePlugin` mounts the routes with it. Its
+ * presence is the composition fact `GET /api/v1/runtime/config` reports as
+ * `features.deploymentNotice` (`@objectstack/cloud-connection`
+ * `RuntimeConfigPlugin`), so the Console asks the notice only of a host that
+ * serves it. A host that mounts the settings routes itself, with no door,
+ * registers nothing, and its routes answer `503`: the route table is the same
+ * on both arms, so only this registration tells them apart.
+ */
+export const DEPLOYMENT_NOTICE_SERVICE = 'settings.deployment-notice';
+
 /** One thing a production deployment keeps on its own disk because nobody set it. */
 export type DeploymentFindingId =
   | 'database_local_file'
