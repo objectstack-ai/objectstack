@@ -101,10 +101,18 @@ function diffObjectsAndSeeds(beforeConfig: any, afterConfig: any): DiffEntry[] {
   for (const name of plan.objects.removed) entries.push({ type: 'removed', category: 'objects', name, breaking: true });
   for (const name of plan.objects.added) entries.push({ type: 'added', category: 'objects', name, breaking: false });
 
+  const beforeObjects = getNames(beforeConfig.objects);
   const afterObjects = getNames(afterConfig.objects);
-  for (const [name, beforeObj] of getNames(beforeConfig.objects)) {
+  // Every object both configs declare, then (#34095) each object the plan
+  // lists field changes on that a config reaches only through
+  // `objectExtensions`: the plan compares those too, and they print alike.
+  const compared = [...beforeObjects.keys()].filter((name) => afterObjects.has(name));
+  for (const list of [plan.fields.removed, plan.fields.added, plan.declaredRenames, plan.typeChanges, plan.suspectedRenames]) {
+    for (const item of list) if (!compared.includes(item.object)) compared.push(item.object);
+  }
+  for (const name of compared) {
+    const beforeObj = beforeObjects.get(name);
     const afterObj = afterObjects.get(name);
-    if (!afterObj) continue;
     const category = `objects.${name}.fields`;
     const mine = <T extends { object: string }>(list: T[]): T[] => list.filter((item) => item.object === name);
 
@@ -138,7 +146,7 @@ function diffObjectsAndSeeds(beforeConfig: any, afterConfig: any): DiffEntry[] {
     }
 
     // Label / ownership changes on the object itself
-    if (beforeObj.label !== afterObj.label) {
+    if (beforeObj && afterObj && beforeObj.label !== afterObj.label) {
       entries.push({
         type: 'modified',
         category: 'objects',
