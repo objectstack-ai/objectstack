@@ -121,11 +121,14 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
           ? { name, _packageId: PKG }
           : undefined,
     },
-    async find(table: string, opts2?: { where?: Record<string, unknown> }) {
-      if (table === 'sys_metadata_history') return historyRows;
+    async find(table: string, opts2?: { where?: Record<string, unknown>; limit?: number }) {
       // The table's own rows, narrowed by the where's scalar equalities (a batch
       // publish lists a package's drafts with one); operator clauses are not read.
-      return Array.from(rows.values()).filter((r) => (r.__table ?? 'sys_metadata') === table && meetsScalars(r, opts2?.where));
+      // The caller's bound applies after the filter, as ObjectQL applies it.
+      const found = table === 'sys_metadata_history'
+        ? historyRows
+        : Array.from(rows.values()).filter((r) => (r.__table ?? 'sys_metadata') === table && meetsScalars(r, opts2?.where));
+      return typeof opts2?.limit === 'number' ? found.slice(0, opts2.limit) : found;
     },
     async findOne(table: string, opts2: { where: Record<string, unknown> }) {
       assertEngineFindOnePredicate(table, opts2);
