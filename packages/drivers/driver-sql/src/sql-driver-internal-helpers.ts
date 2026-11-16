@@ -4,8 +4,8 @@
  * [#29520 codemod] The "Internal helpers" section of `SqlDriver`: the bodies of
  * `getKnex`, `getBuilder`, `resolveTenantField`, `isMultiTenantMode`,
  * `applyTenantScope`, `readableIdsSubquery`, `injectTenantOnInsert`,
- * `auditMissingTenant` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `auditMissingTenant` moved out of `sql-driver.ts` whole (split
+ * by #29598 and #30249).
  *
  * A MOVE, not a redesign. {@link InternalHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`

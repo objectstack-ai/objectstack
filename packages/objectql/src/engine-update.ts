@@ -2,7 +2,7 @@
 
 /**
  * [#29986 codemod] The "Update" section of `ObjectQL`: the bodies of `update`
- * moved out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * moved out of `engine.ts` whole (split by #32046).
  *
  * A MOVE, not a redesign. {@link UpdateFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`

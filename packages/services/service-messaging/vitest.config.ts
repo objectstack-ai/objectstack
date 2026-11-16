@@ -30,6 +30,9 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // The outbound-request guard the HTTP dispatcher sends through, read from
+      // source for the same reason: its pins judge this checkout's guard.
+      { find: /^@objectstack\/core\/egress$/, replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
       // [#24983] The template channel refusal pins drive the real data
       // protocol (create / update / bulk update / the import runner's writes),
       // so it is read from source for the same reason as core above.

@@ -45,7 +45,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Credential Use",
           scim_refused: "SCIM Refused",
           audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          dataset_query: "Dataset Query",
+          scim_manager_unresolved: "SCIM Manager Unresolved"
         }
       },
       user_id: {

@@ -45,7 +45,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Использование учётных данных",
           scim_refused: "Запрос SCIM отклонён",
           audit_signing_key_change: "Изменение ключа подписи аудита",
-          dataset_query: "Запрос к набору данных"
+          dataset_query: "Запрос к набору данных",
+          scim_manager_unresolved: "Руководитель SCIM не найден"
         }
       },
       user_id: {
