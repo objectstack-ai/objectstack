@@ -18,7 +18,7 @@
 
 import type { Expression } from '@objectstack/spec';
 
-import { buildScope } from './stdlib';
+import { buildScope, labelEachOption } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
 
 /**
@@ -165,13 +165,14 @@ const FORMATTERS: Record<string, Formatter> = {
   // field it throws, whatever the value (`optionTableRefusal`): the hole
   // promises a label, so the stored value is never printed in its place, as
   // `currency` never picks a currency. A multi-select value labels each
-  // element, joined with `, `.
+  // element, in stored order, joined with `, ` — `labelEachOption`, the rule
+  // `label(record.<field>)` prints a multi-select by too.
   option: (v, arg, _locale, _timeZone, _currency, optionLabels) => {
     const objectField = arg ?? '';
     const refusal = optionTableRefusal(`option:${objectField}`, objectField, optionLabels);
     if (refusal) throw new RangeError(refusal);
     const labels = optionLabels![objectField];
-    if (Array.isArray(v)) return v.map((item) => optionLabelOf(item, labels)).join(', ');
+    if (Array.isArray(v)) return labelEachOption(v, (item) => optionLabelOf(item, labels));
     return optionLabelOf(v, labels);
   },
 };

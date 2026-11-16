@@ -83,10 +83,51 @@ export interface DbJobAdapterOptions {
    * row's own `last_status` / `run_count` / `failure_count` counters.
    */
   recordRuns?: boolean;
+  /**
+   * How long `destroy()` waits for a scheduled run already in flight on the
+   * adapter's own timer (the no-cron fallback) before settling its row as
+   * interrupted, in milliseconds (default 10000). A `cron` adapter passed in
+   * brings its own bound (`CronJobAdapterOptions.shutdownDrainMs`).
+   */
+  shutdownDrainMs?: number;
 }
 
 /** Terminal statuses a finished run can land in — everything except `running`. */
 type TerminalStatus = 'success' | 'failed' | 'degraded' | 'timeout';
+
+/**
+ * A scheduled run of one wrapped handler, from the start of its first attempt
+ * until it settles — what {@link DbJobAdapter.destroy} settles as interrupted
+ * when the run outlives the shutdown drain.
+ */
+interface OpenScheduledRun {
+  /** The attempt whose `sys_job_run` row is open, once its start was recorded. */
+  current?: { id?: string; settled: boolean; startedMs: number };
+  /** The bookkeeping write in progress — the row insert or the terminal write. */
+  write?: Promise<unknown>;
+  /** Settle the open attempt's row as interrupted by shutdown; a no-op once it is settled. */
+  interrupt(): Promise<void>;
+}
+
+/**
+ * The `error` a scheduled run's row carries when the shutdown drain ended
+ * before the run did. Its `status` is `failed`: the run did not finish, which
+ * is what that status already says — no status of its own is minted for it.
+ */
+const INTERRUPTED_BY_SHUTDOWN =
+  'interrupted by shutdown: the job service shut down while this scheduled run was in flight, ' +
+  'and the run had not finished when the shutdown drain ended. It may have done part of its work.';
+
+/**
+ * Why a scheduled run's next attempt never started: the job service began
+ * shutting down first. It reaches the timer adapter's in-memory history only —
+ * nothing after shutdown writes a row.
+ */
+function shutdownBeforeAttempt(name: string, attempt: number): Error {
+  return new Error(
+    `Job "${name}": attempt ${attempt} of its scheduled run was not started because the job service is shutting down.`,
+  );
+}
 
 /**
  * The options handed DOWN to the timer adapter.
@@ -249,6 +290,10 @@ export class DbJobAdapter implements IJobService {
   private readonly recordRuns: boolean;
   /** job name → its `replay()` pre-flight (#14501). See {@link ReplayGuard}. */
   private readonly replayGuards = new Map<string, ReplayGuard>();
+  /** Scheduled runs whose row may still need settling — see {@link DbJobAdapter.destroy}. */
+  private readonly openScheduledRuns = new Set<OpenScheduledRun>();
+  /** Set when `destroy()` begins: no scheduled run starts another attempt after it. */
+  private shuttingDown = false;
 
   constructor(args: {
     engine: JobEngineLike;
@@ -261,7 +306,11 @@ export class DbJobAdapter implements IJobService {
     this.recordRuns = args.options?.recordRuns ?? true;
     // The logger reaches `inner` so its skipped-tick line (#31811) is heard on
     // the no-cron fallback, where `inner` owns the timer.
-    this.inner = new IntervalJobAdapter({ maxExecutions: args.options?.maxExecutions, logger: args.logger });
+    this.inner = new IntervalJobAdapter({
+      maxExecutions: args.options?.maxExecutions,
+      logger: args.logger,
+      shutdownDrainMs: args.options?.shutdownDrainMs,
+    });
     this.cron = args.cron;
   }
 
@@ -541,9 +590,38 @@ export class DbJobAdapter implements IJobService {
    *
    * `IJobService` does not declare `destroy()`, so the call is structural,
    * exactly like the `cancel` forwarding above.
+   *
+   * **A scheduled run in flight is waited for, or settled — never handed to a
+   * released driver.** The kernel destroys plugins in reverse order, so the
+   * driver goes AFTER this returns. Each timer adapter's `destroy()` waits for
+   * the scheduled fire it holds, up to its `shutdownDrainMs`; a run that ends
+   * inside that bound writes its own terminal row as usual. A run still going
+   * when the bound passes has its open row settled here, while the driver is
+   * still up, as `failed` with an `error` that says it was interrupted by
+   * shutdown (and `sys_job` mirrors it like any failed run) — so no row is left
+   * `running`, and when the abandoned handler does finish, its settle finds
+   * the row already terminal and writes nothing. No scheduled run starts
+   * another attempt once this has begun. Manual `trigger()` / `replay()` runs
+   * are untouched: their caller awaits them.
    */
   async destroy(): Promise<void> {
+    this.shuttingDown = true;
     await this.inner.destroy();
+    await this.destroyCron();
+    await this.settleInterruptedRuns();
+  }
+
+  /** Settle every scheduled run still open after the drain — see {@link DbJobAdapter.destroy}. */
+  private async settleInterruptedRuns(): Promise<void> {
+    for (const run of [...this.openScheduledRuns]) {
+      // A row insert or terminal write already under way finishes first, so
+      // the run is never settled twice and its insert is never orphaned.
+      try { await run.write; } catch { /* its own catch logged it */ }
+      await run.interrupt();
+    }
+  }
+
+  private async destroyCron(): Promise<void> {
     const cron = this.cron as (IJobService & { destroy?: () => Promise<void> }) | undefined;
     if (!cron || typeof cron.destroy !== 'function') return;
     try {
@@ -640,46 +718,78 @@ export class DbJobAdapter implements IJobService {
   ): JobHandler {
     const wrapped: JobHandler = async (ctx) => {
       const trigger = runTriggerOf(wrapped, ctx);
+      const scheduled = trigger === 'schedule';
       // Per-FIRE state: one of these closures exists per invocation, so two
       // overlapping fires of the same job never share a run row.
-      let current: { id?: string; settled: boolean } | undefined;
-
-      const settle = async (status: TerminalStatus, error?: string, durationMs?: number) => {
-        const run = current;
-        // One terminal write per row. Nothing reaches here twice today; the
-        // latch is what keeps that true as this seam grows (#7734).
-        if (!run || run.settled) return;
-        run.settled = true;
-        if (run.id) await this.finishRun(run.id, status, error, durationMs);
-        await this.bumpJob(name, status, error);
+      const fire: OpenScheduledRun = {
+        interrupt: async () => {
+          const startedMs = fire.current?.startedMs;
+          await settle('failed', INTERRUPTED_BY_SHUTDOWN, startedMs === undefined ? undefined : Date.now() - startedMs);
+          // Already settled by its own path? Then that terminal write may still
+          // be under way — the driver has to outlast it too.
+          await fire.write;
+        },
+      };
+      const tracked = <T>(write: Promise<T>): Promise<T> => {
+        fire.write = write;
+        return write;
       };
 
-      // [ADR-0153 D7] The handler is told this attempt's `sys_job_run` row:
-      // `current` is set by `onAttemptStart`, which runs before each attempt.
-      return await runWithPolicy<void | JobRunOutcome>(name, () => handler(current?.id ? { ...ctx, runId: current.id } : ctx), options, {
-        onAttemptStart: async (attempt) => {
-          current = { id: this.recordRuns ? await this.startRun(name, trigger, attempt) : undefined, settled: false };
-        },
-        onAttemptSettled: async (_attempt, result) => {
-          if (result.ok) {
-            const outcome = result.value;
-            if (outcome && outcome.outcome === 'degraded') {
-              // Not a failure: the reason rides the existing `error` column and
-              // `failure_count` stays flat (decided on #7072, recorded in the
-              // `JobExecutionStatus` TSDoc). A reader must gate on `status`
-              // before reading that column as a failure.
-              await settle('degraded', outcome.reason, result.durationMs);
-            } else {
-              await settle('success', undefined, result.durationMs);
+      const settle = async (status: TerminalStatus, error?: string, durationMs?: number) => {
+        const run = fire.current;
+        // One terminal write per row. Shutdown is the second path that can
+        // reach here for one row — `destroy()` settling a run that outlived
+        // the drain, then that run's own handler finishing — and the latch is
+        // what makes the later of the two write nothing (#7734).
+        if (!run || run.settled) return;
+        run.settled = true;
+        await tracked((async () => {
+          if (run.id) await this.finishRun(run.id, status, error, durationMs);
+          await this.bumpJob(name, status, error);
+        })());
+      };
+
+      if (scheduled) this.openScheduledRuns.add(fire);
+      try {
+        // [ADR-0153 D7] The handler is told this attempt's `sys_job_run` row:
+        // `current` is set by `onAttemptStart`, which runs before each attempt.
+        return await runWithPolicy<void | JobRunOutcome>(name, () => handler(fire.current?.id ? { ...ctx, runId: fire.current.id } : ctx), options, {
+          onAttemptStart: async (attempt) => {
+            if (scheduled && this.shuttingDown) throw shutdownBeforeAttempt(name, attempt);
+            const startedMs = Date.now();
+            const id = this.recordRuns ? await tracked(this.startRun(name, trigger, attempt)) : undefined;
+            fire.current = { id, settled: false, startedMs };
+            // Shutdown began while the row was being written: settle the row
+            // now, while `destroy()` is still holding the driver for this run,
+            // and never start the attempt itself.
+            if (scheduled && this.shuttingDown) {
+              await fire.interrupt();
+              throw shutdownBeforeAttempt(name, attempt);
             }
-            return;
-          }
-          const msg = result.error instanceof Error ? result.error.message : String(result.error);
-          // `timeout` vs `failed` is the distinction `JobExecutionStatus` has
-          // always declared and the durable record never carried.
-          await settle(result.timedOut ? 'timeout' : 'failed', msg, result.durationMs);
-        },
-      });
+          },
+          onAttemptSettled: async (_attempt, result) => {
+            if (result.ok) {
+              const outcome = result.value;
+              if (outcome && outcome.outcome === 'degraded') {
+                // Not a failure: the reason rides the existing `error` column and
+                // `failure_count` stays flat (decided on #7072, recorded in the
+                // `JobExecutionStatus` TSDoc). A reader must gate on `status`
+                // before reading that column as a failure.
+                await settle('degraded', outcome.reason, result.durationMs);
+              } else {
+                await settle('success', undefined, result.durationMs);
+              }
+              return;
+            }
+            const msg = result.error instanceof Error ? result.error.message : String(result.error);
+            // `timeout` vs `failed` is the distinction `JobExecutionStatus` has
+            // always declared and the durable record never carried.
+            await settle(result.timedOut ? 'timeout' : 'failed', msg, result.durationMs);
+          },
+        });
+      } finally {
+        this.openScheduledRuns.delete(fire);
+      }
     };
     return wrapped;
   }

@@ -7,7 +7,7 @@
  * `computeTenantField`, `computeAndRecordTenantField`,
  * `registerManagedObjectMetadata`, `registerObjectMetadata`, `initObjects`,
  * `withPinnedSession`, `migrateMysqlDatetimeColumns`, `migrateMysqlTimeColumns`
- * moved out of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * moved out of `sql-driver.ts` whole (split by #29598 and #30363).
  *
  * A MOVE, not a redesign. {@link RotationFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`

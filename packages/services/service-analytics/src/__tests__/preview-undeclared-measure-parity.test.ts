@@ -6,28 +6,21 @@
  *
  * ## What these pins hold
  *
- * The live faces mint an undeclared measure (`mintableMeasureKey` +
- * `inferMeasure`: `amount_sum` is `SUM(amount)`, a bare `amount` is
- * `SUM(amount)`) and judge it before a strategy reads anything. The draft
- * preview now mints and judges it the same way:
+ * The dataset is a closed surface (ADR-0021, ADR-0149 D1): a selection
+ * measure the dataset does not declare is refused by the closed-member rule
+ * (`dataset-declared-members.ts`) before a strategy, the preview evaluator or
+ * any gate behind them reads anything, so every face answers it the same way:
+ * `INVALID_FIELD` / 400 naming the member, the declared measures and the
+ * remedy. That covers every spelling the faces used to mint and then judge —
+ * a field the object does not have (`nope`, `ghost_avg`), a suffix or bare
+ * field over a real one (`amount_sum`, `amount`), a minted aggregate the
+ * field-type table refuses (`region_sum`), a spelling that is not a column
+ * reference (`amount + 1`), the ad-hoc `count`, and a minted `secret_sum`
+ * over a field the caller may not read.
  *
- * - A spelling whose field the object does not have (`nope`, `ghost_avg`) is
- *   refused `INVALID_FIELD` / 400 on every face, with the same message naming
- *   the member and the valid measures. Before, the preview served a row count
- *   per group under the misspelled name.
- * - A spelling over a real field (`amount_sum`, `amount`) serves the live value
- *   on every face. Before, the preview served the row count.
- * - A minted aggregate the field-type table refuses (`region_sum` over text)
- *   and a spelling that is not a column reference (`amount + 1`) get the live
- *   faces' refusals on the preview too, rather than `0` or a sum of nothing.
- * - CONTROL: a declared measure and the undeclared `count` serve the same
- *   values on every face.
+ * - CONTROL: a declared measure serves the same values on every face.
  * - The evaluator refuses a measure the cube it is handed does not carry,
  *   instead of reading it as `count(*)`.
- * - A minted measure is judged by the field it aggregates: the field-level read
- *   gate refuses `secret_sum` on the preview, as on a live strategy, when the
- *   caller may not read `secret`. Without that, minting on the preview would
- *   sum a field the caller may not read.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -135,17 +128,16 @@ describe('[#28172] an undeclared measure on the native, ObjectQL and draft-previ
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  for (const [measure, field] of [['nope', 'nope'], ['ghost_avg', 'ghost']] as const) {
-    it(`refuses '${measure}' INVALID_FIELD / 400 with one message on every face`, async () => {
+  for (const measure of ['nope', 'ghost_avg', 'amount_sum', 'amount', 'region_sum', 'amount + 1', 'count'] as const) {
+    it(`refuses '${measure}', which the dataset does not declare, INVALID_FIELD / 400 with one message on every face`, async () => {
       const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, measure))));
       for (const err of refusals) {
         expect(err.code, err.message).toBe('INVALID_FIELD');
         expect(err.status).toBe(400);
         expect(err.param).toBe('measures');
-        expect(err.field).toBe(field);
-        expect(err.measure).toBe(measure);
-        expect(err.message).toContain(`Measure '${measure}' on cube 'os28172_deals' aggregates field '${field}'`);
-        expect(err.message).toContain('Valid measures: total, deals.');
+        expect(err.member).toBe(measure);
+        expect(err.message).toContain(`The dataset "os28172_deals" does not declare the measure "${measure}".`);
+        expect(err.message).toContain('Measures you may use: total, deals.');
       }
       const [native, objectql, preview] = refusals;
       expect(preview.message).toBe(native.message);
@@ -153,41 +145,41 @@ describe('[#28172] an undeclared measure on the native, ObjectQL and draft-previ
     });
   }
 
-  for (const measure of ['amount_sum', 'amount'] as const) {
-    it(`serves '${measure}' as SUM(amount) on every face`, async () => {
-      for (const face of FACES) {
-        const result = await ask(face, measure);
-        expect(byRegion(result, measure), face).toEqual({ amer: 150, emea: 30 });
-      }
-    });
-  }
-
-  it("refuses 'region_sum' over a text field INVALID_FIELD / 400 with one message on every face", async () => {
-    const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, 'region_sum'))));
+  it('a stale DECLARED measure over a field the object does not have: one dataset-door remedy on every face, the draft preview included', async () => {
+    // [ADR-0021, ADR-0149 D1] The source-field gate meets a dataset only
+    // through a declared member, so its refusal points at the declared field
+    // and never offers the cube door's suffix-inferred measures.
+    const stale = DatasetSchema.parse({ ...DATASET, measures: [...DATASET.measures, { name: 'ghost_total', aggregate: 'sum', field: 'ghost' }] });
+    const refusals = await Promise.all(
+      FACES.map((face) =>
+        refusalOf(
+          services[face === 'preview' ? 'objectql' : face]!.queryDataset(
+            stale,
+            { dimensions: ['region'], measures: ['ghost_total'] } as never,
+            undefined,
+            face === 'preview' ? { previewDrafts: true } : undefined,
+          ),
+        ),
+      ),
+    );
     for (const err of refusals) {
       expect(err.code, err.message).toBe('INVALID_FIELD');
       expect(err.status).toBe(400);
+      expect(err.field).toBe('ghost');
+      expect(err.message).toContain("The dataset declares this measure over 'ghost': point its `field` at one of the object's fields, or remove the measure");
+      expect(err.message).not.toMatch(/inferred from the object's OWN fields/);
     }
-    expect(refusals[2].message).toBe(refusals[0].message);
+    const [native, objectql, preview] = refusals;
+    expect(preview.message).toBe(native.message);
+    expect(objectql.message).toBe(native.message);
   });
 
-  it("refuses 'amount + 1', which is not a column reference, PERMISSION_DENIED / 403 on every face", async () => {
-    const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, 'amount + 1'))));
-    for (const err of refusals) {
-      expect(err.code, err.message).toBe('PERMISSION_DENIED');
-      expect(err.status).toBe(403);
+  it("CONTROL: 'total' serves the same values on every face", async () => {
+    for (const face of FACES) {
+      const result = await ask(face, 'total');
+      expect(byRegion(result, 'total'), face).toEqual({ amer: 150, emea: 30 });
     }
-    expect(refusals[2].message).toBe(refusals[0].message);
   });
-
-  for (const [measure, expected] of [['total', { amer: 150, emea: 30 }], ['count', { amer: 2, emea: 1 }]] as const) {
-    it(`CONTROL: '${measure}' serves the same values on every face`, async () => {
-      for (const face of FACES) {
-        const result = await ask(face, measure);
-        expect(byRegion(result, measure), face).toEqual(expected);
-      }
-    });
-  }
 
   it('the evaluator refuses a measure the cube it is handed does not carry, instead of counting rows', () => {
     const cube = {
@@ -213,7 +205,7 @@ describe('[#28172] an undeclared measure on the native, ObjectQL and draft-previ
   });
 });
 
-describe('[#28172] a minted measure on the draft preview meets the field-level read gate', () => {
+describe('[#28172] a measure over a field the caller may not read, undeclared, is refused before any gate reads it', () => {
   const CALLER = { userId: 'u_member', tenantId: 'org_a' } as ExecutionContext;
   const DEAL = 'os28172_secret_deal';
   const dataset = DatasetSchema.parse({
@@ -233,7 +225,7 @@ describe('[#28172] a minted measure on the draft preview meets the field-level r
       executeAggregate: async () => [],
     } as never);
 
-  it("refuses 'secret_sum' PERMISSION_DENIED / 403 naming 'secret' on the preview and on the live strategy", async () => {
+  it("refuses 'secret_sum' INVALID_FIELD / 400 on the preview and on the live strategy, never minting it", async () => {
     for (const draft of [false, true]) {
       const err = await refusalOf(
         service(draft).queryDataset(
@@ -243,9 +235,10 @@ describe('[#28172] a minted measure on the draft preview meets the field-level r
           draft ? { previewDrafts: true } : undefined,
         ),
       );
-      expect(err.code, err.message).toBe('PERMISSION_DENIED');
-      expect(err.status).toBe(403);
-      expect((err as Refusal & { fields?: string[] }).fields).toEqual(['secret']);
+      expect(err.code, err.message).toBe('INVALID_FIELD');
+      expect(err.status).toBe(400);
+      expect(err.member).toBe('secret_sum');
+      expect(err.message).toContain('The dataset "os28172_secret" does not declare the measure "secret_sum".');
     }
   });
 });

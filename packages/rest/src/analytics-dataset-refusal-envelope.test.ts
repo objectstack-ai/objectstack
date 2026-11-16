@@ -59,6 +59,10 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 // ── harness (the shape `analytics-filter-refusal-envelope.test.ts` uses) ──────
 
@@ -323,12 +327,18 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
 
   it('POSITIVE control (raw-SQL path): a DECLARED relationship still joins → 200 with rows', async () => {
     // The allowlist case's twin: `include: ['account']` makes the same dotted
-    // selection legal, so case ⑤ above is a verdict about the allowlist rather
-    // than about dotted members being rejected outright.
+    // path legal, so case ⑤ above is a verdict about the allowlist rather
+    // than about dotted paths being rejected outright. [ADR-0021, ADR-0149 D1]
+    // A dataset selection names only declared members, so the path is read
+    // through a dimension the dataset DECLARES over it, as an author writes it.
     const route = buildRoute(async () => nativeAnalytics());
     const res = await post(route, {
-      dataset: { ...dataset, include: ['account'] },
-      selection: { dimensions: ['account.region'], measures: ['revenue'] },
+      dataset: {
+        ...dataset,
+        include: ['account'],
+        dimensions: [...dataset.dimensions, { name: 'account_region', field: 'account.region', type: 'string' }],
+      },
+      selection: { dimensions: ['account_region'], measures: ['revenue'] },
     });
     expect(res.statusCode).toBe(200);
     expect(res.body.rows).toEqual([{ stage: 'won', revenue: 100 }]);

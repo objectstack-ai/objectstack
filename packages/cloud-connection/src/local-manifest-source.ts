@@ -436,6 +436,16 @@ export class LocalManifestSource {
         }
     }
 
+    /**
+     * [#34336] The basename of this manifest id's ledger file, as it sits on
+     * disk (`SkippedManifestEntry.file`'s spelling) — for a caller that read the
+     * entry and then found its body unusable, so the answer names the file to
+     * repair the same way a failed read does.
+     */
+    fileNameOf(manifestId: string): string {
+        return safeFilename(manifestId);
+    }
+
     /** Whether the ledger holds an entry for this manifest id. */
     has(manifestId: string): boolean {
         return existsSync(this.fileFor(manifestId));

@@ -14,9 +14,12 @@
  *  - S1: the list naming no package and the execution list leave it out too,
  *    whether the row was hydrated at boot or saved after it.
  *  - S3: a package-less save of that member while the package is disabled is
- *    accepted and kept, and hidden until the package is enabled again; a
- *    delete removes it. A save at a member the package ships is refused, as
- *    before.
+ *    refused 409 with the `?package=` remedy, naming no package, and stores
+ *    no row (#34144 ruling A, #34262: a disabled package holds no name, so a
+ *    save naming none has no row to write). Re-enabled, the same save is
+ *    kept. A delete of the stored package-less row removes it while the
+ *    package is disabled, as before. A save at a member the package ships is
+ *    refused, as before.
  *  - S5: while an ENABLED package holds the name through a stored row the
  *    registry has not read, the row is served and listed as on `main`, in
  *    either read order.
@@ -188,21 +191,32 @@ describe('[#33401, review#2 S1] the lists leave out the package-less row the by-
 });
 
 describe('[#33401, review#2 S3] a package-less save and delete while every holder is disabled', () => {
-    it('a save at a member the package never ships is kept and hidden until re-enable; a delete removes it; a save at a shipped member is refused, as before', async () => {
+    it('a save at a member the package never ships is refused naming no package and stores no row; re-enabled it is kept; a delete removes it; a save at a shipped member is refused, as before', async () => {
         const stores: Stores = new Map();
         const { engine, protocol } = await boot(stores);
         engine.registry.disablePackage(PKG);
-        expect(await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr') } as any))
-            .toMatchObject({ success: true, state: 'active' });
-        expect(packagelessRows(stores)).toEqual(['fr-FR']);
-        // BASE: the read-back served `SAVED fr`.
+        // FROM (#33995): accepted (`success: true, state: 'active'`), stored
+        // package-less at `fr-FR`, hidden until the package is enabled again.
+        // TO (#34144 ruling A, #34262): refused 409 with the `?package=`
+        // remedy, naming no package, and no row is stored.
+        const refused: any = await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr') } as any)
+            .then(() => undefined, (error: unknown) => error);
+        expect([refused?.status, refused?.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(String(refused?.message)).toContain('?package=');
+        expect(String(refused?.message)).not.toContain(PKG);
+        expect(packagelessRows(stores)).toEqual([]);
         expect(await subjectAt(protocol, 'fr-FR')).toBeUndefined();
         expect(await listed(protocol)).toEqual({ list: [], execution: [] });
         // CONTROL — unchanged: a shipped member's save naming no package is refused.
         await expect(protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('en-US', 'SAVED en') } as any))
             .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        // CONTROL — re-enabled: the same save is accepted and kept.
         engine.registry.enablePackage(PKG);
+        expect(await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr') } as any))
+            .toMatchObject({ success: true, state: 'active' });
+        expect(packagelessRows(stores)).toEqual(['fr-FR']);
         expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr');
+        // Unchanged: with the package disabled again, a delete naming no package removes the row.
         engine.registry.disablePackage(PKG);
         expect(await protocol.deleteMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any))
             .toMatchObject({ success: true });

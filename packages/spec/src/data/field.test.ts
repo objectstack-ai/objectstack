@@ -2989,14 +2989,14 @@ describe('FieldSchema.lookupFilters — { $record } comparand and orEmpty', () =
     }
   });
 
-  it('lets the eq shorthand the picker sends through the shared door unchanged (refused later, by the driver)', () => {
+  it('lets the eq shorthand the picker sends through the shared door unchanged (refused later, by the engine\'s token pass)', () => {
     // The card's market entry: the picker lowers `eq` to the shorthand
     // { field: value }, so an unresolved { $record } arrives as
     // { cb_market: { $record } }. The door reads that object as filter
-    // structure and passes it through as it is; a driver then meets `$record`
-    // as an operator it does not know and refuses the query (INVALID_FILTER).
-    // A refusal by name at the door is the server follow-up's: when it lands,
-    // this pin turns into a refusal and moves with it.
+    // structure and passes it through as it is; the engine's token pass
+    // (`resolveFilterTokens`, `@objectstack/core`) then refuses it by name,
+    // INVALID_FILTER / 400 naming the field and the path, before any driver
+    // is asked (pinned in `packages/core/src/utils/filter-tokens.test.ts`).
     const shorthand = { cb_market: { $record: 'account.cb_market' } };
     expect(parseFilterAST(shorthand)).toEqual(shorthand);
   });

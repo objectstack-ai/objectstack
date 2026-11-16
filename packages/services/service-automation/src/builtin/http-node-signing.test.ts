@@ -65,6 +65,16 @@ let server: Server;
 let baseUrl: string;
 const received: Received[] = [];
 
+// This suite's receiver listens on loopback, which the outbound-request guard
+// refuses unless the operator allowlists it — so the suite allowlists it the way
+// an operator does, through the environment.
+beforeAll(() => {
+    vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '127.0.0.1');
+});
+afterAll(() => {
+    vi.unstubAllEnvs();
+});
+
 beforeAll(async () => {
     server = createServer((req, res) => {
         const chunks: Buffer[] = [];

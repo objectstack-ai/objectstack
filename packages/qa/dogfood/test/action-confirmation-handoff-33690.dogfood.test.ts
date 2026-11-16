@@ -15,9 +15,12 @@
 // `approval-decide-over-mcp.dogfood.test.ts` and
 // `mcp-system-object-action-exposure.dogfood.test.ts`).
 //
-//   ⭐ the same `run_action` call carrying `confirm: true`, sent N times,
-//      writes the record 0 times and is held N times, each with its own
-//      pending id, each hand-off recorded for the person the call ran as;
+//   ⭐ the same `run_action` call, sent N times, writes the record 0 times
+//      and is held N times, each with its own pending id, each hand-off
+//      recorded for the person the call ran as;
+//   ⭐ [#34209] a call carrying the retired `confirm` member is refused at
+//      the tool's input, on the gated action and on an ungated one: nothing
+//      is written and nobody is asked;
 //   ⭐ CONTROL: the same update through an action that declares no
 //      confirmation runs at once, and nobody is asked.
 
@@ -143,12 +146,12 @@ describe('[#33690] a confirmation-gated action over MCP is handed to the person,
     await stack?.stop?.();
   });
 
-  it(`⭐ the same call with confirm: true, sent ${N} times, writes 0 times and is held ${N} times with a pending id`, async () => {
+  it(`⭐ the same call, sent ${N} times, writes 0 times and is held ${N} times with a pending id`, async () => {
     const id = await openTicket('gated');
     const before = handOffs.length;
     for (let i = 1; i <= N; i++) {
       const answer = await tool('run_action', {
-        actionName: GATED, objectName: OBJECT, recordId: id, [AI_ACTION_CONFIRMATION_MEMBER]: true,
+        actionName: GATED, objectName: OBJECT, recordId: id,
       });
       expect(answer.isError, answer.text).toBe(false);
       expect(answer.payload).toMatchObject({
@@ -162,6 +165,22 @@ describe('[#33690] a confirmation-gated action over MCP is handed to the person,
     for (const { handOff, userId } of recorded) {
       expect(handOff).toMatchObject({ actionName: GATED, objectName: OBJECT, recordId: id, door: 'mcp' });
       expect(userId, 'the hand-off is recorded for the person the call ran as').toBe(personId);
+    }
+  }, 120_000);
+
+  it('⭐ [#34209] a call carrying confirm is refused at the input, gated or not: nothing written, nobody asked', async () => {
+    for (const [actionName, value] of [[GATED, true], [PLAIN, true], [GATED, false]] as const) {
+      const id = await openTicket(`with-member-${actionName}-${value}`);
+      const before = handOffs.length;
+      const answer = await tool('run_action', {
+        actionName, objectName: OBJECT, recordId: id, [AI_ACTION_CONFIRMATION_MEMBER]: value,
+      });
+      const label = `${actionName} confirm=${value}`;
+      expect(answer.isError, label).toBe(true);
+      expect(answer.text, label).toContain(`\`${AI_ACTION_CONFIRMATION_MEMBER}\``);
+      expect(answer.text, label).toContain('in the app');
+      expect(await statusOf(id), label).toBe('open');
+      expect(handOffs.length, label).toBe(before);
     }
   }, 120_000);
 
