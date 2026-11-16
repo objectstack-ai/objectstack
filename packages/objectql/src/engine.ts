@@ -6156,6 +6156,8 @@ export class ObjectQL implements IObjectQLEngine {
       get summaryIndexRevision() { return engine.summaryIndexRevision; },
       set summaryIndexRevision(v) { engine.summaryIndexRevision = v; },
       get summaryRetryOptions() { return engine.summaryRetryOptions; },
+      get txStore() { return engine.txStore; },
+      isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),
       update: (...a) => engine.update(...a),
     }));
     transactionsSectionHost.install((engine) => ({

@@ -665,8 +665,13 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * that reads a parent's summary during the batch reads the value from
      * before the batch, as during a predicate update.
      * The scope is ambient: it covers every write made while the callback
-     * runs, including writes a hook issues on another object (a hook's own
-     * insert, update or delete), whose roll-ups are deferred to the end too.
+     * runs under the transaction the scope was opened in (or under none, when
+     * it was opened outside one), including writes a hook issues on another
+     * object (a hook's own insert, update or delete), whose roll-ups are
+     * deferred to the end too. A write under another transaction opened
+     * within the scope (a hook's own `ctx.api.transaction`, an atomic batch
+     * reached from inside a non-atomic one) recomputes at once, inside that
+     * transaction, as outside any scope: it may commit before the scope ends.
      * A summary over a summary still recomputes in dependency order.
      *
      * Every way out of the callback recomputes. Resolved: the callback's
@@ -674,12 +679,9 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * engine's stale-roll-up refusal (`ERR_SUMMARY_RECOMPUTE`) whose `written`
      * is that result: the writes are stored, only the named summaries are
      * stale. Rejected: the recompute runs for the writes that landed, and the
-     * callback's own error is rethrown. When the call that opens the scope
-     * runs inside a {@link transaction}, the recompute runs before the
-     * commit, so a caller that lets the refusal escape rolls the batch back.
-     * A call that joins an open scope from inside a transaction opened within
-     * that scope does not get this: its transaction commits first and its
-     * rows recompute when the outer scope ends.
+     * callback's own error is rethrown. Opened inside a {@link transaction},
+     * the scope's recompute runs before the commit, so a caller that lets the
+     * refusal escape rolls the batch back.
      *
      * OPTIONAL by ruling: a caller probes
      * `typeof engine.deferSummaryRecompute === 'function'`, and without it

@@ -1015,6 +1015,50 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
     expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50 });
   });
 
+  it('a write under a transaction a hook opened and committed inside the batch recomputes in that transaction, not on its dead handle at the end', async () => {
+    // The sandbox runner's `ctx.api.transaction` is the discrete trio
+    // (`beginTransaction` / `commitTransaction`): with no transaction to join
+    // (a non-atomic bulk update) it opens and commits its own, before the
+    // batch ends. A driver call on a committed handle fails, as on knex.
+    driver.commit = async (h: any) => { h.done = true; };
+    for (const op of ['find', 'findOne', 'create', 'update', 'delete', 'count', 'aggregate', 'bulkCreate', 'updateMany']) {
+      const real = driver[op];
+      if (typeof real !== 'function') continue;
+      driver[op] = async (...args: any[]) => {
+        if (args.some((a) => a?.transaction?.done)) throw new Error('Transaction query already complete');
+        return real.apply(driver, args);
+      };
+    }
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        note_count: { type: 'summary', summaryOperations: { object: 'inv_note', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_note',
+      fields: { text: { type: 'text' }, inv: { type: 'master_detail', reference: 'inv' } },
+    } as any);
+    const { a, b, c, lines } = await seed();
+    const api = engine.createContext({ isSystem: true });
+    engine.registerHook('afterUpdate', async (ctx: any) => {
+      const row = await engine.findOne('inv_line', { where: { id: ctx.id ?? ctx.input?.id } });
+      const unit = (await api.beginTransaction())!;
+      expect(unit.owned).toBe(true);
+      await unit.ctx.object('inv_note').insert({ text: 'changed', inv: (row as any).inv });
+      await api.commitTransaction(unit.handle);
+    }, { object: 'inv_line' });
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+    });
+    for (const p of [a, b, c]) expect(storeFor('inv').get(p.id)).toMatchObject({ line_count: 2, note_count: 2 });
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50 });
+  });
+
   it('a scope with no roll-up write runs nothing', async () => {
     const before = log.length;
     await engine.deferSummaryRecompute(async () => { await engine.insert('region', { name: 'R' }); });

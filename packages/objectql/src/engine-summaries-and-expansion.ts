@@ -85,6 +85,14 @@ export const SUMMARY_RECOMPUTE_WRITE: unique symbol = Symbol.for('objectstack.ob
  */
 export interface SummaryBatchScope {
   /**
+   * The transaction the scope was opened in (the ambient one, or none). Only a
+   * write under this same transaction is recorded: the recompute at the end
+   * runs here, so a write under any other transaction (one a hook or a nested
+   * batch opened and may already have committed) recomputes at once, inside
+   * its own transaction, as outside any scope.
+   */
+  transaction: unknown;
+  /**
    * Set once the outermost callback has settled. Work the callback started
    * and did not await still sees this scope ambiently; a write it makes after
    * this point recomputes at once, as outside any scope, because the one
@@ -107,14 +115,24 @@ export interface SummaryBatchScope {
  * (`isSystem`), so what still tells two callers apart is the tenant it is
  * scoped to and the user the parent's hooks are told triggered it. Identity
  * of the context object would not do: the security middleware hands every
- * operation its own copy of the caller's context. Two writes under the same
- * user and tenant but a different transaction handle share one entry, and the
- * first recorded row's context (and its transaction handle) is the one the
- * recompute runs under.
+ * operation its own copy of the caller's context. The transaction needs no
+ * place in the key: a scope records only writes under the transaction it was
+ * opened in ({@link SummaryBatchScope.transaction}), so every entry's recorded
+ * context carries that one.
  */
 function summaryBatchKey(childObject: string, execCtx: ExecutionContext | undefined): string {
   const ctx = execCtx as { tenantId?: unknown; userId?: unknown } | undefined;
   return JSON.stringify([childObject, ctx?.tenantId ?? null, ctx?.userId ?? null]);
+}
+
+/**
+ * [#33795] The transaction a write runs in, read the way `buildDriverOptions`
+ * reads it: the context's own handle unless its unit has closed, else the
+ * ambient one (ADR-0034), else none.
+ */
+function writeTransactionOf(host: Pick<SummariesAndExpansionHost, 'isClosedUnitHandle' | 'txStore'>, execCtx: ExecutionContext | undefined): unknown {
+  const explicit = execCtx?.transaction;
+  return explicit !== undefined && !host.isClosedUnitHandle(explicit) ? explicit : host.txStore.getStore()?.transaction;
 }
 
 /**
@@ -135,6 +153,7 @@ export interface SummariesAndExpansionHost {
   getOwnedSummaryDescriptors: ObjectQLClass['getOwnedSummaryDescriptors'];
   getSummaryDescriptors: ObjectQLClass['getSummaryDescriptors'];
   invalidateSummaryIndex: ObjectQLClass['invalidateSummaryIndex'];
+  isClosedUnitHandle: ObjectQLClass['isClosedUnitHandle'];
   readonly logger: ObjectQLClass['logger'];
   serveReferenceNames: ObjectQLClass['serveReferenceNames'];
   readonly summaryBatchStore: ObjectQLClass['summaryBatchStore'];
@@ -142,6 +161,7 @@ export interface SummariesAndExpansionHost {
   summaryIndexByParent: ObjectQLClass['summaryIndexByParent'];
   summaryIndexRevision: ObjectQLClass['summaryIndexRevision'];
   readonly summaryRetryOptions: ObjectQLClass['summaryRetryOptions'];
+  readonly txStore: ObjectQLClass['txStore'];
   update: ObjectQLClass['update'];
 }
 
@@ -521,7 +541,7 @@ export class SummariesAndExpansionFacet {
    * Insert, update, delete and a re-parent of a child all reach the master
    * through this one write, so they all stamp the same way.
    */
-  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
+  static async recomputeSummaries(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'isClosedUnitHandle' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'txStore' | 'update'>, childObject: string, records: any, previous: any, execCtx?: ExecutionContext): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
     if (descriptors.length === 0) return [];
 
@@ -530,8 +550,11 @@ export class SummariesAndExpansionFacet {
     // settles (`deferSummaryRecompute`). Nothing else of the write moves —
     // its hooks, validation, audit and realtime ran where they run. No
     // failure can be reported here, so none is: the scope reports them.
+    // Only a write under the scope's own transaction is recorded; one under
+    // another (a hook's `ctx.api.transaction`, a nested atomic batch) may
+    // commit before the scope ends, so it recomputes now, inside it.
     const scope = this.summaryBatchStore.getStore();
-    if (scope && !scope.closed) {
+    if (scope && !scope.closed && writeTransactionOf(this, execCtx) === scope.transaction) {
       const fkFields = [...new Set(descriptors.map((d) => d.fkField))];
       const keysOf = (r: unknown): Record<string, unknown> => {
         const keys: Record<string, unknown> = {};
@@ -718,21 +741,21 @@ export class SummariesAndExpansionFacet {
    *
    * Called inside a `transaction`, the recompute runs inside it, before
    * the commit, and a caller that lets the refusal escape rolls the batch back.
-   * That holds for the call that OPENS the scope. A call that joins an open
-   * scope from inside a transaction opened within that scope (an atomic batch
-   * reached from inside a non-atomic one) records into the outer scope: its
-   * transaction commits first, its rows recompute when the outer scope ends,
-   * and a failure then no longer rolls its batch back. No caller does this
-   * today.
+   * Only writes under the transaction the scope was opened in are deferred.
+   * A write under another transaction opened within the scope (a hook's
+   * `ctx.api.transaction`, an atomic batch reached from inside a non-atomic
+   * one) recomputes at once, inside that transaction, as outside any scope:
+   * that transaction may commit before the scope ends, and its recompute
+   * belongs before its commit.
    * A write recorded after the callback settled (work it started and did not
    * await) recomputes at once.
    */
-  static async deferSummaryRecompute<T>(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'update'>, callback: () => Promise<T>): Promise<T> {
+  static async deferSummaryRecompute<T>(this: Pick<SummariesAndExpansionHost, 'facade' | 'getSummaryDescriptors' | 'isClosedUnitHandle' | 'logger' | 'summaryBatchStore' | 'summaryRetryOptions' | 'txStore' | 'update'>, callback: () => Promise<T>): Promise<T> {
     // A nested call joins the open scope: the outermost one runs the recompute.
     const open = this.summaryBatchStore.getStore();
     if (open && !open.closed) return await callback();
 
-    const scope: SummaryBatchScope = { closed: false, entries: new Map() };
+    const scope: SummaryBatchScope = { closed: false, transaction: writeTransactionOf(this, undefined), entries: new Map() };
     // The recorded recomputes, run once the callback has settled — outside
     // the scope, so each parent write recomputes ITS parents at once, in
     // dependency order, as a multi-row write's recompute always has. Inside
