@@ -574,7 +574,12 @@ The loader refuses the **whole load**, writing no row, and reports why, when a
 - names the dataset's own object (`defineSeed` also refuses this when it runs);
 - names an object no other dataset of the same load seeds: a misspelling, or a
   dataset that `env` or `locale` scoped out of this load. A seed published on its
-  own is its own load, so publish it together with the seeds it depends on;
+  own is its own load, so publish it together with the seeds it depends on. Two
+  more loads carry only part of an app's seeds and refuse the same way: the dev
+  hot-reload seeder loads only the datasets of objects first seen in that reload,
+  so restart the dev server after adding a seed that depends on an object seeded
+  earlier, and a marketplace install loads one package's datasets, so name only
+  objects your own package seeds;
 - closes a cycle with the other edges, lookups included: `crm_rating_rule`
   declaring `dependsOn: ['crm_customer_rating']` while the rating looks up its
   rule. No order can keep that edge.

@@ -7,7 +7,7 @@ feat(spec, metadata-protocol): a seed dataset can declare `dependsOn`, the objec
 
 Clause-②: yes (widening)
 Metadata-protocol: added
-Skills-docs: follow-up owed — `skills/objectstack-data/references/seeds.md` (its relationship section and its best-practice table tell the author to order seeds parent before child in the exported array, which orders nothing; `dependsOn` is not taught)
+Skills-docs: follow-up #34277 — `skills/objectstack-data/references/seeds.md` (its relationship section and its best-practice table tell the author to order seeds parent before child in the exported array, which orders nothing; `dependsOn` is not taught)
 
 The seed loader orders a load's datasets by the `lookup`, `master_detail` and `user` fields between their objects; the order of the stack's `data` array only breaks ties. A dataset whose `beforeInsert` hook reads another seeded object had no way to say so, and its hook ran against whatever that object held at the moment, which an unrelated dataset could change. A rating scored from seeded bands, ordered by its one lookup to its rule, was written a wave before the bands and scored every row as if none existed.
 
