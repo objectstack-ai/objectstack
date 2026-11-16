@@ -875,7 +875,7 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
   it('a hook reading the parent summary during the batch reads the value from before the batch', async () => {
     const { a, lines } = await seed();
     const seen: unknown[] = [];
-    engine.registerHook('beforeUpdate', async (ctx: any) => {
+    engine.registerHook('beforeUpdate', async () => {
       const parent = await engine.findOne('inv', { where: { id: a.id } } as any);
       seen.push((parent as any)?.line_total);
     }, { object: 'inv_line' });
