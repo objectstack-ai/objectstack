@@ -2,8 +2,6 @@
 
 ## Where Actions Appear (`locations`)
 
-`locations` is an array of surfaces:
-
 | Value            | Surface |
 |:-----------------|:--------|
 | `record_header`  | Detail page header (single record) |
@@ -24,7 +22,7 @@
 - `preflight` — a read the param dialog shows above the params before submit: `{ read: { url }, path?, fields?, seed? }` sends one `GET` (no other `method`, no body or credentials) to a same-origin API path (one leading `/`) whose only holes are `${param.NAME}` (a declared param; re-read when it changes), `${ctx.recordId}` and `${ctx.record.FIELD}`. `path` selects the answer's sub-tree (`data`); `fields` rows are `resultDialog.fields`' `{ path, label?, format? }` (omitted: JSON). Each `seed: [{ param, path }]` entry fills a declared param, drawn read-only and submitted as shown: seeded once, no `defaultValue` / `defaultFromRow` / `carryOver`, read by no hole; mark it `required` so Confirm waits for the answer. Refused without a non-empty `params` and beside `execution: 'aggregate'`. UX, not authorization: the endpoint still checks a seeded value.
 - `successMessage` / `errorMessage` — toast copy on success / failure; without `successMessage` the UI shows a generic "Action completed" toast.
 - Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
-- A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`), holes in either; the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
+- A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`); the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
 
 <!-- os:check -->
@@ -142,7 +140,7 @@ export const PrintA3Action = defineAction({
 });
 ```
 
-### `opensInNewTab` + `newTabUrl` — async / computed redirect (SSO)
+### `opensInNewTab` + `newTabUrl` (SSO)
 
 A redirect URL **computed after a fetch**: `opensInNewTab:
 true` pre-opens the tab synchronously on click (no popup blocker), then navigates
@@ -181,5 +179,46 @@ validation, options, placeholder and widget come from the object metadata
 that overrides `type` names its own `widget`);
 `objectOverride` borrows a field of another object, and `defaultFromRow: true`
 pre-fills from the selected row in `list_item` contexts.
+
+**An action that adds a child line sets its price.** `lookupAutofill` fills only
+the form and the grid, and a stored `expression` reads only its own row, so a
+body inserting `invoice`, `product` and `quantity` alone stores no `amount`. Read
+the price from the source the build declares, or take it as a `required` param
+where the persona sets prices:
+
+<!-- os:check -->
+```typescript
+import { defineAction } from '@objectstack/spec/ui';
+
+export const AddInvoiceLineAction = defineAction({
+  name: 'crm_add_invoice_line',
+  label: 'Add Line',
+  objectName: 'invoice',
+  type: 'script',
+  locations: ['record_header'],
+  params: [
+    { field: 'product', objectOverride: 'invoice_line', required: true },
+    { field: 'quantity', objectOverride: 'invoice_line', required: true },
+  ],
+  body: {
+    language: 'js',
+    source: `
+      const product = await ctx.api.object('product').findOne({ where: { id: input.product } });
+      if (!product) throw new Error('Product not found.');
+      await ctx.api.object('invoice_line').insert({
+        invoice: ctx.recordId, product: input.product, quantity: input.quantity,
+        unit_price: product.list_price,
+      });
+    `,
+    capabilities: ['api.read', 'api.write'],
+  },
+  refreshAfter: true,
+});
+```
+
+Lines also written past the action (API, an agent, an import — one with
+automations off skips hooks) get the price from a `beforeInsert` hook on the
+line instead (objectstack-data → Lifecycle Hooks), `runAs: 'system'` when the
+writer cannot read it.
 
 > Set `refreshAfter: true` whenever the action mutates the current record.
