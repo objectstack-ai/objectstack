@@ -7714,6 +7714,12 @@ export class ObjectStackClient {
      * Reads and decisions are separately permissioned server-side (`ai:read`
      * vs `ai:approve`), so a caller that can list the queue may still be
      * refused on approve — handle the 403, do not assume one implies the other.
+     *
+     * Deciding (approve or reject) is the person's own act: only the person
+     * the call ran as decides their item, and only on their signed-in session
+     * to the app. Another user is refused whatever they hold, and so is a
+     * client on an API key or token, even the person's own: such a client can
+     * list and get, never decide.
      */
     pendingActions: {
       /** Queued actions, newest first. */
@@ -7743,6 +7749,9 @@ export class ObjectStackClient {
        * back `{ status: 'failed', error }` with HTTP 200, because the approval
        * succeeded even though the execution did not. Treating 2xx as "the write
        * happened" reports a failed write as a success.
+       *
+       * Only the person the call ran as approves, on their own signed-in
+       * session; a client on an API key or token is refused.
        */
       approve: async (id: string): Promise<ApproveAiPendingActionResponse> => {
         const route = this.getRoute('ai');
@@ -7753,7 +7762,11 @@ export class ObjectStackClient {
         return this.unwrapResponse<ApproveAiPendingActionResponse>(res);
       },
 
-      /** Reject with an optional reason. Executes nothing. */
+      /**
+       * Reject with an optional reason. Executes nothing. Only the person the
+       * call ran as rejects, on their own signed-in session; a client on an
+       * API key or token is refused.
+       */
       reject: async (id: string, reason?: string): Promise<RejectAiPendingActionResponse> => {
         const route = this.getRoute('ai');
         const res = await this.fetch(`${this.baseUrl}${route}/pending-actions/${encodeURIComponent(id)}/reject`, {
