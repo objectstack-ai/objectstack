@@ -33,6 +33,10 @@ Commands:
   run [flags]   run the scenario cards end to end and write one run record per card
                 (the flags of run-scenarios: --only, --modes, --driver, --cards, --out, …;
                 see the package README, "Running from npm")
+  summary [--card ID[,ID]] [--mode M[,M]] <record.json|dir>…
+                read run records (a directory at every depth) and print one markdown
+                table per card and mode: rows the author model, columns the ask model;
+                reads files only (no model, no network)
   export-gallery --check DIR
                 check a gallery tree (index.json, apps/) as a PR on objectstack-ai/gallery
                 must pass: one line per finding, exit 1 on any
@@ -58,6 +62,8 @@ function packageVersion(): string {
 export async function runCli(argv: readonly string[], io: CliIo = consoleIo): Promise<number> {
   const [command, ...rest] = argv;
   if (command === 'run') return (await import('./runner/cli.js')).main(rest);
+  // `summary` (`runner/summary.ts`) through the same built runner entry, which re-exports it.
+  if (command === 'summary') return (await import('./runner/cli.js')).summaryMain(rest, io);
   if (command === 'export-gallery') return (await import('./export/check-cli.js')).mainCheck(rest, { io });
   if (command === 'help' || command === '--help' || command === '-h') {
     io.out(USAGE);
