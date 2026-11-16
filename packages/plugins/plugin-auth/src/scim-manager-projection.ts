@@ -132,7 +132,7 @@ async function scimInvalidValue(code: string, detail: string): Promise<Error> {
     scimType: 'invalidValue',
     code,
     detail,
-  } as never);
+  });
   error.message = detail;
   return error;
 }
