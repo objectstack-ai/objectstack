@@ -68,7 +68,7 @@ const SELF_PATH = fileURLToPath(import.meta.url);
 export const EXIT = Object.freeze({ CLEAN: 0, OVERLAP: 1, USAGE: 2, CANNOT_ANSWER: 3 });
 export const DEFAULT_REPO = 'objectstack-ai/objectstack';
 export const REF_NAMESPACE = 'refs/overlap-check/pull';
-export const DEEPEN_HINT = 'git fetch --deepen=1500 REMOTE main';
+export const deepenHint = (remote) => `git fetch --deepen=1500 ${remote} main`;
 
 const USAGE =
   'usage: node scripts/pm/overlap-check.mjs [--branch=REF] [--base=REF] [--remote=NAME] [--repo=OWNER/NAME]\n' +
@@ -125,10 +125,10 @@ function resolveCommit(cwd, ref) {
 }
 
 /** The branch's own change set against its merge base with `base`; `{ ok, files }` or `{ ok: false, error }`. */
-export function changedFiles(cwd, base, branch) {
+export function changedFiles(cwd, base, branch, remote = 'origin') {
   const mb = git(cwd, ['merge-base', base, branch]);
   if (mb.status !== 0) {
-    return { ok: false, error: `no merge base between ${base} and ${branch} here — a shallow clone? Run ${DEEPEN_HINT}` };
+    return { ok: false, error: `no merge base between ${base} and ${branch} here — a shallow clone? Run ${deepenHint(remote)}` };
   }
   const d = git(cwd, ['diff', '--name-only', '--no-renames', '-z', mb.stdout.trim(), branch]);
   if (d.status !== 0) return { ok: false, error: `git diff failed: ${d.stderr}` };
@@ -139,7 +139,7 @@ export function changedFiles(cwd, base, branch) {
  * One `merge-tree --write-tree --name-only` with no attributes (header: why). `{ ok, conflicts }` — exit 0 is
  * clean, exit 1 lists the conflicted paths; anything else is `{ ok: false, error }`.
  */
-export function mergeTree(cwd, ours, theirs) {
+export function mergeTree(cwd, ours, theirs, remote = 'origin') {
   const empty = emptyTree(cwd);
   if (!empty) return { ok: false, error: 'git could not name the empty tree' };
   const r = git(cwd, [`--attr-source=${empty}`, 'merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ours, theirs]);
@@ -150,7 +150,7 @@ export function mergeTree(cwd, ours, theirs) {
   const shallowish = /unrelated histories/.test(r.stderr);
   return {
     ok: false,
-    error: `merge-tree ${ours} ${theirs} exited ${r.status}: ${r.stderr}` + (shallowish ? ` — run ${DEEPEN_HINT}` : ''),
+    error: `merge-tree ${ours} ${theirs} exited ${r.status}: ${r.stderr}` + (shallowish ? ` — run ${deepenHint(remote)}` : ''),
   };
 }
 
@@ -205,14 +205,14 @@ export function run(opts, { cwd = process.cwd(), get } = {}) {
   const sym = git(cwd, ['rev-parse', '--abbrev-ref', opts.branch]);
   const branchName = sym.status === 0 && sym.stdout.trim() !== 'HEAD' ? sym.stdout.trim() : null;
 
-  const own = changedFiles(cwd, opts.base, opts.branch);
+  const own = changedFiles(cwd, opts.base, opts.branch, opts.remote);
   if (!own.ok) return cannot(own.error);
 
   const report = {
     branch: opts.branch, branchName, branchSha, base: opts.base, baseSha, own: own.files,
     baseConflicts: [], prs: [], verdict: null,
   };
-  const vsBase = mergeTree(cwd, opts.base, opts.branch);
+  const vsBase = mergeTree(cwd, opts.base, opts.branch, opts.remote);
   if (!vsBase.ok) return cannot(vsBase.error);
   report.baseConflicts = vsBase.conflicts;
 
@@ -228,7 +228,7 @@ export function run(opts, { cwd = process.cwd(), get } = {}) {
   for (const c of candidates) {
     const head = fetchPrHead(cwd, opts.remote, c.number);
     if (!head.ok) return cannot(head.error);
-    const m = mergeTree(cwd, opts.branch, head.ref);
+    const m = mergeTree(cwd, opts.branch, head.ref, opts.remote);
     if (!m.ok) return cannot(`#${c.number}: ${m.error}`);
     report.prs.push({
       number: c.number,
@@ -442,7 +442,7 @@ function selfTest() {
     fixtureGit(work, ['checkout', '-q', '--orphan', 'island']);
     fixtureGit(work, ['commit', '-q', '--allow-empty', '-m', 'no shared history']);
     const island = cli(['--pr=7']);
-    check(L, 'no merge base (the shallow-clone shape) exits 3 naming --deepen, never 0', island.status === 3 && /--deepen/.test(island.stderr), `${island.status}\n${island.stdout}${island.stderr}`);
+    check(L, 'no merge base (the shallow-clone shape) exits 3 naming --deepen on the remote, never 0', island.status === 3 && /--deepen=1500 origin main/.test(island.stderr), `${island.status}\n${island.stdout}${island.stderr}`);
   } catch (err) {
     failed += 1;
     console.error(`  ✗ the self-test threw: ${err.stack ?? err.message}`);
