@@ -15,8 +15,12 @@
  * so `owner_id` read right; a `Field.user()` or `Field.lookup('sys_user')`
  * column naming the owner stayed NULL.
  *
- * The control boots the same app un-walled, where the seed already resolves
- * the same references: the walled Default Organization must read the same.
+ * The control boots the same app un-walled. There the boot seed loads before
+ * the dev admin exists, so its person columns have nobody to resolve to, and
+ * only the first-admin handoff writes `owner_id` afterwards. That outcome is
+ * measured on main and pinned here as it stands: the fix waits only for the
+ * walled bootstrap's own `default` organization, so the un-walled boot must
+ * read exactly as before.
  *
  * ## What is real
  *
@@ -180,7 +184,7 @@ describe('the walled Default Organization’s seed resolves the platform owner i
   });
 });
 
-describe('control: the same seed on an un-walled boot resolves the same references', () => {
+describe('control: the same seed on an un-walled boot reads as it did before the fix', () => {
   const env = legEnv([
     ['OS_TENANCY_POSTURE', undefined],
     ['OS_AUTH_MEMBERSHIP_POLICY', undefined],
@@ -197,15 +201,12 @@ describe('control: the same seed on an un-walled boot resolves the same referenc
     env.restore();
   });
 
-  it('the wall is down, and the seeded row names the admin in every person reference', async () => {
+  it('the wall is down, the seed landed once before the admin existed, and only the handoff owns the row', async () => {
     const tenancy: any = await booted.stack.kernel.getServiceAsync('tenancy');
     expect(tenancy.isolationActive).toBe(false);
+    expect(booted.adminId).not.toBe('');
     const rows = await ownerTasks(booted.ql, {});
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      assignee: booted.adminId,
-      reviewer: booted.adminId,
-      owner_id: booted.adminId,
-    });
+    expect(rows[0]).toMatchObject({ assignee: null, reviewer: null, owner_id: booted.adminId });
   });
 });
