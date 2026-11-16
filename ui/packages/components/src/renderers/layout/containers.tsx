@@ -20,7 +20,7 @@
 
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { ComponentRegistry, ExpressionEvaluator, declaredNameField, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
+import { ComponentRegistry, ExpressionEvaluator, declaredNameField, isElementDataSourceConfig, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
 import { actionRendersAt, placedHeaderActions, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
@@ -597,6 +597,25 @@ const collectRelatedLists = (
 };
 
 /**
+ * objectstack#34250 — whether a collected `record:related_list` reads its
+ * PARENT from a `parentDataSource` binding of its own. Such a list hangs off the
+ * record its binding answers, not off the record context around the strip: on
+ * an app page there is none, and on a record page the page's record is not
+ * this list's parent. So the strip never probes it (it cannot name the parent
+ * to count for); the list reports the number it holds through its panel's
+ * count channel instead, and the tab is kept mounted while inactive so it can.
+ *
+ * Both doors the list itself is authored through are read, as `objectName` is
+ * read below: the `properties` bag (the spec's props door, which
+ * `SchemaRenderer` hoists for the list) and the hoisted key. The predicate is
+ * the one the list's own parent scope (`ParentRecordBinding` in
+ * `@object-ui/plugin-detail`) reads the binding by, so a value it would ignore
+ * leaves the list on the strip's probe, keyed on the page's record as before.
+ */
+const isParentBoundList = (rl: any): boolean =>
+  isElementDataSourceConfig(rl?.properties?.parentDataSource ?? rl?.parentDataSource);
+
+/**
  * One count probe: which collection to count, scoped how.
  *
  * `filter` is the declared scope carried on the `record:related_list` node
@@ -900,7 +919,9 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       if (itemGated && !recordLoaded) return;
       const lists = shownListsByItem[idx]
         .filter((entry) => recordLoaded || entry.gates.length === 0)
-        .map((entry) => entry.node);
+        .map((entry) => entry.node)
+        // objectstack#34250 — a parent-bound list reports its own number.
+        .filter((rl) => !isParentBoundList(rl));
       const probes: Array<Probe> = [];
       for (const rl of lists) {
         const objectName: string | undefined = rl?.properties?.objectName || rl?.objectName;
@@ -1104,7 +1125,13 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       // objectstack#26613 — a tab whose badge its list blocks answer is
       // mounted while inactive, so they run their queries; an authored count
       // needs none of that, and leaves the tab mounted on open only.
-      reportsListCount: !authoredCount && containsListViewNode((it as any).children),
+      // objectstack#34250 — a related list bound to its parent by
+      // `parentDataSource` answers its tab's badge the same way, so its tab
+      // is kept mounted too. Only a list the badge counts (its gates open).
+      reportsListCount:
+        !authoredCount &&
+        (containsListViewNode((it as any).children) ||
+          shownListsByItem[idx].some((entry) => isParentBoundList(entry.node))),
     };
   });
 

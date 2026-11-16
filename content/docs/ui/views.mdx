@@ -259,6 +259,18 @@ and per-row retry is replaced by re-running the action. `batchSize` does not
 apply (the call is never chunked); set `maxRecords` when the server work is
 expensive.
 
+A rejection is reported as **one outcome for the whole selection**: the result
+dialog says the action did not complete for the selected records and shows the
+rejection's message once — its `userMessage` when the handler threw one (the
+text the handler wrote for the user, in the request's locale), else its
+`message`. It shows no per-row count and no per-row failure list, because one
+call cannot say which records it had changed before it stopped, nor whether
+it kept any of those changes. So the dialog says only that some records may
+already have been changed. When you close the dialog at the result step, the
+list re-reads its rows, whether the action resolved or rejected, so a record
+the handler changed shows its current value; the selection stays after a
+rejection, ready for a re-run.
+
 **Pick the right key for the dispatch you mean.** Per-record is
 `bulkActions: ['<name>']` — the bare-string form, which has nowhere to carry a
 flag and is promoted with the action's own label, params and `visible`.
