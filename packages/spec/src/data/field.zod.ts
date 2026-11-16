@@ -193,9 +193,9 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * enumeration goes one revision stale).
  *
  * Exported for ONE reader beside this file's superRefine: the AI blueprint
- * field (`ai/solution-blueprint.zod.ts`), which refuses `multiple: true` on the
- * same types so that a blueprint can never propose a declaration the built
- * field refuses. It answers "may an author DECLARE `multiple: true` here", and
+ * field (`ai/solution-blueprint.zod.ts`), which refuses `multiple: true` on
+ * exactly the types this file refuses it on, reading this set rather than a
+ * copy. It answers "may an author DECLARE `multiple: true` here", and
  * is not a third answer to "is this field multi-valued". That question has
  * exactly one answer — `isMultiValueField` (`field-value.zod.ts`) — and both of
  * the sets this one unions stay untouched.

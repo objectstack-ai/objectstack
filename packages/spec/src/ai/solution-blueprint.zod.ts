@@ -331,10 +331,13 @@ function refuseUnfitDefaultValue(field: unknown, ctx: z.RefinementCtx): void {
 /**
  * The refusal of `multiple: true` on a type that cannot hold several values,
  * judged against `FieldSchema`'s own declarable set
- * ({@link multiDeclarableFieldTypes}), so a blueprint can propose no
- * `multiple` the built field refuses and miss none it accepts. `radio` is in
- * that set and is refused by its own branch, as `FieldSchema` refuses it: a
- * radio group is single-choice. Each issue lands on the field's `multiple`.
+ * ({@link multiDeclarableFieldTypes}), so `multiple: true` is refused here on
+ * exactly the types `FieldSchema` refuses it on (the blueprint test pins every
+ * `FieldType`). `radio` is in that set and is refused by its own branch, as
+ * `FieldSchema` refuses it: a radio group is single-choice. Each issue lands
+ * on the field's `multiple`. What `multiple: true` rules out on the REST of a
+ * field is judged by the two rules beside it (a `defaultValue`, an option
+ * `kind`), each pinned against `FieldSchema` on its own.
  *
  * Guarded like the `defaultValue` refusal: it runs on every parse, so a
  * `type` outside `FieldType` is left to that key's own issue.
@@ -360,10 +363,40 @@ function refuseUndeclarableMultiple(field: unknown, ctx: z.RefinementCtx): void 
     + '"checkboxes" / "tags" field. For a single value, drop `multiple`.');
 }
 
-/** Both cross-key rules of a blueprint field, in one refinement. */
+/**
+ * The refusal of an option `kind` on a `select` with `multiple: true`
+ * (`FieldSchema`'s #23809 rule, in its wording): a lifecycle kind says where
+ * ONE record stands, and a multi-value select holds no single option code per
+ * record, so the built field refuses it. One issue per option that declares a
+ * kind, at that option's `kind`. `radio` with `multiple: true` is left to the
+ * `multiple` refusal, whose remedy (drop the flag) makes the kinds legal; the
+ * `multiselect` / `checkboxes` / `tags` kind case is outside this rule.
+ */
+function refuseKindOnMultiValueSelect(field: unknown, ctx: z.RefinementCtx): void {
+  if (typeof field !== 'object' || field === null) return;
+  const { name, type, options, multiple } = field as Record<string, unknown>;
+  if (type !== 'select' || multiple !== true || !Array.isArray(options)) return;
+  const subject = `Field "${typeof name === 'string' ? name : '<unnamed>'}" (select)`;
+  options.forEach((option: unknown, index: number) => {
+    if (typeof option !== 'object' || option === null) return;
+    const { value, kind } = option as Record<string, unknown>;
+    if (kind === undefined || kind === null) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['options', index, 'kind'],
+      message: `${subject}: option '${String(value)}' declares \`kind: '${String(kind)}'\`, but \`kind\` is only valid on `
+        + 'the options of a single-value `select` or `radio` field (this field is `select` with `multiple: true`): it '
+        + 'says where one record stands in its lifecycle, and this field holds no single option code per record. '
+        + 'Delete `kind`, or make the field a single-value `select`.',
+    });
+  });
+}
+
+/** The cross-key rules of a blueprint field, in one refinement. */
 function refineBlueprintField(field: unknown, ctx: z.RefinementCtx): void {
   refuseUnfitDefaultValue(field, ctx);
   refuseUndeclarableMultiple(field, ctx);
+  refuseKindOnMultiValueSelect(field, ctx);
 }
 
 /**
@@ -384,7 +417,8 @@ const MULTIPLE_RULE =
   + '"user", several files on a "file" / "image", several chosen options on a "select". Declarable only on "select" / '
   + '"lookup" / "user" / "file" / "image" (and redundantly on "multiselect" / "checkboxes" / "tags", which are '
   + 'lists already); `multiple: true` on any other type, "radio" included, is refused by name. A multi-value '
-  + '"select" takes no defaultValue. Carried into the built field by the applier as its `multiple`.';
+  + '"select" takes no defaultValue, and its options take no `kind` (a lifecycle is one value per record, so it is '
+  + 'never an object\'s stage field). Carried into the built field by the applier as its `multiple`.';
 const MEDIA_TYPES_PHRASE = 'a media field ("file" / "image" / "avatar" / "video" / "audio")';
 const ACCEPT_RULE =
   `The upload types ${MEDIA_TYPES_PHRASE} permits, as MIME types or extensions, e.g. ["application/pdf", "image/*", `

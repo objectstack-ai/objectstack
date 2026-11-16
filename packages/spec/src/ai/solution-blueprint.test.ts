@@ -2018,6 +2018,46 @@ describe('blueprint field `multiple`, `accept` and `maxSize`', () => {
     expect(lenientField({ type: 'select', options: OPTIONS, multiple: false, defaultValue: 'open' }).success).toBe(true);
   });
 
+  it('refuses an option `kind` on a multi-value "select", one issue per option at its `kind`, as the built field does', () => {
+    const KINDED = [{ label: 'Open', value: 'open', kind: 'open' }, { label: 'Plain', value: 'plain' }, { label: 'Won', value: 'won', kind: 'won' }];
+    const result = lenientField({ type: 'select', options: KINDED, multiple: true });
+    expect(result.success).toBe(false);
+    const refused = result.error!.issues.map((i) => ({ path: i.path, code: i.code }));
+    expect(refused).toEqual([
+      { path: ['objects', 0, 'fields', 0, 'options', 0, 'kind'], code: 'custom' },
+      { path: ['objects', 0, 'fields', 0, 'options', 2, 'kind'], code: 'custom' },
+    ]);
+    expect(result.error!.issues[0].message).toContain('"invoices" (select)');
+    expect(result.error!.issues[0].message).toContain('with `multiple: true`');
+    // The built field refuses the same options at the same paths.
+    const built = FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type: 'select', options: KINDED, multiple: true });
+    expect((built.error?.issues ?? []).map((i) => i.path)).toEqual([['options', 0, 'kind'], ['options', 2, 'kind']]);
+    // CONTROL: the same kinds on a single-value select parse on both, and so does a multi-value select without kinds.
+    expect(lenientField({ type: 'select', options: KINDED }).success).toBe(true);
+    expect(lenientField({ type: 'select', options: KINDED, multiple: false }).success).toBe(true);
+    expect(FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type: 'select', options: KINDED }).success).toBe(true);
+    expect(lenientField({ type: 'select', options: OPTIONS, multiple: true }).success).toBe(true);
+    // The strict mirror's null kind is absence: no refusal.
+    const nulled = strictField({ type: 'select', multiple: true, options: OPTIONS.map((o) => ({ ...o, kind: null })) });
+    expect(nulled.success).toBe(true);
+  });
+
+  it('refuses an object whose stageField names a multi-value "select", at `stageField`', () => {
+    const object = (multiple: boolean) => SolutionBlueprintSchema.safeParse({
+      summary: 's',
+      objects: [{
+        name: 'claim',
+        stageField: 'status',
+        fields: [{ name: 'status', type: 'select', multiple, options: [{ label: 'Open', value: 'open' }, { label: 'Paid', value: 'paid' }] }],
+      }],
+    });
+    const refused = object(true);
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues.map((i) => i.path)).toEqual([['objects', 0, 'stageField']]);
+    // CONTROL: the single-value select is a stage field (its options still owe a kind, refused at the options).
+    expect(object(false).error!.issues.map((i) => i.path).some((p) => p.at(-1) === 'stageField')).toBe(false);
+  });
+
   it('the describes name where each key applies, pinned against the built field\'s own sets, and promise no build', () => {
     for (const shape of [lenientShape(), strictShape()]) {
       const multiple: string = shape.multiple.description;
