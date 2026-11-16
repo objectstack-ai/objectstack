@@ -1242,6 +1242,9 @@ describe('[#33905] the bare entries of a flow whose only holder\'s package is di
         expect(engine.flowSlotKey(P1, 'solo')).toBe('solo');
         expect(engine.flowDispatchHolder('solo')).toEqual({ packageId: P1, claimBare: true });
         expect(engine.getFlowVersionHistory('solo')).toHaveLength(1);
+        // [#34145] The write doors' read over every holder answers the slot's body.
+        expect(engine.getHeldFlow('solo')).toBe(engine.getFlowSlot(P1, 'solo'));
+        expect(engine.getHeldFlow('solo')).toMatchObject({ name: 'solo' });
 
         registry.enablePackage(P1);
         expect((await engine.execute('solo')).success).toBe(true);
