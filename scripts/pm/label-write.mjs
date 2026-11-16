@@ -2434,7 +2434,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
-  [LAND_DOGFOOD_BATTERY]: 45,
+  [LAND_DOGFOOD_BATTERY]: 46,
 });
 const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -3076,6 +3076,7 @@ export async function selfTest() {
       'a pull read with no full head sha': [pull({ head: 'abc' }), 'no full head sha'],
       'NO CARD — no closing keyword, no `Part of`, no dev branch': [pull({ body: 'A body naming nothing.\n', ref: 'feature/x' }), 'why: no card'],
       'a card thread that does not read': [pull({ cards: {} }), "card #8's thread did not read", EXIT_PREREQUISITE],
+      'a card thread page that answers no list': [{ ...pull(), hooks: { 'comments-list': [{ status: 200, json: { message: 'not a list' } }] } }, 'answered no list on page 1'],
       'a RATE-LIMITED card thread read': [{ ...pull(), hooks: { 'comments-list': [{ status: 403, rateRemaining: 0, json: { message: 'API rate limit exceeded' } }] } }, 'ratelimit) — NOT MEASURED', EXIT_PREREQUISITE],
       'NO REPORT on the card': [pull({ cards: { 8: [{ id: 9, created_at: '2026-11-08T14:00:00Z', user: { login: FLEET }, body: 'Claim: PM loop round 1' }] } }), 'carries no `os-dev-report` by'],
       'an UNPARSABLE report': [pull({ cards: { 8: [report(null, { raw: `${SIG}\nos-dev-report\n\n\`\`\`json\n{ "dogfood_battery": \n\`\`\`\n` })] } }), 'no readable `dogfood_battery`'],
