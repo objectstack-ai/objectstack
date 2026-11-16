@@ -6065,7 +6065,33 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
         if (incompatible) return incompatible;
 
-        return this.purgeSeedDatasets(c, ctx, manifestId, seedDatasetsOf(entry.manifest), entry);
+        const read = this.ledgerSeedDatasets(c, ctx, manifestId, entry, 'purge sample data');
+        if ('response' in read) return read.response;
+        return this.purgeSeedDatasets(c, ctx, manifestId, read.datasets, entry);
+    };
+
+    /**
+     * [#34336] The seed datasets of a ledger entry the purge or the count acts
+     * on ({@link seedDatasetsOf}), or — when the resolver refuses the entry's
+     * body (a malformed `packages`, ADR-0112) — the answer the two doors give
+     * an unreadable entry ({@link unreadableLedgerEntry}), naming the ledger
+     * file and quoting the refusal, instead of a throw that reaches the route's
+     * error path with no entry named.
+     */
+    private ledgerSeedDatasets = (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        entry: InstalledEntry,
+        attempted: string,
+    ): { datasets: PurgeSeedDataset[] } | { response: Response } => {
+        try {
+            return { datasets: seedDatasetsOf(entry.manifest) };
+        } catch (cause) {
+            return {
+                response: this.unreadableLedgerEntry(c, ctx, manifestId, { file: this.ledger.fileNameOf(manifestId), cause }, attempted),
+            };
+        }
     };
 
     /**
@@ -6366,7 +6392,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
             if (incompatible) return incompatible;
-            datasets = seedDatasetsOf(entry.manifest);
+            const read = this.ledgerSeedDatasets(c, ctx, manifestId, entry, 'count sample data');
+            if ('response' in read) return read.response;
+            datasets = read.datasets;
         }
         if (datasets.length === 0) return answer(0, 0);
 

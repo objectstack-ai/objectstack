@@ -56,6 +56,7 @@ vi.mock('./marketplace-install-local-purge.js', async (importOriginal) => ({
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { LocalManifestSource } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -276,5 +277,44 @@ describe('controls: a body that carries a top-level data reads that list, once',
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(res.payload.data.seeded).toEqual({ mode: 'skipped', reason: 'no-datasets' });
         expect(loadCalls).toHaveLength(0);
+    });
+});
+
+/**
+ * A ledger entry whose body the resolver refuses — a `packages` that is present
+ * but is not an array (ADR-0112 `INVALID_ARTIFACT_PACKAGES`) — reaches the purge
+ * and the count as the answer those doors give an unreadable entry: the stable
+ * `MARKETPLACE_STORAGE_FAILED` 500 naming the ledger file to repair, never a
+ * throw into the route's error path with no entry named.
+ */
+describe('purge and count over a ledger body the resolver refuses', () => {
+    async function installThenCorrupt() {
+        const rt = await boot(dir);
+        expect((await rt.install(composed('6.3.0'))).status).toBe(200);
+        const ledger = new LocalManifestSource(dir);
+        const { entry } = ledger.read(SUITE);
+        ledger.write({ ...entry!, manifest: { ...(entry!.manifest as object), packages: 'not-a-list' } } as any);
+        // The ledger file's basename, as it sits on disk.
+        return { rt, file: `${SUITE}.json` };
+    }
+
+    it('the purge answers the unreadable-entry 500 naming the ledger file, and deletes nothing', async () => {
+        const { rt, file } = await installThenCorrupt();
+        const res = await rt.purge(SUITE);
+        expect(res.status).toBe(500);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('MARKETPLACE_STORAGE_FAILED');
+        expect(res.payload.error.message).toContain(file);
+        expect(purgeCalls).toHaveLength(0);
+    });
+
+    it('the count answers the same', async () => {
+        const { rt, file } = await installThenCorrupt();
+        const res = await rt.count(SUITE);
+        expect(res.status).toBe(500);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('MARKETPLACE_STORAGE_FAILED');
+        expect(res.payload.error.message).toContain(file);
+        expect(countCalls).toHaveLength(0);
     });
 });
