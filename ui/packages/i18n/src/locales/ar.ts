@@ -3328,6 +3328,10 @@ const ar = {
       granted: "تم منح الوصول",
       denied: "تم رفض الوصول",
       noRedirect: "لم يُرجع الخادم أي عنوان URL لإعادة التوجيه.",
+      returnToApp: "ارجع إلى {{appName}} للمتابعة. يمكنك إغلاق علامة التبويب هذه.",
+      returnToUnnamedApp: "ارجع إلى التطبيق للمتابعة. يمكنك إغلاق علامة التبويب هذه.",
+      openApp: "فتح {{appName}}",
+      openUnnamedApp: "فتح التطبيق",
       failed: "فشلت الموافقة",
       footer: "يمكنك إلغاء الوصول في أي وقت من إعدادات حسابك.",
     },
@@ -4317,13 +4321,11 @@ const ar = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'تبقّى {{left}} من حصتك في الذكاء الاصطناعي. النموذج الموسوم بـ ×N يستهلكها أسرع بـ N مرة من النموذج الافتراضي.',
@@ -4388,6 +4390,7 @@ const ar = {
       get_metadata_schema: "الاطلاع على تنسيق البيانات الوصفية",
       get_package: "مراجعة معلومات الحزمة",
       get_record_history: "قراءة سجل تعديلات هذا السجل",
+      list_flow_runs: "مراجعة سجل تشغيل التدفق",
       list_metadata: "سرد البيانات الوصفية الموجودة",
       list_objects: "سرد الكائنات الموجودة",
       list_packages: "سرد الحزم الموجودة",

@@ -633,6 +633,9 @@ export type {
     SummaryBackfillLogger,
     SummaryBackfillOptions,
 } from './summary-backfill.js';
+// [#34096] What `ObjectQL.materialiseAddedSummaries` (run by every install
+// door's `syncSchemas`) did with the roll-ups an install or upgrade added.
+export type { SummaryMaterialiseOutcome } from './summary-install-materialise.js';
 // [#29961] The backfill behind `os migrate stored-expressions`: stored computed
 // fields over rows no write has computed since the field was declared, and the
 // boot advisory naming it. Same split as the roll-up backfill above.

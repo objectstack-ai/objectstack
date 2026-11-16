@@ -18,7 +18,7 @@ import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@objec
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
-import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, withRecordBeingEdited, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
@@ -1021,8 +1021,16 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // A `permission-ref` field also carries the object this form edits
           // (objectstack#32795), so the widget tells the grant's name column
           // from a column of the same name on another object.
+          // A lookup whose `lookupFilters` read `{ $record }` also carries the
+          // form's statement that one record is being edited here, with the
+          // object each hop's lookup points at: its picker resolves the
+          // references only on that stamp, and reads a hop for the id the
+          // form holds.
           field: withFormObject(
-            withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
+            withRecordBeingEdited(
+              withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
+              objectSchema.fields,
+            ),
             schema.objectName,
           ),
           // A per-field widget override. `form.tsx` resolves `widget || type`, so this makes the
