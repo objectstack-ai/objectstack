@@ -178,9 +178,10 @@ jobs:
           # EMPTY value for every other stroke, so every other run's token is exactly what it was. The App
           # installation must hold `Merge queues: write` (a maintainer's setting); without it this mint fails with
           # zero writes. Whether GitHub honours the jump for an App token is NOT MEASURED until the first live
-          # stroke, whose read-back judges it (`scripts/pm/fleet-write/execute.mjs`, "The front-of-queue enqueue");
-          # nor is whether `dequeuePullRequest` needs this grant at all, or what a token without it answers
-          # (`scripts/pm/fleet-write/ops.mjs`, "The one row that takes a pull OUT of the merge queue").
+          # stroke, whose read-back judges it (`scripts/pm/fleet-write/execute.mjs`, "The front-of-queue enqueue").
+          # Whether `dequeuePullRequest` needs this grant at all, or what a token without it answers, is
+          # NOT MEASURED either: the one live stroke carried the grant (`scripts/pm/fleet-write/ops.mjs`, "The one
+          # row that takes a pull OUT of the merge queue").
           permission-merge-queues: ${{ steps.validate.outputs.permission_merge_queues }}
 
       # The sender gate, then the actions in order, then the step summary —

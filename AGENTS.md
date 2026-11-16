@@ -291,7 +291,7 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档 L2 审核落地: `.claude/**`,
     objectstack workflow edits (`readWorkflowDiff`), skills-only wording and add-only ADR notes (`lowRiskArmVerdict`, on
     a `Security-touching: no` record, no named card ever labelled `security`; the seat labels unnamed security teaching)
-    read as S): those four lift once the PR thread or its card carries a PASS `## Contract review` record for its
+    read as S): those four lift once the PR thread or its card carries a PASS `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and every check is green — the owning seat queues it. A PR
     whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
     uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving
@@ -299,9 +299,9 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     says nothing about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
-    an unqueued PR; for a queued one its landing seat sends the relay's `pr_dequeue` (measured live, comment 6902190812)
-    and any other seat asks the maintainer to remove it by hand at once — then confirm from the remote that it is in
-    neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
+    an unqueued PR; a queued one's landing seat sends the relay's `pr_dequeue` (measured live, comment 6902190812); any
+    other seat, or a stroke that does not land, asks the maintainer at once — then confirm from the remote that it is
+    in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
     spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
     governed diff without its tier's record; CODEOWNERS routes every Tier H surface but the low-risk arm's rows to the
     approvers, the relay asks per pull on drafts (no barrier); the post-merge audit (`check-governed-merges.mjs`) lists
