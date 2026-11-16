@@ -2254,6 +2254,9 @@ const ko = {
       fieldErrorsToast_one: "확인이 필요한 설정 {{count}}개: {{settings}}",
       fieldErrorsToast_other: "확인이 필요한 설정 {{count}}개: {{settings}}",
       cryptoRefusalTitle: "이 배포는 시크릿을 암호화할 수 없습니다",
+      platformManagedTitle: "플랫폼에서 관리합니다",
+      platformManagedBody: "호스팅 플랫폼이 이 환경을 위해 제공하고 구성하므로 여기에서 설정하지 않습니다.",
+      aiProviderManaged: "AI 공급자, 모델 및 자격 증명은 플랫폼에서 관리합니다.",
       cryptoRefusalSubjectSuffix: "은(는) 암호화 대상으로 선언되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalNoSubject: "암호화 대상으로 선언된 값이 거부되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalToast: "시크릿을 암호화할 수 없습니다: {{subject}}",
@@ -2352,6 +2355,8 @@ const ko = {
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
+      firstApp: { title: '첫 번째 앱 추가', todo: '아직 자체 앱이 없습니다. 마켓플레이스에서 설치하거나 직접 만들면 홈에 표시됩니다.', done: '자체 앱이 홈에 있습니다.' },
+      firstRecord: { title: '첫 번째 레코드 추가', todo: '아직 앱에서 레코드를 만든 사람이 없습니다.', done: '앱에서 레코드가 만들어졌습니다.', action: '앱 열기' },
     },
     error: {
       connectionFailed: "서버에 연결할 수 없습니다",
@@ -2705,6 +2710,7 @@ const ko = {
         retry: "싱글 사인온으로 계속",
       },
       ssoHandoff: "{{target}}(으)로 계속",
+      ssoHandoffClient: "{{clientName}}(으)로 계속하려면 로그인하세요",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
         signIn: "개발용 관리자로 로그인",
@@ -2734,6 +2740,8 @@ const ko = {
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
         networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
+        ssoAccessDeniedNotMember: "로그인한 계정은 이 환경 조직의 멤버가 아닙니다. 멤버인 계정으로 로그인하거나, 조직 관리자에게 초대를 요청하세요.",
+        ssoAccessDeniedInvitationPending: "이 환경 조직에 초대되었지만 아직 초대를 수락하지 않았습니다. 이메일에서 초대를 수락한 후 다시 로그인하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
@@ -5089,6 +5097,25 @@ const ko = {
     sourceRequired: "{{kind}} 페이지에는 비어 있지 않은 {{source}} 값이 필요합니다.",
     loading: "React 런타임을 불러오는 중…",
     error: "React 페이지 오류",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "모바일 앱",
+    subtitle: "ObjectOS 모바일 앱을 이 서버에 연결합니다",
+    scanHint: "ObjectOS 모바일 앱을 열고 이 코드를 스캔하면 이 서버에 연결됩니다.",
+    qrAlt: "ObjectOS 모바일 앱을 이 서버에 연결하는 QR 코드",
+    linkLabel: "연결 링크",
+    copy: "링크 복사",
+    copied: "링크를 복사했습니다",
+    privacy: "이 코드에는 이 서버의 주소만 들어 있으며 계정 정보는 들어 있지 않습니다.",
+    loadFailed: "이 서버의 공개 주소를 읽지 못했습니다. 페이지를 새로 고친 후 다시 시도하세요.",
+    unreachableTitle: "휴대폰에서 이 서버의 주소에 접속할 수 없습니다",
+    unreachableBody: "이 서버의 주소는 {{address}}이며, 휴대폰에서 열 수 없는 로컬 또는 사설 주소이므로 코드를 표시하지 않습니다. 서버의 {{setting}}을(를) 공개 주소(예: {{example}})로 설정하고 서버를 다시 시작하세요.",
+    insecureTitle: "이 서버의 주소는 HTTPS를 사용하지 않습니다",
+    insecureBody: "이 서버의 주소는 {{address}}입니다. 모바일 앱은 이 주소로 로그인하므로 HTTPS를 사용해야 하며, 코드를 표시하지 않습니다. 서버를 HTTPS로 제공하고 {{setting}}을(를) https:// 주소(예: {{example}})로 설정한 뒤 서버를 다시 시작하세요.",
+    unpublishedTitle: "이 서버는 공개 주소를 게시하지 않습니다",
+    unpublishedBody: "코드를 표시하지 않습니다. 이 서버는 아직 모바일 앱에 공개 주소를 제공하지 않습니다. 이를 지원하는 버전으로 서버를 업데이트하세요.",
   },
 };
 

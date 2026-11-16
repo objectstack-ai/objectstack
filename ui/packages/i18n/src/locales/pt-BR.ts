@@ -2315,6 +2315,9 @@ const pt = {
       fieldErrorsToast_many: "{{count}} de configurações precisam de atenção: {{settings}}",
       fieldErrorsToast_other: "{{count}} configurações precisam de atenção: {{settings}}",
       cryptoRefusalTitle: "Esta implantação não consegue criptografar segredos",
+      platformManagedTitle: "Gerenciado pela plataforma",
+      platformManagedBody: "A plataforma de hospedagem fornece e configura isso para este ambiente, por isso não é definido aqui.",
+      aiProviderManaged: "O provedor de IA, seu modelo e suas credenciais são gerenciados pela plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como criptografado, portanto nada foi gravado.",
       cryptoRefusalNoSubject: "O valor declarado como criptografado foi recusado, portanto nada foi gravado.",
       cryptoRefusalToast: "Não é possível criptografar segredos: {{subject}}",
@@ -2413,6 +2416,8 @@ const pt = {
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Adicione seu primeiro aplicativo', todo: 'Ainda não há um aplicativo seu. Instale um pelo marketplace ou crie um, e ele aparecerá no Início.', done: 'Um aplicativo seu está no Início.' },
+      firstRecord: { title: 'Adicione seu primeiro registro', todo: 'Ninguém criou um registro nos seus aplicativos ainda.', done: 'Um registro foi criado nos seus aplicativos.', action: 'Abrir aplicativo' },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",
@@ -2770,6 +2775,7 @@ const pt = {
         retry: "Continuar com login único",
       },
       ssoHandoff: "Continuar para {{target}}",
+      ssoHandoffClient: "Entre para continuar em {{clientName}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
         signIn: "Entrar como administrador de desenvolvimento",
@@ -2799,6 +2805,8 @@ const pt = {
         directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
         networkNotAllowed: "Este sistema não permite entrar a partir da sua rede. Conecte-se de uma rede permitida (por exemplo, a rede do escritório ou a VPN da sua organização) ou fale com o administrador.",
         ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
+        ssoAccessDeniedNotMember: "A conta com a qual você entrou não é membro da organização deste ambiente. Entre com uma conta que seja ou peça a um administrador da organização para convidar você.",
+        ssoAccessDeniedInvitationPending: "Você foi convidado para a organização deste ambiente, mas o convite ainda não foi aceito. Aceite o convite pelo seu e-mail e entre novamente.",
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",
         ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
@@ -5228,6 +5236,25 @@ const pt = {
     sourceRequired: "Uma página {{kind}} requer um {{source}} não vazio.",
     loading: "Carregando o runtime do React…",
     error: "Erro na página React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicativo móvel",
+    subtitle: "Conecte o aplicativo móvel ObjectOS a este servidor",
+    scanHint: "Abra o aplicativo móvel ObjectOS e escaneie este código para conectá-lo a este servidor.",
+    qrAlt: "Código QR que conecta o aplicativo móvel ObjectOS a este servidor",
+    linkLabel: "Link de conexão",
+    copy: "Copiar link",
+    copied: "Link copiado",
+    privacy: "O código contém apenas o endereço deste servidor, nunca a sua conta.",
+    loadFailed: "Não foi possível ler o endereço público deste servidor. Recarregue a página para tentar novamente.",
+    unreachableTitle: "Um celular não consegue acessar o endereço deste servidor",
+    unreachableBody: "O endereço deste servidor é {{address}}, um endereço local ou privado que um celular não consegue abrir, então nenhum código é exibido. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    insecureTitle: "O endereço deste servidor não usa HTTPS",
+    insecureBody: "O endereço deste servidor é {{address}}. O aplicativo móvel faz login por ele, então ele precisa usar HTTPS, e nenhum código é exibido. Sirva este servidor por HTTPS, defina {{setting}} com o endereço https:// dele, por exemplo {{example}}, e reinicie-o.",
+    unpublishedTitle: "Este servidor não publica seu endereço público",
+    unpublishedBody: "Nenhum código é exibido: este servidor ainda não oferece seu endereço público ao aplicativo móvel. Atualize o servidor para uma versão compatível.",
   },
 };
 

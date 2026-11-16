@@ -2010,6 +2010,9 @@ const zh = {
       fieldErrorsToast_one: '{{count}} 项设置需要处理：{{settings}}',
       fieldErrorsToast_other: '{{count}} 项设置需要处理：{{settings}}',
       cryptoRefusalTitle: '此部署无法加密机密信息',
+      platformManagedTitle: '此项由平台托管',
+      platformManagedBody: '托管平台为此环境提供并配置此项，因此无需在此设置。',
+      aiProviderManaged: 'AI 提供商、模型与凭据由平台托管。',
       cryptoRefusalSubjectSuffix: '被声明为加密字段，因此未写入任何内容。',
       cryptoRefusalNoSubject: '声明为加密的值被拒绝，因此未写入任何内容。',
       cryptoRefusalToast: '无法加密机密信息：{{subject}}',
@@ -2108,6 +2111,8 @@ const zh = {
         done: '你已连接了 AI 助手或 API 密钥。',
         action: '连接',
       },
+      firstApp: { title: '放进第一个应用', todo: '还没有你自己的应用。从应用市场安装一个或自己搭建一个，它会出现在首页。', done: '你自己的应用已在首页。' },
+      firstRecord: { title: '添加第一条记录', todo: '还没有人在你的应用里创建记录。', done: '你的应用里已经有人创建了记录。', action: '打开应用' },
     },
     error: {
       connectionFailed: '无法连接到服务器',
@@ -2784,6 +2789,7 @@ const zh = {
         retry: "继续单点登录",
       },
       ssoHandoff: '继续前往 {{target}}',
+      ssoHandoffClient: "登录以继续前往 {{clientName}}",
       devAdminHint: {
         title: '本地开发实例',
         signIn: '以开发管理员登录',
@@ -2806,6 +2812,8 @@ const zh = {
         directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
         networkNotAllowed: "本系统不允许从你当前的网络登录。请从允许的网络（例如组织的办公网络或 VPN）连接，或联系管理员。",
         ssoAccessDenied: "你登录所用的账号无权访问本系统。请使用有权访问的账号登录，或请本系统所属组织的管理员将你添加为成员。",
+        ssoAccessDeniedNotMember: "你登录所用的账号不是本系统所属组织的成员。请使用该组织成员的账号登录，或请该组织的管理员邀请你。",
+        ssoAccessDeniedInvitationPending: "你已受邀加入本系统所属组织，但尚未接受邀请。请先在邮件中接受邀请，然后重新登录。",
         ssoSwitchAccount: "切换账号",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
@@ -5150,6 +5158,25 @@ const zh = {
     sourceRequired: '{{kind}} 页面需要非空的 {{source}}。',
     loading: '正在加载 React 运行时…',
     error: 'React 页面错误',
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "移动应用",
+    subtitle: "将 ObjectOS 移动应用连接到此服务器",
+    scanHint: "打开 ObjectOS 移动应用，扫描此二维码即可连接到此服务器。",
+    qrAlt: "用于将 ObjectOS 移动应用连接到此服务器的二维码",
+    linkLabel: "连接链接",
+    copy: "复制链接",
+    copied: "链接已复制",
+    privacy: "二维码只包含此服务器的地址，不包含你的账号。",
+    loadFailed: "无法读取此服务器的公开地址。请刷新页面重试。",
+    unreachableTitle: "手机无法访问此服务器的地址",
+    unreachableBody: "此服务器的地址是 {{address}}，这是手机无法打开的本机或内网地址，因此不显示二维码。请在服务器上将 {{setting}} 设为它的公开地址（例如 {{example}}），然后重启服务器。",
+    insecureTitle: "此服务器的地址未使用 HTTPS",
+    insecureBody: "此服务器的地址是 {{address}}。移动应用会通过它登录，因此它必须使用 HTTPS，此处不显示二维码。请让此服务器通过 HTTPS 提供服务，将 {{setting}} 设为它的 https:// 地址（例如 {{example}}），然后重启服务器。",
+    unpublishedTitle: "此服务器未公布其公开地址",
+    unpublishedBody: "不显示二维码：此服务器尚未向移动应用提供其公开地址。请将服务器升级到支持此功能的版本。",
   },
 } as const;
 
