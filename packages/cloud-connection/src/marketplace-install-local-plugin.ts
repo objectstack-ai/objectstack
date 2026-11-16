@@ -1940,6 +1940,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     install-time rows (or the user's own data) are still present, and
      *     re-upserting would silently revert user edits on every boot.
      *
+     * [#34405] The load honours the landed-key record (`sys_seed_landed_key`),
+     * as the runtime's boot seed does: a seed row whose key landed in this
+     * organization before and whose row is gone was removed by a person, and is
+     * withheld (counted in `skipped`), not inserted again. A database that lost
+     * its rows and the record with them is healed whole. A heal that withheld
+     * rows and landed none, with no error, is that declared outcome: it is
+     * reported at `info` and recorded with its real `skipped`, never as an
+     * `emptyInstall`. Only a load that landed nothing otherwise (nothing
+     * withheld, or an error) is the empty install the boot banner escalates.
+     *
      * `converted` is the entry's manifest as rehydrate converted it — the one the
      * package registered — so the heal seeds what registered, not the raw
      * ledger bytes.
@@ -2004,6 +2014,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     rejected: summary.errors ?? 0,
                     droppedRefs: summary.droppedRefs ?? 0,
                     healed: true,
+                });
+            } else if ((summary.skipped ?? 0) > 0 && (summary.errors ?? 0) === 0) {
+                // [#34405] Every row withheld by the landed-key record: the seed
+                // a person emptied stays empty, on every restart from now on. A
+                // settled seed, not a failed one, so no `emptyInstall`.
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows: ${summary.skipped} seed row(s) skipped, none in error (a row a person removed is withheld by the landed-key record); the package's sample-data reseed brings them back`);
+                await this.recordSeedSummary(ctx, {
+                    source: entry.manifestId,
+                    marketplace: true,
+                    inserted: 0,
+                    updated: 0,
+                    skipped: summary.skipped,
+                    rejected: 0,
+                    droppedRefs: summary.droppedRefs ?? 0,
                 });
             } else {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows${summary.errorSample ? ` — first error: ${summary.errorSample}` : ''}`);
