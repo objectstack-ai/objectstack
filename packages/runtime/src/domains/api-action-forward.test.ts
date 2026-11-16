@@ -1051,6 +1051,15 @@ describe('[#28943] an API-key caller is never offered a `sys_api_key` write as r
     };
     const CASE_OBJECT = { name: 'crm_case', actions: [CLOSE_CASE] };
     const bootWithKeys = (opts: Parameters<typeof boot>[0] = {}) => boot({ ...opts, extraObjects: [API_KEY_OBJECT, CASE_OBJECT] });
+    /**
+     * [#33690] The same forward with no confirmation declared: the MCP door
+     * hands a declared-gated action to the person before anything is forwarded,
+     * so the forward's own guard is reached at MCP only on this twin.
+     */
+    const UNGATED_API_KEY_OBJECT = {
+        name: 'sys_api_key', actions: [{ ...REVOKE_API_KEY, ai: { ...REVOKE_API_KEY.ai, requiresConfirmation: false } }],
+    };
+    const bootUngatedKeys = (opts: Parameters<typeof boot>[0] = {}) => boot({ ...opts, extraObjects: [UNGATED_API_KEY_OBJECT, CASE_OBJECT] });
 
     const KEY_CTX = (): HttpProtocolContext => {
         const ctx: any = CTX({ 'x-api-key': 'osk_member_key' });
@@ -1097,11 +1106,17 @@ describe('[#28943] an API-key caller is never offered a `sys_api_key` write as r
         const h = bootWithKeys();
         const listed = await listFor(h, KEY_CTX());
 
-        const thrown = await runViaMcp(h, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        // [#33690] Declared-gated: held for the person before the forward, so no guard is reached.
+        const held = await runViaMcp(h, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        expect(held).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details: { reason: 'no_confirmation_service' } });
+
+        const ungated = bootUngatedKeys();
+        const thrown = await runViaMcp(ungated, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
         expect(thrown).toBeInstanceOf(Error);
         expect((thrown as any).status).toBe(403);
         expect((thrown as any).code).toBe(listed[REVOKE_API_KEY.name].unavailable.code);
         expect(String(thrown.message)).toBe(listed[REVOKE_API_KEY.name].unavailable.reason);
+        expect(ungated.request).not.toHaveBeenCalled();
 
         const res = await h.dispatcher.handleActions(`/sys_api_key/${REVOKE_API_KEY.name}`, 'POST', { recordId: 'key_1' }, KEY_CTX());
         expect(statusOf(res)).toBe(403);
@@ -1118,12 +1133,18 @@ describe('[#28943] an API-key caller is never offered a `sys_api_key` write as r
         expect(listed[REVOKE_API_KEY.name]).toBeDefined();
         expect(listed[REVOKE_API_KEY.name].unavailable).toBeUndefined();
 
-        const result: any = await runViaMcp(h, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1');
+        // [#33690] Declared-gated: the caller's `confirm: true` does not run it at MCP.
+        const held = await runViaMcp(h, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        expect(held).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details: { reason: 'no_confirmation_service' } });
+        expect(h.injected).toHaveLength(0);
+
+        const u = bootUngatedKeys({ answer: { body: { success: true, data: { id: 'key_1', revoked: true } } } });
+        const result: any = await runViaMcp(u, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1');
         expect(result.ok).toBe(true);
-        expect(h.injected).toHaveLength(1);
-        expect(h.injected[0].url).toBe('http://app.example.test/api/v1/data/sys_api_key/key_1');
-        expect(h.injected[0].init.method).toBe('PATCH');
-        expect(JSON.parse(String(h.injected[0].init.body))).toMatchObject({ revoked: true });
+        expect(u.injected).toHaveLength(1);
+        expect(u.injected[0].url).toBe('http://app.example.test/api/v1/data/sys_api_key/key_1');
+        expect(u.injected[0].init.method).toBe('PATCH');
+        expect(JSON.parse(String(u.injected[0].init.body))).toMatchObject({ revoked: true });
     });
 
     it('control: the same data-door write on an object no rule guards stays runnable under an API key', async () => {

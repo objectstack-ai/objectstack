@@ -13,7 +13,12 @@
  *     artifact is 0 of the card's `expect` count, never "not run" — a degraded
  *     build must show up. Each bare item name is also listed as a finding, and
  *     so is each reference cycle the build made required on every side (its
- *     seed cannot load it).
+ *     seed cannot load it). Each roll-up the build leaves readable to a persona
+ *     over child data the card withholds from that persona (a standing
+ *     `security-rollup-source-unreadable`, `rollupSourceCharges`) is one more
+ *     failed check, in total and never in passed, and a finding naming the
+ *     persona, the roll-up and the withheld child
+ *     ({@link rollupSourceFindings}); so such a build is never `pass`.
  *   - A build whose authoring turn did not finish — killed by the runner's
  *     timeout (`author timed out after N min`), or ended with no result line
  *     or an error result (`author turn failed: …`) — is NOT MEASURED, never a
@@ -90,10 +95,11 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
-import { askedFirst, confirmedByAgent } from '../score/index.js';
-import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, TurnSummary } from './orchestrate.js';
+import { askedFirst, confirmedByAgent, type CheckResult } from '../score/index.js';
+import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
+import { promptChoiceText, type PromptChoice } from './prompts.js';
 import { cycleText } from './seed.js';
 
 export interface Tally {
@@ -254,6 +260,8 @@ export interface CardScorecard {
   confirmation?: ConfirmationTally;
   /** How many times each question turn was asked (`CardRun.askRepeats`), when more than once; absent ⇒ once. */
   askRepeats?: number;
+  /** The prompt choice the run sent (`CardRun.promptChoice`), when a flag set one; absent ⇒ the default prompts. */
+  promptChoice?: PromptChoice;
   modes: ModeScorecard[];
 }
 
@@ -276,7 +284,8 @@ export function buildTally(b: BuildHalf | undefined, expectCount: number): HalfS
   if (b.notMeasured) return { passed: 0, total: 0, degraded: false, failedCommands: [], notMeasuredReason: b.notMeasured, ...(author ? { author } : {}) };
   const failedCommands = b.commands.filter((c) => c.exit !== 0).map((c) => cmdName(c.command));
   const passed = b.score?.passed ?? 0;
-  const total = b.score?.total ?? expectCount;
+  // Each charged roll-up is a failed Build check: in total, never in passed.
+  const total = (b.score?.total ?? expectCount) + (b.rollupSourceUnreadable?.length ?? 0);
   return { passed, total, degraded: !b.score || failedCommands.length > 0 || passed < total, failedCommands, ...(author ? { author } : {}) };
 }
 
@@ -511,6 +520,30 @@ export function requiredCycleFindings(b: BuildHalf | undefined, half: string): s
   );
 }
 
+/** `client_viewer` from the object `demoproject_task` / the field `demoproject_task.estimate_hours`. */
+const withheldText = (c: RollupSourceCharge): string => ('object' in c.withheld ? `the object ${c.withheld.object}` : `the field ${c.withheld.field}`);
+
+/**
+ * One Build finding per roll-up the build leaves readable over child data the
+ * card withholds ({@link BuildHalf.rollupSourceUnreadable}), naming the
+ * persona, the roll-up and the withheld child.
+ */
+export function rollupSourceFindings(b: BuildHalf | undefined, half: string): string[] {
+  return (b?.rollupSourceUnreadable ?? []).map(
+    (c) =>
+      `${half}: the roll-up ${c.rollup} stays readable to ${c.persona} (permission set ${c.permissionSet}) over ${c.child}, while the card withholds ${withheldText(c)} from ${c.persona}: ${c.finding.rule} stands, so ${c.persona} reads an aggregate of what it may not see`,
+  );
+}
+
+/** The record's evidence for each charged roll-up: a failed check, `rollup-source-unreadable:<persona>:<parent.field>`. */
+export function rollupSourceChecks(b: BuildHalf | undefined): CheckResult[] {
+  return (b?.rollupSourceUnreadable ?? []).map((c) => ({
+    check: `rollup-source-unreadable:${c.persona}:${c.rollup}`,
+    pass: false,
+    detail: `card withholds ${withheldText(c)}; ${c.finding.where}: ${c.finding.message}`,
+  }));
+}
+
 export function modeScorecard(m: ModeRun): ModeScorecard {
   const first: HalfScores = {};
   const b = buildTally(m.build, NO_ARTIFACT_TOTAL);
@@ -540,10 +573,12 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
       ...m.findings,
       ...bareNameFindings(m.build, 'build'),
       ...requiredCycleFindings(m.build, 'build'),
+      ...rollupSourceFindings(m.build, 'build'),
       ...buildDenialFindings(m.run, 'build'),
       ...platformNotMeasuredFindings(m.run, 'run'),
       ...bareNameFindings(m.iterate?.build, 'iterate build'),
       ...requiredCycleFindings(m.iterate?.build, 'iterate build'),
+      ...rollupSourceFindings(m.iterate?.build, 'iterate build'),
       ...buildDenialFindings(m.iterate?.run, 'iterate build'),
       ...platformNotMeasuredFindings(m.iterate?.run, 'iterate run'),
     ],
@@ -588,6 +623,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     askSpend: askSpend(run.modes.flatMap(askTurnsOf)),
     ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
     ...(run.askRepeats !== undefined && run.askRepeats > 1 ? { askRepeats: run.askRepeats } : {}),
+    ...(run.promptChoice !== undefined ? { promptChoice: run.promptChoice } : {}),
     modes,
   };
 }
@@ -694,6 +730,7 @@ export function renderScorecard(sc: CardScorecard): string {
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns${sc.askRepeats !== undefined && sc.askRepeats > 1 ? `, each asked ${sc.askRepeats} times` : ''}), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
+    ...(sc.promptChoice ? [`prompts: ${promptChoiceText(sc.promptChoice)}`, ''] : []),
     `author cost: ${noAuthoring ? NO_AUTHORING_TURNS : authorCostText(sc.authorCost)}`,
     `author time: ${noAuthoring ? NO_AUTHORING_TURNS : authorTimeText(sc.authorTime)}`,
     `ask cost: ${askCostText(sc.askSpend)}`,
@@ -768,10 +805,10 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     const iterateOut = firstOut ?? noIterate ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
     const buildNote = (b: HalfScores['build']) => supplied ?? (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
     const halves: Array<[string, Tally | undefined, string | undefined, unknown[], string]> = [
-      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.personaGrants, ...m.build.score.naming] : [], buildNote(s.first.build)],
+      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.personaGrants, ...m.build.score.naming, ...rollupSourceChecks(m.build)] : rollupSourceChecks(m.build), buildNote(s.first.build)],
       ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? [], s.first.ask ? cell(s.first.ask) : (firstOut ?? '')],
       ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? [], s.first.operations ? cell(s.first.operations) : (firstOut ?? '')],
-      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? noIterate ?? '')],
+      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming, ...rollupSourceChecks(m.iterate.build)] : rollupSourceChecks(m.iterate?.build), s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? noIterate ?? '')],
       ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? [], s.iterate?.ask ? cell(s.iterate.ask) : (iterateOut ?? '')],
       ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? [], s.iterate?.operations ? cell(s.iterate.operations) : (iterateOut ?? '')],
     ];

@@ -35,6 +35,10 @@ export default defineConfig({
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../formula/src/index.ts') },
       { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
       { find: /^@objectstack\/plugin-sharing$/, replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts') },
+      // The runner's Build charge (`rollupSourceCharges`) reads the roll-up
+      // rule's report against its wording: judged as the checkout states the
+      // rule, so a change of wording fails this suite, not a run.
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../lint/src/index.ts') },
     ],
   },
 });
