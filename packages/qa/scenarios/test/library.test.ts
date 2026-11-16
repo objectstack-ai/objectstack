@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarios, readCapabilityAreas, type Truth } from '../src/index.js';
+import { promptLanguageGaps } from '../src/runner/prompts.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = resolve(HERE, '../../../../docs/qa/scenarios');
@@ -165,4 +166,33 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     expect(areas.size).toBeGreaterThan(1);
     expect(areas.has('ai')).toBe(true);
   });
+});
+
+describe('the three control cards: Chinese asks, unanswerable twins, every field aggregate', () => {
+  const result = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const controls = result.cards.filter((c) => c.card.tier === 'control');
+
+  it('holds the three controls (control for the cases below)', () => {
+    expect(controls.map((c) => c.card.id).sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
+  });
+
+  for (const { card } of controls) {
+    it(`${card.id}: --lang zh runs it in every mode, with either build prompt: no text the runner sends lacks its Chinese`, () => {
+      for (const prompt of ['short', 'detailed'] as const) {
+        expect(promptLanguageGaps(card, { lang: 'zh', prompt }, ['scratch', 'template', 'ask']), prompt).toEqual([]);
+      }
+      // Each Chinese text is Chinese, not the English one copied over.
+      const texts = [card.prompt.short, card.prompt.detailed, card.iterate.change, ...card.run.questions.map((q) => q.ask), ...card.run.operations.map((o) => o.ask)];
+      for (const t of texts) {
+        expect(t.zh, t.en).toMatch(/[\u4e00-\u9fff]/);
+        expect(t.zh, t.en).not.toBe(t.en);
+      }
+    });
+
+    it(`${card.id}: three unanswerable questions beside the answerable ones, and an avg, a max and a min truth`, () => {
+      const kinds = card.run.questions.map((q) => q.truth.kind);
+      expect(kinds.filter((k) => k === 'unanswerable')).toHaveLength(3);
+      for (const kind of ['avg', 'max', 'min'] as const) expect(kinds, kind).toContain(kind);
+    });
+  }
 });

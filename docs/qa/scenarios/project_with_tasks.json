@@ -8,7 +8,7 @@
   "prompt": {
     "short": {"zh": "做一个项目管理应用,管理项目和任务。", "en": "Build a project management app with projects and tasks."},
     "detailed": {
-      "zh": "一个项目管理应用:一个项目下有多个任务(标题、状态、预估工时)。任务直接在项目里行内编辑,项目上显示任务数和预估总工时。",
+      "zh": "一个项目管理应用:一个项目下有多个任务(标题、状态、预估工时)。任务在项目表单上直接内联编辑,项目上显示任务数和预估总工时。",
       "en": "A project management app: a project owns many tasks (title, status, estimate in hours). Tasks are edited inline within the project, and the project shows a task count and total estimate."
     }
   },

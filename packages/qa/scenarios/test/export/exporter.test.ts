@@ -187,7 +187,7 @@ describe('exportGallery — one passing, generic app', () => {
         summary: { ...(fx.scenario.card.prompt.short.en ? { en: fx.scenario.card.prompt.short.en } : {}), ...(fx.scenario.card.prompt.short.zh ? { zh: fx.scenario.card.prompt.short.zh } : {}) },
         capabilities: [...fx.scenario.card.capabilities].sort(),
         screenshots: [],
-        qa: { questions: 8, turns: 9, personas: 2 },
+        qa: { questions: 14, turns: 16, personas: 2 },
         operations: 5,
         framework: { version: '18.3.0', runner: 'abc1234' },
         runDate: '2026-11-06',
@@ -202,7 +202,7 @@ describe('exportGallery — one passing, generic app', () => {
     const t = JSON.parse(readFileSync(join(out, 'apps', CARD_ID, 'transcript.json'), 'utf8'));
     expect(t.halves.map((h: { mode: string; phase: string }) => `${h.mode}/${h.phase}`)).toEqual(['scratch/run', 'scratch/iterate-run', 'template/iterate-run']);
     const first = t.halves[0].turns;
-    expect(first).toHaveLength(9); // 8 questions, one of them asked as both personas
+    expect(first).toHaveLength(16); // 14 questions, two of them asked as both personas
     for (const turn of first) {
       expect(turn.answer.replyText.length).toBeGreaterThan(0);
       expect(turn.grade).toMatchObject({ correct: true, cited: true, leaks: [] });
@@ -639,7 +639,7 @@ describe('buildTranscript — a run that asked each question turn more than once
     const record = asRecord(fx.record); // the record reader takes it: the repeat count is outside the exact `counts`
     expect(record.cardRun.askRepeats).toBe(3);
     const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
-    expect(t.halves.map((h) => h.turns.length)).toEqual([27]);
+    expect(t.halves.map((h) => h.turns.length)).toEqual([48]);
     const asks = t.halves[0]!.turns.filter((x) => x.question === 'account_count' && x.persona === 'sdr');
     const base = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'sdr' });
     expect(asks.map((x) => x.answer!.replyText)).toEqual([fx.recording.turns[base]!.replyText, 'I could not find that.', fx.recording.turns[`${base}/repeat-3`]!.replyText]);
