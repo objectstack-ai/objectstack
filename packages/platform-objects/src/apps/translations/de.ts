@@ -18,6 +18,7 @@ export const de: TranslationData = {
         grp_account_developer: { label: 'Entwickler' },
         grp_account_ai_assistant: { label: 'KI-Assistent' },
         nav_account_profile: { label: 'Profil' },
+        nav_account_mobile_app: { label: 'Mobile-App' },
         nav_account_notifications: { label: 'Benachrichtigungen' },
         nav_account_approvals: { label: 'Meine ausstehenden Genehmigungen' },
         nav_account_memberships: { label: 'Meine Organisationen' },

@@ -18,6 +18,7 @@ export const zhCN: TranslationData = {
         grp_account_developer: { label: '开发者' },
         grp_account_ai_assistant: { label: 'AI 助手' },
         nav_account_profile: { label: '个人资料' },
+        nav_account_mobile_app: { label: '移动应用' },
         nav_account_notifications: { label: '通知' },
         nav_account_approvals: { label: '待我审批' },
         nav_account_memberships: { label: '我的组织' },

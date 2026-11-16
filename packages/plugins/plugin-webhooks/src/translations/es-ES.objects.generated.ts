@@ -53,7 +53,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Método HTTP",
         help: "Método HTTP utilizado en la solicitud de callback.",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",
