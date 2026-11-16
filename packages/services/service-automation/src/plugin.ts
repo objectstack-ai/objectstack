@@ -1565,6 +1565,29 @@ export function i18nServiceReader(ctx: Pick<PluginContext, 'getService'>): () =>
 }
 
 /**
+ * [ruling 6913660232] The engine's reader of the run organization's language —
+ * the language a record write's field value MARKED as text is written in:
+ * `@objectstack/core`'s `resolveOrganizationLocale`, the one reader of the
+ * deployment-default ladder (the Localization setting when somebody set it,
+ * else the app's declared `i18n.defaultLocale`).
+ *
+ * Both services are resolved at QUESTION time, for {@link i18nServiceReader}'s
+ * reason. A composition with neither answers `undefined`, and the text is
+ * written as authored; a settings read that throws rejects.
+ */
+export function organizationLocaleReader(
+    ctx: Pick<PluginContext, 'getService'>,
+): (tenantId: string | undefined) => Promise<string | undefined> {
+    return async (tenantId) => {
+        let settings: unknown;
+        let i18n: unknown;
+        try { settings = ctx.getService('settings'); } catch { settings = undefined; }
+        try { i18n = ctx.getService('i18n'); } catch { i18n = undefined; }
+        return (await resolveOrganizationLocale({ settings, i18n, organizationId: tenantId }))?.locale;
+    };
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -2241,13 +2264,7 @@ export class AutomationServicePlugin implements Plugin {
         // else the app's declared `i18n.defaultLocale` — the one reader of that
         // ladder. Both services are probed when a record node asks, never at
         // boot, for `i18nServiceReader`'s reason.
-        this.engine.setOrganizationLocaleResolver(async (tenantId) => {
-            let settings: unknown;
-            let i18n: unknown;
-            try { settings = ctx.getService('settings'); } catch { settings = undefined; }
-            try { i18n = ctx.getService('i18n'); } catch { i18n = undefined; }
-            return (await resolveOrganizationLocale({ settings, i18n, organizationId: tenantId }))?.locale;
-        });
+        this.engine.setOrganizationLocaleResolver(organizationLocaleReader(ctx));
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);

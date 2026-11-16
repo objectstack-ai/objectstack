@@ -384,8 +384,10 @@ describe('the flows translation face covers every user-read flow slot (#22507)',
 
     // Every slot the engine renders as text, on any node type, is classified.
     const all = { ...RUNNER_SLOTS, ...OTHER_NODE_SLOTS };
+    // A map slot (`eachValue`) is classified where its values sit (`.*`).
     for (const slot of FLOW_NODE_TEXT_SLOTS) {
-      expect(rowFor(all, `${slot.nodeType}.${slot.key}`), `${slot.label} has no disposition`).toBeDefined();
+      const leaf = `${slot.nodeType}.${slot.key}${slot.eachValue ? '.*' : ''}`;
+      expect(rowFor(all, leaf), `${slot.label} has no disposition`).toBeDefined();
     }
   });
 
