@@ -3710,6 +3710,14 @@ const en = {
       granted: 'Access granted',
       denied: 'Access denied',
       noRedirect: 'No redirect URL returned by the server.',
+      // Shown in place of the consent card after a decision whose redirect is
+      // not `http(s)` (a native app's custom scheme): the tab stays here while
+      // the operating system opens the app. `{{appName}}` is the registered
+      // name; the Unnamed forms are used when the client was not identified.
+      returnToApp: 'Return to {{appName}} to continue. You can close this tab.',
+      returnToUnnamedApp: 'Return to the application to continue. You can close this tab.',
+      openApp: 'Open {{appName}}',
+      openUnnamedApp: 'Open the application',
       failed: 'Consent failed',
       footer: 'You can revoke access at any time from your account settings.',
     },
