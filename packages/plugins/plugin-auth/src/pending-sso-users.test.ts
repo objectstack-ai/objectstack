@@ -1278,6 +1278,37 @@ describe('[#34130] Set Password is offered and works without the admin plugin', 
     expect((await s.signIn(EMAILS.member)).status).toBe(401);
   });
 
+  it('unmanaged kernel: with the dialog defaults the door also flags the member and revokes their sessions', async () => {
+    const s = await stage();
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(false);
+    // The values the dialog submits when the admin types only the password:
+    // every other declared param at its declared default.
+    const defaults = Object.fromEntries(
+      (declaredAction('set_user_password').params ?? [])
+        .filter((p) => p.defaultValue !== undefined)
+        .map((p) => [String(p.name ?? p.field), p.defaultValue]),
+    );
+    expect(defaults).toEqual({ mustChangePassword: true, revokeSessionsAndKeys: true });
+    expect(s.rowsOf('sys_session', s.ids.member).length, 'the member holds a session before').toBeGreaterThan(0);
+
+    const call = actionCall('set_user_password', s.ids.member, { newPassword: NEW_PASSWORD, ...defaults });
+    const v = await verdict(await s.fire(call.path, call.body, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    const data = JSON.parse(v.text).data;
+    expect(data.mustChangePassword).toBe(true);
+    expect(data.revokeSessionsAndKeys).toBe(true);
+    expect(data.revoked?.complete).toBe(true);
+    expect(s.row(EMAILS.member)!.must_change_password).toBe(true);
+    // Revocation stamps each session row rather than deleting it.
+    const sessions = s.rowsOf('sys_session', s.ids.member);
+    expect(data.revoked.sessions).toBe(sessions.length);
+    for (const row of sessions) {
+      expect(row.revoke_reason).toBe('admin_password_reset');
+      expect(new Date(row.expires_at).getTime()).toBeLessThanOrEqual(Date.now());
+    }
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+  });
+
   it('managed kernel: Set Password stays hidden, the rule kept beside the dropped gate', async () => {
     const s = await managedStage();
     const features = (s.manager.getPublicConfig() as any).features;

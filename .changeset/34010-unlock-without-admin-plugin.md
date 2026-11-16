@@ -5,8 +5,8 @@
 
 fix(platform-objects): Setup → Users offers Unlock Account on environments without the better-auth admin plugin
 
-Clause-②: no for a gate drop (as #33989's record judged its ban/unban drop; the dev verifies against that record)
-Metadata-protocol: none unless the action's declared shape changes
+Clause-②: no
+Metadata-protocol: none
 
 `sys_user.unlock_user` no longer carries `requiresFeature: 'admin'`. Its door, `POST /api/v1/auth/admin/unlock-user`, already works without the better-auth admin plugin: the sign-in lockout is ObjectStack's own (`sys_user.locked_until` / `failed_login_count`), and the unlock clears it through the data engine. The action was still hidden wherever `features.admin` is off, so a platform administrator there could not release a locked-out person early and had to wait for the lock to expire.
 

@@ -572,9 +572,8 @@ export const SysUser = ObjectSchema.create({
       // The door's platform-admin gate, declared where both action doors read it (#30771).
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
-      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
-      // Console only: the server keeps answering it on an `env_native` row, so
-      // the break-glass admin stays editable (ruling 6341690661, Q4 A).
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
+      // the door refuses every target there (plugin-auth `cloud-managed.ts`).
       visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
       recordIdParam: 'userId',
       successMessage: 'Password updated',

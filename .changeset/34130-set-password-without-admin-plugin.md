@@ -13,3 +13,5 @@ Metadata-protocol: none
 It is now offered to a platform administrator on every environment that runs without the admin plugin and is not cloud-managed. Its other rule is unchanged: it stays hidden on a cloud-managed environment, whose door refuses every target, and the door's own refusals (a pending person, SSO-only mode) answer as before. `create_user` and `impersonate_user` keep their admin-plugin gate.
 
 `PUBLIC_AUTH_FEATURES.admin.gatedInputs` in `@objectstack/spec/kernel` no longer lists `sys_user.actions.set_user_password`, since it is no longer gated on that flag.
+
+The `features.admin` description in `@objectstack/spec` (`AuthFeaturesConfigSchema`, and the generated auth-endpoints reference page) no longer says the console shows Unlock Account and Set Password only when it is true: whether the console offers banning, unbanning, unlocking or setting a password does not depend on it.
