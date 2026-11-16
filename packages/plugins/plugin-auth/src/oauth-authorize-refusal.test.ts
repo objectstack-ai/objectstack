@@ -29,7 +29,8 @@ import {
   OAUTH_REFUSAL_REASON_PARAM,
   REFUSAL_MESSAGE_MAX_LENGTH,
 } from './oauth-authorize-refusal';
-import { answerOAuthClientName, OAUTH_CLIENT_NAME_NOT_FOUND } from './oauth-client-name';
+import { answerOAuthClientName, OAUTH_CLIENT_NAME_NOT_FOUND, OAUTH_CLIENT_NAME_RATE_LIMIT } from './oauth-client-name';
+import { InProcessCounterStore, type CounterStore } from './rate-limit-storage';
 import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking';
 
 const SECRET = 'test-secret-at-least-32-chars-long-authorize-refusal';
@@ -853,11 +854,19 @@ describe('the sign-in page reads the client name only for the client its signed 
     return location.slice(location.indexOf('?') + 1);
   };
 
-  const read = (rig: Rig, queries: Record<string, string[]>) =>
-    answerOAuthClientName(
-      { queries },
-      { getAuthContext: () => rig.manager.getAuthContext(), getDataEngine: () => rig.manager.getDataEngine() as any },
+  /** One window counter per rig, as the plugin keeps one per process. */
+  const counters = new WeakMap<Rig, CounterStore>();
+  const read = (rig: Rig, queries: Record<string, string[]>, clientAddress = '203.0.113.7') => {
+    if (!counters.has(rig)) counters.set(rig, new InProcessCounterStore());
+    return answerOAuthClientName(
+      { queries, clientAddress },
+      {
+        getAuthContext: () => rig.manager.getAuthContext(),
+        getDataEngine: () => rig.manager.getDataEngine() as any,
+        counterStore: async () => counters.get(rig)!,
+      },
     );
+  };
 
   /** A client registered with every public field set, so an answer that carried more would show it. */
   const registerNamed = async (rig: Rig, name: string): Promise<string> => {
@@ -904,6 +913,27 @@ describe('the sign-in page reads the client name only for the client its signed 
     expect(answer.status).toBe(404);
     expect(answer.body).toEqual(OAUTH_CLIENT_NAME_NOT_FOUND);
     expect(JSON.stringify(answer.body)).not.toContain('Other Org');
+  });
+
+  it('is rate-limited per client address: the window's reads answer, the next is refused, another address still answers', async () => {
+    const rig = await arrange();
+    const clientId = await registerNamed(rig, 'Acme Corp');
+    const oauthQuery = await signedRequestFor(rig, clientId);
+    const queries = { client_id: [clientId], oauth_query: [oauthQuery] };
+
+    for (let i = 0; i < OAUTH_CLIENT_NAME_RATE_LIMIT.max; i++) {
+      expect((await read(rig, queries, '198.51.100.1')).status).toBe(200);
+    }
+    const tripped: any = await read(rig, queries, '198.51.100.1');
+    expect(tripped.status).toBe(429);
+    expect(tripped.body).toEqual({ success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: expect.any(String) } });
+    expect(tripped.headers['Cache-Control']).toBe('no-store');
+    const retryAfter = Number(tripped.headers['Retry-After']);
+    expect(Number.isInteger(retryAfter) && retryAfter >= 1 && retryAfter <= OAUTH_CLIENT_NAME_RATE_LIMIT.window).toBe(true);
+
+    const other: any = await read(rig, queries, '198.51.100.2');
+    expect(other.status).toBe(200);
+    expect(other.body).toEqual({ success: true, data: { client_name: 'Acme Corp' } });
   });
 
   const sameRefusal: ReadonlyArray<[string, (rig: Rig, clientId: string, oauthQuery: string) => Record<string, string[]>]> = [

@@ -19,7 +19,7 @@ Nothing the host answers is trusted as markup or as a URL fragment. A reason out
 
 On the environment, the OAuth callback for the platform identity provider keeps a valid `objectstack_error_reason` on its redirect to the Console sign-in page. The sign-in page shows its own sentence for `not_member` and `invitation_pending` (in every Console language); any other reason, or none, keeps the existing `access_denied` sentence. The organization's name is carried only inside the host's sentence.
 
-The sign-in page reads the client name only for the client its signed request names: on an OAuth hand-off it asks the new `GET /api/v1/auth/oauth2/client-name` and says "Sign in to continue to NAME". Any other answer keeps the host line ("Continue to HOST").
+The sign-in page reads the client name only for the client its signed request names: on an OAuth hand-off it asks the new `GET /api/v1/auth/oauth2/client-name` and says "Sign in to continue to NAME". Any other answer keeps the host line ("Continue to HOST"). The read is rate-limited per client address (a fixed window of 10 reads per 60 seconds, counted in the kernel `cache` service when one is registered); over the limit it answers `429` `RATE_LIMIT_EXCEEDED` with `Retry-After`.
 
 Unchanged: a gate that answers a boolean is answered byte for byte as before on all three doors; who is admitted (an object refuses only when it says `allowed: false`; any other answer keeps the truthiness the gate was always read with); which `redirect_uri` is followed.
 

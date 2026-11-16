@@ -29,18 +29,29 @@
  * A malformed request (a parameter outside the closed set, a repeated one, a
  * missing one) answers `400`: it is not a state of a client.
  *
+ * **Rate-limited**, as ADR-0121 D6 requires of a door that admits an anonymous
+ * caller, the same way the signed-out invitation preview is: a fixed window per
+ * established client address ({@link OAUTH_CLIENT_NAME_RATE_LIMIT}), counted
+ * BEFORE anything is read or parsed, in the kernel `cache` service when one is
+ * registered. Over the limit it answers `429` `RATE_LIMIT_EXCEEDED` with
+ * `Retry-After`.
+ *
  * Mounted by `auth-plugin.ts` ahead of the catch-all and ledgered in
  * `auth-route-ledger.ts`.
  */
 
 import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import { withSystemContext } from './objectql-adapter.js';
+import { incrementFixedWindow, type CounterStore } from './rate-limit-storage.js';
 
 /** The route under the auth base path. */
 export const OAUTH_CLIENT_NAME_PATH = '/oauth2/client-name';
 
 /** The route's CLOSED query-parameter set. */
 export const OAUTH_CLIENT_NAME_QUERY_PARAMS: readonly string[] = ['client_id', 'oauth_query'];
+
+/** At most `max` reads per client address per `window` seconds (ADR-0121 D6). */
+export const OAUTH_CLIENT_NAME_RATE_LIMIT = { window: 60, max: 10 } as const;
 
 /** The one answer for every request that is not served a name. */
 export const OAUTH_CLIENT_NAME_NOT_FOUND = {
@@ -52,7 +63,7 @@ export const OAUTH_CLIENT_NAME_NOT_FOUND = {
 } as const;
 
 export interface OAuthClientNameAnswer {
-  status: 200 | 400 | 404 | 500;
+  status: 200 | 400 | 404 | 429 | 500;
   body: unknown;
   headers: Record<string, string>;
 }
@@ -66,19 +77,24 @@ export interface OAuthClientNameDeps {
   /** The better-auth context: its `secret` signed the request. */
   getAuthContext(): Promise<{ secret?: unknown } | undefined>;
   getDataEngine(): OAuthClientNameEngine | undefined;
+  /** The store the per-address window counts in. */
+  counterStore(): Promise<CounterStore>;
+  now?: () => number;
 }
 
 export interface OAuthClientNameRequest {
   /** Every query parameter as the transport parsed it, each name with all its values. */
   queries: Record<string, readonly string[]>;
+  /** The address the server established for the caller; `undefined` when it could not. */
+  clientAddress: string | undefined;
 }
 
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
 const notFound = (): OAuthClientNameAnswer => ({ status: 404, body: OAUTH_CLIENT_NAME_NOT_FOUND, headers: { ...NO_STORE } });
 
-function refusal(status: 400 | 500, code: string, message: string): OAuthClientNameAnswer {
-  return { status, body: { success: false, error: { code, message } }, headers: { ...NO_STORE } };
+function refusal(status: 400 | 429 | 500, code: string, message: string, headers?: Record<string, string>): OAuthClientNameAnswer {
+  return { status, body: { success: false, error: { code, message } }, headers: { ...NO_STORE, ...headers } };
 }
 
 /** The one value of a parameter, or a `400` answer. */
@@ -95,6 +111,25 @@ export async function answerOAuthClientName(
   request: OAuthClientNameRequest,
   deps: OAuthClientNameDeps,
 ): Promise<OAuthClientNameAnswer> {
+  // Counted first: a malformed probe spends the budget like a well-formed one.
+  const store = await deps.counterStore();
+  const nowMs = (deps.now ?? Date.now)();
+  const { count, resetAt } = await incrementFixedWindow(
+    store,
+    `oauth-client-name:${request.clientAddress ?? 'unestablished'}`,
+    OAUTH_CLIENT_NAME_RATE_LIMIT.window,
+    nowMs,
+  );
+  if (count > OAUTH_CLIENT_NAME_RATE_LIMIT.max) {
+    const retryAfter = Math.max(1, Math.ceil((resetAt - nowMs) / 1000));
+    return refusal(
+      429,
+      'RATE_LIMIT_EXCEEDED',
+      'Too many application name requests from this address. Try again later.',
+      { 'Retry-After': String(retryAfter) },
+    );
+  }
+
   const unknown = unknownQueryParamRefusalMessage(request.queries, OAUTH_CLIENT_NAME_QUERY_PARAMS);
   if (unknown !== undefined) return refusal(400, 'VALIDATION_ERROR', unknown);
   const asked = single(request.queries, 'client_id');

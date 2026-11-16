@@ -726,6 +726,8 @@ export class AuthPlugin implements Plugin {
   private authSettingsBinding: Promise<void> | null = null;
   /** [#26020] The per-address window of the signed-out invitation preview counts here; set in `init()`. */
   private invitationPreviewCounters: (() => Promise<CounterStore>) | null = null;
+  /** The per-address window of the signed-out application-name read counts here; set in `init()`. */
+  private oauthClientNameCounters: (() => Promise<CounterStore>) | null = null;
 
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
@@ -900,6 +902,16 @@ export class AuthPlugin implements Plugin {
         degradedImpact:
           'The limit is still enforced, but PER NODE: an N-node deployment admits up to N× the configured ' +
           'previews per address per window',
+      });
+      // The signed-out application-name read (`oauth-client-name.ts`): the
+      // same per-address window, under its own subject.
+      this.oauthClientNameCounters = createLazyCounterStore({
+        resolveCache,
+        logger: ctx.logger,
+        subject: 'signed-out application name rate limit',
+        degradedImpact:
+          'The limit is still enforced, but PER NODE: an N-node deployment admits up to N× the configured ' +
+          'reads per address per window',
       });
     }
 
@@ -5316,14 +5328,32 @@ export class AuthPlugin implements Plugin {
     // The application name for a sign-in hand-off: the sign-in page reads the
     // client name only for the client its signed request names. The reasons
     // for each answer live in oauth-client-name.ts. It never reads the
-    // session. Ledgered `public` in auth-route-ledger.ts.
+    // session, and it is rate-limited per client address (ADR-0121 D6), like
+    // the invitation preview above. Ledgered `public` in auth-route-ledger.ts.
     rawApp.get(`${basePath}/oauth2/client-name`, async (c: any) => {
       try {
+        const counters = this.oauthClientNameCounters;
         const mgr = this.authManager!;
+        if (!counters) {
+          ctx.logger.error('[AuthPlugin] oauth2/client-name: the rate-limit store was never wired; refusing');
+          return c.json(
+            { success: false, error: { code: 'INTERNAL_ERROR', message: 'The application name is unavailable.' } },
+            500,
+            { 'Cache-Control': 'no-store' },
+          );
+        }
         const { answerOAuthClientName } = await import('./oauth-client-name.js');
+        const headers = (c.req.header() ?? {}) as Record<string, string>;
         const answer = await answerOAuthClientName(
-          { queries: (c.req.queries() ?? {}) as Record<string, string[]> },
-          { getAuthContext: () => mgr.getAuthContext(), getDataEngine: () => mgr.getDataEngine() as any },
+          {
+            queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+            clientAddress: mgr.resolveClientAddress({ headers, ...transportOf(c) }),
+          },
+          {
+            getAuthContext: () => mgr.getAuthContext(),
+            getDataEngine: () => mgr.getDataEngine() as any,
+            counterStore: counters,
+          },
         );
         return c.json(answer.body, answer.status as any, answer.headers);
       } catch (error) {
