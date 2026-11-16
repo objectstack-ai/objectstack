@@ -216,3 +216,80 @@ describe('the same seed on an un-walled boot resolves the first admin once that 
     });
   });
 });
+
+/**
+ * ADR-0138 D1 on the un-walled handoff. The person the seed names here signs
+ * up after the boot (and after the dev admin), so the held reference waits
+ * past the admin's insert and resolves on that person's own insert. Only the
+ * seed's own rows are reached, and only while their column is still NULL: a
+ * row the seed did not write keeps the NULL its writer left, and a seeded row
+ * someone assigned meanwhile keeps that assignment.
+ */
+describe('un-walled: a held seed person reference fills only the seed’s own rows, and only while still NULL', () => {
+  const env = legEnv([
+    ['OS_TENANCY_POSTURE', undefined],
+    ['OS_AUTH_MEMBERSHIP_POLICY', undefined],
+  ]);
+  const LATE_NAME = 'Late Person';
+  const LATE_EMAIL = 'late.person@example.com';
+  const LATE_APP = {
+    ...APP,
+    manifest: { ...APP.manifest, id: 'com.example.seedowner.late' },
+    data: [
+      {
+        object: TASK,
+        mode: 'upsert',
+        externalId: 'name',
+        records: [
+          { name: 'Late task', assignee: LATE_NAME },
+          { name: 'Late task, assigned meanwhile', assignee: LATE_NAME },
+        ],
+      },
+    ],
+  };
+  let stack: VerifyStack;
+  let ql: any;
+  let adminId: string;
+  let lateId: string;
+  let beforeSignUp: Array<Record<string, unknown>>;
+
+  const taskNamed = async (name: string) => (await ql.find(TASK, { where: { name }, ...SYS }))[0];
+
+  beforeAll(async () => {
+    env.apply();
+    stack = await bootStack(LATE_APP as never, { extraPlugins: [new OrganizationsPlugin()] });
+    await stack.signIn();
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+    adminId = String((await ql.findOne('sys_user', { where: { email: ADMIN_EMAIL }, ...SYS }))?.id ?? '');
+    // A row the seed did not write, with no person: a guest's or a form's.
+    await ql.insert(TASK, { name: 'Guest task' }, SYS);
+    // A seeded row someone assigned by hand before the named person arrived.
+    const meanwhile = await taskNamed('Late task, assigned meanwhile');
+    await ql.update(TASK, { id: meanwhile.id, assignee: adminId }, SYS);
+    beforeSignUp = await ql.find(TASK, { where: {}, ...SYS });
+    await stack.signUp(LATE_EMAIL, undefined, LATE_NAME);
+    lateId = String((await ql.findOne('sys_user', { where: { email: LATE_EMAIL }, ...SYS }))?.id ?? '');
+  }, 120_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+    env.restore();
+  });
+
+  it('PREMISE: before the named person signs up, the seeded reference is NULL and the admin’s insert did not fill it', () => {
+    expect(adminId).not.toBe('');
+    expect(lateId).not.toBe('');
+    const byName = Object.fromEntries(beforeSignUp.map((row) => [row.name, row.assignee]));
+    expect(byName).toEqual({
+      'Late task': null,
+      'Late task, assigned meanwhile': adminId,
+      'Guest task': null,
+    });
+  });
+
+  it('the seed’s NULL reference resolves to the person once they exist; the guest row and the hand assignment stand', async () => {
+    expect((await taskNamed('Late task')).assignee).toBe(lateId);
+    expect((await taskNamed('Late task, assigned meanwhile')).assignee).toBe(adminId);
+    expect((await taskNamed('Guest task')).assignee).toBeNull();
+  });
+});
