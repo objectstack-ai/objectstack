@@ -4184,7 +4184,10 @@ export class RestServer {
      * The default locale is read from `getDefaultLocale()`, the same accessor
      * `extractLocale` already answers a header-less request from, so the
      * request that falls to the default and the rule that recognises the
-     * default read one value. Both are feature-detected like
+     * default read one value — unless the deployment declared the language
+     * its labels are authored in (`i18n.sourceLocale`, `getSourceLocale()`,
+     * #33634), which is then the locale answered from the authored label.
+     * All are feature-detected like
      * `getPackagedObjectBase` (both methods are optional on `II18nService`;
      * the core in-memory fallback declares neither): a service that does not
      * declare a fallback gets NO chain, and one that does not declare a

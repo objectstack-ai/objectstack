@@ -49,16 +49,41 @@ import { parseStreamJson, refusalCodeOf, type ParsedTurn, type RunnerToolCall } 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
   card: string;
-  /** `scratch` (from nothing) or `template` (from a verified build installed unmanaged). */
-  mode: 'scratch' | 'template';
+  /**
+   * `scratch` (from nothing), `template` (from a verified build installed
+   * unmanaged, then changed) or `ask` (the Run half alone, on a verified build
+   * installed unmanaged; its turns are `run` questions and operations only).
+   */
+  mode: 'scratch' | 'template' | 'ask';
   /** `build`, `iterate`, `run` (the first Run half) or `iterate-run` (the Run half after the iterate). */
   phase: 'build' | 'iterate' | 'run' | 'iterate-run';
   /** A question or operation id; `author` for an authoring turn. */
   step: string;
   persona?: string;
+  /**
+   * Which ask of a question turn this is, counted from 1, when the run asks
+   * each question turn more than once (`--ask-repeats`). Absent, or 1, is the
+   * first ask, whose key is the one every turn had before repeats, so a
+   * recording made without them still replays. An authoring or operation
+   * turn never carries one.
+   */
+  repeat?: number;
 }
 
-export const stepKey = (s: StepRef): string => [s.card, s.mode, s.phase, s.step, s.persona ?? '-'].join('/');
+/** The key segment an ask after the first adds ({@link stepKey}): `…/account_count/sdr/repeat-2`. */
+const REPEAT_KEY_PREFIX = 'repeat-';
+
+/**
+ * The replay key of a step: `card/mode/phase/step/persona`, `-` for no
+ * persona. A repeated question turn's asks after the first add one segment,
+ * `repeat-N` ({@link StepRef.repeat}); the first ask's key is unchanged.
+ */
+export const stepKey = (s: StepRef): string => {
+  const key = [s.card, s.mode, s.phase, s.step, s.persona ?? '-'].join('/');
+  if (s.repeat === undefined || s.repeat === 1) return key;
+  if (!Number.isInteger(s.repeat) || s.repeat < 1) throw new RangeError(`a step's repeat counts asks from 1, not ${String(s.repeat)} (\`${key}\`)`);
+  return `${key}/${REPEAT_KEY_PREFIX}${s.repeat}`;
+};
 
 export interface AuthorTask extends StepRef {
   /** The project directory the agent edits. */
@@ -517,6 +542,9 @@ function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unknown {
 
 /**
  * Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn.
+ * Each ask of a repeated question turn is read by its own key ({@link stepKey});
+ * how many asks are read is the run's `--ask-repeats`, checked against what the
+ * recording holds before any card runs ({@link RecordedDriver.assertAskRepeats}).
  *
  * A question or operation turn's recorded writes (`create_record`,
  * `update_record`, `delete_record`, `run_action` through the app's MCP door)
@@ -542,6 +570,45 @@ export class RecordedDriver implements AgentDriver {
 
   static fromFile(path: string): RecordedDriver {
     return new RecordedDriver(JSON.parse(readFileSync(path, 'utf8')) as Recording, path);
+  }
+
+  /**
+   * How many asks of a question turn the recording holds: its first ask and
+   * each repeat after it ({@link StepRef.repeat}), counted from 1 up to the
+   * first ask it does not hold. 0 ⇒ it holds no ask of that turn.
+   */
+  heldAsks(ref: StepRef): number {
+    let n = 0;
+    while (this.recording.turns[stepKey({ ...ref, repeat: n + 1 })] !== undefined) n++;
+    return n;
+  }
+
+  /**
+   * Refuse an `--ask-repeats` the recording cannot replay, before any card
+   * runs: each question turn of `cards` that the recording holds an ask of
+   * must hold `repeats` asks ({@link heldAsks}); the refusal names every turn
+   * short of it with the count found. A replay reads the first `repeats` asks
+   * of a turn and never more, so a smaller count is no refusal. A turn the
+   * recording holds no ask of is left to the run, as before: the runner does
+   * not ask a seed-dependent turn, and a turn it asks is a loud
+   * {@link MissingRecordingError} where it is asked.
+   */
+  assertAskRepeats(repeats: number, cards: ReadonlyArray<{ id: string; run: { questions: ReadonlyArray<{ id: string }> } }>): void {
+    if (repeats <= 1) return;
+    const questions = new Map(cards.map((c) => [c.id, new Set(c.run.questions.map((q) => q.id))]));
+    const short: string[] = [];
+    for (const key of Object.keys(this.recording.turns)) {
+      const parts = key.split('/');
+      // An ask after the first has a sixth segment; its turn is counted from its first ask's key.
+      if (parts.length !== 5) continue;
+      const [card, mode, phase, step, persona] = parts as [string, StepRef['mode'], StepRef['phase'], string, string];
+      if ((phase !== 'run' && phase !== 'iterate-run') || !questions.get(card)?.has(step)) continue;
+      const held = this.heldAsks({ card, mode, phase, step, ...(persona !== '-' ? { persona } : {}) });
+      if (held < repeats) short.push(`\`${key}\` (question \`${step}\`${persona !== '-' ? ` as ${persona}` : ''}) holds ${held} ask${held === 1 ? '' : 's'}`);
+    }
+    if (short.length === 0) return;
+    const shown = short.slice(0, 5).join('; ') + (short.length > 5 ? `; and ${short.length - 5} more` : '');
+    throw new Error(`--ask-repeats ${repeats} replays ${repeats} asks of each question turn, but the recording ${this.source} holds fewer of ${short.length}: ${shown}`);
   }
 
   info(): DriverInfo {

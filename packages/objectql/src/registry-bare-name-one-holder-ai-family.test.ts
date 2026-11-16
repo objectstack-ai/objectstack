@@ -561,18 +561,45 @@ describe('what the AI family leaves alone', () => {
   });
 });
 
-describe('the refusal\'s reason names the consumers of the types it lists', () => {
+describe('the refusal\'s reason states the rule of the types it lists', () => {
   it('one sentence per refusal, naming only the types it carries', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { agent: ['a1'], skill: ['s1'] }))).toBeUndefined();
     const err = await register(rival('agent', 'com.acme.beta', { agent: ['a1'], skill: ['s1'] }));
     expect(err!.conflicts!.map((c) => `${c.type}/${c.name}`)).toEqual(['agent/a1', 'skill/s1']);
     expect(err!.message).toContain(bareNameReason(['agent', 'skill']));
-    expect(bareNameReason(['agent', 'skill'])).toMatch(
-      /^An agent and a skill each hold one name per deployment: `\/meta\/agent\/NAME` serves one agent per name and an MCP client fetches a skill's prompt by its name, /,
-    );
-    expect(bareNameReason(['skill'])).toMatch(/^A skill holds one name per deployment: an MCP client fetches a skill's prompt by its name, /);
-    expect(bareNameReason(['tool'])).toMatch(/^A tool holds one name per deployment: a skill's `tools` and an MCP client name a tool, /);
+    expect(bareNameReason(['agent', 'skill'])).toMatch(/^An agent and a skill each hold one name per namespace: /);
+    expect(bareNameReason(['skill'])).toMatch(/^A skill holds one name per namespace: /);
+    expect(bareNameReason(['tool'])).toMatch(/^A tool holds one name per namespace: /);
+  });
+
+  // No covered type is held one name per deployment on main any more, so the
+  // per-deployment sentence is reached only by a type that joins the covered
+  // list before its own narrowing: simulated here by reading `tool` as not
+  // narrowed, in a fresh copy of the module.
+  it('a type not yet narrowed keeps the one-name-per-deployment sentence, after the narrowed one', async () => {
+    vi.resetModules();
+    vi.doMock('@objectstack/core', async (importOriginal) => {
+      const core = await importOriginal<typeof import('@objectstack/core')>();
+      return {
+        ...core,
+        isNamespaceScopedBareNameType: (type: unknown) => type !== 'tool' && core.isNamespaceScopedBareNameType(type),
+      };
+    });
+    try {
+      const { bareNameReason: reasonWithToolUnnarrowed } = await import('./bare-name-one-holder.js');
+      expect(reasonWithToolUnnarrowed(['tool'])).toBe(
+        "A tool holds one name per deployment: a skill's `tools` and an MCP client name a tool, with no package "
+        + 'to tell two definitions apart, so with two holders every caller is served the same one, chosen by '
+        + 'registration order.',
+      );
+      expect(reasonWithToolUnnarrowed(['skill', 'tool'])).toMatch(
+        /^A skill holds one name per namespace: .+ A tool holds one name per deployment: /,
+      );
+    } finally {
+      vi.doUnmock('@objectstack/core');
+      vi.resetModules();
+    }
   });
 
   it('a built-in name is refused to a package at the package door, naming the platform', async () => {

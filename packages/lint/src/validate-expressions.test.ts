@@ -4482,6 +4482,12 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // check; its keys are Array methods. The metadata read is `hook.events`,
       // on the tabled `hook` receiver.
       'hookEvents',
+      // [#33435] The flow and hook sites' null-guard index (the declared one
+      // joined with the injected columns the object as read does not carry),
+      // the pre-stamp index, and the join's own Maps and Sets. Their keys are
+      // Map / Set methods, never metadata keys; the injected columns are read
+      // off the spec's `injectedSystemColumnDefs` over the tabled `obj`.
+      'flowHookNullableIndex', 'preStampIndex', 'carriedFieldNames', 'joinedNullable', 'joinedFields',
       // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
       // `severity`, `triggerKind`, `sweepsTypedObject`), built at each call site from the
       // tabled receivers (`rule.severity`) — never read off metadata itself.

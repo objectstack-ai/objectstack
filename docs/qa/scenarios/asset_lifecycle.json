@@ -344,7 +344,7 @@
         {"id": "dr03", "name": "DR-0003", "asset": "a096", "requested_by": "e12", "requested_on": "2026-10-12", "reason": "Worn armrests.", "approver": "e13", "status": "rejected", "decided_on": "2026-10-14", "disposed_on": null},
         {"id": "dr04", "name": "DR-0004", "asset": "a088", "requested_by": "e12", "requested_on": "2026-10-20", "reason": "Broken base; the gas lift cannot be replaced.", "approver": "e05", "status": "approved", "decided_on": "2026-10-22", "disposed_on": null},
         {"id": "dr05", "name": "DR-0005", "asset": "a114", "requested_by": "e12", "requested_on": "2026-10-24", "reason": "Flickering panel; replacing it costs less than the repair quote.", "approver": "e01", "status": "submitted", "decided_on": null, "disposed_on": null},
-        {"id": "dr06", "name": "DR-0006", "asset": "a102", "requested_by": "e12", "requested_on": "2026-10-27", "reason": "Backlight failure; the repair quote exceeds the replacement cost.", "approver": "e05", "status": "submitted", "decided_on": null, "disposed_on": null},
+        {"id": "dr06", "name": "DR-0006", "asset": "a102", "requested_by": "e12", "requested_on": "2026-10-27", "reason": "Dropped during the stock-room move; the panel is shattered. Accidental damage is not covered, and a new panel costs more than a new monitor.", "approver": "e05", "status": "submitted", "decided_on": null, "disposed_on": null},
         {"id": "dr07", "name": "DR-0007", "asset": "a024", "requested_by": "e06", "requested_on": "2026-10-29", "reason": "The seat frame cracked; it is no longer safe to sit on.", "approver": "e05", "status": "submitted", "decided_on": null, "disposed_on": null}
       ],
       "depreciation_entry": [

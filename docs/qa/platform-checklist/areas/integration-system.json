@@ -142,7 +142,7 @@
       "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
       "since": "v15.1",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -183,7 +183,7 @@
         {
           "clause": "retries back off on the DECLARATIVE_RETRY_BASE_MS (5s) doubling ladder to the 300s ceiling — no hot loop against the dead upstream",
           "oracle": "log",
-          "verify": "observed retry intervals: one early retry at kernel-ready, about 3 s after the boot's degrade (the host's crypto provider registers after the boot reconcile, and a degraded instance retries at once then, #27237), then ≈ 10 s / 20 s / 40 s … — the delay is base · 2^(attempts−1), and the early retry has already spent the 5 s rung (packages/services/service-automation/src/plugin.ts#DECLARATIVE_RETRY_BASE_MS). A metadata:reloaded reconcile retries IMMEDIATELY but does not reset the backoff: the attempt count keeps climbing and the next delay keeps doubling (QA run #24575 read attempt 6 with a 160 s next delay after a reload). Only a config edit, a changed materialization signature, resets it (packages/services/service-automation/src/plugin.ts#degradeConnectorInstance restarts attempts at 1 only when the signature differs)",
+          "verify": "observed retry intervals: the delay is base · 2^(attempts−1), so with no early retry the ladder reads ≈ 5 s / 10 s / 20 s / 40 s … (QA runs #33829 at a557fa38 and #33910 at b914e724 read exactly that, with no early retry). An early retry at kernel-ready MAY appear, about 3 s after the boot's degrade (the host's crypto provider registers after the boot reconcile, and a degraded instance retries at once then, #27237); it is timing-dependent, and when it appears it has already spent the 5 s rung, so the ladder then reads ≈ 10 s / 20 s / 40 s …. Either ladder passes; a delay that does not double, or a hot loop, fails (packages/services/service-automation/src/plugin.ts#DECLARATIVE_RETRY_BASE_MS). A metadata:reloaded reconcile retries IMMEDIATELY but does not reset the backoff: the attempt count keeps climbing and the next delay keeps doubling (QA run #24575 read attempt 6 with a 160 s next delay after a reload). Only a config edit, a changed materialization signature, resets it (packages/services/service-automation/src/plugin.ts#degradeConnectorInstance restarts attempts at 1 only when the signature differs)",
           "evidence": "timestamped log excerpt"
         },
         {
@@ -255,6 +255,12 @@
           "date": "2026-11-14",
           "change": "acceptance[3]: the observed ladder is an early retry at kernel-ready (about 3 s, when the host's crypto provider registers: packages/services/service-automation/src/plugin.ts, the onCryptoProviderChange retry of #27237), then about 10 s / 20 s / 40 s, not 5 s / 10 s / 20 s; the 5 s base and the 300 s ceiling are unchanged, and the reload arm is unchanged. Read from source at base 87330e89. Source records: QA records #33025 (comment 6844741021) and #33081 (comment 6850173588) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "verify-text correction, no clause change. acceptance[3].verify: the early retry at kernel-ready is timing-dependent, so it MAY appear; both rounds of the 18.5.0 sweep read no early retry and a 5 s / 10 s / 20 s / 40 s ladder, which passes as the doubling ladder from the 5 s base. Read from source at base 895783a1. Source records: QA records #33829 (comment 6893937847) and #33910 (comment 6895587997) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -350,7 +356,7 @@
       "title": "Connector openapi spec file refs resolve package-relative only: './…' works, absolute and '../' escapes reject with the confinement error, missing files fail loudly",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "build",
       "fixtures": {
@@ -370,7 +376,7 @@
       ],
       "steps": [
         "boot the stock showcase; confirm showcase_status_openapi materialized with the spec-derived getHealth action",
-        "author scratch entries and boot each: spec '/etc/hostname' (absolute), spec '../../outside.json' (escape), spec './does-not-exist.json' (missing); capture each error verbatim",
+        "author scratch entries and boot each: spec '/etc/hostname' (absolute), spec '../../outside.json' (escape), spec './does-not-exist.json' (missing); capture each error verbatim. Name which layer answered: on an `os dev` or `os build` boot that compiles the config, the compile-time bundler refuses a bad ref FIRST, in its own wording ('… is absolute; a spec file path is relative to the directory holding objectstack.config.ts', '… climbs out of the package root …', '… names no file: …', packages/cli/src/utils/bundle-connector-spec-files.ts collectConnectorSpecFiles), and the runtime loader texts the acceptance clauses quote (packages/services/service-automation/src/plugin.ts createPackageFileLoader) appear only when the artifact the runtime loads still carries the path string (e.g. a hand-edited dist/objectstack.json booted without a recompile). Score the clauses on the runtime texts and record the bundler's refusal beside them; QA runs #33829 and #33910 read both layers this way",
         "author one with a nested traversal that RESOLVES inside the root after normalization (e.g. './src/../src/system/connectors/status-openapi.json') and record whether it is accepted — the guard rejects on the RESOLVED path, not on the substring",
         "verify boot-vs-reload policy: repeat the missing-file probe via a metadata reload and confirm it is skipped-with-log instead of fatal"
       ],
@@ -422,6 +428,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[1] names which layer answers: on a compiling `os dev` / `os build` boot the compile-time bundler (bundle-connector-spec-files.ts) refuses a bad ref first in its own wording, and the runtime loader texts the clauses quote appear only when the loaded artifact still carries a path string. Read from source at base 895783a1. Source records: QA records #33829 (comment 6893937847) and #33910 (comment 6895587997) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -506,7 +518,7 @@
       "title": "The flow designer's connector picker mirrors GET /automation/connectors: same instances, declarative ones annotated, actions and their input schemas offered per pick",
       "since": "v15.1",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -524,7 +536,7 @@
       },
       "steps": [
         "before the browser: GET /api/v1/automation/connectors and record { connectors, total } — this is the ground truth the picker must mirror",
-        "in Studio, open a flow (e.g. showcase_declarative_connector_ping, or a scratch flow authored env-wide through POST /api/v1/automation, which opens editable — knownGaps) and add/select a connector_action node — if the editor opens behind the 'provided by an installed package' banner, check how the flow was authored before filing anything (see the knownGap)",
+        "in Studio, open a flow (e.g. showcase_declarative_connector_ping, or a scratch flow authored env-wide through POST /api/v1/automation, which opens editable — knownGaps) and add/select a connector_action node. An env-wide scratch flow opens at /_console/studio/~org/automations?surface=flow:NAME (the Organization flows scope); /_console/apps/setup/metadata/flow/NAME redirects to /studio/~all/metadata/flow/NAME, the JSON form view, which draws no node inspector and no picker — if the editor opens behind the 'provided by an installed package' banner, check how the flow was authored before filing anything (see the knownGap)",
         "focus the connector field and screenshot it, which confirms the field rendered; the picker is a NATIVE input with a datalist, whose open list a headless screenshot cannot show, so read the datalist's options from the DOM only AFTER that screenshot",
         "pick showcase_mcp_tools; record which actions are offered and screenshot the action + input form for echo_upper",
         "pick a plugin-registered connector and compare its presentation with the declarative one's annotation"
@@ -539,8 +551,8 @@
         {
           "clause": "declarative instances carry their annotation (origin distinguishable from plugin-registered), per the descriptor's origin field the API serves",
           "oracle": "screenshot",
-          "verify": "the three declarative entries are visually marked; the plugin rest/slack ones are not",
-          "evidence": "annotated screenshot"
+          "verify": "the three declarative entries carry the declarative mark in their datalist option labels ('… · declarative'), the plugin rest/slack ones do not. The mark lives on the native datalist's options, which a headless screenshot cannot show open (as acceptance[0]): the field screenshot confirms render, and the marks are read from the DOM option labels after it",
+          "evidence": "the field screenshot + the datalist option labels read from the DOM, marked vs unmarked"
         },
         {
           "clause": "picking an instance offers its DERIVED actions with their input schemas (echo_upper for the mcp instance) — the ADR-0022 descriptor pipeline reaches the designer end-to-end",
@@ -598,6 +610,12 @@
           "date": "2026-11-14",
           "change": "fixture-text correction, no clause change. fixtures.requires[1]: a fixture flow authored through POST /api/v1/automation carries a connectorConfig block and a real connectorId (packages/spec/src/automation/flow.zod.ts refuses the config-only node 422; a blank connectorId answers 400). acceptance[2].verify: the typed form's two by-design omissions (no required asterisk, no editor for an items-less array) are named so they are not scored as gaps (connector-input-fields.ts header). Read from source at base 87330e89. Source records: QA records #33058 (comment 6846283471), #33093 (comment 6850899929) and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "verify- and step-text correction, no clause change. acceptance[1].verify and evidence: the declarative mark is read from the datalist option labels in the DOM after the field screenshot, as acceptance[0] rev 5 did, since a headless screenshot cannot show a native datalist open. steps[1]: an env-wide scratch flow opens at /_console/studio/~org/automations?surface=flow:NAME; the Setup metadata route redirects to the JSON form view, which has no picker. Source records: QA record #33853 (comment 6894307378) and QA record #33914 (comment 6895723718) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -606,7 +624,7 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 16,
+      "revision": 17,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -638,7 +656,7 @@
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data (a `$filter` is a JSON filter object; project with `select=`, since a single-row GET takes only expand and select and answers `fields=` 400 VALIDATION_ERROR): one row per delivery with status/attempts/response_code, its failure text in `error` and its schedule in next_retry_at / last_attempted_at (packages/services/service-messaging/src/objects/http-delivery.object.ts)",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
-        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the body key is camelCase `deliveryId`, which webhook-outbox-plugin.ts reads; a `delivery_id` or `id` key is read as no deliveryId at all and answers 400 MISSING_REQUIRED_FIELD) (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
+        "restore the receiver answering a permanent 4xx (not 408/429), so the failing row reaches a terminal status (failed/dead) at its next attempt — packages/services/service-messaging/src/http-sender.ts maps a 4xx to a permanent failure and retries 408, 429, 5xx and transport errors on the outbox schedule, so a receiver that only comes back healthy leaves the row non-terminal for the whole schedule — then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as the seeded admin (the body key is camelCase `deliveryId`, which webhook-outbox-plugin.ts reads; a `delivery_id` or `id` key is read as no deliveryId at all and answers 400 MISSING_REQUIRED_FIELD) (the door is gated on webhook-administration access): capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE) — hold that row non-terminal first by pointing it at a receiver answering 503 (retryable), since a retryable row can turn terminal between your read and the redeliver and then answers 200, correctly (QA run #33853)",
         "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there with `active` true, and the switch is still in force. No public door reads a declared webhook's switch: GET /api/v1/meta/webhook/showcase_task_changed serves the declaration, which answers isActive:false by design (the activation ledger is separate, ADR-0126 §4), so the in-force half is read off a fresh sys_http_delivery row for a task change made after the reboot (the switch is deployment state; the declaration is code)"
       ],
       "acceptance": [
@@ -687,7 +705,7 @@
       ],
       "negative": [
         "an unreachable receiver must surface as failed/dead sys_http_delivery rows (and retry per the outbox schedule) — a dropped delivery with no durable trace is a FAIL",
-        "a stored row whose triggers contain an unknown value must be dropped LOUDLY by the dispatcher (the #3196 drift-guard warn: 'dead while looking armed in Setup') — silent armed-looking deadness is a FAIL",
+        "a stored row whose triggers contain an unknown value must be dropped LOUDLY by the dispatcher (the #3196 drift-guard warn: 'dead while looking armed in Setup') — silent armed-looking deadness is a FAIL. The data door refuses an unknown trigger value (invalid_option), so no door writes such a row: plant a legacy row with a direct write into the run's own database while the server is stopped, then boot and read the warn (QA run #33853 did this)",
         "connector-attached `webhooks`/`triggers` (integration/connector.zod.ts) are RETIRED `retiredKey()` tombstones (ADR-0049) — nothing ever dispatched either, and the parse now refuses both with a prescription; a connector entry carrying one must fail publish, never be accepted and ticked as live, and a delivery or flow run appearing from one would be a spec-contract FAIL"
       ],
       "traps": [
@@ -800,6 +818,12 @@
           "date": "2026-11-14",
           "change": "steps[4]: names the projection parameter (select; fields= on a single-row GET answers 400) and the sys_http_delivery columns a runner reads beside status/attempts/response_code: error, next_retry_at and last_attempted_at (packages/services/service-messaging/src/objects/http-delivery.object.ts). No clause changed. Read from source at base 87330e89. Source record: QA record #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 17,
+          "date": "2026-11-15",
+          "change": "step- and negative-text correction, no clause change. negative[1]: the data door refuses an unknown trigger value, so the drift guard is reachable only from a planted legacy row. steps[6]: hold the 409 probe's row non-terminal with a 503 receiver, since a retryable row can turn terminal between the read and the redeliver. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ],
       "enumSource": {
@@ -1842,7 +1866,7 @@
       "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1854,7 +1878,8 @@
         "requires": [
           "MessagingServicePlugin installed (the showcase config requires the 'messaging' capability) — its emit() consults the PreferenceResolver before fan-out",
           "the shipped notify flow showcase_task_assigned_notify (notify node: topic 'task.assigned', channels ['inbox'] — examples/app-showcase/src/automation/flows/index.ts)",
-          "two personas with sessions: admin and the assignee"
+          "two personas with sessions: admin and the assignee",
+          "for acceptance[5]: a file-database boot (single posture, the Default Organization only), so a preference row can be written under another organization straight into the database, as data an earlier organization or an import left behind: the API stamps the caller's organization and cannot write it"
         ],
         "knownGaps": [
           "no shipped sys_notification_preference rows nor a sys_notification_template fixture — both authored in-run (both are writable system-data objects); the notify flow fixture itself is shipped. The spec's channel enum spells this 'in-app'; the implemented channel id is 'inbox' (the #3197 naming drift) — the preference row must name the IMPLEMENTED id 'inbox'",
@@ -1868,7 +1893,8 @@
         "read the messaging outbox / dead-letter surface and confirm there is no dead-letter row for the muted (recipient, 'inbox') — a deliberate mute is a DROP by the preference filter, not a dead-letter (dead-letter is reserved for unimplemented channels, #3197)",
         "flip the row enabled:true (or delete it); re-fire; confirm the inbox row is delivered again",
         "probe the resolution order: an admin-global default OFF (the row whose user_id is EMPTY: omit it — since ADR-0118 D1 user_id is a sys_user reference, a '*' answers 400 VALIDATION_FAILED reference_not_found, and legacy '*' rows are rewritten at boot by packages/services/service-messaging/src/preference-user-conversion.ts#convertWildcardPreferenceUsers) with a user-specific row ON delivers (user row overrides global); a mandatoryTopics-configured topic bypasses the matrix entirely (cannot be muted)",
-        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale. The template's holes read the notification's top-level title, body and topic plus payload.*: the notify node's message reaches a template as {{ body }}, never {{ message }}, which renders '' (an unknown path renders empty by design; packages/services/service-messaging/src/template-renderer.ts)"
+        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale. The template's holes read the notification's top-level title, body and topic plus payload.*: the notify node's message reaches a template as {{ body }}, never {{ message }}, which renders '' (an unknown path renders empty by design; packages/services/service-messaging/src/template-renderer.ts)",
+        "preferences are read in the emitting organization: with the file-database boot, INSERT a sys_notification_preference row for the assignee (topic 'task.assigned', channel 'inbox', enabled false) whose organization_id names an organization other than the Default Organization, then re-fire the flow and list the assignee's notifications; next, author through the API the assignee's opt-out in the Default Organization, change the other organization's row to enabled true, and re-fire"
       ],
       "acceptance": [
         {
@@ -1900,11 +1926,18 @@
           "oracle": "log",
           "verify": "the captured render carries the template's substituted subject/body (email/sms channel path; messaging-service-plugin 'renders sys_notification_template')",
           "evidence": "the captured render"
+        },
+        {
+          "clause": "preferences are read in the emitting organization: a flow that names no organization emits in the one stored on its event row, so a preference row stored under another organization neither mutes the recipient nor overrides their opt-out",
+          "oracle": "api",
+          "verify": "with only the other organization's enabled:false row, the fire delivers the inbox row; with the Default Organization's opt-out beside the other organization's enabled:true row, the fire delivers nothing (packages/services/service-messaging/src/messaging-service.ts, emit's preference filter reads organizationId from the event row's organization). Pinned by packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts (describe 'the event row's derived organization is the one role: and the preference read use'; run it with `pnpm --filter @objectstack/service-messaging exec vitest run --reporter=tree --maxWorkers=1 FILE`, ≥1 test and 0 failed). Released with 18.5.0 (2673f59, #33779; its changeset was not consumed by the version commit, #33903): a run on 18.4.x reads the other organization's row, which is that release's behaviour, not a FAIL; from 18.5.0 on, score the clause as written",
+          "evidence": "the two fires' notification listings, the two preference rows with their organization_id, and the pin's output"
         }
       ],
       "negative": [
         "a suppression row present and enabled:false but an inbox row STILL landing is a FAIL — the preference filter was bypassed (distinct from the by-design fail-OPEN, which applies only to a preference OUTAGE: no data engine / lookup error keeps all channels; a HEALTHY lookup ignoring an enabled:false row is the FAIL)",
-        "distinct from notify-inbox-delivery (the inbox happy path) — a run must not double-count the happy path here; this item's proof is the SUPPRESSION and its reversal"
+        "distinct from notify-inbox-delivery (the inbox happy path) — a run must not double-count the happy path here; this item's proof is the SUPPRESSION and its reversal",
+        "a row stored under another organization deciding the delivery (muting the recipient, or overriding the emitting organization's opt-out) on 18.5.0 or later is a FAIL: preferences are per organization"
       ],
       "traps": [
         "wrong-persona",
@@ -1917,7 +1950,8 @@
         "packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver (emit() consults the PreferenceResolver before fan-out)",
         "packages/services/service-messaging/src/messaging-service-plugin.ts#sys_notification_template (email/sms channels render sys_notification_template; shared retry/dead-letter substrate)",
         "packages/spec/src/system/notification.zod.ts (#3197 dead-letter for unimplemented channels; 'in-app' vs 'inbox' naming drift)",
-        "examples/app-showcase/src/automation/flows/index.ts#showcase_task_assigned_notify (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])"
+        "examples/app-showcase/src/automation/flows/index.ts#showcase_task_assigned_notify (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])",
+        "packages/services/service-messaging/src/preference-resolver.ts#PreferenceResolver (filter's organizationId scopes the preference read to the emitting organization; with none the read stays unscoped)"
       ],
       "history": [
         {
@@ -1949,6 +1983,12 @@
           "date": "2026-11-14",
           "change": "steps[5], acceptance[3] and source[0]: the admin-global default is the row whose user_id is EMPTY since ADR-0118 D1 (user_id is a sys_user reference; a '*' answers 400 reference_not_found, and packages/services/service-messaging/src/preference-user-conversion.ts#convertWildcardPreferenceUsers rewrites legacy '*' rows at boot), not user_id='*'. steps[6]: the notify message reaches a template as {{ body }} (template-renderer.ts RenderInput). The precedence the clause asserts is unchanged. Read from source at base 87330e89. Source record: QA record #33058 (comment 6846283471) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[5], steps[7], fixtures.requires[3], negative[2] and source[6] (new): the preference read follows the emitting organization (#33649, released with 18.5.0 in 2673f59, #33779; its changeset was left unconsumed by the version commit, #33903). No clause asked which organization's rows decide, so a row under another organization muting a recipient passed unseen. New coverage for ledger 6896511848 of #33761, rows 196 and 209. Read from source at main 159757ab. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -1957,14 +1997,14 @@
       "title": "A shipped driver's datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact, including legacy alias spellings already sitting in stored rows. A plugin driver's config is its author's to keep credential-free; the platform redacts only its fixed credential spellings there and does not guess",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the ability to author/publish a datasource (os build and/or POST /api/v1/datasources)",
+          "the ability to author/publish a datasource (os build and/or POST /api/v1/datasources). A minimal scratch project for the os build door must declare `sharingModel` on its object, or the build stops at security-owd-unset before the credential check is visible (QA run #33909)",
           "the ability to write a stored sys_metadata datasource row directly, to plant a legacy alias spelling that no current parse would produce"
         ],
         "knownGaps": [
@@ -2118,6 +2158,12 @@
           "date": "2026-11-10",
           "change": "fixtures.knownGaps[2] names the one command that provisions the credentialed PostgreSQL acceptance[1] and acceptance[6] connect to (`node scripts/qa/qa-fixture.mjs external-database`, or OS_TEST_EXTERNAL_DB_URL for a database the runner brings), and how it refuses without either. QA run #32135 left both connect legs not run and listed this database among the recurring fixture debt (#32168 ask C). The recipe text it replays is unchanged. No clause changed",
           "ref": "#32168"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "fixture-text correction, no clause change. fixtures.requires[0]: a minimal scratch project for the os build door must declare sharingModel, or security-owd-unset stops the build before the credential check. Source records: QA record #33909 (comment 6895587997) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -2260,7 +2306,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2287,7 +2333,7 @@
         "Tables tab: SchemaBrowser loads the remote tables (mount + explicit Refresh only — never a timer); compare the rendered list name-by-name and columnCount-by-columnCount against the pre-captured listing",
         "header 'Refresh catalog': click it and capture the POST /api/v1/datasources/showcase_external/external/refresh-catalog on the network; the snapshot timestamp renders from the returned catalog.snapshotAt",
         "Import: pick customers → ImportObjectDialog fires POST.../external/tables/customers/draft, renders the suggested name, any review flags, and the generated *.object.ts source; click 'Import as Object' and capture the PUT /api/v1/meta/object/<name> it performs (the UI's import door IS the metadata channel — api.ts importObjectDraft); confirm the object now exists over GET /api/v1/meta and answers a read-only /data query against the external rows",
-        "the server-side import twin: POST /api/v1/datasources/showcase_external/external/tables/orders/import (a second, scratch import) → 201 { object }; confirm it too landed and is queryable; then delete/clean up both imported objects",
+        "the server-side import twin: POST /api/v1/datasources/showcase_external/external/tables/orders/import (a second, scratch import) → 201 { object }; confirm it too landed and is queryable; then delete/clean up both imported objects. The two land in different places: the twin lands as showcase_custom_orders in the customization pair com.example.showcase.custom (its name prefixed with the pair's namespace), while the UI import of step 4 lands package-less as showcase_customers, so the twin's cleanup DELETE names ?package=com.example.showcase.custom (QA run #33853)",
         "Validation tab: run validation; capture POST .../external/validate → { ok, results } (URL-scoped work, #10537) and compare the rendered per-object verdict rows against it; on the in-sync stock fixture expect all-green; if an induced-drift scratch copy is available, confirm each reported diff kind renders with its DIFF_LABEL text",
         "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 PERMISSION_DENIED naming manage_platform_settings AND manage_metadata — a write requires the read capability as well as FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses 403 FORBIDDEN 'Saving a metadata item requires the `manage_metadata` capability.' (packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict, the item save door's sentence; 'Rewriting stored metadata …' is POST /meta/_migrate-stored's, and the federation routes answer PERMISSION_DENIED)",
         "run the objectui api.test.ts 503 cases (acceptance[6]). ONLY on a deliberately unwired boot (see knownGaps), also drive the Tables tab into the 503 and record that the designed 'Federation is not enabled on this server.' state renders"
@@ -2410,6 +2456,12 @@
           "date": "2026-11-03",
           "change": "personas[0], steps[7], acceptance[3] and acceptance[5]: import and refresh-catalog require manage_platform_settings as well as manage_metadata. Seeing a datasource's remote structure needs the read capability on every route, writes included (maintainer ruling 2026-11-03, verbatim: 「两个写接口同时要求读权限 (Recommended)」), so the no-capability session's 403 on the writes names both capabilities. The admin persona already holds both; no step's expected success changes",
           "ref": "claude/sec-hardening-d"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[5]: the server-side twin import lands as showcase_custom_orders in com.example.showcase.custom while the UI import lands package-less, so the twin's cleanup names ?package=. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -2418,7 +2470,7 @@
       "title": "Inbound mail (new on v18): with requires:[\"mailbox\"] and an IMAP mailbox, a synced message is stored as sys_mail_message and associated with the record whose mailAssociation email field matches (inline forwards by an org member match on the original participants), attachments land as sys_file + sys_attachment, and an unmatched message is visible only to manage_mailboxes holders",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2444,7 +2496,7 @@
         {
           "clause": "mailbox ingest, association, inline-forward matching and attachments — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2494,6 +2546,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify and acceptance[2].verify name the HTTP read their api oracle needs, and automated.ref adds the engine-layer association pin — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: the run scored the attachment clause at in-process — the pin reads the stored rows through the real engine after a real ingest, and no HTTP read was made. a1: inline-forward.test.ts pins the parser's participant extraction, not the association; mail-ingest-service.test.ts pins the association on a real engine for all three client formats and was not in the ref. Read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2502,7 +2560,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2527,7 +2585,7 @@
         {
           "clause": "notification org stamping, recipient-only receipts, redeliver eligibility and MCP stdio cwd — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2589,6 +2647,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2]'s recipe said to create an ACTIVE webhook with POST /api/v1/data/sys_webhook and gave no body. QA run #27438 found the create needs method in lower case ('post') and definition_json, or it answers 400 VALIDATION_FAILED. sys-webhook.object.ts declares method a select with lower-case option values and definition_json a required textarea. The recipe now names both. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27438"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2597,7 +2661,7 @@
       "title": "Two packages may each declare a job of one name: the first holder keeps the bare job key, the second is armed under PACKAGE_ID:NAME, and both keys survive a restart unchanged",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the seeded admin)"],
@@ -2610,7 +2674,7 @@
       },
       "steps": [
         "boot at --log-level info (os dev defaults to warn); install qa_a, then qa_b; GET /api/v1/data/sys_job and record each row's name, the key the adapter arms it by. sys_job carries no package column, so which package holds the bare key is read from the binder's info line for the second holder: \"job 'qa_nightly' is also declared by package 'com.qa.addr-a', which holds that name on the job service — scheduled under its package-scoped identity 'com.qa.addr-b:qa_nightly' …\" (packages/runtime/src/app-artifact-handlers.ts, the binder's info line after jobKeyFor)",
-        "restart the server against the same DB and read the keys again; on the restart the second holder's info line reads \"job 'qa_nightly' keeps its package-scoped identity 'com.qa.addr-b:qa_nightly': the job catalogue holds it active under that name …\""
+        "restart the server against the same DB and read the keys again; the second holder's info line on the restart depends on load order (packages/runtime/src/app-artifact-handlers.ts, the branches after jobKeyFor): when qa_a binds first again (install order), qa_b's line is the \"is also declared by package 'com.qa.addr-a' …\" line of step 0 again; only when qa_b binds with no in-process holder of the bare name (e.g. a restart after uninstalling qa_a) does it read \"job 'qa_nightly' keeps its package-scoped identity 'com.qa.addr-b:qa_nightly': the job catalogue holds it active under that name …\". Either way the key stays com.qa.addr-b:qa_nightly; record which line printed and why (QA run #33853 measured both)"
       ],
       "acceptance": [
         {
@@ -2651,6 +2715,12 @@
           "date": "2026-11-14",
           "change": "fixture-text correction, no clause change. fixtures.requires[0]: the scratch jobs are sandboxed `body` jobs, because the install door refuses a `handler` job 422 (packages/cloud-connection/src/marketplace-install-local-plugin.ts#describeUnrunnable); fixtures.requires[1] added: OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1, without which no packaged job is scheduled. steps[0], steps[1] and acceptance[0].verify: sys_job has no package column (packages/platform-objects/src/audit/sys-job.object.ts), so the holder is read from the binder's info-level lines (app-artifact-handlers.ts), on a --log-level info boot. Read from source at base 87330e89. Source records: QA records #33048 (comment 6846028996) and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "step-text correction, no clause change. steps[1]: the restart's info line depends on load order (app-artifact-handlers.ts, the branches after jobKeyFor): qa_a binding first prints the 'is also declared' line again, and the 'keeps its package-scoped identity' line prints only with no in-process holder of the bare name. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     },
@@ -2802,7 +2872,7 @@
       "title": "An Oracle datasource reads its tables as objects, refuses an empty-string comparand (Oracle stores '' as NULL), writes only under the double opt-in, and refuses upsert as a capability gap",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2845,7 +2915,7 @@
         {
           "clause": "the pins pass at the run subject sha: upsert is refused NOT_IMPLEMENTED 501 before any statement, DDL is refused as federation-only, and the dialect binds dates and day values as it declares",
           "oracle": "test",
-          "verify": "run each file in automated.ref with the driver-sql vitest; the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
+          "verify": "run each file in automated.ref with the driver-sql vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
           "evidence": "the vitest summary lines, with the subject sha and whether OS_TEST_ORACLE_URL was set"
         }
       ],
@@ -2874,6 +2944,12 @@
           "date": "2026-11-10",
           "change": "initial — the Oracle federation dialect: reads, the empty-string refusal, gated writes and the upsert gap. Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2956,7 +3032,7 @@
       "title": "A SQL Server datasource reads its tables as objects, matches a uniqueidentifier column in text operators by the lower-case text every read answers, keeps case-exact matching exact, and writes only under the double opt-in",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2999,7 +3075,7 @@
         {
           "clause": "the pins pass at the run subject sha: the mssql dialect, the analytics text-match parity on mssql and oracle, and the SQL Server row window",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
           "evidence": "the vitest summary lines, with the subject sha"
         }
       ],
@@ -3031,6 +3107,12 @@
           "date": "2026-11-10",
           "change": "initial — the SQL Server federation dialect: uniqueidentifier text matching, case-exact parity and gated writes. Blocked(fixture): no credentialed SQL Server. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3039,7 +3121,7 @@
       "title": "Mobile push: a device registers under the caller's session with its server origin, the push service boots on the hosted relay only where requires names push, and an air-gapped or unrequested push key says why at boot",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3057,7 +3139,7 @@
         "knownGaps": [
           "no leg delivers a push. The relay needs a server bound to the cloud (the cloud-binding service, Setup → Cloud connection) and the direct transport needs an APNs key or a Firebase project, so the relay request, the origin each push carries (PushDeliveryDataSchema.origin) and the dead-token retirement are held by the pins in automated.ref only",
           "the Console's registration runs only inside the mobile shell: ui/apps/console/src/nativePushRegistration.ts#useNativePushRegistration reads the native bridge through ui/packages/mobile/src/nativeHost.ts#nativeGetPushToken, sends the page origin only when the request grammar accepts it (#registrationOrigin), and unregisters before sign-out through @object-ui/auth's registerBeforeSignOut. No stock fixture provides the bridge in a browser, so that half is the pins' too",
-          "the scratch boots' lines are read from source (push-plugin.ts, capability-arg.ts, serve.ts) and have not been booted for this item"
+          "CLOSED: the scratch boots have been booted for this item — QA runs #33853 (at a557fa38) and #33914 (at b914e724) booted legs 2–4 with `os dev --log-level info` on a showcase copy, and every log line the clauses quote printed verbatim. The lines are still cited from source (push-plugin.ts, capability-arg.ts, serve.ts) so a reader can re-derive them"
         ]
       },
       "steps": [
@@ -3142,6 +3224,12 @@
           "date": "2026-11-14",
           "change": "fixture-text correction, no clause change. acceptance[3] and acceptance[5] name the '[messaging] channel provider registered: push (resolved per lookup)' line that every info-level boot prints (packages/services/service-messaging/src/messaging-service-plugin.ts registers the lazy push provider at kernel:ready, unconditionally), so a runner grepping for 'push' does not read it as the push channel mounting; steps[5] reads leg 3's exit code from a foreground run (a forking wrapper reported 0, the server exits 1). Read from source at base 87330e89. Source records: QA records #32940 and #33096 (comment 6851700388) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "fixture-text correction, no clause change. fixtures.knownGaps[2] CLOSED: the scratch boots were booted by QA runs #33853 and #33914 and every quoted line printed verbatim. Source records: QA record #33853 (comment 6894307378) and QA record #33914 (comment 6895723718) on #33761. Batch D of the #33761 close-out, card #33966",
+          "ref": "#33984"
         }
       ]
     }

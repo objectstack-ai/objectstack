@@ -621,6 +621,7 @@ export class ObjectQL implements IObjectQLEngine {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
@@ -1555,7 +1556,9 @@ export class ObjectQL implements IObjectQLEngine {
     ancestors: readonly string[],
   ): Promise<N> {
     // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts`, its docblock with it (see `ReadableIdsPermissionFormulaHost`).
+    const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof composeReadableIdsChain> = {
+      get _registry() { return readRegistry(); },
       refuseUncomposableReadableIdsClasses: (...a) => this.refuseUncomposableReadableIdsClasses(...a),
       readableIdsScopeOf: (...a) => this.readableIdsScopeOf(...a),
       composeReadableIdsChain: (...a) => this.composeReadableIdsChain(...a),
@@ -2542,6 +2545,7 @@ export class ObjectQL implements IObjectQLEngine {
     getTranslations?: (locale: string) => Record<string, unknown>;
     getFallbackLocale?: () => string | undefined;
     getDefaultLocale?: () => string | undefined;
+    getSourceLocale?: () => string | undefined;
   }): void {
     // [#29986 codemod] The body moved to `engine-references-and-master-detail.ts` (see `ReferencesAndMasterDetailHost`).
     return ReferencesAndMasterDetailFacet.setI18nService.call(referencesAndMasterDetailHost.of(this), service);

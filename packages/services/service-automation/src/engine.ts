@@ -126,6 +126,7 @@ import {
     evaluateCondition,
     seedDeclaredVariables,
     seedRunVariables,
+    startConditionHolds,
     executeWithoutRetry,
     type runUserOf,
 } from './dag-traversal.js';
@@ -7895,20 +7896,18 @@ export class AutomationEngine implements IAutomationService {
             // trigger — owns evaluating it, so every trigger type (record-change,
             // schedule, …) and a manual `execute()` share one gate. Plain-string
             // conditions are routed through CEL so bare field references resolve.
-            const startCondition = (startNode.config as Record<string, unknown> | undefined)?.condition as
-                | string
-                | { dialect?: string; source?: string; ast?: unknown }
-                | undefined;
-            if (startCondition !== undefined && startCondition !== null && startCondition !== '') {
-                const condExpr =
-                    typeof startCondition === 'string' ? { dialect: 'cel', source: startCondition } : startCondition;
-                if (!this.evaluateCondition(condExpr, variables, runContext)) {
-                    this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
-                    // `flowLabel` rides even here, unlike `successMessage` /
-                    // `summary`: it names the flow, it claims no work done, and
-                    // this answer reaches a runner as a 200 like any other.
-                    return { success: true, output: { skipped: true, reason: 'condition_not_met' }, flowLabel: flow.label };
-                }
+            //
+            // The evaluator is shared with `executeWithoutRetry`, which re-runs
+            // this gate on every retry attempt: a condition that throws here
+            // is a fault the catch below hands to the error strategy, and
+            // under `strategy: 'retry'` each later attempt evaluates it again
+            // rather than running the nodes ungated (see `startConditionHolds`).
+            if (!startConditionHolds.call(this, startNode, variables, runContext)) {
+                this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
+                // `flowLabel` rides even here, unlike `successMessage` /
+                // `summary`: it names the flow, it claims no work done, and
+                // this answer reaches a runner as a 200 like any other.
+                return { success: true, output: { skipped: true, reason: 'condition_not_met' }, flowLabel: flow.label };
             }
 
             // Re-entrancy loop guard (see `activeRecordFlows`). Breaks the SAME
@@ -11678,6 +11677,7 @@ export class AutomationEngine implements IAutomationService {
             nextRunId: (...a) => this.nextRunId(...a),
             seedRunVariables: (...a) => this.seedRunVariables(...a),
             resolveRunContext: (...a) => this.resolveRunContext(...a),
+            evaluateCondition: (...a) => this.evaluateCondition(...a),
             validateNodeInputSchemas: (...a) => this.validateNodeInputSchemas(...a),
             executeNode: (...a) => this.executeNode(...a),
             recordLog: (...a) => this.recordLog(...a),

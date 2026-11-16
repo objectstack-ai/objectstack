@@ -34,7 +34,7 @@
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
+import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view/core';
 import { useNavigationOverlay } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';
@@ -195,6 +195,11 @@ export function useObjectViewRecordNavigation({
             // answers `page` whatever the view or the object declares.
             if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) };
             const authored = activeView?.navigation ?? objectDef.navigation;
+            // `preventNavigation: true` ("Disable standard navigation
+            // entirely") outranks every mode: the row resolves to `none`, so
+            // no click opens it, a modifier click included, and the list
+            // draws no link face for it (`rowOpensRecord`, objectstack#33549).
+            if (authored?.preventNavigation) return { mode: 'none' };
             if (authored) {
                 // Authored config wins. For an overlay, resolve the `size`
                 // bucket to a viewport-clamped width when no explicit width was

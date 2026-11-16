@@ -1050,6 +1050,33 @@ describe('#33456 — the bare action read grafts a holder\'s envelope only at it
         });
     }
 
+    /**
+     * [#33904 item 2, ADR-0150 D4] A DISABLED package holding the name on
+     * another object lends the environment's item no envelope: the face would
+     * withhold an item stamped with a disabled package's `_packageId` (404).
+     * Reported on main `895783a1e` by the #33385 fold's harness probe; closed
+     * by #33898's owner-key lookup (the package bound at the served item's
+     * object, disabled holders included, and none there).
+     */
+    describe('[#33904] a disabled holder on another object', () => {
+        const registryOnlyAction = (objectName: string) =>
+            registry.registerItem('action', body('platform', objectName), 'name' as never);
+        for (const [shape, place] of [
+            ['the environment\'s item (its row stored)', () => environmentAction('contact')],
+            ['a package-less registry item alone', () => registryOnlyAction('contact')],
+        ] as const) {
+            it(`A disabled on \`account\`, ${shape} on \`contact\`: served, with no package's envelope (BASE: A's \`_packageId\`, withheld 404)`, async () => {
+                for (const steps of bothOrders([() => shipAction(A, 'account'), place])) {
+                    compose();
+                    steps.forEach((step) => step());
+                    registry.disablePackage(A);
+                    const [status, , objectName, packageId, packaged] = await envelopeOf();
+                    expect([status, objectName, packageId, packaged]).toEqual([200, 'contact', undefined, false]);
+                }
+            });
+        }
+    });
+
     describe('CONTROLs (unchanged)', () => {
         it('one package on one object with the environment\'s item on that object: its customization, under the package\'s envelope', async () => {
             shipAction(A, 'account');

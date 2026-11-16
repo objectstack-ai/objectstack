@@ -258,11 +258,12 @@ export async function runCrm(
     work?: string;
     date?: string;
     iterateRun?: boolean;
-    modes?: Array<'scratch' | 'template'>;
+    modes?: Array<'scratch' | 'template' | 'ask'>;
     /** Seed rows every booted app refuses, `object/id`. */ refuse?: string[];
     /** The package source the record states; default published 18.3.0. */ packages?: PackageSource;
     /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;
     /** Wraps the scripted model (e.g. to send its turns through another driver); the recording records what this answers. */ wrap?: (scripted: AgentDriver) => AgentDriver;
+    /** How many times each question turn is asked (`--ask-repeats`); left to the runner's default when absent. */ askRepeats?: number;
   } = {},
 ): Promise<FixtureRun> {
   const scenario = loadCrm();
@@ -282,7 +283,12 @@ export async function runCrm(
   };
   const scripted = new ScriptedDriver(scenario, ops, () => current);
   const driver = new RecordingDriver(opts.wrap ? opts.wrap(scripted) : scripted);
-  const cardRun = await runCard(scenario, driver, ops, { modes: opts.modes ?? ['scratch', 'template'], admin: ADMIN, ...(opts.iterateRun === false ? { iterateRun: false } : {}) });
+  const cardRun = await runCard(scenario, driver, ops, {
+    modes: opts.modes ?? ['scratch', 'template'],
+    admin: ADMIN,
+    ...(opts.iterateRun === false ? { iterateRun: false } : {}),
+    ...(opts.askRepeats !== undefined ? { askRepeats: opts.askRepeats } : {}),
+  });
   const date = opts.date ?? '2026-11-06';
   const packages = opts.packages ?? { source: 'published', versions: ['18.3.0'] };
   const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
