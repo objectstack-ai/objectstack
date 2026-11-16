@@ -242,7 +242,7 @@ const result = CurrencyConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ |  |
 | **operator** | `Enum<'eq' \| 'ne' \| 'gt' \| 'lt' \| 'gte' \| 'lte' \| 'contains' \| 'in' \| 'notIn'>` | ✅ |  |
-| **value** | `any` | ✅ | The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a `{ $now: true, addDays }` comparand for a date relative to today, or a `{ $record: "path" }` reference to the record being edited — a field of it, or one lookup hop ("account.cb_market"); a `{ $record }` value pairs only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced value in place of the reference; every other picker host leaves the entry out. |
+| **value** | `any` | ✅ | The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a `{ $now: true, addDays }` comparand for a date relative to today, or a `{ $record: "path" }` reference to the record being edited — a field of it, or one lookup hop ("account.cb_market"); a `{ $record }` value pairs only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced value in place of the reference; every other picker host leaves the entry out. A `{ $record }` path through or to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) has no single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`). |
 | **orEmpty** | `boolean` | optional | TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no start date". Only with eq, ne, gt, lt, gte or lte. The picker sends the comparison or a null match on the same column. |
 
 ### Nested Shape: `Field.lookupAutofill[number]`
@@ -437,7 +437,7 @@ Allowed Values: `phone`, `id_card`, `bank_account`, `email`, `name`
 
 ## LookupFilterRecordReference
 
-A lookupFilters comparand read from the record being edited: `{ $record: "field" }` or `{ $record: "lookup_field.field" }` (at most one lookup hop). The picker replaces it with that value before querying; unlike `{ $field }`, which names a column of the candidate row.
+A lookupFilters comparand read from the record being edited: `{ $record: "field" }` or `{ $record: "lookup_field.field" }` (at most one lookup hop). The picker replaces it with that value before querying; unlike `{ $field }`, which names a column of the candidate row. A path through or to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) has no single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`).
 
 ### Properties
 
