@@ -109,7 +109,7 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionByPackage,
     resolveActionHandlerKeys,
-    resolveRecordTitle,
+    servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
     type PackageScopedRefusal,
@@ -3287,9 +3287,10 @@ export type ActionConfirmationElicitor = (subject: ActionConfirmationElicitSubje
 /**
  * [#33712] The subject an elicitation names, built from what the admitted
  * sequence already holds: the declaration, the object and the record the
- * caller-scope subject load read. The title is the object's own
- * (`resolveRecordTitle`: its `nameField`, formula or column), and is left out
- * rather than replaced by the id when it does not resolve.
+ * caller-scope subject load read. The title is the value that read SERVED
+ * under the object's title pointer (`servedRecordTitle`), never re-derived
+ * from the row, and is left out rather than replaced by the id when the read
+ * served none. The door that phrases the question bounds and neutralises it.
  */
 export function actionConfirmationElicitSubject(
     action: any,
@@ -3300,15 +3301,9 @@ export function actionConfirmationElicitSubject(
     record: Record<string, unknown> | undefined,
 ): ActionConfirmationElicitSubject {
     const label = typeof action?.label === 'string' && action.label !== '' ? action.label : undefined;
-    let recordTitle: string | undefined;
-    if (recordId !== undefined && record && Object.keys(record).length > 0) {
-        try {
-            recordTitle = resolveRecordTitle(obj, record);
-        } catch {
-            // A title that cannot be composed is left out: the id still names the record.
-            recordTitle = undefined;
-        }
-    }
+    const recordTitle = recordId !== undefined && record && Object.keys(record).length > 0
+        ? servedRecordTitle(obj, record)
+        : undefined;
     return {
         actionName,
         ...(label !== undefined ? { actionLabel: label } : {}),

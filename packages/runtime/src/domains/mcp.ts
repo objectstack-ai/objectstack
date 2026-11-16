@@ -2053,6 +2053,11 @@ export async function resumeActionRun(
                 ...elicited.refused.details,
             });
         }
+        // The person answered some time after the gates were read: ask the
+        // admitting action's gates again before the resume below, which reads
+        // the subject and the screen again itself (`continueAdmittedRun`).
+        const regated = resumeAdmissionRefusal(deps, admitted, ec, activationEngine);
+        if (regated instanceof Error) throw regated;
     } else if (handOff) {
         await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
         const answer = await actionExec.handOffActionConfirmation(deps, context, envId, {

@@ -286,12 +286,22 @@ export async function runResolvedAction(
     requestContext: HttpProtocolContext,
     call: ResolvedActionCall,
 ): Promise<ResolvedActionRun> {
-    const admission = await admitResolvedAction(deps, requestContext, call);
+    let admission = await admitResolvedAction(deps, requestContext, call);
     if ('refused' in admission) return admission;
     if (admission.handOff) {
         const confirmation = await confirmAdmittedAction(deps, requestContext, call, admission);
         // [#33712] Only an elicited `accept` falls through to the dispatch.
         if (confirmation !== 'accepted') return confirmation;
+        // [#33712] The person answered some time after the admission was read.
+        // The call dispatches on a read taken AFTER the answer: every gate and
+        // the subject load again, then the caller-scope verdict on that fresh
+        // subject, exactly as the question was preceded. A refusal there runs
+        // nothing; the dispatch never sees the read taken before the question.
+        const fresh = await admitResolvedAction(deps, requestContext, call);
+        if ('refused' in fresh) return fresh;
+        const verdict = await subjectVerdictRefusal(deps, requestContext, call, fresh);
+        if (verdict) return verdict;
+        admission = fresh;
     }
     const outcome = await dispatchAdmittedAction(deps, requestContext, call, admission);
     return {
@@ -320,6 +330,36 @@ interface Admission {
  * the person is asked there instead, after the same verdict: `'accepted'`
  * sends the caller on to the dispatch, any other answer is the refusal.
  */
+/** The admitted record id as the hand-off and the question carry it: absent for a record-less call. */
+function subjectRecordIdOf(recordId: unknown): string | undefined {
+    return recordId === undefined || recordId === null || recordId === '' ? undefined : String(recordId);
+}
+
+/**
+ * [#33690] The caller-scope subject verdict on an admission, as the dispatch
+ * arm would read it, rendered as a refusal; `undefined` when the call may go
+ * on. [#33712] Asked before the person is asked, and again on the read taken
+ * after an elicited `accept`.
+ */
+async function subjectVerdictRefusal(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    call: ResolvedActionCall,
+    admission: Admission,
+): Promise<{ refused: ActionRefusal } | undefined> {
+    const { objectName, wiring } = call;
+    try {
+        await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, admission.actionDef, {
+            objectName, recordId: subjectRecordIdOf(admission.recordId), subject: admission.subject, ec: wiring.ec, envId: wiring.envId,
+        });
+    } catch (error) {
+        const thrown = error as Error & { code?: unknown; status?: unknown };
+        if (typeof thrown?.status !== 'number' || typeof thrown?.code !== 'string') throw error;
+        return { refused: { message: thrown.message, status: thrown.status, details: { code: thrown.code } } };
+    }
+    return undefined;
+}
+
 async function confirmAdmittedAction(
     deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
@@ -328,16 +368,9 @@ async function confirmAdmittedAction(
 ): Promise<ResolvedActionRun | 'accepted'> {
     const { objectName, wiring } = call;
     const { actionDef, recordId, params, subject } = admission;
-    const subjectRecordId = recordId === undefined || recordId === null || recordId === '' ? undefined : String(recordId);
-    try {
-        await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, actionDef, {
-            objectName, recordId: subjectRecordId, subject, ec: wiring.ec, envId: wiring.envId,
-        });
-    } catch (error) {
-        const thrown = error as Error & { code?: unknown; status?: unknown };
-        if (typeof thrown?.status !== 'number' || typeof thrown?.code !== 'string') throw error;
-        return { refused: { message: thrown.message, status: thrown.status, details: { code: thrown.code } } };
-    }
+    const subjectRecordId = subjectRecordIdOf(recordId);
+    const verdict = await subjectVerdictRefusal(deps, requestContext, call, admission);
+    if (verdict) return verdict;
     const handOff = call.confirmationHandOff!;
     const actionName = typeof actionDef?.name === 'string' && actionDef.name ? actionDef.name : call.actionName;
     // [#33712] Step 1: a client that can be elicited is asked in place, after
