@@ -1349,9 +1349,12 @@ with `503` and nothing removed, as it refuses a deactivation: the door calls
 the host once and keeps no record to ask again from, so try again once the
 host is back. A person who is not pending (they have signed in, or were not
 added this way) is refused with `409`: deactivate them instead. That holds at
-the removal itself, so a person whose first sign-in lands while the host is
-asked, or while the removal is being written, is not removed either, and the
-answer says the host was already told. A record that
+the removal itself: the person is checked again inside the removal's unit of
+work and the delete carries `source: 'idp_pending'`, so a person whose first
+sign-in lands while the host is asked is not removed either, and the answer
+says the host was already told. Because `sys_user` has cascading lookups, the
+engine deletes the row by id after walking them, so a first sign-in that
+commits in that narrow window is not yet refused. A record that
 still points at the person through a lookup that restricts deletes refuses the
 removal with that lookup's own answer, and nothing is removed; when the host
 had already cancelled the invitation of a person who is still pending and not

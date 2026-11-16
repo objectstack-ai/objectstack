@@ -481,12 +481,16 @@ const TAKE_BACK_OBJECTS = ['sys_user_position', 'sys_user_permission_set', 'sys_
  * record that points at the person follows its lookup's `deleteBehavior`.
  * Two callers: an add the host refused (the person was just written and
  * never told anything), and `admin/remove-sso-user`, which passes
- * `pendingOnly`. Then the person is read inside the unit of work before
- * anything is deleted, and the row's delete carries the pending marker in
- * its `where`, so a person whose first sign-in commits at any point before
- * that delete is not removed: {@link NoLongerPending} is thrown and the unit
- * of work rolls the child deletes back. A failure here is thrown: the caller
- * must hear it rather than a clean answer.
+ * `pendingOnly`. Then the person is re-checked inside the unit of work
+ * before anything is deleted, and the row's delete carries
+ * `source: 'idp_pending'` in its `where`: when it removes no row,
+ * {@link NoLongerPending} is thrown and the unit of work rolls the child
+ * deletes back. One window stays open: `sys_user` has cascading lookups, so
+ * the engine reads the matching ids, walks the cascade and then deletes by
+ * id alone, with no row lock, and a first sign-in committing between that
+ * read and that delete is not yet refused (#34373, an engine defect). A
+ * failure here is thrown: the caller must hear it rather than a clean
+ * answer.
  */
 async function takeBackPerson(
   deps: PendingSsoUserDeps,
@@ -734,9 +738,10 @@ const REMOVE_KEYS = new Set(['userId']);
  * of work, through the engine's delete, so a record that points at the person
  * follows its lookup's `deleteBehavior`: a `restrict` refuses the removal with
  * the engine's own answer and nothing is removed. "Pending only" is held at
- * the removal too: the row's delete carries the pending marker, so a person
- * who signs in while the host is asked, or inside the unit of work, is
- * answered `409` and kept. A host that could not be reached refuses the
+ * the removal too: the person is re-checked inside the unit of work and the
+ * row's delete carries `source: 'idp_pending'`, so a person who signs in
+ * while the host is asked is answered `409` and kept (the narrow window the
+ * engine's delete leaves is in {@link takeBackPerson}). A host that could not be reached refuses the
  * removal (`503`, nothing removed), as it refuses a deactivation: the door
  * calls the host once and keeps no record to ask again from, so removing the
  * person would leave an invitation nothing can cancel. With no host wired

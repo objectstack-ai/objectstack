@@ -1442,11 +1442,29 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
     expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
   });
 
-  it('a person whose first sign-in commits inside the unit of work, after the pending read, is not removed: 409', async () => {
+  it('a person whose first sign-in commits inside the unit of work, after the pending read, is not removed: 409, and the child deletes roll back', async () => {
     const email = 'signs.in.late@example.com';
     const { host } = removingHost();
     const s = await managedStage({ host });
     const id = await addPending(s, email);
+    const CHILDREN = ['sys_user_position', 'sys_user_permission_set', 'sys_member'] as const;
+    for (const table of CHILDREN) expect(s.rowsOf(table, id).length, table).toBeGreaterThan(0);
+    // The memory engine has no transaction, so the plugin's `runAtomically`
+    // would run the removal unatomically. Give it one: the seam calls
+    // `engine.transaction`, and a throw out of it restores every table this
+    // unit of work wrote. `sys_user` is left as it is, because its change is
+    // the concurrent sign-in's commit, not this unit of work's write.
+    let units = 0;
+    (s.engine as any).transaction = async (work: (trx: unknown, info: unknown) => Promise<unknown>) => {
+      units += 1;
+      const before = new Map([...s.engine.tables].filter(([name]) => name !== 'sys_user').map(([name, rows]) => [name, structuredClone(rows)]));
+      try {
+        return await work({}, {});
+      } catch (error) {
+        for (const [name, rows] of before) s.engine.tables.set(name, rows);
+        throw error;
+      }
+    };
     // The first sign-in lands between the in-unit pending read and the row's
     // delete: the first child delete is the moment after that read.
     const realDelete = s.engine.delete.bind(s.engine);
@@ -1461,6 +1479,8 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
     expect(v.code).toBe('RESOURCE_CONFLICT');
     expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
     expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
+    expect(units, 'the removal ran inside the transactional seam').toBe(1);
+    for (const table of CHILDREN) expect(s.rowsOf(table, id).length, `${table} rolled back`).toBeGreaterThan(0);
   });
 });
 
