@@ -496,6 +496,20 @@ type EffectiveSubmitBehavior = SubmitBehavior | { kind: 'created-record' };
 interface RenderableField {
   name: string;
   label: string;
+  /**
+   * Where {@link RenderableField.label} came from, decided where the row is
+   * built and never re-guessed from the string: `'entry'` when the form
+   * view's field entry declared its own `label`, `'object'` when the row fell
+   * back to the object field's label (or its name).
+   *
+   * The two are different texts. An entry label is the visitor-facing copy
+   * the author wrote for THIS form, served already localized by the form
+   * endpoint (`_sections.{section}.fields.{field}.label`); the app bundle's
+   * `fields.{object}.{field}` translates the OBJECT field, the agent-side
+   * label. So only an `'object'` row takes the bundle overlay — see
+   * `rowLabel` in {@link FormPage}.
+   */
+  labelSource: 'entry' | 'object';
   type: string;
   required: boolean;
   readonly: boolean;
@@ -853,6 +867,10 @@ export function buildSections(
         // objectui#13380 — the three `I18nLabel` keys, collapsed to the
         // visitor's language before they reach a `string` slot.
         label: localized(override.label ?? def.label) ?? override.field,
+        // The same `??` as the line above, read once more for its branch: an
+        // entry that declared a label is the visitor's copy, never overlaid
+        // by the object field's bundle translation at render.
+        labelSource: override.label != null ? 'entry' : 'object',
         type: def.type ?? 'text',
         required: override.required ?? def.required ?? false,
         readonly: override.readonly ?? false,
@@ -2529,6 +2547,19 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    * and NO in the same position with the wrapper removed.
    */
   const { sectionLabel, fieldLabel, objectLabel } = useSafeFieldLabel();
+  /**
+   * The label a row is NAMED by, on screen and in every refusal that names
+   * it — one rule for all of them, so a message never calls a field something
+   * the visitor cannot see.
+   *
+   * An entry-declared label (`labelSource: 'entry'`) is printed as served: it
+   * is this form's own copy, already localized by the form endpoint, and the
+   * bundle's `fields.{object}.{field}` translates a different text — the
+   * object field's. Only a row whose label came from the object field takes
+   * that overlay, falling back to the served label on a miss.
+   */
+  const rowLabel = (object: string, f: Pick<RenderableField, 'name' | 'label' | 'labelSource'>): string =>
+    f.labelSource === 'entry' ? f.label : fieldLabel(object, f.name, f.label);
   // The page's own chrome — the loading line, the success toast, the
   // thank-you panel's defaults, and (objectui#11071) the submit button, the
   // pending-redirect line and the required refusal's frame — through the same
@@ -2817,7 +2848,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     if (faultedVisibleWhen.length > 0) {
       const msg = t('form.visibleWhenFaulted', {
         fields: faultedVisibleWhen
-          .map((f) => fieldLabel(object, f.name, f.label))
+          .map((f) => rowLabel(object, f))
           .join(t('validation.formInvalidJoiner')),
       });
       setError(msg);
@@ -2835,7 +2866,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       // the words are the locale's, not a concatenation of English.
       const msg = t('publicForm.requiredFields', {
         fields: missing
-          .map((f) => fieldLabel(object, f.name, f.label))
+          .map((f) => rowLabel(object, f))
           .join(t('validation.formInvalidJoiner')),
       });
       setError(msg);
@@ -2843,7 +2874,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       // The record form's message for an empty required field, per row.
       setFieldErrors(Object.fromEntries(missing.map((f) => [
         f.name,
-        t('validation.required', { field: fieldLabel(object, f.name, f.label) }),
+        t('validation.required', { field: rowLabel(object, f) }),
       ])));
       return true;
     }
@@ -3297,9 +3328,11 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
                 * payload, which is why the symptom looked like "field
                 * labels translate, section headings do not"; the client
                 * lookup is the overlay an app bundle can put on top,
-                * not a replacement for that server value.
+                * not a replacement for that server value — and only for
+                * a row whose label IS the object field's (`rowLabel`):
+                * an entry-declared label is printed as served.
                 */}
-              {fieldLabel(loaded.object, f.name, f.label)}
+              {rowLabel(loaded.object, f)}
               {/* Visual-only (objectui#3299): the control's `required` /
                   `aria-required` is the announced channel; hiding the `*`
                   keeps it out of the control's accessible name. */}

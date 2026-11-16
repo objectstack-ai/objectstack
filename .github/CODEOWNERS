@@ -1,10 +1,12 @@
-# .github/CODEOWNERS — governance routing: every Tier H governed surface to
-# every authorized approver.
+# .github/CODEOWNERS — governance routing: every Tier H governed surface but
+# the low-risk arm's rows to every authorized approver.
 #
 # The ruling this file helps enforce (maintainer, verbatim):
 # 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」
-# It holds for every ADR change except an add-only note (no removed line, no `Status:` line, nothing under
-# `Decision`, no new, renamed or deleted file), which rides the low-risk arm (Ruling-ref Leehom, 「同意 把低风险的 Tier H 放权给座位」).
+# It holds for every ADR change except an add-only note in the root tree (no
+# removed line, no `Status:` line, nothing under `Decision`, no new, renamed or
+# deleted file), which lands under the low-risk arm's conditions (Ruling-ref
+# Leehom, 「同意 把低风险的 Tier H 放权给座位」).
 #
 # The owner list on EVERY row mirrors `GOVERNED_APPROVERS` in
 # scripts/pm/check-governed-queue-guard.mjs — the one list of accounts whose
@@ -17,8 +19,9 @@
 # any line names fewer or other owners than that constant, or when a Tier S row
 # (`.claude/**`, which lands on a seat's review of record) is routed here. A
 # Tier H row carrying the register's low-risk arm (`lowRisk`: the two skills
-# catalogs and the root ADR tree) has NO line here and reds if one is added: the relay's per-pull
-# review plan reads the arm and decides who is asked (ruling record 6891850019).
+# catalogs and the root ADR tree) has NO line here and reds if one is added:
+# the relay's per-pull review plan reads the arm and decides who is asked
+# (ruling record 6891850019).
 # Change the constant or the register first; this file follows in the same PR.
 #
 # What routing buys, and what it does not: GitHub requests a code owner's

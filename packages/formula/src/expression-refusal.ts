@@ -69,11 +69,17 @@ interface TypeMismatchParams {
   readonly reference?: string;
 }
 
-/** The params every `date-text-call*` code interpolates; the codes differ in the outcome their sentence states. */
+/**
+ * The params every `date-text-call*` code interpolates; the codes differ in the
+ * outcome their sentence states. `shift` is an optional clause's: present
+ * exactly when the call is `timestamp(<date field>)` (#34363), naming the
+ * whole-day shift that keeps the result a date, `isoDate(addDays(<field>, N))`.
+ */
 interface DateTextCallParams {
   readonly call: string;
   readonly reference: string;
   readonly rewrite: string;
+  readonly shift?: string;
 }
 
 /** Code → the params its message interpolates. The keys ARE the closed set. */
@@ -227,7 +233,9 @@ export interface ExpressionRefusalParams {
    * field declared as that text: the evaluator faults on it on every row.
    * `call` is the call as written, `reference` the date field as written, and
    * `rewrite` the call with that field parsed by `date(…)` first, which the
-   * check proved clean. A flattened (flow) condition is
+   * check proved clean — for `timestamp(<date field>)`, whose string overload
+   * checks clean and faults on the `YYYY-MM-DD` text, `date(…)` in place of the
+   * call, with the optional `shift` clause. A flattened (flow) condition is
    * `date-text-call-run-fails` / `-run-may-fail`; a fail-closed site is
    * `date-text-call-fail-closed`, an advisory rule's `date-text-call-fail-open`.
    */

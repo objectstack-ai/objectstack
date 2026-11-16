@@ -626,10 +626,21 @@ drive this MCP server. Same word, different layer.
   (`428` `ACTION_CONFIRMATION_REQUIRED`) at `run_action`, `resume_run` and REST
   `/actions`, whatever the call carries; a person runs that action.
 - **`delete_record` needs `confirm: true` on every call.** A record delete over
-  MCP is permanent, so the tool refuses a call without it with `run_action`'s
+  MCP is destructive, so the tool refuses a call without it with `run_action`'s
   refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, its `details.actionName`
-  naming `delete_record`) and deletes nothing. The agent asks its human, then retries
-  with `confirm: true`; the flag asserts an approval, it does not obtain one.
+  naming `delete_record`) and deletes nothing. A request in which the human
+  names the record to delete, with exactly one record matching, is the human's
+  approval of that delete: the agent sends `confirm: true` on that call,
+  without asking again. When the name matches more than one record, or the
+  request does not identify one record, the agent does not delete yet: it lists
+  the candidates, asks the human which one, and sends `confirm: true` only
+  after the answer. The flag asserts an approval, it does not obtain one. A
+  deleted business record goes to the recycle bin, where it can be restored
+  until the deployment's retention ends (30 days by default); a record of a
+  platform object (`sys_`, `cloud_`, `ai_`), or any record on a deployment
+  with no recycle bin, is deleted permanently. The answer names the
+  recycle-bin entry as `recycleBinEntryId`; an answer without one means the
+  delete was permanent.
   REST `DELETE /api/v1/data/:object/:id` and `update_record` take no
   confirmation.
 - **`delete_records` takes the same gate, and its refusal is the preview.** A
