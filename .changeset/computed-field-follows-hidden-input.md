@@ -24,7 +24,7 @@ Who moves:
 - a delegate acting on behalf of a delegator who is not served such a field whole;
 - every public-form submitter: the record the engine echoes for a public-form grant carries no computed field that reads through a reference, whatever the submitter could read there (the form submit route itself answers the created id only);
 - a caller with edit on the object whose payload names a computed field it is not served whole, a computed field served masked by its own `maskingRule` included;
-- a caller who reads a computed field whose expression reads the record in a way no field name describes (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL), while some other field of the object is not served whole to that caller.
+- a caller who reads a computed field whose expression reads the record in a way no field name describes (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL), while some other field of the object is not served whole to that caller; such a field is also withheld for what it reads through a reference, as any computed field is.
 
 For that caller, after this release, the computed field is withheld exactly as the field it reads is:
 
