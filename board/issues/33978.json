@@ -2,8 +2,8 @@
   "number": 33978,
   "kind": "issue",
   "title": "Authoring skill: line-item add paths must set or compute the amount, and a persona's create policy must not need values the user never says",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T15:17:15Z",
-  "updated_at": "2026-11-15T17:36:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T06:02:16Z",
+  "closed_at": "2026-11-16T02:56:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33978",
   "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiled by eval#1 (#33468) from the classification on #33973 (requested by repo:cloud#5).\n\nFiling-gate category: ③ maintainer-directed (#33973: 「聊天里改数据 出问题的关键还是我们的skills需要优化吧？」 and its acceptance \"each class with at least two failures has a card filed\").\n\n## Why (business)\n\n20 of the 121 failed in-chat writes in the 2026-11-15 runs (#33920) trace to how the AI built the app, which the authoring skills steer. Fixing the guidance helps every model that builds, including the hosted one.\n\n## What the runs show\n\n1. **Line items with no way to set the amount** (6, haiku and opus): the built app's add-line action takes `invoice`, `product`, `quantity` but no price, and the price field is not writable or readable for the sales persona, so a line the user asked for at a stated amount is written with amount 0. The agent reports it (\"the add-line action doesn't let me set a price\"). Guidance: a line-item add path either takes the amount (or unit price) as a parameter the persona may set, or computes it from a source the build declares (for example a product price), never leaves it 0.\n2. **Create policy needs a value the user never says** (14, haiku builds only, none from opus): the contractor asks \"Add a 'Launch checklist' task to the Website relaunch.\"; the build's policy refuses the create with 403 unless a field the ask does not name is set (the card's expected row also carries an assignee). Guidance: when a persona may create only rows tied to them, default that field to the current user (or document it in the field's description so an agent sets it), so a plain request succeeds.\n\n## Where\n\nThe published authoring skills under `skills/` (the line-items and permissions guidance); the skills lane owns the exact files. A sibling authoring card from the same runs: #33819 (mask a roll-up over a child the persona may not read).\n\n## Acceptance\n\n- The guidance names both rules with a short example each.\n- The next eval-run round shows no `add_line` amount-0 writes and no create 403 on `add_task` from haiku builds, or the record says why."

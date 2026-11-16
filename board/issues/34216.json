@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T01:00:22Z",
-  "updated_at": "2026-11-16T02:19:01Z",
+  "updated_at": "2026-11-16T04:18:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34216",
   "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ card #34173 ask 3, kept out of PR #34213 as an action-contract change. Its dev says it is still needed (os-dev-report 6904367386, carrier: seat).\nReader: `domain:spec` (the action contract an `execution: 'aggregate'` bulk handler answers), then `domain:ui` (the bulk result dialog). Grade suggestion: p3. After PR #34213 the dialog states no false count, so what is missing is a truthful per-row count, not a wrong one.\nDedupe: `is:issue is:open per-row result aggregate bulk`: none. Related: objectui#3139 (aggregate dispatch), #34173.\n\n## 维护者速读\n\n聚合（全有或全无）批量动作是一次调用处理整个选择。处理器中途失败时，现在没有任何约定好的形状能告诉控制台「哪些行已改、哪些没改」。#34173 修完后，对话框只能说「未对所选记录全部完成」，给不出逐行结果。要给，得在动作契约里加一个聚合处理器可以返回或随拒绝带上的逐行结果形状，例如 `{ succeeded: [ids], failed: [{ id, message }] }`。\n\n## Ask\n\n1. Spec: define an optional per-row result an aggregate bulk handler may resolve with, or attach to its rejection. The shape is the spec seat's call. Keep it optional, so a handler that returns nothing keeps today's one-outcome report.\n2. UI, after the spec lands: when the result is present, the dialog shows the true per-row count and list. When it is absent, it shows the #34173 one-outcome panel.\n3. Pins: a handler that rejects with the shape gets a true count and list; CONTROL: one that rejects without it gets the one-outcome panel.\n\n⛔ Not a claim."

@@ -10,16 +10,21 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T02:11:07Z",
-  "updated_at": "2026-11-16T02:11:07Z",
+  "updated_at": "2026-11-16T03:16:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34243",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUZKdq3PK2Sab53cT3\n\nFiled by area S6 from PR #34239 (#34098), dev report 6905346098. Category: misleading user-visible text.\n\n**What happens.** `POST /api/v1/webhooks/redeliver` (`MessagingService.redeliverHttp`) on a parked `dead` row answers `DELIVERY_NEVER_SENT` with the text from `assertHttpRedeliverable` (`packages/services/service-messaging/src/http-outbox.ts`). That text says the row has no signature \"because the signing secret it needed could not be resolved\". Since #34098, a stored `sys_webhook` row with the retired method GET is parked through the same #8069 `recordUndeliverable` path, so its dead rows also answer this text. For those rows the clause is false; the reason recorded on the row (which the same text quotes) names the method.\n\n**Ask.** Word the never-sent refusal so it does not name a cause the row does not carry: lead with the row's own recorded reason, and keep the signing-secret sentence only for rows parked for that reason (or drop it). Pin both shapes: a secret-park row and a GET-park row.\n\n**Reach.** Operators redelivering a parked webhook delivery; about three lines in service-messaging. Not a behaviour change: the refusal code and status stay.\n\nDedupe words: redeliver DELIVERY_NEVER_SENT parked row signing secret wording; assertHttpRedeliverable parked reason text."

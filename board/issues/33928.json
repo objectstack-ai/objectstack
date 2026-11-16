@@ -2,8 +2,8 @@
   "number": 33928,
   "kind": "issue",
   "title": "plugin-sharing: a write whose id is an operator object (where:{id:{$in:[…]}}) is gated as a by-id write of the row \"[object Object]\", so a member's multi delete of rows it owns is refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "bug",
     "domain:server",
     "lease:A2",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:29:57Z",
-  "updated_at": "2026-11-16T00:52:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T05:12:27Z",
+  "closed_at": "2026-11-16T04:22:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33928",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ① a public door gives a wrong answer. Found by the #33782 dev (S1) while pinning cascade-delete parity for #33699. Not a security finding: it over-refuses, nothing is exposed. Grading and lane are triage's; the seat has routed it to S1 as a blocker of #33699 / PR #33887. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象：** 成员一次删除多条自己拥有的记录（`where: { id: { $in: [...] } }`），在私有共享模型的对象上被拒（403），一条也删不掉。\n- **原因：** 共享中间件把 `$in` 这样的操作符对象当成单条记录 id，去判断一条叫 \"[object Object]\" 的记录能不能删，自然被拒。\n- **影响：** 级联删除改为按批删除（#33699）后，凡是应当成功的级联都会被这一处拒掉，所以它挡住了 #33699。\n- **方向（席位已定）：** 对匹配到的每一行用和按 id 删除完全相同的判断；任何一行不允许就整体拒绝，什么都不删。\n\n## What happens (measured on main)\n\n- `packages/plugins/plugin-sharing/src/sharing-plugin.ts` `inferTargetId` returns `options.where.id` (and `options.filter.id`) even when it is an operator object, so the by-id gate (`SharingService.admitsByIdWrite`) is asked about the row `String(id)` = \"[object Object]\" and answers no.\n- Repro: a member, an object with `private` OWD and an `owner_id` field, a row the member owns; `delete` with `where: { id: { $in: ['<own row id>'] } }` → 403 FORBIDDEN, nothing deleted. CONTROL: the by-id delete of the same row lands.\n- With S2's objectql diff for #33699 (cb2cafef) applied, 4 of #33782's 8 cascade parity pins go red for this reason alone: every cascade that should land answers 403.\n\n## Asked (seat-level terms, routing note in the S1 thread)\n\n1. The per-row judgment is exactly the by-id judgment (`admitsByIdWrite`, the delegator gate, the RLS deferral), no new shortcut. ⛔ Never \"skip the gate when the id is an operator object\".\n2. A mixed set fails closed: if any matched row is refused, the whole request is refused and nothing is deleted, unless an existing many-delete rule in the codebase says otherwise (the bulk path's `buildWriteFilter` composition is the candidate to read and cite).\n3. Other operator shapes (`$eq`, `$nin`, nested and/or) are either gated per matched row or refused, never treated as a by-id string; one pinned.\n4. By-id behaviour unchanged.\n\n## Pins\n\n- An owned row in an `$in` delete lands.\n- A not-owned row in the same `$in` set: refused, and nothing of the set is deleted.\n- One other operator shape gated or refused.\n- By-id control unchanged. Each negative pin ablated.\n\nPrior rulings read: `inferTargetId` / `admitsByIdWrite` / `buildWriteFilter` / operator id: sharing-plugin.ts docblocks (#27175 one by-id gate; #5493 ruling 5226389104 RLS deferral; \"By-id only … the bulk path composes a FILTER … tracked separately (#6736)\", closed); ADR-0111 D3 (delete needs ownership, write depth or Modify All Data); ADR-0090 D10 (delegator gate). No line says an operator-valued id is deliberately refused.\n\nBlocks: #33699"

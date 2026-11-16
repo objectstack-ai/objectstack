@@ -1,0 +1,30 @@
+{
+  "number": 34311,
+  "kind": "issue",
+  "title": "security/explain: ask several operations in one request, so a list's first row-action use costs one call, not two",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T05:20:59Z",
+  "updated_at": "2026-11-16T05:46:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34311",
+  "body": "domain:ui#2 · os-steve · session_01ADHkmSzhXR4yUAgwq1bQRi\n\nFiling gate: ③ an out-of-scope finding of the #34208 dev (os-dev-report 6907980033 on #34208, PR #34227), carrier: seat. Measured on PR #34227 head `1ca52c3e`.\nReader: `domain:spec` (`ExplainRequest` in `@objectstack/spec/security`) and the server's `POST /api/v1/security/explain` route; the client `ui/packages/plugin-grid/src/hooks/useRecordCrudVerdicts.ts` follows. Grade suggestion: p3 (a cost, not a defect: the first-paint calls are gone after PR #34227).\nDedupe: `is:issue is:open explain operations`: none.\n\n## 维护者速读\n\n列表行上的编辑/删除按钮要问服务端「这些记录能不能改、能不能删」。PR #34227 已经把这次询问从首屏挪到第一次使用行操作时，但仍是两次请求（update 一次、delete 一次），因为 `ExplainRequest` 一次只收一个 operation。这张卡让一次请求问多个 operation。\n\n## Facts\n\n- `ExplainRequest` takes a single `operation`; the batch is per (object, operation) per page.\n- After PR #34227: a list's first paint sends 0 explain calls; the first row-action use sends 2 (`update`, `delete`), each ~45 ms runtime and 50–60 queries in the cloud#4563 hosted measurement; an inline-editable grid sends `update` on first paint and `delete` on first use.\n\n## Ask\n\n1. Spec: `ExplainRequest` accepts `operations: [...]` (or an equivalent) beside or instead of `operation`, with the answer keyed per operation; additive, so today's single-operation callers keep working.\n2. Server: the explain route answers every asked operation in one pass over the records.\n3. Client (a follow-up on `domain:ui`): `useRecordCrudVerdicts` asks `update` and `delete` in one request on first use.\n4. Pins: one request answers both operations for a page of ids; CONTROL a single-operation request answers as today.\n\n⛔ Not a claim."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 34260,
+  "kind": "issue",
+  "title": "docs: state in ADR-0150 and the package-disable API page that a disabled package holds no name and hides its names' environment customizations",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "lease:E1",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:53:55Z",
+  "updated_at": "2026-11-16T02:53:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34260",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ② a documentation gap that a review named. Source: review-c's fresh contract record 6905931301 on PR #33995 (N4). Filed by area S5 (E1b), lease E1, as a follow-up of #33385/#33401.\n\n## 维护者速读\n\n- 问题：PR #33995 的变更集和文档引用\"停用的包不持有名字（ADR-0150 D3）\"，但 main 上 ADR-0150 的正文没有关于停用包的句子；这条规则只写在注册表的 TSDoc 和各卡的裁决里。\n- 另外，`content/docs/api/metadata-api.mdx` 里 `PATCH /packages/:id/disable` 一节没有说明：包停用期间，它名下的环境定制会被隐藏、不在列表中出现。\n- 修法方向：给 ADR-0150 加一段补充，并更新这一节 API 文档。\n- 优先级 p3。\n\n## Acceptance\n\n1. ADR-0150 gains an addendum, through the ADR process: a disabled package holds no name, and a package-less customization of a name only disabled packages hold is hidden from by-name reads and lists until re-enable. Cite the rulings on #33385 / #33401 / #34144.\n2. The disable section of `content/docs/api/metadata-api.mdx` says what a disabled package does to its names' reads, lists and saves, matching PR #33995 and #34144's changesets.\n3. Docs only: `Clause-②: no`.\n\n## Dedupe\n\nI searched for \"disabled package holds no name\" ADR; the only hits were the cards that cite it."
+}

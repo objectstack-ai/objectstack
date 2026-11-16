@@ -1,0 +1,32 @@
+{
+  "number": 34320,
+  "kind": "issue",
+  "title": "Eval run · M2 close-out cross matrix · 2 builds × 3 ask configs · 31eb2aed · 2026-11-16",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "eval-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T06:00:43Z",
+  "updated_at": "2026-11-16T06:02:47Z",
+  "closed_at": "2026-11-16T06:02:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34320",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiled by eval#1 (#33468): the M2 close-out row \"cross matrix: opus build × haiku / sonnet ask, and the reverse\" of #33595. Record shape as #33920 (maintainer ruling 2026-11-15: records in this repository, like `qa-run`, with full scores).\n\n## Environment\n\n- Runner: `@objectstack/scenarios` at objectstack main `31eb2aed` (all ten M2 children of #33595 merged), pinned for the whole run.\n- Package under test: published `18.4.0`, `--modes ask` on a fixed template (`--template F`), so every ask config is graded on the same app.\n- Templates: the first builds of the 2026-11-15 confirmation runs (#33920), rebuilt byte-for-byte from their recordings: opus low rep 1 (all three cards) and haiku medium rep 1 (crm, invoice) / rep 2 (project).\n- Ask configs: `--model haiku --effort medium`, `--model sonnet --effort medium`, `--model opus --effort low`; `--ask-repeats 3` (each question asked 3 times, fresh session each); operations run once. Subscription driver, no API key; cost is the CLI's nominal figure.\n- 18 card runs, all exit 0, all recorded.\n\n## Results (3 control cards, Run half)\n\n| Build | Ask | Ask k/N | Operations | Ops not measured (build) | Leak flags | Ask min | Ask nominal $ |\n|:--|:--|:--|:--|--:|--:|--:|--:|\n| opus low | haiku medium | 75/87 (86%) | 9/15 (60%) | 1 | 2 | 33 | 0.61 |\n| opus low | sonnet medium | 81/87 (93%) | 10/14 (71%) | 0 | 2 | 26 | 8.26 |\n| opus low | opus low | 77/87 (89%) | 12/15 (80%) | 1 | 3 | 20 | 17.19 |\n| haiku medium | haiku medium | 76/87 (87%) | 9/15 (60%) | 0 | 1 | 31 | 0.63 |\n| haiku medium | sonnet medium | 75/87 (86%) | 12/15 (80%) | 0 | 1 | 26 | 8.06 |\n| haiku medium | opus low | 76/87 (87%) | 12/15 (80%) | 0 | 3 | 21 | 17.05 |\n\nPer card, Ask · Operations (crm / invoice / project):\n\n| Build × Ask | crm | invoice | project |\n|:--|:--|:--|:--|\n| opus × haiku | 24/27 · 4/5 | 31/33 · 3/5 | 20/27 · 2/5 |\n| opus × sonnet | 24/27 · 3/4 | 33/33 · 4/5 | 24/27 · 3/5 |\n| opus × opus | 24/27 · 4/5 | 30/33 · 4/5 | 23/27 · 4/5 |\n| haiku × haiku | 23/27 · 4/5 | 30/33 · 3/5 | 23/27 · 2/5 |\n| haiku × sonnet | 25/27 · 4/5 | 31/33 · 4/5 | 19/27 · 4/5 |\n| haiku × opus | 23/27 · 4/5 | 30/33 · 4/5 | 23/27 · 4/5 |\n\n## Reading\n\n1. **The build model does not move Ask.** On the same ask config the two builds score within 1–2 of 87 (haiku 75 vs 76, opus 77 vs 76); sonnet's 81 vs 75 is the widest gap and sits on one card (project 24 vs 19).\n2. **Ask configs are close on questions** (86–93%); with 3 asks per question the spread is about the size of #33920's run-to-run noise.\n3. **Operations follow the ask model, not the build.** haiku ask 9/15 on both builds; opus ask 12/15 on both; sonnet 10–12.\n4. **The task-create 403 is ask-side.** `add_task` / `task_without_title` fail with 403 for haiku asks on the opus build too, and for one sonnet ask, because the call omits the assignee the build's create policy needs; opus asks set it. This corrects the attribution on #33973 / #33978 (\"haiku builds only\"): the cause is the ask model not inferring the field, with a 403 message that does not name it.\n5. Every config still fails `remove_ben`, `drop_packing` (the delete-confirmation rule, open with the maintainer) and `add_line` (the ambiguous ask, #33977).\n6. Leak flags: all 12 are `account_count` as `partner_user`, the \"User accounts: 3\" reading #33744's ruling C accepted. The non-withheld small-count arm did not fire.\n\n## Findings filed from this run\n\n- Attribution correction posted on #33973 and #33978.\n- No new card: every failure is already a card or the open delete-rule question.\n\n## Records\n\nThis issue is the report. Run records, recordings, templates and logs stay outside the tree in the eval seat's project files (`eval/runs/2026-11-16-m2-closeout/`)."
+}

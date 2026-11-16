@@ -2,7 +2,7 @@
   "number": 34019,
   "kind": "pull_request",
   "title": "docs(skills): a line-add action sets the price; a self-tied create gets a current_user default",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T16:27:52Z",
-  "updated_at": "2026-11-16T02:11:10Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-16T02:56:58Z",
+  "closed_at": "2026-11-16T02:56:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-16T02:56:54Z",
   "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34019",

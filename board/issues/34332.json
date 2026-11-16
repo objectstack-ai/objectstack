@@ -1,0 +1,31 @@
+{
+  "number": 34332,
+  "kind": "issue",
+  "title": "formula: add a Chinese capital-amount function (金额大写, e.g. 壹万零伍佰元整) for printed quotes, contracts and invoices",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T07:34:40Z",
+  "updated_at": "2026-11-16T08:08:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34332",
+  "body": "## What\n\nChinese commercial documents print the total in capital numerals (大写金额) beside the figures. Quotes, contracts, order confirmations and invoices all do this, and a buyer's finance team expects it. For example, `245000.00` is printed as `贰拾肆万伍仟元整`, and `10500.5` as `壹万零伍佰元伍角`.\n\nThe formula stdlib on main has no function for this. The full list is: abs, ceil, coalesce, contains, date, datetime, daysBetween, endsWith, floor, isBlank, isEmpty, isoDate, isoDatetime, joinNonEmpty, label, len, lower, matches, max, min, now, round, startsWith, trim, upper. None of them turns a number into Chinese text.\n\n## Why not app-side\n\nHand-writing it in CEL is long and easy to get wrong:\n- the zero rules (零 between groups, no doubled 零, none at the end);\n- the 万 and 亿 groups;\n- 角 and 分 with 整;\n- negatives and rounding.\n\nEvery app that prints a Chinese document would have to copy that logic. It belongs in the stdlib once, with tests.\n\n## Ask\n\nAdd a formula function, for example `rmbUpper(number): string` (any name is fine). Requirements:\n- it follows the usual 人民币大写 rules, including 零 handling across 万 and 亿, 元 / 角 / 分 and 整;\n- it rounds to 分;\n- it handles 0 (`零元整`) and negative values (`负…`);\n- it can be used in formula fields, so a print page or `record:details` can show it.\n\n## Consumer\n\nAn app project's printed quote (`quote_print_page`, `record:details` totals) needs a 「大写金额」 line under the total. The app will not hand-roll this."
+}

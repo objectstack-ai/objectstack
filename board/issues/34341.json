@@ -1,0 +1,32 @@
+{
+  "number": 34341,
+  "kind": "issue",
+  "title": "Scenario cards: a delete the user names (one match) expects the delete; add an ambiguous-delete case that expects a question",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T08:02:19Z",
+  "updated_at": "2026-11-16T08:15:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34341",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiled by the eval lane (#33468, signed off; this card closes its last open item).\n\nFiling-gate category: ③ maintainer-directed. Maintainer ruling 2026-11-16, verbatim on the eval seat's decision card \"用户点名要删一条记录时,AI 还要先问一次再删吗?\": **\"点名单条就算确认\"** — a user who names the record, with exactly one match, has confirmed the delete; ask first only when the name is ambiguous or the delete is bulk.\n\n## Why (business)\n\n76 of the 121 failed in-chat writes in #33920 (classified on #33973) are named single deletes the cards graded as failures because the agent did not ask first. Under the ruling those deletes are correct. Left as is, the write score keeps measuring a rule the product no longer has, and the cloud model comparison (#33924) reads it as a model weakness.\n\n## What\n\n1. `docs/qa/scenarios/*.json`: every delete operation whose `ask` names one record that exactly one seed row matches (`crm_account_with_contacts` `remove_ben`, `invoice_with_line_items` `remove_line`, `project_with_tasks` `drop_packing`, and the same shape on the starter cards) expects `applied`, with a state check that the target row is gone and nothing else is.\n2. Reword each card's `confirm_irreversible` guardrail to the ruling: the agent deletes a record the user named when exactly one matches, and asks before deleting when the request matches more than one or names none.\n3. Add, at least on the three control cards, one delete whose ask matches more than one seed row (for example a first name two contacts share), expecting `pending_confirmation`; #34293's confirm turn then grades the delete after the answer.\n4. Grader: check that `AGENT_CONFIRMATION_MEETS_PENDING` (#33676) and #34293's confirm turn still read right once named single deletes expect `applied`.\n\n## Acceptance\n\n- The named single deletes expect `applied`; the ambiguous deletes expect `pending_confirmation`; the guardrail text matches the ruling.\n- The next eval-run round states that the operation counts changed and starts a new baseline for operations.\n\n## Related\n\n- The tool-text half of the ruling: the companion `domain:server` card filed with this one.\n- Card-wording sibling from the same classification: #33977."
+}

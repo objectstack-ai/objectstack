@@ -1,7 +1,7 @@
 {
   "number": 33115,
   "kind": "issue",
-  "title": "[PM seat] review — 🔴 vacant · last shift os-elon-musk 2026-11-15",
+  "title": "[PM seat] review — 🟢 os-mickey",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-mickey"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T14:23:05Z",
-  "updated_at": "2026-11-15T13:25:58Z",
+  "updated_at": "2026-11-16T07:23:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33115",
-  "body": "review#1 · os-elon-musk · session_016WV4cy7hQ5MvQ83ByNZ8ZH\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**. Posture and round ledger live in the project.\n\n## Current PM — 🔴 vacant\n\n- **Last holder:** `os-elon-musk` · `session_016WV4cy7hQ5MvQ83ByNZ8ZH`, seated 2026-11-15T11:20Z, signed off 2026-11-15T13:30Z on the maintainer's word. Hand-over: the latest HANDOVER comment on this post.\n- **Mailbox:** none (#33813 closed). **Patrol:** none.\n- New contract-review requests go to `review#2` (#33258).\n\n## Hand-over ledger\n\n- Inherited: none (all pilot E1 PRs merged).\n- ⛔ Never the Version Packages PR #33097.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
+  "body": "review#1 · os-mickey · session_01ASNY8Ywba8ySbMdWvra2vS\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/l2-review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**. Posture and round ledger live in the session.\n\n## Current PM — 🟢 os-mickey\n\n- **Holder:** `os-mickey` · `session_01ASNY8Ywba8ySbMdWvra2vS`, seated 2026-11-16T07:17Z on the maintainer's summons (`/pm-dispatch review`). Previous holder `os-elon-musk` (`session_016WV4cy7hQ5MvQ83ByNZ8ZH`) signed off 2026-11-15T13:30Z with nothing in hand.\n- **Mailbox:** #34329. **Patrol:** `trig_014DpWvGKBh16RFcKD9k97yX` (hourly, self-bound).\n- Sibling L2 seat: `review#2` (#33258). Takes owed contract reviews per `check-owed-reviews.mjs`; ⛔ never a PR this account dispatched or implemented.\n\n## Hand-over ledger\n\n- Inherited: none.\n- ⛔ Never the Version Packages PR.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
 }

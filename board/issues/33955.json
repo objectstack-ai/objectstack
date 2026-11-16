@@ -14,18 +14,20 @@
     "bug",
     "domain:server",
     "lease:E1",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:50:56Z",
-  "updated_at": "2026-11-15T14:50:56Z",
+  "updated_at": "2026-11-16T06:17:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33955",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, measured. Found by area S5's dev on #32605 (report 6896224874, out_of_scope_findings, class a), filed by the area on the seat's instruction. Area S5 (E1b), lease E1.\n\n## 维护者速读\n\n- 问题：两个启用中的包都发布了同名仪表板时，按名字裸读会拒绝（409，列出两个包），但按名字裸保存却成功（200）：没有存储行时会写出一条不属于任何包的行，只有一个包有存储行时会改那个包的行。读和写对同一个地址给出两种答案。\n- 影响：保存\"猜\"了一个包或新建了一行，违反 ADR-0150 红线 2（有歧义就报告，不猜）。\n- 修法方向：裸保存按读取的规则判断地址（D3/D5 对称），两个以上启用持有者时拒绝并给出 `?package=` 的补救办法。\n- 优先级 p2，本区（S5）处理。\n\n## Measured\n\nOn the dispatcher at the #32605 branch (49ebb6d2) and on main 1e65a389: two ENABLED packages ship a `dashboard` of one name.\n- The bare read (`GET /meta/dashboard/NAME`, no `?package=`) answers 409 `RESOURCE_CONFLICT` naming both packages.\n- The bare save (`PUT /meta/dashboard/NAME`, no `?package=`) answers 200:\n  - with no stored row: it writes a package-unbound row;\n  - with one package's row stored: it updates that row.\n\nCause (read): the save door resolves its address with `packagelessAddress` over stored-row bindings only, while the read counts registry holders. Seam: `packages/metadata-protocol/src/protocol-save.ts` `saveMetaItemUnaudited` (packageless address) vs `packages/metadata-protocol/src/protocol-meta-item-face.ts` `readMetaItemFace`. PR #33889 (#32605) fixed only the case where a DISABLED package is among the holders.\n\n## Acceptance\n\n1. A bare publish-mode save of a name two or more enabled packages hold refuses 409 `RESOURCE_CONFLICT` naming the holders with the `?package=` remedy, as the bare read does, in both registration orders and with 0 / 1 / 2 stored rows. CONTROL: one holder (unchanged), the environment's own item (unchanged).\n2. Measure and align the same shape on the bare DELETE (`protocol-diff-delete-load.ts`, `packagelessAddress`) and the draft-mode bare save (`packagelessDraftAddress`).\n3. Declared FROM→TO with its Clause-② arm (accepted→refused is a narrowing: `!`, BREAKING banner, ADR-0087 marker, dogfood battery), pinned and ablated.\n\n## Reader\n\n`domain:server` area S5 (E1b). Same file as #32780 (`protocol-save.ts`): serial behind it only if a merge-tree check shows overlap.\n\n## Dedupe\n\nSearched `\"bare save\" packagelessAddress` and `\"bare save\" \"two packages\" 409`: #32605 (disabled holder, fixed by PR #33889), #32607 (read, closed), #32354 (read, closed), #33127 (restart rows), #30806 (phase 3 bare names). None covers the save with two enabled holders."

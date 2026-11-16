@@ -1,0 +1,31 @@
+{
+  "number": 34277,
+  "kind": "issue",
+  "title": "skills: seeds.md teaches array order as seed load order and does not teach dependsOn (after #34276)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "docs",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T03:32:30Z",
+  "updated_at": "2026-11-16T03:32:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34277",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). This is the `Skills-docs: follow-up owed` line of PR #34276 (Fixes #33812), from os-dev report 6906493106.\n\n## Today\n\n`skills/objectstack-data/references/seeds.md` teaches the authored array order as the seed load order. Its relationship section and its best-practice table both tell the author to put parent datasets before child datasets in the exported array. The seed loader has never ordered by array position. It orders by lookup edges (`buildDependencyGraph`), so that advice orders nothing. The page also does not teach `dependsOn`.\n\n## Ask\n\nAfter PR #34276 lands, re-read the page against `content/docs/data-modeling/seed-data.mdx` as that PR leaves it:\n- Load order comes from lookup edges plus the new `Seed.dependsOn`, which names objects. Array order is not load order.\n- Use `dependsOn` when a dataset's lifecycle hook reads another seeded object that no lookup field links to. The blackcat-crm case is `crm_customer_rating` reading `crm_rating_band`.\n- A name that no dataset of the same load seeds, the dataset's own object, or a declared edge that closes a cycle refuses the whole load, and nothing is written.\n\nFix both spots on the page. Do not edit it before #34276 merges, because the key does not exist on main until then.\n\nPrior rulings read: maintainer ruling on #33812 (「新增 dependsOn 显式声明」; `dependsOn` names objects; a cycle or an unseeded name refuses the load).\n\nReader: the skills lane (`skills/**` is governed text). Size XS."
+}

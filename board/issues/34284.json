@@ -1,0 +1,34 @@
+{
+  "number": 34284,
+  "kind": "pull_request",
+  "title": "feat(core, service-messaging, service-automation, plugin-webhooks)!: tenant-aimed outbound requests reach only public addresses unless the operator allowlists the target",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T03:57:25Z",
+  "updated_at": "2026-11-16T07:53:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34284",
+  "body": "Clause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no published skill teaches a webhook or flow `http` node target on an internal address; the rule and its setting are stated in the changeset and the webhooks docs.\n\n## 维护者速读\n\n- 改了什么:webhook 投递和流程 `http` 节点的出站请求,现在只能到达公网地址;要访问本机或内网目标,运维需在 `OS_EGRESS_ALLOWED_TARGETS` 里明确列出;链路本地与云元数据地址无论如何都不能放行。\n- 为什么改:租户可以自己填写这些请求的目标地址,原先没有任何出站检查,可以借此访问平台内部服务和云元数据。判定的是实际连上的地址(DNS 解析后、字面 IP、带 IPv4 的 IPv6 形式、每一跳重定向都判),所以 DNS 重绑定也拦得住。\n- 风险与回滚:webhook 或流程原本发往内网地址的部署会被拒绝(BREAKING,changeset 有「Who moves」与一行修复:设置 `OS_EGRESS_ALLOWED_TARGETS`);发往公网目标不受影响。允许列表写错会让启动失败并列出每条错误项。回滚即还原本 PR。\n- 先看:`packages/core/src/egress/`(策略、地址分类、受保护的 fetch),`packages/services/service-messaging` 的 HTTP 投递默认 fetch,`packages/services/service-automation` 的 `http` 节点内联分支。\n- 两分钟验证:`pnpm --filter @objectstack/core exec vitest run src/egress`,预期 88 个测试全绿。\n- 需要你做的:无,席位落地\n\n## What changes\n\n**Rule.** An outbound request whose target a tenant can author reaches only public addresses unless the operator's allowlist names the target. Link-local and cloud metadata addresses are never reachable. The rule is judged on the address the connection is actually made to.\n\n- `@objectstack/core/egress` (new subpath entry):\n  - `EgressPolicy`: the seam, decided per connected address, host name, organization and source.\n  - `createEnvEgressPolicy`: the open-core default. It refuses loopback, private (RFC 1918), carrier-grade NAT, link-local, `0/8`, `::`, multicast, broadcast and reserved, unique-local and local-use NAT64. IPv6 forms that carry an IPv4 address (mapped, SIIT, NAT64, 6to4, compat, Teredo) are judged as the IPv4 address they carry.\n  - `OS_EGRESS_ALLOWED_TARGETS`: exact host names, IP addresses or CIDR blocks, comma-separated, with a strict grammar. A malformed or over-broad entry, or a link-local or metadata address, fails the boot and names every bad entry.\n  - A guarded fetch: the connector resolves the host, judges every address, connects to the judged address and judges the socket's remote address again. Every redirect hop and every literal IP is judged.\n- **Webhooks and durable flow callouts:** the guard is the HTTP outbox dispatcher's default fetch (service-messaging). A refused target dead-letters on its first attempt as `EGRESS_REFUSED` and is never retried.\n- **Flow `http` node:** the inline arm goes through the guard by a new seam (service-automation). A refusal answers `http: EGRESS_REFUSED: …`.\n- **Boot:**\n  - The messaging, automation and webhook plugins install the guard at init and take an `egressPolicy` option.\n  - One line per policy says the guard is active.\n  - plugin-webhooks logs once how many stored `sys_webhook` rows the guard will refuse.\n  - The boot fails if the guard cannot be built.\n- **Error-code ledger:** registers `EGRESS_REFUSED` and `EGRESS_ALLOWLIST_INVALID` under `@objectstack/core`.\n- **Test fixtures:** four loopback-dialing automation suites and one QA checklist recipe get `OS_EGRESS_ALLOWED_TARGETS` through their environment. There is no `NODE_ENV` branch.\n\n## Tests\n\n- `packages/core/src/egress/egress-policy.test.ts` and `guarded-fetch.test.ts`: 88 cases covering address classes, embedded-IPv4 forms, allowlist grammar and boot refusal, connect-time judgement, redirect hops and literal IPs.\n- `service-messaging` `src/http-egress-guard.test.ts`: 9 cases (refused target dead-letters once, never retried; public target delivered).\n- `service-automation` `src/builtin/http-node-egress-guard.test.ts`: 10 cases (inline arm refused, allowlisted target reached).\n- `plugin-webhooks` `src/webhook-egress-census.test.ts`: 5 cases (the boot census of stored rows).\n\n## Acceptance notes\n\n- **Scope, as ruled:** the first wave is webhooks plus the flow `http` node.\n  - Still unguarded, and named as follow-up: declarative connectors (`resilientFetch`), the OAuth grant fetches, MCP, embedders and push delivery.\n  - The guard connects directly to the judged address, so an HTTP proxy configured through the environment is not used for these requests.\n- **Not measured:** delivery to a real public target, because there is no direct egress in the implementing container. The public-target controls use an allowlisted stand-in.\n\n## Verification\n\n<details><summary>Readings (implementer, head 28edf362a)</summary>\n\n- New pins: core 88/88, service-messaging 9/9, service-automation 10/10, plugin-webhooks 5/5.\n- Full package suites at 1f0fcd7e, which later commits do not touch: core 3491/3491, service-messaging 981/981, service-automation 3987/3987, plugin-webhooks 312/312. Typecheck of all four: exit 0. spec ledger tests: 36/36.\n- **Ablation:** the connect-time refusal in `guarded-fetch.ts` was replaced via `scripts/ablation-replace.mjs` and core rebuilt. `ablation-dist-preflight` showed the marker in dist.\n  - Results: core 9 failed / 79 passed; messaging 4 failed / 5 passed; automation 6 failed / 4 passed. The webhooks census stayed 5/5, as it judges URLs without connecting.\n  - Restore: blob == HEAD, `git diff HEAD` empty, rebuilt, and the marker was gone from all built files. Then 88/88, 9/9, 10/10 and 5/5.\n- `dispatch-gates --commands`: 143 derived, 143 run, all exit 0. `--ran`: 143 derived, 143 run, 0 NOT-MEASURED, 0 UNRUN.\n- Dogfood battery: owed on the final head after `origin/main` is merged; the seat carries the reading here before landing.\n</details>\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017xRBcT1w3zpekijraHJE4f\n\n<!-- signed: security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f -->\n"
+}

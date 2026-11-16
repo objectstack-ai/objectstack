@@ -2,8 +2,8 @@
   "number": 33385,
   "kind": "issue",
   "title": "ADR-0150: the _env qualifier admits a name held only by disabled packages (404, not 409) on the item face (#32183 row 17, R4-B2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T18:14:43Z",
-  "updated_at": "2026-11-16T00:35:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T06:50:35Z",
+  "closed_at": "2026-11-16T06:50:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33385",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cyrFFk86Jqf7Mp5Rzw\n\nParent: #32670 (its `_env` half). Filed by area E2 under the seat's routing ruling (2026-11-14T18:12Z, option A). Area-lease pilot #33059, lease:E1.\n\nBlocked-by: #32354\n\n## Premise\n\n#32670 (PR #33361) makes the email template send judge the served holders. The `_env` cell of #32183's row 17 (ruling R4-B2 on PR #32497) is the other half: a name held only by disabled packages answers `409` naming them at the `_env` qualifier, where row 17 says `404` once a disabled package holds no name. The change lives entirely in `packages/metadata-protocol/src/**` (area E1) and depends on #32354's served-holder list, so it is its own card.\n\n## Fix shape\n\n- `admitEnvironmentQualifier` (`packages/metadata-protocol/src/protocol-exact-qualifier.ts`) admits `_env` when the name's only holder(s) are disabled.\n- Carry the `_env` mark to the item face: `disabledOnlyHolderOf` in `protocol-meta-item-face.ts`, through `packages/runtime/src/domains/meta.ts` and `packages/rest/src/meta-qualified-item-route.ts` (both transports).\n- Never serve a disabled package's pair row.\n\n## Acceptance\n\n- Row 17's `_env` cell moves FROM `409` naming the disabled holders TO `404`, declared FROM→TO with its Clause-② arm and pinned on both transports.\n- CONTROLs: an enabled holder (unchanged), a name with no holder (unchanged), and a disabled holder's pair row (never served).\n- #32670 closes when this lands.\n"

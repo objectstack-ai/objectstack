@@ -1,7 +1,7 @@
 {
   "number": 32231,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 7 — 🟢 os-tesla",
+  "title": "[PM seat] domain:server · seat 7 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T13:40:26Z",
-  "updated_at": "2026-11-15T03:57:11Z",
+  "updated_at": "2026-11-16T08:01:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32231",
-  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908, seat 8 is #32831.\n\n<sub>Refreshed 2026-11-15T03:55Z at seating.</sub>\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` · `session_01L9qibzuZJBQY4wUQFJbkfx` (cloud session), seated 2026-11-15T03:55Z on the maintainer's 「重新入座开信箱」. Previous holder `sunhaolin` · `session_017xRBcSZ51q2s3nMfakhdJ3`, clock-out brief 6881196166.\n- **Mailbox:** PR #33640. **Patrol:** `trig_01CcmYm4RVaajru2wQYVnqnr` · `20 */5 * * *`.\n- **Scope:** unclaimed `pm:queue` `domain:server` cards at `priority:p1`, cards blocking a p1, and the MCP p2 cards; cap 5 card threads. The seat runs its own contract reviews and lands reviewed PRs; Tier H (over 3,000 lines) lands on the maintainer's approval through os-zhuang.\n\n## Ledger\n\n- **In flight:** #33181 → PR #33227 (Tier H, os-zhuang approval 5907242051, in the merge queue at `2ab05f46`, jump audit 6888826889).\n- **Landed since 11-14 14:32Z by this account:** #33218 (#31699 3a-ii), #33222 (#33207, #33206), #33281 (#31699 3b), #33221 (#33183), #33431 (#31699, card closed).\n- **Pointer:** the canonical ledger is the labels, the assignee, the `Claim:` comments carrying `Seat: domain:server#7`, and the `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- #33203 is serial after #33181 (PR #33227). ⛔ Re-derive it from live `Claim:` comments and PR file lists before dispatching.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, which is a human act.\n- **Security:** findings go only to the security seat, by private advisory, never on a public card.\n"
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908, seat 8 is #32831.\n\n<sub>Refreshed 2026-11-16T08:01Z after the stay-behind ended.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-tesla` · `session_01L9qibzuZJBQY4wUQFJbkfx`, seated 2026-11-15T03:55Z, signed off on the maintainer's 「其他座位当前任务处理完也可以下班了」 (2026-11-16T07:11Z, project chat). Clock-out brief: the next comment on this post.\n- **Mailbox:** PR #33640 closed. **Patrol:** `trig_01CcmYm4RVaajru2wQYVnqnr` deleted.\n- **Scope when held:** unclaimed `pm:queue` `domain:server` cards at `priority:p1`, cards blocking a p1, and the MCP p2 cards; cap 5 card threads; own contract review and landing; Tier H (over 3,000 lines) lands on GOVERNED_APPROVERS approval.\n- **Next holder:** `/pm-dispatch 接手`, then read this post and the brief.\n\n## Ledger\n\n- **Stay-behind:** none. #33228 / PR #34162 went to the cloud lane on the maintainer's 「34162 已经通知 cloud 车道接手」 (2026-11-16T07:59Z); repo:cloud#5 took it over (6910778242).\n- **Landed this tenure (11-15 03:55Z onward):** #33227 (#33181), #34236 (#34167) at `c2cabced`. Follow-up #34237 (SKILL.md teaches `mcpPrompt`) sits in the skills lane's queue.\n- **Queue snapshot at sign-off:** in-scope `pm:queue` cards: #34062 (p1, `lease:A5`, not this seat's). Nothing else at p1 or MCP p2 is unleased.\n- **Pointer:** the canonical ledger is the labels, the assignee, the `Claim:` comments carrying `Seat: domain:server#7`, and the `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- Server seat 5's #34183 (`userDeleted`) builds on PR #34162 (now the cloud lane's) and lands after it. ⛔ Re-derive from live `Claim:` comments and PR file lists before dispatching.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, which is a human act.\n- **Security:** findings go only to the security seat, by private advisory, never on a public card.\n"
 }

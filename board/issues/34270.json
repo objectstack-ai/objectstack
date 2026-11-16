@@ -1,0 +1,31 @@
+{
+  "number": 34270,
+  "kind": "issue",
+  "title": "Register cloud's `discard_package_drafts` tool, and the chat's change card names a `discard_draft` row 「丢弃草稿」 as a removal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T03:25:44Z",
+  "updated_at": "2026-11-16T03:25:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34270",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① the framework half of objectstack-ai/cloud#4623 (maintainer ruling 6904513095 on that card: A, whole package), surfaced by objectstack-ai/cloud PR #4662. Dedupe: `discard_draft` and `discard_package_drafts` find no card.\nConsumer: objectstack-ai/cloud#4623 (hosted and self-hosted in-app AI).\n\n## 维护者速读\n\n- 要做的：聊天里的「确认修改」卡片给「丢弃草稿」这一行配上中文标签和删除样式（红色 －），并把 cloud 新工具 `discard_package_drafts` 登记进平台工具清单、补上各语言的工具名。\n- 为什么：cloud#4623 让 AI 能按要求撤销本包所有未发布的草稿；现在卡片把这一行显示成原始英文 `discard_draft`，并画成「修改」样式。\n- 影响：只改界面标签、样式和工具清单；确认按钮、重放流程不变。\n- 落地后：cloud 侧的 `AHEAD_OF_REGISTRY` 例外在下次升级 framework 版本时自动失效并被删除。\n\n## Why\n\ncloud#4623 (ruled A by the maintainer, whole package, in-app only) gives the in-app copilot a tool, `discard_package_drafts`. Asked to undo its drafts, the copilot answers the chat's 确认修改 card (`status: 'changes_proposed'`) with one row per pending draft of the package:\n\n```json\n{ \"verb\": \"discard_draft\", \"type\": \"view\", \"name\": \"ticket_board\", \"details\": \"不是这次对话改的\" }\n```\n\n`ChatbotEnhanced.tsx` draws rows by verb. It has no label for `discard_draft`, so:\n\n- the kind column (`useChangeKindLabel`) and the v1 line (`formatChangeRow`) show the raw verb `discard_draft`;\n- `changeFaceOf` returns `modify` (✎), when the row removes a draft.\n\n## Rule\n\n1. `DEFAULT_CHANGE_VERB_LABELS` gets `discard_draft: 'Discard draft'`. The console's translated `changeVerbLabels` gets 「丢弃草稿」 in zh and the matching key in every locale pack the set already covers.\n2. `useChangeKindLabel`: a `discard_draft` row names its draft's kind through `kindOfType(c.type)` (视图 / 对象 / …), the same as a metadata row. A type the pack has no word for renders as its machine name, as today.\n3. `changeFaceOf('discard_draft')` returns `remove` (－, red), like `delete_field`.\n\nNothing else changes: the envelope, the confirm button and the replay stay as they are. A row with an unknown verb keeps rendering its verb.\n\n4. `packages/spec/src/system/constants/platform-tool-names.ts`: `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` lists `discard_package_drafts`, as its maintenance contract asks of every new cloud AI tool. With it, every pack under `ui/packages/i18n/src/locales/` gets `chatbot.tool.discard_package_drafts` (zh 「撤销草稿」, en \"Undo drafts\"), which the label-parity tests read off the registry.\n\nCloud side: cloud#4623 carries `AHEAD_OF_REGISTRY: { discard_package_drafts }` in `service-ai-studio`'s registry conformance test. That entry fails, and so retires itself, on the pin move that brings item 4.\n\n## Pins\n\nA `ChatbotEnhanced.changesCard` test: a `changes_proposed` envelope with two `discard_draft` rows renders 「丢弃草稿」 (zh pack), the draft kind, the name, the `details` small type, and `data-change=\"remove\"`.\n\n## Known until this lands\n\ncloud#4623 ships with the raw verb row, accepted by the seat as a known gap and named in its PR body."
+}

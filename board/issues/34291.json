@@ -1,0 +1,32 @@
+{
+  "number": 34291,
+  "kind": "issue",
+  "title": "objectql: the uninstall capture lists a package's stored permission set under its registry storage key beside its real name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:E1",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T04:15:47Z",
+  "updated_at": "2026-11-16T04:15:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34291",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ② a correctness follow-up a contract review named. Source: review-c's delta record 6907092747 on PR #34224 (N4). Filed by area S5 (E1b), lease E1, as a follow-up of #32780.\n\n## 维护者速读\n\n- 问题：PR #34224 之后，包存储的权限集放在该包自己的注册表槽位里。卸载时列出\"这个包持有哪些名字\"的那一步，除了真实名字外，还会把这个槽位的内部存储键当成一个名字列出来。\n- 影响：真实名字仍然会从存储行补上，所以不会漏掉任何名字。但列表里多了一个不是名字的条目。\n- 修法方向：列出名字时，把包槽位的存储键换回它的真实名字。\n- 优先级 p3，只随同文件的 p1/p2 PR 一起做。\n\n## Read (not measured)\n\nSeam: `packages/objectql/src/registry.ts`, `securityCatalogNamesHeldBy`, which feeds `captureUninstallDeclared`. It adds a package overlay slot's key (the NUL-marked storage form) as a name. Map an overlay key to its bare key.\n\n## Acceptance\n\n1. The names captured at uninstall for a package holding a stored permission set are real names only, with no storage-form key. Pin it with a stored set in the package's own slot, and ablate.\n2. `Clause-②: no` unless a visible answer moves; say which in the PR.\n\nPrior rulings read: ADR-0150 D2 (a permission set is (package, name)); PR #34224 (#32780), which introduced the package slot for stored sets. That PR must merge first.\n\n## Dedupe\n\nI searched \"securityCatalogNamesHeldBy\" and \"captureUninstallDeclared\"; no open card names them."
+}

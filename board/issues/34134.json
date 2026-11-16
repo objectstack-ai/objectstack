@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T20:52:17Z",
-  "updated_at": "2026-11-15T21:45:54Z",
+  "updated_at": "2026-11-16T03:36:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34134",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFiling gate: ① follow-up owed by work in flight: PR #34132 (card #33644), contract review record 6901169669, ③ escalated items. Class a: a door gap, plus a false refusal.\nReader: package / AI builders extending another package's object.\nDedupe: `is:issue is:open fieldPatches label duplicate`. No open card.\n\n## What is wrong\n\nThe `field-label-duplicate` rule (#33639, extended to `object_extension` writes by PR #34132) judges an extension's added `fields` but never reads its `fieldPatches`. The registry applies a patch's `label` when it folds an extension onto its target. Two consequences, at both `os build` and the door:\n1. **Gap (accepting):** a `fieldPatches` entry that relabels an existing field into a label the target already shows is published unjudged, and the reader sees two columns with one label (#33506).\n2. **False refusal:** an extension that adds a field under a clashing label and patches it away in the same entry (or patches the other member) is refused, even though the served result has no clash.\n\nThe same review recorded reach limits, all in the accepting direction. Judge each and either close it or pin it as declared:\n- a target outside the written package's closure is narrowed out, so the rule is silent;\n- an unserved target, or an `extend` filed under a legacy key, is silent;\n- only built-in locales are compared at the door, which has no `translations` in its snapshot;\n- a write with no `packageId` does not strip its own stored extension before the differential.\n\n## Do\n\nFold `fieldPatches` labels in the order the registry applies them, at both doors, before the label grouping. Then pin both directions: a patch into a clash is refused; an add plus a patch away is accepted. Measure first-party exposure (showcase, plugin-auth extensions). Declare per ADR-0087: arm 1 narrows and arm 2 widens, so state both.\n\nSuggested-grade: p3 · door coverage of a p3 guard."

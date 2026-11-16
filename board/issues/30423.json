@@ -1,7 +1,7 @@
 {
   "number": 30423,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 6 — ⏳ vacant",
+  "title": "[PM seat] domain:ui · seat 6 — 🟢 os-lizheng",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-sales"
+    "os-lizheng"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:43:50Z",
-  "updated_at": "2026-11-12T23:05:39Z",
+  "updated_at": "2026-11-16T08:37:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30423",
-  "body": "domain:ui#6 · os-sales · session_01L6bhgUAXJEaRNwDiLuAvEZ\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 6**. Seat 1 is #25966, seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-12T23:10Z at sign-off.</sub>\n\n## Current PM\n\n⏳ vacant. Successor: `/pm-dispatch 接手`, then read this post first.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#6` + `head:claude/` PRs.\n- **Previous holder:** `os-sales` · session `session_01L6bhgUAXJEaRNwDiLuAvEZ`, seated 2026-11-12T11:12Z, off duty 2026-11-12T23:10Z on the maintainer's 「UI spec 处理完当前任务就下班」 (2026-11-12T21:25Z). `check-handover.mjs` exit 0 at 23:04Z (no unreleased claim, no decision outside the inbox).\n- **In flight:** none. Last card #32807 landed as PR #32852 (`461ea2f7`, 2026-11-12T23:01Z).\n- **Landed this tenure:** #32722, #32729, #32693, #32748, #32724, #32769, #32793, #32800, #32824, #32852.\n- **Queue snapshot (unclaimed, for the next ui claimant):** #32833 (p2, `pm:queue`, nits after the permission-ref edges); #32868 (p2, `pm:blocked`, `Blocked-by: #32867`).\n- **Cross-lane notes:** #32867 is the server-side reading behind #32868 (`domain:server#4`). #32667 (ui#2's card, landed by the maintainer's exception 「可以」 2026-11-12T22:20Z) merged as PR #32850.\n- **Patrol:** routine deleted at sign-off. **Mailbox:** PR #32709 closed at sign-off.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Sibling split:** cards held by `domain:ui#1`–`#5` are theirs; the claim stamp arbitrates an unclaimed card.\n- **Standing constraints:** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#6 · os-lizheng · session_012MmDsR2MvJuPqJW5jG2YQV\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 6**. Seat 1 is #25966, seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-16T08:35Z at seating.</sub>\n\n## Current PM\n\n🟢 `os-lizheng` · session `session_012MmDsR2MvJuPqJW5jG2YQV` · seated 2026-11-16T08:35Z. **Tenure scope:** one card — file the OAuth consent custom-scheme finding the account owner reported in this session, then sign off in the same session. No claims, no dispatches.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#6` + `head:claude/` PRs.\n- **Previous holder:** `os-sales` · session `session_01L6bhgUAXJEaRNwDiLuAvEZ`, off duty 2026-11-12T23:10Z; its ledger stays in the previous body revision.\n- **In flight:** none.\n- **Patrol:** none — one-card tenure, sign-off in this session (recorded deviation, see the seating comment). **Mailbox:** none, same reason.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Sibling split:** cards held by `domain:ui#1`–`#5` are theirs; the claim stamp arbitrates an unclaimed card.\n- **Standing constraints:** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
 }

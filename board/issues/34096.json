@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T18:30:52Z",
-  "updated_at": "2026-11-16T01:46:06Z",
+  "updated_at": "2026-11-16T03:50:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34096",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① observed. Found in the cloud seat's local HotCRM 6.2.0 → 6.4.0 upgrade test (2026-11-15, cloud `2a08986`, objectstack 18.5.0 `b914e7247f69`), ordered by the maintainer.\n\n## Defect\n\nHotCRM 6.3.0's o2c module adds `summary` roll-ups through `objectExtensions`: crm_contract `planned_amount`, `invoiced_amount`, `received_amount`, `receivable_balance`, and three on crm_account. After the upgrade:\n\n- contracts and accounts stored BEFORE it read `null` for every roll-up (`GET /api/v1/data/crm_contract/ID`), and the record page folds them under \"Show 5 empty fields\";\n- a contract created AFTER the upgrade reads `0` for all four;\n- a pre-upgrade row fills in only when one of its billing milestones, invoices or payments is written (CTR-0005 then read 36000 / 36000 / 20000 / 16000, which is correct).\n\nSo the same empty state reads `null` or `0` depending on when the row was made, and an existing customer sees blank balances until something moves. No backfill covers it, and HotCRM's changelog says nothing about it.\n\n## What done looks like\n\n- When a package install or upgrade adds a summary field, the platform materialises it for the rows that already exist (or computes it on read), so a pre-existing row reads what a new row with the same children reads.\n- A pin test: add a summary field to an object with existing parent and child rows; every parent reads the computed value without any child write.\n- If materialising existing rows is ruled out, say so here, and HotCRM's 6.4.0 notes get a line saying when balances appear."

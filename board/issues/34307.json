@@ -1,0 +1,31 @@
+{
+  "number": 34307,
+  "kind": "issue",
+  "title": "spec(dashboard): the global filter `field` TSDoc says the analytics query API serves an undeclared object field as an ad-hoc dimension — false for dataset queries once PR #34198 lands",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T05:18:17Z",
+  "updated_at": "2026-11-16T05:18:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34307",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). Finding M1 of the L2 contract review 6908009392 on PR #34198 (card #34005), the spec half, which is outside that PR's claimed surface.\n\n## Today\n\n`packages/spec/src/ui/dashboard.zod.ts` (the TSDoc on the dashboard global filter's `field`, around line 1615) says the analytics query API \"does accept an object's own field as an ad-hoc dimension without the dataset declaring it\". With PR #34198, a dataset query (REST single and batch doors, `query_dataset`, the MCP bridges, the publish build probes) refuses any measure or dimension the dataset does not declare, under the maintainer ruling 6902027136. The sentence then describes a capability the dataset path no longer has. The same sentence in `content/docs/ui/dashboards.mdx` is corrected inside PR #34198.\n\n## Ask\n\nRewrite the TSDoc sentence to match: the dataset door answers declared members only; name the cube door (`POST /analytics/query`) only if it is still true there. Run the spec's generated-artifact gates (build-docs reference page, schema baselines) for the TSDoc change. Text only; no schema shape changes.\n\nBlocked-by: #34198 (land after it, so the text never runs ahead of the code).\n\nReader: domain:spec. Size XS."
+}

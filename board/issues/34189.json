@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T00:14:03Z",
-  "updated_at": "2026-11-16T01:45:36Z",
+  "updated_at": "2026-11-16T03:22:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34189",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ② a declared follow-up with no carrier. The changeset of #34001 declares `Skills-docs: follow-up` for these three places and says it \"moves with the change that implements the in-app door\". That change is objectstack-ai/cloud#4607 (card #33809), whose contract review named the missing carrier as a should-fix. Dedupe: `pendingActions` docs, `ai:approve deciding` return no open card.\nConsumer: objectstack-ai/cloud#4607 names this card in its PR body.\n\n## 维护者速读\n\n- 要做的：把技能文档、`client-sdk.mdx` 和 `client.ai.pendingActions` 的注释改成：批准或拒绝应用内待批动作，只能由本人用自己的会话来做。\n- 为什么：ADR-0087 `in-app-pending-action-decided-by-person` 在 cloud#4607 落地后，这三处还在教用令牌或 SDK 调用决定路由，照着做会得到 403。\n- 需要你做的：无。\n\n## Change\n\n1. `skills/objectstack-ai/SKILL.md:166`: the paragraph on how an operator approves or rejects a held action says deciding is the person's own act from the console (their signed-in session), and drops the `GET/POST /api/v1/ai/pending-actions/...` call as a way to decide. Listing stays as written.\n2. `content/docs/api/client-sdk.mdx:426`: \"deciding takes `ai:approve`\" says deciding also takes the person's own session; an SDK client on a token can list but not decide.\n3. The `client.ai.pendingActions` approve/reject docblock says the same.\n4. Land it in the same release window as the cloud pin bump that carries objectstack-ai/cloud#4607, or after; not before.\n5. Done when the three places agree with ADR-0087's rule and `check:all` passes."

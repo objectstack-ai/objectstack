@@ -1,0 +1,35 @@
+{
+  "number": 34259,
+  "kind": "issue",
+  "title": "metadata-protocol: pin the disabled-holder package-less cells PR #33995 holds by reading only (lists at GET /meta/:type, /layers?member=, bare draft reads, the stored-row 409 CONTROL on all types) and memoise the list's active-row reads",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:E1",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:53:09Z",
+  "updated_at": "2026-11-16T03:51:55Z",
+  "closed_at": "2026-11-16T03:51:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34259",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ② test coverage and efficiency follow-ups that a review named. Source: review-c's fresh contract record 6905931301 on PR #33995 (N2, N5) and review#2's record 6903732565 (N2–N5). Filed by area S5 (E1b), lease E1, as a follow-up of #33385/#33401.\n\n## 维护者速读\n\n- 问题：PR #33995 在\"所有持有者都停用\"时隐藏不带包的定制行。多处答案靠读代码判断正确，但没有测试固定；列表对每个被隐藏的候选都串行、无缓存地重读一次存储行。\n- 影响：将来改动可能悄悄破坏这些答案；包多时列表会多做读取。\n- 修法方向：补齐下列固定测试，并给列表的存储行读取加按名字的缓存。\n- 优先级 p3，只随同文件的 p1/p2 PR 一起做。\n\n## Cells held by reading, unpinned\n\n- The list at either transport's `GET /meta/:type` (pinned only for `email_template`, at the protocol). Add a CONTROL that lists the environment's own item while some other package is disabled.\n- `/layers?member=` and `/published` over a stored row at a never-shipped member. Also the bare `?state=draft` / `?preview=draft` reads.\n- The stored-row 409 CONTROL, today live on 4 of 18 types. The string key's four spellings, and the 501 on an engine without the registry by-name reads.\n- The list's arm runs for `object`, which the face excludes. Align the two exclusions (review#2 N4).\n- `_env/NAME?member=M` when an enabled package holds the name only through an unhydrated stored row at another member: 404 before hydration, an unmarked 409 after (review-c N2, a transient refusal→refusal).\n\n## Efficiency\n\nThe list reads each withheld candidate's active rows uncached and in series, on both the list and the execution list (review#2 N3). A per-name memo would do.\n\n## Acceptance\n\n1. Each cell above is pinned, or aligned and pinned, with its answer stated.\n2. The list reads each name's active rows at most once per list read.\n3. Declare the FROM→TO for any answer that moves; pins alone are `Clause-②: no`.\n\nPrior rulings read: as PR #33995. That PR must merge first.\n\n## Dedupe\n\nI searched \"packagelessRowWithheld\" and \"disabled holder list pin\". The only hits were #33385 and #33401 themselves."
+}

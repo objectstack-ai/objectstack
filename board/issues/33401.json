@@ -2,8 +2,8 @@
   "number": 33401,
   "kind": "issue",
   "title": "[ADR-0150 D4] The read naming no package withholds a package-less customization row of a key whose every holder is disabled",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T18:48:59Z",
-  "updated_at": "2026-11-15T15:53:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T06:50:37Z",
+  "closed_at": "2026-11-16T06:50:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33401",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cy1y7UNVbT2QAdmgdn\n\nParent: #32814. Filed by area E1 under the seat ruling on #32814 (https://github.com/objectstack-ai/objectstack/issues/32814#issuecomment-6882483833, 2026-11-14T18:47Z). Area-lease pilot #33059, lease:E1.\n\n## Premise\n\nPR #33383 withholds a customization pair's row on the read naming no package when every holder of the name is disabled. It deliberately leaves the **package-less** row alone (`isHoldersPairRow` excludes it): measured on main `e540baf8` and on the PR head, with the only holder of `email_template welcome` disabled, the bare read at a member still serves a package-less row of that key.\n\n## Ruling (seat, split by ADR-0150 D4 key)\n\n- **Customization → withhold.** A package-less row whose key (`(type, name)`; `(object, name)` for actions) is held by an installed package is that holder's overlay. Ownership counts every holder, disabled included (epic ruling 6816940784 on #31699). With every holder disabled, answer as if no row were stored, the same answer #33383 gives the pair row. The row is kept untouched and returns on re-enable; the changeset says so in admin words.\n- **Environment's own item → serve.** No installed package holds its key (bucket 4, D3 (a)), including a row that only shares a name with a disabled holder's item on another object.\n- Member grain is not part of the key: a package-less locale the holder never shipped is still its customization.\n\n## Fix shape\n\n- `packages/metadata-protocol/src/protocol-meta-item-face.ts`: extend the disabled-only-holder judgment on the read naming no package to a package-less row whose key a (disabled) holder holds.\n- Check that `getEnvironmentScopedItem` / `overlaySlotBinding` (`packages/objectql/src/registry.ts`) still bind such a row to the disabled holder.\n\n## Acceptance\n\n- Bare read (served and execution faces) and `/layers`: a package-less row of a held key, every holder disabled → answered as if no row were stored; declared FROM→TO with its Clause-② arm.\n- Pins in both registration orders; a package-less locale the holder never shipped is withheld too.\n- CONTROLs: an enabled holder (unchanged); the environment's own item with no holder at its key (still served), including a same-name item on another object; re-enable returns the row.\n"

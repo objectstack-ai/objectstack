@@ -1,0 +1,30 @@
+{
+  "number": 34340,
+  "kind": "issue",
+  "title": "MCP delete_record: a user's request that names one record counts as the confirmation; ask only when it is ambiguous",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T08:01:55Z",
+  "updated_at": "2026-11-16T08:04:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34340",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiled by the eval lane (#33468, signed off; this card closes its last open item).\n\nFiling-gate category: ③ maintainer-directed. Maintainer ruling 2026-11-16, verbatim on the eval seat's decision card \"用户点名要删一条记录时,AI 还要先问一次再删吗?\": **\"点名单条就算确认\"** — when the user names the record and exactly one record matches, delete it (it goes to the recycle bin); ask first only when the name is ambiguous or the delete is bulk.\n\n## Why (business)\n\nIn the 2026-11-15 runs (#33920, classified on #33973), 76 of 121 failed in-chat writes were one rule conflict: the scenario cards expected the agent to ask before deleting a record the user had just named, while the `delete_record` description lets the user's request count as the approval. haiku, sonnet and opus all read it the same way (they send `confirm: true` on the first call). The maintainer has now ruled for the user's reading. The tool text should say it plainly so every model acts the same, and the opposite case (an ambiguous or multi-match request) should still stop for a question.\n\n## What\n\n1. `packages/mcp/src/mcp-http-tools.ts`, `delete_record` description and its `confirm` member: say that a request in which the human names the record, with exactly one record matching, is the human's approval of that delete; when the name matches more than one record, or the request does not identify one record, list the candidates and ask, and send `confirm: true` only after the answer. Keep the gate itself (no `confirm: true` → refused) unchanged.\n2. `delete_records` (bulk) is unchanged: preview first, `confirm: true` only after the human approves the preview.\n3. `skills/objectstack-ai/SKILL.md` line 202 (the `delete_record` row: \"ask the human first, then retry\") says the same as item 1.\n\n## Acceptance\n\n- The tool description, the `confirm` member's description and the skill row carry the rule above; the gate's refusal for a call without `confirm: true` is unchanged.\n- A test pins the description text.\n\n## Related\n\n- The scenario cards' delete operations change with the same ruling: the companion `domain:devx` card filed with this one.\n- Earlier recycle-bin wording: #33692."
+}

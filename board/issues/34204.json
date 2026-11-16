@@ -12,19 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T00:51:02Z",
-  "updated_at": "2026-11-16T00:51:02Z",
+  "updated_at": "2026-11-16T07:31:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34204",
   "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\nFiling-gate category: ① process defect, measured. `reach:` the #31518 7-day re-reading of every merge-queue root, 2026-11-09..15 (comment 6904236520, class (b)). Parent card #31518 (p1, `domain:devx`), Wanted 2 for class (b).\n\n## What happened\n\nClass (b), not selected on the PR, had 6 roots and 18 cascades in the window, the highest cost per root (3.0 cascades). All six are dogfood, which skips `pull_request` by the ruled two-speed design (6663883327 on #30461). That design leans on the os-dev rule that a `!` or (narrowing) PR runs the full dogfood battery before landing, and on `review-checklist.md` line 48 (「`!` 或 `(narrowing)`:入队前核 `dogfood_battery` 钉 head、全量…缺或收窄 ⇒ REWORK」).\n\nTwo of the six roots carried `!` in their PR titles, and the battery did not run on the landed head:\n\n- PR #32926 `fix(runtime)!: …` (card #32936): the os-dev-report 6846244737 says `dogfood_battery: \"n/a: no ! in the PR title and no (narrowing) arm\"`.\n- PR #33431 `feat(service-automation)!: …` (card #31699): the last three reports (6869754560, 6878937714, 6879908528) say `\"not run: the title carries no breaking marker\"`, after earlier rounds had run it.\n\nSo the rule exists and was not applied at ACCEPT; the report's own line contradicts the PR's title.\n\n## Ask (`scripts/pm/label-write.mjs` `--land`, or the readiness check it already calls)\n\n1. On `--land`, read the PR title. If it carries `!` before the colon or a `(narrowing)` arm, read the newest `os-dev-report` on the PR's card and refuse to land unless its `dogfood_battery` names a head equal to the PR's current head (or an ancestor that differs only by `main` merges, as review-checklist allows).\n2. The refusal names the title, the report comment id and its `dogfood_battery` text.\n3. Self-test rows for: `!` title with an `n/a` line (refused), `!` title with a run line on the head (passes), no `!` (not judged).\n\n⛔ No change to the two-speed CI design, no dogfood shard added to `pull_request`.\n\nReader: `domain:skills` lane seat, from `pm:queue` (scripts/pm tooling). Dedupe: `dogfood_battery land refuse`, `breaking marker battery not run`, no open hit. Priority p2: it would have stopped 2 roots and their cascades this week, at no runner cost."

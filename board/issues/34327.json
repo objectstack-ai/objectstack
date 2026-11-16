@@ -1,0 +1,37 @@
+{
+  "number": 34327,
+  "kind": "pull_request",
+  "title": "fix(console): show the platform-managed state on hosted storage and AI provider settings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T07:05:27Z",
+  "updated_at": "2026-11-16T07:47:43Z",
+  "closed_at": "2026-11-16T07:47:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T07:47:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34327",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi99tocKWwN1LMoWm6vP4y3d6)_\n\nFixes #34149\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：托管环境里直接打开 Setup →「文件存储」时，控制台显示「此项由平台托管」，不再是通用报错；「AI 与向量化」页顶部多一行「AI 提供商、模型与凭据由平台托管」，对话标题与可观测性设置照常可改。\n- **为什么改**：#33891 让服务端在托管环境拒绝存储设置、裁掉 AI 提供商键，控制台还不认这个拒绝，书签或手输网址会看到报错或缺了提供商的表单。\n- **风险与回滚**：只改控制台设置页的读法与三条文案；自托管环境不受影响（对照用例钉住）。回滚即还原本 PR。\n- **先看**：`ui/apps/console/src/pages/settings/platformManaged.ts`（拒绝与 AI 投影的判定）、`SettingsView.tsx` 的 `error?.managed` 分支与 `aiProviderManaged` 行、`api.ts` 的 `runSettingsAction` 新增一行。\n- **两分钟验证**：在 `ui/` 下跑 `pnpm exec vitest run apps/console/src/pages/settings/__tests__/SettingsView.platformManaged-34149.test.tsx`，预期 9 例全绿。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nThe console half of #33891 (server contract landed in #34254).\n\n- **Storage page, hosted.** `GET /api/settings/storage` answers `409 RESOURCE_CONFLICT` with `error.details.managedBy: 'platform'` on a cloud-managed environment. `SettingsView` now reads that refusal by its declared shape (status, code and `details.managedBy`, never the message, via `isPlatformManagedRefusal` in the new `platformManaged.ts`) and draws a \"Managed by the platform\" card: no form, no save bar, no retry. A `409` without `managedBy: 'platform'` keeps today's error card.\n- **AI page, hosted (Ask 2).** The page is served projected, so nothing errors. The console draws one line, \"The AI provider, its model and credentials are managed by the platform.\", only when two served facts agree: the auth config's `features.cloudManaged === true` (plugin-auth answers it from the same `isCloudManaged()` the settings projection reads, and `FirstRunChecklist` already reads it through `getAuthConfig`, which asks no new request) and the served `ai` manifest carries no `provider` key (the projection actually ran). No served field was added.\n- **Stale page refusals.** `runSettingsAction` now throws the managed refusal like a failed read (status + raw body on `payload`) instead of folding it into `{ ok: false, message }`; `onAction` and `onSave` toast \"Managed by the platform\" for that shape. Read from the code before this change: such a refusal fell to the last branch of `runSettingsAction` and a stale `ai.test` click toasted the server's English sentence.\n- **i18n.** Three keys under `console.settingsView` in every pack (`platformManagedTitle`, `platformManagedBody`, `aiProviderManaged`); `zh-Hant` regenerated with `node scripts/gen-zh-hant.mjs`.\n- `SettingsHub.tsx` is untouched: it reads the list (`GET /api/settings`), which already leaves `storage` out on a hosted environment.\n\n## Tests\n\nNew: `__tests__/SettingsView.platformManaged-34149.test.tsx` (9 cases) and `platformManaged.test.ts` (5 cases).\n\n- hosted `GET storage` 409 + `managedBy: 'platform'` → managed card, no input, no retry, one read;\n- CONTROL: 409 `RESOURCE_CONFLICT` without `managedBy` → today's error card with the server's sentence;\n- CONTROL: self-hosted storage → form renders;\n- hosted AI (flag on, provider withheld) → one line, served keys still render;\n- CONTROLs: flag off with a projected manifest → no line; flag off with the full manifest → no line; flag on but provider served → no line;\n- stale action and stale save refused as platform-managed → the managed toast;\n- `runSettingsAction`: the managed 409 throws with status and raw body; another 409 stays `{ ok: false, message }`.\n\nNo existing test was edited.\n\n<details><summary>Ablations (each landed on disk through scripts/ablation-replace.mjs, restored to the HEAD blob)</summary>\n\n- A1 `isPlatformManagedRefusal` returns false → 5 red (storage managed state, stale action, stale save, the helper, the api throw).\n- A2 the `features.cloudManaged` check dropped → red: the helper case and the view CONTROL \"a page served without a provider on a self-hosted environment draws no line\".\n- A3 the `runSettingsAction` throw line deleted → red: \"throws the refusal with its status and raw body\".\n\nEach run: `ok mutation landed` then `ok restored: blob == HEAD and git diff HEAD is empty`.\n</details>\n\n## Acceptance notes\n\n- The console names the `ai` namespace and its `provider` key as constants (`platformManaged.ts`); the server's table is `CLOUD_MANAGED_HIDDEN_SETTINGS`. If a later server stops withholding the provider, the line disappears by itself (the manifest check); if it starts projecting another namespace partially, that page draws no line until the console learns it. A served marker on the projected manifest would remove the console constant, but it is a served field (Clause-②, server), so it was not added here.\n- `onClearSaved` (clear a value beneath an env pin) on a stale page still toasts the server's sentence for a managed refusal; on a hosted environment the managed keys are not served, so the row is not reachable without a stale page.\n\n## Verification\n\nAll on head `febd90e8`, run after the last commit.\n\n- `pnpm --filter @object-ui/console type-check`: exit 0.\n- `cd ui && pnpm exec vitest run packages/i18n/ apps/console/src/pages/settings/`: 145 files, 2313 passed, 13 skipped, exit 0 (includes the zh-Hant generated-pack pin and the settings-page bare-literal pin).\n- Derived gate set (`node scripts/pm/dispatch-gates.mjs --commands`): 40 commands, all exit 0; `--ran` reconciliation: 40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm check:new-line-citations` (ui): 0 new citations.\n- eslint on the five changed console files: 0 errors.\n- Narrowing, declared: the console run covers `apps/console/src/pages/settings/` and `packages/i18n/`, the modules that import the changed files; CI's Test UI shards run the whole tree. No dogfood battery: no `!` in the title and no `(narrowing)` arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmSWkWcHBfKEZ8RmTrv)_\n"
+}

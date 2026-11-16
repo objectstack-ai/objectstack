@@ -2,8 +2,8 @@
   "number": 34167,
   "kind": "issue",
   "title": "mcp: a skill that serves only the in-product agents is still projected as an MCP prompt when its bound tools happen to be served, and a host has no way to say so",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T22:42:54Z",
-  "updated_at": "2026-11-16T01:47:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T04:26:14Z",
+  "closed_at": "2026-11-16T04:25:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34167",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling category: ① product defect (residual of #32767). Filed by the cloud lane; first touch (domain, queue) is left to triage. Drafted by the cloud#4337 card thread from a static reading at pin `b914e7247f`.\nreach: public entry `/api/v1/mcp` (`prompts/list`, `prompts/get`) on any connection whose token carries `data:write` or `actions:execute`.\nRelated: objectstack-ai/cloud#4337 (blocked on this card), objectstack#32767 (closed by PR #32880 `b4f69716e7`), objectstack#32885.\n\n## Business reason\n\nAn MCP agent (Claude Code, Cursor) follows the prompts the server lists. Cloud registers the playbooks of its in-product `ask` / `build` agents as `skill` metadata, because those agents resolve their skills from it. Those playbooks are written for the in-product tool set and the in-product approval card. When one reaches an MCP client, the agent calls tools that connection never lists and promises the user a confirmation card that never appears. Cloud filters these rows today through a proxy over the `mcp` service (cloud PR #4419, `packages/service-ai-studio/src/mcp-skill-prompts.ts`). Cloud wants to drop that proxy, and it can't while two of its rows still pass the framework's test.\n\n## What happens at b914e7247f\n\n#32880 offers a skill only when the connection serves every tool in its `tools` binding (`packages/mcp/src/skill-prompts.ts:188`, `skillBindingServed` at `:232`, `bindingEntryServed` at `:210`). That withholds 8 of cloud's 10 rows on every connection, because each binds a tool only the in-product agents have. Two rows bind only tools that MCP also serves, so they pass:\n\n1. **`record_writing`** binds `create_record` and `update_record` (cloud `packages/service-ai-studio/src/skills/record-writing-skill.ts:30`). The MCP data door serves both names (`packages/mcp/src/mcp-http-tools.ts:2955`, `:2982`) on a `data:write` connection. Its instructions (`record-writing-skill.ts:29`) tell the agent to call `open_record`, which no MCP connection lists, and say \"the user confirms on a card\", which is the in-product approval card. MCP has no such card.\n2. **`actions_executor`** binds `action_*` (cloud `packages/service-ai-studio/src/skills/actions-executor-skill.ts:47`). `TOOL_FAMILY_DOORS` (`skill-prompts.ts:207`) counts an `action_` binding as served wherever `run_action` is (`mcp-http-tools.ts:3294`, gated on `actions:execute` at `:3253`). Its instructions (`actions-executor-skill.ts:43`) tell the agent to call `action_<object>__<action>` tools, which MCP never lists (MCP reaches actions only through `list_actions` / `run_action`), and to fall back on the in-product confirm card.\n\nThe binding is the right test for \"can this connection run the playbook\". It can't answer \"is this playbook written for MCP at all\": a skill can bind tools MCP serves under the same names and still be written for a different agent loop. #32767's Expected asked for the binding test \"and/or a declared host seam to withhold skills per request\". PR #32880 delivered the first half only.\n\n## What cloud needs\n\nA skill that serves only the in-product agents is never projected as an MCP prompt, on any connection, whatever its binding. The owner of the skill declares this. Cloud does not need it to be per-request. The shape is the framework's call (for example a declared property on the skill, or a host seam on the skill bridge). This card names the need, not a key.\n\n## Done when\n\n- A skill declared in-product-only is absent from `prompts/list` and unknown to `prompts/get` on every MCP connection, including one that serves every tool it binds. A pin test uses a skill that binds `create_record` / `update_record` on a `data:write` connection.\n- A skill without the declaration is projected exactly as at b914e7247f. The #32767 binding test is unchanged.\n- The declaration does not change how the in-product agents resolve or offer the skill.\n- Docs for the `skill` type (and #32885's text on `SkillSchema.tools`) say how a skill opts out of MCP projection.\n- Cloud then marks its in-product rows, drops `mcp-skill-prompts.ts`, and adds `data:write` and `actions:execute` tokens to `apps/objectos/test/mcp-served-guidance-4337.e2e.test.ts` (that test mints only `data:read` and `metadata:write` today, at `:205`–`:206`). That is cloud#4337's remaining half, not this card.\n\n## Dedupe\n\nWords searched: `skill prompt MCP projection` (72 hits; only #32767 is about this, closed), `skillBindingServed` (2 hits: #32767, #32885, both closed and both about the binding test). Suggested dedupe words: skill MCP projection opt-out, in-product skill prompts/list, skill not projected MCP, host withhold skill prompt, record_writing prompt MCP."

@@ -15,20 +15,18 @@
     "enhancement",
     "lease:A1",
     "pm:blocking",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T23:55:54Z",
-  "updated_at": "2026-11-16T00:00:41Z",
+  "updated_at": "2026-11-16T08:03:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34183",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① a gap found while building objectstack-ai/cloud#4469 (contract review record on cloud PR #4594, ③): the seam from objectstack#33181 (closed by PR #33227) has `userAdded`, `userDeactivated` and `userReactivated` but no delete, so a host cannot answer a deleted person. Dedupe: `EnvironmentUserHost userDeleted` and `environment user host delete` return no open card.\nBlocks: objectstack-ai/cloud#4469 follow-up (deleting a pending row leaves its invitation live).\n\n## 维护者速读\n\n- 要做的：给 plugin-auth 的 `EnvironmentUserHost` 加一个 `userDeleted(event)`，在管理员删除用户（含待激活的 pending 行）提交之后调用。\n- 为什么：托管环境里，管理员删掉一个填错邮箱的待加入成员，云端的组织邀请仍然有效；宿主现在没有可挂「取消邀请」的事件。\n- 需要你做的：无。\n\n## Change\n\n1. Add `userDeleted(event)` to `EnvironmentUserHost`, with the same `EnvironmentUserEvent` shape (userId, email, source, actorId, impersonatedBy?, actorCloudUserId?).\n2. Call it after any `sys_user` row is deleted through the admin doors (pending rows included), after the commit and outside the transaction.\n3. Failure posture as `userAdded`: a throw reports `host_failed`; the delete stands and is never undone; no typed refusal.\n\n## Done when\n\n- A test pins the call after a committed delete (active and pending rows), not on a refused delete, and `host_failed` on a throwing host with the row still deleted.\n- The cloud half (a queued cancel from cloud's host) is a cloud card filed when this lands in cloud's pin."

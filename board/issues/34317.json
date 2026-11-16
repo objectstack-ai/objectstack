@@ -1,0 +1,29 @@
+{
+  "number": 34317,
+  "kind": "pull_request",
+  "title": "chore(ci): refresh the Test UI per-file timings dataset",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T05:52:00Z",
+  "updated_at": "2026-11-16T05:52:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34317",
+  "body": "Refreshes `ui/scripts/test-shard-timings.json`, the per-file dataset the Test UI\nshard split is balanced on. Opened automatically by\n`.github/workflows/ui-test-timings-refresh.yml`. Every byte came out of\n`ui/scripts/test-file-timings.mjs merge`; nothing here was hand-edited, and no bound,\ntimeout or matrix entry was touched.\n\nMeasured 2026-11-16T04:04:10Z, the median of 6 full-battery run(s):\n\n- run 43692761758 (schedule, `48e695966a`)\n- run 43711948237 (schedule, `6ec7b93c28`)\n- run 43733293176 (schedule, `03b4d2d1f4`)\n- run 43755861925 (schedule, `385ea1cce5`)\n- run 43778747333 (schedule, `75ab117896`)\n- run 43801810947 (schedule, `01598d936f`)\n\n6775 files, 30136.4 s summed over their workers.\n\n**Measured for the first time (1390):**\n- `apps/console/src/__tests__/App.linkRefusalLanding-33063.test.tsx`\n- `apps/console/src/__tests__/App.listPageBootReadsOnce-28085.test.tsx`\n- `apps/console/src/__tests__/App.nativeShellMode-29039.test.tsx`\n- `apps/console/src/__tests__/App.nativeShellOpenSet-29330.test.tsx`\n- `apps/console/src/__tests__/App.permissionsWave-29114.test.tsx`\n- `apps/console/src/__tests__/App.rootLandingReadsOnce-32633.test.tsx`\n- `apps/console/src/__tests__/html-node-retired-13449.test.tsx`\n- `apps/console/src/__tests__/main.nativeBridgeVersion-29330.test.tsx`\n- `apps/console/src/__tests__/nativePushRegistration-29042.test.tsx`\n- `apps/console/src/__tests__/nativeShellRoute-29750.test.ts`\n- `apps/console/src/__tests__/recordOpenFromEveryView-27057.test.tsx`\n- `apps/console/src/__tests__/sessionCheckBootDedup.test.tsx`\n- `apps/console/src/__tests__/zod-jitless-13511.test.ts`\n- `apps/console/src/components/FormPage.currencyPlaceholder-27398.test.tsx`\n- `apps/console/src/components/FormPage.externalWriteRefusal-30334.test.tsx`\n- `apps/console/src/components/FormPage.formViewChrome-26843.test.tsx`\n- `apps/console/src/components/FormPage.inAppShell-13433.test.tsx`\n- `apps/console/src/components/FormPage.inlineLocaleEntry-13380.test.tsx`\n- `apps/console/src/components/FormPage.loadRefusal-29186.test.tsx`\n- `apps/console/src/components/FormPage.nativeInvalid-27496.test.tsx`\n- and 1370 more\n\n**No longer measured: 162.**\n\n**The ten heaviest files:**\n- 85.5 s `packages/app-shell/src/views/studio-design/StudioDesignSurface.autosaveSwitch-11232.test.tsx`\n- 75.3 s `scripts/__tests__/date-only-zone-pins-10183.test.ts`\n- 60.9 s `packages/app-shell/src/views/studio-design/InterfacesPillar.customize-28562.test.tsx`\n- 54.7 s `packages/app-shell/src/views/metadata-admin/ResourceEditPage.serverRefusalGate.test.tsx`\n- 54.4 s `examples/schema-catalog/test/form-field-channel-effects-12130.test.tsx`\n- 48.3 s `packages/cli/src/__tests__/cli-bin.test.ts`\n- 43.8 s `packages/app-shell/src/views/studio-design/StudioDesignSurface.navPlaceholderSave-11776.test.tsx`\n- 41.7 s `packages/cli/src/__tests__/cli-bin.surface.test.ts`\n- 41.3 s `packages/app-shell/src/views/studio-design/StudioDesignSurface.autosaveInFlight-11204.test.tsx`\n- 39.4 s `packages/app-shell/src/views/ObjectView.userListState-12418.test.tsx`\n\n## Source\n\nEvery run below had all 16 `Test UI (N/16)` shards conclude\n`success` and all 16 `test-file-timings-N` reports retained; the log of\nthe run that opened this PR names every run it skipped and why.\n\n- https://github.com/objectstack-ai/objectstack/actions/runs/43801810947\n- https://github.com/objectstack-ai/objectstack/actions/runs/43778747333\n- https://github.com/objectstack-ai/objectstack/actions/runs/43755861925\n- https://github.com/objectstack-ai/objectstack/actions/runs/43733293176\n- https://github.com/objectstack-ai/objectstack/actions/runs/43711948237\n- https://github.com/objectstack-ai/objectstack/actions/runs/43692761758\n\nPushed and opened as the fleet App (`objectstack-fleet[bot]`), so this PR's own\nevents start CI: no push or reopen is needed to get its checks.\n"
+}

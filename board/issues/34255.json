@@ -1,0 +1,31 @@
+{
+  "number": 34255,
+  "kind": "issue",
+  "title": "Console AI approvals: show a lapsed pending action as Expired, not Rejected, in the chat card and the AI Approvals inbox",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:40:12Z",
+  "updated_at": "2026-11-16T02:50:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34255",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① the console half of objectstack-ai/cloud#4608 (maintainer ruling 6904228929 on that card: a lapsed item is shown as expired, not as rejected), named in the contract review of objectstack-ai/cloud PR #4647 (record 6905692497, S2). Dedupe: `pending action expired lapsed approvals inbox` finds no card.\nConsumer: objectstack-ai/cloud#4608 (hosted and self-hosted in-app AI).\n\n## 维护者速读\n\n- 要做的：AI 待确认操作 7 天没人处理会自动失效；聊天里的确认卡片和「AI 审批」收件箱要把这种条目显示为「已过期」，不是「已拒绝」。\n- 为什么：裁决 A（cloud#4608）明确要求显示为过期；现在界面会把它显示成「被拒绝，原因 lapsed」，看起来像是有人拒绝了。\n- 需要你做的：无。\n\n## Change\n\n- Since cloud#4608 an in-app AI pending action nobody decided within 7 days is stored `status: 'rejected'`, `rejection_reason: 'lapsed'`, `decided_by` empty (no new `PendingActionStatus` value).\n- The approve and reject doors answer such an item `409 RESOURCE_CONFLICT` with `error.details.reason: 'pending_action_lapsed'`; GET `/api/v1/ai/pending-actions[/:id]` returns the row as above.\n- The chat's inline pending-approval card and the `ai:approvals` inbox render that row as \"Rejected\" with reason \"lapsed\", which reads as if the person refused it.\n- Ask (the console renders): when `status === 'rejected' && rejection_reason === 'lapsed' && !decided_by`, show \"Expired\" (not answered in time, or the proposer lost access) and no \"Rejected by\"; on a 409 with `details.reason === 'pending_action_lapsed'`, show the same and refresh the item instead of a generic conflict error.\n- Done when both surfaces show \"Expired\" for a lapsed row and for the 409, with a test each; a person's own rejection (`decided_by` set) still shows \"Rejected\".\n\nReader: framework console lane (chat pending-approval card, `ai:approvals` inbox)."
+}

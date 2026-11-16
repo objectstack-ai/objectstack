@@ -2,7 +2,7 @@
   "number": 34205,
   "kind": "pull_request",
   "title": "test(driver-sql): count the default-order index in the live MySQL activation-ledger index lists",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T00:52:00Z",
-  "updated_at": "2026-11-16T02:10:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-16T02:32:51Z",
+  "closed_at": "2026-11-16T02:32:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T02:32:48Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34205",

@@ -1,0 +1,32 @@
+{
+  "number": 34261,
+  "kind": "issue",
+  "title": "metadata-protocol: the draft and layered _env reads (?state=draft, ?preview=draft, ?layers=true) still refuse 409 for a name only disabled packages hold, where the plain _env read answers 404",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:E1",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:54:18Z",
+  "updated_at": "2026-11-16T02:54:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34261",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a measured inconsistency left open on purpose. Source: review#2's record 6903732565 (S4 loose end) and the #33385 dev report 6904063441 (out_of_scope_findings). PR #33995 pins these three reads as CONTROLs that keep main's 409. Filed by area S5 (E1b), lease E1, as a follow-up of #33385.\n\n## 维护者速读\n\n- 问题：一个名字的所有持有者都停用时，PR #33995 之后，普通的 `_env` 读取回答 404，但带草稿或分层开关的 `_env` 读取（`?state=draft`、`?preview=draft`、`?layers=true`）仍回答 409，并点名停用的包。\n- 影响：同一个地址，开关不同答案不同。\n- 修法方向：判断这三种读取是否也应回答 404；如果是，补齐并声明。\n- 优先级 p3，只随同文件的 p1/p2 PR 一起做。\n\n## Measured\n\nPR #33995 pins the three reads as CONTROL rows on both transports for all 18 types: they keep main's 409 when every holder is disabled.\n\nSeam: `admitEnvironmentAddress` (REST `meta-qualified-item-route.ts`, runtime `domains/meta.ts`), which admits a marked refusal only for the plain read.\n\n## Acceptance\n\n1. Decide each of the three reads by ADR-0150 D3. If 404 is right, align them and flip PR #33995's CONTROL pins.\n2. Declare the FROM→TO (409→404 is refusal→refusal, so `Clause-②: no`).\n\nPrior rulings read: ADR-0150 D3, and the #33385 ruling PR #33995 implements. Open PR #34169 (layered reads) touches the same face. That PR must merge first.\n\n## Dedupe\n\nI searched \"_env draft 409 disabled\" and \"layered _env\"; the only hits were #33385 and #34169's card #32849."
+}

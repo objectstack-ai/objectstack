@@ -1,0 +1,31 @@
+{
+  "number": 34288,
+  "kind": "issue",
+  "title": "service-settings: on a cloud-managed process, close the hosted-settings door census over settings-history readers and pin the write refusal's second body shape",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T04:13:00Z",
+  "updated_at": "2026-11-16T04:13:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34288",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jTEivi2wogPpeo3xd5\n\nFound by area S3 while delivering #33891 (PR #34254). These are the should-fix items from contract record 6907083890, which passed with no must-fix. PR #34254 lands without them, because its code is correct at its head. This card carries them.\n\n**What PR #34254 does:** on a cloud-managed process (`isCloudManaged()`), one table, `CLOUD_MANAGED_HIDDEN_SETTINGS` in `packages/services/service-settings/src/cloud-managed-settings.ts`, is asked by:\n- the six settings routes;\n- the data-API read door over the four settings stores: `sys_setting`, `sys_platform_setting` and their two audit objects.\n\nStorage and the hosted `ai` keys are refused, or left out, for non-system callers.\n\n**What is not closed:**\n1. **(S1) The door census stops at the ruled doors.** Other platform records of a settings change were neither read nor pinned. Examples are an audit or activity row, a history read, or an export that carries the setting's key or value. Nothing shows that they ask the table. The record found no credential value served anywhere it read. Measure each reader of settings-change history and either route it through `cloudManagedRowScope`, or state why it carries no hidden key or value. A doc may say a hosted environment never shows these settings only after this is closed.\n2. **(S2) The write refusal is pinned for one accepted PUT body shape only.** Add a hosted case for the other accepted shape, so the order of the check (refuse before apply) cannot regress silently.\n3. **(N1, N2, folded here)** Add the hosted `ai` action ids to the classification pin, and add one hosted read-door case each for the two audit objects.\n\n**Reach:** a hosted tenant administrator only. No credential leak was observed. These are a census and pins.\n\nBlocked-by: #34254\n\nPrior rulings read: the #33891 ruling (option A, 「服务端按托管裁剪并拒绝」, edits E1–E5) and contract record 6907083890."
+}

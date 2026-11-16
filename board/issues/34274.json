@@ -1,0 +1,30 @@
+{
+  "number": 34274,
+  "kind": "issue",
+  "title": "verify: flows.resume drops userMessage from a failed flow — a localized hook refusal can only be asserted over raw REST",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T03:27:10Z",
+  "updated_at": "2026-11-16T03:48:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34274",
+  "body": "## What\n\nIn `@objectstack/verify` 18.5.0, `flows.resume` reports a failed screen-flow submit as a `VerifyRefusal` carrying only `name`, `code`, `status` and `details`. It drops the `userMessage` that the REST resume door returns for the same failure.\n\nSince #33214, `userMessage` is where the hook's catalogued, localized refusal sentence lives. The flow's `message` and run-log `error` now hold the diagnostic instead, for example `hook 'quote_workflow' threw: Error: present_unsettled`.\n\n## Repro (app project, 18.5.0)\n\n1. A Convert Lead screen flow whose account-create hook refuses with a catalogued reason (`cb_account_registration_required` / `conversion`).\n2. Call `verify.flows.resume(...)` with `Accept-Language: zh-CN`. The `VerifyRefusal` has code and status, but no sentence.\n3. Call the REST resume door directly with the same request. The answer is `400 FLOW_FAILED`, and `userMessage` holds the zh-CN sentence.\n\n## Expected\n\n`VerifyRefusal` carries `userMessage` (and `error`, if served) from the REST answer, so tests can pin the localized sentence through the verify handle.\n\n## Impact\n\nTest tooling only; no public door is affected. The app's conversion test reads the sentence over raw REST as a stopgap."
+}

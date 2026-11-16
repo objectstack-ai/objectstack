@@ -1,0 +1,37 @@
+{
+  "number": 34295,
+  "kind": "issue",
+  "title": "Scenario runner: a summary command reads many run records and prints one author-model × ask-model table",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T04:26:22Z",
+  "updated_at": "2026-11-16T06:17:12Z",
+  "closed_at": "2026-11-16T06:11:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34295",
+  "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M3 row of its milestone table, Blocked-by M2, which closed 2026-11-16 with #33818). Maintainer, 2026-11-15 02:10Z: 「你建议的任务全部立卡，你负责开 devx 车道派发处理」; 08:36Z, on the epic seat's decision card \"M2/M3 的行现在立卡吗?立了交给谁派发?\": \"立卡,留给本专题席位派发\".\n\n## Mechanism\n\nThe runner writes one record per card per run (`runRecord` in `packages/qa/scenarios/src/runner/scorecard.ts`) and renders one scorecard per card (`renderScorecard`). Nothing reads several records together. The record already states the served author and ask models (`Run · model`, `askSpend`, `authorCost`), the prompt choice (#33743), the ask repeats (#33741) and the mode (#33742).\n\n## Why it matters\n\nThe M2 close-out cross matrix (opus build × haiku / sonnet ask, on the same build via `--modes ask`) and the cloud-default question (\"is haiku good enough\") need one table across runs. Today eval#1 assembles it by hand from record files, which is slow and easy to get wrong.\n\n## Done when\n\n- A subcommand (e.g. `objectstack-scenarios summary <records…|dir>`) reads run records and prints a markdown table: rows = author model, columns = ask model (or the reverse, stated), cells = Build, Run-问数 and operations pass counts with k/N when repeats were asked, plus ask cost and time per cell.\n- Records that differ in a dimension the table does not show (card, prompt choice, package version, mode) are kept apart or refused with a line naming the difference, never summed together silently.\n- A record from before a field existed reads `not recorded` in that cell.\n- Deterministic and offline: it reads files only.\n- Tests pin a 2×2 matrix from fixture records, a refusal on mixed prompt choices, and an older record.\n\n## Reader\n\nThe epic seat `epic:#33595#1` dispatches it to `os-dev` (`domain:devx`, `packages/qa/scenarios`), serial with the other M3 runner cards where files overlap.\n\nDedup: `repo:objectstack-ai/objectstack is:issue multi-run summary scenario` → 14 hits; #33923 (closed) put the round runbook in the eval seat skill, none adds a cross-record table to the runner."
+}

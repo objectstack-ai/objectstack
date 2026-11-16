@@ -1,0 +1,31 @@
+{
+  "number": 34339,
+  "kind": "issue",
+  "title": "formula: label() over a multi-select reads null at runtime, yet validate and lint --strict pass it — render the selected options' labels joined, or refuse it at author time",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T07:56:53Z",
+  "updated_at": "2026-11-16T08:08:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34339",
+  "body": "## What\n\nOn 18.5.0, the formula field `label(record.gaps)` over a `Field.select({ multiple: true })` evaluates to **null** at runtime for every non-empty selection. This holds for a one-element list too, in both zh-CN and en. The engine logs:\n\n> formula field 'cb_probe_note' on 'crm_quote_line_item' could not be evaluated, so it reads null ... label(record.cb_probe_gaps) renders ONE option value, and `cb_probe_gaps` holds a list of values on this record.\n\n`optionLabelOf` in `@objectstack/formula` throws when the value is an object or array.\n\nNeither author-time gate catches it: `os validate` and `os lint --strict` both exit 0 on this metadata. An author who follows the documented `label()` pattern ships a formula that passes both gates and reads null in every view.\n\n## Repro (app project, pinned 18.5.0, booted with @objectstack/verify)\n\n- Line object with these fields:\n  - `cb_probe_gaps`: select, `multiple: true`, 3 options, zh-CN labels in the pack;\n  - `cb_probe_note`: formula `label(record.cb_probe_gaps)`;\n  - control pair `cb_probe_one`: single select, with `cb_probe_one_note` = `label(record.cb_probe_one)`.\n- Results from `GET /data/OBJ/ID` with Accept-Language zh-CN and en:\n\n| Selection | `cb_probe_note` | Control (`cb_probe_one_note`) |\n|---|---|---|\n| `[\"no_sales_price\",\"no_customer\"]` | null in both languages | `无客户` / `No customer` |\n| `[\"no_freight_region\"]` | null in both languages | — |\n| empty or null | `\"\"` | — |\n\n## Ask\n\n1. **Capability.** `label()` on a multi-select returns the selected options' labels in the reader's language, joined with `, ` in option order. The mail-template `option` hole already does this (`OPTION_ARGUMENT_RULE`). Alternatively, provide a documented sibling such as `labels(list): string`.\n2. **Author-time.** Until (1) ships, `os validate` / `os lint` refuse `label()` over a `multiple: true` select with a rule naming the field. A formula that is known to read null should not stage clean.\n\n## Consumer\n\nAn app project stores a quote line's \"margin cannot be estimated\" gaps as structured data, and needs the sentence rendered in the reader's language (structured field + `label()` in a formula, no language in hooks). The natural shape is one multi-select of gap kinds. The app is holding that card on this platform answer rather than build a field-per-slot workaround."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 34308,
+  "kind": "issue",
+  "title": "dashboard: no save or publish gate judges a compare widget's date key against the dataset's declared dimensions",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T05:18:42Z",
+  "updated_at": "2026-11-16T07:13:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34308",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). Finding M2 (d) of the L2 contract review 6908009392 on PR #34198 (card #34005).\n\n## Today\n\nA dashboard's date range names an object FIELD (`dateRange.field`, default `created_at`), judged against the object by `dashboard-filter-field-unknown`, not against the dataset's declared `dimensions`. A compare widget lowers that date key into `timeDimensions`. With PR #34198 a dataset query refuses an undeclared member, so a dashboard whose date field is not also the NAME of a declared dimension is refused at render. No gate sees it first: `report-date-range-dimension-unknown` judges reports only, no lint rule reads a widget's `compareTo`, and the publish build probe asks each widget's measures with no window. The shipped stacks name the dimension after the field, so the authored census found none; a runtime-saved or third-party dashboard has no such guarantee.\n\n## Ask\n\nRefuse at save and at publish a dashboard compare widget whose effective date key (its `compareTo.dimension`, else the dashboard date-range field) is not a declared dimension of the widget's dataset, with the remedy in the message (declare a date dimension named as the date-range field, or set `compareTo.dimension` to a declared one). Pin the refused and the served case. Re-run the authored census and state its count.\n\nBlocked-by: #34198 (the runtime rule this gate mirrors).\n\nReader: domain:server (lint + build probes). Size S."
+}

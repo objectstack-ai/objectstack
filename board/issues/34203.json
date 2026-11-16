@@ -2,8 +2,8 @@
   "number": 34203,
   "kind": "issue",
   "title": "landing-operations: refresh at any K when main moved a shared budget (skills token ratchet, eager-chunk ceilings) since the PR's base",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T00:50:36Z",
-  "updated_at": "2026-11-16T00:50:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T05:22:39Z",
+  "closed_at": "2026-11-16T05:21:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34203",
   "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\nFiling-gate category: ① process defect, measured. `reach:` the #31518 7-day re-reading of every merge-queue root, 2026-11-09..15 (comment 6904236520, class (a) rows 10, 11, 60). Parent card #31518 (p1, `domain:devx`), Wanted 2 for class (a).\n\n## What happened\n\nClass (a), stale base, had 7 roots, 13 cascades and 180 minutes of `main` standing still in the window. The K ≥ 15 refresh rule (`landing-operations.md` line 45, from #31548 / PR #31571) was in force all week and caught none of them. Two of the seven are **shared-budget ledgers**, where every PR spends from one headroom, so two PRs that are green on their own go red together in the queue:\n\n- Rows 10–11, PR #32050: Build & E2E UI eager-closure budget. `i18n-locale-en` was 60.6 KB against its 60.5 KB ceiling, because #32129 and #32028 (en strings) landed after the PR run's base. It was enqueued at K 11, and the same queue stay rebuilt it at K 15 with the head unchanged, red again.\n- Row 60, PR #33355: the published-skills token ratchet, K 227 (enqueued by hand outside the seat procedure). Step 1 (6722460022) had 29 skills-ratchet reds of the same shape.\n\n## Ask (`.claude/skills/pm-dispatch/references/landing-operations.md`, governed)\n\n1. Widen the existing any-K clause on line 45 (a locale PR whose base predates a new locale landing) to a PR that spends a shared budget: `skills/**` against the published-skills token ratchet, and ui eager-chunk locale or strings files against `PER_CHUNK_GZIP_CEILINGS`. Such a PR merges `main` first at any K when `main` has moved that budget since the PR's base.\n2. Name how the seat reads \"moved that budget\" cheaply (for example, `git diff --name-only PRBASE..origin/main` touching the ledger's inputs).\n3. Proof: the rule caught rows 10, 11 and 60 when replayed against the re-reading's table (8 cascades, 23 rebuilt builds).\n\n⛔ No gate made report-only, no ceiling raised, no merge-queue setting changed.\n\nReader: `domain:skills` lane seat, from `pm:queue`. Dedupe: `landing-operations any K shared budget`, `token ratchet refresh enqueue`, no open hit; related #31548 (closed, the K rule), #34152 (flake p0 rule, different class). Priority p2: it removes about 3 roots a week from the queue."

@@ -1,0 +1,31 @@
+{
+  "number": 34252,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): SCIM projects the enterprise manager attribute into sys_user.manager_id",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T02:25:31Z",
+  "updated_at": "2026-11-16T05:10:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34252",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbSUQWB2j9eHYsRcrCiq1X1C)_\n\n## 维护者速读\n\n- 改了什么：SCIM 目录（Entra/Okta）在创建、替换、修补用户时带的企业扩展 `manager`，现在写进 `sys_user.manager_id`；移除该属性即清空。\n- 为什么改：上一单让管理员入口拒绝目录持有的人，但目录这一侧从没写过上级字段，两边都改不了，按上级流转的审批跟不上组织调整。\n- 风险与回滚：今天被接受的一类请求将被拒（manager 不是本连接已建用户的 SCIM id、自指、成环、超深、跨组织 → 400 invalidValue，整笔回滚）；回滚即撤本 PR，无数据迁移。\n- 先看：`packages/plugins/plugin-auth/src/scim-manager-projection.ts`（何时投影、何时拒）、`admin-set-user-manager.ts`（拒绝谓词抽出复用，未复制）、`auth-manager-plugin-list.ts`（接线，D4 盖章未动）。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-auth exec vitest run src/scim-manager-projection.test.ts`，预期 15/15 通过。\n- 需要你做的：定夺 Clause-② 的臂：实测发现今天被服务的请求会被拒（见 Acceptance notes），认领行写的是 yes (widening)。\n\nFixes #33918\n\nClause-②: yes (widening). A SCIM request whose `manager` is ignored today starts writing `manager_id`. A manager value naming no known user is answered as a SCIM error. The dev measures this again before the PR, including whether any request served today becomes refused.\nMetadata-protocol: none\n\n## What changes\n\n- **`scim-manager-projection.ts` (new).** On the vendor's `identity.reconcileUser` callback, which `@better-auth/scim` 1.7.12 calls after every user create, replace, patch, reprovision and delete inside its transaction, the projection reads the user's profile source (`profileSourceId`, the same rule that decides whose name and email the user carries), parses the stored canonical attributes, and writes `enterprise.manager` onto `sys_user.manager_id` through the data engine, which joins the SCIM transaction. A refusal rolls the whole SCIM mutation back.\n- **What `manager.value` matches:** the manager's SCIM resource `id`, among the Users the same connection provisioned (RFC 7643 section 4.3: \"the id of the SCIM resource representing the User's manager\"). A `$ref` alone is read by its final `/Users/{id}` segment. Not the `externalId`, `userName` or an email.\n- **Refusals:** a reference naming no User the connection provisioned, plus the admin endpoint's own four (self-assignment, cycle, depth cap, cross-organization), via `screenUserManagerLink`, extracted from `applyUserManagerLink` and imported, never copied. Each is a SCIM 400 with `scimType: invalidValue`, the refusal's sentence as `detail`, and the admin endpoint's ADR-0112 `code` for the same refusal.\n- **Clear:** a PATCH `remove`, or a replace without the attribute, clears `manager_id`.\n- **Not projected, on purpose:** outside an authenticated SCIM request (connection decommission and domain replay call the same callback), on an inactive state (a deprovision is never refused over the org chart), from a profile source of another connection, and when the resolved manager equals the one the user has (an unrelated PATCH is never re-judged).\n- **`admin-set-user-manager.ts`:** refusals 1 to 4 moved into the exported `screenUserManagerLink`; `applyUserManagerLink` calls it. Behaviour unchanged (its suites pass unchanged).\n- **`auth-manager-plugin-list.ts`:** `identity.reconcileUser` runs `reconcileScimUserLifecycle` first (the ADR-0135 D4 stamp, untouched), then the projection.\n- **lint:** the graded-route note in `validate-approval-approvers.ts` and `MANAGER_ONLY_ROUTES` in `rule-explanations.ts` now grade SCIM as a route this platform gives.\n\n## Tests\n\n- `packages/plugins/plugin-auth/src/scim-manager-projection.test.ts` (new, 15 cases), end to end through `AuthManager.handleRequest()` with a real SCIM bearer on ObjectQL over better-sqlite3: set by id, set by `$ref`, PUT change and PUT clear, PATCH set and PATCH remove, an unchanged manager not re-judged, a deprovision with a dangling reference served; refused unknown id (nothing written), externalId, another connection's id, PATCH to unknown keeps the old manager; self, cycle, depth, cross-organization, each asserting `status`, `scimType`, `code` and unchanged state.\n- `packages/lint/src/validate-approval-approvers.test.ts`: two pins rewritten to the new remedy text (see Acceptance notes).\n\n## Acceptance notes\n\n- **Clause-② re-measured: there IS a narrowing arm.** With the projection unwired (ablation of the wiring line, same suite), these requests are served today and refused after this PR: create with an unknown `manager.value` (201 today), with the manager's `externalId` (201), with another connection's id (201), with a manager past the depth cap (201); PATCH to an unknown manager (200), self (200), cycle (200), cross-organization (200). The claim's line is copied verbatim as the dispatch rules require; the arm is the seat's call.\n- **`validate-approval-approvers.test.ts` is outside the claim's file surface.** Its two pins asserted the sentence this card makes false (\"declares the SCIM 'manager' attribute without projecting it\"); they were rewritten, not widened.\n- **A stored reference that no longer resolves** (the manager was DELETEd through SCIM) refuses an active user's next SCIM write until the directory sends a new manager or removes it. A deprovision is not affected.\n- **An inactive user's manager** is not projected while inactive; it is projected when the directory re-activates the user.\n\n## Verification\n\nFinal head and gate readings are in the os-dev report on the card.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}
