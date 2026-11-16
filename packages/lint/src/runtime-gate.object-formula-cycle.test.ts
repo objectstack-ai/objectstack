@@ -294,7 +294,10 @@ describe('#33153 — formula cycles an object extension adds, at the object_exte
 
   it('the target\'s own stored cycle is not the extension write\'s to answer for (the differential)', () => {
     const cyclic = target({ f_x: formula('record.f_y + 1'), f_y: formula('record.f_x + 1') });
-    const result = gateExtension(extension({ e__c: formula('record.quantity * 2') }), [cyclic]);
+    // [#33644] A label of its own: under the helper's shared 'F' the entry
+    // would join the target's `f_x` / `f_y` label group, a clash the
+    // duplicate-label rule charges to the extension at this door.
+    const result = gateExtension(extension({ e__c: { ...formula('record.quantity * 2'), label: 'E' } }), [cyclic]);
     expect(result.errors, dump(result)).toEqual([]);
   });
 

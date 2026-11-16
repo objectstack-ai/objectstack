@@ -51,5 +51,28 @@
       "card": "#30147",
       "reason": "accepted terminal exception (ruling 6687801899): codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
     }
+  ],
+  "ceilings": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "baseLines": 11605,
+      "baseCommit": "63db7240aa",
+      "maxLines": 11705,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "baseLines": 6754,
+      "baseCommit": "63db7240aa",
+      "maxLines": 6854,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "baseLines": 9971,
+      "baseCommit": "63db7240aa",
+      "maxLines": 10071,
+      "ruling": "6897467376"
+    }
   ]
 }
