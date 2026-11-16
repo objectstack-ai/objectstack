@@ -1,0 +1,371 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#34206, ADR-0156] The compiled metadata answer cache: the served item read
+ * (`getMetaItem`) of an app, object, view, page or dashboard, kept per engine
+ * and answered again while every source it was compiled from is unchanged.
+ *
+ * ## What is cached, and what is not (ADR-0156 D3)
+ *
+ * The value is `getMetaItem`'s envelope for one `(type, name)` read with no
+ * package, member, state or draft preview: the merge of the stored rows, the
+ * schema registry and the metadata service, governed, decorated and locked.
+ * That read takes no caller: it reads the store as the system and the
+ * registries in memory, so every caller of the environment is answered the
+ * same envelope. The per-caller gate, the field mask, the translation and the
+ * `ETag` are the REST door's, applied over this envelope on every request,
+ * as before.
+ *
+ * Three members of the envelope are NOT cached: `registration`,
+ * `disabledActions` and `cascadeDeleteObjects` ({@link LIVE_ITEM_TRAILER_KEYS}).
+ * They read the automation engine, the action-activation ledger and the
+ * cascade closure, which have no counter here; a hit reads them again through
+ * the one function the miss used ({@link liveItemTrailers}).
+ *
+ * ## The sources and their counters (ADR-0156 D1 (a), D2)
+ *
+ * | source | counter |
+ * |:--|:--|
+ * | `sys_metadata` rows | the overlay cache generation ({@link readOverlayCacheGeneration}): every engine-seam write to the table, and every non-write epoch move (a peer's write through the cluster bridge, a metadata or manual bump) |
+ * | schema registry: objects | `registry.objectRevision` |
+ * | schema registry: items, artifacts, packages and enablement, navigation contributions, namespaces, claims | `registry.revision` (objectql `registry-revision.ts`) |
+ * | metadata service | `revision` on the service registered as `'metadata'`, and the service's identity |
+ *
+ * A source without its counter makes the cache DECLINE: the read runs
+ * uncached, exactly as before. A registry without `revision` or
+ * `objectRevision`, an engine without the overlay seam, a metadata service
+ * without `revision`: each declines. ⛔ No counter is guessed, and none is
+ * borrowed from another source.
+ *
+ * ## The time bound and the confirmation (ADR-0156 D1 (b), D5)
+ *
+ * `OS_METADATA_COMPILE_CACHE_TTL_MS` (default {@link META_COMPILE_CACHE_DEFAULT_TTL_MS};
+ * `0` is off and the read is the uncached one, the same reads in the same
+ * order). The bound covers what this process cannot see: another node's
+ * write with no cluster bridge, a write that bypasses the engine.
+ *
+ * When the bound passes, the cache confirms before it recompiles: the
+ * counters above at their stamp, and a reading of everything outside this
+ * process that the bound exists for ({@link readConfirmationMark}):
+ *
+ *  - the stored rows: the `sys_metadata` row count and its newest
+ *    `updated_at` ({@link readStoreMark}), which another writer's insert,
+ *    update or delete moves;
+ *  - the metadata service's loaders: `loaderChangeMark()` on the service
+ *    (`@objectstack/metadata`), each loader's own reading of its backing
+ *    store (the file loader stats the directories and files its reads
+ *    touched, so a file a deployment creates, removes or edits under a
+ *    running process moves it).
+ *
+ * Nothing moved: the entries are kept for another bound. Anything moved:
+ * every entry goes.
+ *
+ * ⛔ A renewal is a claim about what was looked at (ADR-0156 D5). When the
+ * confirmation cannot read one of those (the store cannot be read, the
+ * service keeps no `loaderChangeMark`, a loader keeps no mark), nothing is
+ * renewed: every entry is dropped at its bound and compiled again, so the
+ * cache answers repeats within one bound and never across two.
+ *
+ * ## Invalidation is coarse, by construction
+ *
+ * The stamp is the whole tuple of counters, held per engine. Any counter
+ * moving retires EVERY entry of that engine at once: metadata changes are
+ * rare, and a per-entry dependency graph would be the call-site list ADR-0127
+ * D2 forbids in another shape. A read in flight across a change is stamped
+ * with the counters it STARTED under and is not stored when they moved
+ * before it settled.
+ *
+ * ## Values are cloned in both directions
+ *
+ * An envelope is cloned when stored and again when served, so a caller that
+ * edits its answer (the REST door spreads and translates it) cannot reach the
+ * entry, and a hit is byte-equivalent to a miss. An envelope that cannot be
+ * cloned is not stored. The served row's change time
+ * (`servedRowChangedAtOf`, a non-enumerable symbol member) is kept beside the
+ * clone and put back on every served copy.
+ *
+ * ## Hydration (ADR-0156 D4)
+ *
+ * The served item read registers nothing in the schema registry; the list
+ * read (`getMetaItems`) does, and is not cached here. A hit therefore leaves
+ * the registry exactly as a miss does.
+ */
+
+import { isMissingTableError } from '@objectstack/metadata/errors';
+import { readOverlayCacheGeneration } from './meta-overlay-cache.js';
+import { metadataReadFailureError } from './protocol-client-failures.js';
+import { servedRowChangedAtOf, withServedRowChangedAt } from './served-row-changed-at.js';
+
+/** Env var naming the compile cache's time bound, in milliseconds. `0` turns the cache off. */
+export const META_COMPILE_CACHE_TTL_ENV = 'OS_METADATA_COMPILE_CACHE_TTL_MS';
+
+/**
+ * The default bound: 30 s, the overlay row cache's. On a single node with the
+ * engine seam every local change is seen at once and the bound only paces the
+ * confirmation; across nodes with no cluster bridge it is how long another
+ * node's write can stay unseen, as it already is for the row cache.
+ */
+export const META_COMPILE_CACHE_DEFAULT_TTL_MS = 30_000;
+
+/** The types whose served item read is cached: the app bundle's member types. */
+export const META_COMPILE_CACHE_TYPES: ReadonlySet<string> = new Set(['app', 'object', 'view', 'page', 'dashboard']);
+
+/** The time bound, read from {@link META_COMPILE_CACHE_TTL_ENV}. Unset or blank: the default. Not a non-negative number: `0`. */
+export function metaCompileCacheTtlMs(
+    env: Record<string, string | undefined> = typeof process !== 'undefined' ? process.env : {},
+): number {
+    const raw = env[META_COMPILE_CACHE_TTL_ENV];
+    if (raw === undefined || raw.trim() === '') return META_COMPILE_CACHE_DEFAULT_TTL_MS;
+    const parsed = Number(raw.trim());
+    if (!Number.isFinite(parsed) || parsed < 0) return 0;
+    return Math.floor(parsed);
+}
+
+/** The request shape this cache answers: a served read naming only a type and a name. */
+export interface MetaCompileCacheRequest {
+    type: string;
+    name: string;
+    packageId?: string;
+    state?: 'active' | 'draft';
+    previewDrafts?: boolean;
+    member?: string;
+}
+
+/** What the cache reads from the protocol: the engine, the services, and the live trailers. */
+export interface MetaCompileCacheHost {
+    readonly engine: unknown;
+    readonly getServicesRegistry?: (() => { get(name: string): unknown } | undefined) | undefined;
+    /** The live members of a served envelope, as the miss computed them. */
+    liveTrailers(type: string, name: string, item: unknown): Record<string, unknown>;
+    /** The keys {@link liveTrailers} may answer; stripped from a stored envelope. */
+    readonly liveTrailerKeys: readonly string[];
+}
+
+/** The counters an entry was compiled under. Compared member by member, never interpreted. */
+interface CompileStamp {
+    readonly overlay: number;
+    readonly objectRevision: number;
+    readonly registryRevision: number;
+    readonly metadataService: object | undefined;
+    readonly metadataServiceRevision: number | undefined;
+}
+
+interface CompileEntry {
+    /** A private clone of the envelope, the live trailers removed. Never handed out un-cloned. */
+    readonly envelope: Record<string, unknown>;
+    readonly changedAt: string | undefined;
+}
+
+interface CompileBucket {
+    readonly stamp: CompileStamp;
+    /** The confirmation reading ({@link readConfirmationMark}) the entries were last confirmed at; `undefined` until the first. */
+    mark: string | undefined;
+    /** Until when the entries stand without a confirmation. */
+    confirmedUntil: number;
+    readonly entries: Map<string, CompileEntry>;
+}
+
+/** One bucket per engine: the engine owns the rows and the registry every entry was compiled from. */
+const buckets = new WeakMap<object, CompileBucket>();
+
+/** The metadata service the protocol reads, or `undefined` when there is none. */
+function metadataServiceOf(host: MetaCompileCacheHost): object | undefined {
+    try {
+        const service = host.getServicesRegistry?.()?.get('metadata');
+        return service !== null && typeof service === 'object' ? service : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Every source's counter, now — or `undefined` when a source the read can
+ * reach exposes none, which makes the cache decline (ADR-0156 D2).
+ */
+export function readCompileStamp(host: MetaCompileCacheHost): CompileStamp | undefined {
+    const engine = host.engine;
+    if (!engine || typeof engine !== 'object') return undefined;
+    const overlay = readOverlayCacheGeneration(engine);
+    if (overlay === undefined) return undefined;
+    const registry = (engine as { registry?: { objectRevision?: unknown; revision?: unknown } }).registry;
+    if (!registry || typeof registry.objectRevision !== 'number' || typeof registry.revision !== 'number') return undefined;
+    const metadataService = metadataServiceOf(host);
+    let metadataServiceRevision: number | undefined;
+    if (metadataService !== undefined) {
+        const revision = (metadataService as { revision?: unknown }).revision;
+        if (typeof revision !== 'number') return undefined;
+        metadataServiceRevision = revision;
+    }
+    return {
+        overlay,
+        objectRevision: registry.objectRevision,
+        registryRevision: registry.revision,
+        metadataService,
+        metadataServiceRevision,
+    };
+}
+
+function sameStamp(a: CompileStamp, b: CompileStamp): boolean {
+    return a.overlay === b.overlay
+        && a.objectRevision === b.objectRevision
+        && a.registryRevision === b.registryRevision
+        && a.metadataService === b.metadataService
+        && a.metadataServiceRevision === b.metadataServiceRevision;
+}
+
+/**
+ * The confirmation's reading of everything outside this process the bound
+ * exists for: the stored rows ({@link readStoreMark}) and the metadata
+ * service's loaders (`loaderChangeMark()`), or `undefined` when either
+ * cannot be read, which forbids a renewal (ADR-0156 D5).
+ */
+export async function readConfirmationMark(engine: unknown, metadataService: object | undefined): Promise<string | undefined> {
+    const read = (metadataService as { loaderChangeMark?: unknown } | undefined)?.loaderChangeMark;
+    if (metadataService !== undefined && typeof read !== 'function') return undefined;
+    const [store, loaders] = await Promise.all([
+        readStoreMark(engine),
+        metadataService === undefined
+            ? Promise.resolve('')
+            : (read as () => Promise<unknown>).call(metadataService).then(
+                (mark) => (typeof mark === 'string' ? mark : undefined),
+                () => undefined,
+            ),
+    ]);
+    if (store === undefined || loaders === undefined) return undefined;
+    return JSON.stringify([store, loaders]);
+}
+
+/**
+ * The store reading the confirmation compares (ADR-0156 D5): the number of
+ * `sys_metadata` rows and the newest `updated_at` among them, read as the
+ * system. Another writer's insert moves both, its update moves the second,
+ * its delete moves the first.
+ *
+ * `undefined` when there is nothing to read it with (an engine without
+ * `count` / `find`) or no store yet (`sys_metadata` not provisioned, by error
+ * type): the bucket's entries then go, and nothing is renewed. Any other
+ * failure is thrown as the uncached read throws it
+ * (`rethrowUnlessMetadataStoreUnprovisioned`): an outage is never read as
+ * "nothing moved", and never served from the entries it could not confirm.
+ */
+export async function readStoreMark(engine: unknown): Promise<string | undefined> {
+    const ql = engine as {
+        count?: (object: string, query: unknown) => Promise<unknown>;
+        find?: (object: string, query: unknown) => Promise<unknown>;
+    };
+    if (typeof ql?.count !== 'function' || typeof ql?.find !== 'function') return undefined;
+    try {
+        const context = { isSystem: true };
+        const [count, newest] = await Promise.all([
+            ql.count('sys_metadata', { where: {}, context }),
+            ql.find('sys_metadata', {
+                where: {},
+                fields: ['updated_at'],
+                orderBy: [{ field: 'updated_at', order: 'desc' }],
+                limit: 1,
+                context,
+            }),
+        ]);
+        if (typeof count !== 'number') return undefined;
+        const row = Array.isArray(newest) ? newest[0] as { updated_at?: unknown } | undefined : undefined;
+        const at = row?.updated_at instanceof Date ? row.updated_at.toISOString() : String(row?.updated_at ?? '');
+        return JSON.stringify([count, at]);
+    } catch (error) {
+        if (isMissingTableError(error, 'sys_metadata')) return undefined;
+        throw metadataReadFailureError(error);
+    }
+}
+
+/** Whether this request is one the cache answers. */
+function cacheableRequest(request: MetaCompileCacheRequest): boolean {
+    return META_COMPILE_CACHE_TYPES.has(request.type)
+        && typeof request.name === 'string' && request.name !== ''
+        && request.packageId === undefined
+        && request.member === undefined
+        && request.state === undefined
+        && request.previewDrafts === undefined;
+}
+
+function entryKey(request: MetaCompileCacheRequest): string {
+    return JSON.stringify([request.type, request.name]);
+}
+
+/** A clone of `value`, or `undefined` when it cannot be cloned. */
+function cloned<T>(value: T): T | undefined {
+    try {
+        return structuredClone(value);
+    } catch {
+        return undefined;
+    }
+}
+
+/** The served copy of an entry: a fresh clone, the live trailers read now, the row change time put back. */
+function serve(host: MetaCompileCacheHost, request: MetaCompileCacheRequest, entry: CompileEntry): unknown {
+    const envelope = structuredClone(entry.envelope);
+    const served = { ...envelope, ...host.liveTrailers(request.type, request.name, envelope.item) };
+    return withServedRowChangedAt(served, entry.changedAt);
+}
+
+/**
+ * Confirm `bucket` at its bound (ADR-0156 D5) and open the next one: its
+ * entries stand for another bound only when the reading of everything outside
+ * this process is the one they were last confirmed at. A moved reading drops
+ * them all. An unreadable one drops them all too, and leaves no reading to
+ * compare at the next bound, so nothing compiled under it is ever renewed:
+ * it is a cache for one bound at a time.
+ */
+async function confirm(engine: object, bucket: CompileBucket, ttlMs: number, now: number): Promise<void> {
+    const mark = await readConfirmationMark(engine, bucket.stamp.metadataService);
+    if (mark === undefined || bucket.mark !== mark) bucket.entries.clear();
+    bucket.mark = mark;
+    bucket.confirmedUntil = now + ttlMs;
+}
+
+/**
+ * Answer a served item read through the cache, or by `compute` (the uncached
+ * read) when the cache is off, the request is not one it answers, a source
+ * exposes no counter, or the entry is missing. See the module header.
+ */
+export async function readThroughMetaCompileCache<T>(
+    host: MetaCompileCacheHost,
+    request: MetaCompileCacheRequest,
+    compute: () => Promise<T>,
+): Promise<T> {
+    const ttlMs = metaCompileCacheTtlMs();
+    if (ttlMs <= 0 || !cacheableRequest(request)) return compute();
+    const stamp = readCompileStamp(host);
+    if (stamp === undefined) return compute();
+    const engine = host.engine as object;
+
+    let bucket = buckets.get(engine);
+    if (bucket === undefined || !sameStamp(bucket.stamp, stamp)) {
+        bucket = { stamp, mark: undefined, confirmedUntil: 0, entries: new Map() };
+        buckets.set(engine, bucket);
+    }
+    const now = Date.now();
+    if (now >= bucket.confirmedUntil) await confirm(engine, bucket, ttlMs, now);
+
+    const key = entryKey(request);
+    const hit = bucket.entries.get(key);
+    // The stamp is read again: the confirmation awaited the store.
+    const current = readCompileStamp(host);
+    if (hit !== undefined && current !== undefined && sameStamp(current, stamp) && buckets.get(engine) === bucket) {
+        return serve(host, request, hit) as T;
+    }
+
+    const answer = await compute();
+    const after = readCompileStamp(host);
+    if (after === undefined || !sameStamp(after, stamp) || buckets.get(engine) !== bucket) return answer;
+    const item = (answer as { item?: unknown } | null | undefined)?.item;
+    if (item === null || typeof item !== 'object') return answer;
+    const copy = cloned(answer) as Record<string, unknown> | undefined;
+    if (copy === undefined) return answer;
+    for (const trailer of host.liveTrailerKeys) delete copy[trailer];
+    bucket.entries.set(key, { envelope: copy, changedAt: servedRowChangedAtOf(answer) });
+    return answer;
+}
+
+/** Test seam: drop every entry this process holds for `engine`. */
+export function clearMetaCompileCache(engine: object): void {
+    buckets.delete(engine);
+}

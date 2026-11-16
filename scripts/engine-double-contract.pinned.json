@@ -252,6 +252,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/meta-compile-cache.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
       "verb": "delete",
       "pinned": 1
