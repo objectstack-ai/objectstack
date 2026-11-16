@@ -10,8 +10,8 @@
  * `reconcileViewExpansions`, `anotherPackageShips`,
  * `applyRegistryWriteThrough`, `restoreArtifactRegistryView`,
  * `ensureObjectStorage`, `dropObjectStorage`, `unboundOwnerPackageRefusal`,
- * `dropStorageRemainingRowsRefusal` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `dropStorageRemainingRowsRefusal` moved out of `protocol.ts` whole (split
+ * by #29998).
  *
  * A MOVE, not a redesign. `ProtocolRegistryHydrationFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -141,6 +141,18 @@ type ServiceRead = { data: unknown; degraded: boolean; errors: string[] };
  * Asked of the service rather than the registry: tier 1 has already healed
  * whenever the registry holds the base's composite artifact under a shadow, so
  * this read is reached exactly where it does not.
+ *
+ * [#33832, ADR-0150 D3, epic ruling 6818436831] ⛔ Except where the service
+ * cannot name a holder. A type addressed by `(package, name)` that the service
+ * stores by name alone (outside `PACKAGE_SLOTTED_STORE_TYPES`: `dashboard`,
+ * `report`, `page`, `app`, …) keeps ONE item per name, the one registered
+ * last, and answers it to a read naming any package or none. Where the
+ * registry holds the name for two or more packages, that answer is a pick, and
+ * registered in the bare slot it served the last-registered holder's item to
+ * every bare registry lookup and listed it twice. So no baseline is read: a
+ * settled miss, and tier 3 retires only the removed row's own entry. The bare
+ * slot stays empty, and a read naming no package answers the registry's
+ * refusal naming every holder, as the hydrator leaves it.
  */
 async function readHealBaseline(
     host: Pick<ProtocolHost, 'engine' | 'readItemFromMetadataService'>,
@@ -148,6 +160,12 @@ async function readHealBaseline(
     name: string,
     packageId: string | undefined,
 ): Promise<ServiceRead> {
+    const canonical = canonicalMetaType(type);
+    if (isPackageScopedType(canonical) && !PACKAGE_SLOTTED_STORE_TYPES.has(canonical)) {
+        const registry = (host.engine as { registry?: { packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null, options?: { includeDisabledPackages?: boolean }): readonly string[] | undefined } } | undefined)?.registry;
+        const holders = registry?.packageScopedHoldersOf?.(canonical, name, undefined, { includeDisabledPackages: true }) ?? [];
+        if (holders.length > 1) return { data: undefined, degraded: false, errors: [] };
+    }
     const own = await host.readItemFromMetadataService(type, name, packageId);
     if (packageId === undefined || (own.data !== undefined && own.data !== null) || own.degraded) return own;
     try {
@@ -194,7 +212,11 @@ function soleHolderOf(registry: { packageScopedHoldersOf?(type: string, name: st
  *  - a `permission`: a stored fork of a shipped permission set keeps the
  *    disposition of its own maintainer ruling (detection, never a silent
  *    change of the grants the deployment enforces; see
- *    `isUnservedSealedOverlay`).
+ *    `isUnservedSealedOverlay`). A row of a package that holds no set of the
+ *    name is that package's own set (ADR-0150 D2): it wears no other
+ *    package's envelope ({@link ownPermissionEnvelope}) and takes its own
+ *    package's slot ({@link takesPackageOverlaySlot}), so it is never a
+ *    holder's item to decline.
  */
 function judgesRowHolder(canonicalType: string): boolean {
     return canonicalType !== 'flow' && canonicalType !== 'permission' && !BORROWED_ENVELOPE_DECLINED_TYPES.has(canonicalType);
@@ -249,12 +271,39 @@ function namesNoHolderAmongMany(
  *
  * ⛔ Not a `flow`: the name's one bare slot keeps the shipping package's
  * declared override over any other row ({@link incomingTakesStoredFlowSlot},
- * #28717), which the boot pull reads. ⛔ Not a `permission`: a stored fork of
- * a shipped permission set keeps the disposition of its own maintainer ruling
- * (see {@link judgesRowHolder}). A package-less row keeps the bare slot.
+ * #28717), which the boot pull reads. A package-less row keeps the bare slot.
+ *
+ * A `permission` takes its package's slot too (ADR-0150 D2/D3 "security
+ * catalog: permission sets by (package, name)"): a set is `(package, name)`, so
+ * two namespaces' stored sets of one name are two sets, each served at its own
+ * package and each retired by its own delete, in every boot read order. With
+ * the one bare slot the set stored last took the other package's place, so the
+ * save door had to refuse a second namespace's stored set. Its envelope is its
+ * own package's ({@link ownPermissionEnvelope}).
  */
 function takesPackageOverlaySlot(canonicalType: string): boolean {
-    return PACKAGE_SLOTTED_STORE_TYPES.has(canonicalType) && canonicalType !== 'flow' && canonicalType !== 'permission';
+    return PACKAGE_SLOTTED_STORE_TYPES.has(canonicalType) && canonicalType !== 'flow';
+}
+
+/**
+ * [ADR-0150 D2/D4] The artifact whose envelope a stored `permission` row bound
+ * to `bound` wears: `artifact` only when it is the row's own package's set, or
+ * the set of the base whose customization pair `bound` is (ADR-0146). The
+ * artifact lookup scoped to a package that ships no set of the name falls back
+ * to a package that does; that package's envelope is never this row's. With
+ * none of its own, the row registers as the tenant-authored set it is, bound
+ * to its own package. Any other type, or a package-less row, keeps `artifact`.
+ */
+function ownPermissionEnvelope(
+    registry: InstalledPackageSource,
+    canonicalType: string,
+    bound: string | undefined,
+    artifact: unknown,
+): unknown {
+    if (canonicalType !== 'permission' || bound === undefined || artifact === undefined || artifact === null) return artifact;
+    const shipper = (artifact as { _packageId?: unknown })._packageId;
+    if (shipper === bound) return artifact;
+    return typeof shipper === 'string' && isPairOf(bound, shipper, installedManifestsOf(registry)) ? artifact : undefined;
 }
 
 /** {@link pairRowEnvelopeHolder}'s answer for a row that is not a customization pair's row of a two-holder name. */
@@ -871,9 +920,12 @@ export class ProtocolRegistryHydrationFacet {
         const envelopePackage = pairHolder !== NOT_A_PAIR_ROW
             ? pairHolder
             : options.packageId ?? (scoped ? soleHolderOf(registry, canonicalType, rowName) : undefined);
-        const artifact = envelopePackage === null ? undefined : host.lookupArtifactItem(
+        // [ADR-0150 D2] A stored permission row wears its own package's
+        // envelope only ({@link ownPermissionEnvelope}), never the envelope of
+        // another namespace's set the lookup falls back to.
+        const artifact = envelopePackage === null ? undefined : ownPermissionEnvelope(registry, canonicalType, boundPackageOf(options.packageId), host.lookupArtifactItem(
             type, (data as any).name, envelopePackage ?? undefined, bundleMemberOf(type, data),
-        );
+        ));
         // [#29600] See the header: a dashboard, report or email-template row
         // bound to a package that ships no artifact of its name, under a name
         // another package ships, is not registered under the bare name, where
@@ -1940,7 +1992,7 @@ export class ProtocolRegistryHydrationFacet {
                 // where the pair relation names zero or several bases: the only
                 // refusal {@link readHealBaseline} lets through for a bound row.
                 // Its entry sits in the bare slot for a type with no package
-                // overlay slot (`flow`, `permission`), where it kept serving the
+                // overlay slot (`flow`; a `permission` until it took its own), where it kept serving the
                 // deleted body to the non-holder's read and stood as a refused
                 // holder read's candidate. Retiring it picks nobody and restores
                 // each holder's exact address (entry kept → retired).

@@ -589,6 +589,7 @@ const ar = {
       succeeded: "نجح {{count}} / {{total}}",
       resultFailed: " · فشل {{count}}",
       succeededRecords: "السجلات الناجحة",
+      aggregateNotCompleted: "لم يكتمل الإجراء للسجلات المحددة. ربما تم تغيير بعض السجلات بالفعل. عند الإغلاق تعرض القائمة قيمها الحالية.",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
       cancel: "إلغاء",
@@ -2508,6 +2509,9 @@ const ar = {
       fieldErrorsToast_many: "{{count}} إعدادًا يحتاج إلى مراجعة: {{settings}}",
       fieldErrorsToast_other: "{{count}} إعداد يحتاج إلى مراجعة: {{settings}}",
       cryptoRefusalTitle: "لا يمكن لهذا النشر تشفير الأسرار",
+      platformManagedTitle: "تتم إدارته بواسطة المنصة",
+      platformManagedBody: "توفر منصة الاستضافة هذا الإعداد وتهيئه لهذه البيئة، لذا لا يُضبط هنا.",
+      aiProviderManaged: "تتم إدارة مزوّد الذكاء الاصطناعي ونموذجه وبيانات اعتماده بواسطة المنصة.",
       cryptoRefusalSubjectSuffix: "معلن كمشفَّر، لذلك لم تتم كتابة أي شيء.",
       cryptoRefusalNoSubject: "تم رفض القيمة المعلنة كمشفَّرة، لذلك لم تتم كتابة أي شيء.",
       cryptoRefusalToast: "تعذّر تشفير الأسرار: {{subject}}",
@@ -2606,6 +2610,8 @@ const ar = {
         done: 'تم ربط مساعد ذكاء اصطناعي أو مفتاح API خاص بك.',
         action: 'ربط',
       },
+      firstApp: { title: 'أضف تطبيقك الأول', todo: 'لا يوجد تطبيق خاص بك بعد. ثبّت تطبيقًا من السوق أو أنشئ واحدًا، وسيظهر في الصفحة الرئيسية.', done: 'يوجد تطبيق خاص بك في الصفحة الرئيسية.' },
+      firstRecord: { title: 'أضف سجلك الأول', todo: 'لم ينشئ أحد سجلًا في تطبيقاتك بعد.', done: 'تم إنشاء سجل في تطبيقاتك.', action: 'فتح التطبيق' },
     },
     error: {
       connectionFailed: "تعذّر الاتصال بالخادم",
@@ -2978,6 +2984,7 @@ const ar = {
         retry: "المتابعة بتسجيل الدخول الموحّد",
       },
       ssoHandoff: "المتابعة إلى {{target}}",
+      ssoHandoffClient: "سجّل الدخول للمتابعة إلى {{clientName}}",
       devAdminHint: {
         title: "بيئة تطوير محلية",
         signIn: "تسجيل الدخول كمسؤول التطوير",
@@ -3007,6 +3014,8 @@ const ar = {
         directSignInRateLimited: "بدأ عدد كبير جدًا من عمليات تسجيل الدخول من هذه الشبكة للتو. انتظر بضع ثوانٍ ثم حاول مرة أخرى.",
         networkNotAllowed: "لا يسمح هذا النظام بتسجيل الدخول من شبكتك. اتصل من شبكة مسموح بها (مثل شبكة مكتب مؤسستك أو شبكة VPN الخاصة بها)، أو تواصل مع المسؤول.",
         ssoAccessDenied: "الحساب الذي سجّلت الدخول به ليس لديه صلاحية الوصول إلى هذه البيئة. سجّل الدخول بحساب لديه صلاحية الوصول، أو اطلب من مسؤول مؤسسة هذه البيئة إضافتك عضوًا.",
+        ssoAccessDeniedNotMember: "الحساب الذي سجّلت الدخول به ليس عضوًا في مؤسسة هذه البيئة. سجّل الدخول بحساب عضو فيها، أو اطلب من مسؤول المؤسسة دعوتك.",
+        ssoAccessDeniedInvitationPending: "لقد تمت دعوتك إلى مؤسسة هذه البيئة، لكن الدعوة لم تُقبل بعد. اقبل الدعوة من بريدك الإلكتروني، ثم سجّل الدخول مرة أخرى.",
         ssoSwitchAccount: "تبديل الحساب",
         ssoBackToConsole: "العودة إلى وحدة التحكم",
         ssoSwitchAccountHint: "يفتح «تبديل الحساب» خدمة تسجيل الدخول في علامة تبويب جديدة ويسجّل خروجك هناك. ثم سجّل الدخول هنا مرة أخرى بحساب لديه صلاحية الوصول.",
@@ -3319,6 +3328,10 @@ const ar = {
       granted: "تم منح الوصول",
       denied: "تم رفض الوصول",
       noRedirect: "لم يُرجع الخادم أي عنوان URL لإعادة التوجيه.",
+      returnToApp: "ارجع إلى {{appName}} للمتابعة. يمكنك إغلاق علامة التبويب هذه.",
+      returnToUnnamedApp: "ارجع إلى التطبيق للمتابعة. يمكنك إغلاق علامة التبويب هذه.",
+      openApp: "فتح {{appName}}",
+      openUnnamedApp: "فتح التطبيق",
       failed: "فشلت الموافقة",
       footer: "يمكنك إلغاء الوصول في أي وقت من إعدادات حسابك.",
     },
@@ -3409,6 +3422,9 @@ const ar = {
     allDocs: 'كل الوثائق',
     onlineDocs: 'الوثائق عبر الإنترنت',
     loadingDocumentation: 'جارٍ تحميل الوثائق',
+    docConflictTitle: 'اختر حزمة',
+    docConflictDescription: 'توفّر أكثر من حزمة مثبّتة مستندًا باسم {{name}}. افتح المستند الذي تريد قراءته.',
+    docConflictCandidates: 'الحزم التي توفّر هذا المستند',
     documentation: 'الوثائق',
     uncategorized: 'غير مصنف',
     about: 'حول',
@@ -4305,13 +4321,11 @@ const ar = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'تبقّى {{left}} من حصتك في الذكاء الاصطناعي. النموذج الموسوم بـ ×N يستهلكها أسرع بـ N مرة من النموذج الافتراضي.',
@@ -4376,6 +4390,7 @@ const ar = {
       get_metadata_schema: "الاطلاع على تنسيق البيانات الوصفية",
       get_package: "مراجعة معلومات الحزمة",
       get_record_history: "قراءة سجل تعديلات هذا السجل",
+      list_flow_runs: "مراجعة سجل تشغيل التدفق",
       list_metadata: "سرد البيانات الوصفية الموجودة",
       list_objects: "سرد الكائنات الموجودة",
       list_packages: "سرد الحزم الموجودة",
@@ -5657,6 +5672,25 @@ const ar = {
     sourceRequired: "تتطلب صفحة {{kind}} قيمة {{source}} غير فارغة.",
     loading: "جارٍ تحميل بيئة تشغيل React…",
     error: "خطأ في صفحة React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "تطبيق الجوال",
+    subtitle: "اربط تطبيق ObjectOS للجوال بهذا الخادم",
+    scanHint: "افتح تطبيق ObjectOS للجوال وامسح هذا الرمز لربطه بهذا الخادم.",
+    qrAlt: "رمز QR يربط تطبيق ObjectOS للجوال بهذا الخادم",
+    linkLabel: "رابط الاتصال",
+    copy: "نسخ الرابط",
+    copied: "تم نسخ الرابط",
+    privacy: "لا يحمل الرمز سوى عنوان هذا الخادم، ولا يحمل حسابك أبدًا.",
+    loadFailed: "تعذّرت قراءة العنوان العام لهذا الخادم. أعد تحميل الصفحة للمحاولة مرة أخرى.",
+    unreachableTitle: "لا يستطيع الهاتف الوصول إلى عنوان هذا الخادم",
+    unreachableBody: "عنوان هذا الخادم هو {{address}}، وهو عنوان محلي أو خاص لا يستطيع الهاتف فتحه، لذلك لا يُعرض أي رمز. اضبط {{setting}} على الخادم على عنوانه العام، مثل {{example}}، ثم أعد تشغيله.",
+    insecureTitle: "عنوان هذا الخادم لا يستخدم HTTPS",
+    insecureBody: "عنوان هذا الخادم هو {{address}}. يسجّل تطبيق الهاتف الدخول عبره، لذا يجب أن يستخدم HTTPS، ولا يُعرض أي رمز. قدّم هذا الخادم عبر HTTPS، واضبط {{setting}} على عنوانه https://، مثل {{example}}، ثم أعد تشغيله.",
+    unpublishedTitle: "لا ينشر هذا الخادم عنوانه العام",
+    unpublishedBody: "لا يُعرض أي رمز: لا يوفّر هذا الخادم عنوانه العام لتطبيق الهاتف بعد. حدّث الخادم إلى إصدار يدعم ذلك.",
   },
 };
 

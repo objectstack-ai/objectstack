@@ -743,16 +743,18 @@ describe('feature-gate lowering matrix (#2874)', () => {
   const MANAGED_ON = 'has(features.cloudManaged) && features.cloudManaged == true';
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
-    ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
+    // Hidden while cloud-managed: create makes the caller an owner, and
+    // membership is the hosting organisation's there.
+    ['SysOrganization', SysOrganization, 'create_organization', `(${MANAGED}) && ${MULTI_ORG}`],
     // Their doors are better-auth's `organization/update` (owner, admin) and
     // `organization/delete` (owner), so the grade term leads the feature gate.
     ['SysOrganization', SysOrganization, 'update_organization', `${ADMINS} && ${MULTI_ORG}`],
     // [#25347] The name/logo-only rename is on the capability: under `single`
     // it is the one organization's only name door.
     ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${ORG}`],
-    ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
+    ['SysOrganization', SysOrganization, 'delete_organization', `((${MANAGED}) && ${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
-    ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
+    ['SysOrganization', SysOrganization, 'leave_organization', `(${MANAGED}) && ${MULTI_ORG}`],
     ['SysUser', SysUser, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysUser', SysUser, 'create_user', `(${STANDING} && ${MANAGED}) && features.admin == true`],
     // Their managed counterparts carry no feature gate (their doors mount
@@ -781,12 +783,18 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysSsoProvider', SysSsoProvider, 'edit_sso_groups_claim', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'show_sso_attribute_mapping', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'edit_sso_attribute_mapping', STANDING],
-    ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
-    ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
-    ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
+    // Hidden while cloud-managed: membership and its tiers are the hosting
+    // organisation's there, and both doors refuse.
+    ['SysMember', SysMember, 'update_member_role', `((${MANAGED}) && ${ADMINS}) && ${ORG}`],
+    ['SysMember', SysMember, 'remove_member', `((${MANAGED}) && ${ADMINS}) && ${ORG}`],
+    ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner' && ${MANAGED}) && ${OWNER}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
     ['SysInvitation', SysInvitation, 'resend_invitation', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
+    // No feature gate to lower: the authored pending-row predicate is served
+    // as written, with the cloud-managed conjunct (accepting creates a
+    // membership, which the hosting organisation manages there).
+    ['SysInvitation', SysInvitation, 'accept_invitation', `has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending' && ${MANAGED}`],
     ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'update_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'remove_team', `${ADMINS} && ${ORG}`],
@@ -798,12 +806,13 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // Their doors are platform-admin gated, so the standing leads.
     // The three also read the row's state after the standing (the
     // evaluated truth tables are `identity/action-state-visibility.test.ts`).
-    // Ban / Unban carry no `admin` gate: their doors work without the plugin,
-    // so nothing is lowered onto the hand-written predicate.
+    // Ban / Unban / Unlock / Set Password carry no `admin` gate: their doors
+    // work without the plugin, so nothing is lowered onto the hand-written
+    // predicate.
     ['SysUser', SysUser, 'ban_user', `${STANDING} && has(record.banned) && record.banned != true`],
     ['SysUser', SysUser, 'unban_user', `${STANDING} && has(record.banned) && record.banned == true`],
-    ['SysUser', SysUser, 'unlock_user', `(${STANDING} && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))) && features.admin == true`],
-    ['SysUser', SysUser, 'set_user_password', `(${STANDING} && ${MANAGED}) && features.admin == true`],
+    ['SysUser', SysUser, 'unlock_user', `${STANDING} && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))`],
+    ['SysUser', SysUser, 'set_user_password', `${STANDING} && ${MANAGED}`],
     ['SysUser', SysUser, 'impersonate_user', `(${STANDING}) && features.admin == true`],
     ['SysUser', SysUser, 'enable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true) && features.twoFactor == true'],
     ['SysUser', SysUser, 'disable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],

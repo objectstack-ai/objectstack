@@ -24,6 +24,11 @@
       "file": "packages/drivers/driver-sql/src/sql-driver.ts",
       "class": "SqlDriver",
       "card": "#30105"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "card": "#33949"
     }
   ],
   "exceptions": [
@@ -50,6 +55,141 @@
       "member": "get supports",
       "card": "#30147",
       "reason": "accepted terminal exception (ruling 6687801899): codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "constructor",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): the first pass never moves a constructor (the engine moved its own in its fourth pass, #30020 R8); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "registeredBundleHolding",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "declaredBundleHolding",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "recordCurrencyFollowRefusalOf",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): its stub keeps the base signature byte-for-byte, and two parameter defaults are closures over `this` (`() => this.getAllObjects()`), which the gate reads as a computed default; a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "registerObject",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): its stub keeps the base signature byte-for-byte, and the `priority` default is a conditional over `ownership`, which the gate reads as a computed default; a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "[FIND_BOUND_ACTION_COLLISIONS]",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): not-identifier-name: a symbol-keyed method (the engine moved its own under R9, #30020); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "assertPackageUninstallable",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "registerItem",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): inferred-return-type: a public method whose return type is inferred, so moving it would change the published .d.ts; a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "unregisterItem",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): inferred-return-type: a public method whose return type is inferred, so moving it would change the published .d.ts; a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "settledPairRowBinding",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "isBundleAddition",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "resolveItem",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "refuseAmbiguousObjectLessAction",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): parameter-shadows: a parameter (`readStoredRows`) shadows a stub local; a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "picklistReferenceVerdict",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "class": "SchemaRegistry",
+      "member": "judgePicklistArrival",
+      "card": "#33949",
+      "reason": "first-pass stay (the #33949 split codemod of PR #34285, kept in its branch history, not committed; the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
+    }
+  ],
+  "ceilings": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "baseLines": 11605,
+      "baseCommit": "63db7240aa",
+      "maxLines": 11705,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "baseLines": 6754,
+      "baseCommit": "63db7240aa",
+      "maxLines": 6854,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "baseLines": 9971,
+      "baseCommit": "63db7240aa",
+      "maxLines": 10071,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/objectql/src/registry.ts",
+      "baseLines": 6326,
+      "baseCommit": "c27f4ab0d6",
+      "maxLines": 6426,
+      "ruling": "6897467376"
     }
   ]
 }

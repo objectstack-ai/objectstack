@@ -136,7 +136,7 @@ import {
   omitServerResolvedDefaults,
   optionListDefault,
   resolveSectionGroupReferences,
-} from '@object-ui/plugin-form';
+} from '@object-ui/plugin-form/core';
 // ADR-0059's published door for a host that renders field widgets OUTSIDE the
 // form renderer: `resolveFormWidgetType` + `getLazyFieldWidget` hand back the
 // very component `@object-ui/fields` registers for the form, so a host built on

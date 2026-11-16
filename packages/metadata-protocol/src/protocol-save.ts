@@ -5,7 +5,7 @@
  * migrateStoredMetadata" facet of `ObjectStackProtocolImplementation`: the
  * bodies of `metaTypeNamespaceExists`, `viewContainerNameCollisionRefusal`,
  * `saveMetaItem`, `saveMetaItemUnaudited`, `migrateStoredMetadata` moved out of
- * `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
+ * `protocol.ts` whole (split by #29998 and #30687).
  *
  * A MOVE, not a redesign. `ProtocolSaveFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -46,7 +46,7 @@ import type {
     StoredMigrationTodo,
 } from './stored-migration.js';
 import { droppedWithheldKeyNotices } from './protocol-credential-carry-forward.js';
-import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { flowVerdictBody } from './protocol-flow-save-replay.js';
 import { withParsedStoredActions } from './protocol-stored-action-parse.js';
@@ -333,7 +333,7 @@ export class ProtocolSaveFacet {
     }
 
     /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
+    static async saveMetaItemUnaudited(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'assertRuntimeAuthoringRules' | 'authoredLockFamily' | 'authoringChannel' | 'carryForwardRedactedCredentials' | 'classifyObjectContribution' | 'codeOnlyCreateError' | 'codeOnlyOverrideError' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'emitMetaItemPublished' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'envWritableTypes' | 'externalBindingSaveRefusal' | 'flowCanonicalizeFallbackWarned' | 'flowSaveReplaysRetired' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isWritablePackage' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'readMetaItem' | 'receiptVersion' | 'recordMetadataAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseOverride' | 'refuseUngrammaticalMetaItemName' | 'refuseUnmintableMetaType' | 'registryAllowsOverlay' | 'resolveFlowCanonicalizer' | 'resolveSduiManifest' | 'restoreInjectedColumnEchoes' | 'restoreTranslatedObjectEchoes' | 'restoredCredentialPathsFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runAuthoringGate' | 'runMutationProjector' | 'saveConflict' | 'saveWriteBinding' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storableViewFallbackWarned' | 'storedParentForToken' | 'stripServedObjectColumns' | 'tenantAuthoredWriteRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal' | 'viewContainerNameCollisionRefusal'>, request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -1824,6 +1824,7 @@ export class ProtocolSaveFacet {
                 state: mode === 'draft' ? 'draft' : 'active',
                 body: request.item,
                 ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
+                packageId: request.packageId,
             });
         }
 
@@ -1908,7 +1909,7 @@ export class ProtocolSaveFacet {
         }
         if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-        const artifactBacked = host.isArtifactBacked(singularTypeForRepo, request.name);
+        const artifactBacked = host.isArtifactBacked(singularTypeForRepo, request.name) && !isOwnPermissionSetWrite(host.engine, singularTypeForRepo, request.name, request.packageId);
         // [ADR-0146 D2] An admitted declared override writes the pair's own
         // row; it edits no managed item, so the store judges a runtime write.
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
@@ -2222,6 +2223,43 @@ export class ProtocolSaveFacet {
                 // draft naming none inherits the active rows' package).
                 ...mutationEventPackage(mode === 'draft' && request.packageId == null ? inheritedDraftPackageId : request.packageId),
             });
+            // A position saved straight to active is live the moment this
+            // save lands, exactly as one promoted by the per-item publish door,
+            // and its one boot-cached consumer listens only to the kernel's
+            // `metadata:reloaded`: plugin-security's `renamedFrom` holder carry
+            // (`position-renamed-holder-carry.ts`). So this door signals it the
+            // way that door does — awaited, after the projector and the mutation
+            // event, so the 2xx means the holders of a renamed position were
+            // carried, not merely queued. The host turns the signal into
+            // `{ changed: ['position/NAME'] }` (`ObjectQLPlugin`).
+            //
+            // Position only, on purpose. Every type's active save announcing
+            // would cost a kernel-wide re-sync per save and per item of every
+            // internal caller of this door; the types with a live consumer of a
+            // direct active save (flow, connector, permission, translation)
+            // already hear the mutation event above. The per-item publish and
+            // publish-drafts never reach this line, so neither announces twice.
+            //
+            // Nor do the two BULK package doors that save every item of a
+            // package through this door (`duplicatePackage`, the unmanaged
+            // import): a signal per copied position would be one kernel-wide
+            // re-sync per position, inside one operation. What those doors
+            // carry stays as it was (the next boot); one announcement for the
+            // whole package is the door's to make, never this per-item save's.
+            // Their write face is server-stated, never a caller's. The signal
+            // never rides the cluster channel, so only the origin node announces.
+            if (
+                mode === 'publish'
+                && singularTypeForRepo === 'position'
+                && request.writeFace !== 'package-duplicate'
+                && request.writeFace !== 'package-unmanaged-import'
+            ) {
+                await host.emitMetaItemPublished({
+                    type: singularTypeForRepo,
+                    name: request.name,
+                    organizationId: null,
+                });
+            }
             // [#32527] Ruling 6816429574, letter A: a stored computed field this
             // save added, turned from a formula, or gave a new expression is
             // filled over the object's existing rows now, with the write's own

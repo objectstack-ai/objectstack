@@ -506,6 +506,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     evidence: [{ code: 'const stack: any = authoringRuleUnionStack(config);' }],
     why: '`collectMetadataStats` folds on entry.',
   },
+  'utils/graft-runtime-hooks.ts :: bundle.functions': {
+    reads: 'top-level',
+    why: 're-points the callables `mergeRuntimeModule` wrote onto the artifact bundle\'s top-level `functions` (packages/runtime/src/load-artifact-bundle.ts), the slot `collectBundleFunctions` resolves handlers from; a package body carries no callable.',
+  },
   'utils/i18n-coverage.ts :: config': {
     reads: 'resolved',
     evidence: [

@@ -1755,7 +1755,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private runAuthoringGate(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown;
-        userTextLocales?: readonly (string | undefined)[];
+        userTextLocales?: readonly (string | undefined)[]; packageId?: string | null;
     }): Promise<void> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const readAuthoringGates = () => this.authoringGates;
@@ -4210,7 +4210,9 @@ export class ObjectStackProtocolImplementation implements
      * `409 RESOURCE_CONFLICT`, the holders sorted and the `?package=`
      * prescription), asked of the same resolution
      * ({@link packagelessAddress} at `active`, at the addressed bundle member,
-     * read in full): one answer to one ambiguity. `undefined` for a name one
+     * read in full): one answer to one ambiguity. [#32622] It also carries
+     * its holders as a package-scoped refusal (`refusal.candidates`), so both
+     * transports answer them as `details.candidates`. `undefined` for a name one
      * package holds, none does, or only the package-unbound row does, and for
      * every request that names a package (the caller asks only without one).
      *
@@ -4224,7 +4226,10 @@ export class ObjectStackProtocolImplementation implements
      * `createMetaLayeredAnswer`), ⛔ never inside {@link getMetaItemLayered}:
      * its in-process resolution readers (the security catalog echo, the
      * packaged-permission-set lock gate, `/published`) read the layers of a
-     * name with no package and keep the answer they had.
+     * name with no package and keep the answer they had. [#32914] Those
+     * readers do meet the registry's own refusal of a name two packages
+     * register in code, which {@link getMetaItemLayered} asks as
+     * `getMetaItem` does.
      *
      * [#32354, ADR-0150 D3] While a package is disabled, a name the stored
      * rows of two or more served packages hold beside it is refused here
@@ -4289,6 +4294,10 @@ export class ObjectStackProtocolImplementation implements
      *         layer's MetadataService read reporting `degraded` with nothing
      *         in the registry to answer instead, carrying the failing loaders'
      *         messages on `cause`.
+     * @throws `PackageScopedNameRefusedError` — [#32914, ADR-0150 D3/D5] 409 /
+     *         `RESOURCE_CONFLICT`, naming no package, for a name two or more
+     *         served packages register in code: the registry's own refusal, as
+     *         {@link getMetaItem} throws it, before any layer is read.
      *
      * [#29814] `opts.withDraft` adds the `draft` layer
      * (`GetMetaItemLayeredResponseSchema.draft`): the pending draft row the
@@ -11070,12 +11079,32 @@ export class ObjectStackProtocolImplementation implements
      *         for any item with no history. Without that
      *         asymmetry an outage would be indistinguishable from "these two
      *         versions are identical" (ADR-0110 D3).
+     * @throws {@link PackageScopedNameRefusedError} — 409 /
+     *         `RESOURCE_CONFLICT` (ADR-0150 D3/D4, #33308), for a type stored
+     *         per `(package, name)`, when no `packageId` is named and two or
+     *         more row slots hold the name, or the bare plain read refuses it
+     *         (`details.candidates` naming every holder), before any version
+     *         is read; and when `packageId` names a package that neither
+     *         holds a row of the name nor ships it while another slot holds
+     *         one (`not-held-by-qualifier`). The history and rollback doors'
+     *         rule (`historySlotOf`).
+     * @throws `VERSION_NOT_FOUND` — 404 (#33308), with `packageId`, when an
+     *         explicit version belongs to another holder's slot, or is
+     *         attributed to no package while two hold the name, saying whose
+     *         it is: nothing is compared. With `packageId` the default `to`
+     *         side is that holder's own active row and the default `from`
+     *         side is found among its own versions.
+     * @throws `VALIDATION_ERROR` — 400 (#33308), when `packageId` is named
+     *         on a type not stored per `(package, name)`: refused, never
+     *         accepted and dropped.
      */
     async diffMetaItem(request: {
         type: string;
         name: string;
         fromVersion?: number;
         toVersion?: number;
+        /** [ADR-0150 D3/D4, #33308] The package whose versions to compare (`?package=`); omitted, the name's. */
+        packageId?: string;
     }): Promise<{
         type: string;
         name: string;

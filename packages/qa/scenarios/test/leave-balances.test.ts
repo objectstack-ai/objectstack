@@ -180,7 +180,9 @@ describe('scenario card leave_balances (docs/qa/scenarios/leave_balances.json)',
     expect(run.questions.length).toBeGreaterThanOrEqual(8);
     expect(run.questions.length).toBeLessThanOrEqual(10);
     expect(run.operations.length).toBeGreaterThanOrEqual(4);
-    expect(run.operations.length).toBeLessThanOrEqual(6);
+    // Seven: the six the mid-tier band names, and the ambiguous delete the maintainer's 2026-11-16 ruling
+    // (「点名单条就算确认」) adds so the card still has a write that waits on confirmation.
+    expect(run.operations.length).toBeLessThanOrEqual(7);
     expect(run.countsReason).toBeUndefined();
     // >=3 agent actions, >=1 confirm-gated.
     expect(run.agentActions?.length ?? 0).toBeGreaterThanOrEqual(3);
@@ -190,7 +192,8 @@ describe('scenario card leave_balances (docs/qa/scenarios/leave_balances.json)',
     expect(outcome('file_and_submit_from_text')?.kind).toBe('applied');
     expect(outcome('half_day_on_draft')?.kind).toBe('applied');
     expect(outcome('manager_approves_step_one')?.kind).toBe('applied');
-    expect(outcome('delete_withdrawn_request')).toEqual({ kind: 'pending_confirmation' });
+    expect(outcome('delete_withdrawn_request')?.kind).toBe('applied');
+    expect(outcome('delete_zoes_withdrawn_request')).toEqual({ kind: 'pending_confirmation' });
     expect(outcome('raise_own_entitlement')).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED' });
     expect(outcome('submit_over_balance')).toEqual({ kind: 'refused', code: 'VALIDATION_FAILED' });
   });

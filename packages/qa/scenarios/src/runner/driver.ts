@@ -44,13 +44,18 @@ import { flowRefusalOf } from '../score/scenario-run-grade.js';
 import type { ToolAnswer } from './app.js';
 import { noResult, runTurnProcess } from './drivers/process.js';
 import { WRITE_TOOLS } from './observe.js';
+import { promptChoiceText, statedPromptChoice, type PromptChoice } from './prompts.js';
 import { parseStreamJson, refusalCodeOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
   card: string;
-  /** `scratch` (from nothing) or `template` (from a verified build installed unmanaged). */
-  mode: 'scratch' | 'template';
+  /**
+   * `scratch` (from nothing), `template` (from a verified build installed
+   * unmanaged, then changed) or `ask` (the Run half alone, on a verified build
+   * installed unmanaged; its turns are `run` questions and operations only).
+   */
+  mode: 'scratch' | 'template' | 'ask';
   /** `build`, `iterate`, `run` (the first Run half) or `iterate-run` (the Run half after the iterate). */
   phase: 'build' | 'iterate' | 'run' | 'iterate-run';
   /** A question or operation id; `author` for an authoring turn. */
@@ -64,18 +69,35 @@ export interface StepRef {
    * turn never carries one.
    */
   repeat?: number;
+  /**
+   * The second turn of a `pending_confirmation` operation: the agent asked
+   * first, and this turn carries the person's confirmation. Its key adds one
+   * segment, {@link CONFIRM_KEY_SEGMENT}; the first turn's key is unchanged, so
+   * a recording made without second turns still replays its first turns. Only
+   * an operation turn carries one, and never with {@link repeat}.
+   */
+  confirmation?: true;
 }
 
 /** The key segment an ask after the first adds ({@link stepKey}): `…/account_count/sdr/repeat-2`. */
 const REPEAT_KEY_PREFIX = 'repeat-';
 
+/** The key segment of an operation's confirmation turn ({@link StepRef.confirmation}): `…/remove_ben/sdr/confirm`. */
+export const CONFIRM_KEY_SEGMENT = 'confirm';
+
 /**
  * The replay key of a step: `card/mode/phase/step/persona`, `-` for no
  * persona. A repeated question turn's asks after the first add one segment,
- * `repeat-N` ({@link StepRef.repeat}); the first ask's key is unchanged.
+ * `repeat-N` ({@link StepRef.repeat}); the first ask's key is unchanged. An
+ * operation's confirmation turn adds one segment, `confirm`
+ * ({@link StepRef.confirmation}).
  */
 export const stepKey = (s: StepRef): string => {
   const key = [s.card, s.mode, s.phase, s.step, s.persona ?? '-'].join('/');
+  if (s.confirmation === true) {
+    if (s.repeat !== undefined && s.repeat !== 1) throw new RangeError(`an operation's confirmation turn is never a repeated ask (\`${key}\`)`);
+    return `${key}/${CONFIRM_KEY_SEGMENT}`;
+  }
   if (s.repeat === undefined || s.repeat === 1) return key;
   if (!Number.isInteger(s.repeat) || s.repeat < 1) throw new RangeError(`a step's repeat counts asks from 1, not ${String(s.repeat)} (\`${key}\`)`);
   return `${key}/${REPEAT_KEY_PREFIX}${s.repeat}`;
@@ -477,6 +499,22 @@ export interface Recording {
   turns: Record<string, ParsedTurn>;
   /** Authoring turns' resulting project sources, keyed like `turns`. */
   files: Record<string, Record<string, string>>;
+  /**
+   * The prompt choice the recorded turns were sent (`--lang`, `--prompt`),
+   * when a flag set one; absent ⇒ the default prompts. A replay under
+   * another choice is refused before any card runs
+   * ({@link RecordedDriver.assertPromptChoice}).
+   */
+  promptChoice?: PromptChoice;
+}
+
+/**
+ * Two prompt choices send the same prompts: the same language (no choice is
+ * its own: English, else Chinese, per card text) and the same build prompt
+ * (no choice is `detailed`).
+ */
+export function samePromptChoice(a: PromptChoice | undefined, b: PromptChoice | undefined): boolean {
+  return a?.lang === b?.lang && (a?.prompt ?? 'detailed') === (b?.prompt ?? 'detailed');
 }
 
 export class MissingRecordingError extends Error {
@@ -607,6 +645,23 @@ export class RecordedDriver implements AgentDriver {
     throw new Error(`--ask-repeats ${repeats} replays ${repeats} asks of each question turn, but the recording ${this.source} holds fewer of ${short.length}: ${shown}`);
   }
 
+  /**
+   * Refuse a replay under another prompt choice than the recording was made
+   * with ({@link samePromptChoice}), before any card runs: the recorded turns
+   * answered the prompts the recording was sent, and a replay never sends a
+   * prompt, so the run would grade one choice's answers as another's.
+   */
+  assertPromptChoice(choice: PromptChoice | undefined): void {
+    const made = this.recording.promptChoice;
+    if (samePromptChoice(made, choice)) return;
+    const flags = (c: PromptChoice | undefined) =>
+      [c?.lang !== undefined ? `--lang ${c.lang}` : '', c?.prompt !== undefined ? `--prompt ${c.prompt}` : ''].filter(Boolean).join(' ') || 'neither flag';
+    throw new Error(
+      `the recording ${this.source} was sent ${promptChoiceText(made ?? {})}, and this run asks for ${promptChoiceText(choice ?? {})}: ` +
+        `a replay re-reads the answers to the prompts that were recorded, so replay it with ${flags(made)}`,
+    );
+  }
+
   info(): DriverInfo {
     const made = this.recording.driver;
     // A recording of a replay names the agent of the run it replayed, not the replay.
@@ -678,8 +733,18 @@ export class RecordedDriver implements AgentDriver {
 export class RecordingDriver implements AgentDriver {
   readonly recording: Recording;
 
-  constructor(private readonly inner: AgentDriver) {
-    this.recording = { driver: inner.info(), turns: {}, files: {} };
+  /** `choice`: the prompt choice the run sends, stated on the recording when a flag set one ({@link Recording.promptChoice}). */
+  constructor(
+    private readonly inner: AgentDriver,
+    choice?: PromptChoice,
+  ) {
+    const stated = statedPromptChoice(choice);
+    this.recording = {
+      driver: inner.info(),
+      turns: {},
+      files: {},
+      ...(stated !== undefined ? { promptChoice: stated } : {}),
+    };
   }
 
   info(): DriverInfo {

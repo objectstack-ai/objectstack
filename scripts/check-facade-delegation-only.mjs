@@ -26,7 +26,8 @@
  *
  * ## What it reads
  *
- * `scripts/facade-delegation-registry.json`, two lists:
+ * `scripts/facade-delegation-registry.json`, three lists (the third,
+ * `ceilings`, is § The line ceiling below):
  *
  *   facades     { file, class, card }    a file that has LANDED in facade form,
  *                                        the class in it that is the facade, and
@@ -42,7 +43,7 @@
  * `class` (in a file with one facade the `class` may be left out).
  *
  * The next split adds one `facades` row, and a NEW facade file also adds its
- * path to `DECLARED_WATCH_HINTS` below (the self-test refuses the registry and
+ * `ceilings` row and its path to `DECLARED_WATCH_HINTS` below (the self-test refuses the registry and
  * the declaration disagreeing). ⛔ A file joins only once it is in
  * facade form on `main`, so the gate never reds `main` ahead of a landing: the
  * PR that lands the facade (or the first PR after it) adds the row.
@@ -142,6 +143,36 @@
  *   • an EMPTY `facades` list is legal (nothing has landed yet) and the
  *     success line says, in words, that the gate guards nothing.
  *
+ * ## The line ceiling — a facade file does not grow back (ruling 6897467376 item 2)
+ *
+ * Delegation-only keeps logic out of the facade class, but it does not stop
+ * the FILE growing: each new member is a stub plus its docblock, and measured
+ * over the five days to 63db7240aa `protocol.ts` regrew 178 lines (11,427 →
+ * 11,605) and objectql `engine.ts` 157 (6,597 → 6,754). The maintainer ruled a
+ * line ceiling in the narrow form only, and this gate carries it as a third
+ * list in the same registry:
+ *
+ *   ceilings    { file, baseLines, baseCommit, maxLines, ruling }
+ *                                        one row per registered facade FILE:
+ *                                        its line count measured at
+ *                                        `baseCommit`, the ceiling, and the
+ *                                        ruling record that set it.
+ *
+ *   • a facade file over its `maxLines`                              → red,
+ *     telling the author to put the new code in a new module
+ *   • a registered facade file with no ceiling row                   → red
+ *     (the PR that registers a facade sets its ceiling with it)
+ *   • a ceiling on a file that is not a registered facade            → red
+ *     (the ruling: a file not yet split takes no ceiling)
+ *   • `maxLines` outside `baseLines` … `baseLines + CEILING_MARGIN`  → red
+ *     (a ceiling is the measured count plus the margin, never a number
+ *     picked to fit; a raise re-measures `baseLines` under a new ruling)
+ *   • a missing or malformed field, a second row for one file        → red
+ *
+ * The margin is CEILING_MARGIN, one flat number for every file; why that
+ * number is written beside it. Lines are counted as `wc -l` counts them on a
+ * file that ends in a newline, and a last line without one still counts.
+ *
  * ## What it does NOT judge (measured, so nobody assumes it)
  *
  * Only the members of the registered class. Top-level functions in the facade
@@ -151,8 +182,9 @@
  * head `bba9d24d`: `protocol.ts` holds two top-level functions (24 lines) and
  * one class, and no member of either facade head forwards into its own file.
  *
- * Exit codes: 0 every registered facade is delegation-only (exceptions aside);
- * 1 a body, a registry problem or an unreadable facade; 2 bad arguments;
+ * Exit codes: 0 every registered facade is delegation-only (exceptions aside)
+ * and within its line ceiling; 1 a body, a file over its ceiling, a registry
+ * problem or an unreadable facade; 2 bad arguments;
  * 3 a source that does not parse.
  */
 
@@ -194,11 +226,34 @@ const DECLARED_WATCH_HINTS = [
   'packages/metadata-protocol/src/protocol.ts',
   'packages/objectql/src/engine.ts',
   'packages/drivers/driver-sql/src/sql-driver.ts',
+  'packages/objectql/src/registry.ts',
 ];
 
 const CARD_REF = /^#[1-9][0-9]*$/;
 const FACADE_KEYS = Object.freeze(['file', 'class', 'card']);
 const EXCEPTION_KEYS = Object.freeze(['file', 'class', 'member', 'card', 'reason']);
+const CEILING_KEYS = Object.freeze(['file', 'baseLines', 'baseCommit', 'maxLines', 'ruling']);
+const COMMIT_REF = /^[0-9a-f]{10,40}$/;
+const RULING_REF = /^[1-9][0-9]*$/;
+
+/** The ruling record that named the ceiling and its narrow form. */
+export const CEILING_RULING = '6897467376';
+
+/**
+ * Lines a facade file may grow past its measured count before the gate reds.
+ *
+ * 100, flat. Two readings on 63db7240aa set it. It absorbs the work already in
+ * flight four times over: the largest net addition any open PR makes to a
+ * facade file is +25 lines (objectql `engine.ts`, across four open PRs;
+ * `protocol.ts` +9, `sql-driver.ts` none), so the ceiling does not red a PR
+ * that was reviewed before it existed. And it is small against the regrowth:
+ * about three days at the rate `protocol.ts` (+178) and `engine.ts` (+157)
+ * grew over the last five, so a file that starts growing again meets the
+ * ceiling inside a week instead of after another thousand lines. One number
+ * for every file, because the regrowth is per member (a stub and its
+ * docblock), not proportional to the file's size.
+ */
+export const CEILING_MARGIN = 100;
 
 /** One level of nested call in an argument: `protocolHost(this)`. Two is logic. */
 const MAX_NESTED_CALL_DEPTH = 1;
@@ -207,6 +262,19 @@ export const FIX_LINE =
   'move the body into its facet module and delegate to it in one forwarding call ' +
   '(`return <Facet>.<member>(<host>, ...args)`); a member that cannot move yet takes an ' +
   `exceptions row in ${REGISTRY_FILE} naming the card that will move it`;
+
+export const CEILING_FIX_LINE =
+  'a file in facade form does not grow: put the new code in a new module (a facet file beside ' +
+  'the facade, or a module of its own) and import it from there, instead of adding lines here. ' +
+  `Raising a ceiling is ⛔ MAINTAINER-ONLY: it needs a maintainer ruling (ruling ${CEILING_RULING} ` +
+  'item 2), recorded in the row as its `ruling`, with `baseLines` and `baseCommit` re-measured';
+
+/** Lines as `wc -l` counts them, plus a last line that has no newline. */
+export function countLines(text) {
+  if (text === '') return 0;
+  const n = text.split('\n').length;
+  return text.endsWith('\n') ? n - 1 : n;
+}
 
 // ── The delegation grammar ─────────────────────────────────────────────────
 
@@ -680,21 +748,23 @@ function unknownKeys(row, allowed) {
 
 /**
  * Judge a registry against the files it names.
- * @param {{ facades: unknown[], exceptions: unknown[] }} registry
+ * @param {{ facades: unknown[], exceptions: unknown[], ceilings: unknown[] }} registry
  * @param {(file: string) => string | null} readFile  null = the file does not exist
- * @returns {{ problems: Array<{ where: string, message: string }>, facades: object[], excepted: object[] }}
+ * @returns {{ problems: Array<{ where: string, message: string }>, facades: object[], excepted: object[], ceilings: object[] }}
  */
 export function checkRegistry(registry, readFile) {
   const problems = [];
   const facades = [];
   const excepted = [];
+  const ceilings = [];
   const problem = (where, message) => problems.push({ where, message });
 
-  if (!registry || typeof registry !== 'object' || !Array.isArray(registry.facades) || !Array.isArray(registry.exceptions)) {
-    problem(REGISTRY_FILE, 'the registry must be an object with a `facades` array and an `exceptions` array');
-    return { problems, facades, excepted };
+  if (!registry || typeof registry !== 'object' || !Array.isArray(registry.facades) || !Array.isArray(registry.exceptions) ||
+      !Array.isArray(registry.ceilings)) {
+    problem(REGISTRY_FILE, 'the registry must be an object with a `facades` array, an `exceptions` array and a `ceilings` array');
+    return { problems, facades, excepted, ceilings };
   }
-  const extraTop = unknownKeys(registry, ['facades', 'exceptions']);
+  const extraTop = unknownKeys(registry, ['facades', 'exceptions', 'ceilings']);
   if (extraTop.length) problem(REGISTRY_FILE, `unknown top-level key(s) ${extraTop.join(', ')}`);
 
   const facadeKey = (file, cls) => `${file}\u0000${cls}`;
@@ -799,7 +869,55 @@ export function checkRegistry(registry, readFile) {
       problem(`${f.file}:${m.line}`, `${f.class}.${m.key} holds a body, not a delegation: ${m.why}.\n    fix: ${FIX_LINE}.`);
     }
   }
-  return { problems, facades, excepted };
+
+  checkCeilings(registry.ceilings, classesOfFile, readFile, problem, ceilings);
+  return { problems, facades, excepted, ceilings };
+}
+
+/**
+ * The `ceilings` list (ruling 6897467376 item 2): one row per registered facade
+ * file, none for any other file, each well-formed, and each file within it.
+ */
+function checkCeilings(rows, classesOfFile, readFile, problem, out) {
+  const byFile = new Map();
+  const isCount = (v) => Number.isInteger(v) && v > 0;
+  rows.forEach((row, i) => {
+    const where = `${REGISTRY_FILE} ceilings[${i}]`;
+    if (!row || typeof row !== 'object') return problem(where, 'a row must be an object');
+    const extra = unknownKeys(row, CEILING_KEYS);
+    if (extra.length) problem(where, `unknown key(s) ${extra.join(', ')} (a row carries ${CEILING_KEYS.join(', ')})`);
+    if (typeof row.file !== 'string' || !row.file) return problem(where, 'a row must name its `file`');
+    if (!classesOfFile.has(row.file)) {
+      return problem(where, `${row.file}: a line ceiling applies only to a file already in facade form, and this file is not a registered facade (ruling ${CEILING_RULING} item 2: a file not yet split takes no ceiling). Register the facade first, or delete the row.`);
+    }
+    if (byFile.has(row.file)) return problem(where, `${row.file} has two ceiling rows`);
+    byFile.set(row.file, row);
+    let wellFormed = true;
+    const bad = (message) => { wellFormed = false; problem(where, `${row.file}: ${message}`); };
+    if (!isCount(row.baseLines)) bad(`\`baseLines\` is the file's measured line count, a positive integer; got ${JSON.stringify(row.baseLines)}`);
+    if (!isCount(row.maxLines)) bad(`\`maxLines\` is the ceiling, a positive integer; got ${JSON.stringify(row.maxLines)}`);
+    if (typeof row.baseCommit !== 'string' || !COMMIT_REF.test(row.baseCommit)) {
+      bad(`\`baseCommit\` names the commit \`baseLines\` was measured on, 10 to 40 lowercase hex digits; got ${JSON.stringify(row.baseCommit)}`);
+    }
+    if (typeof row.ruling !== 'string' || !RULING_REF.test(row.ruling)) {
+      bad(`\`ruling\` names the maintainer ruling record that set this ceiling, as its record id (\`${CEILING_RULING}\`); got ${JSON.stringify(row.ruling)}`);
+    }
+    if (isCount(row.baseLines) && isCount(row.maxLines) &&
+        (row.maxLines < row.baseLines || row.maxLines > row.baseLines + CEILING_MARGIN)) {
+      bad(`\`maxLines\` ${row.maxLines} must sit between \`baseLines\` ${row.baseLines} and \`baseLines\` + ${CEILING_MARGIN} (CEILING_MARGIN): a ceiling is the measured count plus the margin, never a number picked to fit. Raising a ceiling is ⛔ MAINTAINER-ONLY: it needs a maintainer ruling, cited as the row's \`ruling\`, with \`baseLines\` and \`baseCommit\` re-measured`);
+    }
+    const text = readFile(row.file);
+    if (text === null) return; // the missing facade file is refused above
+    const lines = countLines(text);
+    out.push({ file: row.file, lines, maxLines: row.maxLines, ruling: row.ruling });
+    if (wellFormed && lines > row.maxLines) {
+      problem(row.file, `is ${lines} lines, over its line ceiling of ${row.maxLines} by ${lines - row.maxLines} (measured ${row.baseLines} at ${row.baseCommit}, plus the margin; ruling ${row.ruling}).\n    fix: ${CEILING_FIX_LINE}.`);
+    }
+  });
+  for (const file of classesOfFile.keys()) {
+    if (byFile.has(file)) continue;
+    problem(file, `registered as a facade but carries no line ceiling (ruling ${CEILING_RULING} item 2). The PR that registers a facade adds its \`ceilings\` row: the file's line count as \`baseLines\`, the commit it was measured on as \`baseCommit\`, \`maxLines\` = \`baseLines\` + ${CEILING_MARGIN}, and \`ruling\` "${CEILING_RULING}".`);
+  }
 }
 
 // ── Self-test ───────────────────────────────────────────────────────────────
@@ -851,17 +969,29 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'N5 an empty registry → GREEN with nothing guarded, never a crash': 1,
   'N6 the committed registry is well-formed against this checkout': 1,
   'N7 the declared watch hints are exactly the committed registry\'s facade files': 1,
+  'C1 a facade file over its line ceiling → RED telling the author to use a new module, raising MAINTAINER-ONLY': 1,
+  'C2 a facade file at its ceiling, with or without a last newline → GREEN, its count reported': 1,
+  'C3 a registered facade file with no ceiling row → RED': 1,
+  'C4 a ceiling on a file that is not a registered facade → RED (a file not yet split takes none)': 1,
+  'C5 a ceiling above its base plus the margin, or below its base → RED': 1,
+  'C6 a ceiling row with a bad count, commit or ruling, an unknown key, or twice for one file → RED': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 38;
+const SELF_TEST_BATTERY_FLOOR = 44;
 
 function selfTest() {
   const FILE = 'pkg/src/facade.ts';
   const facadeOf = (body, extraTop = '') =>
     `${extraTop}export class Facade {\n  private engine: unknown;\n${body}\n  ok(a: string) { return Facet.ok(host(this), a); }\n}\n`;
-  const reg = (facadeRows, exceptions = []) => ({ facades: facadeRows, exceptions });
+  // Every fixture file gets a well-formed ceiling far above its size, so the
+  // delegation cases judge delegation alone; the C rows pass their own.
+  const ceilingFor = (file, baseLines = 1000, extra = {}) =>
+    ({ file, baseLines, baseCommit: '0123456789', maxLines: baseLines + CEILING_MARGIN, ruling: CEILING_RULING, ...extra });
+  const roomyCeilings = (facadeRows) =>
+    [...new Set(facadeRows.map((r) => r?.file).filter((f) => typeof f === 'string' && f))].map((f) => ceilingFor(f));
+  const reg = (facadeRows, exceptions = [], ceilings = roomyCeilings(facadeRows)) => ({ facades: facadeRows, exceptions, ceilings });
   const row = { file: FILE, class: 'Facade', card: '#1' };
-  const run = (text, exceptions = [], rows = [row]) =>
-    checkRegistry(reg(rows, exceptions), (f) => (f === FILE ? text : null));
+  const run = (text, exceptions = [], rows = [row], ceilings = undefined) =>
+    checkRegistry(reg(rows, exceptions, ceilings), (f) => (f === FILE ? text : null));
   const red = (r, re) =>
     r.problems.some((p) => re.test(`${p.where} ${p.message}`))
       ? null
@@ -1064,6 +1194,48 @@ function selfTest() {
         doubled.length === 0 ? null : `DECLARED_WATCH_HINTS names ${doubled.join(', ')} twice`,
       );
     } },
+    { label: 'C1 a facade file over its line ceiling → RED telling the author to use a new module, raising MAINTAINER-ONLY', run: () => {
+      const text = facadeOf('');
+      const lines = countLines(text);
+      const r = run(text, [], [row], [ceilingFor(FILE, lines - 1, { maxLines: lines - 1 })]);
+      if (r.problems.length !== 1) return `expected exactly 1 problem, got ${JSON.stringify(r.problems.map((p) => `${p.where} ${p.message}`))}`;
+      return all(
+        red(r, new RegExp(`^pkg/src/facade\\.ts is ${lines} lines, over its line ceiling of ${lines - 1} by 1 `)),
+        red(r, /fix: a file in facade form does not grow: put the new code in a new module/),
+        red(r, /Raising a ceiling is ⛔ MAINTAINER-ONLY: it needs a maintainer ruling/),
+      );
+    } },
+    { label: 'C2 a facade file at its ceiling, with or without a last newline → GREEN, its count reported', run: () => {
+      const text = facadeOf('');
+      const lines = countLines(text);
+      const atCeiling = [ceilingFor(FILE, lines, { maxLines: lines })];
+      const r = run(text, [], [row], atCeiling);
+      return all(
+        green(r),
+        green(run(text.replace(/\n$/, ''), [], [row], atCeiling)),
+        lines === text.split('\n').length - 1 ? null : `countLines(${JSON.stringify(text)}) = ${lines}, not the wc -l count`,
+        r.ceilings.length === 1 && r.ceilings[0].lines === lines && r.ceilings[0].maxLines === lines ? null : `ceilings ${JSON.stringify(r.ceilings)}`,
+      );
+    } },
+    { label: 'C3 a registered facade file with no ceiling row → RED', run: () =>
+      red(run(facadeOf(''), [], [row], []), /^pkg\/src\/facade\.ts registered as a facade but carries no line ceiling/) },
+    { label: 'C4 a ceiling on a file that is not a registered facade → RED (a file not yet split takes none)', run: () =>
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE), ceilingFor('pkg/src/big.ts')]),
+        /ceilings\[1\] pkg\/src\/big\.ts: a line ceiling applies only to a file already in facade form/) },
+    { label: 'C5 a ceiling above its base plus the margin, or below its base → RED', run: () => all(
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { maxLines: 1000 + CEILING_MARGIN + 1 })]),
+        /`maxLines` \d+ must sit between `baseLines` 1000 and `baseLines` \+ \d+ .*⛔ MAINTAINER-ONLY/),
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { maxLines: 999 })]), /`maxLines` 999 must sit between/),
+    ) },
+    { label: 'C6 a ceiling row with a bad count, commit or ruling, an unknown key, or twice for one file → RED', run: () => all(
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { baseLines: '1000' })]), /`baseLines` is the file's measured line count/),
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { maxLines: 10.5 })]), /`maxLines` is the ceiling, a positive integer/),
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { baseCommit: 'main' })]), /`baseCommit` names the commit/),
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { ruling: undefined })]), /`ruling` names the maintainer ruling record/),
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE, 1000, { max: 3 })]), /ceilings\[0\] unknown key\(s\) max/),
+      red(run(facadeOf(''), [], [row], [ceilingFor(FILE), ceilingFor(FILE)]), /pkg\/src\/facade\.ts has two ceiling rows/),
+      red(checkRegistry({ facades: [], exceptions: [] }, () => null), /a `ceilings` array/),
+    ) },
   ];
 
   const batterySeen = new Map();
@@ -1164,7 +1336,7 @@ function main() {
     console.error(`✗ check-facade-delegation-only: ${loadError}`);
     process.exit(1);
   }
-  const { problems, facades, excepted } = result;
+  const { problems, facades, excepted, ceilings } = result;
 
   if (opts.verbose) {
     for (const f of facades) {
@@ -1176,7 +1348,7 @@ function main() {
   }
 
   if (problems.length > 0) {
-    console.error(`✗ check-facade-delegation-only: ${problems.length} problem(s). A registered facade keeps delegations only (ruling 6624258595 item 3).\n`);
+    console.error(`✗ check-facade-delegation-only: ${problems.length} problem(s). A registered facade keeps delegations only (ruling 6624258595 item 3) and stays within its line ceiling (ruling ${CEILING_RULING} item 2).\n`);
     for (const p of problems) console.error(`  ✗ ${p.where} ${p.message}`);
     process.exit(1);
   }
@@ -1204,8 +1376,11 @@ function main() {
     );
     for (const [shape, n] of [...shapes].sort((a, b) => b[1] - a[1])) console.log(`    ${String(n).padStart(4)}  ${shape}`);
   }
+  for (const c of ceilings) {
+    console.log(`✓ ${c.file}: ${c.lines} lines, ceiling ${c.maxLines} (${c.maxLines - c.lines} left; ruling ${c.ruling})`);
+  }
   const files = new Set(facades.map((f) => f.file)).size;
-  console.log(`✓ check-facade-delegation-only: ${facades.length} facade class(es) in ${files} file(s) hold delegations only, ${excepted.length} named exception(s).`);
+  console.log(`✓ check-facade-delegation-only: ${facades.length} facade class(es) in ${files} file(s) hold delegations only, ${excepted.length} named exception(s); ${ceilings.length} file(s) within their line ceiling.`);
 }
 
 if (isEntrypoint(import.meta.url)) {

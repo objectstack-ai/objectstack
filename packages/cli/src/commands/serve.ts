@@ -76,6 +76,7 @@ import {
   type SeedSuppressionReason,
 } from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
+import { composeSeedSettledMessage } from '../utils/seed-settled-message.js';
 // The deployment's product name, for `AuthPlugin` — the same resolver the email
 // capability's template context reads (`resolveEmailCapabilityArg`), so the two
 // cannot disagree. Both moved to `@objectstack/plugin-email` beside the mail
@@ -118,7 +119,7 @@ import {
   type ListenerProtocol,
 } from '../utils/dev-tls-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
-import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
+import { graftAuthoredRuntimeMembers, isAppPluginLike, type RuntimeGraftResult } from '../utils/graft-runtime-hooks.js';
 // [ADR-0130 D4 / option B, #15006] Every read below that keys off a
 // PACKAGE-OWNED collection goes through this seam, so an option-B artifact
 // (flattened top level gone, `packages[]` carrying everything once) reaches
@@ -908,19 +909,9 @@ export function seedingHasSettled(snapshot: SeedSettlementSnapshot | undefined):
   return !snapshot || snapshot.inFlight === 0;
 }
 
-/** Build the message from the two things the kernel already knows. */
-export function composeSeedSettledMessage(
-  snapshot: SeedSettlementSnapshot | undefined,
-  sources: SeedSourceSummary[] | undefined,
-): SeedSettledMessage {
-  const list = sources ?? [];
-  return {
-    type: 'objectstack:seed-settled',
-    ok: list.every((s) => s.rejected === 0 && (s.droppedRefs ?? 0) === 0 && !s.emptyInstall),
-    suppressed: snapshot ? [...snapshot.suppressed] : [],
-    sources: list,
-  };
-}
+// Built in its own module so a test can drive the verdict without loading
+// this file's composition graph; re-exported here, where it always lived.
+export { composeSeedSettledMessage };
 
 /** What {@link createSeedSettlementAnnouncer} needs from its host. */
 export interface SeedSettlementChannels {
@@ -3876,7 +3867,23 @@ export default class Serve extends Command {
       // order and one story in the boot logs.
       // A config whose code found no app bundle to land on is reported, never
       // dropped (#4095) — on both routes below that graft it.
-      const warnOrphanedRuntimeMembers = (graft: ReturnType<typeof graftAuthoredRuntimeMembers>): void => {
+      const reportRuntimeGraft = (graft: RuntimeGraftResult): void => {
+        // The graft's other loud answer: code of the artifact's runtime module
+        // that the module this boot evaluated does not serve, so it still runs
+        // from that module's separate evaluation and cannot see state the
+        // config's `onEnable` binds. Said once, naming the refs and the remedy.
+        const unbound = graft.unbound ?? [];
+        if (unbound.length > 0) {
+          console.warn(chalk.yellow(
+            `  ⚠ ${unbound.length} handler${unbound.length === 1 ? '' : 's'} of the compiled artifact `
+            + `(${unbound.join(', ')}) ${graft.rebindError
+              ? `could not be matched to ${relativeConfig} (${graft.rebindError})`
+              : `${unbound.length === 1 ? 'has' : 'have'} no counterpart in ${relativeConfig} as this boot evaluated it`}`
+            + `, so ${unbound.length === 1 ? 'it runs' : 'they run'} from ${graft.runtimeModule}, a second evaluation of`
+            + `\n    the same source: module state its onEnable sets is not visible there. Recompile (os compile) so the`
+            + '\n    artifact matches the config.',
+          ));
+        }
         if (graft.orphaned.length === 0) return;
         console.warn(chalk.yellow(
           `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
@@ -3909,6 +3916,16 @@ export default class Serve extends Command {
             // the same module, so nothing served changes; with `--no-compile`
             // the boot serves the artifact, as the warning says.
             //
+            // "One evaluation" is the graft's to keep, not the compile's: the
+            // artifact's callables arrive from its compiled runtime module, an
+            // esbuild bundle of this same source and so a SECOND evaluation of
+            // it, and grafting the module's `onEnable` beside them put state
+            // `onEnable` binds at module scope out of every handler's reach (a
+            // job reading it failed each run while `os start` served it).
+            // `graftAuthoredRuntimeMembers` re-points those callables at the module's own,
+            // ref for ref, so `onEnable` and every handler share one evaluation;
+            // a ref the module no longer serves is announced, never left silent.
+            //
             // An artifact that does not load (malformed, unreadable) leaves the
             // module as the wrap's bundle, as before — `loadArtifactBundle`
             // has already said why, and the door, reading the same bytes,
@@ -3932,7 +3949,7 @@ export default class Serve extends Command {
               // Grafted onto THIS wrap only: the host's own `plugins[]` may hold
               // other apps, and the module's code belongs to the bundle it was
               // compiled into.
-              warnOrphanedRuntimeMembers(graftAuthoredRuntimeMembers([wrap], config));
+              reportRuntimeGraft(await graftAuthoredRuntimeMembers([wrap], config));
               // The ready banner names the file the metadata came from (#21501).
               configBootBundle = path.relative(process.cwd(), devArtifactDoorPath) || devArtifactDoorPath;
             }
@@ -3960,8 +3977,12 @@ export default class Serve extends Command {
         // — that silent drop is what hid this.
         // Success is silent: on the config-boot path this is now the normal
         // route by which handlers reach the engine, and the observable proof is
-        // that the actions dispatch.
-        warnOrphanedRuntimeMembers(graftAuthoredRuntimeMembers(plugins, config));
+        // that the actions dispatch. The standalone stack's bundle got its
+        // callables from the artifact's runtime module, a second evaluation of
+        // this source, so the graft also re-points them at the module's own
+        // (`graftAuthoredRuntimeMembers`): the `onEnable` grafted here and every handler
+        // then share one module evaluation, as the wrap above gives a host.
+        reportRuntimeGraft(await graftAuthoredRuntimeMembers(plugins, config));
       }
 
       // 3b. Auto-register I18nServicePlugin if config contains translations/i18n

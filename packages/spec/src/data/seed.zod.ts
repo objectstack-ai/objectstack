@@ -313,6 +313,39 @@ export const SeedSchema = lazySchema(() => strictObject({
     .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
 
   /**
+   * Load-Order Dependencies
+   *
+   * The objects this dataset must be loaded after, by object name — for a
+   * dependency no field expresses: most often a lifecycle hook on this object
+   * (`beforeInsert`) that reads another seeded object while the row is
+   * written, e.g. a rating scored from seeded bands:
+   * `defineSeed(CustomerRating, { dependsOn: ['crm_rating_band'], records })`.
+   *
+   * A load orders its datasets by the dependency graph of their objects:
+   * a `lookup` / `master_detail` / `user` field already makes its object load
+   * after the one it points at, and the order the datasets are written in
+   * only breaks ties between objects ready at the same moment. Each name here
+   * adds one more edge to that same graph, so this dataset's object lands
+   * after the named object's rows. A dataset that declares none keeps the
+   * order the fields alone give.
+   *
+   * Every name must be an object another dataset of the same load seeds. The
+   * loader refuses the whole load, writing no row, when a name is this
+   * dataset's own object, when no dataset of the load seeds it (a misspelling,
+   * or a dataset that `env` / `locale` scoped out of this load), or when the
+   * edge closes a cycle with the other edges (lookup fields included). A cycle
+   * made of lookup fields alone is still loaded in several passes, as before.
+   * `defineSeed` refuses a dataset that names its own object when it runs.
+   */
+  dependsOn: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/)).optional()
+    .describe(
+      'Objects (by name) this dataset loads after, for an order no lookup field gives — e.g. a beforeInsert ' +
+      'hook that reads another seeded object. Each name adds an edge to the load\'s dependency graph. The load ' +
+      'is refused, writing nothing, when a name is the dataset\'s own object, is not seeded by another dataset of ' +
+      'the same load, or closes a cycle with the other edges. Omitted, the order comes from lookup fields alone.',
+    ),
+
+  /**
    * The Payload
    * Array of raw JSON objects matching the Object Schema.
    *
@@ -541,6 +574,9 @@ function assertSeedFilesOnFileFields(
  * The keys of {@link SeedSchema.shape.columns} are held to the same set, both
  * times ({@link SeedColumns}).
  *
+ * A `dependsOn` that names the dataset's own object is refused when it runs
+ * ({@link SeedSchema.shape.dependsOn}).
+ *
  * A `seedFile(path)` value is refused when it runs on a field that is not a
  * file field (`file`, `image`, `avatar`, `video`, `audio`) — see
  * {@link SeedSchema.shape.files} for how the bytes reach the loader.
@@ -573,5 +609,24 @@ export function defineSeed<
   const seed = SeedSchema.parse({ ...config, object: objectDef.name });
   assertSeedKeysDeclared(objectDef, seed.records, seed.columns);
   assertSeedFilesOnFileFields(objectDef, seed.records);
+  assertSeedNotDependingOnItself(objectDef, seed.dependsOn);
   return seed;
+}
+
+/**
+ * The call-time half of the load's `dependsOn` refusals: the one a dataset
+ * can be judged on alone. A dataset that names its own object asks to load
+ * after itself, which no order satisfies. The other two refusals (a name no
+ * dataset of the load seeds, an edge that closes a cycle) need the whole load,
+ * so only the seed loader can make them.
+ */
+function assertSeedNotDependingOnItself(
+  objectDef: { name: string },
+  dependsOn: readonly string[] | undefined,
+): void {
+  if (!dependsOn?.includes(objectDef.name)) return;
+  throw new Error(
+    `defineSeed('${objectDef.name}'): dependsOn names the dataset's own object '${objectDef.name}'. ` +
+      'A dataset cannot load after itself: list the other seeded objects its hooks read, or drop the entry.',
+  );
 }

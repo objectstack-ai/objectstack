@@ -169,6 +169,7 @@ import {
   resolveTwoFactorAccountLockout,
   settleSignInAttempt,
   stampLastLogin,
+  type PasswordSignInDoor,
   type SignInLockoutHost,
   type SignInOutcome,
   type SignInSettlement,
@@ -300,6 +301,7 @@ import {
   type SignOutAuthContext,
   type SsoSignOutDeps,
 } from './sso-sign-out-of-idp.js';
+import { trustingBodyNamedOrigins } from './sso-discovery-companion-origins.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 import {
@@ -318,9 +320,11 @@ import {
 // with it.
 import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
+import { publicBaseUrlOf } from './public-base-url.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
 import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
 import type { OrganizationBoundaryJudge } from './scim-group-projection.js';
+import type { OidcAuthorizeGateAnswer, OidcAuthorizeGateRefusal } from './oauth-authorize-refusal.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -968,8 +972,13 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * may only obtain a code for an env client (`project_<envId>`) of an org
    * they belong to. Unset (open editions / self-host, where the OP is not a
    * multi-tenant issuer) = allow. Host is expected to fail CLOSED on error.
+   *
+   * In place of `false` the gate may answer an {@link OidcAuthorizeGateRefusal}
+   * (`{ allowed: false, reason, message }`) to say why: the refusal then
+   * carries the reason and the host's sentence to the caller
+   * (`oauth-authorize-refusal.ts`). A boolean is answered as it always was.
    */
-  oidcAuthorizeGate?: (params: { userId: string; clientId: string }) => boolean | Promise<boolean>;
+  oidcAuthorizeGate?: (params: { userId: string; clientId: string }) => OidcAuthorizeGateAnswer | Promise<OidcAuthorizeGateAnswer>;
 
   /**
    * The host's own check on `POST /organization/delete`: answer a
@@ -2219,7 +2228,6 @@ export class AuthManager {
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoDomainVerificationEnabled: (...a) => this.isSsoDomainVerificationEnabled(...a),
-      isSsoWired: (...a) => this.isSsoWired(...a),
       isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       linkingContext: (...a) => this.linkingContext(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
@@ -4451,6 +4459,12 @@ export class AuthManager {
    * (`judgeSignOutOfIdpCapability`, ruling record 6866334319). An OIDC
    * endpoint it read is kept for the after-hook, which stores it once the
    * vendor's write landed.
+   *
+   * Its verdict on the OIDC logout endpoint is a validation of the provider
+   * the body names, so that verdict alone trusts the origins that body names
+   * (`ssoDiscoveryTrustedOrigins`) beside the configured ones, on both doors.
+   * The discovery read it makes keeps the configured trust, and the request's
+   * own origin check never sees them (`sso-discovery-companion-origins.ts`).
    */
   private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
     const path = ctx?.path;
@@ -4477,6 +4491,10 @@ export class AuthManager {
       stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
       body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
       isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+      isTrustedLogoutOrigin: trustingBodyNamedOrigins(
+        (url) => context.isTrustedOrigin(url),
+        await this.ssoDiscoveryTrustedOrigins(ctx.body),
+      ),
     });
     if (!verdict.ok) {
       const { APIError } = await import('better-auth/api');
@@ -5857,6 +5875,7 @@ export class AuthManager {
     };
     const termsUrl = resolveLegalUrl(rawTermsUrl, DEFAULT_TERMS_URL);
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
+    const publicBaseUrl = publicBaseUrlOf(this.getCanonicalOrigin());
 
     const turnstileKeys = resolveTurnstileKeys();
     const organizationEditions = this.resolveOrganizationEditions(request);
@@ -5947,6 +5966,11 @@ export class AuthManager {
       ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
+      // The public base URL every emailed / OAuth link is built on
+      // (`getCanonicalOrigin`), reduced to its address, so the console's
+      // mobile-app connect code never reads `window.location` for it
+      // (registered in PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(publicBaseUrl ? { publicBaseUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge
       // is wired (both keys set; the resolver `buildPluginList()` mounts the
       // plugin from). The secret is never part of this payload.
@@ -6103,24 +6127,27 @@ export class AuthManager {
   }
 
   /**
-   * Extra `trustedOrigins` entries derived from an external-SSO registration
-   * request. For a `POST /sso/register` | `/sso/update-provider`, parse the
-   * (cloned) body and return the PUBLIC-ROUTABLE origins of the declared
-   * `issuer` / `oidcConfig` endpoints so `@better-auth/sso`'s discovery
-   * validation accepts a customer IdP registered at runtime (ADR-0135 D6) without
-   * the operator pre-listing it in boot config. Only public-routable hosts are
-   * returned — private / internal / loopback hosts are never auto-trusted
-   * (better-auth's `isPublicRoutableHost`, the same predicate its own
-   * sub-endpoint check uses). Best-effort: any parse error yields `[]`.
+   * The origins an external-SSO register or update body names, trusted for
+   * that provider's discovery fetch and validation only (ADR-0135 D6: a
+   * customer IdP registers at runtime without the operator pre-listing it in
+   * boot config). `body` is the vendor endpoint's parsed `/sso/register` or
+   * `/sso/update-provider` body; the answer is the PUBLIC-ROUTABLE origins of its `issuer` and every explicit
+   * `oidcConfig` endpoint. Private / internal / loopback hosts are never
+   * trusted this way (better-auth's `isPublicRoutableHost`, the same predicate
+   * its own sub-endpoint check uses). Best-effort: anything unreadable yields
+   * `[]`.
+   *
+   * ⛔ Never an accepted `Origin`: the request's own origin check reads the
+   * deployment's configured trusted origins alone. This list reaches two
+   * server-side checks of that provider only: the vendor's register endpoint
+   * (the global before-hook hands it to that endpoint's context, after the
+   * origin check has run) and the sign-out capability check's verdict on the
+   * provider's logout endpoint, on register and update
+   * (`assertSsoSignOutOfIdpSupported`); see
+   * `sso-discovery-companion-origins.ts`.
    */
-  private async ssoDiscoveryTrustedOrigins(request: unknown): Promise<string[]> {
+  private async ssoDiscoveryTrustedOrigins(body: unknown): Promise<string[]> {
     try {
-      const req = request as { url?: string; method?: string; clone?: () => Request } | undefined;
-      if (!req || typeof req.clone !== 'function' || !req.url) return [];
-      if ((req.method ?? 'GET').toUpperCase() !== 'POST') return [];
-      const path = new URL(req.url).pathname;
-      if (!/\/sso\/(register|update-provider)$/.test(path)) return [];
-      const body = await req.clone().json().catch(() => null);
       if (!body || typeof body !== 'object') return [];
       const oidc = (body as any).oidcConfig ?? {};
       const candidates = [
@@ -7157,7 +7184,7 @@ export class AuthManager {
    * resolves the identifier to ({@link findSignInAccount}), so they hold for
    * every spelling of the address that signs in to that account.
    */
-  private admitSignInAttempt(email: string, ctx?: unknown): Promise<void> {
+  private admitSignInAttempt(email: string, ctx?: unknown, door?: PasswordSignInDoor): Promise<void> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
     const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
@@ -7166,7 +7193,7 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return admitSignInAttempt.call(host, email, ctx);
+    return admitSignInAttempt.call(host, email, ctx, door);
   }
 
   /**
@@ -7193,7 +7220,7 @@ export class AuthManager {
    * transition the `account_locked` row records, so a lock that was never
    * written is never reported as one.
    */
-  private settleSignInAttempt(email: string, outcome: SignInOutcome): Promise<SignInSettlement> {
+  private settleSignInAttempt(email: string, outcome: SignInOutcome, door?: PasswordSignInDoor): Promise<SignInSettlement> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
     const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
@@ -7202,7 +7229,7 @@ export class AuthManager {
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return settleSignInAttempt.call(host, email, outcome);
+    return settleSignInAttempt.call(host, email, outcome, door);
   }
 
   /**
@@ -7241,6 +7268,7 @@ export class AuthManager {
     ctx: any,
     email: string,
     settlement: SignInSettlement,
+    door?: PasswordSignInDoor,
   ): Promise<void> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const readConfig = () => this.config;
@@ -7248,7 +7276,7 @@ export class AuthManager {
       get config() { return readConfig(); },
       resolveSignInAccountId: (...a) => this.resolveSignInAccountId(...a),
     };
-    return auditRefusedSignIn.call(host, ctx, email, settlement);
+    return auditRefusedSignIn.call(host, ctx, email, settlement, door);
   }
 
   /**
@@ -7257,14 +7285,14 @@ export class AuthManager {
    * row names the account the credential check actually judged and the lock
    * gate and counter hold.
    */
-  private resolveSignInAccountId(email: string): Promise<string | undefined> {
+  private resolveSignInAccountId(email: string, door?: PasswordSignInDoor): Promise<string | undefined> {
     // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
     const host: Pick<SignInLockoutHost, 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
       findSignInAccount: (...a) => this.findSignInAccount(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
     };
-    return resolveSignInAccountId.call(host, email);
+    return resolveSignInAccountId.call(host, email, door);
   }
 
   /**

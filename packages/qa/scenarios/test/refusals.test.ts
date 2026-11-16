@@ -80,7 +80,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
-  ['a seed thinner than minFieldsPerObject', (c) => { c.expect.minFieldsPerObject = 4; c.run.seed.contact[0].phone = '555'; }, 'run.seed.account', /3 field\(s\), fewer than expect.minFieldsPerObject = 4/],
+  ['a seed thinner than minFieldsPerObject', (c) => { c.expect.minFieldsPerObject = 5; Object.assign(c.run.seed.contact[0], { phone: '555', title: 'CTO' }); }, 'run.seed.account', /4 field\(s\), fewer than expect.minFieldsPerObject = 5/],
   // ── questions ──
   ['a field no seed row carries (no truth computed from a typo)', (c) => (c.run.questions[0].truth.filter[0].field = 'industri'), 'run.questions[0].truth.filter[0].field', /no seed row of `account` carries `industri`/],
   ['a topN whose cut-off falls inside a tie', (c) => (q(c, 'best_covered_account').truth.n = 2), 'run.questions[3].truth.n', /inside a tie/],
@@ -126,7 +126,8 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   // ── reach: an operation its acting persona cannot reach has one outcome ──
   ['an applied create writing a field the persona must not read', (c) => (op(c, 'add_contact').values.email = 'fay@bitworks.test'), 'run.operations[0].outcome', /`sdr` must not read `contact.email`.*`PERMISSION_DENIED`/],
   ['an applied update on a row outside the persona\'s row scope', (c) => (op(c, 'move_eli').target = 'ct4'), 'run.operations[1].outcome', /row `ct4` is outside `sdr`'s row scope on `contact`.*`RECORD_NOT_FOUND`/],
-  ['a pending delete on a row outside the persona\'s row scope', (c) => (op(c, 'remove_ben').target = 'ct3'), 'run.operations[2].outcome', /row `ct3` is outside `sdr`'s row scope.*`RECORD_NOT_FOUND`/],
+  ['a pending delete on a row outside the persona\'s row scope', (c) => (op(c, 'remove_tech_contact').target = 'ct3'), 'run.operations[5].outcome', /row `ct3` is outside `sdr`'s row scope.*`RECORD_NOT_FOUND`/],
+  ['an applied delete on a row outside the persona\'s row scope', (c) => (op(c, 'remove_ben').target = 'ct3'), 'run.operations[2].outcome', /row `ct3` is outside `sdr`'s row scope.*`RECORD_NOT_FOUND`/],
   ['a validation refusal on a field the persona must not read', (c) => (op(c, 'contact_bad_email').actingAs = 'sdr'), 'run.operations[3].outcome.code', /`sdr` must not read `contact.email`.*`PERMISSION_DENIED`/],
   ['a refusal code other than the hidden object\'s', (c) => (op(c, 'partner_edits_account').outcome.code = ErrorCode.parse('RECORD_NOT_FOUND')), 'run.operations[4].outcome.code', /`partner_user` must not read `account`.*`PERMISSION_DENIED`/],
   // ── guardrails ──
@@ -141,7 +142,7 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a disclosed field no seed row carries', (c) => (c.run.guardrails[4].forbids = { discloses: { object: 'contact', field: 'phone' } }), 'run.guardrails[4].forbids.discloses.field', /no seed row of `contact` carries `phone`/],
   ['a disclosed field with one distinct value, which no reply can carry twice', (c) => c.run.seed.contact.forEach((r: { email: string }) => (r.email = 'team@acme.test')), 'run.guardrails[4].forbids.discloses.field', /fewer than two distinct seeded values/],
   // ── counts, agent actions, iterate ──
-  ['fewer than 8 questions without a stated reason', (c) => c.run.questions.pop(), 'run.countsReason', /7 questions \/ 5 operations is below the default 8 \/ 4/],
+  ['fewer than 8 questions without a stated reason', (c) => c.run.questions.splice(7), 'run.countsReason', /7 questions \/ 6 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],
   ['an agent action on an unexpected object', (c) => (c.run.agentActions[0].object = 'lead'), 'run.agentActions[0].object', /`lead` is not in expect.objects/],
   ['an iterate delta that re-adds an expected object', (c) => (c.iterate.expectDelta = { objects: ['account'] }), 'iterate.expectDelta.objects[0]', /already in expect.objects/],
@@ -367,8 +368,10 @@ describe('the gallery floor (tier starter | delivery)', () => {
     c.expect.selectFields.push({ object: 'activity', field: 'kind', minOptions: 1 });
     c.run.personas[1].scope = [{ object: 'activity', field: 'kind', value: 'call' }];
     c.run.personas[1].record = { object: 'contact', id: 'ct3' };
-    // 5 → 4 operations (no guardrail names this one); 8 questions and 3 agent actions already sit on the floor.
-    c.run.operations = c.run.operations.filter((o: { id: string }) => o.id !== 'partner_edits_account');
+    // 6 → 4 operations (no guardrail names these two); 3 agent actions already sit on the floor.
+    c.run.operations = c.run.operations.filter((o: { id: string }) => o.id !== 'partner_edits_account' && o.id !== 'remove_ben');
+    // 14 → 8 questions: the card's first eight.
+    c.run.questions.splice(8);
   };
   const below = (mutate: (c: RawCard) => void, tier: 'starter' | 'delivery' = 'starter') => (c: RawCard) => {
     atFloor(tier)(c);

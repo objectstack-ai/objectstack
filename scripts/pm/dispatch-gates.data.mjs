@@ -513,6 +513,13 @@ export const COMPOUND_ANCHOR_LEDGER = [
  * in the rule text — the same population claim, on a second governed file. The
  * one `self-test-reads` line names both paths, so a card touching either file
  * derives `check:pm-record-recognisers`.
+ *
+ * ## The seventh row: the claim template's `Thread session:` pin
+ *
+ * The same self-test reads pm-dispatch `SKILL.md` to pin the claim template's
+ * one `Thread session:` line against the reader that lists a card thread on
+ * its seat's roster — the same population claim, on a third governed file,
+ * named on the same `self-test-reads` line.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
@@ -539,6 +546,11 @@ export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({
     script: 'scripts/pm/record-recognisers.mjs',
     file: '.claude/skills/pm-dispatch/references/contract-review.md',
+    declared: true,
+  }),
+  Object.freeze({
+    script: 'scripts/pm/record-recognisers.mjs',
+    file: '.claude/skills/pm-dispatch/SKILL.md',
     declared: true,
   }),
 ]);
@@ -1317,7 +1329,7 @@ export const UI_SCRIPTS_SUITE_ROOTS = Object.freeze([
  * recall expires. The model tier had the same shape and had not been fixed: the
  * PM recalled the mandatory roots and wrote free prose into the claim comment's
  * `Container & model` line. Measured incident: a card whose surface included
- * `.claude/skills/pm-dispatch/references/review-checklist.md` was claimed as
+ * `.claude/skills/pm-dispatch/references/review-checklist.md` (since renamed `l1-review-checklist.md`) was claimed as
  * "not under the fable-mandatory roots" and dispatched at opus. One
  * misclassification sentence flowed unchecked from claim to dispatch to model
  * choice, and only a downstream seat's skepticism caught it — at PR time, after

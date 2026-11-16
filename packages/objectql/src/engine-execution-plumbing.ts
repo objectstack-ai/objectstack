@@ -34,7 +34,7 @@
  * move.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30341),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  */
@@ -143,17 +143,35 @@ export function buildSession(execCtx?: ExecutionContext): HookContext['session']
  * write authorizes as the impersonated user, so the administrator at the
  * keyboard reaches the audit writer here and never through `session`, where
  * every caller-gating hook would read the administrator as the caller.
+ *
+ * `performedByAgentId`, `performedByConversationId` and
+ * `performedByConfirmationId` ride it on the reasoning of
+ * `performedByClientId`: the server-constructed in-product AI path writes AS
+ * the signed-in person, so the AI that performed the write reaches the audit
+ * writer here, never through `session` (ADR-0090 D10 rule 4, as the owner's
+ * ruling on objectstack-ai/cloud#3826 reads it; #33786). Each is copied from
+ * its `ExecutionContext.performedBy` sibling and nothing else.
  */
 export function buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
   const flowRunId = (execCtx as any)?.flowRunId;
   const attributedUserId = (execCtx as any)?.attributedUserId;
-  const performedByClientId = (execCtx as any)?.performedBy?.clientId;
+  const performedBy = (execCtx as any)?.performedBy;
+  const performedByClientId = performedBy?.clientId;
+  const performedByAgentId = performedBy?.agentId;
+  const performedByConversationId = performedBy?.conversationId;
+  const performedByConfirmationId = performedBy?.confirmationId;
   const impersonatedBy = (execCtx as any)?.impersonatedBy;
-  if (!flowRunId && !attributedUserId && !performedByClientId && !impersonatedBy) return undefined;
+  if (
+    !flowRunId && !attributedUserId && !performedByClientId && !performedByAgentId
+    && !performedByConversationId && !performedByConfirmationId && !impersonatedBy
+  ) return undefined;
   return {
     ...(flowRunId ? { flowRunId: String(flowRunId) } : {}),
     ...(attributedUserId ? { attributedUserId: String(attributedUserId) } : {}),
     ...(performedByClientId ? { performedByClientId: String(performedByClientId) } : {}),
+    ...(performedByAgentId ? { performedByAgentId: String(performedByAgentId) } : {}),
+    ...(performedByConversationId ? { performedByConversationId: String(performedByConversationId) } : {}),
+    ...(performedByConfirmationId ? { performedByConfirmationId: String(performedByConfirmationId) } : {}),
     ...(impersonatedBy ? { impersonatedBy: String(impersonatedBy) } : {}),
   };
 }

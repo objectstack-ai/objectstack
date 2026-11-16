@@ -4487,6 +4487,15 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
+    'On those picker fields a `lookupFilters[].value.$record` path is judged too, against the record ' +
+      'being edited: a field of the object that owns the picker field, or at most one relationship hop ' +
+      'from it (a ' +
+      'relationship field of that object, then a field of the object it references, as in ' +
+      '`account.cb_market`). The picker is declared to swap that value into its query and to leave ' +
+      'an entry out while the value is empty, so a path the record does not have would drop the filter ' +
+      'without a word. A miss names the segment: an unknown head, ' +
+      'a hop through a field that is not a relationship, a leaf the referenced object lacks, or a ' +
+      'second hop. A `$record` nested inside a literal value is not a reference and is not judged.',
     'A summary field\'s `summaryOperations.filter` is judged against the CHILD object ' +
       '`summaryOperations.object` names: the engine ANDs it with the parent-FK match and runs it as the ' +
       'query on that child, so every key (inside `$and` / `$or` / `$not` groups) is a field of the child. ' +
@@ -6170,9 +6179,13 @@ const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
       'and the finding names that locale.',
     'An error at `os build`, `os validate`, `os lint` and the metadata publish door. At the door a write of ' +
       'another object is never refused for a clash a stored object carries, while saving the object itself is ' +
-      'refused until its clash is fixed; nothing on the boot path runs the rule, so an installed app keeps ' +
+      'refused until its clash is fixed. An `object_extension` publish is refused for a clash the fields it ' +
+      'adds create on the object it extends, two of its own fields included, judged on that object as it will be served, and never for one ' +
+      'the object already carried, nor for what is left of one after the extension took a field out of it. ' +
+      'Nothing on the boot path runs the rule, so an installed app keeps ' +
       'loading. To fix it, give each ' +
-      'visible field its own label (in the translation bundle too, when only a translation clashes), set ' +
+      'visible field its own label (in the translation bundle too, when only a translation clashes; the publish ' +
+      'door reads no bundle, the build does), set ' +
       '`hidden: true` on the field readers should not see, or drop the duplicate and use the platform\'s column.',
   ],
 };

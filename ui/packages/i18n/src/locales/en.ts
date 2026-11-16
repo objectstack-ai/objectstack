@@ -1039,6 +1039,7 @@ const en = {
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
       succeededRecords: 'Records that succeeded',
+      aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -2389,6 +2390,9 @@ const en = {
       // would have left a single translated string among a dozen hardcoded
       // ones — and deferred them to this card, which converts the screen whole.
       cryptoRefusalTitle: 'This deployment cannot encrypt secrets',
+      platformManagedTitle: 'Managed by the platform',
+      platformManagedBody: 'The hosting platform provides and configures this for this environment, so it is not set here.',
+      aiProviderManaged: 'The AI provider, its model and credentials are managed by the platform.',
       // `{{subject}}` is rendered as a `< code >` element by the view, so the
       // sentence is split around it rather than interpolated.
       cryptoRefusalSubjectSuffix: 'is declared encrypted, so nothing was written.',
@@ -2532,6 +2536,8 @@ const en = {
         done: 'An AI assistant or API key of yours is connected.',
         action: 'Connect',
       },
+      firstApp: { title: 'Put your first app in', todo: 'No app of your own yet. Install one from the marketplace or build one, and it shows on Home.', done: 'An app of your own is on Home.' },
+      firstRecord: { title: 'Add your first record', todo: 'Nobody has created a record in your apps yet.', done: 'A record was created in your apps.', action: 'Open app' },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -3278,6 +3284,7 @@ const en = {
         retry: "Continue with single sign-on",
       },
       ssoHandoff: 'Continue to {{target}}',
+      ssoHandoffClient: "Sign in to continue to {{clientName}}",
       // Phone/OTP sign-in labels. `LoginForm` interpolates `{seconds}` with a
       // literal `.replace('{seconds}', …)` of its own (in `LoginForm`),
       // so those SINGLE braces must survive translation — i18next never sees
@@ -3395,6 +3402,8 @@ const en = {
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
+        ssoAccessDeniedNotMember: "The account you signed in with is not a member of this environment's organization. Sign in with an account that is, or ask an administrator of the organization to invite you.",
+        ssoAccessDeniedInvitationPending: "You have been invited to this environment's organization, but the invitation has not been accepted yet. Accept the invitation from your email, then sign in again.",
         ssoSwitchAccount: "Switch account",
         ssoBackToConsole: "Back to console",
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
@@ -3701,6 +3710,14 @@ const en = {
       granted: 'Access granted',
       denied: 'Access denied',
       noRedirect: 'No redirect URL returned by the server.',
+      // Shown in place of the consent card after a decision whose redirect is
+      // not `http(s)` (a native app's custom scheme): the tab stays here while
+      // the operating system opens the app. `{{appName}}` is the registered
+      // name; the Unnamed forms are used when the client was not identified.
+      returnToApp: 'Return to {{appName}} to continue. You can close this tab.',
+      returnToUnnamedApp: 'Return to the application to continue. You can close this tab.',
+      openApp: 'Open {{appName}}',
+      openUnnamedApp: 'Open the application',
       failed: 'Consent failed',
       footer: 'You can revoke access at any time from your account settings.',
     },
@@ -3794,6 +3811,9 @@ const en = {
     keyboardShortcuts: 'Keyboard shortcuts',
     onlineDocs: 'Online documentation',
     loadingDocumentation: 'Loading documentation',
+    docConflictTitle: 'Choose a package',
+    docConflictDescription: 'More than one installed package provides a document named {{name}}. Open the one you want to read.',
+    docConflictCandidates: 'Packages that provide this document',
     documentation: 'Documentation',
     uncategorized: 'Uncategorized',
     about: 'About',
@@ -4893,13 +4913,11 @@ const en = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
     modelPicker: {
@@ -4965,6 +4983,7 @@ const en = {
       get_metadata_schema: 'Read the metadata format',
       get_package: 'Look at the package',
       get_record_history: 'Read the record history',
+      list_flow_runs: 'Check automation runs',
       list_metadata: 'List the existing metadata',
       list_objects: 'List the existing objects',
       list_packages: 'List the existing packages',
@@ -5991,6 +6010,25 @@ const en = {
     sourceRequired: 'A {{kind}} page requires a non-empty {{source}}.',
     loading: 'Loading react runtime…',
     error: 'React page error',
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Mobile App",
+    subtitle: "Connect the ObjectOS mobile app to this server",
+    scanHint: "Open the ObjectOS mobile app and scan this code to connect it to this server.",
+    qrAlt: "QR code that connects the ObjectOS mobile app to this server",
+    linkLabel: "Connection link",
+    copy: "Copy link",
+    copied: "Link copied",
+    privacy: "The code holds only this server's address, never your account.",
+    loadFailed: "Could not read this server's public address. Reload the page to try again.",
+    unreachableTitle: "A phone cannot reach this server's address",
+    unreachableBody: "This server's address is {{address}}, a local or private address a phone cannot open, so no code is shown. Set {{setting}} on the server to its public address, for example {{example}}, and restart it.",
+    insecureTitle: "This server's address does not use HTTPS",
+    insecureBody: "This server's address is {{address}}. The mobile app signs in through it, so it must use HTTPS, and no code is shown. Serve this server over HTTPS, set {{setting}} to its https:// address, for example {{example}}, and restart it.",
+    unpublishedTitle: "This server does not publish its public address",
+    unpublishedBody: "No code is shown: this server does not offer its public address to the mobile app yet. Update the server to a version that does.",
   },
 } as const;
 

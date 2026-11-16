@@ -359,6 +359,7 @@ import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
+import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import {
   AppNavCanvas,
   heldNavEntriesOf,
@@ -10369,6 +10370,14 @@ export function AccessPillar({
     />
   );
 
+  // A suggestion names its set by machine name only; the banner, its toasts
+  // and its state lines name it by the label the rail shows for that set
+  // (`ux-conventions.labels-over-machine-names`). The suggestions listed here
+  // are this package's own sets, which the rail read; a set the rail does not
+  // hold, or one with no label, is named by its machine name.
+  const suggestedSetLabel = (s: SuggestedBinding): string =>
+    perms.find((p) => p.name === s.permission_set_name)?.label || s.permission_set_name;
+
   return (
     <div className="flex h-full flex-col">
       {/* ADR-0090 D5/D9 — this package's suggested audience bindings
@@ -10391,33 +10400,33 @@ export function AccessPillar({
                 ? 'engine.studio.access.suggestPromptGuest'
                 : 'engine.studio.access.suggestPromptEveryone',
               locale,
-              { set: s.permission_set_name },
+              { set: suggestedSetLabel(s) },
             ),
           confirm: t('engine.studio.access.suggestConfirm', locale),
           confirming: t('engine.studio.access.suggestConfirming', locale),
           dismiss: t('engine.studio.access.suggestDismiss', locale),
           confirmedToast: (s) =>
             tFormat('engine.studio.access.suggestConfirmedToast', locale, {
-              set: s.permission_set_name,
+              set: suggestedSetLabel(s),
               anchor: s.anchor,
             }),
           dismissedToast: (s) =>
-            tFormat('engine.studio.access.suggestDismissedToast', locale, { set: s.permission_set_name }),
+            tFormat('engine.studio.access.suggestDismissedToast', locale, { set: suggestedSetLabel(s) }),
           guestUnsupported: t('engine.studio.access.suggestGuestUnsupported', locale),
           acceptedState: (s) =>
-            tFormat('engine.studio.access.suggestAcceptedState', locale, { set: s.permission_set_name }),
+            tFormat('engine.studio.access.suggestAcceptedState', locale, { set: suggestedSetLabel(s) }),
           notInForceState: (s) =>
-            tFormat('engine.studio.access.suggestNotInForceState', locale, { set: s.permission_set_name }),
+            tFormat('engine.studio.access.suggestNotInForceState', locale, { set: suggestedSetLabel(s) }),
           dismissedState: (s) =>
-            tFormat('engine.studio.access.suggestDismissedState', locale, { set: s.permission_set_name }),
+            tFormat('engine.studio.access.suggestDismissedState', locale, { set: suggestedSetLabel(s) }),
           revoke: t('engine.studio.access.suggestRevoke', locale),
           revoking: t('engine.studio.access.suggestRevoking', locale),
           revokedToast: (s) =>
-            tFormat('engine.studio.access.suggestRevokedToast', locale, { set: s.permission_set_name }),
+            tFormat('engine.studio.access.suggestRevokedToast', locale, { set: suggestedSetLabel(s) }),
           reopen: t('engine.studio.access.suggestReopen', locale),
           reopening: t('engine.studio.access.suggestReopening', locale),
           reopenedToast: (s) =>
-            tFormat('engine.studio.access.suggestReopenedToast', locale, { set: s.permission_set_name }),
+            tFormat('engine.studio.access.suggestReopenedToast', locale, { set: suggestedSetLabel(s) }),
         }}
       />
 

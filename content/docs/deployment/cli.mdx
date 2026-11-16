@@ -1476,7 +1476,7 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
-| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on rows no write has computed since the field was declared or its expression changed. A field added, turned from a formula or given a new expression through a save in publish mode or a publish (`PUT /api/v1/meta/:type/:name`, `POST /api/v1/meta/:type/:name/publish`, `POST /api/v1/packages/:id/publish-drafts`) is filled at that change, and the answer reports the rows per field; this command is for a definition changed in a repository and booted, which holds `NULL` (or the old expression's value) on existing rows until each is next written, and for a rollback or revert, which does not fill. The boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
+| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on rows no write has computed since the field was declared or its expression changed. A field added, turned from a formula or given a new expression through a save in publish mode, a publish (`PUT /api/v1/meta/:type/:name`, `POST /api/v1/meta/:type/:name/publish`, `POST /api/v1/packages/:id/publish-drafts`), a rollback or revert (`POST /api/v1/meta/:type/:name/rollback`, `POST /api/v1/packages/:id/commits/:commitId/revert`, `POST /api/v1/packages/:id/rollback`) or the delete of an `object_extension` that re-declared it (`DELETE /api/v1/meta/:type/:name`) is filled at that change, and the answer reports the rows per field; this command is for a definition changed in a repository and booted, which holds `NULL` (or the old expression's value) on existing rows until each is next written, and for rows such a fill could not write, which its `stored-expression-fill-incomplete` warning names this command for. The boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate blank-multi-values` | Rewrite the empty lists (`[]`) and empty strings (`''`) still stored on optional multi-value columns to `null`, the form a cleared value is stored in today, so rows cleared before and after read alike. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-multi-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
@@ -1678,6 +1678,29 @@ name that is not a roll-up this run walks — a typo, a plain field, or an objec
 `--object` left out — is refused before any row is read. Naming a `count` /
 `sum` is accepted and changes nothing, so a caller can pass every column it
 just declared.
+
+**A package install or upgrade does this for you.** When a running deployment
+installs or upgrades a package through an install door (the marketplace
+install, for example), the door's schema sync computes every roll-up the
+package added, on each stored row still holding `NULL`. It uses the aggregate
+the child-write recompute uses and a system-context write that covers every
+organization's rows, and it writes no child row. Like the door's own seed
+writes, it runs with automations off: no metadata-bound hook or record-change
+flow fires on a backfilled parent. A roll-up over that parent is still
+recomputed. This command, run by hand, keeps running them. `min` / `max` / `avg` are
+included, because the door knows those columns are new. Roll-ups the deployment
+already served when it booted are not walked again, so an upgrade that adds no
+roll-up costs nothing here. Two cases still need this command:
+
+- **The walk did not complete.** A row failed, an object could not be read, or
+  the per-object bound was reached. The server logs it at `error`, naming each
+  roll-up, and gives the exact
+  `os migrate summary-nulls --apply --recompute-undefined-on-empty …` line.
+  The next install in the same process also walks those roll-ups again.
+- **The roll-up arrived with a restart, not through an install door.** This
+  covers a code-defined app's new version and a marketplace install whose hot
+  register failed and loaded at the next restart. A boot records what it serves
+  and computes nothing.
 
 Idempotent — every write turns a `NULL` into a number, so a second run finds
 nothing and writes nothing. Re-running until the report says zero *is* the

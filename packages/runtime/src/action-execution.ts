@@ -30,9 +30,14 @@ import { renderOperationMessage } from '@objectstack/spec/system';
 // retries have to agree on it, and two doors each writing their own 'confirm'
 // is how one contract becomes two dialects (Prime Directive #12).
 import {
+    ACTION_CONFIRMATION_SERVICE,
     AI_ACTION_CONFIRMATION_MEMBER,
     type AIActionConfirmation,
+    type ActionConfirmationHandOff,
+    type ActionConfirmationPending,
+    type ActionConfirmationRefusalReason,
     type ActionConfirmationRequiredDetails,
+    type IActionConfirmationService,
 } from '@objectstack/spec/contracts';
 import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from './api-exposure.js';
 // [#22823] The ONE walk every door that hands a caller's filter to the engine
@@ -104,6 +109,7 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionByPackage,
     resolveActionHandlerKeys,
+    servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
     type PackageScopedRefusal,
@@ -3018,9 +3024,13 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  * REST `/actions` and a host door on `rest` refuse it too, and the MCP
  * `resume_run` door asks it for every candidate action.
  *
- * For every other caller, the doors that enforce the author's AI opt-in —
- * today {@link invokeBusinessAction}, reached from the MCP `run_action` tool,
- * and `resume_run`. REST `/actions` (`domains/actions.ts`) is NOT
+ * For every other caller, a door that enforces the author's AI opt-in and
+ * still reads the member: today a host's door under the `ai` posture
+ * (`dispatchAction`, `action-dispatch.ts`). [#33690] The MCP `run_action`
+ * ({@link invokeBusinessAction}) and `resume_run` doors no longer read it:
+ * under the amended contract they hand a declared-gated call to the person
+ * ({@link aiDoorConfirmation}, {@link handOffActionConfirmation}) and the
+ * caller's `confirm` never counts. REST `/actions` (`domains/actions.ts`) is NOT
  * `ai.exposed`-gated and sits OUTSIDE this gate for a person and for a
  * delegated agent. Widening that set is its own decision, not a thing to infer
  * from this comment.
@@ -3079,28 +3089,314 @@ export function actionConfirmationRefusal(
     if (!account && request?.[AI_ACTION_CONFIRMATION_MEMBER] === true) return undefined;
 
     const actionName = String(action?.name ?? '');
+    const declared = `Action '${actionName}'${confirmationSubjectOn(objectName)} declares ai.requiresConfirmation: true — nothing was run. `;
+    // For an account the message states the rule and prescribes no retry:
+    // nothing the account adds to the request runs this action. Its refusal
+    // carries `reason: 'service_account'` at every door (the amended
+    // contract, rule 6); a person's member refusal carries none, which is how
+    // a caller tells a member gate from the amended doors.
+    return account
+        ? confirmationRefusalOf(
+            actionName, objectName,
+            declared + 'An AI service account does not confirm an action for itself: a person runs this action.',
+            'service_account',
+        )
+        : confirmationRefusalOf(
+            actionName, objectName,
+            declared
+                + `Confirm with the human in the loop, then retry this call with `
+                + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+        );
+}
+
+/** ` on '<object>'`, or nothing for an object-less action: the refusals' and the hand-off's shared phrase. */
+function confirmationSubjectOn(objectName: string | undefined): string {
+    return objectName ? ` on '${objectName}'` : '';
+}
+
+/** The registered `ACTION_CONFIRMATION_REQUIRED` envelope, `reason` set only when given. */
+function confirmationRefusalOf(
+    actionName: string,
+    objectName: string | undefined,
+    message: string,
+    reason?: ActionConfirmationRefusalReason,
+): ActionConfirmationRefusal {
     const details: ActionConfirmationRequiredDetails = {
         actionName,
         ...(objectName ? { objectName } : {}),
         // Echoed off the constant so a refused caller reads the member's
         // spelling from the refusal instead of hard-coding it from docs.
         confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+        ...(reason !== undefined ? { reason } : {}),
     };
-    const on = objectName ? ` on '${objectName}'` : '';
-    const declared = `Action '${actionName}'${on} declares ai.requiresConfirmation: true — nothing was run. `;
+    return { code: ACTION_CONFIRMATION_REQUIRED_CODE, status: ACTION_CONFIRMATION_REQUIRED_STATUS, message, details };
+}
+
+/**
+ * [#33690] The confirmation step of the MCP `run_action` and `resume_run`
+ * doors under the amended contract (`AI_ACTION_CONFIRMATION_CAPABILITY`,
+ * `@objectstack/spec/contracts`; ADR-0011, the note on confirmation): what
+ * the door does with a call on `action` from `caller`.
+ *
+ *  - `admit`: the author declared no gate (`ai.requiresConfirmation` is not
+ *    `true` — the DECLARED flag, as {@link actionConfirmationRefusal} reads
+ *    it), so the call runs as any admitted call does.
+ *  - `refuse`: an AI service account (ADR-0151 D3 rule 3), refused whatever
+ *    it sends, `reason: 'service_account'`, exactly as the member gate
+ *    refuses it. It is never handed off: no person stands behind it.
+ *  - `hand-off`: every other caller. The call is handed to the person it runs
+ *    as ({@link handOffActionConfirmation}) once every other admission gate
+ *    has passed, and nothing runs here.
+ *
+ * ⛔ The request is not a parameter, on purpose: the caller's
+ * `confirm` (`AI_ACTION_CONFIRMATION_MEMBER`) never counts on such a call,
+ * and a function that cannot read the member cannot be satisfied by it. The
+ * caller's own `confirm: true` was an unverifiable claim an agent made for its
+ * person; this door asks the person instead.
+ */
+export type AiDoorConfirmation =
+    | { kind: 'admit' }
+    | { kind: 'refuse'; refusal: ActionConfirmationRefusal }
+    | { kind: 'hand-off' };
+
+export function aiDoorConfirmation(
+    deps: ActionExecutionDeps,
+    action: any,
+    objectName: string | undefined,
+    caller: unknown,
+): AiDoorConfirmation {
+    if (action?.ai?.requiresConfirmation !== true) return { kind: 'admit' };
+    if (isAiServiceAccountCaller(caller)) {
+        // The member gate's own account refusal: it does not read the request
+        // for an account, so `undefined` loses nothing.
+        return { kind: 'refuse', refusal: actionConfirmationRefusal(deps, action, undefined, objectName, caller)! };
+    }
+    return { kind: 'hand-off' };
+}
+
+/**
+ * [#33690] The host's pending-confirmation service, registered under
+ * `ACTION_CONFIRMATION_SERVICE` (`'ai.actionConfirmation'`), or `null` when
+ * this kernel registers none — the open build ships none, so a bare
+ * deployment answers `null`. Resolved per call, where it is used: a host
+ * registers it in its own plugin, and a resolution at startup would record a
+ * verdict the boot can still contradict. A registration without a `submit`
+ * member, or a resolution that throws, reads as none: the door then refuses,
+ * so nothing ever runs for want of the service.
+ */
+export async function resolveActionConfirmationService(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    envId?: string,
+): Promise<IActionConfirmationService | null> {
+    try {
+        const svc = await deps.resolveService(requestContext, ACTION_CONFIRMATION_SERVICE, envId);
+        return svc && typeof svc.submit === 'function' ? (svc as IActionConfirmationService) : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * [#33690] Hand a declared-gated call off to the person it runs as (step 2 of
+ * the amended contract), or refuse it when the host has no service to hand it
+ * to (step 3). Runs nothing either way.
+ *
+ * - A registered service: `submit(handOff, ec)` records the call for the
+ *   person and notifies them; the door answers `ActionConfirmationPending`
+ *   (`status: 'pending_confirmation'`, the service's `pendingId`, a plain
+ *   message). A hand-off is not a refusal, it is the call's successful answer.
+ *   What happens next — approval in the app, the action running as the
+ *   approver with every gate re-checked, a rejection, a lapse — is the
+ *   host's (`IActionConfirmationService`).
+ * - None: `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason:
+ *   'no_confirmation_service'`. The message names the one route that works on
+ *   this server — performing the action in the app — and no retry: no request
+ *   this caller can send runs the action here.
+ *
+ * A service that answers no `pendingId` is a broken host, never a hand-off
+ * that happened: thrown, so the caller is not told a person was asked.
+ */
+export async function handOffActionConfirmation(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    envId: string | undefined,
+    handOff: ActionConfirmationHandOff,
+    ec: any,
+): Promise<{ pending: ActionConfirmationPending } | { refused: ActionConfirmationRefusal }> {
+    const on = confirmationSubjectOn(handOff.objectName);
+    const declared = `Action '${handOff.actionName}'${on} declares ai.requiresConfirmation: true, so a person confirms it`;
+    const service = await resolveActionConfirmationService(deps, requestContext, envId);
+    if (!service) {
+        return {
+            refused: confirmationRefusalOf(
+                handOff.actionName, handOff.objectName,
+                `${declared} — nothing was run. This server has no pending-confirmation service to ask them through, `
+                    + `and a confirmation sent on the request does not count. Perform the action in the app instead.`,
+                'no_confirmation_service',
+            ),
+        };
+    }
+    const submitted = await service.submit(handOff, ec as ExecutionContext);
+    const pendingId = submitted?.pendingId;
+    if (typeof pendingId !== 'string' || pendingId === '') {
+        throw new Error(
+            `The pending-confirmation service (${ACTION_CONFIRMATION_SERVICE}) answered no pendingId for action `
+                + `'${handOff.actionName}'${on}; nothing was run and no confirmation can be tracked.`,
+        );
+    }
     return {
-        code: ACTION_CONFIRMATION_REQUIRED_CODE,
-        status: ACTION_CONFIRMATION_REQUIRED_STATUS,
-        // For an account the message states the rule and prescribes no retry:
-        // nothing the account adds to the request runs this action.
-        message: account
-            ? declared
-                + 'An AI service account does not confirm an action for itself: a person runs this action.'
-            : declared
-                + `Confirm with the human in the loop, then retry this call with `
-                + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
-        details,
+        pending: {
+            status: 'pending_confirmation',
+            pendingId,
+            message:
+                `${declared}. Nothing has run yet: a confirmation request was sent to the person this call runs as, `
+                    + `who approves or rejects it in the app. It runs only if they approve it, as them. `
+                    + `Pending confirmation: ${pendingId}.`,
+            actionName: handOff.actionName,
+            ...(handOff.objectName ? { objectName: handOff.objectName } : {}),
+        },
     };
+}
+
+/**
+ * [#33712] What an MCP door asks the person to confirm (step 1 of the amended
+ * contract, `AI_ACTION_CONFIRMATION_CAPABILITY`): the action, the object and
+ * the record it runs on, its id and, when the subject load read one, its
+ * title. Structurally the `McpActionConfirmationSubject` of `@objectstack/mcp`,
+ * which this package does not depend on.
+ */
+export interface ActionConfirmationElicitSubject {
+    actionName: string;
+    actionLabel?: string;
+    objectName?: string;
+    recordId?: string;
+    recordTitle?: string;
+}
+
+/** [#33712] The person's answer, as the door read it (`McpActionConfirmationAnswer`). */
+export type ActionConfirmationElicitAnswer = 'accept' | 'decline' | 'cancel' | 'timed_out';
+
+/**
+ * [#33712] The door's channel to the person's client for ONE call
+ * (`McpActionConfirmationElicitor`). Present only when the client can be
+ * elicited; its absence means "hand off" (step 2), never a refusal.
+ */
+export type ActionConfirmationElicitor = (subject: ActionConfirmationElicitSubject) => Promise<ActionConfirmationElicitAnswer>;
+
+/**
+ * [#33712] The subject an elicitation names, built from what the admitted
+ * sequence already holds: the declaration, the object and the record the
+ * caller-scope subject load read. The title is the value that read SERVED
+ * under the object's title pointer (`servedRecordTitle`), never re-derived
+ * from the row, and is left out rather than replaced by the id when the read
+ * served none. The door that phrases the question bounds and neutralises it.
+ */
+export function actionConfirmationElicitSubject(
+    action: any,
+    actionName: string,
+    objectName: string | undefined,
+    recordId: string | undefined,
+    obj: unknown,
+    record: Record<string, unknown> | undefined,
+): ActionConfirmationElicitSubject {
+    const label = typeof action?.label === 'string' && action.label !== '' ? action.label : undefined;
+    const recordTitle = recordId !== undefined && record && Object.keys(record).length > 0
+        ? servedRecordTitle(obj, record)
+        : undefined;
+    return {
+        actionName,
+        ...(label !== undefined ? { actionLabel: label } : {}),
+        ...(objectName && !isObjectLessActionKey(objectName) ? { objectName } : {}),
+        ...(recordId !== undefined ? { recordId } : {}),
+        ...(recordTitle !== undefined && recordTitle !== '' ? { recordTitle } : {}),
+    };
+}
+
+/**
+ * [#33712] Step 1 of the amended contract: ask the person in their client, and
+ * read the answer as step 4 does. Asked by a door that holds an elicitor, once
+ * every admission gate has passed (the subject load and its caller-scope
+ * verdict included) and never for an AI service account, which the
+ * confirmation step refuses before it gets here.
+ *
+ * - `accept`: `{ accepted: true }`; the caller dispatches the call exactly
+ *   once, as any admitted call. Nothing is stored: the next call is asked again.
+ * - `decline`: refused `428`, `reason: 'declined'`.
+ * - `cancel` (a dismissal, an error answer, a dropped connection): refused,
+ *   `reason: 'cancelled'`.
+ * - `timed_out` (no answer within the door's bound): refused,
+ *   `reason: 'timed_out'`.
+ *
+ * An elicitor that throws, or answers anything else, reads as `cancel`:
+ * nothing runs for want of a readable answer. Nothing is handed off on any of
+ * these answers: the person was asked, and their answer (or their silence)
+ * stands.
+ */
+export async function elicitActionConfirmation(
+    elicit: ActionConfirmationElicitor,
+    subject: ActionConfirmationElicitSubject,
+): Promise<{ accepted: true } | { refused: ActionConfirmationRefusal }> {
+    let answer: unknown;
+    try {
+        answer = await elicit(subject);
+    } catch {
+        answer = 'cancel';
+    }
+    if (answer === 'accept') return { accepted: true };
+    const on = confirmationSubjectOn(subject.objectName);
+    const declared = `Action '${subject.actionName}'${on} declares ai.requiresConfirmation: true, so the person was asked to confirm it in their client`;
+    if (answer === 'decline') {
+        return {
+            refused: confirmationRefusalOf(
+                subject.actionName, subject.objectName,
+                `${declared}, and they declined — nothing was run. Do not retry unless they ask again.`,
+                'declined',
+            ),
+        };
+    }
+    if (answer === 'timed_out') {
+        return {
+            refused: confirmationRefusalOf(
+                subject.actionName, subject.objectName,
+                `${declared}, and no answer arrived in time — nothing was run, and a later answer runs nothing. `
+                    + 'Retry only when they are there to answer.',
+                'timed_out',
+            ),
+        };
+    }
+    return {
+        refused: confirmationRefusalOf(
+            subject.actionName, subject.objectName,
+            `${declared}, and the question was dismissed without an answer — nothing was run. `
+                + 'Retry only if they ask again.',
+            'cancelled',
+        ),
+    };
+}
+
+/**
+ * [#33690] The caller-scope subject verdict, as the dispatch arm that would
+ * run `action` reads it, asked BEFORE a hand-off (the amended contract, step
+ * 2: every admission gate has passed, the subject load and its verdict
+ * included, so nobody is asked to confirm a call that is refused anyway). A
+ * declarative update asks its object-level update refusal first (#30848), as
+ * its arm does; every other arm asks {@link refuseDeniedSubjectLoadBeforeDispatch}.
+ * Throws the refusal the arm would throw; reads nothing new.
+ */
+export async function refuseDeniedSubjectBeforeHandOff(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    action: any,
+    wiring: { objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string },
+): Promise<void> {
+    const { objectName, recordId, subject, ec, envId } = wiring;
+    if (isDeclarativeUpdateAction(action)) {
+        if (subject.recordLoadDenied) await refuseUngrantedDeclarativeUpdate(deps, requestContext, objectName, ec, envId);
+        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        return;
+    }
+    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject);
 }
 
 export function summarizeAction(
@@ -4635,9 +4931,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         // metadata service's `loadMany('action')` is read, as before.
         readActions?: () => Promise<readonly any[] | undefined>;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+        /**
+         * [#33712] The MCP door's channel to the person's client for this call
+         * (step 1 of the amended contract), present only when the client can
+         * be elicited. A declared-gated call is then asked in place instead of
+         * handed off; see {@link elicitActionConfirmation}.
+         */
+        elicitConfirmation?: ActionConfirmationElicitor;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, readActions, callData } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation } = wiring;
     const meta: any = await getMeta();
     const params = input?.params && typeof input.params === 'object' ? input.params : {};
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
@@ -4719,7 +5022,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             ? { unknownName: addressedUnknownNameRefusal(name, input?.objectName, qualifier) }
             : askedObject ? {} : { unknownName: refusalOfThrown(objectlessNameNotFoundError(name)) }),
         body: { params, ...(recordId !== undefined ? { recordId } : {}) },
-        confirmation: input,
+        // [#33690] This door hands a declared-gated call to the person it runs
+        // as: the caller's `confirm` is not passed on, because it never counts
+        // there (the amended contract, `AI_ACTION_CONFIRMATION_CAPABILITY`).
+        // [#33712] With the door's elicitor, the person is asked in their
+        // client first (step 1); the hand-off is then never taken.
+        confirmationHandOff: {
+            door: 'mcp',
+            ...(namespace !== undefined ? { namespace } : {}),
+            ...(elicitConfirmation ? { elicitConfirmation } : {}),
+        },
         ql: engine,
         wiring: {
             ec, envId, driver, callData,
@@ -4727,6 +5039,10 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         },
     });
     if ('refused' in run) throw refusalThrownByBridge(run.refused);
+    // [#33690] Handed to the person: the successful answer, nothing ran, and
+    // no invocation row is written (the call did not run; the host's pending
+    // item is its record, and an approved run writes its own row).
+    if ('handedOff' in run) return run.handedOff;
 
     // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW.
     // Every call that cleared the gates writes one `action_invocation` row,

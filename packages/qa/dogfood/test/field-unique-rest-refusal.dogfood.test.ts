@@ -101,6 +101,7 @@ describe('records-forms.field-unique-enforcement — the unique refusal at the R
   it.each([
     ['sku', 'FUE-SKU-0001', {
       error: 'A record with this SKU already exists',
+      userMessage: 'A record with this SKU already exists',
       code: 'UNIQUE_VIOLATION',
       developerMessage: `Duplicate record refused on '${LABEL}': a unique constraint on 'SKU' already holds this value. No record was written.`,
       field: 'sku',
@@ -108,6 +109,7 @@ describe('records-forms.field-unique-enforcement — the unique refusal at the R
     }],
     ['gsku', 'FUE-GSKU-0001', {
       error: 'A record with this Global SKU already exists',
+      userMessage: 'A record with this Global SKU already exists',
       code: 'UNIQUE_VIOLATION',
       developerMessage: `Duplicate record refused on '${LABEL}': a unique constraint on 'Global SKU' already holds this value. No record was written.`,
       field: 'gsku',

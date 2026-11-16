@@ -457,7 +457,7 @@ const contactsSeed = defineSeed(Contact, {
   ],
 });
 
-// Export in dependency order — parents before children
+// The loader puts accounts first because `contact.account` looks them up
 export const SeedData = [accountsSeed, contactsSeed];
 ```
 
@@ -473,7 +473,7 @@ organization**, by what the target object carries:
 | `sys_user` (people: `owner_id`, people lookups) | a person who is a **member** of the load's organization (a `sys_member` row there); a same-named person outside it is never used |
 | `sys_organization` | the load's own organization only |
 | An object no organization walls: no `organization_id` column and no tenant field (for example `tenancy: { enabled: false }`) | any row: global rows belong to every organization |
-| An object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column | nothing on such a load: the lookup is refused and reported, never answered from another organization |
+| An object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column | a row of the load's organization only, matched on that tenant column (the column a seeded row of such an object is stamped with); another organization's row with the same key is never used |
 
 A load with no organization (the single-tenant boot) resolves across the whole
 database, as it always has. When the database refuses a lookup outright (for
@@ -536,6 +536,56 @@ const membershipsSeed = defineSeed(ProjectMembership, {
 
 Without a composite key such a table can only fall back to `mode: 'insert'`, which
 duplicates on every replay boot ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
+
+---
+
+## Load Order — `dependsOn`
+
+A load orders its datasets by the relationships between their objects: a `lookup`,
+`master_detail` or `user` field makes its object load after the object it points
+at, however the datasets are listed. The order of your `data` array only breaks
+ties between objects that are ready at the same moment.
+
+Some dependencies are not fields. A `beforeInsert` hook that **reads** another
+seeded object while a row is written (a rating scored from seeded bands, a price
+computed from a seeded rate table) needs those rows to be there first, and no
+lookup says so. Declare it with `dependsOn`, naming the objects:
+
+```typescript
+export const ratingBandsSeed = defineSeed(RatingBand, {
+  externalId: 'code',
+  records: [/* … */],
+});
+
+// The rating's beforeInsert hook scores each row from crm_rating_band rows,
+// so this dataset must load after them.
+export const customerRatingsSeed = defineSeed(CustomerRating, {
+  dependsOn: ['crm_rating_band'],
+  records: [/* … */],
+});
+```
+
+Each name adds an edge to the same dependency graph the lookup fields feed. A
+dataset that declares no `dependsOn` loads exactly where its lookups put it.
+
+The loader refuses the **whole load**, writing no row, and reports why, when a
+`dependsOn`:
+
+- names the dataset's own object (`defineSeed` also refuses this when it runs);
+- names an object no other dataset of the same load seeds: a misspelling, or a
+  dataset that `env` or `locale` scoped out of this load. A seed published on its
+  own is its own load, so publish it together with the seeds it depends on. Two
+  more loads carry only part of an app's seeds and refuse the same way: the dev
+  hot-reload seeder loads only the datasets of objects first seen in that reload,
+  so restart the dev server after adding a seed that depends on an object seeded
+  earlier, and a marketplace install loads one package's datasets, so name only
+  objects your own package seeds;
+- closes a cycle with the other edges, lookups included: `crm_rating_rule`
+  declaring `dependsOn: ['crm_customer_rating']` while the rating looks up its
+  rule. No order can keep that edge.
+
+A cycle made only of lookup fields is still loaded in several passes (each row is
+written first and its missing reference filled in afterwards), as before.
 
 ---
 
@@ -705,11 +755,11 @@ import { contactsSeed }  from './contacts.seed';
 import { leadsSeed }     from './leads.seed';
 import { productsSeed }  from './products.seed';
 
-/** All seed datasets — order determines load sequence */
+/** All seed datasets — the loader orders them by their lookups and dependsOn */
 export const SeedData = [
   accountsSeed,   // no dependencies
   productsSeed,   // no dependencies
-  contactsSeed,   // depends on accounts
+  contactsSeed,   // looks up accounts, so it loads after them
   leadsSeed,      // no dependencies
 ];
 ```
@@ -753,10 +803,12 @@ when the use case requires it — `upsert` for reference data the package keeps 
 (with `applyOn: 'create'` on the columns the customer or a job owns), or `replace`
 for ephemeral cache tables.
 
-### Seed in dependency order
+### Declare a dependency no field expresses
 
-Always export parent datasets before child datasets. If `contact` has a lookup to
-`account`, `accountsSeed` must appear before `contactsSeed` in the exported array.
+Lookup fields order the load for you: if `contact` has a lookup to `account`,
+accounts load first wherever `accountsSeed` sits in the array. Listing parents
+first keeps the file readable, but it orders nothing. When a hook reads another
+seeded object, declare it with `dependsOn` (see "Load Order").
 
 ### Keep records realistic
 
@@ -783,6 +835,7 @@ function defineSeed<
     columns?: { [field: string]: { applyOn?: 'create' | 'always' } }; // per-column write policy; default: 'always'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale
+    dependsOn?: string[];                   // objects this dataset loads after (see "Load Order")
     records: Array<SeedRecord<TObj['fields']>>;  // declared fields + injectable system columns
   }
 ): Seed

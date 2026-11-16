@@ -108,6 +108,7 @@ import {
   SplitPaneGrid,
   ImportWizard,
   InlineEditing,
+  RecordPointerCell,
   FormulaBar,
   GroupRow,
   RowActionMenu,
@@ -135,6 +136,8 @@ import type {
   ImportWizardProps,
   ImportResult,
   InlineEditingProps,
+  RecordPointerCellProps,
+  RecordPointerSource,
   FormulaBarProps,
   GroupRowProps,
   RowActionMenuProps,
@@ -156,6 +159,12 @@ import type {
   ColumnSummaryResult,
 } from '@object-ui/plugin-grid';
 ```
+
+`RecordPointerCell` is the face a `referenceVia` pointer column draws: given an
+(object name, record id) pair and a data source, it names the record by its
+display name, batching every cell's read into one `find` per object. A page
+that lists such pairs outside a grid (the Console's audit log) draws the same
+face.
 
 The *schema* types are not here — they live in `@object-ui/types`
 (`ObjectGridSchema`, `ListColumn`), because the schema is the shared authoring
@@ -781,6 +790,16 @@ const schema: ObjectGridBlockNode = {
   } satisfies ObjectGridProps,
 };
 ```
+
+Edit and Delete also fold the server's verdict on each row: `writeScope`,
+sharing rules and row-level security can refuse a record the object grant
+allows. The grid asks for that verdict (`POST /api/v1/security/explain`, one
+batch per operation for the rows on the page) when a row's actions are first
+reached for — a pointer or the focus on the actions cell, or a row menu opening
+— and never on the list's first paint. Until the answer lands every row keeps
+the object-level verdict, and an open menu shows Edit and Delete inert; an item
+the answer refuses then goes. A failed or missing answer keeps the object-level
+verdict.
 
 ### Row callbacks are component props
 

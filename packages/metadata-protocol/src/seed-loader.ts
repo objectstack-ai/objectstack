@@ -20,6 +20,8 @@ import {
   isTenancyDisabled,
   referenceTargetOf,
   resolveInjectedSystemColumns,
+  // [#33791] The injected `owner_id`'s own definition, the one the registry adds.
+  OWNER_FIELD_DEF,
   // [#24624] The ONE declaration of which field types the engine masks on read
   // (and which `managedBy` buckets exempt them), and the mask itself (ADR-0100).
   isMaskedOnReadFieldType,
@@ -29,7 +31,7 @@ import {
   RAW_FILE_VALUES_CONTEXT_KEY,
 } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
-import { SystemObjectName } from '@objectstack/spec/system';
+import { SystemFieldName, SystemObjectName } from '@objectstack/spec/system';
 import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
@@ -507,6 +509,34 @@ function seedRowTenantColumn(definition: unknown): string | null {
   const resolved = resolveTenantFieldName(definition);
   if (resolved !== null) return resolved;
   return resolveInjectedSystemColumns(definition).tenant ? DEFAULT_TENANT_FIELD : null;
+}
+
+/**
+ * [#33791] The fields the seed reference graph reads for one object: the ones
+ * its definition declares, plus `owner_id` when the system-column pass injects
+ * it and the object does not declare it.
+ *
+ * The definition the loader resolves is the metadata service's, which is what
+ * the author wrote. An object that relies on the platform's owner has no
+ * `owner_id` there: objectql adds it at registration, from the same
+ * `resolveInjectedSystemColumns` plan read here, as {@link OWNER_FIELD_DEF} (a
+ * `sys_user` lookup). Read from the declared fields alone, a seed value naming
+ * a person in that column was written as the name itself, while a declared
+ * person field on the same row resolved. With it, the injected owner is a
+ * reference exactly as a declared `sys_user` lookup named `owner_id` is: the
+ * same resolution, the same organization-scoped membership probe, and NULL with
+ * the same "not a member" error for a person outside the load's organization.
+ *
+ * A declared `owner_id` is the author's and wins, whatever its type (the
+ * registry lets it win too). An object the pass gives no owner (`ownership:
+ * 'org' | 'none' | 'business_unit'`, `managedBy`, a `sys_*` name,
+ * `systemFields: false`) gets nothing added.
+ */
+function seedReferenceGraphFields(definition: { fields: Record<string, unknown> }): Record<string, unknown> {
+  const fields = definition.fields;
+  if (Object.prototype.hasOwnProperty.call(fields, SystemFieldName.OWNER_ID)) return fields;
+  if (!resolveInjectedSystemColumns(definition).owner) return fields;
+  return { ...fields, [SystemFieldName.OWNER_ID]: OWNER_FIELD_DEF };
 }
 
 /** [ADR-0131 D9] Does a seed row of this object need an organization? See {@link seedRowTenantColumn}. */
@@ -1169,9 +1199,17 @@ export class SeedLoaderService implements ISeedLoaderService {
       return this.buildEmptyResult(config, Date.now() - startTime);
     }
 
-    // 2. Build dependency graph
+    // 2. Build dependency graph. `Seed.dependsOn` adds its declared edges to
+    // the ones the lookup fields give; a declaration this load cannot honour
+    // (a name it does not seed, an edge that closes a cycle) refuses the
+    // whole load before any row is written.
     const objectNames = datasets.map(d => d.object);
-    const graph = await this.buildDependencyGraph(objectNames);
+    const declared = this.collectDeclaredDependencies(datasets, request.seeds);
+    const graph = await this.buildDependencyGraph(objectNames, declared.edges);
+    const dependsOnRefusals = [...declared.refusals, ...this.findDeclaredEdgeCycles(graph.nodes, declared.edges)];
+    if (dependsOnRefusals.length > 0) {
+      return this.refuseDeclaredDependencies(config, graph, dependsOnRefusals, Date.now() - startTime);
+    }
 
     this.logger.info('[SeedLoader] Dependency graph built', {
       objects: objectNames.length,
@@ -1280,7 +1318,18 @@ export class SeedLoaderService implements ISeedLoaderService {
     return this.buildResult(config, graph, allResults, allErrors, durationMs);
   }
 
-  async buildDependencyGraph(objectNames: string[]): Promise<ObjectDependencyGraphParsed> {
+  /**
+   * Object dependency graph of a load: one node per object, an edge per
+   * `lookup` / `master_detail` / `user` field that points at another object of
+   * the load, plus — when `declared` is given — an edge per `Seed.dependsOn`
+   * name (object → the objects it loads after). The declared names are
+   * expected to be objects of the load: {@link collectDeclaredDependencies}
+   * holds them to it before this runs.
+   */
+  async buildDependencyGraph(
+    objectNames: string[],
+    declared?: ReadonlyMap<string, ReadonlySet<string>>,
+  ): Promise<ObjectDependencyGraphParsed> {
     const nodes: ObjectDependencyNodeParsed[] = [];
     const objectSet = new Set(objectNames);
 
@@ -1290,7 +1339,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       const references: ReferenceResolutionParsed[] = [];
 
       if (objDef && objDef.fields) {
-        const fields = objDef.fields as Record<string, any>;
+        // [#33791] The declared fields plus the injected `owner_id`.
+        const fields = seedReferenceGraphFields(objDef) as Record<string, any>;
         for (const [fieldName, fieldDef] of Object.entries(fields)) {
           if (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail' || fieldDef.type === 'user') {
             // [#18550] The read goes through the ONE arbiter, which also
@@ -1343,11 +1393,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         }
       }
 
+      // [Seed.dependsOn] The declared edges join the same node, after the
+      // ones the fields gave.
+      for (const target of declared?.get(objectName) ?? []) {
+        if (objectSet.has(target) && !dependsOn.includes(target)) dependsOn.push(target);
+      }
+
       nodes.push({ object: objectName, dependsOn, references });
     }
 
     // Topological sort
-    const { insertOrder, circularDependencies } = this.topologicalSort(nodes);
+    const { insertOrder, circularDependencies } = this.topologicalSort(nodes, declared);
 
     return { nodes, insertOrder, circularDependencies };
   }
@@ -3952,6 +4008,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private topologicalSort(
     nodes: ObjectDependencyNodeParsed[],
+    declared?: ReadonlyMap<string, ReadonlySet<string>>,
   ): { insertOrder: string[]; circularDependencies: string[][] } {
     const inDegree = new Map<string, number>();
     const adjacency = new Map<string, string[]>();
@@ -4004,15 +4061,186 @@ export class SeedLoaderService implements ISeedLoaderService {
       const cycles = this.findCycles(remaining);
       circularDependencies.push(...cycles);
 
-      // Add remaining objects to insertOrder (they'll need multi-pass)
-      for (const node of remaining) {
-        if (!insertOrder.includes(node.object)) {
-          insertOrder.push(node.object);
+      // Add remaining objects to insertOrder (they'll need multi-pass).
+      // [Seed.dependsOn] Their lookup edges are left to the deferred passes,
+      // as before, but a DECLARED edge is an order the load must keep: a
+      // dataset depending on an object that sits behind a lookup cycle is
+      // left over too, and is appended after that object. The declared edges
+      // never form a cycle here (the load refuses one before it writes), and
+      // with none declared the append order is the node order, as before.
+      for (const object of this.orderByDeclaredEdges(remaining.map(n => n.object), declared)) {
+        if (!insertOrder.includes(object)) {
+          insertOrder.push(object);
         }
       }
     }
 
     return { insertOrder, circularDependencies };
+  }
+
+  /**
+   * [Seed.dependsOn] `objects`, stably reordered so each lands after every
+   * object of the list it declared a dependency on: repeatedly the first
+   * object whose declared dependencies are all placed. An object caught on a
+   * declared cycle (which the load refuses before using this order) keeps its
+   * place at the end rather than being lost.
+   */
+  private orderByDeclaredEdges(
+    objects: string[],
+    declared: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+  ): string[] {
+    if (!declared || declared.size === 0) return objects;
+    const pending = [...new Set(objects)];
+    const inList = new Set(pending);
+    const placed: string[] = [];
+    const isPlaced = new Set<string>();
+    while (pending.length > 0) {
+      const next = pending.findIndex(object =>
+        [...(declared.get(object) ?? [])].every(dep => dep === object || !inList.has(dep) || isPlaced.has(dep)));
+      const [object] = pending.splice(next === -1 ? 0 : next, 1);
+      placed.push(object);
+      isPlaced.add(object);
+    }
+    return placed;
+  }
+
+  /**
+   * [Seed.dependsOn] The declared edges of a load, pooled per object across
+   * its datasets, and the declarations the load cannot honour: a dataset that
+   * names its own object, or a name no dataset of the load seeds — told apart
+   * from a name whose datasets `env` / `locale` scoped out of this load.
+   * Only datasets this load seeds are judged.
+   */
+  private collectDeclaredDependencies(
+    datasets: Seed[],
+    requested: Seed[],
+  ): { edges: Map<string, Set<string>>; refusals: DeclaredDependencyRefusal[] } {
+    const edges = new Map<string, Set<string>>();
+    const refusals: DeclaredDependencyRefusal[] = [];
+    const loaded = new Set(datasets.map(d => d.object));
+    const scopedOut = new Set(requested.map(d => d.object).filter(object => !loaded.has(object)));
+    for (const dataset of datasets) {
+      for (const target of dataset.dependsOn ?? []) {
+        if (target === dataset.object) {
+          refusals.push({
+            object: dataset.object,
+            target,
+            message:
+              `Seed dataset '${dataset.object}' declares dependsOn its own object: a dataset cannot load after ` +
+              'itself. List the other seeded objects its hooks read, or drop the entry. The seed load was refused ' +
+              'and no row was written.',
+          });
+          continue;
+        }
+        if (!loaded.has(target)) {
+          refusals.push({
+            object: dataset.object,
+            target,
+            message: scopedOut.has(target)
+              ? `Seed dataset '${dataset.object}' declares dependsOn '${target}', whose datasets are all scoped out ` +
+                'of this load by their env or locale, so its rows would not be there when this dataset loads. ' +
+                `Scope '${dataset.object}' the same way, or widen '${target}'. The seed load was refused and no row ` +
+                'was written.'
+              : `Seed dataset '${dataset.object}' declares dependsOn '${target}', which no dataset of this load ` +
+                'seeds. dependsOn names objects that other datasets of the same load seed; check the spelling, or ' +
+                `load '${target}'s dataset together with this one. The seed load was refused and no row was written.`,
+          });
+          continue;
+        }
+        let set = edges.get(dataset.object);
+        if (!set) edges.set(dataset.object, set = new Set());
+        set.add(target);
+      }
+    }
+    return { edges, refusals };
+  }
+
+  /**
+   * [Seed.dependsOn] Every declared edge that closes a cycle of the combined
+   * graph. The rule: a declared edge `A dependsOn B` is refused when B already
+   * depends on A, directly or through any chain of edges — lookup or declared
+   * (self-references excluded, as the sort excludes them). Equivalently, the
+   * edge lies on a cycle, which is the one case where no order keeps it. A
+   * cycle made of lookup edges alone is not this rule's: those still load in
+   * deferred passes.
+   */
+  private findDeclaredEdgeCycles(
+    nodes: ObjectDependencyNodeParsed[],
+    declared: ReadonlyMap<string, ReadonlySet<string>>,
+  ): DeclaredDependencyRefusal[] {
+    if (declared.size === 0) return [];
+    const dependsOnOf = new Map<string, string[]>();
+    for (const node of nodes) {
+      const deps = dependsOnOf.get(node.object) ?? [];
+      for (const dep of node.dependsOn) if (dep !== node.object && !deps.includes(dep)) deps.push(dep);
+      dependsOnOf.set(node.object, deps);
+    }
+    /** A dependency chain from `from` to `to` (both ends included), or undefined. */
+    const chain = (from: string, to: string): string[] | undefined => {
+      const previous = new Map<string, string>();
+      const queue = [from];
+      const seen = new Set([from]);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current === to) {
+          const path = [to];
+          while (path[0] !== from) path.unshift(previous.get(path[0])!);
+          return path;
+        }
+        for (const dep of dependsOnOf.get(current) ?? []) {
+          if (seen.has(dep)) continue;
+          seen.add(dep);
+          previous.set(dep, current);
+          queue.push(dep);
+        }
+      }
+      return undefined;
+    };
+    const refusals: DeclaredDependencyRefusal[] = [];
+    for (const [object, targets] of declared) {
+      for (const target of targets) {
+        const back = chain(target, object);
+        if (!back) continue;
+        const cycle = [object, ...back].join(' → ');
+        refusals.push({
+          object,
+          target,
+          message:
+            `Seed dataset '${object}' declares dependsOn '${target}', and that edge closes a cycle: ${cycle} ` +
+            '(each arrow reads "loads after", from a lookup field or a dependsOn). No load order keeps it. Drop the ' +
+            'entry, or the dependency that runs the other way. The seed load was refused and no row was written.',
+        });
+      }
+    }
+    return refusals;
+  }
+
+  /**
+   * [Seed.dependsOn] The answer of a load refused for its declarations:
+   * nothing written, `success: false`, one error per refused declaration
+   * (`field: 'dependsOn'`). Returned rather than thrown, so every caller
+   * reports it the way it reports any failed load, and none falls back to
+   * writing the rows some other way.
+   */
+  private refuseDeclaredDependencies(
+    config: SeedLoaderConfigParsed,
+    graph: ObjectDependencyGraphParsed,
+    refusals: DeclaredDependencyRefusal[],
+    durationMs: number,
+  ): SeedLoaderResultParsed {
+    const errors: ReferenceResolutionError[] = refusals.map(refusal => ({
+      sourceObject: refusal.object,
+      field: 'dependsOn',
+      targetObject: refusal.target,
+      targetField: '(dataset)',
+      attemptedValue: refusal.target,
+      // The declaration is the dataset's, not a row's; no row was attempted.
+      recordIndex: 0,
+      message: refusal.message,
+    }));
+    // No log line of its own: the refusal is handed to the caller, which
+    // reports a failed load's errors (AGENTS.md, degradation log levels).
+    return this.buildResult(config, graph, [], errors, durationMs);
   }
 
   private findCycles(nodes: ObjectDependencyNodeParsed[]): string[][] {
@@ -4802,6 +5030,13 @@ export class SeedLoaderService implements ISeedLoaderService {
 // ==========================================================================
 // Internal Types
 // ==========================================================================
+
+/** [Seed.dependsOn] One declaration a load refuses: `object` named `target`. */
+interface DeclaredDependencyRefusal {
+  readonly object: string;
+  readonly target: string;
+  readonly message: string;
+}
 
 /**
  * Structural view of objectql's `SummaryRecomputeError` (framework#3147).

@@ -144,7 +144,8 @@ export interface PendingSsoUserDeps
   /** better-auth's `addMember`, for the multi-organization join; absent when the organization plugin is off. */
   getAddMember?(): Promise<AddMemberCapableApi['addMember'] | undefined>;
   host?: EnvironmentUserHostAccessor;
-  logger?: { warn(msg: string): void };
+  /** `error` receives, once, a membership failure answered with the generic message (`mapAuthApiError`). */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -226,18 +227,32 @@ function readPerson(
 async function findUserByEmail(
   engine: PendingSsoUserEngine,
   email: string,
-): Promise<{ id: string; name?: string; source?: string | null } | undefined> {
+): Promise<{ id: string; name?: string; source?: string | null; deactivated: boolean } | undefined> {
   const rows = await engine.find('sys_user', {
     where: { email },
-    fields: ['id', 'name', 'source'],
+    fields: ['id', 'name', 'source', 'banned'],
     limit: 1,
     context: SYSTEM_CTX,
   });
-  const row = Array.isArray(rows) ? (rows[0] as { id?: unknown; name?: unknown; source?: unknown } | undefined) : undefined;
+  const row = Array.isArray(rows)
+    ? (rows[0] as { id?: unknown; name?: unknown; source?: unknown; banned?: unknown } | undefined)
+    : undefined;
   return row && typeof row.id === 'string'
-    ? { id: row.id, name: typeof row.name === 'string' ? row.name : undefined, source: typeof row.source === 'string' ? row.source : null }
+    ? {
+        id: row.id,
+        name: typeof row.name === 'string' ? row.name : undefined,
+        source: typeof row.source === 'string' ? row.source : null,
+        deactivated: isDeactivated(row),
+      }
     : undefined;
 }
+
+/**
+ * Whether a `sys_user` row is deactivated. A boolean column reads back as
+ * `true`, `1`, or a string form (`'1'`, `'true'`) depending on the driver.
+ */
+const isDeactivated = (user: { banned?: unknown }): boolean =>
+  user.banned === true || user.banned === 1 || user.banned === '1' || user.banned === 'true';
 
 /** The answer for a grant the security service refused: its own status and code, and that no one was added. */
 function grantRefused(what: string, error: unknown): EndpointResult {
@@ -337,6 +352,11 @@ async function addOnePendingPerson(
   if (existing) {
     if (!isPendingSsoSource(existing.source)) {
       return { ok: false, result: fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.alreadyExists) };
+    }
+    // A deactivated person is never sent an invitation: reactivating them
+    // (`admin/unban-user`) is what sends it again.
+    if (existing.deactivated) {
+      return { ok: true, userId: existing.id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } };
     }
     const host = await notifyEnvironmentUserHost(
       deps.host,
@@ -456,28 +476,45 @@ const hostRefusal = ({ refused }: EnvironmentUserHostRefused): EndpointResult =>
 const TAKE_BACK_OBJECTS = ['sys_user_position', 'sys_user_permission_set', 'sys_member'] as const;
 
 /**
- * Take a person the host refused back out: their grants, their membership
- * and their row, as the system, in one unit of work. The person was never
- * told anything and never signed in, so nothing else points at them. A
- * failure here is thrown: the person would stay without the host's consent,
- * and the caller must hear that rather than a clean refusal.
+ * Take a pending person back out: their grants, their membership and their
+ * row, as the system, in one unit of work, through the engine's delete, so a
+ * record that points at the person follows its lookup's `deleteBehavior`.
+ * Two callers: an add the host refused (the person was just written and
+ * never told anything), and `admin/remove-sso-user`, which passes
+ * `pendingOnly`. Then the person is re-checked inside the unit of work
+ * before anything is deleted, and the row's delete carries
+ * `source: 'idp_pending'` in its `where`: when it removes no row,
+ * {@link NoLongerPending} is thrown and the unit of work rolls the child
+ * deletes back. One window stays open: `sys_user` has cascading lookups, so
+ * the engine reads the matching ids, walks the cascade and then deletes by
+ * id alone, with no row lock, and a first sign-in committing between that
+ * read and that delete is not yet refused (#34373, an engine defect). A
+ * failure here is thrown: the caller must hear it rather than a clean
+ * answer.
  */
 async function takeBackPerson(
   deps: PendingSsoUserDeps,
   engine: PendingSsoUserEngine,
   userId: string,
   settlement: RequestSettlement,
+  opts: { pendingOnly?: boolean } = {},
 ): Promise<void> {
   if (typeof engine.delete !== 'function') {
-    throw new Error(`The host refused user ${userId}, and this data engine cannot take the row back out`);
+    throw new Error(`This data engine cannot delete, so user ${userId} could not be taken back out`);
   }
   const remove = engine.delete.bind(engine);
   const work = async (): Promise<void> => {
+    if (opts.pendingOnly) await assertStillPending(engine, userId);
     const context = await authSystemWriteContext();
     for (const object of TAKE_BACK_OBJECTS) {
       await remove(object, { where: { user_id: userId }, multi: true, context });
     }
-    await remove('sys_user', { where: { id: userId }, context });
+    if (!opts.pendingOnly) {
+      await remove('sys_user', { where: { id: userId }, context });
+      return;
+    }
+    const removed = await remove('sys_user', { where: { id: userId, source: PENDING_SSO_SOURCE }, multi: true, context });
+    if (removed === 0 || removed === false || removed == null) throw new NoLongerPending();
   };
   const unit = settlement.grant?.seam ?? deps.createGrant;
   await (unit ? unit.runAtomically(work) : work());
@@ -682,4 +719,203 @@ export async function runImportSsoUsers(
       } as Record<string, unknown>,
     },
   };
+}
+
+const REMOVE_KEYS = new Set(['userId']);
+
+/**
+ * `POST /api/v1/auth/admin/remove-sso-user` — `{ userId }`. Removes a person
+ * who is still pending (the email-typo case) and cancels their invitation:
+ * the hosting rulings' "a pending row that never accepts … can be deleted,
+ * which cancels the invitation". The caller already passed the platform-admin
+ * gate.
+ *
+ * Refused for any row that is not pending (`409`): a person who has signed in
+ * is deactivated instead. The host is asked first, outside any transaction
+ * (`userRemoved`, or `userDeactivated` on a host without it), so its typed
+ * refusal leaves the person where they are. Then the person's positions,
+ * permission sets, membership and row are removed as the system, in one unit
+ * of work, through the engine's delete, so a record that points at the person
+ * follows its lookup's `deleteBehavior`: a `restrict` refuses the removal with
+ * the engine's own answer and nothing is removed. "Pending only" is held at
+ * the removal too: the person is re-checked inside the unit of work and the
+ * row's delete carries `source: 'idp_pending'`, so a person who signs in
+ * while the host is asked is answered `409` and kept (the narrow window the
+ * engine's delete leaves is in {@link takeBackPerson}). A host that could not be reached refuses the
+ * removal (`503`, nothing removed), as it refuses a deactivation: the door
+ * calls the host once and keeps no record to ask again from, so removing the
+ * person would leave an invitation nothing can cancel. With no host wired
+ * nothing is called.
+ */
+export async function runRemoveSsoUser(
+  deps: PendingSsoUserDeps,
+  actor: AdminActor & EnvironmentUserActor,
+  request: Request,
+): Promise<EndpointResult> {
+  if (!deps.isCloudManaged()) {
+    return fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.notManagedRemove);
+  }
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return badRequest(reading.message);
+  const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
+  const unknownKeys = Object.keys(body).filter((key) => !REMOVE_KEYS.has(key));
+  if (unknownKeys.length > 0) return badRequest(`Unknown field(s): ${unknownKeys.join(', ')}. This door takes userId.`);
+  const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+  if (!userId) return badRequest('userId is required');
+
+  const engine = deps.getDataEngine();
+  if (!engine) return fail(503, 'SERVICE_UNAVAILABLE', 'Data engine unavailable, so no one was removed.');
+  const rows = await engine.find('sys_user', {
+    where: { id: userId },
+    fields: ['id', 'email', 'name', 'source'],
+    limit: 1,
+    context: SYSTEM_CTX,
+  });
+  const target = (Array.isArray(rows) ? rows[0] : undefined) as
+    | { id?: unknown; email?: unknown; name?: unknown; source?: unknown }
+    | undefined;
+  if (!target) return fail(404, 'RESOURCE_NOT_FOUND', 'User not found');
+  if (!isPendingSsoSource(target.source)) {
+    return fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.removeNotPending);
+  }
+  const email = typeof target.email === 'string' ? target.email : '';
+  const name = typeof target.name === 'string' ? target.name : '';
+
+  // The host first, outside any transaction: a refusal leaves the person as they are.
+  let host: EnvironmentUserHostOutcome;
+  let event: EnvironmentUserEvent | undefined;
+  if (deps.host) {
+    event = {
+      userId,
+      email,
+      name,
+      source: PENDING_SSO_SOURCE,
+      ...(await environmentUserAttribution(engine, actor, deps.logger)),
+      occurredAt: new Date().toISOString(),
+    };
+    const answer = await notifyEnvironmentUserHost(deps.host, 'removed', event, deps.logger);
+    if ('refused' in answer) return hostRefusal(answer);
+    if (!answer.notified && answer.reason === 'host_failed') {
+      return fail(503, 'SERVICE_UNAVAILABLE', PENDING_SSO_MESSAGES.removeHostUnreachable);
+    }
+    host = answer;
+  } else {
+    host = { notified: false, reason: 'no_host' };
+  }
+
+  // Pending only, held at the write: the person may have signed in while the
+  // host was asked, and then they are not removed.
+  try {
+    await takeBackPerson(deps, engine, userId, {}, { pendingOnly: true });
+  } catch (error) {
+    return removalNotDone(deps, engine, error, { userId, host, event });
+  }
+
+  return { status: 200, body: { success: true, data: { userId, email, removed: true, host } } };
+}
+
+/** Throws {@link NoLongerPending} unless the person is still pending, read now. */
+async function assertStillPending(engine: PendingSsoUserEngine, userId: string): Promise<void> {
+  const now = await engine.find('sys_user', { where: { id: userId }, fields: ['id', 'source'], limit: 1, context: SYSTEM_CTX });
+  const row = (Array.isArray(now) ? now[0] : undefined) as { source?: unknown } | undefined;
+  if (!row || !isPendingSsoSource(row.source)) throw new NoLongerPending();
+}
+
+/** Thrown inside the removal's unit of work when the person is no longer pending there. */
+class NoLongerPending extends Error {
+  constructor() {
+    super('The person is no longer pending');
+  }
+}
+
+/**
+ * The answer when the removal's unit of work did not commit: no one was
+ * removed. What the host was told is said as it happened. When the host had
+ * taken the cancellation and the person is still pending and not
+ * deactivated, their invitation is sent again here, once, through
+ * `userAdded`, and the answer says whether that worked; nothing is retried
+ * later.
+ */
+async function removalNotDone(
+  deps: PendingSsoUserDeps,
+  engine: PendingSsoUserEngine,
+  error: unknown,
+  call: { userId: string; host: EnvironmentUserHostOutcome; event: EnvironmentUserEvent | undefined },
+): Promise<EndpointResult> {
+  const { userId, host, event } = call;
+  // A host that could not be reached refused the removal before this, so the
+  // host was either told (and took the cancellation) or not called at all.
+  const told = event !== undefined && host.notified;
+  const hostSentence = told ? PENDING_SSO_MESSAGES.removeHostCancelled : '';
+
+  if (error instanceof NoLongerPending) {
+    return fail(
+      PENDING_SSO_REFUSAL_STATUS,
+      PENDING_SSO_REFUSAL_CODE,
+      [PENDING_SSO_MESSAGES.removeNotPending, hostSentence].filter(Boolean).join(' '),
+    );
+  }
+
+  const thrown = resolveThrownHttpError(error, 500);
+  const cause = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
+  if (thrown.status >= 500) {
+    const line = `[AuthPlugin] removing pending user ${userId} failed, so no one was removed`;
+    if (deps.logger?.error) deps.logger.error(line, error instanceof Error ? error : undefined);
+    else deps.logger?.warn(`${line}. Cause: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let after = hostSentence;
+  if (told) {
+    const person = await readPersonState(engine, userId);
+    if (person.pending && !person.deactivated) {
+      after = (await reinvite(deps, event!))
+        ? PENDING_SSO_MESSAGES.removeRefusedReinvited
+        : PENDING_SSO_MESSAGES.removeRefusedNotReinvited;
+    }
+  }
+  return fail(thrown.status, thrown.code, [PENDING_SSO_MESSAGES.removeRefused, cause, after].filter(Boolean).join(' '));
+}
+
+/** Whether the person is pending and whether they are deactivated, read now; unreadable reads as neither safe. */
+async function readPersonState(
+  engine: PendingSsoUserEngine,
+  userId: string,
+): Promise<{ pending: boolean; deactivated: boolean }> {
+  try {
+    const rows = await engine.find('sys_user', {
+      where: { id: userId },
+      fields: ['id', 'source', 'banned'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row = (Array.isArray(rows) ? rows[0] : undefined) as { source?: unknown; banned?: unknown } | undefined;
+    if (!row) return { pending: false, deactivated: false };
+    return { pending: isPendingSsoSource(row.source), deactivated: isDeactivated(row) };
+  } catch {
+    return { pending: false, deactivated: true };
+  }
+}
+
+/**
+ * Send the invitation again, once, to a pending person whose removal failed
+ * after the host took the cancellation of theirs (`userAdded`). Answers
+ * whether the host took it; a refusal or failure is logged at `error`: the
+ * person stays pending with no invitation until they are added again.
+ */
+async function reinvite(deps: PendingSsoUserDeps, event: EnvironmentUserEvent): Promise<boolean> {
+  const answer = await notifyEnvironmentUserHost(
+    deps.host,
+    'added',
+    { ...event, occurredAt: new Date().toISOString() },
+    deps.logger,
+  );
+  if (!('refused' in answer) && answer.notified) return true;
+  const cause = 'refused' in answer ? `${answer.refused.code}: ${answer.refused.message}` : answer.reason;
+  const message =
+    `[AuthPlugin] removing pending user ${event.userId} failed after the hosting organisation was told to cancel `
+    + 'their invitation, and sending it again did not succeed, so they stay pending with no invitation. '
+    + `Add them again to send one. Cause: ${cause}`;
+  const logger = deps.logger as { warn(msg: string): void; error?(msg: string): void } | undefined;
+  if (logger?.error) logger.error(message);
+  else logger?.warn(message);
+  return false;
 }

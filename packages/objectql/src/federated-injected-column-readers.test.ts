@@ -111,7 +111,7 @@ interface Row {
 }
 
 /**
- * engine.ts and the modules `scripts/codemod-split-engine.mjs` (#29986) split
+ * engine.ts and the modules split by #30012 (the #29986 codemod)
  * out of it. A method there may keep its signature in engine.ts and its body in
  * one of these, so a {@link Row.via} helper is looked up across the set.
  */
@@ -223,6 +223,14 @@ const READERS: Record<string, Row> = {
   'engine-driver-options.ts#buildDriverOptions :: resolveTenantFieldName()': {
     disposition: 'exempt',
     why: 'resolves the wall column only after the federated exemption',
+  },
+  'engine-driver-options.ts#isDriverTenantScopedSchema :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: "the tenancy class a read's driver options follow: a federated object is handed no organization wall; it reads no row",
+  },
+  'relation-semi-join.ts#relationSemiJoinServes :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated related object keeps the id read, so no subquery is compiled against it; it reads no row',
   },
   // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
   // validation predicates and formula fields share it; a formula's hop is read
@@ -447,11 +455,11 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'the tenant index the registry declares on a provisioned tenant column',
   },
-  'registry.ts#<module> :: owning_business_unit_id': {
+  'registry-top-level.ts#<module> :: owning_business_unit_id': {
     disposition: 'not-a-read',
     why: 'the name the injection writes the ADR-0117 D1 anchor under',
   },
-  'registry.ts#<module> :: queue': {
+  'registry-top-level.ts#<module> :: queue': {
     disposition: 'not-a-read',
     why: 'the name the injection writes the ADR-0142 D3 ownership-queue column under',
   },
@@ -494,17 +502,17 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'names the metadata type the boot refusal lists; it reads no row',
   },
-  'registry.ts#declaresTenantIndex :: organization_id': {
+  'registry-top-level.ts#declaresTenantIndex :: organization_id': {
     disposition: 'not-a-read',
     why: 'reads an index declaration, not a row',
   },
-  'registry.ts#applyDeploymentTenancy :: organization_id': {
+  'registry-platform-global.ts#applyDeploymentTenancy :: organization_id': {
     disposition: 'not-a-read',
     why:
       "drops the platform's own injected definition from a declared object's schema (ADR-0131 D7); " +
       'it reads a definition, never a row',
   },
-  'registry.ts#setDeploymentPlatformGlobalObjects :: organization_id': {
+  'registry-platform-global.ts#setDeploymentPlatformGlobalObjects :: organization_id': {
     disposition: 'not-a-read',
     why:
       'tells an authored organization_id from the injection while re-planning registered schemas ' +

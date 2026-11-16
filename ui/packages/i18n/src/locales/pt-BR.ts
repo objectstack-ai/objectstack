@@ -553,6 +553,7 @@ const pt = {
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
       succeededRecords: "Registros concluídos",
+      aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Alguns registros podem já ter sido alterados; ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",
@@ -2314,6 +2315,9 @@ const pt = {
       fieldErrorsToast_many: "{{count}} de configurações precisam de atenção: {{settings}}",
       fieldErrorsToast_other: "{{count}} configurações precisam de atenção: {{settings}}",
       cryptoRefusalTitle: "Esta implantação não consegue criptografar segredos",
+      platformManagedTitle: "Gerenciado pela plataforma",
+      platformManagedBody: "A plataforma de hospedagem fornece e configura isso para este ambiente, por isso não é definido aqui.",
+      aiProviderManaged: "O provedor de IA, seu modelo e suas credenciais são gerenciados pela plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como criptografado, portanto nada foi gravado.",
       cryptoRefusalNoSubject: "O valor declarado como criptografado foi recusado, portanto nada foi gravado.",
       cryptoRefusalToast: "Não é possível criptografar segredos: {{subject}}",
@@ -2412,6 +2416,8 @@ const pt = {
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Adicione seu primeiro aplicativo', todo: 'Ainda não há um aplicativo seu. Instale um pelo marketplace ou crie um, e ele aparecerá no Início.', done: 'Um aplicativo seu está no Início.' },
+      firstRecord: { title: 'Adicione seu primeiro registro', todo: 'Ninguém criou um registro nos seus aplicativos ainda.', done: 'Um registro foi criado nos seus aplicativos.', action: 'Abrir aplicativo' },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",
@@ -2769,6 +2775,7 @@ const pt = {
         retry: "Continuar com login único",
       },
       ssoHandoff: "Continuar para {{target}}",
+      ssoHandoffClient: "Entre para continuar em {{clientName}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
         signIn: "Entrar como administrador de desenvolvimento",
@@ -2798,6 +2805,8 @@ const pt = {
         directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
         networkNotAllowed: "Este sistema não permite entrar a partir da sua rede. Conecte-se de uma rede permitida (por exemplo, a rede do escritório ou a VPN da sua organização) ou fale com o administrador.",
         ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
+        ssoAccessDeniedNotMember: "A conta com a qual você entrou não é membro da organização deste ambiente. Entre com uma conta que seja ou peça a um administrador da organização para convidar você.",
+        ssoAccessDeniedInvitationPending: "Você foi convidado para a organização deste ambiente, mas o convite ainda não foi aceito. Aceite o convite pelo seu e-mail e entre novamente.",
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",
         ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
@@ -3110,6 +3119,10 @@ const pt = {
       granted: "Acesso concedido",
       denied: "Acesso negado",
       noRedirect: "O servidor não retornou nenhuma URL de redirecionamento.",
+      returnToApp: "Volte para {{appName}} para continuar. Você pode fechar esta aba.",
+      returnToUnnamedApp: "Volte para o aplicativo para continuar. Você pode fechar esta aba.",
+      openApp: "Abrir {{appName}}",
+      openUnnamedApp: "Abrir o aplicativo",
       failed: "Falha no consentimento",
       footer: "Você pode revogar o acesso a qualquer momento nas configurações da sua conta.",
     },
@@ -3200,6 +3213,9 @@ const pt = {
     allDocs: 'Toda a documentação',
     onlineDocs: 'Documentação online',
     loadingDocumentation: 'Carregando documentação',
+    docConflictTitle: 'Escolha um pacote',
+    docConflictDescription: 'Mais de um pacote instalado fornece um documento chamado {{name}}. Abra o que você quer ler.',
+    docConflictCandidates: 'Pacotes que fornecem este documento',
     documentation: 'Documentação',
     uncategorized: 'Sem categoria',
     about: 'Sobre',
@@ -4048,13 +4064,11 @@ const pt = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Resta {{left}} da sua cota de IA. Um modelo marcado com ×N a consome N vezes mais rápido que o modelo padrão.',
@@ -4119,6 +4133,7 @@ const pt = {
       get_metadata_schema: "Consultar o formato dos metadados",
       get_package: "Revisar o pacote",
       get_record_history: "Ler o histórico do registro",
+      list_flow_runs: "Verificar as execuções do fluxo",
       list_metadata: "Listar os metadados existentes",
       list_objects: "Listar os objetos existentes",
       list_packages: "Listar os pacotes existentes",
@@ -5224,6 +5239,25 @@ const pt = {
     sourceRequired: "Uma página {{kind}} requer um {{source}} não vazio.",
     loading: "Carregando o runtime do React…",
     error: "Erro na página React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicativo móvel",
+    subtitle: "Conecte o aplicativo móvel ObjectOS a este servidor",
+    scanHint: "Abra o aplicativo móvel ObjectOS e escaneie este código para conectá-lo a este servidor.",
+    qrAlt: "Código QR que conecta o aplicativo móvel ObjectOS a este servidor",
+    linkLabel: "Link de conexão",
+    copy: "Copiar link",
+    copied: "Link copiado",
+    privacy: "O código contém apenas o endereço deste servidor, nunca a sua conta.",
+    loadFailed: "Não foi possível ler o endereço público deste servidor. Recarregue a página para tentar novamente.",
+    unreachableTitle: "Um celular não consegue acessar o endereço deste servidor",
+    unreachableBody: "O endereço deste servidor é {{address}}, um endereço local ou privado que um celular não consegue abrir, então nenhum código é exibido. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    insecureTitle: "O endereço deste servidor não usa HTTPS",
+    insecureBody: "O endereço deste servidor é {{address}}. O aplicativo móvel faz login por ele, então ele precisa usar HTTPS, e nenhum código é exibido. Sirva este servidor por HTTPS, defina {{setting}} com o endereço https:// dele, por exemplo {{example}}, e reinicie-o.",
+    unpublishedTitle: "Este servidor não publica seu endereço público",
+    unpublishedBody: "Nenhum código é exibido: este servidor ainda não oferece seu endereço público ao aplicativo móvel. Atualize o servidor para uma versão compatível.",
   },
 };
 
