@@ -627,6 +627,7 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/layout': path.resolve(import.meta.dirname, '../../packages/layout/src'),
   '@object-ui/plugin-dashboard': path.resolve(import.meta.dirname, '../../packages/plugin-dashboard/src'),
   '@object-ui/plugin-report': path.resolve(import.meta.dirname, '../../packages/plugin-report/src'),
+  '@object-ui/plugin-form/core': path.resolve(import.meta.dirname, '../../packages/plugin-form/src/core.ts'),
   '@object-ui/plugin-form': path.resolve(import.meta.dirname, '../../packages/plugin-form/src'),
   '@object-ui/plugin-grid': path.resolve(import.meta.dirname, '../../packages/plugin-grid/src'),
   '@object-ui/react': path.resolve(import.meta.dirname, '../../packages/react/src'),
@@ -661,6 +662,7 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/plugin-markdown': path.resolve(import.meta.dirname, '../../packages/plugin-markdown/src'),
   '@object-ui/plugin-timeline': path.resolve(import.meta.dirname, '../../packages/plugin-timeline/src'),
   '@object-ui/plugin-tree': path.resolve(import.meta.dirname, '../../packages/plugin-tree/src'),
+  '@object-ui/plugin-view/core': path.resolve(import.meta.dirname, '../../packages/plugin-view/src/core.ts'),
   '@object-ui/plugin-view': path.resolve(import.meta.dirname, '../../packages/plugin-view/src'),
   '@object-ui/plugin-designer': path.resolve(import.meta.dirname, '../../packages/plugin-designer/src'),
 };
@@ -1522,6 +1524,30 @@ export default defineConfig({
             { name: 'plugin-tree', test: /[\\/]packages[\\/]plugin-tree[\\/]/, priority: 70 },
             { name: 'plugin-calendar', test: /[\\/]packages[\\/]plugin-calendar[\\/]/, priority: 70 },
             { name: 'plugin-kanban', test: /[\\/]packages[\\/]plugin-kanban[\\/]/, priority: 70 },
+            //
+            // ## The form and view helpers stay out of their plugin chunks
+            //
+            // The console shell is eager and imports pure helpers through
+            // `@object-ui/plugin-form/core` and `@object-ui/plugin-view/core`.
+            // Left to the `plugin-form` / `plugin-view` groups above, those
+            // modules would be co-tenants of the renderers and pull each whole
+            // chunk back into every first load, the mechanism the chatbot group
+            // below names. Each group takes exactly the modules its `core.ts`
+            // reaches inside its package, for the reason `types-zod` above gives
+            // for `includeDependenciesRecursively: false`. ⛔ A module added to a
+            // `core.ts` closure belongs in its list.
+            {
+              name: 'plugin-form-core',
+              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus)\.tsx?$/,
+              priority: 71,
+              includeDependenciesRecursively: false,
+            },
+            {
+              name: 'plugin-view-core',
+              test: /[\\/]packages[\\/]plugin-view[\\/]src[\\/](core|recordSurface|config[\\/]view-config-utils)\.tsx?$/,
+              priority: 71,
+              includeDependenciesRecursively: false,
+            },
             //
             // ## The chatbot's side-effect-free half stays out of its chunk (objectui#13410)
             //

@@ -17,7 +17,13 @@
  * `idx_<table>_<column>` (the name an author's own `{ fields: [column] }`
  * produces), unless a declared index already leads with that column. System
  * columns (`created_by`, `updated_by`, `owner_id`, `owning_business_unit_id`,
- * the tenant column) and multi-valued (JSON) columns are skipped.
+ * the tenant column) and multi-valued (JSON) columns are skipped AS
+ * REFERENCES.
+ *
+ * #33695 (maintainer ruling 「两个都加」) adds two system-column keys to the
+ * same implicit set: `(created_at, id)`, the default list order, and
+ * `(owner_id)`, the column a private-OWD read filters on. Their pins live in
+ * `sql-driver-33695-system-column-indexes.test.ts`.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
@@ -75,12 +81,15 @@ describe('the expected index set (#31882)', () => {
       { name: implicitName('project'), columns: ['project'], unique: false },
       { name: implicitName('task'), columns: ['task'], unique: false },
       { name: implicitName('member'), columns: ['member'], unique: false },
+      // #33695: the system-column key `owner_id` follows the reference indexes.
+      { name: implicitName('owner_id'), columns: ['owner_id'], unique: false },
     ]);
   });
 
   it('skips multi-valued references and the system columns', () => {
     const names = expectedFor(detailObject()).map((i) => i.name);
-    for (const column of ['watchers', 'tags', 'created_by', 'updated_by', 'owner_id', 'owning_business_unit_id']) {
+    // `owner_id` is indexed since #33695, as a system-column key, not as a reference.
+    for (const column of ['watchers', 'tags', 'created_by', 'updated_by', 'owning_business_unit_id']) {
       expect(names, column).not.toContain(implicitName(column));
     }
     // The tenant column's one index is the provisioned declaration, not a second implicit one.
@@ -183,7 +192,8 @@ describe('the boot sync on an existing database (#31882, SQLite)', () => {
   it('builds no index on a multi-valued reference or a system column', async () => {
     await driver.initObjects([detailObject() as any]);
     const names = await indexNames();
-    for (const column of ['watchers', 'tags', 'created_by', 'updated_by', 'owner_id', 'owning_business_unit_id']) {
+    // `owner_id` is indexed since #33695, as a system-column key, not as a reference.
+    for (const column of ['watchers', 'tags', 'created_by', 'updated_by', 'owning_business_unit_id']) {
       expect(names, column).not.toContain(implicitName(column));
     }
   });
