@@ -1401,8 +1401,9 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
             expect(await fireAll()).toEqual([tagOf(on)]);
             expect(refusedBodyWarned()).toEqual([]);
             expect(engine.flowDispatchHolder(`${on}/t`)).toEqual({ packageId: on, claimBare: false, name: 't' });
-            // [#34145] The write doors' read over every holder still refuses the
-            // name, naming both holders, while the served read reaches `on`'s flow.
+            // [#34145] The read over every holder still refuses the name, naming
+            // both holders, while the served read reaches `on`'s flow: the
+            // runtime's write doors read such a name on that served holder.
             let held: unknown;
             try { engine.getHeldFlow('t'); } catch (e) { held = e; }
             expect(held).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
@@ -1519,7 +1520,7 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
             expect(await fireAll()).toEqual(['alpha']);
         });
 
-        it('[#34145] the remedy for a write refused over every holder: the read over every holder answers the one holder\'s flow, so a package-less write is admitted', () => {
+        it('[#34145] the read over every holder settles the name too: it answers the one holder\'s flow and folds the slot back, and a package-less registration is accepted', () => {
             uninstalled();
             expect(engine.getHeldFlow('t')).toMatchObject({ name: 't' });
             expect(engine.flowSlotKey(P1, 't')).toBe('t');
