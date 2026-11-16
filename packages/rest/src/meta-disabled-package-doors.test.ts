@@ -951,8 +951,11 @@ describe('[#33210] RestServer: a package-less row beside two enabled row holders
                 .toEqual([OTHER_PKG, THIRD_PKG].sort());
             const layers = await host.layers('dashboard', 'three_rows_dash');
             const published = await host.published('dashboard', 'three_rows_dash');
-            for (const answer of [read, layers, published]) {
-                expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+            // [#33210 L1-b R3] Each door's refusal is pinned by its status AND
+            // its code (ADR-0112), as the runtime helper pins them.
+            for (const [door, answer] of [['plain', read], ['layers', layers], ['published', published]] as const) {
+                expect([door, answer.status, answer.body?.code ?? answer.body?.error?.code], JSON.stringify(answer.body))
+                    .toEqual([door, 409, 'RESOURCE_CONFLICT']);
                 for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(answer.body)).toContain(pkg);
                 expect(JSON.stringify(answer.body)).not.toMatch(/(healthy|third|package-less) row/);
             }
