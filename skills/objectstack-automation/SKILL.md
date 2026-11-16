@@ -312,7 +312,7 @@ Most are caught by `objectstack build`:
 
 ---
 
-→ State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md).
+→ State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 

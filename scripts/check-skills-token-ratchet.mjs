@@ -612,29 +612,29 @@ export const CEILINGS = new Map([
   // status to a flow door: +37 bytes, no further restatement left to cut).
   // Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27443 / 4)
-  // 6861 -> 6880 (2026-11-16, card #34434, the skills follow-up of #34062):
+  // 6861 -> 6903 (2026-11-16, card #34434, the skills follow-up of #34062):
   // silently-wrong item 1 teaches the third `create_record` / `update_record`
   // `fields` form, the text envelope `{ dialect: 'template', source }`: written
   // in the organization's language (Localization setting, else the app's
   // `i18n.defaultLocale`), never the run starter's; untranslated, the authored
   // text; an unreadable setting fails the node; a bare string stays a literal.
   // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
-  // 6513306068, letter B). PAID DOWN FIRST — four restatements cut, each keeping
+  // 6513306068, letter B). PAID DOWN FIRST — three restatements cut, each keeping
   // its other home: the CEL callout's "Contract, stdlib, legacy → CEL table:
   // objectstack-formula" (the frontmatter description's "load
-  // objectstack-formula alongside"); the state-introspection route after the
-  // State Machines pointer (references/state-machines-and-approvals.md
-  // § Introspection); the Trigger Configuration lead-in naming the flow's
-  // `label` / `type` / `nodes` / `edges` (references/examples-flows.md's whole
-  // flows); item 3's `// pure — the default` function row (the same item's "A
-  // flow `function` is a PURE compute step"). Arithmetic in priced bytes (stamp
-  // line excluded), against `main`'s 27431 (headroom 3): the diff's added lines
-  // carry 565 bytes and its removed lines 479 (a trimmed line counted on both
-  // sides), net +86, so the LANDED priced text is 27517 bytes ->
-  // ceil(27517 / 4) = 6880; the ceiling moves +19, the measured remainder only.
-  // Pinned AT the measurement.
-  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27517 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6880],
+  // objectstack-formula alongside"); the Trigger Configuration lead-in naming
+  // the flow's `label` / `type` / `nodes` / `edges` (references/examples-flows.md's
+  // whole flows); item 3's `// pure — the default` function row (the same item's
+  // "A flow `function` is a PURE compute step"). The state-introspection route
+  // after the State Machines pointer is NOT a cut: packages/rest's
+  // meta-state-route-doc-spelling test pins this file as one of its teaching
+  // sites. Arithmetic in priced bytes (stamp line excluded), against `main`'s
+  // 27431 (headroom 3): the diff's added lines carry 441 bytes and its removed
+  // lines 261 (a trimmed line counted on both sides), net +180, so the LANDED
+  // priced text is 27611 bytes -> ceil(27611 / 4) = 6903; the ceiling moves +42,
+  // the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27611 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6903],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
